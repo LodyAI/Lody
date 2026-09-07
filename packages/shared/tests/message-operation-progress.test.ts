@@ -62,4 +62,27 @@ describe('operation_progress message content schema', () => {
       progressMessageId: 'operation-progress:requester:create-op.1',
     });
   });
+
+  it('accepts an uncertain completion linked to progress', () => {
+    expect(
+      MessageContentSchema.parse({
+        type: 'operation_completion',
+        deliveryId: 'delivery-uncertain',
+        operationId: 'create-op.uncertain',
+        operationKind: 'session_create',
+        progressMessageId: 'operation-progress:requester:create-op.uncertain',
+        completion: { type: 'result', value: { items: [] } },
+        continuation: {
+          status: 'uncertain',
+          reason: {
+            code: 'DELIVERY_EXECUTION_UNCERTAIN',
+            message: 'Execution may have started.',
+          },
+        },
+      })
+    ).toMatchObject({
+      progressMessageId: 'operation-progress:requester:create-op.uncertain',
+      continuation: { status: 'uncertain' },
+    });
+  });
 });

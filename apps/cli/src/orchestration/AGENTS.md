@@ -1,7 +1,6 @@
 # MCP Session orchestration
 
-Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
-`specs/session-orchestration.md`; this file is only a code-navigation index.
+Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behavior.
 
 - `operation-store.ts` is the shared machine-local WAL SQLite source of truth.
   The key is `(requesterSessionId, operationId)`; foreign Session lookup must be
@@ -20,18 +19,15 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
 - Successful item completion copies only visible assistant text into an 8 KiB
   `output` preview. The store may further head/tail-bound it to keep the whole
   completion at 64 KiB; preserve both per-output and aggregate omission metadata.
-- The Operation directory and SQLite database contain prompts and assistant
-  output and must remain private to the local account (0700/0600 on Unix).
+- Operation files contain prompts and assistant output; keep them private to the
+  local account (0700/0600 on Unix).
 - Create Operations freeze each target's effective dispatch config at
   acceptance; recovery must not re-read mutable requester history defaults.
   Full content stays in the target Session history.
-- Accepted Operations store the invoking user once as `requesterUserId` and bind the exact source
-  Turn as `sourceTurnId`. `requesterSessionId` already identifies the source Session. Recovery
-  routes attribution and member-scoped authorization through that frozen user while the current
-  owner Machine credential remains the executor credential. Completion system Turns retain the
-  same userId so a continuation cannot silently switch identities. The Operation store matches
-  requester user and source Turn together with kind and command fingerprint; a later Turn reusing
-  the id is `OPERATION_ID_REUSED`, not a retry.
+- Accepted Operations freeze `requesterUserId` and exact `sourceTurnId`; `requesterSessionId` names
+  the source Session. Recovery uses that user for attribution/authorization and the current owner
+  Machine credential to execute. Completion preserves userId. Matching includes both ids, kind,
+  and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry.
 - `operation-coordinator.ts` is owned only by the local Host-lease Worker. MCP
   subprocesses may accept Operations but never schedule completion Turns.
 - Reconciliation is level-checked. Loro subscriptions and SQLite directory
@@ -45,9 +41,10 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   store work per raw fs event.
 - The MCP server process also holds ONE store connection (lazy singleton),
   opened with `maintenance: false` so non-owner opens are not themselves write
-  transactions; the daemon coordinator owns open-time repair/cleanup. Do not
-  reintroduce per-call open/close: each close checkpoints against the shared
-  WAL and each default open writes, which is the "database is locked" source.
+  transactions; current-schema detection is read-only and migration takes the
+  writer lock only when that probe finds work. The daemon coordinator owns
+  open-time repair/cleanup. Do not reintroduce per-call open/close: each close
+  checkpoints WAL and each default open writes, causing "database is locked".
 - WAL allows one writer machine-wide. Every writing store transaction runs
   `BEGIN IMMEDIATE` (deferred read→write upgrades fail with
   `SQLITE_BUSY_SNAPSHOT`, which `busy_timeout` cannot wait out). Subprocess
@@ -56,23 +53,34 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   paths must not add blocking waits on top of the driver's `busy_timeout`.
 - `operation-model.ts` is the reduced executable race model. Update its bounded
   exploration and concrete traces whenever scheduling semantics change.
-- Delivery never writes user dispatch pointers. Pending user input wins every
-  idle boundary; completion uses a stable `role: system`
-  `operation_completion` Turn and then the existing Session execution mutex.
+- Delivery never writes user dispatch pointers; pending users win idle boundaries. Completion owns
+  one stable system Turn under the Session mutex and Assistant `assistant:<systemTurnId>`;
+  `finished`/`endedAt` is not evidence because teardown writes it too. Host lease, Worker boot id,
+  and attempt token fence execution. Fields remain in `delivery_execution_state` because stable
+  binaries parse `SELECT * FROM deliveries`; its insert trigger atomically covers current and legacy
+  writers, migration backfills older rows, and app writers do not dual-write. Claims are exclusive;
+  contention has no history/ACP effects, and release/consume match both ids. Terminal/no-execution
+  paths claim, write history before consume, retain failed finalization for settlement-only retry,
+  recheck after awaits, and never rewrite durable history. `claimed` becomes `prepared` after history
+  and spends one attempt; `started` precedes the provider, while stale-ACP recovery skips that fence.
+  Failed start fencing finalizes the Assistant, restores idle under Session ownership, and settles
+  `not_started`; only confirmed pre-provider interruption releases prepared work. Cancellation or
+  accepted steer consumes. Missing post-start settlement becomes `uncertain`, never replays, emits
+  `DELIVERY_EXECUTION_UNCERTAIN`, and preserves output. Claim-bound outcomes survive store failures.
+  Startup recovers older boots without resetting attempts; stop abandons only its Worker. Both make
+  claimed/prepared work runnable and started work uncertain. After two prepared attempts, consume
+  with `DELIVERY_ATTEMPTS_EXHAUSTED` without ACP. Pre-claim migration is uncertain.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
-  replicas. Repair duplicate ids before keyed Mirror updates. It is durable UI state, never
-  agent input or a dispatch pointer. Only emit navigable target cards for materialized
-  target Session/UserTurn evidence (or an already-published target), merge status
-  monotonically by exact target, and treat progress write failures as repairable: they
-  must not fail Operation acceptance, target materialization, cancellation, finalization,
-  delivery, or best-effort target cancel. Set `progressMessageId` only when the row
-  covers every durably materialized target and reflects every successful result;
-  partial or stale rows must retain completion fallback cards. Root cancellation/errors/
-  deadlines do not establish target termination. Retain progress reconciliation after
-  Delivery consumption until every published target is terminal and the Loro write is
-  locally flushed; SQLite settlements and cleanup must preserve this obligation across
-  restart. Missing evidence/write failures retain an owned retry, never an agent wake.
+  replicas. It is durable UI state, never agent input/dispatch. Repair duplicate ids before keyed
+  Mirror updates. Publish cards only from materialized Session/UserTurn evidence or an existing
+  target, and merge status monotonically by exact target.
+  Progress failures must not fail acceptance, materialization, cancellation, finalization,
+  Delivery, or target cancellation. Set `progressMessageId` only when the row covers every durable
+  target and successful result; otherwise retain completion fallback cards. Root cancellation,
+  errors, and deadlines do not terminate targets. Delivery consumption does not end reconciliation:
+  retain it through target terminal state and local Loro flush, and preserve it through SQLite
+  cleanup/restart. Missing evidence or writes retain an owned retry and never wake the agent.
 - Missing Session metadata, a recoverable tombstone, or an unsynchronized
   Machine Flock document is uncertainty, not permanent deletion/configuration
   absence. Keep the item/Delivery pending until positive evidence or deadline.
