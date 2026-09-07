@@ -1,9 +1,10 @@
 import { checkPullRequestBody, hasRelatedIssueReference } from './check-pr-body.mjs';
-import { normalizeRelatedIssueLink } from './pr-issue-link.mjs';
+import { normalizeRelatedIssueLink, relatedIssueNumbers } from './pr-issue-link.mjs';
 
 const GRACE_PERIOD_DAYS = 7;
 const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1_000;
 const MAX_EXTERNAL_CHANGED_LINES = 200;
+const MAX_COMMUNITY_REVIEW_LINES = 1000;
 
 export const PULL_REQUEST_DISPOSITION = Object.freeze({
   BOT: 'bot',
@@ -133,16 +134,54 @@ function changedLines(pullRequest) {
   return Number(pullRequest.additions ?? 0) + Number(pullRequest.deletions ?? 0);
 }
 
-function checkPullRequestPolicy(pullRequest) {
+function checkPullRequestPolicy(pullRequest, { authorAssignedToRelatedIssue = false } = {}) {
   const result = checkPullRequestBody(pullRequest.body);
   const findings = [...result.findings];
   const lines = changedLines(pullRequest);
-  if (lines > MAX_EXTERNAL_CHANGED_LINES && !hasRelatedIssueReference(pullRequest.body)) {
+  if (lines > MAX_COMMUNITY_REVIEW_LINES && !authorAssignedToRelatedIssue) {
+    findings.push(
+      `PR changes ${lines} lines; community PRs over ${MAX_COMMUNITY_REVIEW_LINES} lines require a maintainer assignment on the linked Issue before review.`
+    );
+  } else if (lines > MAX_EXTERNAL_CHANGED_LINES && !hasRelatedIssueReference(pullRequest.body)) {
     findings.push(
       `PR changes ${lines} lines; changes over ${MAX_EXTERNAL_CHANGED_LINES} lines require the prior Lody Issue reference in ## Related issue.`
     );
   }
   return { ok: findings.length === 0, findings };
+}
+
+async function resolveAuthorAssignedToRelatedIssue({
+  github,
+  owner,
+  repo,
+  pullRequest,
+  warnings,
+}) {
+  const lines = changedLines(pullRequest);
+  if (lines <= MAX_COMMUNITY_REVIEW_LINES) {
+    return false;
+  }
+
+  const login = (pullRequest.user?.login ?? '').toLowerCase();
+  const numbers = relatedIssueNumbers(pullRequest.body);
+  if (!login || numbers.length === 0) {
+    return false;
+  }
+
+  for (const issueNumber of numbers) {
+    try {
+      const issue = (await github.rest.issues.get({ owner, repo, issue_number: issueNumber })).data;
+      const assignees = issue.assignees ?? (issue.assignee ? [issue.assignee] : []);
+      if (assignees.some((assignee) => (assignee.login ?? '').toLowerCase() === login)) {
+        return true;
+      }
+    } catch (error) {
+      if (error.status !== 404) {
+        warnings.push(`Could not read assignees for #${issueNumber}: ${warningMessage(error)}`);
+      }
+    }
+  }
+  return false;
 }
 
 function invalidSinceFromComment(body) {
@@ -167,7 +206,7 @@ export function formatCheckerFindings(result) {
     '',
     ...result.findings.map((finding) => `- ${finding}`),
     '',
-    'See `.github/PULL_REQUEST_TEMPLATE.md`.',
+    'See `CONTRIBUTING.md` and `.github/PULL_REQUEST_TEMPLATE.md`.',
   ].join('\n');
 }
 
@@ -525,7 +564,16 @@ export async function reconcilePullRequest({
     return { disposition, state: 'expired', validation: null, warnings };
   }
 
-  const validation = checkPullRequestPolicy(currentPullRequest);
+  const assigned = await resolveAuthorAssignedToRelatedIssue({
+    github,
+    owner,
+    repo,
+    pullRequest: currentPullRequest,
+    warnings,
+  });
+  const validation = checkPullRequestPolicy(currentPullRequest, {
+    authorAssignedToRelatedIssue: assigned,
+  });
   if (validation.ok) {
     try {
       await clearInvalidPullRequest({ ...input, pullRequest: currentPullRequest });
@@ -561,7 +609,15 @@ export async function reconcilePullRequest({
           latest.state === 'open' &&
           pullRequestDisposition(latest) === PULL_REQUEST_DISPOSITION.EXTERNAL &&
           hasPullRequestLabel(latest, NEEDS_ATTENTION_LABEL.name) &&
-          !checkPullRequestPolicy(latest).ok
+          !checkPullRequestPolicy(latest, {
+            authorAssignedToRelatedIssue: await resolveAuthorAssignedToRelatedIssue({
+              github,
+              owner,
+              repo,
+              pullRequest: latest,
+              warnings,
+            }),
+          }).ok
         );
       },
     });

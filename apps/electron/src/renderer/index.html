@@ -8,7 +8,7 @@
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://cdn.agentclientprotocol.com; connect-src 'self' blob: https://codex-resets.com http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'self' https://*.__LODY_PREVIEW_PUBLIC_BASE_DOMAIN__ http://127.0.0.1:* http://localhost:*; font-src 'self' data:;"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' lody-resource: data: blob: https://avatars.githubusercontent.com https://cdn.agentclientprotocol.com; connect-src 'self' lody-resource: blob: https://codex-resets.com http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'self' https://*.__LODY_PREVIEW_PUBLIC_BASE_DOMAIN__ http://127.0.0.1:* http://localhost:*; font-src 'self' data:;"
     />
     <style>
       html,

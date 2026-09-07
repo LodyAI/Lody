@@ -1,9 +1,12 @@
+import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type {
   LoroStreamsMachineRpcClient,
   LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
   getServerNow,
+  machineSupportsLocalFileResourcesProtocol,
+  type MachineProtocolCapabilities,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
   type CodeCollabV2FileIndexSnapshot,
@@ -84,6 +87,9 @@ type LspRequest = {
 export type WorkspaceMachineRpcFacadeDeps = {
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
+  getMachineProtocolCapabilities: (
+    machineId: MachineId
+  ) => Promise<MachineProtocolCapabilities | undefined>;
   getMachineRpcClient: (machineId: MachineId) => Promise<LoroStreamsMachineRpcClient>;
 };
 
@@ -169,7 +175,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
     options?: CodeCollabRequestOptions
-  ): Promise<FilePreviewV3Response> => {
+  ): Promise<FilePreviewV3Response | LocalFilePreviewResource> => {
     const params: FilePreviewV3Request = {
       v: FILE_PREVIEW_PROTOCOL_VERSION,
       sessionId: request.sessionId,
@@ -201,18 +207,24 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
             });
           }
 
-          const sender = getLocalMachineRpcSender();
-          if (!sender) throw new Error('Local Machine RPC is not available.');
-          const response = await sender({
+          const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+          if (!machineSupportsLocalFileResourcesProtocol({ protocolCapabilities })) {
+            return filePreviewV3Error('transient_io', {
+              message:
+                'The local agent does not support file resources. Update or restart the local agent.',
+              retryable: false,
+            });
+          }
+          const ipc = getIpcServices();
+          if (!ipc) throw new Error('Local file preview is not available.');
+          return await ipc.machineRpc.previewFile({
             machineId,
             workspaceId,
-            method: 'file/preview-local',
+            method: 'file/resolve-local',
             params,
             ...ownerSessionFields(options),
             timeoutMs: options?.timeoutMs ?? 30_000,
           });
-          if (!response.ok) throw new Error(response.error);
-          return response.result as FilePreviewV3Response | null;
         }
         const client = await getMachineRpcClient(machineId);
         return await client.requestFilePreview({

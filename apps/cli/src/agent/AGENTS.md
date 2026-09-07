@@ -8,21 +8,19 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `agent-client.ts`
 
-- Consume ACP extensions through `acp-extension-core` (`agentCapabilities._meta.lody`, session
-  `_meta.lody`, `_lody/...` methods). Provider-specific and pre-Core readers stay in the central
-  compatibility adapter, never in session consumers; normalized Core capabilities stay
-  provider-neutral.
+- Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
+  `_lody/...`. Provider/pre-Core readers stay in `lody-acp-extension.ts`; consumers stay neutral.
+- Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
+  the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
 - Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
   startup state.
 - Cache session `_meta.lody.modelReasoningEfforts`; Codex `model[effort]` only.
-- Config projections must consume agent-confirmed state from session setup and
-  `set_config_option` responses, not only `config_option_update` notifications. A
-  present `configOptions` — empty array included — is an authoritative full snapshot; only an
-  omitted field falls back to the requested value, and that fallback updates both replacement
-  startup state and the option's `currentValue`.
+- Project config from setup, `set_config_option` responses, and `config_option_update`.
+  Present `configOptions` (including `[]`) replaces the snapshot; only omission falls back
+  to the requested value, updating both replacement startup state and `currentValue`.
 - Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
   `limited` to the durable `blocked` status.
 - Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the

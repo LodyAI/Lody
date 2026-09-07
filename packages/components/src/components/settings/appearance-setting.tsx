@@ -20,7 +20,7 @@ import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { buildInterfaceFontFamily, listSystemFontFamilies } from '@/lib/local-fonts';
+import { listSystemFontFamilies } from '@/lib/local-fonts';
 import { Input } from '@/ui/input';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
@@ -207,7 +207,7 @@ export function AppearanceSettingsView({
               renderTriggerValue={(option) => (
                 <span
                   className="truncate font-normal"
-                  style={{ fontFamily: buildInterfaceFontFamily(option?.value ?? '') }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option?.label ?? interfaceFontFamily}
                 </span>
@@ -215,7 +215,7 @@ export function AppearanceSettingsView({
               renderOption={(option) => (
                 <span
                   className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildInterfaceFontFamily(option.value) }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option.label}
                 </span>
@@ -275,7 +275,7 @@ export function AppearanceSettingsView({
               renderTriggerValue={(option) => (
                 <span
                   className="truncate font-normal"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option?.value ?? '') }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option?.label ?? terminalFontFamily}
                 </span>
@@ -283,7 +283,7 @@ export function AppearanceSettingsView({
               renderOption={(option) => (
                 <span
                   className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option.value) }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option.label}
                 </span>

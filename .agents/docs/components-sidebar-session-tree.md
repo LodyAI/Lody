@@ -52,7 +52,10 @@ Updated mode.
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child
 widens the shared leading slot from 14px to 26px, which produces the 12px title indent
-without shifting the row background.
+without shifting the row background. The node and its hover menu share a 7px centre:
+replacing a disclosure or connector with ⋯ therefore leaves the title in place. The
+context-menu expand/collapse action uses the disclosure's callback, so either route
+changes the same tree state.
 
 That slot used to hold status as well, with status winning: an active child dropped its
 trunk and elbow, and an active opener dropped its disclosure, because a node can show

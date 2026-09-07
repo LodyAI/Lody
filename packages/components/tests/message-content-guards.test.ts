@@ -160,11 +160,12 @@ describe('shouldRenderSystemRowItem', () => {
   const enabled = true;
   const disabled = false;
 
-  it('renders the three system row types regardless of the Tasks beta', () => {
+  it('renders the four system row types regardless of the Tasks beta', () => {
     for (const tasksEnabled of [enabled, disabled]) {
       expect(shouldRenderSystemRowItem({ type: 'system_notice' }, tasksEnabled)).toBe(true);
       expect(shouldRenderSystemRowItem({ type: 'worktree_script' }, tasksEnabled)).toBe(true);
       expect(shouldRenderSystemRowItem({ type: 'operation_completion' }, tasksEnabled)).toBe(true);
+      expect(shouldRenderSystemRowItem({ type: 'operation_progress' }, tasksEnabled)).toBe(true);
     }
   });
 
@@ -195,5 +196,25 @@ describe('shouldRenderSystemRowItem', () => {
     expect(shouldRenderSystemRowItem({ type: 'system_notice', name: undefined }, disabled)).toBe(
       true
     );
+  });
+});
+
+describe('operation progress content guard', () => {
+  const item = { status: 'created', target: { sessionId: 'child', userTurnId: 'turn' } };
+  const progress = {
+    type: 'operation_progress',
+    operationId: 'create',
+    operationKind: 'session_create',
+    items: [item],
+  };
+  it('accepts every supported target state', () => {
+    for (const status of ['created', 'running', 'succeeded', 'failed', 'cancelled']) {
+      expect(isMessageContent({ ...progress, items: [{ ...item, status }] })).toBe(true);
+    }
+  });
+  it('rejects malformed targets and unknown statuses', () => {
+    expect(isMessageContent({ ...progress, items: [{ ...item, status: 'active' }] })).toBe(false);
+    expect(isMessageContent({ ...progress, items: [{ status: 'created' }] })).toBe(false);
+    expect(isMessageContent({ ...progress, operationKind: 'session_chat' })).toBe(false);
   });
 });

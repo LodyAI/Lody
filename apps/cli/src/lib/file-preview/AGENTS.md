@@ -25,8 +25,9 @@ save path's text reads.
 - `file-preview-path-policy.ts` is the security boundary. Remote `file/preview`
   requests may read only the session workspace root, `os.tmpdir()`,
   `<LodyDataDir>/chats`, and `LODY_FILE_PREVIEW_EXTRA_ROOTS`. The separate
-  local-only `file/preview-local` IPC method is the Electron user's explicit
-  same-machine read capability and may read any regular file; it is never added
+  local-only `file/resolve-local` IPC method is the Electron user's explicit
+  same-machine capability and resolves any regular file for Electron; it returns
+  identity only, never bytes, and is never added
   to the Loro Streams RPC protocol.
 - The `.lody` data-dir ROOT is deliberately not an allowed root: it holds
   `credentials.json` and the git credential broker state. Allowlist named
@@ -55,24 +56,17 @@ save path's text reads.
   it still reports `file_not_found` only inside an allowed root.
 - Unit-test the fold rule through an injected `FilePreviewDirectoryReader`
   (`file-preview-path-policy.test.ts`), not only against the real filesystem.
-- Oversize is refused, never truncated. The read takes one byte past the limit so a
+- Remote oversize is refused, never truncated. The read takes one byte past the limit so a
   file that grew between `stat` and `read` is caught.
 - Binary detection is content-first (NUL sniff, then a failed UTF-8 decode), but a
   known RASTER image extension forces the binary path: an image whose header happens
   to avoid NUL bytes would otherwise ship as mojibake text. Use `isBinaryImagePath`,
   NOT `getImageMimeTypeForPath` — the latter also matches SVG, which is XML text and
   must stay on the text path to keep its source view and its editability.
-- **The default budgets are the REMOTE wire's, not the file's.**
-  `FILE_PREVIEW_V3_LIMITS` (10 MiB text, 5 MiB binary, 1 MiB gzip ceiling) covers
-  the gzipped, base64'd Machine RPC response; `file/preview-local` passes
-  `sameMachine: true` and the service swaps in `FILE_PREVIEW_V3_LOCAL_LIMITS` and
-  ships text `utf8-plain`. Those local limits are DERIVED from
-  `LOCAL_IPC_MAX_RESPONSE_BODY_BYTES` (16 MiB, `shared/node/local-ipc.ts`), and the
-  encoded payload must be measured with `measurePayloadOverflow` before answering —
-  no raw-size cap can stand in for it. Never raise the local limits without raising
-  that IPC cap.
-- `sameMachine` is transport context like `allowArbitraryPaths`: it must never
-  become part of the request schema, or a Streams caller could ask for it.
+- **Remote previews remain one bounded complete response. Local content never rides
+  that response.** `file/resolve-local` returns the canonical absolute path after
+  owner/path resolution; Electron owns bounded content reads and resource lifetime.
+  Negotiate `localFileResources` through the central machine protocol binding.
 - `maxBinaryBytes` stays pinned to `SESSION_IMAGE_MAX_SIZE_BYTES`. Do not raise these
   budgets without measuring against the real gateway, since a non-404 4xx append
   failure is not retried.

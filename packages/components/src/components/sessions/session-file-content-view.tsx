@@ -1,3 +1,4 @@
+import { PagedFileViewer } from './paged-file-viewer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
@@ -1178,8 +1179,23 @@ function SessionFileContentViewImpl({
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
   } else if (data.snapshot.kind === 'binary') {
-    body = <SessionFileBinaryPreview path={normalizedPath} bytes={data.snapshot.bytes} />;
+    body = (
+      <SessionFileBinaryPreview
+        path={normalizedPath}
+        bytes={data.snapshot.bytes}
+        url={data.snapshot.url}
+      />
+    );
   } else if (data.snapshot.kind === 'missing') {
     body = (
       <SessionFileErrorState
@@ -1347,8 +1363,7 @@ function SessionFileContentViewImpl({
   const showWordWrapButton =
     isTextFileReady && !showSvgRendered && !showMarkdownRendered && !showHtmlRendered;
   const showSaveButton = isProviderFileEditable && isTextFileReady;
-  const showRefreshButton =
-    shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
+  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
     showPreviewToggle ||
     isMarkdownTextFile ||
