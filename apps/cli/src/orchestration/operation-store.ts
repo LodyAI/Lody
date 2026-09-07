@@ -763,13 +763,6 @@ export class LodyOperationStore {
           current.initiatorChainDepth,
           JSON.stringify(durableCompletion)
         );
-      this.db
-        .prepare(
-          `INSERT OR IGNORE INTO delivery_execution_state (
-             requester_session_id, operation_id, attempt_count
-           ) VALUES (?, ?, 0)`
-        )
-        .run(current.requesterSessionId, current.operationId);
       const updated = this.getStored(requesterSessionId, operationId);
       if (!updated) {
         throw new Error('Finished Operation disappeared during transaction.');
@@ -1479,6 +1472,14 @@ export class LodyOperationStore {
           ON DELETE CASCADE
       );
 
+      CREATE TRIGGER IF NOT EXISTS deliveries_insert_execution_state
+      AFTER INSERT ON deliveries
+      BEGIN
+        INSERT OR IGNORE INTO delivery_execution_state (
+          requester_session_id, operation_id, execution_phase, attempt_count
+        ) VALUES (NEW.requester_session_id, NEW.operation_id, 'ready', 0);
+      END;
+
       CREATE TABLE IF NOT EXISTS operation_item_materializations (
         requester_session_id TEXT NOT NULL,
         operation_id TEXT NOT NULL,
@@ -1542,6 +1543,7 @@ export class LodyOperationStore {
       'table:deliveries',
       'index:deliveries_pending_session',
       'table:delivery_execution_state',
+      'trigger:deliveries_insert_execution_state',
       'table:operation_item_materializations',
       'table:operation_progress_settlements',
       'table:orchestration_meta',
@@ -1549,7 +1551,7 @@ export class LodyOperationStore {
     const existingObjects = this.db
       .prepare(
         `SELECT type, name FROM sqlite_master
-         WHERE type IN ('table', 'index')`
+         WHERE type IN ('table', 'index', 'trigger')`
       )
       .all() as Array<{ type: string; name: string }>;
     for (const { type, name } of existingObjects) {
@@ -1560,21 +1562,7 @@ export class LodyOperationStore {
     const executionStateColumns = this.db
       .prepare(`PRAGMA table_info(delivery_execution_state)`)
       .all() as Array<{ name: string }>;
-    if (!executionStateColumns.some((column) => column.name === 'execution_phase')) return true;
-
-    return (
-      this.db
-        .prepare(
-          `SELECT 1
-           FROM deliveries
-           LEFT JOIN delivery_execution_state
-             ON delivery_execution_state.requester_session_id = deliveries.requester_session_id
-            AND delivery_execution_state.operation_id = deliveries.operation_id
-           WHERE delivery_execution_state.requester_session_id IS NULL
-           LIMIT 1`
-        )
-        .get() !== undefined
-    );
+    return !executionStateColumns.some((column) => column.name === 'execution_phase');
   }
 
   private repairTerminalDeliveries(): void {
@@ -1604,14 +1592,6 @@ export class LodyOperationStore {
                WHERE deliveries.requester_session_id = operations.requester_session_id
                  AND deliveries.operation_id = operations.operation_id
              )`
-          )
-          .run();
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO delivery_execution_state (
-               requester_session_id, operation_id, execution_phase, attempt_count
-             )
-             SELECT requester_session_id, operation_id, 'ready', 0 FROM deliveries`
           )
           .run();
       })

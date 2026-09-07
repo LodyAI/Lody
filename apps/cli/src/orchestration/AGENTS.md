@@ -43,9 +43,8 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   opened with `maintenance: false` so non-owner opens are not themselves write
   transactions; current-schema detection is read-only and migration takes the
   writer lock only when that probe finds work. The daemon coordinator owns
-  open-time repair/cleanup. Do not
-  reintroduce per-call open/close: each close checkpoints against the shared
-  WAL and each default open writes, which is the "database is locked" source.
+  open-time repair/cleanup. Do not reintroduce per-call open/close: each close
+  checkpoints WAL and each default open writes, causing "database is locked".
 - WAL allows one writer machine-wide. Every writing store transaction runs
   `BEGIN IMMEDIATE` (deferred read→write upgrades fail with
   `SQLITE_BUSY_SNAPSHOT`, which `busy_timeout` cannot wait out). Subprocess
@@ -54,24 +53,23 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   paths must not add blocking waits on top of the driver's `busy_timeout`.
 - `operation-model.ts` is the reduced executable race model. Update its bounded
   exploration and concrete traces whenever scheduling semantics change.
-- Delivery never writes user dispatch pointers; pending users win idle boundaries. Completion uses
-  one stable system Turn, the Session mutex, and Assistant id `assistant:<systemTurnId>`;
-  Assistant `finished`/`endedAt` is not evidence because teardown also writes it.
-  Fences are the Host lease, Worker boot id, and attempt token. Execution fields stay
-  in `delivery_execution_state` because stable binaries parse `SELECT * FROM deliveries`. Active
-  claims cannot be taken over; contention has no history/ACP effects, and release/consume match both
-  ids. Terminal and no-execution paths claim too, write history before consume, retain failed
-  finalization for settlement-only retries, recheck ownership after awaits, and never rewrite
-  durable history. `claimed` becomes `prepared` after history and spends an attempt; `started`
-  precedes provider prompt, and stale-ACP recovery skips that fence. A failed start fence
-  finalizes the Assistant, restores idle under Session ownership, and settles `not_started`; only
-  confirmed pre-provider interruption releases prepared work. Cancellation or accepted steer
-  consumes the Delivery. Missing post-start settlement becomes `uncertain`, never replay, and emits
-  `DELIVERY_EXECUTION_UNCERTAIN` while preserving output. Claim-bound live outcomes survive store
-  failures for settlement-only retry. Startup recovers older boots without resetting attempts;
-  started work becomes uncertain. Stop abandons only its Worker: claimed/prepared work becomes
-  runnable and started work uncertain. After two prepared attempts, consume with
-  `DELIVERY_ATTEMPTS_EXHAUSTED` without ACP. Pre-claim pending migration is uncertain.
+- Delivery never writes user dispatch pointers; pending users win idle boundaries. Completion owns
+  one stable system Turn under the Session mutex and Assistant `assistant:<systemTurnId>`;
+  `finished`/`endedAt` is not evidence because teardown writes it too. Host lease, Worker boot id,
+  and attempt token fence execution. Fields remain in `delivery_execution_state` because stable
+  binaries parse `SELECT * FROM deliveries`; its insert trigger atomically covers current and legacy
+  writers, migration backfills older rows, and app writers do not dual-write. Claims are exclusive;
+  contention has no history/ACP effects, and release/consume match both ids. Terminal/no-execution
+  paths claim, write history before consume, retain failed finalization for settlement-only retry,
+  recheck after awaits, and never rewrite durable history. `claimed` becomes `prepared` after history
+  and spends one attempt; `started` precedes the provider, while stale-ACP recovery skips that fence.
+  Failed start fencing finalizes the Assistant, restores idle under Session ownership, and settles
+  `not_started`; only confirmed pre-provider interruption releases prepared work. Cancellation or
+  accepted steer consumes. Missing post-start settlement becomes `uncertain`, never replays, emits
+  `DELIVERY_EXECUTION_UNCERTAIN`, and preserves output. Claim-bound outcomes survive store failures.
+  Startup recovers older boots without resetting attempts; stop abandons only its Worker. Both make
+  claimed/prepared work runnable and started work uncertain. After two prepared attempts, consume
+  with `DELIVERY_ATTEMPTS_EXHAUSTED` without ACP. Pre-claim migration is uncertain.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Repair duplicate ids before keyed

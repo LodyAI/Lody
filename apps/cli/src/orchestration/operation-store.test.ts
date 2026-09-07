@@ -197,6 +197,49 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('exposes a Delivery inserted by a legacy writer after the store opens', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-live-legacy-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const preTriggerStore = new LodyOperationStore(dbPath);
+    preTriggerStore.accept(baseInput());
+    preTriggerStore.close();
+
+    const legacyWriter = new Database(dbPath);
+    legacyWriter.exec('DROP TRIGGER deliveries_insert_execution_state');
+    const store = new LodyOperationStore(dbPath, undefined, { maintenance: false });
+    try {
+      legacyWriter.exec(`
+        BEGIN IMMEDIATE;
+        UPDATE operations
+        SET state = 'finished', completion_json = '{"type":"cancelled"}',
+            finished_at = '2026-07-20T00:01:00.000Z'
+        WHERE requester_session_id = 'requester-1' AND operation_id = 'review-round-1';
+        INSERT INTO deliveries (
+          workspace_id, requester_session_id, operation_id, delivery_id,
+          system_turn_id, state, initiator_chain_depth, completion_json
+        ) VALUES (
+          'workspace-1', 'requester-1', 'review-round-1',
+          'operation:requester-1:review-round-1:completion',
+          'operation-completion:requester-1:review-round-1', 'pending', 0,
+          '{"type":"cancelled"}'
+        );
+        COMMIT;
+      `);
+
+      expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([
+        expect.objectContaining({
+          operationId: 'review-round-1',
+          executionPhase: 'ready',
+          attemptCount: 0,
+        }),
+      ]);
+    } finally {
+      legacyWriter.close();
+      store.close();
+    }
+  });
+
   it('accepts once and returns the same Operation for canonical-equivalent retries', async () => {
     const store = await makeStore();
     try {

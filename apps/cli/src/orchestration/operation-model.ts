@@ -43,7 +43,6 @@ export type OrchestrationModelAction =
   | 'start_turn'
   | 'history_write_fail'
   | 'complete_turn'
-  | 'fail_turn'
   | 'interrupt_turn'
   | 'cancel_turn'
   | 'complete_finalization'
@@ -180,16 +179,6 @@ export const stepOrchestrationModel = (
       }
       break;
     case 'complete_turn':
-      if (
-        next.activeTurn === 'delivery' &&
-        (next.delivery === 'prepared' || next.delivery === 'started')
-      ) {
-        next.delivery = 'consumed';
-        next.deliveryClaimOwner = 'none';
-      }
-      next.activeTurn = 'none';
-      break;
-    case 'fail_turn':
       if (
         next.activeTurn === 'delivery' &&
         (next.delivery === 'prepared' || next.delivery === 'started')
@@ -343,7 +332,6 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'start_turn',
     'history_write_fail',
     'complete_turn',
-    'fail_turn',
     'interrupt_turn',
     'cancel_turn',
     'complete_finalization',

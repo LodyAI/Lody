@@ -181,7 +181,7 @@ export class LodyOperationCoordinator {
   private readonly reconcileChains = new Map<string, Promise<void>>();
   private readonly deliveryChains = new Map<SessionId, Promise<void>>();
   private readonly queuedDeliveryIds = new Set<string>();
-  private readonly dirtyDeliveryReasons = new Map<string, string>();
+  private readonly dirtyDeliveryIds = new Set<string>();
   private readonly observedDeliverySettlements = new Map<string, ObservedDeliverySettlement>();
   private readonly operationAbortControllers = new Map<string, AbortController>();
   private metaWatch: RepoWatchHandle | null = null;
@@ -300,7 +300,7 @@ export class LodyOperationCoordinator {
     this.reconcileChains.clear();
     this.deliveryChains.clear();
     this.queuedDeliveryIds.clear();
-    this.dirtyDeliveryReasons.clear();
+    this.dirtyDeliveryIds.clear();
     this.observedDeliverySettlements.clear();
     for (const controller of this.operationAbortControllers.values()) controller.abort();
     this.operationAbortControllers.clear();
@@ -927,7 +927,7 @@ export class LodyOperationCoordinator {
       // A wake can carry the state transition that makes an earlier transient
       // return runnable. Coalesce duplicates, but remember to make one serial
       // follow-up attempt after the current attempt finishes.
-      this.dirtyDeliveryReasons.set(delivery.deliveryId, reason);
+      this.dirtyDeliveryIds.add(delivery.deliveryId);
       return;
     }
     this.queuedDeliveryIds.add(delivery.deliveryId);
@@ -938,7 +938,7 @@ export class LodyOperationCoordinator {
       .then(async () => {
         let attemptReason = reason;
         for (;;) {
-          this.dirtyDeliveryReasons.delete(delivery.deliveryId);
+          this.dirtyDeliveryIds.delete(delivery.deliveryId);
           try {
             await this.deliverIfRunnable(delivery, attemptReason);
           } catch (error: unknown) {
@@ -948,11 +948,11 @@ export class LodyOperationCoordinator {
               }`
             );
           }
-          const coalescedReason = this.dirtyDeliveryReasons.get(delivery.deliveryId);
-          if (!this.started || !coalescedReason || !this.isDeliveryPending(delivery)) {
+          const retry = this.dirtyDeliveryIds.delete(delivery.deliveryId);
+          if (!this.started || !retry || !this.isDeliveryPending(delivery)) {
             return;
           }
-          attemptReason = coalescedReason;
+          attemptReason = 'coalesced';
         }
       })
       .catch((error: unknown) => {
@@ -963,17 +963,16 @@ export class LodyOperationCoordinator {
         );
       })
       .finally(() => {
-        const lateCoalescedReason = this.dirtyDeliveryReasons.get(delivery.deliveryId);
+        const lateRetry = this.dirtyDeliveryIds.delete(delivery.deliveryId);
         this.queuedDeliveryIds.delete(delivery.deliveryId);
-        this.dirtyDeliveryReasons.delete(delivery.deliveryId);
         if (this.deliveryChains.get(sessionId) === next) {
           this.deliveryChains.delete(sessionId);
         }
         // A wake can land after the worker loop decides it is clean but before
         // this chain's Promise settles. Clear this chain's ownership first so
         // the follow-up is enqueued behind any newer session work.
-        if (this.started && lateCoalescedReason && this.isDeliveryPending(delivery)) {
-          this.enqueueDelivery(delivery, lateCoalescedReason);
+        if (this.started && lateRetry && this.isDeliveryPending(delivery)) {
+          this.enqueueDelivery(delivery, 'coalesced');
         }
       });
     this.deliveryChains.set(sessionId, next);
@@ -1371,8 +1370,8 @@ export class LodyOperationCoordinator {
     },
     requireAttemptsExhausted = false,
     requiredExecutionPhase: 'ready' | 'uncertain' = 'ready'
-  ): Promise<boolean> {
-    if (!this.started) return false;
+  ): Promise<void> {
+    if (!this.started) return;
     const startedAt = performance.now();
     const claimId = randomUUID();
     const claim = this.withStore((store) =>
@@ -1387,7 +1386,7 @@ export class LodyOperationCoordinator {
       this.options.logger.debug(
         `[orchestration] Delivery ${delivery.deliveryId} finalization skipped status=${claim.status} reason=${evidence} wake=${wakeReason}`
       );
-      return false;
+      return;
     }
     const settled = await this.settleObservedDeliveryClaim(delivery, {
       claimId,
@@ -1399,7 +1398,7 @@ export class LodyOperationCoordinator {
           }
         : {}),
     });
-    if (settled.state !== 'consumed') return false;
+    if (settled.state !== 'consumed') return;
     const timer = this.configurationTimers.get(delivery.requesterSessionId);
     if (timer) clearTimeout(timer);
     this.configurationTimers.delete(delivery.requesterSessionId);
@@ -1408,7 +1407,6 @@ export class LodyOperationCoordinator {
         performance.now() - startedAt
       ).toFixed(2)}`
     );
-    return true;
   }
 
   /**
