@@ -142,6 +142,9 @@ export class ElectronHarness {
     this.app = await _electron.launch({
       args: [
         '--js-flags=--expose-gc',
+        // GitHub-hosted Linux runners restrict unprivileged user namespaces,
+        // which breaks Electron's SUID sandbox from an unpacked dev tree.
+        ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : []),
         MAIN_ENTRY,
         `--user-data-dir=${electronUserDataDir}`,
         '--lang=en-US',
