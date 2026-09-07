@@ -378,19 +378,22 @@ export function ProvidersScreenView({
                         // Hover lives on the row, not the inner edit button,
                         // so highlighting feels like one unit even though
                         // Test/Delete are separate click targets.
-                        'group flex flex-wrap items-center gap-3 rounded-lg border transition-colors',
+                        'group flex flex-wrap items-center rounded-lg border transition-colors',
+                        // Only selection is allowed to tint the row. A passed
+                        // row used to carry the same primary wash, which left
+                        // the list striped in two nearly identical blues and
+                        // the actual selection indistinguishable from status.
+                        // Status now lives in the badge column alone.
                         selected
-                          ? 'border-primary bg-primary/[0.06] ring-2 ring-primary/15'
-                          : status === 'passed'
-                            ? 'border-primary/40 bg-primary/[0.04] hover:bg-primary/[0.07]'
-                            : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
+                          ? 'border-primary bg-primary/[0.06]'
+                          : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
                       )}
                     >
                       <button
                         type="button"
                         disabled={noLocalMachine}
                         className={cn(
-                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 text-left',
+                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 pr-2 text-left',
                           'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                           'disabled:cursor-not-allowed disabled:opacity-60'
                         )}
@@ -422,43 +425,64 @@ export function ProvidersScreenView({
                         </div>
                         {/* Sibling of the two-line text column, so the badge
                             centres against the whole row instead of riding the
-                            name's baseline. */}
-                        <ProviderStatusBadge
-                          status={status}
-                          activity={activity}
-                          failureReason={failureReasons[config.id]}
-                        />
+                            name's baseline. The column is fixed and its
+                            contents right-aligned: every badge then shares one
+                            edge and one gutter to the actions, whatever word it
+                            happens to carry. */}
+                        <div className="flex min-w-20 shrink-0 justify-end">
+                          <ProviderStatusBadge
+                            status={status}
+                            activity={activity}
+                            failureReason={failureReasons[config.id]}
+                          />
+                        </div>
                       </button>
-                      <div className="flex shrink-0 items-center gap-1 pr-3">
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
+                      {/* Fixed-width slots, not intrinsic ones. Test/Re-test,
+                          the progress pill and the needs-auth row all differ in
+                          width, and an intrinsic cluster passed that difference
+                          leftward: the badge and the name column landed at a
+                          different x in every row, and jumped again the moment a
+                          test started. */}
+                      <div className="flex shrink-0 items-center gap-1 py-3 pr-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-16 shrink-0 px-0"
+                          onClick={() => onEdit(config)}
+                        >
                           {t('common.edit', 'Edit')}
                         </Button>
-                        {activity ? (
-                          <ProviderActivityAction activity={activity} config={config} />
-                        ) : status !== 'needs-auth' ? (
-                          <Button
-                            variant={status === 'passed' ? 'ghost' : 'outline'}
-                            size="sm"
-                            disabled={noLocalMachine}
-                            onClick={() => onTest(config)}
-                          >
-                            {status === 'passed'
-                              ? t('onboarding.providers.retest', 'Re-test')
-                              : t('onboarding.providers.test', 'Test')}
-                          </Button>
-                        ) : null}
+                        <div className="flex w-20 shrink-0 items-center gap-1">
+                          {activity ? (
+                            <ProviderActivityAction activity={activity} config={config} />
+                          ) : status !== 'needs-auth' ? (
+                            <Button
+                              variant={status === 'passed' ? 'ghost' : 'outline'}
+                              size="sm"
+                              className="w-full px-0"
+                              disabled={noLocalMachine}
+                              onClick={() => onTest(config)}
+                            >
+                              {status === 'passed'
+                                ? t('onboarding.providers.retest', 'Re-test')
+                                : t('onboarding.providers.test', 'Test')}
+                            </Button>
+                          ) : null}
+                        </div>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                           aria-label={t('common.delete', 'Delete')}
                           onClick={() => onDelete(config)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
+                      {/* Indented to the agent's name, not the card edge: the
+                          panel belongs to the agent named above it. */}
                       {status === 'needs-auth' ? (
-                        <div className="basis-full px-3 pb-3">
+                        <div className="basis-full pb-3 pl-[3.25rem] pr-3">
                           <AcpAuthenticationPanel
                             machineId={localMachineId}
                             configId={config.id}
@@ -1333,7 +1357,8 @@ function useProviderWaitEscalation(activity: ProviderTestActivity | undefined): 
   elapsedSeconds: number;
 } {
   const percent = getProviderTestActivityPercent(activity);
-  const measurable = activity !== undefined && percent === null && activity.phase !== 'runtime-failed';
+  const measurable =
+    activity !== undefined && percent === null && activity.phase !== 'runtime-failed';
   const elapsedSeconds = useElapsedSeconds(measurable ? (activity.startedAtMs ?? null) : null);
   return { escalation: providerWaitEscalation(elapsedSeconds), elapsedSeconds };
 }
@@ -1390,10 +1415,9 @@ function ProviderActivityAction({
       // Copying can be blocked (insecure context, no gesture). Say so rather
       // than leaving the user believing they have something to paste.
       console.error('[onboarding] Could not copy provider setup details to the clipboard');
-      toast.error(
-        t('onboarding.providers.slowWaitCopyFailed', 'Could not copy setup details'),
-        { description: report }
-      );
+      toast.error(t('onboarding.providers.slowWaitCopyFailed', 'Could not copy setup details'), {
+        description: report,
+      });
     });
   }, [activity.phase, config, elapsedSeconds, percent, t]);
 
@@ -1403,23 +1427,28 @@ function ProviderActivityAction({
   // exceptional tier hands them one block to paste. It is also the tier's only
   // pointer-independent affordance: the tooltip beside it is hover-only.
   const copyable = !runtimeFailed && escalation === 'exceptional';
+  const copyLabel = t('onboarding.providers.slowWaitCopy', 'Copy setup details');
 
+  // The escalation turns the pill itself into the copy control rather than
+  // adding a button beside it. A second control here would widen this row's
+  // action cluster past every other row's, so the status column and the name
+  // column would slide sideways for exactly the row already asking for
+  // attention. It stays a real focusable button, so the affordance survives
+  // without a pointer.
   return (
-    <>
-      <ProviderProgressButton percent={percent} label={label} />
-      {copyable ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          aria-label={t('onboarding.providers.slowWaitCopy', 'Copy setup details')}
-          title={t('onboarding.providers.slowWaitCopy', 'Copy setup details')}
-          onClick={handleCopyReport}
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </Button>
-      ) : null}
-    </>
+    <ProviderProgressButton
+      percent={percent}
+      label={label}
+      className="w-full"
+      {...(copyable
+        ? {
+            icon: <Copy className="h-3.5 w-3.5" />,
+            ariaLabel: copyLabel,
+            title: copyLabel,
+            onClick: handleCopyReport,
+          }
+        : {})}
+    />
   );
 }
 
@@ -1428,6 +1457,14 @@ function getProviderTestActivityPercent(activity?: ProviderTestActivity): number
     ? Math.min(100, Math.max(0, Math.round(activity.percent)))
     : null;
 }
+
+/**
+ * One chip geometry for every provider status. The words differ in length and
+ * only some carry a glyph, so without a fixed height and a single padding the
+ * column read as five different controls stacked on top of each other.
+ */
+const PROVIDER_STATUS_CHIP =
+  'h-5 shrink-0 gap-1 whitespace-nowrap rounded-full border px-2 py-0 text-[10px] font-medium';
 
 function ProviderStatusBadge({
   status,
@@ -1487,7 +1524,7 @@ function ProviderStatusBadge({
         // The acknowledgement itself must reach assistive tech regardless.
         aria-label={exceptional ? slowDetail : undefined}
         className={cn(
-          'shrink-0 whitespace-nowrap text-[10px]',
+          PROVIDER_STATUS_CHIP,
           runtimeFailed
             ? 'border-destructive/40 bg-destructive/8 text-destructive'
             : exceptional
@@ -1517,7 +1554,7 @@ function ProviderStatusBadge({
     return (
       <Badge
         variant="outline"
-        className="shrink-0 gap-1 whitespace-nowrap border-primary/40 bg-primary/10 text-[10px] text-primary"
+        className={cn(PROVIDER_STATUS_CHIP, 'border-primary/40 bg-primary/10 text-primary')}
       >
         <CheckCircle2 className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusPassed', 'Verified')}
@@ -1535,7 +1572,10 @@ function ProviderStatusBadge({
               })
             : undefined
         }
-        className="shrink-0 gap-1 whitespace-nowrap border-destructive/40 text-[10px] text-destructive"
+        className={cn(
+          PROVIDER_STATUS_CHIP,
+          'border-destructive/40 bg-destructive/8 text-destructive'
+        )}
       >
         <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
@@ -1560,7 +1600,10 @@ function ProviderStatusBadge({
     return (
       <Badge
         variant="outline"
-        className="shrink-0 whitespace-nowrap text-[10px] text-amber-600 dark:text-amber-400"
+        className={cn(
+          PROVIDER_STATUS_CHIP,
+          'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+        )}
       >
         {t('onboarding.providers.statusNeedsAuth', 'Sign in')}
       </Badge>
@@ -1569,7 +1612,7 @@ function ProviderStatusBadge({
   return (
     <Badge
       variant="outline"
-      className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground"
+      className={cn(PROVIDER_STATUS_CHIP, 'border-border/70 bg-muted/40 text-muted-foreground')}
     >
       {t('onboarding.providers.statusUntested', 'Untested')}
     </Badge>
