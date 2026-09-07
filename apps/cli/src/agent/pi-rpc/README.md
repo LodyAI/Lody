@@ -44,6 +44,17 @@ pending work. Cancel sends `clear_queue` before `abort`.
 Pi's `tool_execution_*` events own execution status. Model `toolcall_*` deltas do
 not imply execution. Tool arguments, outputs, paths and edit replacement pairs
 are translated explicitly; Kimi's title-based enrichment is not their source.
+Steer uses the bundled `pi-rpc-extension.js`, loaded inside Pi through `-e`. Its
+internal `/lody-steer` command atomically refuses an idle session or queues a Pi
+custom message with `details.steerId`. The host confirms application only on that
+message's `message_start`, then waits for the existing ownership-transfer lease
+before forwarding subsequent output. Text is never used as an identity. Startup
+and refusal receipts use Pi's native UI notification channel with a reserved
+`lody-rpc:` prefix; they are consumed by the connection, not shown as chat.
+No separate process or scheduler is introduced. Model/config changes remain
+active-turn constrained; ordinary queued turns continue through Lody.
+Before Pi starts a run, steering is refused so Lody retains the ordinary queued input.
+
 Only events during the active invocation enter chat history. Out-of-turn Pi
 extension output is not imported as a new Lody turn.
 
@@ -68,7 +79,7 @@ extension output is not imported as a new Lody turn.
   Editor prefill is shown as context for a free-text answer. Requests outside a
   prompt are cancelled; late answers cannot change a subsequent turn.
 
-Acknowledged steer, native-session import/discovery, fork, workspace MCP, Pi TUI
+Native-session import/discovery, fork, workspace MCP, Pi TUI
 widgets/status/editor replacement, in-app OAuth and managed-runtime updates are
 not advertised. Ordinary Lody queued turns still work. Selecting workspace MCP
 servers fails explicitly before session establishment rather than ignoring them.
@@ -84,16 +95,25 @@ For an explicit real-runtime smoke from the repository root:
 
 ```sh
 pnpm --filter lody prepare:acp-adapters
+pnpm --filter lody dev:build
 pnpm --filter lody exec tsx scripts/smoke-pi-rpc.ts
 ```
 
 This downloads the pinned package into a temporary npm cache, then uses a synthetic
 in-process Pi provider without model network requests or user credentials. It runs
 through the real launch resolver and `AgentClient`, writes a temporary file with
-Pi's actual `write` tool, handles input and a cancelled dialog, reads stats, kills
+Pi's actual `write` tool, handles input and a cancelled dialog, reads stats, steers a gated tool execution
+and verifies that output waits for the ownership lease, kills
 and restarts Pi, and resumes the same session. Synthetic artifacts are retained in
-the printed temporary directory. It does not validate a commercial provider,
-Electron interaction, or Windows packaging.
+the printed temporary directory. This synthetic script does not validate a commercial provider, Electron interaction,
+or Windows packaging. A separate local live-provider check verified DeepSeek V4 Flash
+tool execution, steering, compaction, stats, native resume and isolated title generation.
+Compaction used an isolated Pi profile with a smaller recent-context retention threshold;
+provider credentials and the normal Pi profile were not modified.
+An isolated Electron acceptance run also verified provider setup, model/thinking
+selection, a local project, steering that changed the actual file result, stats,
+cancellation of a running tool and continuation after renderer reload/reconnection.
+Windows packaging and other commercial providers remain unverified.
 
 Protocol evidence: Pi
 [`rpc-mode.ts`](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/src/modes/rpc/rpc-mode.ts),

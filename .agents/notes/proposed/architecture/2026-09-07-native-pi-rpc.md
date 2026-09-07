@@ -48,12 +48,17 @@ source, documents supported behavior and gives the reproducible smoke command.
 
 ## Limits and review decision
 
-The first PR includes usable ordinary turns and native restart/resume. It omits
-acknowledged steer: Pi's queue acknowledgement alone does not prove the
-application/ownership handoff required by Lody. It also omits terminal-history
+The first PR includes ordinary turns, acknowledged steer and native restart/resume.
+Pi's queue acknowledgement alone does not prove application. A small bundled Pi
+extension preserves the steer id in native custom-message metadata; message_start
+then drives Lody's existing ownership handoff. This avoids matching by text or adding
+a second execution authority. It omits terminal-history
 import, MCP, managed-runtime distribution and TUI widgets. Existing `pi-acp`
-configurations are not migrated. No commercial provider or Electron/Windows UI
-validation is claimed by the offline smoke.
+configurations are not migrated. The offline smoke is complemented by a local DeepSeek V4 Flash check for tool
+execution, steer, compaction, statistics, resume and isolated title generation.
+An isolated Electron run also verified provider/model setup, actual file-changing
+steer, statistics, tool cancellation and continuation after reconnection.
+Windows packaging and other commercial providers remain unverified.
 
 The maintainer decision is whether this bounded native connection is an acceptable
 long-term integration boundary. Changing that decision to an owned ACP executable

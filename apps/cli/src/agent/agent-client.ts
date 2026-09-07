@@ -1684,6 +1684,7 @@ export class AgentClient implements acp.Client {
       'protocol' in stream
         ? new PiRpcConnection(stream, {
             update: (notification) => this.sessionUpdate(notification),
+            extension: (method, params) => this.extNotification!(method, params),
             usage: (usage) => this.options.onUsageUpdate?.(usage),
             question: (request) => this.unstable_createElicitation(request),
           })

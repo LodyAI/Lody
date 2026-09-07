@@ -12,3 +12,9 @@
   extension questions are interactive input, never an approval policy.
 - Serialize notifications but never block response parsing behind user interaction.
   Reject pending work on malformed transport or EOF; do not silently restart a prompt.
+
+- A steer is applied only when Pi emits the custom message with the matching steer id.
+  Hold later notifications behind the host ownership lease. Preserve a native idle
+  refusal even when it arrives after settlement so the host can safely requeue.
+- Keep the small steering extension bundled beside the CLI in both build layouts;
+  initialization must verify its ready receipt before advertising steering.

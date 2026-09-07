@@ -71,6 +71,7 @@ export default defineConfig({
       // better-sqlite3 external, just like the main CLI entry.
       input: {
         index: path.resolve(__dirname, 'src/index.ts'),
+        'pi-rpc-extension': path.resolve(__dirname, 'src/agent/pi-rpc/extension.ts'),
         'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),

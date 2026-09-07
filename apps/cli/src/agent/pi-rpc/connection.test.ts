@@ -6,7 +6,7 @@ import { AgentClient } from '../agent-client';
 import type { Logger } from '@/utils/logger';
 import type { SessionId } from '@lody/shared';
 import { parseSessionNotification } from '@lody/shared';
-import type { SessionUsageUpdate } from 'acp-extension-core';
+import { LODY_EXTENSION_METHODS, type SessionUsageUpdate } from 'acp-extension-core';
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -36,6 +36,7 @@ function peer() {
   const commands: Record<string, unknown>[] = [];
   const replies: Record<string, unknown>[] = [];
   const promptReceived = deferred();
+  const accepted = deferred();
   const questionAnswered = deferred<Record<string, unknown>>();
   const state = {
     sessionId: 'native-id',
@@ -70,6 +71,7 @@ function peer() {
           break;
         case 'get_state':
           reply(request, state);
+          if (commands.some((command) => command.type === 'prompt')) accepted.resolve();
           break;
         case 'get_session_stats':
           reply(request, {
@@ -113,6 +115,11 @@ function peer() {
     },
   });
   const stream: PiStream = { protocol: 'pi', readable, writable };
+  emit({
+    type: 'extension_ui_request',
+    method: 'notify',
+    message: 'lody-rpc:' + JSON.stringify({ type: 'lody_steer_ready', version: 1 }),
+  });
   const updates: acp.SessionNotification[] = [];
   const usages: SessionUsageUpdate[] = [];
   let client: PiRpcConnection | undefined;
@@ -120,6 +127,7 @@ function peer() {
     update: async (notification: acp.SessionNotification) => {
       updates.push(notification);
     },
+    extension: async (_method: string, _params: Record<string, unknown>) => {},
     usage: (value: SessionUsageUpdate) => usages.push(value),
     question: async (): Promise<acp.CreateElicitationResponse> => ({
       action: 'accept',
@@ -135,6 +143,7 @@ function peer() {
     writable,
     updates,
     usages,
+    host,
     emit,
     commands,
     state,
@@ -142,6 +151,7 @@ function peer() {
     questionAnswered,
     reply,
     promptReceived,
+    accepted,
     setAbort: (handler: typeof onAbort) => {
       onAbort = handler;
     },
@@ -165,6 +175,151 @@ const text = (value: string) => ({
 });
 
 describe('native Pi connection', () => {
+  it('hands off a steer only when its tagged message is applied, before any following output', async () => {
+    const p = peer();
+    await start(p);
+    const done = p.client.prompt(prompt);
+    await p.promptReceived.promise;
+    await p.accepted.promise;
+    const queued = deferred();
+    p.setPrompt((request) => {
+      p.reply(request);
+      queued.resolve();
+    });
+    const applied = deferred();
+    const released = deferred();
+    const applications: unknown[] = [];
+    p.host.extension = async (method, params) => {
+      applications.push(params.steerId);
+      expect(method).toBe(LODY_EXTENSION_METHODS.sessionSteerApplied);
+      expect(params.sessionId).toBe(prompt.sessionId);
+      if (params.steerId === 'steer-1') {
+        applied.resolve();
+        await released.promise;
+      }
+    };
+    const steered = p.client.request(LODY_EXTENSION_METHODS.sessionSteer, {
+      sessionId: prompt.sessionId,
+      steerId: 'steer-1',
+      prompt: [{ type: 'text', text: 'change direction' }],
+    });
+    await queued.promise;
+    p.emit({
+      type: 'message_start',
+      message: { role: 'user', content: [{ type: 'text', text: 'change direction' }] },
+    });
+    p.emit(text('old owner'));
+    p.emit({
+      type: 'message_start',
+      message: {
+        role: 'custom',
+        customType: 'lody-steer',
+        details: { steerId: 'steer-1' },
+        content: 'change direction',
+      },
+    });
+    p.emit(text('new owner'));
+    await applied.promise;
+    await expect(steered).resolves.toEqual({ outcome: 'injected' });
+    expect(
+      p.updates.filter((n) => n.update.sessionUpdate === 'agent_message_chunk').map((n) => n.update)
+    ).toEqual([
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old owner' } },
+    ]);
+    // A second identical instruction has its own identity, even during the first lease.
+    p.setPrompt((request) => {
+      p.reply(request);
+      p.emit({
+        type: 'message_start',
+        message: {
+          role: 'custom',
+          customType: 'lody-steer',
+          details: { steerId: 'steer-2' },
+          content: 'change direction',
+        },
+      });
+      p.emit(text('second owner'));
+      p.emit({ type: 'agent_settled' });
+    });
+    const second = p.client.request(LODY_EXTENSION_METHODS.sessionSteer, {
+      sessionId: prompt.sessionId,
+      steerId: 'steer-2',
+      prompt: [{ type: 'text', text: 'change direction' }],
+    });
+    released.resolve();
+    await expect(second).resolves.toEqual({ outcome: 'injected' });
+    expect(applications).toEqual(['steer-1', 'steer-2']);
+    await expect(done).resolves.toEqual({ stopReason: 'end_turn' });
+    expect(
+      p.updates.some(
+        (n) =>
+          n.update.sessionUpdate === 'agent_message_chunk' &&
+          n.update.content.type === 'text' &&
+          n.update.content.text === 'new owner'
+      )
+    ).toBe(true);
+    p.close();
+  });
+
+  it('preserves an idle refusal arriving after settlement so the host can requeue', async () => {
+    const p = peer();
+    await start(p);
+    const done = p.client.prompt(prompt);
+    await p.promptReceived.promise;
+    await p.accepted.promise;
+    p.setPrompt((request) => {
+      p.emit({ type: 'agent_settled' });
+      p.emit({
+        type: 'extension_ui_request',
+        method: 'notify',
+        message: 'lody-rpc:' + JSON.stringify({ type: 'lody_steer_refused', steerId: 'late' }),
+      });
+      p.reply(request);
+    });
+    await expect(
+      p.client.request(LODY_EXTENSION_METHODS.sessionSteer, {
+        sessionId: prompt.sessionId,
+        steerId: 'late',
+        prompt: prompt.prompt,
+      })
+    ).rejects.toMatchObject({ code: -32600 });
+    await done;
+    p.close();
+  });
+
+  it.each(['cancel', 'eof'] as const)(
+    'settles pending steer on %s without applying it to a later turn',
+    async (reason) => {
+      const p = peer();
+      await start(p);
+      const done = p.client.prompt(prompt);
+      void done.catch(() => undefined);
+      await p.promptReceived.promise;
+      await p.accepted.promise;
+      const queued = deferred();
+      p.setPrompt((request) => {
+        p.reply(request);
+        queued.resolve();
+      });
+      const steer = p.client.request(LODY_EXTENSION_METHODS.sessionSteer, {
+        sessionId: prompt.sessionId,
+        steerId: 'pending',
+        prompt: prompt.prompt,
+      });
+      const rejected = expect(steer).rejects.toThrow();
+      await queued.promise;
+      if (reason === 'cancel') {
+        await p.client.cancel({ sessionId: prompt.sessionId });
+        await done;
+        p.close();
+      } else {
+        p.close();
+        await expect(done).rejects.toThrow('closed');
+      }
+      await rejected;
+    }
+  );
+
   it('keeps tool generation distinct from execution, reads cumulative session usage, and waits through retry to settled', async () => {
     const p = peer();
     await start(p);
@@ -408,7 +563,7 @@ describe('AgentClient direct Pi seam', () => {
       stopReason: 'end_turn',
     });
     expect(history).toEqual(['agent_message_chunk']);
-    expect(client.supportsAcknowledgedSteer()).toBe(false);
+    expect(client.supportsAcknowledgedSteer()).toBe(true);
     p.close();
   });
 });

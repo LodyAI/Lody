@@ -54,8 +54,10 @@ describe('resolveBuiltinACPSetting', () => {
         '@earendil-works/pi-coding-agent@0.85.1',
         '--mode',
         'rpc',
+        '-e',
+        expect.stringMatching(/pi-rpc-extension\.js$/),
       ],
-      capabilitySourceVersion: 'builtin-pi-rpc:0.85.1',
+      capabilitySourceVersion: 'builtin-pi-rpc:0.85.1:steer-v1',
     });
   });
 

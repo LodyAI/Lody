@@ -222,7 +222,7 @@ export function getAcpCapabilitySourceVersion(
           ? `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${managedRuntimeVersion}`
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
-      if (input.agentType === 'pi') return `builtin-pi-rpc:${PI_RPC_VERSION}`;
+      if (input.agentType === 'pi') return `builtin-pi-rpc:${PI_RPC_VERSION}:steer-v1`;
       if (input.agentType === 'deepseek') {
         const baseUrl = input.env?.[DEEPSEEK_HARNESS_BASE_URL_ENV];
         return baseUrl?.trim()
@@ -365,7 +365,7 @@ async function resolveManagedRuntimeForLaunch(
 }
 
 function resolveCliAdapterEntry(
-  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp'
+  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp' | 'pi-rpc-extension'
 ): [string] {
   const argvEntry = process.argv[1] ? resolve(process.argv[1]) : undefined;
   const candidates: string[] = [];
@@ -376,6 +376,11 @@ function resolveCliAdapterEntry(
   candidates.push(resolve(importDir, `${adapter}.js`));
   candidates.push(resolve(importDir, '..', `${adapter}.js`));
 
+  if (adapter === 'pi-rpc-extension')
+    candidates.push(
+      resolve(importDir, '../../dist-dev/pi-rpc-extension.js'),
+      resolve(importDir, '../../dist/pi-rpc-extension.js')
+    );
   const entry = candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
   if (!entry) {
     throw new Error(`Unable to resolve bundled ${adapter} entry`);
@@ -398,6 +403,8 @@ async function resolveBuiltinACPProcessLaunch(
         `@earendil-works/pi-coding-agent@${PI_RPC_VERSION}`,
         '--mode',
         'rpc',
+        '-e',
+        ...resolveCliAdapterEntry('pi-rpc-extension'),
         ...(input.env?.LODY_TITLE_AGENT === '1' ? ['--session-dir', '.pi-sessions'] : []),
         ...(input.extraArgs ?? []),
       ],

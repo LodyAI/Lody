@@ -1,7 +1,8 @@
 import path from 'node:path';
-import type * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk';
 import { z } from 'zod';
-import type { SessionUsageUpdate } from 'acp-extension-core';
+import { zContentBlock } from '@lody/shared';
+import { LODY_EXTENSION_METHODS, type SessionUsageUpdate } from 'acp-extension-core';
 import type { AgentConnection, PiStream } from '../agent-connection';
 import { PiTransport } from './transport';
 import { PI_RPC_VERSION } from './version';
@@ -86,6 +87,7 @@ type Run = ReturnType<typeof deferred<acp.PromptResponse>> & {
 };
 type Host = {
   update: (notification: acp.SessionNotification) => Promise<void>;
+  extension: (method: string, params: Record<string, unknown>) => Promise<void>;
   usage: (usage: SessionUsageUpdate) => void;
   question: (request: acp.CreateElicitationRequest) => Promise<acp.CreateElicitationResponse>;
 };
@@ -97,6 +99,13 @@ export class PiRpcConnection implements AgentConnection {
   private cwd = '';
   private model?: z.infer<typeof modelSchema>;
   private active?: Run;
+  private steeringReady = false;
+  private pendingSteer?: {
+    id: string;
+    run: Run;
+    applied: ReturnType<typeof deferred<void>>;
+    acknowledged: ReturnType<typeof deferred<void>>;
+  };
 
   constructor(
     stream: PiStream,
@@ -105,16 +114,31 @@ export class PiRpcConnection implements AgentConnection {
     this.rpc = new PiTransport(
       stream,
       (event) => this.event(event),
-      (error) => this.active?.reject(error)
+      (error) => {
+        this.active?.reject(error);
+        this.pendingSteer?.applied.reject(error);
+      }
     );
   }
 
   initialize: AgentConnection['initialize'] = async () => {
     await this.rpc.request('get_state');
+    await this.rpc.drain();
+    if (!this.steeringReady) throw new Error('Required Lody Pi extension did not initialize');
     return {
       protocolVersion: 1,
       agentInfo: { name: 'pi-rpc', version: PI_RPC_VERSION },
       agentCapabilities: {
+        _meta: {
+          lody: {
+            steering: {
+              version: 1,
+              transport: 'request',
+              upstreamTurn: 'same',
+              configPolicy: 'active',
+            },
+          },
+        },
         promptCapabilities: { image: true, embeddedContext: true },
         sessionCapabilities: { resume: {} },
       },
@@ -289,6 +313,7 @@ export class PiRpcConnection implements AgentConnection {
   cancel: AgentConnection['cancel'] = async (request) => {
     this.assertSession(request.sessionId);
     if (this.active) this.active.cancelled = true;
+    this.pendingSteer?.applied.reject(new Error('Pi steer cancelled before application'));
     // abort alone lets already queued messages continue in Pi.
     await this.rpc.request('clear_queue');
     await this.rpc.request('abort');
@@ -327,6 +352,31 @@ export class PiRpcConnection implements AgentConnection {
   }
 
   private async event(event: Record<string, unknown>): Promise<void> {
+    if (
+      event.type === 'extension_ui_request' &&
+      event.method === 'notify' &&
+      typeof event.message === 'string' &&
+      event.message.startsWith('lody-rpc:')
+    ) {
+      event = z
+        .object({
+          type: z.enum(['lody_steer_ready', 'lody_steer_refused']),
+          version: z.number().optional(),
+          steerId: z.string().optional(),
+        })
+        .parse(JSON.parse(event.message.slice('lody-rpc:'.length)));
+    }
+    if (event.type === 'lody_steer_ready') {
+      this.steeringReady = event.version === 1;
+      return;
+    }
+    if (event.type === 'lody_steer_refused') {
+      if (this.pendingSteer && event.steerId === this.pendingSteer.id)
+        this.pendingSteer.applied.reject(
+          acp.RequestError.invalidRequest(undefined, 'Pi is idle; steer was not delivered')
+        );
+      return;
+    }
     if (event.type === 'extension_ui_request') {
       const request = questionSchema.parse(event);
       // Do not block the wire/notification queue on a human response.
@@ -348,15 +398,53 @@ export class PiRpcConnection implements AgentConnection {
             run.reject(error instanceof Error ? error : new Error('Pi cancellation failed'))
           );
         break;
-      case 'agent_settled':
+      case 'agent_settled': {
         if (!run.started) break;
         run.settled = true;
+        const pending = this.pendingSteer;
+        if (pending) {
+          // A native refusal can follow settlement on the wire. Preserve that verdict,
+          // which lets the host safely requeue, instead of racing it with a generic error.
+          void pending.acknowledged.promise
+            .then(() => this.rpc.drain())
+            .then(() => {
+              if (this.pendingSteer === pending)
+                pending.applied.reject(new Error('Pi settled before steer application'));
+            })
+            .catch((error: Error) => pending.applied.reject(error));
+        }
         await this.reportUsage();
         if (run.error && !run.cancelled) run.reject(new Error(run.error));
         else run.resolve({ stopReason: run.cancelled ? 'cancelled' : 'end_turn' });
         break;
+      }
       case 'message_start': {
-        const message = z.object({ role: z.string() }).parse(event.message);
+        const message = z
+          .object({
+            role: z.string(),
+            customType: z.string().optional(),
+            details: z.unknown().optional(),
+          })
+          .parse(event.message);
+        const pending = this.pendingSteer;
+        const identity = z.object({ steerId: z.string() }).safeParse(message.details);
+        if (
+          pending &&
+          pending.run === run &&
+          !run.cancelled &&
+          message.role === 'custom' &&
+          message.customType === 'lody-steer' &&
+          identity.success &&
+          identity.data.steerId === pending.id
+        ) {
+          this.pendingSteer = undefined;
+          pending.applied.resolve();
+          // The existing host lease switches history ownership before any subsequent output.
+          await this.host.extension(LODY_EXTENSION_METHODS.sessionSteerApplied, {
+            sessionId: this.sessionId,
+            steerId: pending.id,
+          });
+        }
         if (message.role === 'assistant') run.error = undefined;
         break;
       }
@@ -561,7 +649,44 @@ export class PiRpcConnection implements AgentConnection {
   setSessionMode: AgentConnection['setSessionMode'] = async () => {
     throw new Error('Pi has no permission modes');
   };
-  request: AgentConnection['request'] = async () => {
-    throw new Error('Pi does not implement this ACP extension');
+  request: AgentConnection['request'] = async <T>(method: string, params?: unknown): Promise<T> => {
+    if (method !== LODY_EXTENSION_METHODS.sessionSteer)
+      throw new Error('Pi does not implement this ACP extension');
+    const request = z
+      .object({
+        sessionId: z.string(),
+        steerId: z.string(),
+        prompt: z.array(zContentBlock),
+      })
+      .parse(params);
+    this.assertSession(request.sessionId);
+    const run = this.active;
+    if (!run || !run.started || run.settled || run.cancelled || this.pendingSteer)
+      throw acp.RequestError.invalidRequest(undefined, 'No available Pi turn for steer');
+    const { message, images } = this.promptContent(request.prompt);
+    const pending = {
+      id: request.steerId,
+      run,
+      applied: deferred<void>(),
+      acknowledged: deferred<void>(),
+    };
+    this.pendingSteer = pending;
+    try {
+      // The extension preserves identity in Pi metadata and atomically injects or refuses.
+      await this.rpc.request('prompt', {
+        message:
+          '/lody-steer ' +
+          JSON.stringify({
+            steerId: request.steerId,
+            content: [{ type: 'text', text: message }, ...images],
+          }),
+      });
+      pending.acknowledged.resolve();
+      await pending.applied.promise;
+      return { outcome: 'injected' } as T;
+    } finally {
+      pending.acknowledged.resolve();
+      if (this.pendingSteer === pending) this.pendingSteer = undefined;
+    }
   };
 }

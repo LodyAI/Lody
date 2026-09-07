@@ -32,6 +32,8 @@ const logger: Logger = {
 };
 const children = new Set<ReturnType<typeof spawn>>();
 const output: string[] = [];
+let onToolStart: (() => void) | undefined;
+let onPromptAck: (() => void) | undefined;
 
 async function start(resumeSessionId?: ACPSessionId) {
   const config = { cliType: 'builtin' as const, agentType: 'pi' };
@@ -59,6 +61,16 @@ async function start(resumeSessionId?: ACPSessionId) {
     },
   });
   children.add(child);
+  let wire = '';
+  child.stdout?.on('data', (data) => {
+    wire += data.toString();
+    let end;
+    while ((end = wire.indexOf('\n')) >= 0) {
+      const event = JSON.parse(wire.slice(0, end));
+      wire = wire.slice(end + 1);
+      if (event.type === 'response' && event.command === 'prompt' && event.success) onPromptAck?.();
+    }
+  });
   if (!child.stdin || !child.stdout || !child.stderr) throw new Error('Missing Pi stdio');
   child.stderr.on('data', (data) => process.stderr.write(data));
   const started = await createAcpClient({
@@ -69,6 +81,8 @@ async function start(resumeSessionId?: ACPSessionId) {
     agentConfig: config,
     resumeSessionId,
     onUpdateMessage: (n) => {
+      if (n.update.sessionUpdate === 'tool_call' && n.update.title === 'fixture_gate')
+        onToolStart?.();
       if (n.update.sessionUpdate === 'agent_message_chunk' && n.update.content.type === 'text')
         output.push(n.update.content.text);
     },
@@ -76,6 +90,10 @@ async function start(resumeSessionId?: ACPSessionId) {
   });
   return {
     ...started,
+    releaseGate: () =>
+      child.stdin!.write(
+        JSON.stringify({ id: 'smoke-release', type: 'prompt', message: '/release-fixture' }) + '\n'
+      ),
     stop: async () => {
       const exited = once(child, 'exit');
       child.kill();
@@ -113,6 +131,23 @@ try {
     )?.stopReason,
     'end_turn'
   );
+  const gateStarted = new Promise<void>((resolve) => {
+    onToolStart = resolve;
+  });
+  const running = prompt('gate fixture');
+  await gateStarted;
+  onPromptAck = () => {
+    onPromptAck = undefined;
+    first.releaseGate();
+  };
+  const steering = first.client.steerPrompt(first.acpSessionId, [
+    { type: 'text', text: 'steered fixture' },
+  ]);
+  const lease = await steering.applied;
+  assert(!output.includes('Pi steer applied'), 'output must wait for ownership transfer');
+  lease.release();
+  await running;
+  assert(output.includes('Pi steer applied'));
   const nativeSessionFile = first.acpSessionId;
   await first.stop();
   const resumed = await start(nativeSessionFile);
@@ -125,7 +160,7 @@ try {
   assert(output.includes('Pi native smoke passed'));
   assert(output.some((line) => line.startsWith('Pi session usage:')));
   console.log(
-    'PASS: native launch, AgentClient, tool write, handled input, dialog cancellation, stats, and restart/resume.'
+    'PASS: native launch, AgentClient, tool write, handled input, dialog cancellation, stats, acknowledged steer, and restart/resume.'
   );
   console.log(`Synthetic artifacts retained at ${root}`);
 } finally {

@@ -1,5 +1,28 @@
+import { Type } from '@sinclair/typebox';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 export default function (pi) {
+  let release;
+  pi.registerTool({
+    name: 'fixture_gate',
+    label: 'Fixture gate',
+    description: 'Wait for an explicit smoke signal',
+    parameters: Type.Object({}),
+    async execute(_id, _args, signal) {
+      await new Promise((resolve) => {
+        release = resolve;
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', resolve, { once: true });
+      });
+      return { content: [{ type: 'text', text: 'gate released' }] };
+    },
+  });
+  pi.registerCommand('release-fixture', {
+    description: 'Release smoke gate',
+    handler: async () => {
+      release?.();
+    },
+  });
+
   pi.registerProvider('lody-fixture', {
     api: 'lody-fixture-api',
     baseUrl: 'http://fixture.invalid',
@@ -37,19 +60,27 @@ export default function (pi) {
       };
       queueMicrotask(() => {
         stream.push({ type: 'start', partial: message });
-        if (last?.role === 'user' && JSON.stringify(last.content).includes('write fixture')) {
+        if (
+          last?.role === 'user' &&
+          (JSON.stringify(last.content).includes('write fixture') ||
+            JSON.stringify(last.content).includes('gate fixture'))
+        ) {
           const tool = {
             type: 'toolCall',
             id: 'write-fixture',
-            name: 'write',
-            arguments: { path: 'fixture.txt', content: 'native pi wrote this\n' },
+            name: JSON.stringify(last.content).includes('gate fixture') ? 'fixture_gate' : 'write',
+            arguments: JSON.stringify(last.content).includes('gate fixture')
+              ? {}
+              : { path: 'fixture.txt', content: 'native pi wrote this\n' },
           };
           message.content = [tool];
           message.stopReason = 'toolUse';
           stream.push({ type: 'toolcall_start', contentIndex: 0, partial: message });
           stream.push({ type: 'toolcall_end', contentIndex: 0, toolCall: tool, partial: message });
         } else {
-          const text = 'Pi native smoke passed';
+          const text = JSON.stringify(context.messages).includes('steered fixture')
+            ? 'Pi steer applied'
+            : 'Pi native smoke passed';
           message.content = [{ type: 'text', text }];
           stream.push({ type: 'text_start', contentIndex: 0, partial: message });
           stream.push({ type: 'text_delta', contentIndex: 0, delta: text, partial: message });
