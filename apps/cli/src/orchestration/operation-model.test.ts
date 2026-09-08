@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LODY_MAX_CHAIN_DEPTH } from '@lody/shared';
 
 import {
   assertOrchestrationModelSafety,
@@ -256,7 +257,7 @@ describe('Operation delivery executable model', () => {
   });
 
   it('rejects a new machine Command at the fixed chain-depth cap', () => {
-    const capped = { ...initialOrchestrationModelState(), chainDepth: 5 };
+    const capped = { ...initialOrchestrationModelState(), chainDepth: LODY_MAX_CHAIN_DEPTH };
     expect(stepOrchestrationModel(capped, 'accept').operation).toBe('absent');
   });
 
@@ -270,7 +271,7 @@ describe('Operation delivery executable model', () => {
     expect(() =>
       assertOrchestrationModelSafety({
         ...initialOrchestrationModelState(),
-        chainDepth: 6,
+        chainDepth: LODY_MAX_CHAIN_DEPTH + 1,
       })
     ).toThrow(/exceeded the fixed depth cap/);
     expect(() =>

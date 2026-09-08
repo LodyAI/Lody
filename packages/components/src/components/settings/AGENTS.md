@@ -58,3 +58,11 @@ component details.
   target, Role revision, and dispatch config are frozen into the accepted Operation so a
   later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
   `agentRoleRevision` record where a Session came from and are display-only.
+
+## Workspace ownership
+
+- Ownership transfer is an owner-only danger-zone slot shared by desktop and mobile.
+  `workspace-ownership-transfer.tsx` collects an existing member and exact workspace
+  name, then calls the cloud mutation through `account-setting.tsx`. Refresh session
+  and active organization after success; cache refresh failure must not claim transfer
+  failed. Card changes use the billing Portal separately; transfer keeps the current card.

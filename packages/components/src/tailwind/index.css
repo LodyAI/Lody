@@ -10,7 +10,7 @@
 @source "../../node_modules/konsta/shared";
 @source "../../node_modules/konsta/styles";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
 
 @theme inline {
   --font-ios: var(--font-sans);

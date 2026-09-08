@@ -1,3 +1,5 @@
+import { LODY_MAX_CHAIN_DEPTH } from '@lody/shared';
+
 /**
  * Small executable contract model for Operation/Delivery scheduling races.
  * It deliberately omits storage fields and models only state that can change a
@@ -76,7 +78,7 @@ export const stepOrchestrationModel = (
   const next = { ...state };
   switch (action) {
     case 'accept':
-      if (next.operation === 'absent' && next.chainDepth < 5) {
+      if (next.operation === 'absent' && next.chainDepth < LODY_MAX_CHAIN_DEPTH) {
         next.operation = 'active';
         next.targetInput = 'missing';
         next.progress = 'pending';
@@ -311,7 +313,7 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.deliveryAttempts > 2) {
     throw new Error('a Delivery exceeded its bounded attempt count');
   }
-  if (state.chainDepth > 5) {
+  if (state.chainDepth > LODY_MAX_CHAIN_DEPTH) {
     throw new Error('machine-originated chain exceeded the fixed depth cap');
   }
 };

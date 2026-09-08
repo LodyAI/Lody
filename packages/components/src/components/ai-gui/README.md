@@ -13,6 +13,7 @@ the reasoning behind those rules.
 | Stream  | `view.tsx`, `build-chat-stream-items.ts` | Stable Virtua rows and scroll.         |
 | Turns   | `assistant-turn-render-blocks.ts`        | Activity groups and foldable segments. |
 | Outline | `conversation-outline-*`                 | Round ticks and navigation.            |
+| Selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when

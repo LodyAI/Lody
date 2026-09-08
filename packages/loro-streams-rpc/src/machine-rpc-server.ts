@@ -93,6 +93,7 @@ import {
 } from './rpc-secret';
 
 const JSON_RPC_VERSION = '2.0';
+const MACHINE_LIFECYCLE_ACK_TIMEOUT_MS = 5_000;
 
 // Upper bound on RPC handlers running at once on the shared per-machine request
 // loop. Requests are dispatched concurrently (see `handleRequestBatch`) so a slow
@@ -295,7 +296,8 @@ type RpcServerDeps = {
     requestId: string;
     targetVersion?: string;
   }) => Promise<MachineUpgradeResponse>;
-  onMachineLifecycleResponseAppended?: (
+  /** Accepted operations proceed after the ACK succeeds, fails, or reaches its deadline. */
+  onMachineLifecycleResponseSettled?: (
     args:
       | { action: 'restart'; response: MachineRestartResponse }
       | { action: 'upgrade'; response: MachineUpgradeResponse }
@@ -769,8 +771,10 @@ export class LoroStreamsMachineRpcServer {
             requestToken: request.params.requestToken,
             requestId: request.params.requestId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
-          this.deps.onMachineLifecycleResponseAppended?.({ action: 'restart', response });
+          await this.settleMachineLifecycleResponse(request.replyTo, request.id, {
+            action: 'restart',
+            response,
+          });
           return;
         }
         case 'machine/upgrade': {
@@ -787,8 +791,10 @@ export class LoroStreamsMachineRpcServer {
             requestId: request.params.requestId,
             targetVersion: request.params.targetVersion,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
-          this.deps.onMachineLifecycleResponseAppended?.({ action: 'upgrade', response });
+          await this.settleMachineLifecycleResponse(request.replyTo, request.id, {
+            action: 'upgrade',
+            response,
+          });
           return;
         }
         case 'machine/acp-capabilities-refresh': {
@@ -1499,6 +1505,44 @@ export class LoroStreamsMachineRpcServer {
         }
       );
     }
+  }
+
+  private async settleMachineLifecycleResponse(
+    replyTo: string,
+    requestId: string,
+    event:
+      | { action: 'restart'; response: MachineRestartResponse }
+      | { action: 'upgrade'; response: MachineUpgradeResponse }
+  ): Promise<void> {
+    const method = event.action === 'restart' ? 'machine/restart' : 'machine/upgrade';
+    if (!event.response.accepted) {
+      await this.appendResultResponse(replyTo, requestId, method, event.response);
+      return;
+    }
+
+    // Preparation already accepted the operation (including persisting upgrade
+    // intent). Delivery failure must not leave it pending forever. The race also
+    // observes a late append rejection without triggering the action a second time.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.appendResultResponse(replyTo, requestId, method, event.response),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Machine lifecycle ACK deadline exceeded')),
+            MACHINE_LIFECYCLE_ACK_TIMEOUT_MS
+          );
+        }),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.logger.warn(
+        `[rpc-server:${this.deps.machineId}] ${event.action} ACK failed for ${requestId}; continuing accepted operation: ${message}`
+      );
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+    this.deps.onMachineLifecycleResponseSettled?.(event);
   }
 
   private async decryptCodeCollabV2RequestParams(

@@ -20,6 +20,11 @@ import {
   useState,
 } from 'react';
 import {
+  MessageSelectionContext,
+  MessageSelectionOverlay,
+  MessageSelectionRow,
+} from './message-selection';
+import {
   ZoomableImageViewer,
   type ImagePreviewPortalAnchorRef,
 } from '@/components/shared/zoomable-image-viewer';
@@ -1197,6 +1202,7 @@ export const SessionChatStreamView = forwardRef<
     ref
   ) => {
     const vlistRef = useRef<VirtualizerHandle>(null);
+    const messageSelection = useContext(MessageSelectionContext);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
     const search = useSessionSearch();
@@ -1224,12 +1230,13 @@ export const SessionChatStreamView = forwardRef<
         get current() {
           return (
             groupExpansionAutoScrollSuppressedRef.current ||
+            messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
       }),
-      [suppressStickyAutoScrollRef]
+      [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
       (messageId: string, groupKey: string, expanded: boolean) => {
@@ -1659,10 +1666,11 @@ export const SessionChatStreamView = forwardRef<
           >
             <div
               ref={scrollContainerRef}
+              data-message-selection-scroll=""
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.
-              className="chat-scrollbar h-full overflow-x-hidden py-5 sm:py-6"
+              className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
               // Mobile session page floats a frosted header over the list;
               // `--conversation-top-inset` (set by session-detail's mobile
               // branch) pads the scroll content so the first message clears the
@@ -1693,20 +1701,25 @@ export const SessionChatStreamView = forwardRef<
                 {leadingContent == null ? null : (
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
-                {virtualRows.map((row) => {
+                {virtualRows.map((row, rowIndex) => {
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
                     // so they carry no per-turn file diffs or last-assistant
                     // quick actions.
                     return (
-                      <ChatItem
+                      <MessageSelectionRow
                         key={row.key}
-                        item={row.item}
-                        renderMessageRow={renderMessageRow}
-                        noMessagesLabel={noMessagesLabel}
-                        emptyState={emptyState}
-                      />
+                        id={row.item.type === 'message' ? row.item.message.id : undefined}
+                        first
+                      >
+                        <ChatItem
+                          item={row.item}
+                          renderMessageRow={renderMessageRow}
+                          noMessagesLabel={noMessagesLabel}
+                          emptyState={emptyState}
+                        />
+                      </MessageSelectionRow>
                     );
                   }
 
@@ -1720,33 +1733,39 @@ export const SessionChatStreamView = forwardRef<
                       : (messageFileDiffEntriesByTurn[row.item.message.id] ??
                         EMPTY_EDITED_FILE_ENTRIES);
                   return (
-                    <AssistantChatItem
+                    <MessageSelectionRow
                       key={row.key}
-                      row={row}
-                      fileDiffOverride={fileDiffOverride}
-                      assistantActions={resolveAssistantMessageActions(
-                        row.item.message.id,
-                        assistantActionsMessageId,
-                        assistantActions
-                      )}
-                      onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                      forkWorktreeAvailability={forkWorktreeAvailability}
-                      onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                      isForking={forkingAssistantMessageId === row.item.message.id}
-                      onFileDiffClick={onFileDiffClick}
-                      onFilePathClick={onFilePathClick}
-                      onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                      onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                      isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                      onTurnHoverChange={handleAssistantTurnHoverChange}
-                      conversationFontSize={conversationFontSize}
-                    />
+                      id={row.item.message.id}
+                      first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+                    >
+                      <AssistantChatItem
+                        row={row}
+                        fileDiffOverride={fileDiffOverride}
+                        assistantActions={resolveAssistantMessageActions(
+                          row.item.message.id,
+                          assistantActionsMessageId,
+                          assistantActions
+                        )}
+                        onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+                        forkWorktreeAvailability={forkWorktreeAvailability}
+                        onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                        isForking={forkingAssistantMessageId === row.item.message.id}
+                        onFileDiffClick={onFileDiffClick}
+                        onFilePathClick={onFilePathClick}
+                        onGroupExpandedChange={handleAssistantGroupExpandedChange}
+                        onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+                        isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+                        onTurnHoverChange={handleAssistantTurnHoverChange}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </MessageSelectionRow>
                   );
                 })}
                 {shouldShowAgentActivity && agentActivityLabel && (
                   <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                 )}
               </Virtualizer>
+              <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
