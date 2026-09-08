@@ -41,4 +41,6 @@ Electron harness 只把 `XAUTHORITY` 加入继承环境 allowlist。把 runner �
 
 ## 验证
 
-单元测试证明 CRLF 生成内容能够匹配，而内容变化仍会失败；也证明 `DISPLAY` 和 `XAUTHORITY` 会通过 Electron allowlist，无关变量不会。macOS 本地验证无法复现 GitHub-hosted Xvfb session，因此 Linux Actions run 仍是端到端证明。
+单元测试证明 CRLF 生成内容能够匹配，而内容变化仍会失败；也证明 `DISPLAY` 和 `XAUTHORITY` 会通过 Electron allowlist，无关变量不会。Hosted
+[smoke run 34207183958](https://github.com/LodyAI/Lody/actions/runs/34207183958)
+在 Ubuntu、Windows 和 macOS 上完整通过了 suite-contract、build 与 Desktop Journey 流程。

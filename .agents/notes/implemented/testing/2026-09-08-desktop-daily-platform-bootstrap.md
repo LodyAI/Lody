@@ -72,5 +72,7 @@ failure aggregation remains separate work.
 
 Unit coverage proves that CRLF generated output matches while changed content
 does not, and that `DISPLAY` plus `XAUTHORITY` cross the Electron allowlist while
-an unrelated variable does not. Local macOS verification cannot reproduce a
-GitHub-hosted Xvfb session, so a Linux Actions run remains the end-to-end proof.
+an unrelated variable does not. Hosted
+[smoke run 34207183958](https://github.com/LodyAI/Lody/actions/runs/34207183958)
+passed the complete suite-contract, build, and Desktop Journey flow on Ubuntu,
+Windows, and macOS.
