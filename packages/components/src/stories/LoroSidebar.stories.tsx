@@ -1352,17 +1352,18 @@ export const WithProjects: Story = {
   },
 };
 
-/** The same status cases exercise both production project renderers. */
-function projectActivityStory(
-  kind: 'project' | 'repo',
-  counts: { permission?: number; unread?: number; active?: number },
-  collapsed = true,
+type ActivityCounts = [permission: number, unread: number, active: number];
+
+function projectActivityFixture(
+  [permission, unread, active]: ActivityCounts,
+  project: SessionMeta['project'],
+  prefix = 'activity',
   initializing = false
-): Story {
+) {
   const liveSessionStatuses = new Map<string, SessionStatus>();
-  const sessions = Object.entries(counts).flatMap(([status, count]) =>
+  const sessions = Object.entries({ permission, unread, active }).flatMap(([status, count]) =>
     Array.from({ length: count }, (_, index): SessionMeta => {
-      const id = `activity-${status}-${index}` as SessionId;
+      const id = `${prefix}-${status}-${index}` as SessionId;
       if (status !== 'unread')
         liveSessionStatuses.set(id, {
           type:
@@ -1376,16 +1377,35 @@ function projectActivityStory(
         ...demoLocalSessions[0]!,
         id,
         title: `${status} ${index + 1}`,
-        project:
-          kind === 'repo'
-            ? { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'demo' }
-            : {
-                kind: 'local',
-                localProjectId: 'proj-lody' as LocalProjectId,
-              },
+        project,
         lastReadAt: status === 'unread' ? 0 : NOW,
       };
     })
+  );
+  if (!sessions.length)
+    sessions.push({
+      ...demoLocalSessions[0]!,
+      id: `${prefix}-idle` as SessionId,
+      project,
+      lastReadAt: NOW,
+    });
+  return { sessions, liveSessionStatuses };
+}
+
+/** The same status cases exercise both production project renderers. */
+function projectActivityStory(
+  kind: 'project' | 'repo',
+  counts: ActivityCounts,
+  collapsed = true,
+  initializing = false
+): Story {
+  const { sessions, liveSessionStatuses } = projectActivityFixture(
+    counts,
+    kind === 'repo'
+      ? { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'demo' }
+      : { kind: 'local', localProjectId: 'proj-lody' as LocalProjectId },
+    'activity',
+    initializing
   );
   return {
     render: (args) => (
@@ -1418,125 +1438,153 @@ function projectActivityStory(
   };
 }
 
-export const CollapsedProjectRunning: Story = projectActivityStory('project', { active: 1 });
-export const CollapsedProjectRunningMultiple: Story = projectActivityStory('project', {
-  active: 3,
-});
-export const CollapsedProjectUnreadResult: Story = projectActivityStory('project', { unread: 1 });
-export const CollapsedProjectUnreadMultiple: Story = projectActivityStory('project', { unread: 3 });
-export const CollapsedProjectPermissionRequired: Story = projectActivityStory('project', {
-  permission: 1,
-});
-export const CollapsedProjectPermissionMultiple: Story = projectActivityStory('project', {
-  permission: 2,
-});
-export const CollapsedProjectRunningWithUnread: Story = projectActivityStory('project', {
-  unread: 1,
-  active: 1,
-});
-export const CollapsedProjectUnreadWithActiveCounts: Story = projectActivityStory('project', {
-  unread: 3,
-  active: 2,
-});
-export const CollapsedProjectPermissionWithUnread: Story = projectActivityStory('project', {
-  permission: 1,
-  unread: 1,
-});
-export const CollapsedProjectPermissionWithUnreadCounts: Story = projectActivityStory('project', {
-  permission: 2,
-  unread: 3,
-});
-export const CollapsedProjectPermissionPrecedence: Story = projectActivityStory('project', {
-  permission: 1,
-  active: 1,
-});
-export const CollapsedProjectPermissionWithActiveCounts: Story = projectActivityStory('project', {
-  permission: 2,
-  active: 2,
-});
-export const CollapsedProjectThreeStates: Story = projectActivityStory('project', {
-  permission: 1,
-  unread: 1,
-  active: 1,
-});
-export const CollapsedProjectMergedRemainder: Story = projectActivityStory('project', {
-  permission: 2,
-  unread: 3,
-  active: 2,
-});
-export const CollapsedProjectInitializing: Story = projectActivityStory(
-  'project',
-  { active: 1 },
-  true,
-  true
-);
-export const ExpandedProjectActivity: Story = projectActivityStory(
-  'project',
-  { permission: 2, unread: 3, active: 2 },
-  false
-);
+const localActivity = projectActivityStory.bind(null, 'project');
+const repoActivity = projectActivityStory.bind(null, 'repo');
 
-export const CollapsedGitHubRepositoryRunning: Story = projectActivityStory('repo', { active: 1 });
-export const CollapsedGitHubRepositoryRunningMultiple: Story = projectActivityStory('repo', {
-  active: 3,
+export const CollapsedProjectRunning = localActivity([0, 0, 1]);
+export const CollapsedProjectRunningMultiple = localActivity([0, 0, 3]);
+export const CollapsedProjectUnreadResult = localActivity([0, 1, 0]);
+export const CollapsedProjectUnreadMultiple = localActivity([0, 3, 0]);
+export const CollapsedProjectPermissionRequired = localActivity([1, 0, 0]);
+export const CollapsedProjectPermissionMultiple = localActivity([2, 0, 0]);
+export const CollapsedProjectRunningWithUnread = localActivity([0, 1, 1]);
+export const CollapsedProjectUnreadWithActiveCounts = localActivity([0, 3, 2]);
+export const CollapsedProjectPermissionWithUnread = localActivity([1, 1, 0]);
+export const CollapsedProjectPermissionWithUnreadCounts = localActivity([2, 3, 0]);
+export const CollapsedProjectPermissionPrecedence = localActivity([1, 0, 1]);
+export const CollapsedProjectPermissionWithActiveCounts = localActivity([2, 0, 2]);
+export const CollapsedProjectThreeStates = localActivity([1, 1, 1]);
+export const CollapsedProjectMergedRemainder = localActivity([2, 3, 2]);
+export const CollapsedProjectInitializing = localActivity([0, 0, 1], true, true);
+export const ExpandedProjectActivity = localActivity([2, 3, 2], false);
+export const CollapsedGitHubRepositoryRunning = repoActivity([0, 0, 1]);
+export const CollapsedGitHubRepositoryRunningMultiple = repoActivity([0, 0, 3]);
+export const CollapsedGitHubRepositoryUnreadResult = repoActivity([0, 1, 0]);
+export const CollapsedGitHubRepositoryUnreadMultiple = repoActivity([0, 3, 0]);
+export const CollapsedGitHubRepositoryPermissionRequired = repoActivity([1, 0, 0]);
+export const CollapsedGitHubRepositoryPermissionMultiple = repoActivity([2, 0, 0]);
+export const CollapsedGitHubRepositoryRunningWithUnread = repoActivity([0, 1, 1]);
+export const CollapsedGitHubRepositoryUnreadWithActiveCounts = repoActivity([0, 3, 2]);
+export const CollapsedGitHubRepositoryPermissionWithUnread = repoActivity([1, 1, 0]);
+export const CollapsedGitHubRepositoryPermissionWithUnreadCounts = repoActivity([2, 3, 0]);
+export const CollapsedGitHubRepositoryPermissionPrecedence = repoActivity([1, 0, 1]);
+export const CollapsedGitHubRepositoryPermissionWithActiveCounts = repoActivity([2, 0, 2]);
+export const CollapsedGitHubRepositoryThreeStates = repoActivity([1, 1, 1]);
+export const CollapsedGitHubRepositoryMergedRemainder = repoActivity([2, 3, 2]);
+export const CollapsedGitHubRepositoryInitializing = repoActivity([0, 0, 1], true, true);
+export const ExpandedGitHubRepositoryActivity = repoActivity([2, 3, 2], false);
+
+// Each row is a collapsed project; columns compare the same counts in both renderers.
+const activityComparisonCases: [string, ActivityCounts][] = [
+  ['No activity', [0, 0, 0]],
+  ['Permission 1', [1, 0, 0]],
+  ['Permission 2', [2, 0, 0]],
+  ['Unread 1', [0, 1, 0]],
+  ['Unread 3', [0, 3, 0]],
+  ['Active 1', [0, 0, 1]],
+  ['Active 3', [0, 0, 3]],
+  ['Permission + unread', [1, 1, 0]],
+  ['Permissions + unread', [2, 3, 0]],
+  ['Permission + active', [1, 0, 1]],
+  ['Permissions + active', [2, 0, 3]],
+  ['Unread + active', [0, 1, 1]],
+  ['Unread 3 + active 2', [0, 3, 2]],
+  ['Unread 1 + active 3', [0, 1, 3]],
+  ['Permission 1 + mixed', [1, 3, 2]],
+  ['Permission 2 + mixed', [2, 3, 2]],
+  ['All three single', [1, 1, 1]],
+  ['Larger counts', [12, 20, 30]],
+];
+const activityComparison = activityComparisonCases.map(([name, counts], index) => {
+  const id = `activity-case-${index}` as LocalProjectId;
+  const project = { ...demoProjects[0]!, id, name };
+  const repoFullName = `demo/${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`;
+  const { sessions, liveSessionStatuses } = projectActivityFixture(
+    counts,
+    { kind: 'local', localProjectId: id },
+    id
+  );
+  return {
+    project,
+    sessions,
+    liveSessionStatuses,
+    repoFullName,
+    rows: buildSessionListRows(
+      sessions.map((session) => ({
+        ...session,
+        project: { kind: 'github', repoFullName, branch: 'demo' },
+      })),
+      { scope: 'my', currentUserId: 'user-demo', defaultTitle: '', liveSessionStatuses }
+    ),
+  };
 });
-export const CollapsedGitHubRepositoryUnreadResult: Story = projectActivityStory('repo', {
-  unread: 1,
-});
-export const CollapsedGitHubRepositoryUnreadMultiple: Story = projectActivityStory('repo', {
-  unread: 3,
-});
-export const CollapsedGitHubRepositoryPermissionRequired: Story = projectActivityStory('repo', {
-  permission: 1,
-});
-export const CollapsedGitHubRepositoryPermissionMultiple: Story = projectActivityStory('repo', {
-  permission: 2,
-});
-export const CollapsedGitHubRepositoryRunningWithUnread: Story = projectActivityStory('repo', {
-  unread: 1,
-  active: 1,
-});
-export const CollapsedGitHubRepositoryUnreadWithActiveCounts: Story = projectActivityStory('repo', {
-  unread: 3,
-  active: 2,
-});
-export const CollapsedGitHubRepositoryPermissionWithUnread: Story = projectActivityStory('repo', {
-  permission: 1,
-  unread: 1,
-});
-export const CollapsedGitHubRepositoryPermissionWithUnreadCounts: Story = projectActivityStory(
-  'repo',
-  { permission: 2, unread: 3 }
-);
-export const CollapsedGitHubRepositoryPermissionPrecedence: Story = projectActivityStory('repo', {
-  permission: 1,
-  active: 1,
-});
-export const CollapsedGitHubRepositoryPermissionWithActiveCounts: Story = projectActivityStory(
-  'repo',
-  { permission: 2, active: 2 }
-);
-export const CollapsedGitHubRepositoryThreeStates: Story = projectActivityStory('repo', {
-  permission: 1,
-  unread: 1,
-  active: 1,
-});
-export const CollapsedGitHubRepositoryMergedRemainder: Story = projectActivityStory('repo', {
-  permission: 2,
-  unread: 3,
-  active: 2,
-});
-export const CollapsedGitHubRepositoryInitializing: Story = projectActivityStory(
-  'repo',
-  { active: 1 },
-  true,
-  true
-);
-export const ExpandedGitHubRepositoryActivity: Story = projectActivityStory(
-  'repo',
-  { permission: 2, unread: 3, active: 2 },
-  false
-);
+
+function CollapsedActivityComparisonLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggle = (id: string) => setExpanded((previous) => ({ ...previous, [id]: !previous[id] }));
+  return (
+    <div className="flex h-screen gap-6 bg-background p-6">
+      <LoroSidebar
+        {...args}
+        workspaceName="Local projects"
+        sessionListProps={undefined}
+        topContent={activityComparison.map(({ project, sessions, liveSessionStatuses }) => (
+          <LocalProjectItem
+            key={project.id}
+            project={project}
+            machineId={demoMachineId}
+            machineName="Mac Studio"
+            collapsed={!expanded[project.id]}
+            isSelected={false}
+            canRemoveProject
+            canNavigateProject
+            sessionsForProject={sessions}
+            childSessionsByParent={new Map()}
+            liveSessionStatuses={liveSessionStatuses}
+            formattedPath={project.rootPath}
+            defaultSessionTitle="Untitled"
+            selectedSessionId={null}
+            removeProjectLabel="Remove folder"
+            newChatLabel="New chat in this project"
+            archiveTooltipLabel="Archive"
+            archiveActionLabel="Archive"
+            archiveConfirmLabel="Confirm"
+            isMobile={false}
+            toggleLabel="Toggle"
+            onNavigateProject={() => {}}
+            onNavigateSession={() => {}}
+            onArchive={() => {}}
+            onNewChatInProject={() => {}}
+            onOpenProjectSettings={() => {}}
+            onRequestRemoval={() => {}}
+            collapsedOpenedBySessionIds={{}}
+            onToggleOpenedBySessions={() => {}}
+            onToggleCollapsed={() => toggle(project.id)}
+          />
+        ))}
+      />
+      <LoroSidebar
+        {...args}
+        workspaceName="GitHub projects"
+        sessionListProps={{
+          sessions: activityComparison.flatMap(({ rows }) => rows),
+          repos: activityComparison.map(({ repoFullName }) => ({
+            repoFullName,
+            collapsed: !expanded[repoFullName],
+          })),
+          onToggleRepoCollapsed: toggle,
+          onNew: () => {},
+        }}
+      />
+    </div>
+  );
+}
+
+export const CollapsedActivityComparison: Story = {
+  name: 'Collapsed activity · all status combinations',
+  render: (args) => <CollapsedActivityComparisonLayout {...args} />,
+  args: { ...Default.args!, defaultWidth: 380 },
+};
 
 export const CollapsedRemoteProjectRunning: Story = {
   name: 'Collapsed remote project · running',
