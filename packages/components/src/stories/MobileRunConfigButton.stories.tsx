@@ -39,15 +39,12 @@ const reasoningSelector: AcpConfigOptionSelector = {
   ],
 };
 const planSelector: AcpConfigOptionSelector = {
-  type: 'select',
-  configId: 'collaboration_mode',
-  category: 'collaboration_mode',
+  type: 'boolean',
+  configId: 'plan_mode',
+  category: 'plan_mode',
   label: 'Collaboration mode',
-  currentValue: 'default',
-  options: [
-    { value: 'default', label: 'Default' },
-    { value: 'plan', label: 'Plan' },
-  ],
+  currentValue: false,
+  options: [],
 };
 const fastSelector: AcpConfigOptionSelector = {
   type: 'select',
@@ -97,14 +94,14 @@ const CASES: Case[] = [
     model: 'gpt-5.5',
     agentIcon: codexIcon,
     selectors: [codexModeSelector, planSelector, fastSelector],
-    values: { mode: 'agent', collaboration_mode: 'plan' },
+    values: { mode: 'agent', plan_mode: true },
   },
   {
     label: 'Codex · Plan + Fast',
     model: 'gpt-5.5',
     agentIcon: codexIcon,
     selectors: [codexModeSelector, planSelector, fastSelector],
-    values: { mode: 'agent', collaboration_mode: 'plan', 'fast-mode': 'on' },
+    values: { mode: 'agent', plan_mode: true, 'fast-mode': 'on' },
   },
   {
     label: 'Codex · Read-only',

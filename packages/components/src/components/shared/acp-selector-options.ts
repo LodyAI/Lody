@@ -1,9 +1,6 @@
 import {
   ACP_CONFIG_OPTION_OFF_VALUE,
   ACP_CONFIG_OPTION_ON_VALUE,
-  ACP_COLLABORATION_MODE_CONFIG_ID,
-  ACP_COLLABORATION_MODE_DEFAULT_VALUE,
-  ACP_COLLABORATION_MODE_PLAN_VALUE,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   getAcpCapabilityCacheKey,
@@ -54,9 +51,6 @@ export type AcpFastModeConfigOptionSelector = AcpConfigOptionSelector;
 
 export const CODEX_FAST_MODE_CONFIG_ID = 'fast-mode';
 export const CLAUDE_FAST_MODE_CONFIG_ID = 'fast';
-export const CODEX_COLLABORATION_MODE_CONFIG_ID = ACP_COLLABORATION_MODE_CONFIG_ID;
-export const CODEX_COLLABORATION_MODE_DEFAULT_VALUE = ACP_COLLABORATION_MODE_DEFAULT_VALUE;
-export const CODEX_COLLABORATION_MODE_PLAN_VALUE = ACP_COLLABORATION_MODE_PLAN_VALUE;
 export const CONFIG_OPTION_ON_VALUE = ACP_CONFIG_OPTION_ON_VALUE;
 export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 
@@ -148,30 +142,16 @@ export const toggleFastModeSelectorValue = (
   value: AcpConfigOptionValue | undefined
 ): AcpConfigOptionValue => toggleOnOffConfigOptionValue(selector, value);
 
-/**
- * Plan mode is NOT an on/off toggle. Codex — the only agent that carries plan
- * mode as a config option — publishes `collaboration_mode`, a select over
- * `default` / `plan`. (Claude expresses planning as the `plan` PERMISSION mode,
- * so it reaches the UI through the mode selector, never through these.)
- *
- * Plan surfaces must use these two helpers rather than the on/off pair: reading
- * `collaboration_mode` with `resolveOnOffConfigOptionEnabled` always reports
- * "off", and writing `on` produces a value the selector rejects, so
- * `resolveConfigOptionValue` falls back to `currentValue` and the control
- * silently never changes.
- */
+/** Core's Plan option carries a boolean independently of permissions. */
 export const resolvePlanModeSelectorEnabled = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
-): boolean => resolveConfigOptionValue(selector, value) === CODEX_COLLABORATION_MODE_PLAN_VALUE;
+): boolean => resolveConfigOptionValue(selector, value) === true;
 
 export const togglePlanModeSelectorValue = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
-): AcpConfigOptionValue =>
-  resolvePlanModeSelectorEnabled(selector, value)
-    ? CODEX_COLLABORATION_MODE_DEFAULT_VALUE
-    : CODEX_COLLABORATION_MODE_PLAN_VALUE;
+): boolean => !resolvePlanModeSelectorEnabled(selector, value);
 
 /**
  * Classifies a selector as a "thought level" (reasoning effort) control. Registry agents
@@ -571,8 +551,11 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions, modelReasoningEfforts } =
-    resolveConfigOptions(target);
+  const {
+    authority: capabilityAuthority,
+    configOptions,
+    modelReasoningEfforts,
+  } = resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.

@@ -25,15 +25,12 @@ const selectors: AcpConfigOptionSelector[] = [
     ],
   },
   {
-    configId: 'collaboration_mode',
+    configId: 'plan_mode',
     label: 'Collaboration mode',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ],
+    category: 'plan_mode',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
   },
 ];
 
@@ -88,7 +85,7 @@ describe('AcpBottomBarModeSelector UI', () => {
   }
 
   it('uses highlighted active styling for fast mode and labels the plan toggle Plan', () => {
-    renderSelector({ 'fast-mode': 'on', collaboration_mode: 'plan' });
+    renderSelector({ 'fast-mode': 'on', plan_mode: true });
 
     const fastModeButton = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Fast Mode"]'

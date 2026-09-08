@@ -16,10 +16,10 @@ describe('ACP runtime config projection', () => {
           { id: 'model', category: 'model', type: 'select', currentValue: 'gpt-5.6-sol' },
           { id: 'permission', category: 'mode', type: 'select', currentValue: 'default' },
           {
-            id: 'collaboration_mode',
-            category: 'collaboration_mode',
-            type: 'select',
-            currentValue: 'default',
+            id: 'plan_mode',
+            category: 'plan_mode',
+            type: 'boolean',
+            currentValue: false,
           },
           { id: 'fast_mode', type: 'boolean', currentValue: true },
           { id: 'agent', type: 'select', currentValue: 'unsupported' },
@@ -35,7 +35,7 @@ describe('ACP runtime config projection', () => {
       configOptionValues: {
         model: 'gpt-5.6-sol',
         permission: 'default',
-        collaboration_mode: 'default',
+        plan_mode: false,
         fast_mode: true,
       },
     });

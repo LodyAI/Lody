@@ -119,14 +119,11 @@ describe('ACP session config derivation', () => {
   it('applies the runtime baseline over non-user fields', () => {
     const selectors = [
       {
-        configId: 'collaboration_mode',
+        configId: 'plan_mode',
         label: 'Collaboration mode',
-        type: 'select' as const,
-        currentValue: 'plan',
-        options: [
-          { value: 'default', label: 'Default' },
-          { value: 'plan', label: 'Plan' },
-        ],
+        type: 'boolean',
+        currentValue: true,
+        options: [],
       },
       {
         configId: 'reasoning_effort',
@@ -148,27 +145,27 @@ describe('ACP session config derivation', () => {
     const resolved = resolveAcpSessionConfigSelection(
       {
         edits: emptyEdits,
-        preferences: { configOptionValues: { collaboration_mode: 'plan' } },
-        runtimePreferences: { configOptionValues: { collaboration_mode: 'default' } },
+        preferences: { configOptionValues: { plan_mode: true } },
+        runtimePreferences: { configOptionValues: { plan_mode: false } },
       },
       options
     );
-    expect(resolved.configOptionValues.collaboration_mode).toBe('default');
+    expect(resolved.configOptionValues.plan_mode).toBe(false);
     // A local unsent edit outranks the runtime baseline for its own field only.
     expect(
       resolveAcpSessionConfigSelection(
         {
           edits: { configOptions: { reasoning_effort: 'high' } },
           preferences: {
-            configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'low' },
+            configOptionValues: { plan_mode: true, reasoning_effort: 'low' },
           },
           runtimePreferences: {
-            configOptionValues: { collaboration_mode: 'default', reasoning_effort: 'low' },
+            configOptionValues: { plan_mode: false, reasoning_effort: 'low' },
           },
         },
         options
       ).configOptionValues
-    ).toEqual({ collaboration_mode: 'default', reasoning_effort: 'high' });
+    ).toEqual({ plan_mode: false, reasoning_effort: 'high' });
   });
 
   it('removes non-user options omitted from a full runtime snapshot', () => {
@@ -344,9 +341,8 @@ describe('ACP session config derivation', () => {
       ).reasoning_effort
     ).toBe('xhigh');
     expect(
-      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [
-        staleGrokReasoningSelector,
-      ]).reasoning_effort
+      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [staleGrokReasoningSelector])
+        .reasoning_effort
     ).toBeUndefined();
   });
 
@@ -367,27 +363,21 @@ describe('ACP session config derivation', () => {
   it('filters values against the current selector schema', () => {
     const selectors = [
       {
-        configId: 'collaboration_mode',
+        configId: 'plan_mode',
         label: 'Collaboration mode',
-        type: 'select' as const,
-        currentValue: 'default',
-        options: [
-          { value: 'default', label: 'Default' },
-          { value: 'plan', label: 'Plan' },
-        ],
+        type: 'boolean',
+        currentValue: false,
+        options: [],
       },
     ];
     expect(
       filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'plan', future_option: 'enabled' },
+        { 'plan-mode': 'on', plan_mode: true, future_option: 'enabled' },
         selectors
       )
-    ).toEqual({ collaboration_mode: 'plan' });
+    ).toEqual({ plan_mode: true });
     expect(
-      filterAcpSessionConfigOptionValues(
-        { 'plan-mode': 'on', collaboration_mode: 'invalid' },
-        selectors
-      )
+      filterAcpSessionConfigOptionValues({ 'plan-mode': 'on', plan_mode: 'invalid' }, selectors)
     ).toEqual({});
   });
 
@@ -405,14 +395,14 @@ describe('ACP session config derivation', () => {
         ],
       },
       {
-        configId: 'collaboration_mode',
+        configId: 'plan_mode',
         label: 'Collaboration mode',
-        type: 'select' as const,
-        currentValue: 'default',
-        options: [{ value: 'default', label: 'Default' }],
+        type: 'boolean',
+        currentValue: false,
+        options: [],
       },
     ];
-    const pinned = { reasoning_effort: 'xhigh', collaboration_mode: 'invalid' };
+    const pinned = { reasoning_effort: 'xhigh', plan_mode: 'invalid' };
     // These selectors belong to the model being left behind; only the effort is
     // model-dependent, so everything else is still validated against them.
     expect(filterAcpSessionConfigOptionValues(pinned, selectors, { switchesModel: true })).toEqual({

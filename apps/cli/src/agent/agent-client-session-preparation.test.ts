@@ -299,13 +299,13 @@ describe('AgentClient session preparation gate', () => {
       sessionId: 'session-empty-config-snapshot' as SessionId,
       terminalManager: {} as never,
       agentConfig: { cliType: 'builtin', agentType: 'codex' },
-      configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'high' },
+      configOptionValues: { plan_mode: true, reasoning_effort: 'high' },
       onUpdateMessage: vi.fn(),
       onRequestPermission: vi.fn(),
     });
 
     await client.startSession({} as never, '/workdir');
-    await client.setSessionConfigOption('acp-session-1' as never, 'collaboration_mode', 'default');
+    await client.setSessionConfigOption('acp-session-1' as never, 'plan_mode', 'default');
 
     connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
     await client.prepareReplacementSession();
@@ -394,7 +394,7 @@ describe('AgentClient session preparation gate', () => {
       sessionId: 'session-agent-config-update' as SessionId,
       terminalManager: {} as never,
       agentConfig: { cliType: 'builtin', agentType: 'codex' },
-      configOptionValues: { collaboration_mode: 'plan', reasoning_effort: 'high' },
+      configOptionValues: { plan_mode: true, reasoning_effort: 'high' },
       onUpdateMessage: vi.fn(),
       onRequestPermission: vi.fn(),
     });
@@ -406,11 +406,11 @@ describe('AgentClient session preparation gate', () => {
         sessionUpdate: 'config_option_update',
         configOptions: [
           {
-            id: 'collaboration_mode',
-            category: 'collaboration_mode',
-            type: 'select',
+            id: 'plan_mode',
+            category: 'plan_mode',
+            type: 'boolean',
             name: 'Collaboration mode',
-            currentValue: 'default',
+            currentValue: false,
             options: [],
           },
           {
@@ -436,7 +436,7 @@ describe('AgentClient session preparation gate', () => {
           sessionConfig: {
             version: 1,
             configOptionValues: {
-              collaboration_mode: 'default',
+              plan_mode: false,
               reasoning_effort: 'low',
             },
           },

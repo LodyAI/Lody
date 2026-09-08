@@ -47,7 +47,7 @@ describe('SessionDocument ACP runtime config', () => {
     expect(
       doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
-        configOptionValues: { collaboration_mode: 'default' },
+        configOptionValues: { plan_mode: false },
       })
     ).toBe(true);
     expect(
@@ -68,7 +68,7 @@ describe('SessionDocument ACP runtime config', () => {
       basedOnUserTurnId: 'turn-1',
       revision: 2,
       modelId: 'gpt-5.6-sol',
-      configOptionValues: { collaboration_mode: 'default' },
+      configOptionValues: { plan_mode: false },
     });
   });
 
@@ -84,7 +84,7 @@ describe('SessionDocument ACP runtime config', () => {
       doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         modeId: 'plan',
-        configOptionValues: { collaboration_mode: 'plan' },
+        configOptionValues: { plan_mode: true },
       })
     ).toBe(true);
 

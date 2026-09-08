@@ -34,16 +34,13 @@ describe('builtin Grok shared contract', () => {
       { modelId: 'grok-4.5', name: 'Grok 4.5' },
     ]);
     expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
-      'interaction_mode',
+      'plan_mode',
       'permission_mode',
       'model',
       'reasoning_effort',
     ]);
-    expect(capabilities?.configOptions[0]?.currentValue).toBe('agent');
-    expect(capabilities?.configOptions[0]?.options.map((option) => option.value)).toEqual([
-      'agent',
-      'plan',
-    ]);
+    expect(capabilities?.configOptions[0]?.currentValue).toBe(false);
+    expect(capabilities?.configOptions[0]?.type).toBe('boolean');
     expect(capabilities?.configOptions[1]?.options.map((option) => option.value)).toEqual([
       'ask',
       'auto',

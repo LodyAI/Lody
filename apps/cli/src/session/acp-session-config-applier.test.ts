@@ -120,7 +120,7 @@ describe('applyAcpSessionRunConfig', () => {
         getConfigOptions: () => [
           { id: 'effort', category: 'thought_level' },
           { id: 'fast', category: 'fast-mode' },
-          { id: 'collaboration_mode', category: 'collaboration_mode' },
+          { id: 'plan_mode', category: 'plan_mode' },
           { id: 'custom-option', category: 'custom' },
         ],
         setSessionMode: reject,
@@ -143,7 +143,7 @@ describe('applyAcpSessionRunConfig', () => {
             configOptionValues: {
               effort: 'high',
               fast: false,
-              collaboration_mode: 'plan',
+              plan_mode: true,
               'custom-option': 'enabled',
             },
           },
@@ -155,7 +155,7 @@ describe('applyAcpSessionRunConfig', () => {
           'model="model-a"',
           'effort="high"',
           'fast=false',
-          'collaboration_mode="plan"',
+          'plan_mode=true',
           'custom-option="enabled"',
         ],
         warningSelections: ['custom-option="enabled"'],

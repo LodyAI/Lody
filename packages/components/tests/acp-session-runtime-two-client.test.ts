@@ -19,20 +19,17 @@ import {
 const userTurnId = 'turn-plan-low';
 const sharedPlanLow: AcpSessionConfigPreferences = {
   configOptionValues: {
-    collaboration_mode: 'plan',
+    plan_mode: true,
     reasoning_effort: 'low',
   },
 };
 const selectors = [
   {
-    configId: 'collaboration_mode',
+    configId: 'plan_mode',
     label: 'Collaboration mode',
-    type: 'select' as const,
-    currentValue: 'plan',
-    options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ],
+    type: 'boolean',
+    currentValue: true,
+    options: [],
   },
   {
     configId: 'reasoning_effort',
@@ -115,7 +112,7 @@ describe('ACP runtime config across two clients', () => {
         basedOnUserTurnId: userTurnId,
         revision: 1,
         configOptionValues: {
-          collaboration_mode: 'default',
+          plan_mode: false,
           reasoning_effort: 'low',
         },
       },
@@ -136,20 +133,20 @@ describe('ACP runtime config across two clients', () => {
     );
     expect(runtimeA).toEqual(runtimeB);
     expect(runtimeB?.configOptionValues).toEqual({
-      collaboration_mode: 'default',
+      plan_mode: false,
       reasoning_effort: 'low',
     });
 
     expect(resolveComposerValues(editsA, runtimeA)).toEqual({
-      collaboration_mode: 'default',
+      plan_mode: false,
       reasoning_effort: 'high',
     });
     expect(resolveComposerValues(editsB, runtimeB)).toEqual({
-      collaboration_mode: 'default',
+      plan_mode: false,
       reasoning_effort: 'low',
     });
     expect(mirrorB.getState().acpRuntimeConfig?.configOptionValues).toEqual({
-      collaboration_mode: 'default',
+      plan_mode: false,
       reasoning_effort: 'low',
     });
 

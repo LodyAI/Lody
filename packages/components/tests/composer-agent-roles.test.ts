@@ -182,13 +182,13 @@ describe('resolveTurnAgentRoleForRunConfig', () => {
   const role = makeRole({
     id: 'r-1' as AgentRoleId,
     name: 'Planner',
-    runConfig: { modeId: 'plan', configOptionValues: { collaboration_mode: 'plan' } },
+    runConfig: { modeId: 'plan', configOptionValues: { plan_mode: true } },
   });
   const turnSelection = { agentRoleId: role.id, agentRoleRevision: role.revision };
   const current = {
     modeId: 'plan',
     modelId: null,
-    configOptionValues: { collaboration_mode: 'plan' },
+    configOptionValues: { plan_mode: true },
   };
 
   it('freezes explicit None when execute-plan overrides a pinned Role value', () => {
@@ -199,7 +199,7 @@ describe('resolveTurnAgentRoleForRunConfig', () => {
         current,
         overrides: {
           modeIdOverride: 'default',
-          configOptionValuesOverride: { collaboration_mode: 'default' },
+          configOptionValuesOverride: { plan_mode: false },
         },
       })
     ).toBeNull();

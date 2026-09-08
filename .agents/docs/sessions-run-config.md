@@ -231,3 +231,12 @@ this page is the full text of the rules summarised there.
   longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
   routes each selection by MIME into the image or file state machine.
 
+
+## Independent Plan option
+
+Core defines `plan_mode` as a boolean. Codex, Kimi, Grok, and supported DSH presets
+use the dedicated Plan toggle; the permission selector remains independent.
+Claude still exposes Plan among its permission modes. Provider wrappers translate
+native state and config updates; Lody does not send provider collaboration values.
+Legacy persisted values are translated on read only when the target advertises
+Core's boolean option. See the [Spec](../../specs/independent-plan-mode.md).

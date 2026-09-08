@@ -34,15 +34,12 @@ const makeSelector = (
 
 /* Codex's one and only plan-mode shape: a select over `default` / `plan`. */
 const makeCollaborationModeSelector = (): AcpConfigOptionSelector => ({
-  configId: 'collaboration_mode',
+  configId: 'plan_mode',
   label: 'Collaboration mode',
-  category: 'collaboration_mode',
-  type: 'select',
-  currentValue: 'default',
-  options: [
-    { value: 'default', label: 'Default' },
-    { value: 'plan', label: 'Plan' },
-  ],
+  category: 'plan_mode',
+  type: 'boolean',
+  currentValue: false,
+  options: [],
 });
 
 const makeOnOffSelector = (configId: string, label: string): AcpConfigOptionSelector => ({
@@ -85,7 +82,7 @@ describe('orderAcpConfigOptionSelectors', () => {
       model: ['model'],
       thought: ['reasoning_effort'],
       fastMode: ['fast-mode'],
-      planMode: ['collaboration_mode'],
+      planMode: ['plan_mode'],
       interactionMode: [],
       permissionMode: [],
       mode: ['mode'],

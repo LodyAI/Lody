@@ -10,7 +10,7 @@ describe('execution turn config', () => {
         modeOptions: [],
         configOptionSelectors: [],
         configOptionValues: {
-          collaboration_mode: 'plan',
+          plan_mode: true,
           reasoning_effort: 'high',
           'fast-mode': true,
         },
@@ -18,7 +18,7 @@ describe('execution turn config', () => {
     ).toEqual({
       modeIdOverride: null,
       configOptionValuesOverride: {
-        collaboration_mode: 'default',
+        plan_mode: false,
         reasoning_effort: 'high',
         'fast-mode': true,
       },
@@ -72,15 +72,15 @@ describe('execution turn config', () => {
         modeOptions: [],
         configOptionSelectors: [
           {
-            configId: 'collaboration_mode',
-            category: 'collaboration_mode',
-            type: 'select',
-            currentValue: 'plan',
-            options: [{ value: 'default' }, { value: 'plan' }],
+            configId: 'plan_mode',
+            category: 'plan_mode',
+            type: 'boolean',
+            currentValue: true,
+            options: [],
           },
         ],
         configOptionValues: { reasoning_effort: 'low' },
       }).configOptionValuesOverride
-    ).toEqual({ collaboration_mode: 'default', reasoning_effort: 'low' });
+    ).toEqual({ plan_mode: false, reasoning_effort: 'low' });
   });
 });

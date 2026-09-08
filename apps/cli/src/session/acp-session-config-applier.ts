@@ -1,3 +1,4 @@
+import { migrateLegacyPlanSelection } from '@lody/shared';
 import {
   ACP_PLAN_PERMISSION_MODE_ID,
   ACP_REASONING_EFFORT_CONFIG_ID,
@@ -93,7 +94,11 @@ export async function applyAcpSessionRunConfig(args: {
   config: AcpSessionRunConfig;
   logger: Logger;
 }): Promise<AcpSessionRunConfigApplyResult> {
-  const { session, config, logger } = args;
+  const { session, logger } = args;
+  const config = migrateLegacyPlanSelection(
+    args.config,
+    session.agentClient?.getConfigOptions?.() ?? []
+  );
   const { sessionId, acpSessionId, agentClient } = session;
   const configOptionValues = config.configOptionValues;
   const configOptionEntries = configOptionValues ? Object.entries(configOptionValues) : [];

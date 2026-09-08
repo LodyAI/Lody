@@ -1,3 +1,4 @@
+import { createPlanModeConfigOption } from 'acp-extension-core';
 import {
   AvailableCommand,
   PermissionOption,
@@ -422,6 +423,7 @@ export const getBuiltinDefaultModeId = (
     : undefined;
 
 const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'mode',
     name: 'Permission',
@@ -556,22 +558,7 @@ const CODEX_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     currentValue: false,
     options: [],
   },
-  {
-    id: 'collaboration_mode',
-    name: 'Collaboration mode',
-    description: 'How Codex collaborates for subsequent turns',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', name: 'Default' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan before making changes',
-      },
-    ],
-  },
+  { ...createPlanModeConfigOption(false), options: [] },
 ];
 
 const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
@@ -765,11 +752,6 @@ const KIMI_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
     description: 'Manual approvals; tools execute normally.',
   },
   {
-    id: 'plan',
-    name: 'Plan',
-    description: 'Read-only planning; no tool execution.',
-  },
-  {
     id: 'auto',
     name: 'Auto',
     description: 'Auto-approve safe operations.',
@@ -782,10 +764,11 @@ const KIMI_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
 ];
 
 const KIMI_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
+  { ...createPlanModeConfigOption(false), options: [] },
   {
-    id: 'mode',
-    name: 'Mode',
-    category: 'mode',
+    id: 'permission_mode',
+    name: 'Permission',
+    category: '_permission',
     type: 'select',
     currentValue: BUILTIN_DEFAULT_MODE_IDS.kimi,
     options: KIMI_STATIC_MODES.map((mode) => ({
@@ -822,22 +805,7 @@ const GROK_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
 ];
 
 const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
-  {
-    id: 'interaction_mode',
-    name: 'Interaction Mode',
-    description: 'Controls whether the agent acts, plans, or answers read-only questions',
-    category: 'mode',
-    type: 'select',
-    currentValue: BUILTIN_DEFAULT_MODE_IDS.grok,
-    options: [
-      { value: 'agent', name: 'Agent', description: 'Use tools and make changes when needed' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan and reason without modifying the workspace',
-      },
-    ],
-  },
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'permission_mode',
     name: 'Permission Mode',

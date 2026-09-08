@@ -227,7 +227,10 @@ describe('buildAcpSelectorOptions', () => {
       machine: machineWithCapabilities({}),
     });
 
-    expect(options.defaultModeId).toBe('auto');
+    expect(
+      options.configOptionSelectors.find((option) => option.configId === 'permission_mode')
+        ?.currentValue
+    ).toBe('auto');
   });
 
   it('does not relabel Codex auto mode', () => {
@@ -338,15 +341,12 @@ describe('buildAcpSelectorOptions', () => {
               ],
             },
             {
-              id: 'collaboration_mode',
+              id: 'plan_mode',
               name: 'Collaboration mode',
-              category: 'collaboration_mode',
-              type: 'select',
-              currentValue: 'default',
-              options: [
-                { value: 'default', name: 'Default' },
-                { value: 'plan', name: 'Plan' },
-              ],
+              category: 'plan_mode',
+              type: 'boolean',
+              currentValue: false,
+              options: [],
             },
           ],
           fetchedAt: 1,
@@ -359,7 +359,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'collaboration_mode',
+      'plan_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.5');
@@ -559,7 +559,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'collaboration_mode',
+      'plan_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.6-sol');
@@ -639,11 +639,12 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.modeOptions).toEqual([]);
     expect(options.defaultModeId).toBeNull();
     expect(
-      options.configOptionSelectors.find((selector) => selector.configId === 'interaction_mode')
+      options.configOptionSelectors.find((selector) => selector.configId === 'plan_mode')
     ).toMatchObject({
-      label: 'Interaction Mode',
-      currentValue: 'agent',
-      options: [{ value: 'agent' }, { value: 'plan' }],
+      label: 'Plan',
+      type: 'boolean',
+      currentValue: false,
+      options: [],
     });
   });
 
@@ -1054,44 +1055,41 @@ describe('buildAcpSelectorOptions', () => {
 
 describe('plan mode selector value semantics', () => {
   /* Codex is the only agent that carries plan mode as a config option, and it
-     publishes exactly one shape: a `collaboration_mode` select over
+     publishes exactly one shape: a `plan_mode` select over
      `default` / `plan` — never the `on` / `off` pair the fast toggle uses. */
   const collaborationModeSelector: AcpConfigOptionSelector = {
-    configId: 'collaboration_mode',
+    configId: 'plan_mode',
     label: 'Collaboration mode',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ],
+    category: 'plan_mode',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
   };
 
   it('reads plan state from default/plan, not on/off', () => {
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, undefined)).toBe(false);
-    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'plan')).toBe(true);
-    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, 'default')).toBe(false);
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, true)).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, false)).toBe(false);
   });
 
   it('toggles to a value the selector accepts', () => {
     /* Regression: writing 'on' here is invalid for the selector, so the value
        fell back to `currentValue` and the toggle never flipped. */
     const enabled = togglePlanModeSelectorValue(collaborationModeSelector, undefined);
-    expect(enabled).toBe('plan');
+    expect(enabled).toBe(true);
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, enabled)).toBe(true);
 
     const disabled = togglePlanModeSelectorValue(collaborationModeSelector, enabled);
-    expect(disabled).toBe('default');
+    expect(disabled).toBe(false);
     expect(resolvePlanModeSelectorEnabled(collaborationModeSelector, disabled)).toBe(false);
   });
 
   it('resolves an unrecognized stored value through the selector currentValue', () => {
     const planCurrent: AcpConfigOptionSelector = {
       ...collaborationModeSelector,
-      currentValue: 'plan',
+      currentValue: true,
     };
     expect(resolvePlanModeSelectorEnabled(planCurrent, 'bogus')).toBe(true);
-    expect(togglePlanModeSelectorValue(planCurrent, 'bogus')).toBe('default');
+    expect(togglePlanModeSelectorValue(planCurrent, 'bogus')).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { migrateLegacyPlanSelection } from '../src/acp-run-config';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -57,15 +58,12 @@ const codexCapability = (): AcpCapabilityCacheEntry => ({
       options: [],
     },
     {
-      id: 'collaboration_mode',
+      id: 'plan_mode',
       name: 'Collaboration mode',
-      category: 'collaboration_mode',
-      type: 'select',
-      currentValue: 'default',
-      options: [
-        { value: 'default', name: 'Default' },
-        { value: 'plan', name: 'Plan' },
-      ],
+      category: 'plan_mode',
+      type: 'boolean',
+      currentValue: false,
+      options: [],
     },
   ],
   fetchedAt: 1,
@@ -143,7 +141,7 @@ describe('agent run config selection', () => {
       configOptionValues: {
         reasoning_effort: 'high',
         'fast-mode': true,
-        collaboration_mode: 'plan',
+        plan_mode: true,
       },
       // This agent published no per-model breakdown, and the selection switches
       // away from the probed model, so effort/fast cannot be checked offline.
@@ -156,17 +154,17 @@ describe('agent run config selection', () => {
     expect(
       resolveAgentRunConfigSelection({ fastMode: false, planMode: false }, codexCapability())
     ).toEqual({
-      configOptionValues: { 'fast-mode': false, collaboration_mode: 'default' },
+      configOptionValues: { 'fast-mode': false, plan_mode: false },
     });
   });
 
-  it('rejects a plan-mode option that is not the collaboration_mode select', () => {
+  it('rejects a plan-mode option that is not the plan_mode select', () => {
     /* Codex publishes exactly one plan shape. An on/off option under some other
        id is not plan mode, so the request must fail loudly rather than run with
        planning silently off. */
     const other = codexCapability();
     other.configOptions = other.configOptions?.map((option) =>
-      option.id === 'collaboration_mode'
+      option.id === 'plan_mode'
         ? {
             ...option,
             id: 'plan-mode',
@@ -351,5 +349,45 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+});
+
+describe('legacy Plan selections', () => {
+  const options = [{ id: 'plan_mode', type: 'boolean' }];
+  it('converts old Codex and Grok selections without overriding an explicit boolean', () => {
+    for (const configOptionValues of [
+      { collaboration_mode: 'plan' },
+      { interaction_mode: 'plan' },
+    ]) {
+      expect(
+        migrateLegacyPlanSelection({ configOptionValues }, options).configOptionValues
+      ).toEqual({ plan_mode: true });
+      expect(
+        migrateLegacyPlanSelection(
+          { configOptionValues: { ...configOptionValues, plan_mode: false } },
+          options
+        ).configOptionValues
+      ).toEqual({ plan_mode: false });
+    }
+  });
+  it('preserves old Kimi permission and Plan selections, leaving Claude untouched', () => {
+    const kimi = [
+      ...options,
+      {
+        id: 'permission_mode',
+        type: 'select',
+        options: [{ value: 'default' }, { value: 'auto' }, { value: 'yolo' }],
+      },
+    ];
+    expect(migrateLegacyPlanSelection({ modeId: 'plan' }, kimi)).toEqual({
+      modeId: null,
+      configOptionValues: { plan_mode: true, permission_mode: 'default' },
+    });
+    expect(migrateLegacyPlanSelection({ modeId: 'yolo' }, kimi)).toEqual({
+      modeId: null,
+      configOptionValues: { plan_mode: false, permission_mode: 'yolo' },
+    });
+    const claude = { modeId: 'plan' };
+    expect(migrateLegacyPlanSelection(claude, [])).toBe(claude);
   });
 });

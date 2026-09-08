@@ -264,13 +264,13 @@ describe('session-input helpers', () => {
         revision: 3,
         modeId: 'default',
         modelId: 'gpt-5.6-sol',
-        configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+        configOptionValues: { plan_mode: false, fast_mode: true },
       })
     ).toEqual({
       sourceConfigKey: 'runtime:acp-2:3',
       modeId: 'default',
       modelId: 'gpt-5.6-sol',
-      configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+      configOptionValues: { plan_mode: false, fast_mode: true },
     });
 
     expect(
@@ -289,7 +289,7 @@ describe('session-input helpers', () => {
         acpSessionId: 'acp-1',
         basedOnUserTurnId: 'turn-1',
         revision: 1,
-        configOptionValues: { collaboration_mode: 'default' },
+        configOptionValues: { plan_mode: false },
       })
     ).toBeNull();
   });

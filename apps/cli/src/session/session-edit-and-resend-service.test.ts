@@ -49,7 +49,7 @@ const historyFixture = (): SessionHistoryInput[] => [
       agentType: 'codex',
       modelId: 'model-1',
       configOptionValues: {
-        collaboration_mode: 'plan',
+        plan_mode: true,
       },
     },
   },
@@ -212,7 +212,7 @@ describe('SessionEditAndResendService', () => {
       inputConfig: {
         modelId: 'model-1',
         configOptionValues: {
-          collaboration_mode: 'plan',
+          plan_mode: true,
         },
         resume: 'acp-new',
       },

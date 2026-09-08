@@ -1,10 +1,8 @@
+import { LODY_PLAN_MODE_CONFIG_ID } from '@lody/shared';
 import type { SessionDoc } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
-  CODEX_COLLABORATION_MODE_CONFIG_ID,
-  CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
-  CODEX_COLLABORATION_MODE_PLAN_VALUE,
   CODEX_FAST_MODE_CONFIG_ID,
   CONFIG_OPTION_ON_VALUE,
 } from '../src/components/shared/acp-selector-options';
@@ -108,14 +106,14 @@ describe('codex plan decision helpers', () => {
 
   it('detects and disables Codex collaboration plan mode', () => {
     const config = {
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+      [LODY_PLAN_MODE_CONFIG_ID]: true,
       [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
       reasoning_effort: 'low',
     };
 
     expect(isCodexPlanModeEnabled(config)).toBe(true);
     expect(disableCodexPlanMode(config)).toEqual({
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+      [LODY_PLAN_MODE_CONFIG_ID]: false,
       [CODEX_FAST_MODE_CONFIG_ID]: CONFIG_OPTION_ON_VALUE,
       reasoning_effort: 'low',
     });
@@ -125,7 +123,7 @@ describe('codex plan decision helpers', () => {
     expect(isCodexPlanModeEnabled({})).toBe(false);
     expect(
       isCodexPlanModeEnabled({
-        [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+        [LODY_PLAN_MODE_CONFIG_ID]: false,
       })
     ).toBe(false);
   });
@@ -143,7 +141,7 @@ describe('codex plan decision helpers', () => {
       ])
     );
     const config = disableCodexPlanMode({
-      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+      [LODY_PLAN_MODE_CONFIG_ID]: true,
     });
 
     expect(isCodexPlanModeEnabled(config)).toBe(false);

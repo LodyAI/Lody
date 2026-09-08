@@ -1,7 +1,5 @@
 import {
-  ACP_COLLABORATION_MODE_CONFIG_ID,
-  ACP_COLLABORATION_MODE_DEFAULT_VALUE,
-  ACP_COLLABORATION_MODE_PLAN_VALUE,
+  LODY_PLAN_MODE_CONFIG_ID,
   ACP_PLAN_PERMISSION_MODE_ID,
   isAcpPlanModeConfigOption,
   type AcpConfigOptionValue,
@@ -37,26 +35,17 @@ export function buildExecutionTurnConfigOverrides(args: {
       : selectedModeId;
   const planSelector = configOptionSelectors.find(
     (selector) =>
-      selector.type === 'select' &&
+      selector.type === 'boolean' &&
       isAcpPlanModeConfigOption({
         id: selector.configId,
         category: selector.category,
       })
   );
-  const planConfigId = planSelector?.configId ?? ACP_COLLABORATION_MODE_CONFIG_ID;
+  const planConfigId = planSelector?.configId ?? LODY_PLAN_MODE_CONFIG_ID;
   const currentPlanValue = configOptionValues[planConfigId] ?? planSelector?.currentValue;
-  const nonPlanConfigValue =
-    planSelector?.options.find((option) => option.value === ACP_COLLABORATION_MODE_DEFAULT_VALUE)
-      ?.value ??
-    (planConfigId === ACP_COLLABORATION_MODE_CONFIG_ID
-      ? ACP_COLLABORATION_MODE_DEFAULT_VALUE
-      : undefined);
   const configOptionValuesOverride =
-    currentPlanValue === ACP_COLLABORATION_MODE_PLAN_VALUE && nonPlanConfigValue
-      ? {
-          ...configOptionValues,
-          [planConfigId]: nonPlanConfigValue,
-        }
+    currentPlanValue === true
+      ? { ...configOptionValues, [planConfigId]: false }
       : configOptionValues;
 
   return { modeIdOverride, configOptionValuesOverride };

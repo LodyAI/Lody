@@ -62,7 +62,7 @@ export const orderAcpConfigOptionSelectors = (
       ordered.fastModeSelectors.push(selector);
       continue;
     }
-    if (isAcpPlanModeConfigOption({ id: selector.configId, category: selector.category })) {
+    if (selector.type === 'boolean' && isAcpPlanModeConfigOption({ id: selector.configId })) {
       ordered.planModeSelectors.push(selector);
       continue;
     }

@@ -1,3 +1,4 @@
+import { migrateLegacyPlanSelection } from '@lody/shared';
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
   isConfigOptionValueValid,
@@ -232,7 +233,15 @@ export const resolveAcpSessionConfigSelection = (
   selectorOptions: AcpSessionSelectorOptionsInput,
   target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType'>
 ): ResolvedAcpSessionConfigSelection => {
-  const { edits, preferences, runtimePreferences } = inputs;
+  const { edits } = inputs;
+  const planOptions = selectorOptions.configOptionSelectors.map((option) => ({
+    ...option,
+    id: option.configId,
+  }));
+  const preferences = migrateLegacyPlanSelection(inputs.preferences, planOptions);
+  const runtimePreferences = inputs.runtimePreferences
+    ? migrateLegacyPlanSelection(inputs.runtimePreferences, planOptions)
+    : undefined;
   const {
     capabilityAuthority,
     modeOptions,
@@ -335,6 +344,10 @@ export const filterAcpSessionConfigOptionValues = (
   selectors: readonly AcpConfigOptionSelector[],
   options: { switchesModel?: boolean } = {}
 ): Record<string, AcpConfigOptionValue> => {
+  values = migrateLegacyPlanSelection(
+    { configOptionValues: values },
+    selectors.map((selector) => ({ ...selector, id: selector.configId }))
+  ).configOptionValues;
   const filtered: Record<string, AcpConfigOptionValue> = {};
   for (const selector of selectors) {
     const value = values?.[selector.configId];

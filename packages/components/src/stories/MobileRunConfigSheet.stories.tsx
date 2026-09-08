@@ -133,15 +133,12 @@ const codexSelectors: AcpConfigOptionSelector[] = [
     ],
   },
   {
-    type: 'select',
-    configId: 'collaboration_mode',
-    category: 'collaboration_mode',
+    type: 'boolean',
+    configId: 'plan_mode',
+    category: 'plan_mode',
     label: 'Collaboration mode',
-    currentValue: 'default',
-    options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ],
+    currentValue: false,
+    options: [],
   },
   {
     type: 'select',

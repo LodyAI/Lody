@@ -1,9 +1,11 @@
+import { LODY_PLAN_MODE_CONFIG_ID } from 'acp-extension-core';
+export { LODY_PLAN_MODE_CONFIG_ID } from 'acp-extension-core';
 /**
  * Semantic run-config selection (model / reasoning effort / fast mode / plan mode)
  * resolved against an agent's ACP capabilities.
  *
  * ACP agents express these as arbitrary `configOptions` whose ids differ per
- * agent (Codex uses `reasoning_effort` + `fast-mode` + `collaboration_mode`, Claude Code
+ * agent (Codex uses `reasoning_effort` + `fast-mode` + `plan_mode`, Claude Code
  * uses `effort` + `fast` and expresses planning as a permission mode). Callers
  * that only know the semantics — the MCP session tools — describe what they want
  * here and let this module map it onto the concrete option ids the target agent
@@ -17,11 +19,6 @@ import type { AcpCapabilityCacheEntry, AcpConfigOptionSummary, AcpConfigOptionVa
  * `fast-mode`, Claude Code publishes `fast`.
  */
 export const ACP_FAST_MODE_CONFIG_IDS = ['fast-mode', 'fast'] as const;
-
-/** Upstream Codex config option id for default/plan collaboration mode. */
-export const ACP_COLLABORATION_MODE_CONFIG_ID = 'collaboration_mode';
-export const ACP_COLLABORATION_MODE_DEFAULT_VALUE = 'default';
-export const ACP_COLLABORATION_MODE_PLAN_VALUE = 'plan';
 
 /** Legacy config option id that carries reasoning effort without a category. */
 export const ACP_REASONING_EFFORT_CONFIG_ID = 'reasoning_effort';
@@ -43,15 +40,9 @@ type ConfigOptionIdentity = Pick<AcpConfigOptionSummary, 'id' | 'category'>;
 export const isAcpThoughtLevelConfigOption = (option: ConfigOptionIdentity): boolean =>
   option.id === ACP_REASONING_EFFORT_CONFIG_ID || option.category === ACP_THOUGHT_LEVEL_CATEGORY;
 
-/**
- * Codex is the only agent that carries plan mode as a config option, and it
- * publishes exactly one shape: `collaboration_mode`, a select over
- * `default` / `plan`. Claude expresses planning as the `plan` PERMISSION mode
- * instead (see `findPlanPermissionModeId`), so it never matches here.
- */
+/** Shared boolean planning option; Claude continues to use its permission mode. */
 export const isAcpPlanModeConfigOption = (option: ConfigOptionIdentity): boolean =>
-  option.id === ACP_COLLABORATION_MODE_CONFIG_ID ||
-  option.category === ACP_COLLABORATION_MODE_CONFIG_ID;
+  option.id === LODY_PLAN_MODE_CONFIG_ID;
 
 /** Semantic run-config selection, independent of any agent's option ids. */
 export type AgentRunConfigSelection = {
@@ -154,11 +145,6 @@ const isOnOffSelect = (option: AcpConfigOptionSummary): boolean =>
 const isToggleOption = (option: AcpConfigOptionSummary): boolean =>
   option.type === 'boolean' || isOnOffSelect(option);
 
-const isCollaborationModeSelect = (option: AcpConfigOptionSummary): boolean =>
-  option.type === 'select' &&
-  option.options.some((value) => value.value === ACP_COLLABORATION_MODE_DEFAULT_VALUE) &&
-  option.options.some((value) => value.value === ACP_COLLABORATION_MODE_PLAN_VALUE);
-
 const toggleValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfigOptionValue =>
   option.type === 'boolean'
     ? enabled
@@ -187,14 +173,11 @@ const findPlanModeOption = (
 ): AcpConfigOptionSummary | undefined =>
   findConfigOption(
     capability,
-    (option) => isAcpPlanModeConfigOption(option) && isCollaborationModeSelect(option)
+    (option) => isAcpPlanModeConfigOption(option) && option.type === 'boolean'
   );
 
-const planModeValue = (enabled: boolean): AcpConfigOptionValue =>
-  enabled ? ACP_COLLABORATION_MODE_PLAN_VALUE : ACP_COLLABORATION_MODE_DEFAULT_VALUE;
-
 /**
- * Permission mode that means "plan only", for agents (Claude Code, Kimi) that
+ * Permission mode that means "plan only", for agents (Claude Code) that
  * express planning as a mode instead of a dedicated toggle.
  */
 const findPlanPermissionModeId = (
@@ -341,7 +324,7 @@ export const resolveAgentRunConfigSelection = (
   if (selection.planMode !== undefined) {
     const option = findPlanModeOption(capability);
     if (option) {
-      configOptionValues[option.id] = planModeValue(selection.planMode);
+      configOptionValues[option.id] = selection.planMode;
     } else if (selection.planMode) {
       const planModeId = findPlanPermissionModeId(capability);
       if (!planModeId) {
@@ -359,3 +342,67 @@ export const resolveAgentRunConfigSelection = (
     ...(unverifiedSelections.length > 0 ? { unverifiedSelections } : {}),
   };
 };
+
+/** Read pre-plan_mode persisted selections only when the target advertises the new contract. */
+export function migrateLegacyPlanSelection<
+  T extends {
+    modeId?: string | null;
+    configOptionValues?: Record<string, AcpConfigOptionValue>;
+  },
+>(
+  selection: T,
+  options: readonly {
+    id: string;
+    type: string;
+    options?: readonly ({ value: string } | { options: readonly { value: string }[] })[];
+  }[]
+): T {
+  if (
+    !options.some((option) => option.id === LODY_PLAN_MODE_CONFIG_ID && option.type === 'boolean')
+  )
+    return selection;
+  const values = { ...selection.configOptionValues };
+  let modeId = selection.modeId;
+  let changed = false;
+  const setPlan = (enabled: boolean): void => {
+    if (values[LODY_PLAN_MODE_CONFIG_ID] === undefined) values[LODY_PLAN_MODE_CONFIG_ID] = enabled;
+    changed = true;
+  };
+  const legacyCollaboration = values.collaboration_mode;
+  if (legacyCollaboration === 'default' || legacyCollaboration === 'plan') {
+    setPlan(legacyCollaboration === 'plan');
+    delete values.collaboration_mode;
+  }
+  const legacyInteraction = values.interaction_mode;
+  if (
+    legacyInteraction === 'agent' ||
+    legacyInteraction === 'plan' ||
+    legacyInteraction === 'ask'
+  ) {
+    setPlan(legacyInteraction !== 'agent');
+    delete values.interaction_mode;
+  }
+  const permission = options.find((option) => option.id === 'permission_mode');
+  const permissionOptions =
+    permission?.options?.flatMap((option) =>
+      'value' in option ? [option] : [...option.options]
+    ) ?? [];
+  const legacyMode = modeId ?? values.mode;
+  // Kimi's old combined selector becomes independent Plan + permission; Claude has no boolean.
+  if (
+    permissionOptions.some((option) => option.value === 'yolo') &&
+    typeof legacyMode === 'string'
+  ) {
+    if (legacyMode === 'plan' || permissionOptions.some((option) => option.value === legacyMode)) {
+      setPlan(legacyMode === 'plan');
+      values.permission_mode ??= legacyMode === 'plan' ? 'default' : legacyMode;
+      delete values.mode;
+      modeId = null;
+    }
+  } else if (permission && (legacyMode === 'plan' || legacyMode === 'default')) {
+    setPlan(legacyMode === 'plan');
+    delete values.mode;
+    modeId = null;
+  }
+  return changed ? { ...selection, modeId, configOptionValues: values } : selection;
+}
