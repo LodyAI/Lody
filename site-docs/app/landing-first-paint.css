@@ -1,0 +1,639 @@
+/* First-paint subset for the landing hero + nav. Inlined by
+   finalize-prerender-html.mjs; underwater.css / site-nav.css stay the full
+   source. Must match the final first-screen layout, background, and type —
+   deferred CSS must not restyle this chrome. System-font only; no webfonts. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  background: rgb(0, 2, 6);
+  scrollbar-width: none;
+}
+
+html.light {
+  color-scheme: light;
+  background: rgb(248, 251, 255);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+body {
+  margin: 0;
+  overflow-x: clip;
+  font-family: var(--lody-docs-font-sans, ui-sans-serif, system-ui, sans-serif);
+}
+
+body.flex {
+  display: flex;
+}
+
+body.min-h-screen {
+  min-height: 100vh;
+}
+
+body.flex-col {
+  flex-direction: column;
+}
+
+.underwater-landing {
+  position: relative;
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-direction: column;
+  overflow-x: clip;
+  color: hsl(205 100% 96%);
+  --site-content-max: 1200px;
+  --site-content-width: min(var(--site-content-max), 92vw);
+  --lody-docs-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --lody-docs-font-heading: var(--lody-docs-font-sans);
+  --landing-ink: 205 100% 96%;
+  --landing-ink-muted: 203 38% 78%;
+  --landing-border: 200 70% 72%;
+  --landing-surface-1: 213 62% 9%;
+  --landing-surface-2: 211 56% 14%;
+  --landing-primary: 195 100% 64%;
+  --ocean-aqua: 195 100% 66%;
+}
+
+html.light .underwater-landing {
+  color: hsl(209 55% 14%);
+  --landing-ink: 209 55% 14%;
+  --landing-ink-muted: 207 38% 24%;
+  --landing-border: 205 45% 38%;
+  --landing-surface-1: 190 52% 97%;
+  --landing-surface-2: 190 42% 93%;
+  --landing-primary: 192 74% 40%;
+  --ocean-aqua: 205 95% 28%;
+}
+
+.underwater-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100lvh;
+  min-height: 100%;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgb(0, 2, 6) 0%, rgb(2, 7, 16) 50%, rgb(0, 1, 4) 100%);
+}
+
+html.light .underwater-bg {
+  background: linear-gradient(
+    to bottom,
+    rgb(248, 251, 255) 0%,
+    rgb(184, 210, 240) 52%,
+    rgb(144, 182, 232) 100%
+  );
+}
+
+.underwater-bg__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Dark-first: match `.dark .underwater-bg__overlay` so deferred CSS
+     cannot add fog/vignette after the first frame. */
+  background:
+    linear-gradient(
+      to bottom,
+      hsl(214 84% 7% / 0.66) 0%,
+      hsl(214 84% 7% / 0.14) 12%,
+      hsl(214 84% 7% / 0) 28%
+    ),
+    radial-gradient(110% 92% at 23% 33%, hsl(214 86% 5% / 0.5) 0%, hsl(214 86% 5% / 0) 60%),
+    linear-gradient(
+      to top,
+      hsl(216 88% 5% / 0.55) 0%,
+      hsl(216 88% 5% / 0.16) 12%,
+      hsl(216 88% 5% / 0) 30%
+    ),
+    radial-gradient(150% 135% at 50% 48%, transparent 62%, hsl(216 90% 4% / 0.45) 100%);
+}
+
+html.light .underwater-bg__overlay {
+  background: linear-gradient(
+    to top,
+    hsl(0 0% 100% / 0.72) 0%,
+    hsl(0 0% 100% / 0.18) 12%,
+    hsl(0 0% 100% / 0) 30%
+  );
+}
+
+.uw-skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 100;
+  transform: translateY(-160%);
+}
+
+.underwater-main {
+  display: block;
+  position: relative;
+}
+
+/* Below-fold marketing is not first-screen chrome. Skip its layout until
+   near the viewport so the hero/nav box cannot be delayed by 1,700 nodes.
+   First-screen rules above stay the painted look. */
+.uw-content {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 5200px;
+}
+
+.underwater-hero {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: clamp(1.35rem, 3vh, 2rem);
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: clamp(5.25rem, 11vh, 7.5rem) 0 clamp(1.5rem, 3.5vh, 2.5rem);
+  text-align: left;
+}
+
+.underwater-hero__inner {
+  display: flex;
+  width: var(--site-content-width);
+  margin-inline: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(1rem, 2.4vh, 1.7rem);
+}
+
+.underwater-hero__eyebrow {
+  margin: 0;
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: clamp(0.82rem, 1.45vw, 0.95rem);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.underwater-hero__title {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  font-family: var(--lody-docs-font-heading);
+  font-size: clamp(2.2rem, 4.4vw, 3.6rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: hsl(var(--landing-ink));
+  text-wrap: balance;
+  text-shadow: 0 2px 24px hsl(214 90% 4% / 0.6);
+}
+
+html.light .underwater-hero__title {
+  text-shadow: 0 1px 2px hsl(210 50% 14% / 0.16);
+}
+
+.rw {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.rw-prefix,
+.rw-suffix {
+  min-width: 0;
+}
+
+.rw-prefix:not(:empty) {
+  margin-right: 0.35em;
+}
+
+.rw-viewport {
+  --rw-step: 1.18em;
+
+  position: relative;
+  display: inline-block;
+  height: var(--rw-step);
+  overflow: hidden;
+  vertical-align: baseline;
+}
+
+.rw-strip {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(calc(var(--rw-index) * -1 * var(--rw-step)));
+  transition: transform 460ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.rw-strip-static,
+.rw-strip-no-transition {
+  transition: none;
+}
+
+.rw-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  height: var(--rw-step);
+}
+
+.rw-align-end .rw-item {
+  justify-content: flex-end;
+}
+
+.rw-align-center .rw-item {
+  justify-content: center;
+}
+
+.rw-word {
+  color: hsl(var(--landing-primary));
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.underwater-hero__title .rw-word {
+  color: hsl(var(--ocean-aqua));
+  text-shadow: 0 1px 2px hsl(214 92% 6% / 0.5);
+}
+
+.underwater-hero__title .rw-prefix:not(:empty) {
+  white-space: nowrap;
+  margin-right: 0;
+}
+
+.underwater-hero__title .rw {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.underwater-hero__title .rw-item {
+  justify-content: flex-start;
+}
+
+.underwater-hero__lead {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--lody-docs-font-sans);
+  font-size: clamp(1rem, 2.2vw, 1.22rem);
+  line-height: 1.6;
+  /* Dark-first: match `.dark .underwater-hero__lead`. */
+  color: hsl(203 46% 86% / 0.92);
+  text-shadow: 0 1px 16px hsl(214 90% 4% / 0.55);
+}
+
+html.light .underwater-hero__lead {
+  color: hsl(var(--landing-ink-muted));
+  text-shadow: none;
+}
+
+.underwater-hero__cta-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-top: clamp(0.4rem, 1.5vh, 1rem);
+}
+
+.underwater-hero__cta,
+.underwater-hero__cta-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.underwater-hero__cta {
+  justify-content: flex-start;
+  gap: 0.85rem;
+}
+
+.underwater-hero__cta-links {
+  gap: 0.4rem 0.55rem;
+}
+
+.underwater-hero__more {
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.underwater-hero__link-dot {
+  color: hsl(var(--landing-ink-muted) / 0.65);
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.underwater-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 2.9rem;
+  padding: 0 1.5rem;
+  border-radius: 10px;
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.97rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+/* GithubMark has no intrinsic size; pin it so the CTA cannot inflate
+   to the browser's 300×150 SVG default before deferred CSS arrives. */
+.underwater-btn__icon {
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.underwater-btn--primary {
+  background: hsl(var(--landing-ink));
+  color: hsl(var(--landing-surface-1));
+  border-color: hsl(var(--landing-ink));
+}
+
+.underwater-btn--ghost {
+  color: hsl(var(--landing-ink));
+  background: transparent;
+  border-color: hsl(var(--landing-border) / 0.55);
+}
+
+.underwater-hero__scroll-hint {
+  position: absolute;
+  left: max(0px, calc((100% - var(--site-content-width)) / 2));
+  bottom: clamp(1.75rem, 5vh, 3.25rem);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: hsl(var(--landing-ink-muted));
+}
+
+.underwater-hero__scroll-label {
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: -0.01em;
+}
+
+.underwater-hero__scroll-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.underwater-hero__scroll-chevron {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.site-nav {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 50;
+  height: 64px;
+  border-bottom: 1px solid hsl(var(--landing-border) / 0.72);
+  background: hsl(var(--landing-surface-1) / 0.86);
+  color: hsl(var(--landing-ink));
+  backdrop-filter: saturate(1.3) blur(12px);
+}
+
+/* Landing override from underwater.css: fade the bar into the scene.
+   Must be inlined — deferred shared CSS must not restyle this surface. */
+.underwater-landing .site-nav {
+  border-bottom: 0;
+  background: linear-gradient(
+    to bottom,
+    hsl(var(--landing-surface-1) / 0.82),
+    hsl(var(--landing-surface-1) / 0)
+  );
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.site-nav__inner {
+  display: flex;
+  align-items: center;
+  width: var(--site-content-width);
+  height: 100%;
+  margin: 0 auto;
+}
+
+.site-nav__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-right: auto;
+  color: inherit;
+  font-family: var(--lody-docs-font-sans);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.site-nav__brand img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.site-nav__right,
+.site-nav__links,
+.site-nav__actions {
+  display: flex;
+  align-items: center;
+}
+
+.site-nav__right {
+  justify-content: flex-end;
+  gap: 1.25rem;
+  margin-left: auto;
+}
+
+.site-nav__links,
+.site-nav__actions {
+  gap: 1.25rem;
+}
+
+.site-nav__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.site-nav__theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: hsl(var(--landing-ink-muted));
+  cursor: pointer;
+}
+
+.site-nav__theme-window {
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+}
+
+.site-nav__theme-track {
+  display: flex;
+  flex-direction: column;
+}
+
+.site-nav__theme-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.site-nav__theme-toggle[data-theme='dark'] .site-nav__theme-track {
+  transform: translateY(-18px);
+}
+
+.site-nav__social svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.site-nav__divider {
+  width: 1px;
+  height: 18px;
+  background: hsl(var(--landing-border));
+}
+
+.site-nav__toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid hsl(var(--landing-border));
+  border-radius: 10px;
+  background: hsl(var(--landing-surface-2) / 0.72);
+  color: hsl(var(--landing-ink));
+}
+
+.site-nav__toggle svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.site-nav__menu,
+.site-nav__backdrop {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .site-nav__right,
+  .site-nav__links,
+  .site-nav__actions {
+    gap: 0.9rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .rw-prefix:not(:empty) {
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+
+  .underwater-hero {
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding-top: clamp(4.75rem, 12vh, 6.25rem);
+    padding-bottom: 1.35rem;
+    gap: 1.15rem;
+  }
+
+  .underwater-hero__inner {
+    gap: 0.85rem;
+  }
+
+  .underwater-hero__title {
+    letter-spacing: -0.02em;
+    font-size: clamp(1.85rem, 7.2vw, 2.35rem);
+  }
+
+  .underwater-hero__lead {
+    font-size: 0.98rem;
+    line-height: 1.55;
+  }
+
+  .underwater-hero__cta-wrap {
+    margin-top: 0.2rem;
+    gap: 0.5rem;
+  }
+
+  .underwater-hero__scroll-hint {
+    display: none;
+  }
+
+  .underwater-btn {
+    height: 2.85rem;
+    padding: 0 1.35rem;
+  }
+
+  .site-nav__links,
+  .site-nav__desktop {
+    display: none;
+  }
+
+  .site-nav__right {
+    gap: 0.6rem;
+  }
+
+  .site-nav__actions {
+    gap: 0.55rem;
+  }
+
+  .site-nav__toggle {
+    display: inline-flex;
+  }
+}

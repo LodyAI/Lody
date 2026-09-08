@@ -3662,6 +3662,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const mirror = new Mirror({
       doc: persistedDoc.doc as LoroDoc,
       schema: sessionDocSchema,
+      // Temporary availability hotfix: old history must not reject unrelated writes.
+      // Remove only with a reviewed changed-input validation boundary (PR #460).
+      validateUpdates: false,
       // Tolerate root keys written by peers running a newer schema version.
       ignoreUnknownProperties: true,
       // Plan is now stored per-turn on history entries, not at root level

@@ -36,9 +36,14 @@ locks forever, so the date is deliberately not repeated in the note or an FAQ.
 
 ## Why the underwater background starts in three stages
 
-Loading three.js through a module-eval `import()` plus `lazy` keeps it out of the
-landing's critical chunk, with the CSS gradient on `.underwater-bg` standing in
-until mount. The seabed attributes are computed in a worker from pure math shared
+Loading three.js through `lazy(() => import())` keeps it out of the landing's
+critical chunk, with the CSS gradient on `.underwater-bg` standing in until
+mount. The import starts only when the experience mounts (not at module
+evaluation), then waits for `load` plus idle so docs routes do not download the
+3D chunk and the hero title can paint. The preview chunk and rotating H1 words
+use the same gate — a one-viewport `rootMargin` used to start the preview
+download during LCP because the stage sits just below a 100dvh hero.
+The seabed attributes are computed in a worker from pure math shared
 via `underwater-terrain-math.ts`, using one regular height grid for normals
 instead of four extra noise samples per point, and fade in through the terrain
 `uReveal` uniform while gradient, particles, and jellyfish render immediately.

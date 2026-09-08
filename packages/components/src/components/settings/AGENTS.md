@@ -25,6 +25,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
   and SSR consumers do not evaluate its renderer graph.
+- Interface and terminal font choices exclude the known symbol families in
+  `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
+  use the default interface font so they remain readable.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 

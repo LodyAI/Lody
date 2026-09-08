@@ -40,20 +40,15 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 - Read context/terminal-output-lifecycle.md before changing ACP terminal notification handling or
   history compaction.
 
-## MCP tool surface
+## Cross-entry agent contracts
 
-- MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
-  Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
-  before its fallible availability step: a transient post-accept failure returns the active fixed
-  target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
-  the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
-  is a temporary adapter new callers must not use.
+Before changing MCP tools, their callers, or delegated Task automation, read
+[src/mcp/AGENTS.md](src/mcp/AGENTS.md) for Session acceptance, reply bounds, and
+execution/consent rules. These rules also bind CLI callers outside that directory.
+
 - Child Sessions are one level deep. An independent Session created inside another persists exact
   provenance in `openedBySessionId`, plus `openedByRootSessionId` when the opener is a child Tab;
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
-- `lody_session_create_options` publishes valid run-config values per agent config and stays
-  sparse by default (online Machines, one agent config, the current local project, no GitHub
-  fetch), expanding only through explicit query inputs.
 - INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
   describe only the model current at probe time. Validate effort against the TARGET model using
   `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
@@ -61,30 +56,6 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
   never become visible `agent_warning` notices, while other rejections still do. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
-- `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
-  keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
-  and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
-  Machine RPC snapshot. Operations: `src/orchestration/AGENTS.md`, `specs/session-orchestration.md`.
-- Bound every task reply: body 64 KiB with head-and-tail truncation
-  (`bodyTruncated`/`bodyOmittedBytes`), newest 20 comments with `commentCount`, 50 links,
-  `lody_task_list` 20/100 with `matched`. `lody_task_edit_body` still matches exactly against the
-  FULL body server-side.
-- `lody_task_list` reads the Task Index Flock ONLY: never open task documents on a list path, and
-  never return `order`.
-- `lody_task_update` writes every scalar property EXCEPT `agent`, and never the body: the body goes
-  through the exact-match edit, and `agent` is the sole automation consent.
-- INVARIANT: `status`, `ownerId`, and `projects` all sit in the delegated-automation eligibility
-  predicate (`planTaskAutomation`), so an agent write to any of them can START a session on an
-  already-entrusted task; anything in that predicate is an execution trigger. Its attributed
-  activity entry is an audit record, NOT a user-visible notice.
-- `ownerId` on an agent WRITE accepts ONLY `""` (unassign) — `TaskOwnerIdWriteSchema` — because
-  naming an owner points `isTaskAutomationEligible` somewhere new and could route a task into
-  execution under this operator's credentials on someone else's consent; it also disposes of the
-  `me` filter sentinel. Keep that restriction at the MCP boundary, NOT in `task-doc.ts`.
-- `lody_task_create` versus `lody_task_propose` splits on WHO ASKED (user request → create now;
-  agent-noticed follow-up → proposal card), and that split lives in the tool descriptions on
-  purpose. The proposal writer hydrates the Session doc, flushes locally, and confirms remote sync
-  before `ok`.
 - `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.

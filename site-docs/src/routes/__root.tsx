@@ -1,7 +1,4 @@
 import '@site/app/global.css';
-import '@site/app/pricing.css';
-import '@site/app/legal.css';
-import '@site/components/app-preview-shims/pierre-diffs-web-components';
 import { SiteRootProvider } from '@site/components/site-root-provider';
 import { SiteNotFound } from '@site/src/site-pages/not-found';
 import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from '@tanstack/react-router';
@@ -38,14 +35,8 @@ export const Route = createRootRoute({
     ],
     scripts: [
       {
-        async: true,
-        src: `https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsMeasurementId}`,
-      },
-      {
-        children: `window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', '${googleAnalyticsMeasurementId}');`,
+        children: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
+window.addEventListener('load',function(){var s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsMeasurementId}';s.onload=function(){gtag('js',new Date());gtag('config','${googleAnalyticsMeasurementId}');};document.head.appendChild(s);});`,
       },
       ...(vibeloftAuthKey
         ? [

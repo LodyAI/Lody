@@ -10,6 +10,10 @@ build does not declare; without the flag loro-mirror rejects the entire state
 with `Unknown property: <key>`, so the older client can never write to that doc
 again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
+Session Mirrors temporarily use `validateUpdates: false` to avoid blocking writes
+on incompatible old history. Keep external parsers; this is not malformed-input
+safety. Removal requires a reviewed replacement write boundary (PR #460).
+
 ## Streams connection cardinality
 
 - Capability discovery and refresh must reuse the workspace runtime's existing Machine
