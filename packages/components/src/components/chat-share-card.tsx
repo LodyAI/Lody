@@ -359,7 +359,7 @@ export function ChatShareCard({
             // Camera-caption band: brighter than the conversation surface.
             framed
               ? 'border-t border-border bg-white dark:bg-white/[0.04]'
-              : 'border-t border-black/[0.05] bg-white/70 backdrop-blur-xl dark:border-white/[0.07] dark:bg-white/[0.04]'
+              : 'border-t border-black/[0.05] dark:border-white/[0.07]'
           )}
         >
           {meta?.icon ?? <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />}
