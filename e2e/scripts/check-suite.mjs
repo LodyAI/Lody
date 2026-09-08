@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadJourneyRegistry, renderCoverage } from './journey-registry.mjs';
+import { coverageMatchesRegistry, loadJourneyRegistry } from './journey-registry.mjs';
 
 const e2eRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const featureDir = join(e2eRoot, 'src', 'features');
@@ -159,7 +159,7 @@ for (const stableId of scenarioContracts.keys()) {
 }
 
 const coverage = readFileSync(coveragePath, 'utf8');
-if (coverage !== renderCoverage(registry)) {
+if (!coverageMatchesRegistry(coverage, registry)) {
   fail('COVERAGE.md is stale; run `pnpm --filter @lody/e2e journey:coverage`');
 }
 
