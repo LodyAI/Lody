@@ -1410,7 +1410,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           // remount when raw-HTML mode or Mermaid theme changes so sanitized
           // rendering and diagram colors update correctly.
           key={streamdownKey}
-          mode={resolveMarkdownStreamdownMode(isStreaming)}
+          mode={resolveMarkdownStreamdownMode(isStreaming, normalizedText)}
           className="space-y-0"
           controls={STREAMDOWN_CONTROLS}
           isAnimating={isStreaming}
