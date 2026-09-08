@@ -37,6 +37,18 @@ constraint into a note or a `README.md` to buy bytes, because neither is
 guaranteed to be read before a change. A directory whose index cannot fit is
 usually under-structured; prefer child scopes over a longer parent.
 
+For a cross-directory contract, keep its definition in the owning module's
+`AGENTS.md` and an explicit "before changing X, read Y" instruction at the common
+ancestor. Name caller behavior as well as owner files: a rule about a catalog also
+binds its UI and dispatch consumers. A bare background link is not a required-read
+trigger. Check every affected caller before removing the ancestor's full definition.
+
+When simplifying instructions, compare the bytes of the ancestor chain for typical
+source paths, as well as individual file sizes. Count each `AGENTS.md` once, without
+its `CLAUDE.md` alias. Report conditional topic reads separately: relocating a rule
+reduces unrelated tasks' input, but does not remove relevant tasks' reading duties.
+These measurements are diagnostic, not an additional approval or size gate.
+
 The gate rejects an `AGENTS.md` at 8192 bytes, and warns above 7000 without
 failing. Aim for the warning threshold, not the gate: a file that lands 30 bytes
 under the limit breaks for whoever adds the next sentence, and that is rarely the
@@ -138,4 +150,6 @@ Place visuals beside short explanations, mark conceptual sketches, and keep real
 paths accurate. Diagrams are maintained facts too. Use HTML only when a static
 view cannot explain the point; prose must remain independently understandable.
 Worked examples live in [visual explanations](docs/visual-explanations.md); the
-PR template points there so outside authors need nothing installed.
+PR template points there so outside authors need nothing installed. Every PR fills
+its visual-explanation section; changes over 200 lines must include a structural
+view, while semantic complexity remains a reviewer judgment.

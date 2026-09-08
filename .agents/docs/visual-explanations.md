@@ -5,8 +5,15 @@ makes the key point clear, and keep the surrounding prose brief. These examples
 are conceptual; the rules that govern them are in
 [structural explanations](../README.md#structural-explanations).
 
-Authors of a pull request: apply this in the Summary or the Before / after table.
-Nothing needs to be installed.
+Authors of a pull request: apply this in `## Visual explanation`. Nothing needs
+to be installed.
+
+Every pull request fills `## Visual explanation`. Agents invoke `$show-me` before
+writing it. A change is complex when it crosses component, runtime, or authority
+boundaries; changes multi-step control or data flow; or exceeds 200 changed lines.
+Complex changes include one of the structural views below. For a simple change,
+write `Simple change: <why a visual would not help review>` instead. The PR policy
+automatically enforces the 200-line floor; reviewers enforce the semantic cases.
 
 - Show logic or an algorithm as pseudocode:
 
@@ -112,8 +119,8 @@ For a state or control-flow change:
 
 ```ts
 function expandSkill(command: string): string {
-  const skillName = command.slice(1)
-  return `use the ${skillName} skill`
+  const skillName = command.slice(1);
+  return `use the ${skillName} skill`;
 }
 ```
 
@@ -133,5 +140,5 @@ Keep each view at one abstraction level.
 Indentation means directory containment, component containment, or calls; do not
 mix these relationships in one tree. Expand a module in a separate focused view
 when needed. In a PR, any supporting artifact must be accessible to reviewers;
-opening a local HTML file alone does not make it accessible. Small fixes can use
-just a concise sentence or the existing table. Do not add visuals for ceremony.
+opening a local HTML file alone does not make it accessible. Do not add visuals
+for ceremony.

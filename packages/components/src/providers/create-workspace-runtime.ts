@@ -65,6 +65,7 @@ import {
   type LodyPresenceStateMap,
   type LoroStreamsTokenProviderEvent,
   type SyncReason,
+  ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
@@ -1834,7 +1835,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
         },
         signal: options.signal,
-        timeoutMs: 120000,
+        // Backstop only: the machine owns this deadline and reports its own
+        // reason, so this must stay above the machine's worst case rather than
+        // expiring a refresh the machine is still working on.
+        timeoutMs: ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
       });
       return (
         response ?? {

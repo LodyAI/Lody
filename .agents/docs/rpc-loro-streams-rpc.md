@@ -20,6 +20,15 @@ been removed.
   handlers.
 - `README.md` — package smoke-test notes.
 
+## Remote lifecycle acknowledgements
+
+For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts
+delivery for at most five seconds before invoking the CLI lifecycle callback.
+Delivery failure is logged locally rather than turned into an operation error.
+Rejected responses never invoke that callback. The existing CLI process boundary
+owns its one-time shutdown guard; the RPC helper does not install or restart inline.
+See the [draft ACK contract](../../specs/machine-lifecycle-ack.md).
+
 ## Code Collab seam
 
 - Web creates/reuses `LoroStreamsMachineRpcClient` in

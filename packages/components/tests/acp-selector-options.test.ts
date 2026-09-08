@@ -111,6 +111,44 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gpt-5.6-sol',
+              options: [
+                { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+                { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+              ],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      }),
+    });
+
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.modelOptions.map((option) => option.value)).toEqual([
+      'gpt-6-astra',
+      'gpt-5.6-sol',
+    ]);
+  });
+
   it('synthesizes registry model selectors when a stale cache stores empty config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -487,7 +525,11 @@ describe('buildAcpSelectorOptions', () => {
     });
   });
 
-  it('ignores stale registry capability cache entries', () => {
+  it.each([
+    ['legacy entries without a version', undefined],
+    ['older-version entries', ACP_CAPABILITY_CACHE_VERSION - 1],
+    ['newer-version entries with understood fields', ACP_CAPABILITY_CACHE_VERSION + 1],
+  ])('keeps %s readable while the cache converges', (_label, cacheVersion) => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'registry',
@@ -496,7 +538,8 @@ describe('buildAcpSelectorOptions', () => {
         [agentConfigId]: {
           cliType: 'registry',
           agentType: 'codex',
-          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          cacheVersion,
+          provenance: 'runtime',
           modes: [],
           models: [],
           configOptions: [
@@ -513,7 +556,18 @@ describe('buildAcpSelectorOptions', () => {
       }),
     });
 
-    expect(options.configOptionSelectors).toEqual([]);
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.configOptionSelectors).toEqual([
+      {
+        configId: 'safe_mode',
+        label: 'Safe Mode',
+        description: undefined,
+        category: undefined,
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      },
+    ]);
   });
 
   it('provides no mode options before registry capabilities have loaded', () => {

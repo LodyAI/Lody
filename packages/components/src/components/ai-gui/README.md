@@ -8,11 +8,13 @@ the reasoning behind those rules.
 
 ## Ownership
 
-| Area    | Owner                                    | Contract                               |
-| ------- | ---------------------------------------- | -------------------------------------- |
-| Stream  | `view.tsx`, `build-chat-stream-items.ts` | Stable Virtua rows and scroll.         |
-| Turns   | `assistant-turn-render-blocks.ts`        | Activity groups and foldable segments. |
-| Outline | `conversation-outline-*`                 | Round ticks and navigation.            |
+| Area      | Owner                                            | Contract                                                                          |
+| --------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Stream    | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
+| User rows | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
+| Turns     | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
+| Outline   | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
+| Selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
@@ -29,8 +31,10 @@ the reasoning behind those rules.
 
 ## Coverage
 
-`tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`, the
-`ExtremeConversation` story, and `AssistantTurnAlignment.stories`.
+`tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
+`tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,
+`AssistantTurnAlignment.stories`, and the multiple-sender states in
+`SessionConversationPage.stories.tsx`.
 
 ## Why the rules read the way they do
 

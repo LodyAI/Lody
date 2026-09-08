@@ -176,6 +176,11 @@ per-model reasoning-effort ladders on that session response as
 Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
 is a context window). Vendor model `_meta` never enters the CLI.
 
+Capability cache versions are freshness markers, not read barriers. A newer client continues
+to render understood fields from an older daemon's parsed entry while scheduling a replacement
+probe; likewise, an older client may use the understood portion of a newer entry. Runtime
+override entries still apply only when their source-version suffix matches the selected override.
+
 ### Session titles
 
 Builtin Claude owns session title generation through ACP `session_info_update`. Builtin Codex

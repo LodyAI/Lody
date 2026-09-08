@@ -132,6 +132,10 @@ function CloudBillingSettings() {
     const owner = activeOrganization.members?.find((member) => member.role === 'owner');
     return owner?.user?.name?.trim() || owner?.user?.email?.trim() || null;
   }, [activeOrganization, workspaceId]);
+  const createBillingPortalSession = useCloudAction(
+    cloudOperations.billing.createBillingPortalSession
+  );
+  const portalInFlight = useRef(false);
   const createCheckoutSession = useCloudAction(cloudOperations.billing.createCheckoutSession);
   const reconcileWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.reconcileWorkspaceCheckout
@@ -320,6 +324,25 @@ function CloudBillingSettings() {
     }
     window.location.assign(url);
     return 'in-app';
+  };
+
+  const handlePaymentMethod = async () => {
+    if (!workspaceId || !overview?.canManageBilling || portalInFlight.current) return;
+    portalInFlight.current = true;
+    setPendingAction('portal');
+    try {
+      const result = await createBillingPortalSession({
+        workspaceId,
+        ...(isDesktop ? { returnTarget: 'desktop' as const } : { returnUrl }),
+      });
+      await openCheckoutUrl(result.url);
+    } catch (error) {
+      const code = getBillingErrorCode(error);
+      toast.error(t((code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.paymentMethodError'));
+    } finally {
+      portalInFlight.current = false;
+      setPendingAction(null);
+    }
   };
 
   const handleUpgrade = async () => {
@@ -516,6 +539,7 @@ function CloudBillingSettings() {
         paymentProcessing={paymentProcessing}
         externalCheckoutPending={externalCheckoutPending}
         onIntervalChange={setInterval}
+        onPaymentMethod={() => void handlePaymentMethod()}
         onUpgrade={() => void handleUpgrade()}
         onSwitchInterval={() => setSwitchIntervalDialogOpen(true)}
         switchIntervalPending={switchIntervalPending}

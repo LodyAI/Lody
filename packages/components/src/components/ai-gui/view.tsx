@@ -20,6 +20,11 @@ import {
   useState,
 } from 'react';
 import {
+  MessageSelectionContext,
+  MessageSelectionOverlay,
+  MessageSelectionRow,
+} from './message-selection';
+import {
   ZoomableImageViewer,
   type ImagePreviewPortalAnchorRef,
 } from '@/components/shared/zoomable-image-viewer';
@@ -1197,6 +1202,7 @@ export const SessionChatStreamView = forwardRef<
     ref
   ) => {
     const vlistRef = useRef<VirtualizerHandle>(null);
+    const messageSelection = useContext(MessageSelectionContext);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
     const search = useSessionSearch();
@@ -1224,12 +1230,13 @@ export const SessionChatStreamView = forwardRef<
         get current() {
           return (
             groupExpansionAutoScrollSuppressedRef.current ||
+            messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
       }),
-      [suppressStickyAutoScrollRef]
+      [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
       (messageId: string, groupKey: string, expanded: boolean) => {
@@ -1659,10 +1666,11 @@ export const SessionChatStreamView = forwardRef<
           >
             <div
               ref={scrollContainerRef}
+              data-message-selection-scroll=""
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.
-              className="chat-scrollbar h-full overflow-x-hidden py-5 sm:py-6"
+              className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
               // Mobile session page floats a frosted header over the list;
               // `--conversation-top-inset` (set by session-detail's mobile
               // branch) pads the scroll content so the first message clears the
@@ -1693,20 +1701,25 @@ export const SessionChatStreamView = forwardRef<
                 {leadingContent == null ? null : (
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
-                {virtualRows.map((row) => {
+                {virtualRows.map((row, rowIndex) => {
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
                     // so they carry no per-turn file diffs or last-assistant
                     // quick actions.
                     return (
-                      <ChatItem
+                      <MessageSelectionRow
                         key={row.key}
-                        item={row.item}
-                        renderMessageRow={renderMessageRow}
-                        noMessagesLabel={noMessagesLabel}
-                        emptyState={emptyState}
-                      />
+                        id={row.item.type === 'message' ? row.item.message.id : undefined}
+                        first
+                      >
+                        <ChatItem
+                          item={row.item}
+                          renderMessageRow={renderMessageRow}
+                          noMessagesLabel={noMessagesLabel}
+                          emptyState={emptyState}
+                        />
+                      </MessageSelectionRow>
                     );
                   }
 
@@ -1720,33 +1733,39 @@ export const SessionChatStreamView = forwardRef<
                       : (messageFileDiffEntriesByTurn[row.item.message.id] ??
                         EMPTY_EDITED_FILE_ENTRIES);
                   return (
-                    <AssistantChatItem
+                    <MessageSelectionRow
                       key={row.key}
-                      row={row}
-                      fileDiffOverride={fileDiffOverride}
-                      assistantActions={resolveAssistantMessageActions(
-                        row.item.message.id,
-                        assistantActionsMessageId,
-                        assistantActions
-                      )}
-                      onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                      forkWorktreeAvailability={forkWorktreeAvailability}
-                      onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                      isForking={forkingAssistantMessageId === row.item.message.id}
-                      onFileDiffClick={onFileDiffClick}
-                      onFilePathClick={onFilePathClick}
-                      onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                      onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                      isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                      onTurnHoverChange={handleAssistantTurnHoverChange}
-                      conversationFontSize={conversationFontSize}
-                    />
+                      id={row.item.message.id}
+                      first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+                    >
+                      <AssistantChatItem
+                        row={row}
+                        fileDiffOverride={fileDiffOverride}
+                        assistantActions={resolveAssistantMessageActions(
+                          row.item.message.id,
+                          assistantActionsMessageId,
+                          assistantActions
+                        )}
+                        onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+                        forkWorktreeAvailability={forkWorktreeAvailability}
+                        onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                        isForking={forkingAssistantMessageId === row.item.message.id}
+                        onFileDiffClick={onFileDiffClick}
+                        onFilePathClick={onFilePathClick}
+                        onGroupExpandedChange={handleAssistantGroupExpandedChange}
+                        onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+                        isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+                        onTurnHoverChange={handleAssistantTurnHoverChange}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </MessageSelectionRow>
                   );
                 })}
                 {shouldShowAgentActivity && agentActivityLabel && (
                   <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                 )}
               </Virtualizer>
+              <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
@@ -1810,6 +1829,7 @@ export const MessageRowView = memo(function MessageRowView({
   message,
   sessionId,
   user,
+  showSenderIdentity = false,
   onNavigateSession,
   onEdit,
   onResendUndelivered,
@@ -1823,6 +1843,7 @@ export const MessageRowView = memo(function MessageRowView({
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
 }) {
   const { i18n } = useTranslation();
@@ -1853,6 +1874,7 @@ export const MessageRowView = memo(function MessageRowView({
         message={message}
         sessionId={sessionId}
         user={user}
+        showSenderIdentity={showSenderIdentity}
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
@@ -2669,6 +2691,7 @@ const UserMessageRowView = ({
   message,
   sessionId,
   user,
+  showSenderIdentity,
   timestampLabel,
   hasWideContent,
   conversationFontSize,
@@ -2678,6 +2701,7 @@ const UserMessageRowView = ({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   user?: SessionChatUser;
+  showSenderIdentity: boolean;
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
@@ -2782,7 +2806,7 @@ const UserMessageRowView = ({
   return (
     <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
       <div className="mt-0.5 shrink-0 text-muted-foreground">
-        <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
       </div>
       <div
         className={cn(
@@ -2790,7 +2814,15 @@ const UserMessageRowView = ({
           isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
         )}
       >
-        <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div
+          className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground"
+          data-testid="user-message-metadata"
+        >
+          {showSenderIdentity && user?.name ? (
+            <span className="max-w-40 truncate font-medium text-foreground/70" title={user.name}>
+              {user.name}
+            </span>
+          ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
           {isUndelivered ? (
             onResendUndelivered ? (
@@ -2984,6 +3016,67 @@ const UserMessageRowView = ({
     </div>
   );
 };
+
+function UserMessageAuthorAvatar({
+  user,
+  isMobile,
+  showProfile,
+}: {
+  user?: SessionChatUser;
+  isMobile: boolean;
+  showProfile: boolean;
+}) {
+  const { t } = useTranslation();
+  const displayName = user?.name?.trim() || user?.email?.trim();
+  const avatar = (
+    <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+  );
+
+  if (isMobile || !showProfile || !displayName) {
+    return avatar;
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
+            name: displayName,
+          })}
+        >
+          {avatar}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="left"
+        align="start"
+        sideOffset={10}
+        className="w-72 overflow-hidden p-0"
+        aria-label={t('sessions.senderProfile', 'Sender profile')}
+      >
+        <div className="flex items-center gap-3.5 p-4">
+          <UserAvatar
+            user={user}
+            className="h-16 w-16 shrink-0 text-xl"
+            fallbackClassName="bg-primary/10 text-primary"
+          />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">
+              {user?.name?.trim() || displayName}
+            </div>
+            {user?.email ? (
+              <div className="mt-1 truncate text-xs text-muted-foreground" title={user.email}>
+                {user.email}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Confirmation dialog behind the "Not delivered" label: resends the

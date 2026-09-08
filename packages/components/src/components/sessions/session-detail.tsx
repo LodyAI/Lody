@@ -46,6 +46,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  type ConversationMessage,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
 } from '@lody/shared';
@@ -67,6 +68,7 @@ import {
   RenameSessionDialog,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import {
   DraftSessionChatInterface,
   type DraftSessionChatInterfaceHandle,
@@ -1292,9 +1294,7 @@ const SessionDetail = ({
         };
       });
       if (placement === 'tab') {
-        setTabOrderState((current) =>
-          appendTabOrderId(current, sessionGroupIds, targetSessionId)
-        );
+        setTabOrderState((current) => appendTabOrderId(current, sessionGroupIds, targetSessionId));
       }
       if (response.partial && response.warnings.length > 0) {
         toast.warning(
@@ -1302,7 +1302,16 @@ const SessionDetail = ({
         );
       }
     },
-    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, sessionGroupIds, t, user?.id]
+    [
+      canForkSession,
+      currentWorkspaceId,
+      pendingForks,
+      postHog,
+      runtime,
+      sessionGroupIds,
+      t,
+      user?.id,
+    ]
   );
   const pendingForkSourceByTargetSessionId = useMemo(() => {
     const sourceByTarget = new Map<SessionId, string>();
@@ -2364,6 +2373,14 @@ const SessionDetail = ({
     null
   );
 
+  // Share-as-image preview target: the selected tab's session plus the plain-text
+  // conversation snapshot pulled from its chat surface when the menu item fires.
+  const [shareImageTarget, setShareImageTarget] = useState<{
+    session: SessionMeta;
+    messages: ConversationMessage[];
+    agentName?: string;
+  } | null>(null);
+
   const handleRequestDeleteCurrentSession = useCallback(() => {
     if (!activeSession) return;
     setDeleteConfirmOpen(true);
@@ -2516,6 +2533,34 @@ const SessionDetail = ({
     }
     void activeChatRef.copyConversationHistory();
   }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
+
+  const handleShareAsImage = useCallback(() => {
+    if (activeDraftTab) {
+      return;
+    }
+    const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
+    const shareData =
+      activeChatRef && 'getShareImageData' in activeChatRef
+        ? activeChatRef.getShareImageData()
+        : null;
+    if (
+      !activeTabSession ||
+      !shareData ||
+      shareData.messages.length === 0 ||
+      !activeChatRef ||
+      !('startShareImageSelection' in activeChatRef)
+    ) {
+      toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+      return;
+    }
+    activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
+      setShareImageTarget({
+        session: activeTabSession,
+        messages,
+        agentName: shareData.agentName,
+      });
+    });
+  }, [activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
   const handleOpenSearch = useCallback(() => {
     if (activeDraftTab) {
@@ -5369,10 +5414,9 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5421,10 +5465,9 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5672,6 +5715,7 @@ const SessionDetail = ({
       onShareWithTeam={
         showSessionSharing ? () => handleRequestShareSession(activeSession) : undefined
       }
+      onShareAsImage={activeDraftTab ? undefined : handleShareAsImage}
       onOpenPrTab={handleOpenPrTab}
       onNavigateSession={handleNavigateSession}
       browserActionSession={activeBrowserSession}
@@ -5975,6 +6019,15 @@ const SessionDetail = ({
       <RenameSessionDialog
         target={renameDialogTarget}
         onClose={() => setRenameDialogTarget(null)}
+      />
+      <ChatShareImageDialog
+        open={shareImageTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setShareImageTarget(null);
+        }}
+        session={shareImageTarget?.session ?? null}
+        messages={shareImageTarget?.messages ?? []}
+        agentName={shareImageTarget?.agentName}
       />
     </div>
   );

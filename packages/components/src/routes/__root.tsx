@@ -156,7 +156,8 @@ function RootApp() {
     }
     return normalizeCurrentUserFromSessionUser(session.user);
   }, [session?.user]);
-  useDesktopWorkspaceMembershipSync(isElectron ? (currentUser?.id ?? null) : null);
+  const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
+  useDesktopWorkspaceMembershipSync(multiWorkspaceAvailable ? (currentUser?.id ?? null) : null);
 
   useEffect(() => {
     if (typeof document === 'undefined') {

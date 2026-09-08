@@ -15,3 +15,10 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   `--mkt-*` and reference no `fd-` token, which is what keeps the reading override off
   them — check that before moving a component between marketing and reading surfaces.
 - `underwater.css` owns landing layout/legibility; `pricing.css` owns the pricing page.
+- `landing-first-paint.css` is the inlined first-screen sheet (`finalize-prerender-html.mjs`).
+  Keep it system-font-only and visually identical to the final hero/nav layout,
+  background, and type in `underwater.css` / `site-nav.css` (dark default).
+  Include the final hero/nav chrome: `.rw-*`, nav links/theme/toggle fill,
+  landing nav surface, dark overlay, `.underwater-btn__icon`, dark lead
+  treatment, and the desktop scroll hint (hidden ≤768px). Deferred CSS must
+  not restyle that chrome; only WebGL / chevron motion may start later.

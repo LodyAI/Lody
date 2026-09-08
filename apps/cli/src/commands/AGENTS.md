@@ -15,9 +15,9 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
   and signal exits; `daemon-runner.ts` owns watchdog fatal and signal exits. Never force exit from
   reusable libraries, session/agent internals, TUI/watch flows, or worker code — expose cleanup
   and let the process boundary decide.
-- Remote daemon restart/upgrade (context/machine-lifecycle.md): the RPC handler ACKs and asks
-  `start.ts` to exit with the reserved lifecycle code; the watchdog does upgrade/restart work
-  after the worker exits.
+- Remote daemon restart/upgrade: after a bounded ACK attempt, even on delivery failure,
+  accepted work asks `start.ts` to exit with the reserved lifecycle code; the watchdog
+  upgrades/restarts after exit. See [ACK contract](../../../../specs/machine-lifecycle-ack.md).
 - `lody daemon start` resolves cloud authentication in the FOREGROUND process before spawning the
   detached runner (`daemon-auth-preflight.ts`): validate the cached credential, and on a
   missing/rejected one run the interactive device-authorization flow there. An unreachable backend

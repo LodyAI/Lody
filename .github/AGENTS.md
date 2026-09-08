@@ -4,16 +4,16 @@
 
 ## Ownership
 
-| Area                | Source of truth                                                | Contract                                                                         |
-| ------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                            |
-| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                |
-| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.  |
-| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                     |
-| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
-| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                           |
-| Code checks         | `workflows/ci.yml`                                             | Preserve the stable `Static checks` and `Tests` jobs used as required checks.    |
-| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.           |
+| Area                | Source of truth                                                | Contract                                                                             |
+| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                                |
+| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                    |
+| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.      |
+| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                         |
+| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler.     |
+| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                               |
+| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. |
+| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.               |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -35,8 +35,8 @@ Workflow-file security constraints live in
   Issue with analysis and wait to be assigned; do not open the PR. Maintainers
   review small focused changes; large unsolicited patches hide invariant breaks.
   Humans: `CONTRIBUTING.md`.
-- `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
-  body from the template and validate it with
+- Draft every PR from `PULL_REQUEST_TEMPLATE.md`; complex changes use `$show-me`.
+  Validate external bodies with
   `node .github/scripts/check-pr-body.mjs --body-file <file>`.
 - An Agent opens every pull request as a draft (`gh pr create --draft`) and then
   tells its user to mark it ready for review once they judge it ready for

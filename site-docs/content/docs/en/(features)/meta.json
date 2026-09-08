@@ -9,6 +9,8 @@
     "team",
     "session-handoff",
     "parallel-agents",
+    "session-orchestration",
+    "agent-collaboration",
     "agent-roles",
     "cli-runtimes",
     "device-resource-monitoring",
@@ -27,7 +29,6 @@
     "quota",
     "mention",
     "slash-commands",
-    "copy-md",
-    "session-orchestration"
+    "copy-md"
   ]
 }

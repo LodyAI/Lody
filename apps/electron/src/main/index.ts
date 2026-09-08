@@ -21,6 +21,7 @@ import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
+import { configureDevbarDiagnostics } from './services/devbar-service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -76,6 +77,7 @@ if (
   }
 }
 
+configureDevbarDiagnostics()
 registerLocalFileResourceScheme()
 
 const LODY_PROTOCOL = desktopInstallationProfile.desktopProtocol
