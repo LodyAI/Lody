@@ -1124,6 +1124,16 @@ describe('session MCP input schemas', () => {
     expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
   });
 
+  it('does not treat a missing presence join as MACHINE_OFFLINE', async () => {
+    const getOnlineMachineIds = vi.fn(async () => null);
+    const isMachineOnline = makeMachineOnlineLookupForMcp(
+      { getOnlineMachineIds } as never,
+      createMcpContext()
+    );
+
+    await expect(isMachineOnline('remote-unseen' as never)).resolves.toBe(true);
+  });
+
   it('truncates history text on Unicode boundaries with exact omitted bytes', () => {
     const original = '🚀审查'.repeat(100);
     const result = truncateUtf8HeadTail(original, 101);

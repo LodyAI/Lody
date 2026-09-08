@@ -2335,7 +2335,11 @@ const makeMachineOnlineLookupForMcp = (
       return true;
     }
     onlineMachineIds ??= manager.getOnlineMachineIds();
-    return (await onlineMachineIds)?.has(machineId) === true;
+    const ids = await onlineMachineIds;
+    if (ids === null) {
+      return true;
+    }
+    return ids.has(machineId);
   };
 };
 
@@ -2552,7 +2556,9 @@ const buildSessionCreateOptions = async (
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
     const onlineMachineIds = await manager.getOnlineMachineIds();
     const isMachineOnline = (machineId: MachineId): boolean =>
-      machineId === auth.machineId || onlineMachineIds?.has(machineId) === true;
+      machineId === auth.machineId ||
+      onlineMachineIds === null ||
+      onlineMachineIds.has(machineId);
     const machineCandidates = selectMachineMetasForOptions(
       machineEntries.map((entry) => entry.meta),
       input.machineId
