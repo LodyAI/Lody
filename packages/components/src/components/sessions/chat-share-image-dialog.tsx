@@ -295,7 +295,7 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="mb-1">{t('sessions.shareImage.content', 'Content')}</Label>
+              <Label className="mb-2 block">{t('sessions.shareImage.content', 'Content')}</Label>
               <div className="flex items-center justify-between gap-3">
                 <Label
                   htmlFor="chat-share-show-title"
@@ -334,7 +334,7 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="mb-1">{t('sessions.shareImage.code', 'Code')}</Label>
+              <Label className="mb-2 block">{t('sessions.shareImage.code', 'Code')}</Label>
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="chat-share-wrap" className="font-normal text-muted-foreground">
                   {t('sessions.shareImage.wrapLines', 'Wrap long lines')}
