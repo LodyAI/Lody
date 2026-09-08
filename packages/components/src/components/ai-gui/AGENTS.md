@@ -93,7 +93,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Conversation font size is a bounded integer pixel value. Scale body, headings,
   dense monospace, terminal output, and collapsed height through
   `conversation-font-size-classes.ts`; settings own legacy preset migration.
-  Keep Streamdown in streaming mode, but never enable word-level `animated`.
+  Streamdown mode follows isStreaming; never enable word-level `animated`.
 - A Mermaid diagram opens in `mermaid-diagram-viewer.tsx`, never Streamdown's own
   full-screen overlay (`controls.mermaid.fullscreen` stays off). Keep three
   properties: controls padded by the `--safe-area-*` variables rather than a fixed
