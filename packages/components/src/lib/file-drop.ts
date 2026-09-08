@@ -1,9 +1,15 @@
+import { SESSION_IMAGE_ALLOWED_MIME_TYPES } from '@lody/shared';
+
 type FileTransferItem = Pick<DataTransferItem, 'kind' | 'getAsFile'>;
 type FileDropDataTransfer = {
   types?: ArrayLike<string> | Iterable<string>;
   items?: ArrayLike<FileTransferItem> | Iterable<FileTransferItem>;
   files?: ArrayLike<File> | Iterable<File>;
 };
+
+const supportedImageMimeTypes = new Set<string>(SESSION_IMAGE_ALLOWED_MIME_TYPES);
+const isSupportedImage = (file: File): boolean =>
+  supportedImageMimeTypes.has(file.type.trim().toLowerCase());
 
 const toArray = <T>(value: ArrayLike<T> | Iterable<T> | null | undefined): T[] => {
   if (!value) {
@@ -38,7 +44,11 @@ export const getFilesFromDataTransfer = (
 
 export const splitImageAndFileAttachments = (
   files: File[]
-): { images: File[]; attachments: File[] } => ({
-  images: files.filter((file) => file.type.startsWith('image/')),
-  attachments: files.filter((file) => !file.type.startsWith('image/')),
-});
+): { images: File[]; attachments: File[] } => {
+  return {
+    images: files.filter(isSupportedImage),
+    // Image MIME types unsupported by the image upload path (for example
+    // SVG) remain valid general file attachments instead of being rejected.
+    attachments: files.filter((file) => !isSupportedImage(file)),
+  };
+};

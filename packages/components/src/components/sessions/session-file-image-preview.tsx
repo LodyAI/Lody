@@ -7,6 +7,7 @@ interface SessionFileImagePreviewProps {
   readonly path: string;
   /** Raw bytes for binary images (png/jpeg/gif/webp/…). */
   readonly bytes?: Uint8Array;
+  readonly url?: string;
   /** Source text for SVG files (which are classified as text, not binary). */
   readonly svgText?: string;
 }
@@ -31,6 +32,7 @@ export const SessionFileImagePreview = memo(function SessionFileImagePreview({
   path,
   bytes,
   svgText,
+  url,
 }: SessionFileImagePreviewProps) {
   const { t } = useTranslation();
   const mimeType = getImageMimeTypeForPath(path);
@@ -55,21 +57,22 @@ export const SessionFileImagePreview = memo(function SessionFileImagePreview({
       setObjectUrl(undefined);
       return undefined;
     }
-    const url = URL.createObjectURL(blob);
-    setObjectUrl(url);
+    const blobUrl = URL.createObjectURL(blob);
+    setObjectUrl(blobUrl);
     // The open viewer holds the previous object URL; close it before the URL is
     // revoked so it can never show a dead blob.
     setViewerOpen(false);
-    return () => URL.revokeObjectURL(url);
+    return () => URL.revokeObjectURL(blobUrl);
   }, [bytes, svgText, mimeType]);
 
+  const imageUrl = url ?? objectUrl;
   const images = useMemo(
-    () => (objectUrl ? [{ key: path, src: objectUrl, fileName: path }] : []),
-    [objectUrl, path]
+    () => (imageUrl ? [{ key: path, src: imageUrl, fileName: path }] : []),
+    [imageUrl, path]
   );
   const handleClose = useCallback(() => setViewerOpen(false), []);
 
-  if (!mimeType || !objectUrl) return null;
+  if (!mimeType || !imageUrl) return null;
   return (
     <div
       ref={containerRef}
@@ -81,7 +84,7 @@ export const SessionFileImagePreview = memo(function SessionFileImagePreview({
         onClick={() => setViewerOpen(true)}
         aria-label={t('sessions.imagePreview.zoom', 'Open image in full screen')}
       >
-        <img src={objectUrl} alt={path} className="max-h-full max-w-full object-contain" />
+        <img src={imageUrl} alt={path} className="max-h-full max-w-full object-contain" />
       </button>
       <ZoomableImageViewer
         open={viewerOpen}

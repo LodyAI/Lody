@@ -65,4 +65,32 @@ describe('sessionListAtom', () => {
     expect(store.get(sideSessionsAtomFamily(parentId)).map((item) => item.id)).toEqual([sideId]);
     expect(store.get(sessionListAtom).map((item) => item.id)).toEqual([parentId]);
   });
+
+  it('orders child tabs by creation time when no local tab order exists', () => {
+    const store = createStore();
+    const parentId = 'parent-session' as SessionId;
+    const olderChildId = 'older-child' as SessionId;
+    const newerChildId = 'newer-child' as SessionId;
+
+    store.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(parentId)]: { ...session, id: parentId },
+      [getSessionRoomId(newerChildId)]: {
+        ...session,
+        id: newerChildId,
+        parentSessionId: parentId,
+        createdAt: '2026-07-19T00:02:00.000Z',
+      },
+      [getSessionRoomId(olderChildId)]: {
+        ...session,
+        id: olderChildId,
+        parentSessionId: parentId,
+        createdAt: '2026-07-19T00:01:00.000Z',
+      },
+    });
+
+    expect(store.get(childSessionsAtomFamily(parentId)).map((item) => item.id)).toEqual([
+      olderChildId,
+      newerChildId,
+    ]);
+  });
 });

@@ -18,6 +18,8 @@ Lody 会自动使用启动 CLI 的机器上的 Claude Code / Codex 的订阅登�
 如果你的 ACP 兼容 Agent 尚未发布到 ACP Registry，可以选择 **Custom ACP** 并自行填写启动命令。具体步骤和命令解析规则见
 [CLI 类型支持](/zh/docs/cli-runtimes#自定义-acp-agent)。
 
+Agent Config 可以共享给团队，让同事使用同一套 CLI 配置。要交接正在跑的会话——而不只是配置——见[共享并交接 Agent 会话](/zh/docs/session-handoff)。
+
 ## Claude
 
 ```
@@ -39,9 +41,11 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 ### DeepSeek Harness
 
-Lody 内置 **DeepSeek Harness** ACP Provider。新建 Agent Config、选择 DeepSeek Harness 并粘贴
-DeepSeek API Token 即可；Lody 会将其保存为 `DEEPSEEK_API_KEY`，无需另外安装 standalone
-`dsh` 命令。
+Lody 内置 **DeepSeek Harness** ACP Provider。新建 Agent Config 并选择 DeepSeek Harness 后，
+在 **DeepSeek 官方** Tab 中只需填写 DeepSeek API Token；在 **自定义 Endpoint** Tab 中可以填写
+兼容 Harness 的 HTTP(S) API Endpoint 及对应 API Key。Lody 会将它们保存为
+`DEEPSEEK_BASE_URL` 和 `DEEPSEEK_API_KEY`，无需另外安装 standalone `dsh` 命令。保存官方配置时
+会显式使用 `https://api.deepseek.com`，避免启动机器环境中已有的 Endpoint 变量意外改写配置。
 
 > **已知的委派限制：** 当会话使用 DeepSeek-V4-Pro 以外的模型时，委派的子智能体可能仍会使用
 > 会话创建时写入的 DeepSeek-V4-Pro，而不是父会话界面显示的模型，因而可能产生更高费用。继承

@@ -322,6 +322,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   height: 2.9rem;
   padding: 0 1.5rem;
   border-radius: 10px;
@@ -336,6 +337,14 @@
     background 0.18s ease,
     border-color 0.18s ease,
     color 0.18s ease;
+}
+
+/* Brand mark inside a button (GitHub on the hero ghost secondary). Sized to the
+   cap height of the label so the lockup reads as one word, not icon + text. */
+.underwater-btn__icon {
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 /* Primary: a flat, solid, inverted-ink button (dark-on-light in light mode,
@@ -1187,6 +1196,13 @@
   }
 }
 
+/* First-screen decorative motion stays paused until load + idle so the H1
+   LCP box is not competing with looping CSS. Reduced-motion still wins. */
+html:not(.uw-motion-ready) .underwater-hero__scroll-chevron,
+html:not(.uw-motion-ready) .uw-agents__banner-track {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .underwater-btn {
     transition: none;
@@ -1834,6 +1850,24 @@
   font-family: var(--lody-docs-font-sans);
   font-size: var(--uw-body-size);
   line-height: var(--uw-body-lh);
+}
+
+.uw-section-docs {
+  margin: 0.7rem 0 0;
+}
+
+.uw-section-docs a {
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.uw-section-docs a:hover {
+  color: hsl(var(--landing-ink));
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 /* Team beats under power header — plain list, not chips or a second banner. */

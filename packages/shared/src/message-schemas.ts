@@ -9,7 +9,7 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
-import type { SessionId } from './ids';
+import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema } from './session-orchestration';
@@ -367,6 +367,8 @@ export const ACPSessionConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -386,6 +388,8 @@ const LooseSessionTurnInputConfigSchema = z
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     taskToolsEnabled: z.boolean().optional(),
+    agentRoleId: z.string().trim().min(1).nullable().optional(),
+    agentRoleRevision: z.number().int().nonnegative().optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -481,6 +485,23 @@ export const normalizeSessionTurnInputConfig = (
   const taskToolsEnabled = maybeParseField(z.boolean(), record.taskToolsEnabled);
   if (taskToolsEnabled !== undefined) {
     normalized.taskToolsEnabled = taskToolsEnabled;
+  }
+
+  if (record.agentRoleId === null) {
+    normalized.agentRoleId = null;
+  } else {
+    const agentRoleId = trimOptionalString(record.agentRoleId);
+    if (agentRoleId) {
+      normalized.agentRoleId = agentRoleId as AgentRoleId;
+    }
+  }
+
+  const agentRoleRevision = maybeParseField(
+    z.number().int().nonnegative(),
+    record.agentRoleRevision
+  );
+  if (agentRoleRevision !== undefined) {
+    normalized.agentRoleRevision = agentRoleRevision;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
@@ -1161,6 +1182,55 @@ const AcpModelSchema = z
   })
   .strict();
 
+const AcpConfigOptionValueSummarySchema = z
+  .object({
+    value: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    group: z.string().optional(),
+  })
+  .strict();
+
+const AcpConfigOptionSummarySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    type: z.enum(['select', 'boolean']),
+    currentValue: AcpConfigOptionValueSchema,
+    options: z.array(AcpConfigOptionValueSummarySchema),
+  })
+  .strict();
+
+const AcpCapabilityCacheEntrySchema = z
+  .object({
+    cliType: AgentConfigCliTypeSchema,
+    agentType: z.string().trim().min(1),
+    cacheVersion: z.number().optional(),
+    provenance: z.literal('runtime').optional(),
+    sourceVersion: z.string().optional(),
+    modes: z.array(AcpModeSchema),
+    models: z.array(AcpModelSchema),
+    configOptions: z.array(AcpConfigOptionSummarySchema).optional(),
+    modelReasoningEfforts: z.record(z.string(), z.array(z.string())).optional(),
+    availableCommands: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            description: z.string().optional(),
+          })
+          .strict()
+      )
+      .optional(),
+    sessionFork: z.boolean().optional(),
+    acknowledgedSteer: z.boolean().optional(),
+    sessionForkWorktree: z.boolean().optional(),
+    fetchedAt: z.number(),
+  })
+  .strict();
+
 const MachineAcpAuthMethodSummarySchema = z
   .object({
     type: z.enum(['agent', 'env_var', 'terminal']),
@@ -1292,6 +1362,7 @@ export const MachineAcpCapabilitiesRefreshResponseSchema = z
         })
       )
       .optional(),
+    capability: AcpCapabilityCacheEntrySchema.optional(),
     availableCommands: z
       .array(
         z.object({
@@ -1857,7 +1928,7 @@ export const SessionPreviewCreateRequestSchema = z
     approval: z
       .object({
         source: z.enum(['browser_address', 'share_action']),
-        targetClass: z.enum(['loopback', 'private_lan']),
+        targetClass: z.literal('loopback'),
         target: PreviewTargetSchema,
         confirmedByUserId: z.string().trim().min(1),
         confirmedAt: z.number().int().nonnegative(),
@@ -3133,6 +3204,9 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
     toolName: z.string().optional(),
     // IANA timezone of the machine that ran a scheduling tool (cron is local-time to it).
     schedulingTimeZone: z.string().optional(),
+    // Epoch ms when a scheduling tool call was first persisted (true creation moment;
+    // turn-level timestamps are not a safe proxy — see `recordedAtMs` in ai.ts).
+    recordedAtMs: z.number().optional(),
     permissionRequest: PermissionRequestInfoSchema.optional(),
   }),
   z.object({
@@ -3149,19 +3223,43 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
       'session_chat',
       'session_chat_many',
     ]),
+    progressMessageId: z.string().trim().min(1).optional(),
     completion: z.unknown(),
     continuation: z
       .object({
-        status: z.literal('not_started'),
+        status: z.enum(['not_started', 'uncertain']),
         reason: z
           .object({
-            code: z.literal('CONFIGURATION_UNAVAILABLE'),
+            code: z.enum([
+              'CONFIGURATION_UNAVAILABLE',
+              'DELIVERY_ATTEMPTS_EXHAUSTED',
+              'DELIVERY_EXECUTION_UNCERTAIN',
+            ]),
             message: z.string(),
           })
           .strict(),
       })
       .strict()
       .optional(),
+  }),
+  z.object({
+    type: z.literal('operation_progress'),
+    operationId: LodyOperationIdSchema,
+    operationKind: z.enum(['session_create', 'session_create_many']),
+    items: z.array(
+      z
+        .object({
+          target: z
+            .object({
+              sessionId: SessionIdSchema,
+              userTurnId: z.string().trim().min(1),
+            })
+            .strict(),
+          label: z.string().optional(),
+          status: z.enum(['created', 'running', 'succeeded', 'failed', 'cancelled']),
+        })
+        .strict()
+    ),
   }),
 ]);
 

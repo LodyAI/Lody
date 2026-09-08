@@ -1325,6 +1325,8 @@ describe('SessionDispatchWatcher', () => {
           inputBlocks: [{ type: 'text', text: 'queued hello' }],
           cliType: 'builtin',
           agentType: 'codex',
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
         },
       },
     ];
@@ -1411,6 +1413,10 @@ describe('SessionDispatchWatcher', () => {
         role: 'user',
         status: 'pending',
         userId: 'user-1',
+        inputConfig: expect.objectContaining({
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
+        }),
       })
     );
     // The promoted turn is published for dispatch, not just written to history.
@@ -1420,6 +1426,10 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/create',
         sessionId,
         userTurnId: 'queued-mq-1',
+        acpSessionConfig: expect.objectContaining({
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
+        }),
       }),
       { dispatchSource: 'queue' }
     );
@@ -3271,7 +3281,10 @@ describe('SessionDispatchWatcher', () => {
    */
   const createSettleHarness = (
     sessionId: SessionId,
-    initialMeta: Omit<SessionMeta, 'id' | 'machineId' | 'userId' | 'createdAt' | 'cliType' | 'agentType' | 'status'>,
+    initialMeta: Omit<
+      SessionMeta,
+      'id' | 'machineId' | 'userId' | 'createdAt' | 'cliType' | 'agentType' | 'status'
+    >,
     history: SessionHistoryInput[],
     /** Overrides the repo read only, so a test can land a send mid-settle. */
     repoMetaOverride?: Partial<SessionMeta>

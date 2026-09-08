@@ -16,7 +16,7 @@ import { getCliPlatformKind } from '@/lib/cli-platform';
 import { createHybridLogger, getLogger } from '@/utils/logger';
 import { ensureDaemonBackendAuth, type DaemonAuthPreflightOutcome } from './daemon-auth-preflight';
 import { buildDaemonStartPassthroughArgs, type DaemonStartOptions } from './daemon-start-options';
-import { formatDaemonBackendStatus } from './daemon-status-format';
+import { formatDaemonBackendStatus, formatDaemonConnectivityStatus } from './daemon-status-format';
 import { readLatestLogTail } from '@/utils/log-files';
 
 async function exitDaemonCommand(code: number): Promise<void> {
@@ -76,9 +76,9 @@ type StartResult =
   | { status: 'started'; pid: number }
   | { status: 'missing_child_pid' }
   | { status: 'ownership_conflict'; pid: number; ownerMode?: string | undefined }
-  | { status: 'runner_error'; pid: number; message: string }
+  | { status: 'startup_error'; pid: number; message: string }
   | { status: 'runner_exited'; pid: number }
-  | { status: 'claim_timeout'; pid: number };
+  | { status: 'startup_timeout'; pid: number };
 
 type StartReadinessResult =
   | { status: 'ready' }
@@ -113,13 +113,13 @@ async function startDaemonProcess(passthroughArgs: string[]): Promise<StartResul
         ownerMode: result.ownerMode,
       };
     case 'error':
-      return { status: 'runner_error', pid: result.runnerPid, message: result.message };
+      return { status: 'startup_error', pid: result.runnerPid, message: result.message };
     case 'missing_child_pid':
       return { status: 'missing_child_pid' };
     case 'runner_exited':
       return { status: 'runner_exited', pid: result.runnerPid };
     case 'timeout':
-      return { status: 'claim_timeout', pid: result.runnerPid };
+      return { status: 'startup_timeout', pid: result.runnerPid };
     default: {
       const unreachable: never = result;
       return unreachable;
@@ -256,21 +256,21 @@ export const daemonCommand = new Command('daemon')
           await exitDaemonCommand(1);
           return;
         }
-        if (result.status === 'runner_error') {
-          captureDaemonEvent('daemon_start_failed', { reason_code: 'runner_error' });
-          console.error(`Daemon runner (PID ${result.pid}) failed to start: ${result.message}`);
+        if (result.status === 'startup_error') {
+          captureDaemonEvent('daemon_start_failed', { reason_code: 'startup_error' });
+          console.error(`Daemon startup (runner PID ${result.pid}) failed: ${result.message}`);
           await exitDaemonCommand(1);
           return;
         }
         if (result.status === 'runner_exited') {
           captureDaemonEvent('daemon_start_failed', { reason_code: 'runner_exited' });
-          console.error(`Daemon runner (PID ${result.pid}) exited before claiming ownership.`);
+          console.error(`Daemon runner (PID ${result.pid}) exited before its worker became ready.`);
           await exitDaemonCommand(1);
           return;
         }
-        if (result.status === 'claim_timeout') {
-          captureDaemonEvent('daemon_start_failed', { reason_code: 'claim_timeout' });
-          console.error(`Daemon runner (PID ${result.pid}) did not claim ownership in time.`);
+        if (result.status === 'startup_timeout') {
+          captureDaemonEvent('daemon_start_failed', { reason_code: 'startup_timeout' });
+          console.error(`Daemon worker (PID ${result.pid}) did not become ready in time.`);
           await exitDaemonCommand(1);
           return;
         }
@@ -347,9 +347,11 @@ export const daemonCommand = new Command('daemon')
           console.log(`  Stage:        ${runtimeState.startupStage}`);
         }
         if (runtimeBelongsToDaemon && runtimeState.connectivity) {
-          console.log(`  Connectivity: ${runtimeState.connectivity}`);
+          console.log(
+            `  Connectivity: ${formatDaemonConnectivityStatus(runtimeState.connectivity)}`
+          );
         }
-        if (runtimeBelongsToDaemon) {
+        if (runtimeBelongsToDaemon && getCliPlatformKind() === 'cloud') {
           for (const line of formatDaemonBackendStatus(runtimeState)) {
             console.log(line);
           }
@@ -502,20 +504,22 @@ export const daemonCommand = new Command('daemon')
           await exitDaemonCommand(1);
           return;
         }
-        if (startResult.status === 'runner_error') {
+        if (startResult.status === 'startup_error') {
           console.error(
-            `Daemon runner (PID ${startResult.pid}) failed to start: ${startResult.message}`
+            `Daemon startup (runner PID ${startResult.pid}) failed: ${startResult.message}`
           );
           await exitDaemonCommand(1);
           return;
         }
         if (startResult.status === 'runner_exited') {
-          console.error(`Daemon runner (PID ${startResult.pid}) exited before claiming ownership.`);
+          console.error(
+            `Daemon runner (PID ${startResult.pid}) exited before its worker became ready.`
+          );
           await exitDaemonCommand(1);
           return;
         }
-        if (startResult.status === 'claim_timeout') {
-          console.error(`Daemon runner (PID ${startResult.pid}) did not claim ownership in time.`);
+        if (startResult.status === 'startup_timeout') {
+          console.error(`Daemon worker (PID ${startResult.pid}) did not become ready in time.`);
           await exitDaemonCommand(1);
           return;
         }

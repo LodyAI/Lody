@@ -290,15 +290,10 @@ export function useRemoteDirectoryPicker({
   const entryClick = useCallback(
     (entry: LocalProjectBrowseDirectoryEntry) => {
       if (!selectedMachineId) return;
-      if (entry.registeredProjectId) {
-        onLocateRegistered?.(selectedMachineId, entry.registeredProjectId);
-        onClose();
-        return;
-      }
       if (entry.error === 'unreadable') return;
       void browseTo(selectedMachineId, entry.absolutePath);
     },
-    [selectedMachineId, onLocateRegistered, onClose, browseTo]
+    [selectedMachineId, browseTo]
   );
 
   const loadMore = useCallback(async () => {

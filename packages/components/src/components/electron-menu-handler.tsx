@@ -8,12 +8,16 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { commands, getCommandKeybindings, useCommand } from '@/lib/commands';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { closeCurrentTabOrWindow } from '@/lib/desktop-tab-or-window-close';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
 
 /**
  * Map menu-action IPC names to registry command ids. Electron menu accelerators are
  * intercepted at OS level (so they never reach the renderer's keydown listener); we
  * route them into the registry here so menu and palette converge on the same handlers.
+ *
+ * Window chords such as Close are not commands: they stay on the menu accelerator and
+ * are handled before this map.
  *
  * Add new menu actions to this map when they should be invokable from the palette,
  * or just keep them as legacy menu-only actions if they're truly menu-specific.
@@ -23,7 +27,6 @@ const MENU_ACTION_TO_COMMAND_ID: Record<string, string> = {
   settings: 'workspace.openSettings',
   'check-updates': 'workspace.openAboutSettings',
   'new-session': 'session.new',
-  'close-tab': 'session.closeFocusedTab',
   'import-project': 'project.importLocal',
 };
 
@@ -97,6 +100,10 @@ export function ElectronMenuHandler() {
       return undefined;
     }
     return onIpcEvent('app.menuAction', (action) => {
+      if (action === 'close-current-tab-or-window') {
+        closeCurrentTabOrWindow();
+        return;
+      }
       const commandId = MENU_ACTION_TO_COMMAND_ID[action];
       if (!commandId) {
         console.warn(`[electron-menu] unhandled action "${action}"`);

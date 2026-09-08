@@ -16,6 +16,7 @@ import type {
   SessionImagePayload,
   SessionFilePayload,
   SessionTurnInputConfig,
+  AcpCapabilityCacheEntry,
 } from '.';
 import type {
   PreviewCandidateReportRequest,
@@ -320,6 +321,8 @@ export interface MachineAcpCapabilitiesRefreshResponse {
     category?: string;
     optionCount: number;
   }>;
+  /** Complete persisted entry for immediate renderer convergence after the refresh RPC. */
+  capability?: AcpCapabilityCacheEntry;
   /** Available slash commands advertised by the agent. */
   availableCommands?: Array<{
     name: string;

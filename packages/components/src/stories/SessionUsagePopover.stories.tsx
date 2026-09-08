@@ -116,3 +116,33 @@ export const Unavailable: Story = {
     rateLimits: {},
   },
 };
+
+export const ClaudeFableWeekly: Story = {
+  args: {
+    agentType: 'claude',
+    modelId: 'claude-fable-5',
+    modelLabel: 'Fable',
+    showRateLimitWithoutContext: true,
+    rateLimits: {
+      [getRateLimitEntryKey('claude', 'claude')]: {
+        limitId: 'claude',
+        scope: { providerId: 'claude' },
+        planName: 'Max',
+        windows: [
+          { usedPercent: 12, windowDurationSeconds: 18_000, resetsAtEpochSeconds: resetIn(3600) },
+          {
+            usedPercent: 30,
+            windowDurationSeconds: 604_800,
+            resetsAtEpochSeconds: resetIn(172800),
+          },
+          {
+            label: 'Fable',
+            usedPercent: 67,
+            windowDurationSeconds: 604_800,
+            resetsAtEpochSeconds: resetIn(172800),
+          },
+        ],
+      },
+    },
+  },
+};

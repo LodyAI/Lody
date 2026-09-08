@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, shell } from 'electron'
+import { closeFocusedTabOrWindow } from './close-focused-tab-or-window'
 import type { AppUpdaterService } from './services/app-updater-service'
 import en from '../../../../locales/en.json'
 import zhCN from '../../../../locales/zh_CN.json'
@@ -51,6 +52,18 @@ function sendMenuAction(action: string): void {
     return
   }
   contents.send('app.menuAction', action)
+}
+
+function handleCloseFocusedTabOrWindow(targetWindow?: Electron.BaseWindow): void {
+  const focused =
+    targetWindow && 'webContents' in targetWindow
+      ? (targetWindow as BrowserWindow)
+      : BrowserWindow.getFocusedWindow()
+  closeFocusedTabOrWindow({
+    focused,
+    mainWindow: menuOptions?.getMainWindow() ?? null,
+    sendCloseCurrentTabOrWindow: () => sendMenuAction('close-current-tab-or-window')
+  })
 }
 
 function buildAndSetMenu(): void {
@@ -117,23 +130,11 @@ function buildAndSetMenu(): void {
           accelerator: 'CmdOrCtrl+N',
           click: () => sendMenuAction('new-session')
         },
-        ...(isMac
-          ? [
-              {
-                label: t(locale, 'menu.closeTab'),
-                // macOS ignores registerAccelerator:false, so omit the native accelerator
-                // and let the renderer own Cmd+W without the menu consuming it first.
-                click: () => sendMenuAction('close-tab')
-              }
-            ]
-          : [
-              {
-                label: t(locale, 'menu.closeTab'),
-                accelerator: 'CmdOrCtrl+W' as const,
-                registerAccelerator: false,
-                click: () => sendMenuAction('close-tab')
-              }
-            ]),
+        {
+          label: t(locale, 'menu.close'),
+          accelerator: 'CmdOrCtrl+W',
+          click: (_item, targetWindow) => handleCloseFocusedTabOrWindow(targetWindow)
+        },
         ...(isMac
           ? []
           : [

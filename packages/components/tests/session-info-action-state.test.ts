@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveSessionInfoBarGitHubActionIds } from '../src/components/sessions/session-info-action-state';
+import {
+  resolveSessionInfoBarGitHubActionIds,
+  shouldDisableSessionInfoBarGitHubActionForHydration,
+} from '../src/components/sessions/session-info-action-state';
 
 const BASE_INPUT = {
   canShowGitHubActions: true,
@@ -131,5 +134,25 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         canShowGitHubActions: false,
       })
     ).toEqual([]);
+  });
+});
+
+describe('shouldDisableSessionInfoBarGitHubActionForHydration', () => {
+  it('disables only actions that dispatch a Session Turn while the document hydrates', () => {
+    for (const actionId of [
+      'create-pr',
+      'create-draft-pr',
+      'commit-and-push',
+      'fix-ci-errors',
+      'resolve-conflicts',
+    ] as const) {
+      expect(shouldDisableSessionInfoBarGitHubActionForHydration(actionId, false)).toBe(true);
+      expect(shouldDisableSessionInfoBarGitHubActionForHydration(actionId, true)).toBe(false);
+    }
+
+    expect(shouldDisableSessionInfoBarGitHubActionForHydration('ready-for-review', false)).toBe(
+      false
+    );
+    expect(shouldDisableSessionInfoBarGitHubActionForHydration('merge', false)).toBe(false);
   });
 });

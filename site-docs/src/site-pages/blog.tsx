@@ -1,6 +1,6 @@
 import { BlogIndexPage, BlogPostPage } from '@site/components/blog';
 import type { BlogEntry, BlogLocale } from '@site/lib/blog';
-import { pageHead } from '@site/lib/metadata';
+import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
 import { localeCode } from './shared';
 
@@ -45,7 +45,7 @@ export function blogIndexHead(locale: BlogLocale, entries: BlogEntry[] = []): Si
   const text = indexCopy[locale];
 
   return pageHead({
-    title: text.title,
+    title: brandTitle(text.title),
     description: text.description,
     path: text.path,
     locale: localeCode(locale),
@@ -84,7 +84,7 @@ export function BlogIndexRoutePage({
 
 export function blogPostHead(locale: BlogLocale, data: BlogEntry): SiteHead {
   return pageHead({
-    title: data.title,
+    title: brandTitle(data.title),
     description: data.description,
     path: data.url,
     locale: localeCode(locale),

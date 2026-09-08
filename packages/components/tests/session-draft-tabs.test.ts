@@ -9,6 +9,7 @@ import type {
 } from '@lody/shared';
 
 import {
+  appendTabOrderId,
   buildDraftSessionAgentRolePatch,
   createDraftSessionTab,
   filterPendingPromotedChildSessions,
@@ -310,6 +311,17 @@ describe('session draft tabs', () => {
       'a',
       'session-2',
       'c',
+    ]);
+  });
+
+  it('seeds a missing order with displayed tabs before appending a new tab', () => {
+    const initialOrder = appendTabOrderId([], ['child-1', 'child-2'], 'draft:3');
+
+    expect(initialOrder).toEqual(['child-1', 'child-2', 'draft:3']);
+    expect(replaceTabOrderId(initialOrder, 'draft:3', 'child-3')).toEqual([
+      'child-1',
+      'child-2',
+      'child-3',
     ]);
   });
 

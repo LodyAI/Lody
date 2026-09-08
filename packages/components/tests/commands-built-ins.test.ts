@@ -28,10 +28,10 @@ describe('built-in commands', () => {
     // toggle are electron-only; ⌘, settings is cross-platform (desktop's native menu shows
     // it but doesn't register it — the registry owns the binding).
     expect(commands.getDefaultKeybindingsFor('session.newTabOrTerminal')).toEqual(['Alt+n']);
-    expect(commands.getDefaultKeybindingsFor('session.closeFocusedTab')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('nav.back')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.toggleTerminal')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
+    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['$mod+.']);
     // Cyclers with no default binding stay rebindable from the settings page.
     expect(commands.getDefaultKeybindingsFor('session.cycleProvider')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('mention.toggleSessionProjectScope')).toEqual([]);
@@ -63,10 +63,10 @@ describe('built-in commands', () => {
       'Ctrl+`',
       '$mod+j',
     ]);
-    expect(commands.getDefaultKeybindingsFor('session.closeFocusedTab')).toEqual(['$mod+w']);
     expect(commands.getDefaultKeybindingsFor('session.cycleMode')).toEqual(['Shift+Tab']);
     // ⌘, settings is now a cross-platform registry binding (the desktop native menu shows
     // ⌘, but registerAccelerator:false leaves the key to the registry), so it shows here too.
     expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
+    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['$mod+.']);
   });
 });

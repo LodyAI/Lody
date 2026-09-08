@@ -149,10 +149,6 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   return {
     command: 'npx',
     args: [
-      // dsh 0.1.1-rc.1 publishes a cyclic same-version peer graph that npm 10
-      // mis-resolves in a full npx --package closure. Every DSH package remains
-      // explicitly pinned below; --force keeps npm installing external peers.
-      '--force',
       '--prefer-offline',
       '-y',
       ...DEEPSEEK_HARNESS_NPX_PACKAGES.flatMap((packageName) => [

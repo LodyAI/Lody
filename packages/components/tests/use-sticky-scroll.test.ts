@@ -57,6 +57,7 @@ type ScrollFixture = {
   setScrollTop: (value: number) => void;
   getScrollTop: () => number;
   setContentHeight: (value: number) => void;
+  setClientWidth: (value: number) => void;
   setScrollHeight: (value: number) => void;
   setClientHeight: (value: number) => void;
 };
@@ -105,7 +106,7 @@ function createScrollFixture(): ScrollFixture {
   let scrollTop = 0;
   let scrollHeight = 640;
   let clientHeight = 400;
-  const width = 320;
+  let clientWidth = 320;
   let contentHeight = 616;
 
   Object.defineProperty(scrollElement, 'scrollTop', {
@@ -125,11 +126,11 @@ function createScrollFixture(): ScrollFixture {
   });
   scrollElement.getBoundingClientRect = () =>
     ({
-      width,
+      width: clientWidth,
       height: clientHeight,
       top: 0,
       left: 0,
-      right: width,
+      right: clientWidth,
       bottom: clientHeight,
       x: 0,
       y: 0,
@@ -137,11 +138,11 @@ function createScrollFixture(): ScrollFixture {
     }) as DOMRect;
   contentElement.getBoundingClientRect = () =>
     ({
-      width,
+      width: clientWidth,
       height: contentHeight,
       top: 0,
       left: 0,
-      right: width,
+      right: clientWidth,
       bottom: contentHeight,
       x: 0,
       y: 0,
@@ -157,6 +158,9 @@ function createScrollFixture(): ScrollFixture {
     getScrollTop: () => scrollTop,
     setContentHeight: (value) => {
       contentHeight = value;
+    },
+    setClientWidth: (value) => {
+      clientWidth = value;
     },
     setScrollHeight: (value) => {
       scrollHeight = value;
@@ -422,6 +426,37 @@ describe('useStickyScroll Virtua adapter', () => {
 
     expect(vlist.scrollToIndex).toHaveBeenCalledWith(3, { align: 'end', offset: 24 });
     expect(fixture.getScrollTop()).toBe(320);
+    expect(latestResult?.isSticky).toBe(true);
+  });
+
+  it('does not re-anchor the viewport while a flex sibling changes only its width', async () => {
+    const sessionId = 'session-viewport-width-resize' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+
+    await renderHarness({
+      sessionId,
+      vlist,
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    vlist.scrollToIndex.mockClear();
+    fixture.setScrollTop(236);
+
+    for (const width of [300, 280, 260, 240]) {
+      fixture.setClientWidth(width);
+      await act(async () => {
+        emitResize(fixture.scrollElement);
+        await advanceAnimationFrames();
+      });
+    }
+
+    expect(vlist.scrollToIndex).not.toHaveBeenCalled();
+    expect(fixture.getScrollTop()).toBe(236);
     expect(latestResult?.isSticky).toBe(true);
   });
 

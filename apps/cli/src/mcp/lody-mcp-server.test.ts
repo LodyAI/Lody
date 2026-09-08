@@ -7,12 +7,12 @@ import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
   TASK_LABEL_MAX_COUNT,
+  getSessionRoomId,
   workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
-  type SessionHistoryInput,
   type SessionId,
   type SessionTurnInputConfig,
   type WorkspaceId,
@@ -23,7 +23,10 @@ import {
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { getLodyOperationStorePath } from '@/orchestration/operation-store';
+import {
+  getLodyOperationStorePath,
+  LodyOperationStoreError,
+} from '@/orchestration/operation-store';
 
 import {
   __lodyMcpServerInternals,
@@ -53,10 +56,15 @@ const {
   SessionCancelToolInputSchema,
   SessionHistoryToolInputSchema,
   SessionListToolInputSchema,
+  SessionRenameToolInputSchema,
+  SessionRenameManyToolInputSchema,
   SessionStatusManyToolInputSchema,
   mcpErrorResult,
   assertDifferentMcpSession,
   assertBatchSize,
+  resolveSessionRenameItems,
+  applySessionRenameItems,
+  persistSessionRenameItems,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -70,25 +78,12 @@ const {
   getSessionContext,
   resolveOperationStorePathForContext,
   resolveUploadPath,
-  resolveInvokingHistoryInput,
+  buildInvocationIdentity,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
-
-const historyTurn = (
-  id: string,
-  role: SessionHistoryInput['role'],
-  chainDepth?: number
-): SessionHistoryInput => ({
-  id,
-  role,
-  timestamp: '2026-07-20T00:00:00.000Z',
-  items: [],
-  fileDiff: [],
-  ...(chainDepth === undefined ? {} : { inputConfig: { chainDepth } }),
-});
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -172,6 +167,9 @@ describe('Lody Task MCP tool gate', () => {
   it('omits every Task tool while leaving the rest of Lody MCP available when disabled', async () => {
     const names = await listPublishedToolNames(false);
     expect(names).toContain('lody_feedback');
+    expect(names).toEqual(
+      expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
+    );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
 
@@ -275,14 +273,13 @@ describe('session MCP input schemas', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('anchors continuation depth before a later queued human input', () => {
-    const completion = historyTurn('operation-completion', 'system', 5);
-    const executingAssistant = historyTurn('assistant:continuation', 'assistant');
-    const queuedHumanInput = historyTurn('queued-human', 'user', 0);
-
-    expect(resolveInvokingHistoryInput([completion, executingAssistant, queuedHumanInput])).toBe(
-      completion
-    );
+  it('derives delegated identity from the exact driving Turn', () => {
+    expect(
+      buildInvocationIdentity({ id: 'source-turn', userId: 'collaborator-b', inputConfig: {} })
+    ).toEqual({ userId: 'collaborator-b', sourceTurnId: 'source-turn' });
+    expect(() =>
+      buildInvocationIdentity({ id: 'legacy-turn', userId: ' ', inputConfig: {} })
+    ).toThrow('has no authenticated human identity');
   });
 
   it('uses stable ids and rejects legacy selector names', () => {
@@ -364,7 +361,7 @@ describe('session MCP input schemas', () => {
     ).toBe(false);
   });
 
-  it('publishes session create work contexts as object schemas over MCP', async () => {
+  it('publishes session create work contexts and child workspace sharing over MCP', async () => {
     const server = new McpServer({ name: 'schema-test-server', version: '1.0.0' });
     server.registerTool(
       'lody_session_create',
@@ -411,6 +408,10 @@ describe('session MCP input schemas', () => {
       expect(createTool?.inputSchema).toMatchObject({
         type: 'object',
         properties: {
+          useCurrentSessionAsParent: {
+            description:
+              'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+          },
           workContext: workContextSchema,
         },
       });
@@ -419,13 +420,25 @@ describe('session MCP input schemas', () => {
         properties: {
           defaults: {
             type: 'object',
-            properties: { workContext: workContextSchema },
+            properties: {
+              useCurrentSessionAsParent: {
+                description:
+                  'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+              },
+              workContext: workContextSchema,
+            },
           },
           items: {
             type: 'array',
             items: {
               type: 'object',
-              properties: { workContext: workContextSchema },
+              properties: {
+                useCurrentSessionAsParent: {
+                  description:
+                    'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                },
+                workContext: workContextSchema,
+              },
             },
           },
         },
@@ -449,8 +462,11 @@ describe('session MCP input schemas', () => {
     );
     bindMcpCreateContext(
       options,
-      { userId: 'machine-owner' },
-      { machineId: 'machine-id', userId: 'session-owner' }
+      {
+        userId: 'collaborator-b',
+        sourceTurnId: 'source-turn',
+      },
+      { machineId: 'machine-id' }
     );
 
     expect(options).toMatchObject({
@@ -459,8 +475,7 @@ describe('session MCP input schemas', () => {
       machine: 'machine-id',
       agentConfig: 'agent-config-id',
       useCurrentSessionAsParent: true,
-      requesterUserId: 'machine-owner',
-      sessionOwnerUserId: 'session-owner',
+      delegatedRequester: { userId: 'collaborator-b' },
       defaultMachineId: 'machine-id',
     });
   });
@@ -820,6 +835,169 @@ describe('session MCP input schemas', () => {
         timeoutSeconds: 3_601,
       }).success
     ).toBe(false);
+  });
+
+  it('validates single and batch session renames', () => {
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'Current title' }).success).toBe(true);
+    expect(
+      SessionRenameToolInputSchema.safeParse({ sessionId: 'session-1', title: 'New title' }).success
+    ).toBe(true);
+    expect(SessionRenameToolInputSchema.safeParse({ title: '   ' }).success).toBe(false);
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'x'.repeat(201) }).success).toBe(false);
+
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-2', title: 'Two' },
+        ],
+      }).success
+    ).toBe(true);
+    expect(SessionRenameManyToolInputSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-1', title: 'Two' },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: Array.from({ length: 21 }, (_, index) => ({
+          sessionId: `session-${index}`,
+          title: `Title ${index}`,
+        })),
+      }).success
+    ).toBe(false);
+  });
+
+  it('resolves current session renames and preserves ordered independent results', async () => {
+    expect(
+      resolveSessionRenameItems(
+        [{ sessionId: 'current', title: 'Current title' }],
+        createMcpContext()
+      )
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    expect(() =>
+      resolveSessionRenameItems(
+        [
+          { sessionId: 'current', title: 'First' },
+          { sessionId: 'current-session-id', title: 'Second' },
+        ],
+        createMcpContext()
+      )
+    ).toThrow(/appear only once/);
+
+    const results = await applySessionRenameItems(
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      async ({ sessionId }) => {
+        if (sessionId === 'missing') {
+          throw new LodyOperationStoreError(
+            'SESSION_NOT_FOUND',
+            'Session not found: missing',
+            false
+          );
+        }
+      }
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
+  });
+
+  it('persists only existing sessions as user titles and confirms successful writes', async () => {
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) =>
+          roomId === getSessionRoomId('missing' as SessionId)
+            ? undefined
+            : { meta: { id: roomId }, exists: true }
+        ),
+        upsertDocMeta,
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    const results = await persistSessionRenameItems(
+      manager,
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      'mcp.session_rename_many:current-session-id'
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
+    expect(upsertDocMeta.mock.calls).toEqual([
+      [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
+      [getSessionRoomId('session-3' as SessionId), { title: 'Three', titleSource: 'user' }],
+    ]);
+    expect(waitUntilMetaSynced).toHaveBeenCalledOnce();
+    expect(waitUntilMetaSynced).toHaveBeenCalledWith({
+      reason: 'mcp.session_rename_many:current-session-id',
+    });
+  });
+
+  it('does not request write confirmation when every session is missing', async () => {
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta: vi.fn(async () => undefined),
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    await expect(
+      persistSessionRenameItems(
+        manager,
+        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        'mcp.session_rename_many:current-session-id'
+      )
+    ).resolves.toEqual([
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+    ]);
+    expect(manager.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(waitUntilMetaSynced).not.toHaveBeenCalled();
   });
 
   it('cancels only the assistant turn created by the Operation item', () => {

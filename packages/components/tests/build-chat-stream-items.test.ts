@@ -196,3 +196,33 @@ describe('buildChatStreamItems', () => {
     expect(second.lastAssistantMessageId).toBe('assistant-2');
   });
 });
+
+describe('live create progress in the stream', () => {
+  it('keeps a stable row id while invalidating changed progress content', () => {
+    const progress = {
+      type: 'operation_progress',
+      operationId: 'create',
+      operationKind: 'session_create',
+      items: [{ status: 'created', target: { sessionId: 'child', userTurnId: 'child-turn' } }],
+    };
+    const historyEntry = {
+      id: 'progress',
+      role: 'system',
+      timestamp: '2026-08-14T12:00:00.000Z',
+      items: [progress],
+      fileDiff: [],
+    } as unknown as SessionHistory;
+    const first = buildChatStreamItems([historyEntry], sessionId);
+    expect(first.items[0]).toMatchObject({ message: { items: [progress] } });
+    const running = { ...progress, items: [{ ...progress.items[0], status: 'running' }] };
+    const next = buildChatStreamItems(
+      [{ ...historyEntry, items: [running] } as unknown as SessionHistory],
+      sessionId,
+      first.cache
+    );
+    expect(renderedIds(next.items)).toEqual(['progress']);
+    expect(next.items[0]).not.toBe(first.items[0]);
+    expect(next.items[0]).toMatchObject({ message: { items: [running] } });
+    expect(next.lastAssistantMessageId).toBeNull();
+  });
+});

@@ -347,13 +347,9 @@ const isConfigOptionValueRecord = (
  * renderer derives a visible "not delivered" label for it from the marker plus
  * its non-terminal status (no CLI repair write, no schema change). Recovery is
  * a fresh send — the row's "not delivered" label opens a confirmation dialog
- * that re-sends the same content as a brand-new message (new turn id) through
- * the ordinary producer path, whose ordinary dispatch write clears the marker
- * as a side effect; the resend also supersedes the abandoned entry to
- * `canceled` so the stale pending copy can never dispatch once the marker is
- * gone. That is preferred over an unbounded silent wait, repeated recovery
- * loops, or resurrecting a message the user may already have resent as a new
- * turn.
+ * that re-sends the same content as a brand-new message (new turn id). The
+ * renderer retains the marker and supersedes the abandoned entry to
+ * `canceled`.
  *
  * Sessions without an explicit activation signal stay metadata-only. History is
  * a turn-selection source after activation, not a startup activation index.
@@ -1574,6 +1570,11 @@ export class SessionDispatchWatcher {
             sessionId,
             sessionDoc,
             userTurnId: nextUserTurn.id,
+            invocation: {
+              sourceTurnId: nextUserTurn.id,
+              requesterUserId: nextUserTurn.userId,
+              inputConfig: nextUserTurn.inputConfig ?? {},
+            },
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
@@ -1969,6 +1970,8 @@ export class SessionDispatchWatcher {
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
+        agentRoleId: entry.inputConfig?.agentRoleId,
+        agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
@@ -2011,6 +2014,8 @@ export class SessionDispatchWatcher {
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
+        agentRoleId: entry.inputConfig?.agentRoleId,
+        agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume,
       },
@@ -2108,6 +2113,8 @@ export class SessionDispatchWatcher {
         mcpServerIds:
           normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
         taskToolsEnabled: queuedItem.acpSessionConfig?.taskToolsEnabled === true,
+        agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
+        agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
         resume: resolveResumableAcpSessionId(meta),
       });

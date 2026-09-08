@@ -164,7 +164,7 @@ import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-dur
 import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { SessionRelationCard } from '@/components/shared/session-relation-card';
+import { CreatedSessionOperationCard } from './created-session-operation-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
@@ -1915,6 +1915,22 @@ const SystemMessageRowView = ({
             key={`worktree-script-${item.phase}-${itemIndex}`}
             script={item}
           />
+        ) : item.type === 'operation_progress' ? (
+          <div
+            key={item.operationId}
+            className="flex flex-col gap-2"
+            data-session-create-progress=""
+          >
+            {item.items.map((target) => (
+              <CreatedSessionOperationCard
+                key={target.target.sessionId}
+                sessionId={target.target.sessionId}
+                fallbackTitle={target.label}
+                status={target.status}
+                onNavigateSession={onNavigateSession}
+              />
+            ))}
+          </div>
         ) : (
           <OperationCompletionView
             key={`${item.deliveryId}-${itemIndex}`}
@@ -1924,37 +1940,6 @@ const SystemMessageRowView = ({
         )
       )}
     </div>
-  );
-};
-
-const selectSessionTitle = (session: SessionMeta | null | undefined): string | null =>
-  session?.title?.trim() || null;
-
-const CreatedSessionOperationCard = ({
-  sessionId,
-  fallbackTitle,
-  onNavigateSession,
-}: {
-  sessionId: SessionId;
-  fallbackTitle?: string;
-  onNavigateSession?: (target: SessionNavigationTarget) => void;
-}) => {
-  const { t } = useTranslation();
-  const titleAtom = useMemo(
-    () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), selectSessionTitle),
-    [sessionId]
-  );
-  const liveTitle = useAtomValue(titleAtom);
-  const title = liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
-
-  return (
-    <SessionRelationCard
-      relation="opened"
-      label={t('sessions.openedBy.createdSession', 'Session created')}
-      sessionTitle={title}
-      actionLabel={t('sessions.openedBy.viewSession', 'View session')}
-      onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
-    />
   );
 };
 
@@ -1979,8 +1964,9 @@ const OperationCompletionView = ({
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createdSessions =
-    completion.operationKind === 'session_create' ||
-    completion.operationKind === 'session_create_many'
+    !completion.progressMessageId &&
+    (completion.operationKind === 'session_create' ||
+      completion.operationKind === 'session_create_many')
       ? resultItems.flatMap((item) =>
           item.status === 'succeeded'
             ? [
@@ -2001,6 +1987,7 @@ const OperationCompletionView = ({
             key={created.sessionId}
             sessionId={created.sessionId}
             fallbackTitle={created.fallbackTitle}
+            status="succeeded"
             onNavigateSession={onNavigateSession}
           />
         ))}
@@ -2018,9 +2005,13 @@ const OperationCompletionView = ({
                   })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="px-1 text-xs text-muted-foreground">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
@@ -2057,9 +2048,13 @@ const OperationCompletionView = ({
             })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
@@ -5460,11 +5455,7 @@ const PlanPanel = ({
       <div className="relative">
         <div
           ref={bodyRef}
-          className={cn(
-            CONVERSATION_PANEL_BODY_CLASS,
-            !isOpen && 'max-h-56 overflow-hidden',
-            isOpen && 'scrollbar-pro max-h-[32rem] overflow-y-auto'
-          )}
+          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
         >
           <MarkdownRenderer
             text={plan.markdown}
@@ -6294,7 +6285,7 @@ const PlanExitBlock = ({
           awaitingDecision={awaitingDecision}
         />
       ) : null}
-      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />
+      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} collapseByDefault />
     </div>
   );
 };
@@ -6302,9 +6293,12 @@ const PlanExitBlock = ({
 const PermissionRequestBlock = ({
   toolCall,
   sessionId,
+  collapseByDefault = false,
 }: {
   toolCall: ToolCallMessage;
   sessionId: SessionId;
+  /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
+  collapseByDefault?: boolean;
 }) => {
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
@@ -6391,6 +6385,7 @@ const PermissionRequestBlock = ({
   return (
     <PermissionRequestCard
       options={permission.options}
+      defaultCollapsed={collapseByDefault}
       isResolved={isResolved}
       isCancelled={isCancelled}
       isReady={isReady}
