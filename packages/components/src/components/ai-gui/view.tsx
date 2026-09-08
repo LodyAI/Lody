@@ -6128,6 +6128,24 @@ const StandardToolContentBlock = ({
           />
         );
       }
+      // Handle blob resources (binary data like images)
+      if ('blob' in content.resource) {
+        const src = buildSafeBase64DataUrl(content.resource.mimeType, content.resource.blob);
+        if (!src) return null;
+        // Render image blobs inline, other blobs as download links
+         if (content.resource.mimeType?.startsWith('image/')) {
+          return (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Resource</div>
+              <img 
+                src={src}
+                alt={content.resource.uri || 'Resource image'}
+                className="max-h-80 w-full rounded-lg object-contain"
+              />
+            </div>
+          )
+         }
+      }
       const href = sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
