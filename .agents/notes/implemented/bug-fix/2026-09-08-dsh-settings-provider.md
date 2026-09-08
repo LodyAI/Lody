@@ -69,8 +69,13 @@ Plan Mode support. Lody therefore also advances `acp-extension-core` to the merg
 0.1.1 contract required by DSH 0.1.2. The existing workspace override keeps Core
 linked locally, so this changes no lockfile resolution.
 
-- [DSH settings commit](https://github.com/LodyAI/acp-extension-dsh/commit/8c20b5de232cf45adea2e23145377b3edd021b13)
+- [Merged DSH settings PR](https://github.com/LodyAI/acp-extension-dsh/pull/13)
+- [DSH settings commit](https://github.com/LodyAI/acp-extension-dsh/commit/5d79d5b7c16c14d5ae9b69c69bf3b57c21d0610c)
 - [Upstream DSH Plan Mode](https://github.com/LodyAI/acp-extension-dsh/pull/12)
 - [Upstream Core Plan Mode](https://github.com/LodyAI/acp-extension-core/pull/5)
 
 The source integration does not upgrade an already running desktop or daemon.
+
+After DSH #13 merged, the host pin was updated to its squash commit `5d79d5b`.
+Its tree matches the previously tested implementation commit. Synchronization with
+Lody main required no conflict resolution because main was already an ancestor.
