@@ -198,6 +198,53 @@
       "estimatedMinutes": 4
     },
     {
+      "id": "LODY-RELIABILITY-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Survive a Loro status broadcast racing Renderer disposal",
+      "owner": "desktop-reliability",
+      "feature": "src/features/reliability.feature",
+      "fixture": "isolated-local-runtime-and-renderer-disposal-race",
+      "fingerprint": "660b5a00d137bc9c1102e15e9e325c601ddffe9a23b774e65ff0202084ac56ea",
+      "ownerPaths": [
+        "apps/electron/src/main/services/loro-data-plane-relay.ts",
+        "apps/electron/src/main/index.ts",
+        "e2e/src/support/electron-harness.ts"
+      ],
+      "actions": [
+        { "id": "loro.waitUntilConnected" },
+        { "id": "loro.armRendererDisposalAfterAliveCheck" },
+        { "id": "loro.dropConnectionForNetworkJitter" },
+        { "id": "loro.awaitReconnect" },
+        { "id": "electron.verifyRendererResponsive" }
+      ],
+      "checkpoints": [
+        "the Loro status broadcast observes a live Renderer",
+        "the same Renderer is disposed before webContents.send",
+        "the disposed sender is released while Electron and a healthy Renderer remain responsive",
+        "the Loro data plane reconnects without a fatal log"
+      ],
+      "cleanup": ["desktop process tree exits", "isolated endpoint can be rebound"],
+      "coverage": {
+        "renderer": "Real Renderer disposal",
+        "electronIpc": "Loro status broadcast and post-race responsiveness",
+        "bundledCli": "Real owned runtime disconnect",
+        "durableState": "No fatal log for an expected Renderer lifecycle race",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
       "id": "LODY-MCP-001",
       "state": "backlog",
       "priority": "P1",

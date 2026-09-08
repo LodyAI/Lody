@@ -64,6 +64,18 @@ type LogRecord = {
   message: string;
 };
 
+export type RendererSendRaceResult = {
+  baselineRendererCount: number;
+  disconnected: boolean;
+  electronRunning: boolean;
+  fatalLogExists: boolean;
+  raceTriggered: boolean;
+  reconnected: boolean;
+  remainingRendererCount: number;
+  rendererResponsive: boolean;
+  targetDestroyed: boolean;
+};
+
 const INHERITED_ENV_ALLOWLIST = [
   'APPDATA',
   'DBUS_SESSION_BUS_ADDRESS',
@@ -249,6 +261,63 @@ export class ElectronHarness {
   async captureCliBacklog(): Promise<unknown> {
     if (!this.page) return [];
     return await this.page.evaluate(async () => await window.ipc?.invoke('cli.getOutputBacklog'));
+  }
+
+  async triggerLoroRendererSendRace(): Promise<RendererSendRaceResult> {
+    if (!this.app || !this.page || !this.tempRoot) {
+      throw new Error('Electron harness is not running');
+    }
+
+    await this.page.waitForFunction(
+      async () => (await window.ipc?.invoke('loro.isConnected')) === true,
+      undefined,
+      { timeout: 60_000 }
+    );
+
+    const fatalLogDirectory = join(this.tempRoot, 'electron-logs');
+    mkdirSync(fatalLogDirectory, { recursive: true });
+    await this.app.evaluate(
+      ({ app }, input) => {
+        app.setPath('logs', input.fatalLogDirectory);
+        const armRace = (
+          globalThis as typeof globalThis & {
+            __LODY_E2E_ARM_LORO_RENDERER_SEND_RACE__?: () => void;
+          }
+        ).__LODY_E2E_ARM_LORO_RENDERER_SEND_RACE__;
+        if (!armRace) throw new Error('Loro renderer-send race hook is unavailable');
+        armRace();
+      },
+      { fatalLogDirectory }
+    );
+
+    const race = await this.app.evaluate(async () => {
+      const trigger = (
+        globalThis as typeof globalThis & {
+          __LODY_E2E_TRIGGER_LORO_NETWORK_JITTER__?: () => Promise<{
+            baselineRendererCount: number;
+            disconnected: boolean;
+            raceTriggered: boolean;
+            remainingRendererCount: number;
+            targetDestroyed: boolean;
+          }>;
+        }
+      ).__LODY_E2E_TRIGGER_LORO_NETWORK_JITTER__;
+      if (!trigger) throw new Error('Loro network-jitter hook is unavailable');
+      return await trigger();
+    });
+    const reconnected =
+      (await this.page.evaluate(async () => await window.ipc?.invoke('loro.isConnected'))) === true;
+    const rendererResponsive = await this.page.evaluate(
+      () => document.readyState !== 'loading' && typeof window.ipc?.invoke === 'function'
+    );
+
+    return {
+      ...race,
+      electronRunning: this.app.process().exitCode === null,
+      fatalLogExists: existsSync(join(fatalLogDirectory, 'electron-main-fatal.log')),
+      reconnected,
+      rendererResponsive,
+    };
   }
 
   async stopTrace(path?: string): Promise<void> {

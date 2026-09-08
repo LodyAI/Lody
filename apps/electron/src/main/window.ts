@@ -21,6 +21,7 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { persistElectronMainExitTrace } from './posthog-error-reporting'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import {
   clearMountWatchdog,
@@ -213,6 +214,10 @@ async function showUnresponsiveDialog(window: BrowserWindow): Promise<void> {
     return
   }
   if (response === 2) {
+    persistElectronMainExitTrace(
+      new Error('User selected Force quit after the main window became unresponsive'),
+      'unresponsive-force-quit'
+    )
     app.exit(1)
     return
   }

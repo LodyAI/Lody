@@ -1,5 +1,5 @@
 import { World, setWorldConstructor } from '@cucumber/cucumber';
-import { ElectronHarness } from './electron-harness.js';
+import { ElectronHarness, type RendererSendRaceResult } from './electron-harness.js';
 import { OnboardingPage } from './pages/onboarding-page.js';
 import { ReviewPage } from './pages/review-page.js';
 import { SessionPage } from './pages/session-page.js';
@@ -19,6 +19,7 @@ export class LodyWorld extends World {
   reviewFixture: SyntheticReviewRepository | null = null;
   activeAcpEvent: ScriptedAcpEvent | null = null;
   workResources: WorkSessionResources | null = null;
+  rendererSendRaceResult: RendererSendRaceResult | null = null;
 
   prepare(tags: readonly string[]): void {
     this.artifacts = createScenarioArtifacts(tags);

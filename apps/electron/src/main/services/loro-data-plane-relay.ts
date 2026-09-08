@@ -1,5 +1,5 @@
 import net from 'node:net'
-import { type WebContents } from 'electron'
+import type { WebContents } from 'electron'
 import {
   createJsonLineSplitter,
   LocalLoroDataPlaneServerMessageSchema,
@@ -32,6 +32,17 @@ type PendingDaemonWrite = {
   line: string
 }
 
+type RendererSendChannel = 'loro.event' | 'loro.status'
+
+const RENDERER_DISPOSAL_ERROR_MESSAGES = new Set([
+  'Object has been destroyed',
+  'Render frame was disposed before WebFrameMain could be accessed'
+])
+
+function isRendererDisposalError(error: unknown): boolean {
+  return error instanceof Error && RENDERER_DISPOSAL_ERROR_MESSAGES.has(error.message)
+}
+
 /**
  * Persistent bridge between renderer windows and the CLI data-plane push server.
  * This holds one long-lived socket to the daemon: it forwards renderer client
@@ -48,6 +59,10 @@ type PendingDaemonWrite = {
 export class LoroDataPlaneRelay {
   private readonly socketPath: string
   private readonly createSocket: (socketPath: string) => net.Socket
+  private readonly afterRendererAliveCheck?: (
+    sender: WebContents,
+    channel: RendererSendChannel
+  ) => void
   private socket: net.Socket | null = null
   private connecting: Promise<void> | null = null
   private connected = false
@@ -60,6 +75,7 @@ export class LoroDataPlaneRelay {
   private redialAttempt = 0
   private pingTimer: NodeJS.Timeout | null = null
   private lastInboundAt = 0
+  private e2eReconnectWaiter: { reject: (error: Error) => void; resolve: () => void } | null = null
   // Drain-aware outbound queue for the daemon socket (see write()).
   private daemonWriteBlocked = false
   private pendingDaemonWrites: PendingDaemonWrite[] = []
@@ -67,10 +83,12 @@ export class LoroDataPlaneRelay {
 
   constructor(
     socketPath: string,
-    createSocket: (socketPath: string) => net.Socket = (path) => net.createConnection(path)
+    createSocket: (socketPath: string) => net.Socket = (path) => net.createConnection(path),
+    afterRendererAliveCheck?: (sender: WebContents, channel: RendererSendChannel) => void
   ) {
     this.socketPath = socketPath
     this.createSocket = createSocket
+    this.afterRendererAliveCheck = afterRendererAliveCheck
   }
 
   setEnabled(enabled: boolean): void {
@@ -99,17 +117,14 @@ export class LoroDataPlaneRelay {
     if (!this.senders.has(sender)) {
       this.senders.add(sender)
       const releasePeers = (): void => this.releaseSenderPeers(sender)
-      sender.once('destroyed', () => {
-        this.senders.delete(sender)
-        releasePeers()
-      })
+      sender.once('destroyed', () => this.releaseSender(sender))
       // A main-frame navigation (incl. reload) tears down the JS context: its
       // adapters are gone and will rejoin with fresh peerIds, so detach the old
       // ones server-side.
       sender.on('did-navigate', releasePeers)
       // Seed the newly-attached renderer with the current connection state so its
       // transport can join immediately when the daemon is already reachable.
-      sender.send('loro.status', this.connected)
+      this.sendToRenderer(sender, 'loro.status', this.connected)
     }
     if (this.enabled) {
       void this.ensureConnected().catch(() => this.scheduleRedial())
@@ -118,6 +133,30 @@ export class LoroDataPlaneRelay {
 
   isConnected(): boolean {
     return this.connected
+  }
+
+  /** Drop the local socket so E2E can reproduce a network interruption. */
+  async triggerNetworkJitterForE2E(): Promise<boolean> {
+    const socket = this.socket
+    if (!socket || socket.destroyed) {
+      throw new Error('loro_data_plane_socket_unavailable')
+    }
+    if (this.e2eReconnectWaiter) {
+      throw new Error('loro_data_plane_reconnect_already_pending')
+    }
+    const reconnected = new Promise<void>((resolve, reject) => {
+      this.e2eReconnectWaiter = { reject, resolve }
+    })
+    const closed = new Promise<void>((resolve) => socket.once('close', resolve))
+    socket.destroy()
+    await closed
+    const disconnected = !this.connected
+    await reconnected
+    return disconnected
+  }
+
+  getAttachedRendererCountForE2E(): number {
+    return this.senders.size
   }
 
   send(message: LocalLoroDataPlaneClientMessage, sender?: WebContents): void {
@@ -144,6 +183,8 @@ export class LoroDataPlaneRelay {
     this.connecting = null
     this.senders.clear()
     this.sendersPeers.clear()
+    this.e2eReconnectWaiter?.reject(new Error('loro_data_plane_relay_destroyed'))
+    this.e2eReconnectWaiter = null
   }
 
   private trackPeer(message: LocalLoroDataPlaneClientMessage, sender?: WebContents): void {
@@ -179,6 +220,11 @@ export class LoroDataPlaneRelay {
     }
   }
 
+  private releaseSender(sender: WebContents): void {
+    this.senders.delete(sender)
+    this.releaseSenderPeers(sender)
+  }
+
   private async ensureConnected(): Promise<void> {
     if (this.destroyed) throw new Error('loro_data_plane_relay_destroyed')
     if (!this.enabled) throw new Error('loro_data_plane_relay_disabled')
@@ -205,6 +251,12 @@ export class LoroDataPlaneRelay {
         this.lastInboundAt = Date.now()
         this.startPingLoop(socket)
         this.setConnected(true)
+        if (this.e2eReconnectWaiter) {
+          this.write({
+            type: 'ping',
+            protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION
+          })
+        }
         resolve()
       })
       socket.once('error', (error) => {
@@ -355,6 +407,9 @@ export class LoroDataPlaneRelay {
     if (!parsed.success) return
     if (parsed.data.type === 'pong') {
       // Liveness only; `lastInboundAt` was already refreshed on the data event.
+      const waiter = this.e2eReconnectWaiter
+      this.e2eReconnectWaiter = null
+      waiter?.resolve()
       return
     }
     this.publish(parsed.data)
@@ -362,9 +417,7 @@ export class LoroDataPlaneRelay {
 
   private publish(message: LocalLoroDataPlaneServerMessage): void {
     for (const sender of this.senders) {
-      if (!sender.isDestroyed()) {
-        sender.send('loro.event', message)
-      }
+      this.sendToRenderer(sender, 'loro.event', message)
     }
   }
 
@@ -372,9 +425,25 @@ export class LoroDataPlaneRelay {
     if (this.connected === next) return
     this.connected = next
     for (const sender of this.senders) {
-      if (!sender.isDestroyed()) {
-        sender.send('loro.status', next)
-      }
+      this.sendToRenderer(sender, 'loro.status', next)
+    }
+  }
+
+  private sendToRenderer(
+    sender: WebContents,
+    channel: RendererSendChannel,
+    payload: LocalLoroDataPlaneServerMessage | boolean
+  ): void {
+    if (sender.isDestroyed()) {
+      this.releaseSender(sender)
+      return
+    }
+    try {
+      this.afterRendererAliveCheck?.(sender, channel)
+      sender.send(channel, payload)
+    } catch (error) {
+      if (!isRendererDisposalError(error)) throw error
+      this.releaseSender(sender)
     }
   }
 }
