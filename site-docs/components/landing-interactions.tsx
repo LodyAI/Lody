@@ -1,5 +1,6 @@
 'use client';
 
+import { scheduleAfterLoadIdle } from '@site/lib/after-first-paint';
 import {
   useEffect,
   useMemo,
@@ -128,6 +129,7 @@ export function RotatingWords(props: {
   const [index, setIndex] = useState(0);
   const [transitionDisabled, setTransitionDisabled] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [motionArmed, setMotionArmed] = useState(false);
   const timerRef = useRef<number | undefined>(undefined);
   const wordRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const [widths, setWidths] = useState<number[]>([]);
@@ -140,9 +142,13 @@ export function RotatingWords(props: {
   }, [words]);
 
   useEffect(() => {
+    return scheduleAfterLoadIdle(() => setMotionArmed(true));
+  }, []);
+
+  useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     setPrefersReducedMotion(reducedMotion);
-    if (reducedMotion || words.length <= 1) return undefined;
+    if (!motionArmed || reducedMotion || words.length <= 1) return undefined;
 
     const stopTimer = () => {
       if (timerRef.current !== undefined) window.clearInterval(timerRef.current);
@@ -172,12 +178,14 @@ export function RotatingWords(props: {
       stopTimer();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [intervalMs, words.length]);
+  }, [intervalMs, motionArmed, words.length]);
 
   // Measure each word's natural width so the viewport can size to the CURRENT
   // word instead of the widest one. The suffix then slides in to sit against it
-  // (animated) rather than leaving a gap after short words.
+  // (animated) rather than leaving a gap after short words. Wait until after
+  // first paint so the H1 LCP box does not resize during the LCP window.
   useEffect(() => {
+    if (!motionArmed) return undefined;
     const measure = () => {
       const next = wordRefs.current.map((el) => (el ? el.getBoundingClientRect().width : 0));
       setWidths((prev) =>
@@ -198,7 +206,7 @@ export function RotatingWords(props: {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', measure);
     };
-  }, [renderedWords]);
+  }, [motionArmed, renderedWords]);
 
   function disableTransitionBriefly() {
     setTransitionDisabled(true);

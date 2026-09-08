@@ -11,7 +11,7 @@ import {
   normalizeInterfaceFontFamily,
 } from '../src/atoms/settings';
 import { InterfaceFontController } from '../src/components/interface-font-controller';
-import { INTERFACE_FONT_CSS_VARIABLE } from '../src/lib/local-fonts';
+import { INTERFACE_FONT_CSS_VARIABLE, listSystemFontFamilies } from '../src/lib/local-fonts';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -46,6 +46,36 @@ describe('InterfaceFontController', () => {
       normalizeInterfaceFontFamily('a'.repeat(INTERFACE_FONT_FAMILY_MAX_LENGTH + 10))
     ).toHaveLength(INTERFACE_FONT_FAMILY_MAX_LENGTH);
     expect(normalizeInterfaceFontFamily(null)).toBe('');
+  });
+
+  it('excludes symbol fonts while retaining and deduplicating text fonts', async () => {
+    const families = [
+      'Webdings',
+      'Wingdings',
+      'Wingdings 2',
+      'Wingdings 3',
+      'Symbol',
+      'Zapf Dingbats',
+    ];
+    expect(
+      await listSystemFontFamilies(async () =>
+        [...families, 'Inter', ' inter ', 'Wawati SC', 'Zilla Slab'].map((family) => ({ family }))
+      )
+    ).toEqual(['Inter', 'Wawati SC', 'Zilla Slab']);
+  });
+
+  it('recovers a persisted symbol font without applying it to the interface', async () => {
+    window.localStorage.setItem('lody-interface-font-family', JSON.stringify('Wingdings 2'));
+    const store = createStore();
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <InterfaceFontController enabled />
+        </Provider>
+      );
+    });
+    expect(store.get(interfaceFontFamilyAtom)).toBe('');
+    expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
   });
 
   it('updates the global interface font immediately when enabled', async () => {

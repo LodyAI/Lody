@@ -195,3 +195,17 @@ export const ProviderSkip: Story = {};
 export const ProviderPendingSetup: Story = {
   render: () => <PendingProviderJourney />,
 };
+
+export const ProviderSetupFailed: Story = {
+  render: () => (
+    <SummaryScreen
+      agentState="failed"
+      agentName="Codex"
+      agentFailureCode="runtime-install-failed"
+      projectName="Lody"
+      onBack={fn()}
+      onComplete={fn()}
+      onRetryAgent={async () => undefined}
+    />
+  ),
+};

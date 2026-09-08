@@ -141,6 +141,9 @@ export const cloudOperations = {
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
   auth: {
+    transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
+      'auth:transferWorkspaceOwnership'
+    ),
     getInvitationPreview: definePublicCloudQuery<{ invitationId: string }, InvitationPreview>(
       'multiWorkspace',
       'auth:getInvitationPreview'
@@ -190,6 +193,9 @@ export const cloudOperations = {
     ),
   },
   billing: {
+    createBillingPortalSession: action<ConvexApi['billing']['createBillingPortalSession']>(
+      'billing:createBillingPortalSession'
+    ),
     createCheckoutSession: action<ConvexApi['billing']['createCheckoutSession']>(
       'billing:createCheckoutSession'
     ),

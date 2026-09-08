@@ -222,7 +222,14 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
       <header className="site-nav" data-open={open}>
         <div className="site-nav__inner">
           <a className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
-            <img alt="Lody" src="/_docs-assets/logo-96.png" width={24} height={24} />
+            <img
+              alt="Lody"
+              decoding="async"
+              fetchPriority="high"
+              height={24}
+              src="/_docs-assets/logo-96.png"
+              width={24}
+            />
             <span>Lody</span>
           </a>
           <div className="site-nav__right">

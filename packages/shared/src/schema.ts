@@ -282,6 +282,22 @@ const historyMessageItemSchema = schema
             return Array.isArray(v.commands) ? true : 'Missing commands';
           case 'system_notice':
             return typeof v.name === 'string' ? true : 'Missing name';
+          case 'operation_progress':
+            return typeof v.operationId === 'string' &&
+              (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              Array.isArray(v.items) &&
+              v.items.every(
+                (item) =>
+                  isRecord(item) &&
+                  isRecord(item.target) &&
+                  typeof item.target.sessionId === 'string' &&
+                  typeof item.target.userTurnId === 'string' &&
+                  (item.label === undefined || typeof item.label === 'string') &&
+                  typeof item.status === 'string' &&
+                  ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
+              )
+              ? true
+              : 'Missing operation progress metadata';
           case 'operation_completion':
             return typeof v.deliveryId === 'string' &&
               typeof v.operationId === 'string' &&

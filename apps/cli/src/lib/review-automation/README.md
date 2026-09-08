@@ -23,15 +23,16 @@ the reasoning behind those rules.
 
 Two hard constraints, not preferences:
 
-- `LODY_MAX_CHAIN_DEPTH = 5` (`packages/shared/src/session-orchestration.ts`) is
-  fixed and explicitly non-configurable. A loop that can run several rounds cannot
-  be built from MCP session calls — it dies at depth 5.
+- `LODY_MAX_CHAIN_DEPTH = 32` (`packages/shared/src/session-orchestration.ts`) is
+  fixed and explicitly non-configurable. MCP session calls remain bounded by this
+  causal hop limit, so a loop that may need more hops must not depend on nested MCP
+  calls for its progress.
 - `specs/session-orchestration.md`: "MCP observes only Lody-owned state. GitHub,
   CI, webhooks... are outside this contract." This loop is mostly a reaction to
   exactly those.
 
-Stepping around the chain-depth guard is what makes the run's own budgets
-load-bearing: they are the replacement safety mechanism.
+Keeping the loop on the machine side lets it react to GitHub and CI state while
+its own budgets remain the load-bearing safety mechanism.
 
 ## Two modes, one engine
 

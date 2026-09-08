@@ -12,7 +12,7 @@ import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { settingContainerClass } from '.';
 
 export type BillingInterval = 'month' | 'year';
-export type BillingPendingAction = 'checkout' | null;
+export type BillingPendingAction = 'checkout' | 'portal' | null;
 
 export interface BillingOverviewData {
   billingAccountId: string | null;
@@ -122,6 +122,8 @@ export interface BillingSettingsViewProps {
   onSwitchInterval: () => void;
   /** Interval switch request in flight. */
   switchIntervalPending: boolean;
+  /** Opens the Stripe payment-method-only Portal. */
+  onPaymentMethod?: () => void;
   /** Opens the cancel-at-period-end confirmation dialog (container-owned). */
   onCancelSubscription: () => void;
   /** Undoes a scheduled cancel-at-period-end. */
@@ -170,6 +172,7 @@ export function BillingSettingsView({
   onUpgrade,
   onSwitchInterval,
   switchIntervalPending,
+  onPaymentMethod,
   onCancelSubscription,
   onResumeSubscription,
   onRedeemCode,
@@ -774,6 +777,41 @@ export function BillingSettingsView({
               </ul>
             )}
           </div>
+        </Card>
+      ) : null}
+
+      {canManage &&
+      overview.billingAccountId &&
+      ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
+      onPaymentMethod ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <p className="text-sm font-medium">{t('billing.paymentMethod')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('billing.paymentMethodDescription')}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onPaymentMethod}
+            disabled={
+              pendingAction !== null ||
+              cancelPending ||
+              switchIntervalPending ||
+              redeemPending ||
+              checkoutInProgress
+            }
+          >
+            {pendingAction === 'portal' ? (
+              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+            ) : null}
+            {t(
+              pendingAction === 'portal'
+                ? 'billing.paymentMethodOpening'
+                : 'billing.changePaymentMethod'
+            )}
+          </Button>
         </Card>
       ) : null}
 

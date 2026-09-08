@@ -4,6 +4,11 @@ Background for `apps/cli`. Binding rules stay in [apps/cli/AGENTS.md](../../apps
 and the scoped files under it; this page explains why those rules exist and how the pieces fit
 together.
 
+Session/Task MCP tool contracts are owned by
+[src/mcp/AGENTS.md](../../apps/cli/src/mcp/AGENTS.md), including callers outside that
+directory. Cross-entry model validation, Session provenance, and feedback privacy
+remain in the CLI parent rules.
+
 ## Development build
 
 `pnpm dev` bundles with esbuild (`scripts/dev-build.mjs`, ~3s) into `dist-dev/`, then runs

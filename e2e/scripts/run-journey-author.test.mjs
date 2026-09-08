@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -124,7 +124,7 @@ void test('validates reviewed code with an isolated home and no caller secrets',
     PATH: '/bin',
     CI: '1',
     HOME: '/tmp/validation-home',
-    TMPDIR: '/tmp/validation-home/tmp',
+    TMPDIR: resolve('/tmp/validation-home', 'tmp'),
   });
 });
 

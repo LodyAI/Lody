@@ -5,27 +5,27 @@ explain changes, and identify risks. Keep routine fixes lightweight and migrate 
 records only when their topic needs attention. Maintenance instructions use English;
 Specs and Agent Notes follow the bilingual policy below.
 
-| Need | Owner |
-| --- | --- |
-| Spec intent, status, and human approval | [Spec rules](../specs/AGENTS.md) |
-| Cross-module explanations, guides, and diagrams | [Writing rules](docs/AGENTS.md) |
-| Which document owns a piece of content | [Where content goes](#where-content-goes) |
-| Important decisions, classification, and history | [Note rules](notes/AGENTS.md) |
-| SHA protection for selected content | [Content review](content-review.md) |
-| Invariants | Nearest existing `AGENTS.md`; notes explain rationale without duplicating constraints |
+| Need                                             | Owner                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Spec intent, status, and human approval          | [Spec rules](../specs/AGENTS.md)                                                      |
+| Cross-module explanations, guides, and diagrams  | [Writing rules](docs/AGENTS.md)                                                       |
+| Which document owns a piece of content           | [Where content goes](#where-content-goes)                                             |
+| Important decisions, classification, and history | [Note rules](notes/AGENTS.md)                                                         |
+| SHA protection for selected content              | [Content review](content-review.md)                                                   |
+| Invariants                                       | Nearest existing `AGENTS.md`; notes explain rationale without duplicating constraints |
 
 ## Where content goes
 
 An `AGENTS.md` that outgrows 8 KiB is not a formatting problem; it is content in
 the wrong place. Route it rather than delete it:
 
-| Content | Home | Why there |
-| --- | --- | --- |
-| A constraint that still binds | Nearest `AGENTS.md` | Only this chain is read for every change |
-| One directory's file-by-file responsibilities | That directory's `README.md` | It changes whenever the directory does |
-| An explanation crossing modules | [`.agents/docs/`](docs/AGENTS.md) | It answers a reader, not a directory |
-| Product intent, guarantees, protocol | [`specs/`](../specs/AGENTS.md) | It needs explicit human approval |
-| Why a choice was made, what was rejected | [Notes](notes/AGENTS.md) | It is dated history, not current authority |
+| Content                                       | Home                              | Why there                                  |
+| --------------------------------------------- | --------------------------------- | ------------------------------------------ |
+| A constraint that still binds                 | Nearest `AGENTS.md`               | Only this chain is read for every change   |
+| One directory's file-by-file responsibilities | That directory's `README.md`      | It changes whenever the directory does     |
+| An explanation crossing modules               | [`.agents/docs/`](docs/AGENTS.md) | It answers a reader, not a directory       |
+| Product intent, guarantees, protocol          | [`specs/`](../specs/AGENTS.md)    | It needs explicit human approval           |
+| Why a choice was made, what was rejected      | [Notes](notes/AGENTS.md)          | It is dated history, not current authority |
 
 Explanations live under `.agents/` rather than a root `docs/`: `site-docs/` already
 owns the user-facing documentation at `lody.ai/docs`, and a second root `docs/`
@@ -36,6 +36,18 @@ rule in `AGENTS.md` and link the note that explains it. Never move a binding
 constraint into a note or a `README.md` to buy bytes, because neither is
 guaranteed to be read before a change. A directory whose index cannot fit is
 usually under-structured; prefer child scopes over a longer parent.
+
+For a cross-directory contract, keep its definition in the owning module's
+`AGENTS.md` and an explicit "before changing X, read Y" instruction at the common
+ancestor. Name caller behavior as well as owner files: a rule about a catalog also
+binds its UI and dispatch consumers. A bare background link is not a required-read
+trigger. Check every affected caller before removing the ancestor's full definition.
+
+When simplifying instructions, compare the bytes of the ancestor chain for typical
+source paths, as well as individual file sizes. Count each `AGENTS.md` once, without
+its `CLAUDE.md` alias. Report conditional topic reads separately: relocating a rule
+reduces unrelated tasks' input, but does not remove relevant tasks' reading duties.
+These measurements are diagnostic, not an additional approval or size gate.
 
 The gate rejects an `AGENTS.md` at 8192 bytes, and warns above 7000 without
 failing. Aim for the warning threshold, not the gate: a file that lands 30 bytes
@@ -89,10 +101,11 @@ Translation cannot approve a Spec, and the tool does not assess translation accu
 
 ## Finishing work
 
-1. Use the actual diff to identify affected explanations and diagrams. Prepare a Spec
+1. Use the actual diff and research/design conclusions to identify affected explanations and diagrams. Prepare a Spec
    draft for changes to human intent, update `.agents/docs/` for cross-module explanation
-   and the owning README for directory navigation, and record important trade-offs
-   under the [note rules](notes/AGENTS.md).
+   and the owning README for directory navigation. Non-trivial work adds or updates
+   an Agent Note in the same PR under the [note rules](notes/AGENTS.md#when-to-write);
+   design-only work records its conclusions without inventing a PR.
 2. Search earlier decisions before writing a note. Identify additions, partial
    replacements, and full replacements. Update current conclusions in Specs, `.agents/docs/`,
    or owning READMEs so the next agent need not reconstruct history. Link adequate

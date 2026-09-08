@@ -30,6 +30,7 @@ describe('terminal appearance settings', () => {
       normalizeTerminalFontFamily('a'.repeat(TERMINAL_FONT_FAMILY_MAX_LENGTH + 10))
     ).toHaveLength(TERMINAL_FONT_FAMILY_MAX_LENGTH);
     expect(normalizeTerminalFontFamily(null)).toBe('');
+    expect(normalizeTerminalFontFamily('  Webdings  ')).toBe('');
 
     expect(normalizeTerminalFontSize(undefined)).toBe(DEFAULT_TERMINAL_FONT_SIZE);
     expect(normalizeTerminalFontSize(TERMINAL_FONT_SIZE_MIN - 4)).toBe(TERMINAL_FONT_SIZE_MIN);

@@ -6,6 +6,9 @@ this page keeps the reasoning that would otherwise crowd them out.
 
 ## Crash surfaces
 
+Recovery and diagnostic contracts, including callers outside `lib/`, are owned by
+[the helper rules](../../packages/components/src/lib/AGENTS.md#crash-recovery-and-diagnostics).
+
 A crash the user cannot read or copy is a crash we never hear about, which is why the
 `ErrorBoundary` fallback shows the real error text and offers a one-click copy of the
 full report on every build rather than only in development.
@@ -35,6 +38,11 @@ failure: the banner offers the cache-clear flow after 45s of continuous `loading
 the connection attempt completes exactly as it would without it.
 
 ## File preview versus Code Collab
+
+File routing, cache, and caller contracts live in
+[the helper rules](../../packages/components/src/lib/AGENTS.md#file-preview-and-code-collab).
+[File identity background](components-file-paths.md) explains path provenance,
+cache aliases, and the existing inspection gaps.
 
 Opening a file to look at it is not a collaboration session. File Preview v3 answers with
 a plain read — no workspace watch, no All Changes recompute, no Flock publish — which is

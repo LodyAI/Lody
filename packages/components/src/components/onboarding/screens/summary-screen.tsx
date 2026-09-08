@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Clock3, Loader2, Minus, RotateCcw, XCircle } from 'lucide-react';
+import type { ProviderSetupFailureCode } from '@lody/shared';
 import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
 import { Button } from '@/ui/button';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
@@ -21,7 +22,7 @@ export function SummaryScreen({
 }: {
   agentState: OnboardingSummaryAgentState;
   agentName?: string;
-  agentFailureCode?: string;
+  agentFailureCode?: ProviderSetupFailureCode;
   projectName?: string;
   onBack: () => void;
   onComplete: () => void;
@@ -101,14 +102,11 @@ export function SummaryScreen({
       {agentState === 'failed' && onRetryAgent ? (
         <div className="mt-3 space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
           <div role="alert">
-            <p>{t('onboarding.summary.agentRetryHint', 'Agent setup can be retried here.')}</p>
-            {agentFailureCode ? (
-              <p className="mt-1 break-words font-mono opacity-90">
-                {t('onboarding.summary.failureCode', 'Failure code: {{code}}', {
-                  code: agentFailureCode,
-                })}
-              </p>
-            ) : null}
+            <p className="break-words">
+              {agentFailureCode
+                ? agentFailureMessage(t, agentFailureCode)
+                : t('onboarding.summary.agentRetryHint', 'Agent setup can be retried here.')}
+            </p>
             {retryError ? (
               <p className="mt-1 break-words font-mono opacity-90">{retryError}</p>
             ) : null}
@@ -161,6 +159,31 @@ export function SummaryScreen({
       ) : null}
     </OnboardingShell>
   );
+}
+
+function agentFailureMessage(
+  t: ReturnType<typeof useTranslation>['t'],
+  failureCode: ProviderSetupFailureCode
+): string {
+  switch (failureCode) {
+    case 'runtime-unavailable':
+      return t(
+        'onboarding.summary.failure.runtimeUnavailable',
+        'This Agent is not available on the selected machine. Update Lody or choose another machine in Settings.'
+      );
+    case 'runtime-install-failed':
+      return t(
+        'onboarding.summary.failure.runtimeInstallFailed',
+        'Lody could not download the Agent runtime. Check your connection and try again.'
+      );
+    case 'verification-failed':
+      return t(
+        'onboarding.summary.failure.verificationFailed',
+        'Lody could not verify this Agent. Check its sign-in or credentials and try again.'
+      );
+    default:
+      return failureCode satisfies never;
+  }
 }
 
 function SummaryRow({

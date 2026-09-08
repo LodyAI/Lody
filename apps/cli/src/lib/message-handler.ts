@@ -3273,7 +3273,7 @@ export class MessageHandler {
             requestId,
             targetVersion,
           }),
-        onMachineLifecycleResponseAppended: ({ response }) => {
+        onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }

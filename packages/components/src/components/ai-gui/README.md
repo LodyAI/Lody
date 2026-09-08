@@ -13,6 +13,7 @@ the reasoning behind those rules.
 | Stream  | `view.tsx`, `build-chat-stream-items.ts` | Stable Virtua rows and scroll.         |
 | Turns   | `assistant-turn-render-blocks.ts`        | Activity groups and foldable segments. |
 | Outline | `conversation-outline-*`                 | Round ticks and navigation.            |
+| Selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
@@ -33,6 +34,10 @@ the reasoning behind those rules.
 `ExtremeConversation` story, and `AssistantTurnAlignment.stories`.
 
 ## Why the rules read the way they do
+
+- **Final answer tails.** Generated `image_group`s and the `switch_mode`
+  "Exited Plan Mode" card may follow an answer, so the answer is not necessarily
+  the final stream item.
 
 - **Virtua `shift={false}` and `bufferSize`.** Shifting reuses stale cumulative
   heights, so rows overlap. `bufferSize` is a trade between blank space during a
@@ -59,3 +64,18 @@ the reasoning behind those rules.
   layer covered the backdrop and swallowed every tap, so a touch user could not
   leave it. An agent's sequence diagram scaled to a phone screen is also
   unreadable, which is why the replacement opens at natural size and pans.
+
+## Creation progress
+
+`created-session-operation-card.tsx` owns each navigable child card and its title
+subscription; `view.tsx` renders progress and completion rows. The stable
+`operation_progress` row appears after target materialization and changes in place,
+so a long-running child is reachable before its Operation completes. Status comes
+from the creating Operation's target Turn, not later Session activity. Completion
+rows linked by `progressMessageId` show a summary without creating a second set of
+cards. Older histories without progress rows retain successful-target cards.
+
+Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,
+and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror
+validation and snapshot reloads, because schema-free document fakes cannot detect
+a missing persisted-history message variant.

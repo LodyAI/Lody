@@ -1006,7 +1006,7 @@ describe('LoroStreamsMachineRpcServer', () => {
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
     const appendedAtHook: unknown[] = [];
-    const onMachineLifecycleResponseAppended = vi.fn(() => {
+    const onMachineLifecycleResponseSettled = vi.fn(() => {
       appendedAtHook.push(...fake.appended.map((entry) => entry.value));
     });
     const restartMachine = vi.fn(async () => ({
@@ -1026,7 +1026,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
       restartMachine,
-      onMachineLifecycleResponseAppended,
+      onMachineLifecycleResponseSettled,
     });
 
     fake.pushBatch({
@@ -1056,7 +1056,7 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
 
     await vi.waitFor(() => {
-      expect(onMachineLifecycleResponseAppended).toHaveBeenCalledTimes(1);
+      expect(onMachineLifecycleResponseSettled).toHaveBeenCalledTimes(1);
     });
 
     expect(restartMachine).toHaveBeenCalledWith({
@@ -1077,6 +1077,109 @@ describe('LoroStreamsMachineRpcServer', () => {
     ]);
 
     server.stop();
+  });
+
+  describe.each(['restart', 'upgrade'] as const)('machine %s ACK delivery', (action) => {
+    it.each([
+      'success',
+      'failure',
+      'timeout-resolve',
+      'timeout-reject',
+      'rejected',
+      'rejected-failure',
+    ] as const)('handles %s without stranding or executing rejected work', async (outcome) => {
+      vi.useFakeTimers();
+      const fake = createFakeStreamClient();
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const accepted = !outcome.startsWith('rejected');
+      const response = {
+        machineId,
+        requestId: 'lifecycle-1',
+        success: accepted,
+        accepted,
+        disposition: accepted ? ('accepted' as const) : ('unauthorized' as const),
+      };
+      const deliveredActions: string[] = [];
+      const warnings: string[] = [];
+      let resolveAppend: (value: string) => void = () => {};
+      let rejectAppend: (reason: Error) => void = () => {};
+      const stalledAppend = new Promise<string>((resolve, reject) => {
+        resolveAppend = resolve;
+        rejectAppend = reject;
+      });
+      fake.streamClient.appendJson = async (streamId, value) => {
+        fake.appended.push({ streamId, value });
+        if (outcome === 'failure' || outcome === 'rejected-failure') {
+          throw new Error('Synthetic ACK transport failure');
+        }
+        if (outcome.startsWith('timeout')) return await stalledAppend;
+        return 'next-offset';
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: { ...createSilentLogger(), warn: (message) => warnings.push(message) },
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        restartMachine: async () => ({ ...response, type: 'machine/restart_response' }),
+        upgradeMachine: async () => ({ ...response, type: 'machine/upgrade_response' }),
+        onMachineLifecycleResponseSettled: (event) => deliveredActions.push(event.action),
+      });
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'rpc-lifecycle-1',
+            method: `machine/${action}`,
+            rpcVersion: '1',
+            machineId,
+            workspaceId,
+            replyTo: 'workspace-1:rpc:res:synthetic-client',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 30_000,
+            params: {
+              requesterUserId: 'synthetic-user',
+              requestToken: 'synthetic-token',
+              requestId: 'lifecycle-1',
+              ...(action === 'upgrade' ? { targetVersion: '1.2.3' } : {}),
+            },
+          },
+        ],
+        nextOffset: '1',
+        upToDate: true,
+      });
+      try {
+        await server.start();
+        await vi.advanceTimersByTimeAsync(0);
+        if (outcome.startsWith('timeout')) {
+          await vi.advanceTimersByTimeAsync(4_999);
+          expect(deliveredActions).toEqual([]);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(deliveredActions).toEqual([action]);
+          if (outcome === 'timeout-resolve') resolveAppend('late-offset');
+          else rejectAppend(new Error('Synthetic late ACK failure'));
+        }
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(deliveredActions).toEqual(accepted ? [action] : []);
+        if (accepted) {
+          // ACK errors stay diagnostic; no contradictory internal_error response.
+          expect(fake.appended.length).toBeGreaterThan(0);
+          for (const entry of fake.appended) {
+            expect(entry.value).toMatchObject({ result: { accepted: true } });
+            expect(entry.value).not.toHaveProperty('error');
+          }
+          expect(
+            warnings.some((message) => message.includes('continuing accepted operation'))
+          ).toBe(outcome !== 'success');
+        }
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        server.stop();
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('decrypts Code Collab requests and encrypts Code Collab results by owner session', async () => {

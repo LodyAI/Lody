@@ -1879,6 +1879,14 @@ export type LoroStreamsRpcPendingRequest = LoroStreamsRpcPendingRegistration & {
   appendFinishedAtMs?: number;
   resolve: (value: LoroMachineRpcResult | null) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  /**
+   * When the current `timeoutId` was armed. `startedAtMs` still marks the
+   * request, so traces can report the whole wait and the silent tail of it
+   * separately.
+   */
+  timeoutArmedAtMs: number;
+  /** Progress frames seen for this request, for the timeout trace. */
+  progressFrames: number;
 };
 
 export class LoroStreamsRpcResponseDispatcher {
@@ -1939,40 +1947,76 @@ export class LoroStreamsRpcResponseDispatcher {
     return await this.startedPromise;
   }
 
+  /**
+   * Registers a pending call under an INACTIVITY deadline, not an absolute one.
+   *
+   * `timeoutMs` is a backstop for a daemon that died without replying, so it
+   * has to measure silence. An absolute timer measures the machine's work
+   * instead, and then a request the machine is actively reporting progress on
+   * expires anyway — which is the failure the budget in
+   * `@lody/shared/acp-startup-budget` claims cannot happen. Every progress
+   * frame re-arms the timer through {@link renewPending}; that machine is by
+   * definition alive, and the deadline for the work itself is the machine's,
+   * not ours.
+   */
   registerPending(
     requestId: string,
     registration: LoroStreamsRpcPendingRegistration
   ): Promise<LoroMachineRpcResult | null> {
     return new Promise<LoroMachineRpcResult | null>((resolve) => {
-      const timeoutId = setTimeout(() => {
-        const pending = this.pending.get(requestId);
-        this.pending.delete(requestId);
-        const elapsedMs = Date.now() - registration.startedAtMs;
-        this.options.trace?.('machine rpc transport response timeout', {
-          workspaceId: this.options.workspaceId,
-          machineId: registration.machineId,
-          method: registration.method,
-          rpcRequestId: requestId,
-          timeoutMs: registration.timeoutMs,
-          elapsedMs,
-          responseAfterAppendMs:
-            pending?.appendFinishedAtMs === undefined
-              ? undefined
-              : Date.now() - pending.appendFinishedAtMs,
-          responseStreamId: this.responseStreamId,
-        });
-        // A timed-out call with no response is the only signal that an SSE
-        // connection is open but not delivering appends; the transport-level
-        // read looks perfectly healthy in that failure.
-        this.noteLiveModeResponseTimeout();
-        resolve(null);
-      }, registration.timeoutMs);
       this.pending.set(requestId, {
         ...registration,
         resolve,
-        timeoutId,
+        timeoutId: this.armTimeout(requestId, registration),
+        timeoutArmedAtMs: Date.now(),
+        progressFrames: 0,
       });
     });
+  }
+
+  private armTimeout(
+    requestId: string,
+    registration: LoroStreamsRpcPendingRegistration
+  ): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      const pending = this.pending.get(requestId);
+      this.pending.delete(requestId);
+      const now = Date.now();
+      this.options.trace?.('machine rpc transport response timeout', {
+        workspaceId: this.options.workspaceId,
+        machineId: registration.machineId,
+        method: registration.method,
+        rpcRequestId: requestId,
+        timeoutMs: registration.timeoutMs,
+        elapsedMs: now - registration.startedAtMs,
+        // The two numbers that separate "never started" from "went quiet
+        // halfway": how long the machine had been silent, and whether it had
+        // said anything at all before that.
+        silentMs: pending === undefined ? undefined : now - pending.timeoutArmedAtMs,
+        progressFrames: pending?.progressFrames,
+        responseAfterAppendMs:
+          pending?.appendFinishedAtMs === undefined ? undefined : now - pending.appendFinishedAtMs,
+        responseStreamId: this.responseStreamId,
+      });
+      // A timed-out call with no response is the only signal that an SSE
+      // connection is open but not delivering appends; the transport-level
+      // read looks perfectly healthy in that failure.
+      this.noteLiveModeResponseTimeout();
+      pending?.resolve(null);
+    }, registration.timeoutMs);
+  }
+
+  /**
+   * Restarts the inactivity deadline after a progress frame.
+   *
+   * Only frames that belong to a live pending call reach this, so a stale or
+   * unknown id cannot hold a request open.
+   */
+  private renewPending(requestId: string, pending: LoroStreamsRpcPendingRequest): void {
+    clearTimeout(pending.timeoutId);
+    pending.timeoutId = this.armTimeout(requestId, pending);
+    pending.timeoutArmedAtMs = Date.now();
+    pending.progressFrames += 1;
   }
 
   markAppendFinished(requestId: string, appendFinishedAtMs: number = Date.now()): void {
@@ -2140,6 +2184,10 @@ export class LoroStreamsRpcResponseDispatcher {
     if (!parsed.data.error) {
       const progress = MachineAcpBinaryProgressMessageSchema.safeParse(parsed.data.result);
       if (progress.success) {
+        // The machine is alive and working. Restart the silence deadline
+        // before handing the frame on, so a long runtime download cannot
+        // expire the call that is reporting it.
+        this.renewPending(parsed.data.id, pending);
         pending.onAcpBinaryProgress?.(progress.data as MachineAcpBinaryProgressMessage);
         return;
       }
@@ -2147,6 +2195,7 @@ export class LoroStreamsRpcResponseDispatcher {
         parsed.data.result
       );
       if (authenticationProgress.success) {
+        this.renewPending(parsed.data.id, pending);
         pending.onAcpAuthenticationProgress?.(
           authenticationProgress.data as MachineAcpAuthenticationProgressMessage
         );

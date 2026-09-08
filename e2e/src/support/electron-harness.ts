@@ -81,13 +81,17 @@ const INHERITED_ENV_ALLOWLIST = [
   'USERPROFILE',
   'WAYLAND_DISPLAY',
   'WINDIR',
+  'XAUTHORITY',
   'XDG_RUNTIME_DIR',
 ] as const;
 
-function createIsolatedEnvironment(overrides: Record<string, string>): Record<string, string> {
+export function createIsolatedEnvironment(
+  overrides: Record<string, string>,
+  inherited: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of INHERITED_ENV_ALLOWLIST) {
-    const value = process.env[name];
+    const value = inherited[name];
     if (value !== undefined) env[name] = value;
   }
   return { ...env, ...overrides };
@@ -142,6 +146,9 @@ export class ElectronHarness {
     this.app = await _electron.launch({
       args: [
         '--js-flags=--expose-gc',
+        // GitHub-hosted Linux runners restrict unprivileged user namespaces,
+        // which breaks Electron's SUID sandbox from an unpacked dev tree.
+        ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : []),
         MAIN_ENTRY,
         `--user-data-dir=${electronUserDataDir}`,
         '--lang=en-US',

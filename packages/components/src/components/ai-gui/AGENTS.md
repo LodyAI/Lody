@@ -12,14 +12,17 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   restore `searchBlockId` wiring to tool, terminal, or diff renderers.
 - `SessionChatStreamView` flattens turns into one main Virtua list. Collapsed
   activity is one row; expanded details are sibling rows, never a nested output
-  scroller or fixed-height process panel. Streaming keys must remain stable, and
-  history indexes must translate to the matching virtual child row.
-- Keep Virtua `shift={false}`; stale cumulative heights otherwise overlap rows.
+  scroller or fixed-height process panel. Keep streaming keys stable and map
+  history indexes to virtual rows.
+- Keep Virtua `shift={false}`.
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
-- `leadingContent` is a real first row. Include it in sticky counts and every
-  scroll target; never overlay or persist it. A `session_create` completion
-  renders one card per successful target and reads only that target's title.
+- `leadingContent` is a real first row: include it in sticky counts and scroll
+  targets; never overlay or persist it.
+- Create `operation_progress` cards update in place per materialized target; bind
+  status to its exact Turn and subscribe only to its title. `progressMessageId`
+  suppresses duplicate completion cards; legacy completions keep successful-target
+  cards. Ownership and rationale: [README.md](README.md#creation-progress).
 
 ## Turn Folding And Layout
 
@@ -28,8 +31,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   both the worked region and the activity group.
 - The final answer is the final contiguous run of text before trailing
   never-collapsed items, not necessarily the last item: walk backward through
-  adjacent text blocks until a non-text boundary. Generated `image_group`s and
-  the `switch_mode` "Exited Plan Mode" card may follow it.
+  adjacent text blocks until a non-text boundary.
 - A turn may hold several `AssistantTurnRenderSegment`s; a plan approval inside a
   running turn cuts a segment. Match ACP kind `switch_mode`, never a title
   (`plan-surface.ts`). Keep
