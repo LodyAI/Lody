@@ -38,4 +38,16 @@ describe('resolveMarkdownStreamdownMode', () => {
   it('keeps streaming mode when a shorter closer cannot end a longer fence', () => {
     expect(resolveMarkdownStreamdownMode(false, '````ts\nconst x = 1;\n```\n')).toBe('streaming');
   });
+
+  it('keeps streaming mode for an unclosed blockquote fence', () => {
+    expect(resolveMarkdownStreamdownMode(false, '> ```tex\n> \\(x\\)\n')).toBe('streaming');
+  });
+
+  it('keeps streaming mode for an unclosed ordered-list fence', () => {
+    expect(resolveMarkdownStreamdownMode(false, '10. ```tex\n    \\(x\\)\n')).toBe('streaming');
+  });
+
+  it('uses static mode when a nested list fence is closed', () => {
+    expect(resolveMarkdownStreamdownMode(false, '- ~~~tex\n  \\[x\\]\n  ~~~\n')).toBe('static');
+  });
 });
