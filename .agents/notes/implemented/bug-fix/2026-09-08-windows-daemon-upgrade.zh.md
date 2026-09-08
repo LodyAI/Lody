@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/488
 
 [English](2026-09-08-windows-daemon-upgrade.md)
 
