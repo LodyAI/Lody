@@ -24,6 +24,36 @@ afterEach(() => {
 });
 
 describe('chat share image export', () => {
+  it('pins ordinary, nested, and explicitly restarted list numbers during capture', async () => {
+    const card = document.createElement('div');
+    card.innerHTML =
+      '<ol><li>First<ol start="3"><li>Nested</li><li>Nested</li></ol></li><li>Second</li><li value="7">Restart</li><li>Next</li></ol>';
+    const original = card.innerHTML;
+    let captured: number[] = [];
+    mocks.toBlob.mockImplementation(async (element: HTMLElement) => {
+      captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
+      return new Blob([]);
+    });
+    await expect(exportChatShareImage(card)).rejects.toThrow('PNG encoding failed');
+    expect(captured).toEqual([1, 3, 4, 2, 7, 8]);
+    expect(card.innerHTML).toBe(original);
+  });
+
+  it('preserves reversed numbering and restores attributes even when capture fails', async () => {
+    const card = document.createElement('div');
+    card.innerHTML =
+      '<ol reversed><li>Three</li><li>Two</li><li>One</li></ol><ol reversed start="9"><li>Nine</li><li value="0">Zero</li><li>Negative</li></ol>';
+    const original = card.innerHTML;
+    let captured: number[] = [];
+    mocks.toBlob.mockImplementation(async (element: HTMLElement) => {
+      captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
+      throw new Error('Capture failed');
+    });
+    await expect(exportChatShareImage(card)).rejects.toThrow('Capture failed');
+    expect(captured).toEqual([3, 2, 1, 9, 0, -1]);
+    expect(card.innerHTML).toBe(original);
+  });
+
   it('downloads a PNG with a sanitized title and releases the object URL afterward', async () => {
     const downloads: { name: string; url: string }[] = [];
     const revoked: string[] = [];
