@@ -3925,6 +3925,14 @@ export class MessageHandler {
   }
 
   private async processArchiveRequests(): Promise<void> {
+    // Archive cleanup may need a local-project root that exists only in Machine
+    // Flock. In cloud mode, wait until its command watcher has completed the
+    // initial remote sync; a successful read before then can still be stale.
+    if (this.cloudPort.kind !== 'local' && !this.machineFlockCommandWatcher.isReady) {
+      this.logger.debug('[archive] Waiting for authoritative Machine Flock before processing');
+      return;
+    }
+
     let snapshot: MachineCommandSnapshot;
     try {
       snapshot = await this.readMachineCommandSnapshot({ strictFlock: true });

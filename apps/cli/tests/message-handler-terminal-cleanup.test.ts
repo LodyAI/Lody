@@ -18,6 +18,7 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import type { CloudPort } from '@lody/platform';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -67,6 +68,7 @@ type MessageHandlerInternals = {
   previewService: {
     closeSessionPreviewForCleanup: (sessionId: SessionId, reason: string) => Promise<void>;
   };
+  machineFlockCommandWatcher: { isReady: boolean };
 };
 
 function createHarness(options?: {
@@ -80,6 +82,7 @@ function createHarness(options?: {
   includeLegacySessionDeleteRequest?: boolean;
   localProjectRootPaths?: Record<LocalProjectId, string>;
   machineFlockOpenError?: Error;
+  cloudPort?: CloudPort;
 }) {
   const sessionId = options?.sessionId ?? ('session-1' as SessionId);
   const childSessionIds = options?.childSessionIds ?? [];
@@ -209,7 +212,7 @@ function createHarness(options?: {
       machineName: 'machine',
       cliVersion: '0.0.0',
       closeSessionTerminals,
-      cloudPort: createTestCloudPort(),
+      cloudPort: options?.cloudPort ?? createTestCloudPort(),
     }
   );
   const internal = handler as unknown as MessageHandlerInternals;
@@ -298,6 +301,85 @@ describe('MessageHandler terminal cleanup', () => {
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a cloud archive request queued until the Machine Flock watcher is authoritative', async () => {
+    const localProjectId = 'local-project-archive-authority' as LocalProjectId;
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-archive-authority-'));
+    const originalDataDir = process.env.LODY_DATA_DIR;
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    process.env.LODY_DATA_DIR = path.join(testDir, 'data');
+    process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
+    const rootPath = createLocalRepo(testDir);
+    const sessionId = 'session-archive-awaiting-authority' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      userId: 'user-1',
+      cliType: 'codex',
+      agentType: 'codex',
+      status: SessionStatusFactory.idle(),
+      project: { kind: 'local', localProjectId },
+      isWorktree: true,
+    } as SessionMeta;
+    const machineFlockRows = [
+      {
+        key: machineFlockKeys.localProject(localProjectId),
+        value: { id: localProjectId, name: 'Project', rootPath, createdAtMs: 1 },
+      },
+    ];
+    const cloudPort = { ...createTestCloudPort(), kind: 'cloud' } as CloudPort;
+    try {
+      const manager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(rootPath),
+        source: { kind: 'local-shared', originalRootPath: rootPath },
+        logger: createSilentLogger(),
+      });
+      const worktree = await manager.createWorktree(sessionId);
+      const { handler, repo, sessionManager } = createHarness({
+        sessionId,
+        sessionMetas: [sessionMeta],
+        archiveSessionIds: [sessionId],
+        includeLegacySessionDeleteRequest: false,
+        machineFlockRows,
+        cloudPort,
+      });
+      handler.machineFlockCommandWatcher = { isReady: false };
+
+      await handler.processArchiveRequests();
+
+      expect(fs.existsSync(worktree.hostPath)).toBe(true);
+      expect(sessionManager.archiveSession).not.toHaveBeenCalled();
+      expect(repo.upsertDocMeta).not.toHaveBeenCalledWith(
+        getSessionRoomId(sessionId),
+        expect.objectContaining({ isArchived: true })
+      );
+      expect(repo.upsertDocMeta).not.toHaveBeenCalledWith(
+        getMachineRoomId('machine-1'),
+        expect.objectContaining({ needToArchiveSessions: {} })
+      );
+
+      handler.machineFlockCommandWatcher.isReady = true;
+      await handler.processArchiveRequests();
+
+      expect(fs.existsSync(worktree.hostPath)).toBe(false);
+      expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+      expect(repo.upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(sessionId),
+        expect.objectContaining({ isArchived: true })
+      );
+      expect(repo.upsertDocMeta).toHaveBeenCalledWith(
+        getMachineRoomId('machine-1'),
+        expect.objectContaining({ needToArchiveSessions: {} })
+      );
+    } finally {
+      if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = originalDataDir;
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps archive requests queued when the Machine Flock read fails', async () => {
