@@ -23,6 +23,10 @@ both languages, and file hashes for every small edit adds unnecessary work.
 
 ## Decisions and findings
 
+The [explicit note triggers](../../implemented/process/2026-09-07-explicit-agent-note-triggers.md)
+refine this proposal's note-writing threshold, including design-only conclusions;
+the rest of this proposal remains under review.
+
 Notes are organized by lifecycle and decision type. This process proposal remains
 under review; routine small fixes do not require a note.
 

@@ -12,6 +12,7 @@ import {
 
 export type OperationProgressHistoryDocument = {
   handle?: { doc: Pick<Loro, 'getList' | 'commit'> } | null;
+  getHistory: () => Promise<SessionHistoryInput[]>;
   updateHistory: (
     updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
   ) => Promise<void>;
@@ -145,7 +146,7 @@ export const upsertOperationProgressHistory = async (
   const isProgressRow = (entry: SessionHistoryInput) =>
     entry.role === 'system' && (entry.id === id || entry.id.startsWith(duplicatePrefix));
   const timestamp = new Date(now()).toISOString();
-  await sessionDoc.updateHistory((history) => {
+  const updateHistory = (history: SessionHistoryInput[]): SessionHistoryInput[] => {
     const existingIndex = history.findIndex((entry) => entry.id === id && entry.role === 'system');
     const duplicates = history.filter(isProgressRow);
     const existing = duplicates[0];
@@ -186,5 +187,11 @@ export const upsertOperationProgressHistory = async (
     return history.flatMap((candidate, index) =>
       index === existingIndex ? [entry] : isProgressRow(candidate) ? [] : [candidate]
     );
-  });
+  };
+  // Mirror notifies subscribers even when its updater returns unchanged state.
+  // In A -> B -> C, rewriting B's progress wakes A's coordinator indefinitely.
+  // Check before entering Mirror, then recompute against the latest history on write.
+  const history = await sessionDoc.getHistory();
+  if (updateHistory(history) === history) return;
+  await sessionDoc.updateHistory(updateHistory);
 };

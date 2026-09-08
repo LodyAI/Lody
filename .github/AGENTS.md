@@ -25,6 +25,16 @@ Workflow-file security constraints live in
 
 ## Contribution contract
 
+- One-shot identity: Lody team if the user says so, or GitHub login is
+  `zxch3n`, `Leeeon233`, or `wibus-wee` (`gh api user --jq .login`, or git
+  `user.name` Zixuan Chen, Leon Zhao, or Wibus Wu). Otherwise community; do
+  not keep checking. Same-repository branches stay `internal` regardless of
+  login.
+- Community PRs stay under 1000 changed lines (additions + deletions) unless a
+  maintainer assigned the linked Issue to the author. Larger work: file an
+  Issue with analysis and wait to be assigned; do not open the PR. Maintainers
+  review small focused changes; large unsolicited patches hide invariant breaks.
+  Humans: `CONTRIBUTING.md`.
 - `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
   body from the template and validate it with
   `node .github/scripts/check-pr-body.mjs --body-file <file>`.
@@ -82,12 +92,13 @@ valid <-> status:needs-pr-attention (invalid-since) -> status:pr-policy-expired 
 ```
 
 All template and size findings share the same comment, label, timestamp, and
-seven-day correction period. A change over 200 additions plus deletions without
-its prior Issue reference adds a size-specific finding; it does not create a
-second status. A valid edit or a skipped disposition clears managed enforcement
-state. An expired external PR is closed again when reopened; bypass or internal
-classification clears the expired state instead. Before closing an overdue PR,
-the audit must re-read and revalidate the latest PR.
+seven-day correction period. A change over 1000 additions plus deletions
+without a maintainer assignment on the linked Issue adds a size-specific
+finding; over 200 without its prior Issue reference still does. Neither
+creates a second status. A valid edit or a skipped disposition clears managed
+enforcement state. An expired external PR is closed again when reopened;
+bypass or internal classification clears the expired state instead. Before
+closing an overdue PR, the audit must re-read and revalidate the latest PR.
 
 Issue-link normalization and cleanup after a valid or skipped disposition are
 best-effort feedback. The current validation result alone decides whether an

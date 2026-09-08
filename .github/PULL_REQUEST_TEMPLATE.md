@@ -1,8 +1,9 @@
 <!--
 Fork-based contributions must reference a Lody issue below. Keep the change focused:
-all policy findings share one seven-day correction period. A change over 200
-lines (additions + deletions) without its prior Issue adds a size-specific finding.
-Same-repository branches do not create an Issue solely for contribution intake.
+all policy findings share one seven-day correction period. Community PRs over 1000
+lines (additions + deletions) need a maintainer assignment on the linked Issue;
+over 200 without its prior Issue adds a size-specific finding. Same-repository
+branches do not create an Issue solely for contribution intake.
 
 The Issue is for tracking context; maintainers review the contribution through
 the normal PR process. Context handoff is public and cannot use N/A or redacted

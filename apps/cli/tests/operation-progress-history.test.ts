@@ -176,6 +176,7 @@ describe('operation progress history', () => {
       },
     ];
     const doc = {
+      getHistory: async () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -275,6 +276,7 @@ describe('operation progress history', () => {
       },
     ];
     const doc = {
+      getHistory: async () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -323,6 +325,7 @@ it.each(['failed', 'cancelled'] as const)(
   async (status) => {
     let history: SessionHistoryInput[] = [];
     const doc = {
+      getHistory: async () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -373,6 +376,7 @@ it.each(['succeeded', 'failed', 'cancelled'] as const)(
       strict: false,
     });
     const sessionDoc = {
+      getHistory: async () => mirror.getState().history,
       updateHistory: async (updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         mirror.setState((state) => ({ ...state, history: updater(state.history) }));
       },
@@ -451,6 +455,7 @@ it.each(['cancelled', 'error'] as const)(
     const now = () => Date.parse('2026-01-01T00:00:01.000Z');
     let history: SessionHistoryInput[] = [];
     const doc = {
+      getHistory: async () => history,
       updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = update(history);
       },
@@ -548,6 +553,7 @@ it('preserves all 25 merge transitions, including terminal labels and running-to
 it('keeps the original history object for identical progress snapshots', async () => {
   let history: SessionHistoryInput[] = [];
   const doc = {
+    getHistory: async () => history,
     updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       history = update(history);
     },
@@ -593,6 +599,7 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
   });
   const adapter = (mirror: typeof left) => ({
     handle: { doc: mirror === left ? leftDoc : rightDoc },
+    getHistory: async () => mirror.getState().history,
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       mirror.setState((state) => ({ ...state, history: update(state.history) }));
     },
@@ -610,6 +617,7 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
       upsertOperationProgressHistory(
         {
           handle: { doc: leftDoc },
+          getHistory: async () => left.getState().history,
           updateHistory: async () => {
             throw new Error('interrupted after durable aliasing');
           },
@@ -652,4 +660,43 @@ it('preserves a published label when a later snapshot omits it', () => {
       items: [{ target, status: 'running' }],
     }).items
   ).toEqual([{ target, status: 'running', label: 'Keep this label' }]);
+});
+
+it('does not notify real Mirror subscribers when progress is unchanged or absent', async () => {
+  const mirror = new Mirror({
+    doc: new Loro(),
+    schema: sessionDocSchema,
+    initialState: { session: { id: 'requester-1' as SessionId }, history: [], mq: [] },
+    strict: false,
+  });
+  let notifications = 0;
+  const unsubscribe = mirror.subscribe(() => {
+    notifications++;
+  });
+  const doc = {
+    getHistory: async () => mirror.getState().history,
+    updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+      mirror.setState((state) => ({ ...state, history: update(state.history) }));
+    },
+  };
+  const target = { sessionId: 'child' as SessionId, userTurnId: 'child-turn' };
+  try {
+    await upsertOperationProgressHistory(doc, baseOperation([]), () => 0);
+    expect(notifications).toBe(0);
+    const operation = baseOperation([{ status: 'active', inputDurable: true, target }]);
+    await upsertOperationProgressHistory(doc, operation, () => 0);
+    expect(notifications).toBe(1);
+    await upsertOperationProgressHistory(doc, operation, () => 1);
+    expect(notifications).toBe(1);
+    await upsertOperationProgressHistory(
+      doc,
+      operation,
+      () => 2,
+      new Map([[getOperationProgressTargetKey(target), 'running']])
+    );
+    expect(notifications).toBe(2);
+  } finally {
+    unsubscribe();
+    mirror.dispose();
+  }
 });

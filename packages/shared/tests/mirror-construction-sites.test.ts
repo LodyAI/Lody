@@ -20,6 +20,29 @@ function productionSources(dir: string): string[] {
 }
 
 describe('Mirror construction sites', () => {
+  it('temporarily skips full-state validation only for session mirrors', () => {
+    let sessionSites = 0;
+    for (const root of searchRoots) {
+      for (const file of productionSources(join(repoRoot, root))) {
+        const source = readFileSync(file, 'utf8');
+        for (
+          let at = source.indexOf('new Mirror(');
+          at !== -1;
+          at = source.indexOf('new Mirror(', at + 1)
+        ) {
+          const options = source.slice(at, source.indexOf('});', at));
+          if (/schema:\s*sessionDocSchema\b/.test(options)) {
+            sessionSites++;
+            expect(options, file).toMatch(/validateUpdates:\s*false\b/);
+          } else {
+            expect(options, file).not.toMatch(/validateUpdates:\s*false\b/);
+          }
+        }
+      }
+    }
+    expect(sessionSites).toBe(2);
+  });
+
   it('always opt into tolerating unknown root keys', () => {
     const missing: string[] = [];
     let sites = 0;

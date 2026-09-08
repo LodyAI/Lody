@@ -411,6 +411,128 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('keeps repeated token rotations inside one backoff-controlled meta recovery episode', async () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const analyticsEvents: Array<{
+      name: string;
+      properties?: Record<string, unknown>;
+    }> = [];
+    mocks.joinMetaRoom.mockRejectedValue(new Error('transport connection failed'));
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      onAnalyticsEvent: (event) => analyticsEvents.push(event),
+    });
+
+    // Reproduce the field incident without manufacturing an 800ms token loop:
+    // seven genuinely different auth tokens arrive over roughly two minutes
+    // while every meta-room join fails immediately with a transport error.
+    // A token may prompt one immediate recovery, but it must not turn the same
+    // outage back into a fresh initial-sync episode or forgive accumulated
+    // retry history.
+    for (let index = 0; index < 7; index += 1) {
+      await runtime.setAuthToken(`auth-token-${index}`);
+      await flushPromises();
+      if (index < 6) {
+        await vi.advanceTimersByTimeAsync(17_000);
+      }
+    }
+    await vi.advanceTimersByTimeAsync(18_000);
+    await flushPromises();
+
+    await runtime.dispose();
+    random.mockRestore();
+
+    const metaSyncFailures = analyticsEvents.filter(
+      (event) => event.name === 'workspace/meta_sync_failed'
+    );
+    const initialFailures = metaSyncFailures.filter(
+      (event) => event.properties?.phase === 'initial'
+    );
+
+    // One outage has one initial attempt. Everything after it is recovery,
+    // including retries prompted by a newly issued credential.
+    expect.soft(initialFailures).toHaveLength(1);
+    // With a 30s capped exponential backoff, seven external credential edges
+    // plus scheduled recovery cannot legitimately produce hundreds of joins
+    // in this two-minute window. Keep this assertion generous enough for
+    // jitter and boundary-aligned timers while still catching a reset storm.
+    expect(metaSyncFailures.length).toBeLessThanOrEqual(20);
+  });
+
+  it('shares an in-flight meta join across overlapping token rotations', async () => {
+    let resolveMetaJoin!: (sub: FakeMetaSub) => void;
+    const pendingMetaJoin = new Promise<FakeMetaSub>((resolve) => {
+      resolveMetaJoin = resolve;
+    });
+    mocks.joinMetaRoom.mockReturnValue(pendingMetaJoin);
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    const initialAttach = runtime.setAuthToken('auth-token-1');
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+
+    const overlappingRotation = runtime.setAuthToken('auth-token-2');
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+
+    resolveMetaJoin(createMetaSub(Promise.resolve()));
+    await Promise.all([initialAttach, overlappingRotation]);
+    await flushPromises();
+
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+    await runtime.dispose();
+  });
+
+  it('reports first-sync failures after a rejoin as recovery', async () => {
+    let rejectInitialSync!: (error: Error) => void;
+    let rejectRecoverySync!: (error: Error) => void;
+    const initialSync = new Promise<void>((_resolve, reject) => {
+      rejectInitialSync = reject;
+    });
+    const recoverySync = new Promise<void>((_resolve, reject) => {
+      rejectRecoverySync = reject;
+    });
+    const analyticsEvents: Array<{
+      name: string;
+      properties?: Record<string, unknown>;
+    }> = [];
+    mocks.joinMetaRoom
+      .mockResolvedValueOnce(createMetaSub(initialSync))
+      .mockResolvedValueOnce(createMetaSub(recoverySync));
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      onAnalyticsEvent: (event) => analyticsEvents.push(event),
+    });
+
+    rejectInitialSync(new Error('initial transport failure'));
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(2);
+
+    rejectRecoverySync(new Error('recovery transport failure'));
+    await flushPromises();
+
+    const failurePhases = analyticsEvents
+      .filter((event) => event.name === 'workspace/meta_sync_failed')
+      .map((event) => event.properties?.phase);
+    expect(failurePhases).toEqual(['initial', 'recovery']);
+
+    await runtime.dispose();
+  });
+
   it('delays ACP capability refresh until meta and presence stay synced', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
