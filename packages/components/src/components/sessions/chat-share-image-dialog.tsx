@@ -206,6 +206,27 @@ export function ChatShareImageDialog({
             className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
           >
             <div className="space-y-2">
+              <Label htmlFor="chat-share-theme">{t('sessions.shareImage.theme', 'Theme')}</Label>
+              <Select
+                value={theme}
+                onValueChange={(value) => setTheme(value as 'app' | 'light' | 'dark')}
+              >
+                <SelectTrigger id="chat-share-theme" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="app">
+                    {t('sessions.shareImage.themeApp', 'Follow app')}
+                  </SelectItem>
+                  <SelectItem value="light">
+                    {t('sessions.shareImage.themeLight', 'Light')}
+                  </SelectItem>
+                  <SelectItem value="dark">{t('sessions.shareImage.themeDark', 'Dark')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="chat-share-backdrop">
                 {t('sessions.shareImage.backdrop', 'Background')}
               </Label>
@@ -250,27 +271,6 @@ export function ChatShareImageDialog({
                   <SelectItem value="spacious">
                     {t('sessions.shareImage.paddingSpacious', 'Spacious')}
                   </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="chat-share-theme">{t('sessions.shareImage.theme', 'Theme')}</Label>
-              <Select
-                value={theme}
-                onValueChange={(value) => setTheme(value as 'app' | 'light' | 'dark')}
-              >
-                <SelectTrigger id="chat-share-theme" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="app">
-                    {t('sessions.shareImage.themeApp', 'Follow app')}
-                  </SelectItem>
-                  <SelectItem value="light">
-                    {t('sessions.shareImage.themeLight', 'Light')}
-                  </SelectItem>
-                  <SelectItem value="dark">{t('sessions.shareImage.themeDark', 'Dark')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
