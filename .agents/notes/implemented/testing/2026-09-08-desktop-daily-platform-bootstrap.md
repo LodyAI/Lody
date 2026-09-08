@@ -15,6 +15,8 @@ Xvfb authorization path before launching Electron. Coverage checks now treat
 CRLF and LF as the same generated content, and the isolated Electron environment
 retains `XAUTHORITY`. This restores platform bootstrap without weakening registry
 validation or broadening the process environment inherited by the application.
+The first verification run also exposed a latent POSIX-only path expectation in
+the suite-contract tests; that expectation now uses Node's platform path resolver.
 
 ## Evidence
 
@@ -24,6 +26,12 @@ on commit `a07eeba2bf97faa40ba501000ab9c3296dc4a031` was the first scheduled run
 matrix. macOS passed. Windows stopped in the suite contract because its CRLF
 checkout did not equal the LF-only string returned by `renderCoverage()`. The
 registry and generated Markdown were otherwise identical.
+
+After the coverage fix allowed the Windows suite contract to continue, hosted
+[smoke run 34206280687](https://github.com/LodyAI/Lody/actions/runs/34206280687)
+exposed a second infrastructure failure. The journey-author environment test
+expected a literal `/tmp/validation-home/tmp`, while the production helper
+correctly returned a Windows path through `path.resolve()`.
 
 All four Linux scenarios failed before opening a window. Electron logged
 `Authorization required, but no authorization protocol specified` followed by an
@@ -40,6 +48,10 @@ normalizes CRLF to LF before comparing generated coverage. It still rejects ever
 other content difference, including added text, missing rows, and whitespace not
 caused by Windows line endings. Both the suite checker and the standalone coverage
 checker use this contract.
+
+The journey-author test derives its expected temporary directory with the same
+platform path semantics promised by `buildValidationEnvironment()`. It continues
+to assert the isolated home and exact environment allowlist.
 
 The Electron harness adds only `XAUTHORITY` to its inherited environment allowlist.
 Passing the entire runner environment would expose unrelated CI variables to the
