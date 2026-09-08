@@ -3,6 +3,8 @@
 Status: implemented
 Translation: pending
 
+PR: [#525](https://github.com/LodyAI/Lody/pull/525)
+
 ## Abstract
 
 Desktop performance investigations need visible measurements in both development
