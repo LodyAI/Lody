@@ -36,7 +36,11 @@ const createHandler = async (
   latestMeta?: { title?: string; titleSource?: SessionTitleSource },
   options?: {
     agentConfigId?: string;
-    agentConfigMeta?: { titleGeneration?: { configOptionValues: Record<string, string> } } | null;
+    agentConfigMeta?: {
+      titleGeneration?: { configOptionValues: Record<string, string> };
+      cliType?: string;
+      agentType?: string;
+    } | null;
   }
 ) => {
   const logger = createSilentLogger();
@@ -365,7 +369,6 @@ describe('MessageHandler title generation', () => {
 
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix flaky login', 'generated', [
       'draft',
-      'generated',
     ]);
   });
 
@@ -406,5 +409,90 @@ describe('MessageHandler title generation', () => {
     expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
       expect.objectContaining({ titleConfig: undefined })
     );
+  });
+
+  it('does not let a Codex explicit title replace an already generated title', async () => {
+    const { handler, sessionDoc, workspaceDocument } = await createHandler(
+      'Exact ping5 reply',
+      'generated'
+    );
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle(
+      's-codex-resume' as SessionId,
+      'Single-word ping5b response'
+    );
+
+    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith(
+      'Single-word ping5b response',
+      'generated',
+      ['draft']
+    );
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(false);
+  });
+
+  it('still lets a Codex explicit title name a draft new session', async () => {
+    const { handler, sessionDoc } = await createHandler(undefined, 'draft');
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle(
+      's-codex-new' as SessionId,
+      'Single-word alpha7k reply'
+    );
+
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith(
+      'Single-word alpha7k reply',
+      'generated',
+      ['draft']
+    );
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
+  });
+
+  it('does not let an agent title replace a user rename', async () => {
+    const { handler, sessionDoc } = await createHandler('KeepPong7k', 'user');
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle(
+      's-user' as SessionId,
+      'Exact pong7k response request'
+    );
+
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith(
+      'Exact pong7k response request',
+      'generated',
+      ['draft']
+    );
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(false);
+  });
+
+  it('still lets builtin Claude replace a generated title', async () => {
+    const { handler, sessionDoc, workspaceDocument } = await createHandler(
+      'Earlier generated title',
+      'generated',
+      undefined,
+      {
+        agentConfigId: 'agent-config-1',
+        agentConfigMeta: { cliType: 'builtin', agentType: 'claude' },
+      }
+    );
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle('s-claude' as SessionId, 'Fix login bug');
+
+    expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix login bug', 'generated', [
+      'draft',
+      'generated',
+    ]);
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
   });
 });

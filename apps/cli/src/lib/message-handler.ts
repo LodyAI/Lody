@@ -48,6 +48,7 @@ import {
   type MachineMeta,
   type MachineResourceInfo,
   SessionMeta,
+  type SessionTitleSource,
   LocalProjectId,
   type NeedToDeleteSessionQueueItem,
   getMachineRoomId,
@@ -8912,10 +8913,14 @@ export class MessageHandler {
   }
 
   /**
-   * Stores a session title pushed by the agent via ACP session_info_update
+   * Stores a session title pushed by the agent via ACP session_info_update.
    * Builtin Claude skips the isolated local generator, so the pushed title is
-   * its only generated source. Never overwrites a user-set title; the conditional
-   * write guards against renames racing in via sync.
+   * its only generated source and may replace an earlier generated title.
+   * Codex (and other isolated-generator agents) already have a generated title
+   * from title-generator.ts; an explicit Codex thread name must not replace it
+   * — that path used to retitle a resumed conversation from the latest prompt.
+   * Never overwrites a user-set title; the conditional write also guards
+   * against renames racing in via sync.
    */
   private async maybeStoreAgentSessionTitle(sessionId: SessionId, title: string): Promise<void> {
     try {
@@ -8928,10 +8933,28 @@ export class MessageHandler {
       if (meta?.title?.trim() === sanitized) {
         return;
       }
-      const applied = await sessionDoc.setTitleIfSourceIn(sanitized, 'generated', [
-        'draft',
+      const allowedSources: SessionTitleSource[] = ['draft'];
+      if (meta?.agentConfigId) {
+        try {
+          const agentConfigMeta = await this.workspaceDocument.getAgentConfigById(
+            meta.agentConfigId
+          );
+          if (
+            usesAcpProvidedSessionTitle(agentConfigMeta?.cliType, agentConfigMeta?.agentType)
+          ) {
+            allowedSources.push('generated');
+          }
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to load agent config ${meta.agentConfigId} for title source policy: ${formatErrorMessage(error)}`
+          );
+        }
+      }
+      const applied = await sessionDoc.setTitleIfSourceIn(
+        sanitized,
         'generated',
-      ]);
+        allowedSources
+      );
       if (applied) {
         this.logger.debug(`[${sessionId}] Session title updated from agent: ${sanitized}`);
       }
