@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Loader2 } from 'lucide-react';
+import { Check, Copy, Download, Loader2 } from 'lucide-react';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Label } from '@/ui/label';
 import { Input } from '@/ui/input';
 import { Button } from '@lody/ui/button';
-import { exportChatShareImage } from '@/lib/chat-share-image-export';
+import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import {
@@ -18,7 +19,7 @@ import {
 } from '@/components/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
-const BACKDROPS: ChatShareCardBackdrop[] = ['none', 'lody', 'aurora', 'ocean', 'sunset'];
+const BACKDROPS: ChatShareCardBackdrop[] = ['none', 'lody', 'aurora', 'ocean', 'sunset', 'welcome'];
 const FOOTER_VARIANTS: ChatShareCardFooterVariant[] = [
   'stacked',
   'row',
@@ -26,6 +27,15 @@ const FOOTER_VARIANTS: ChatShareCardFooterVariant[] = [
   'canvas',
   'exif',
 ];
+
+const BACKDROP_SWATCHES: Record<Exclude<ChatShareCardBackdrop, 'none'>, string> = {
+  lody: 'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%), radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%), radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%), linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+  aurora: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)',
+  ocean: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)',
+  sunset: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+  welcome:
+    'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px), radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%), radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%), linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)), #dce5e7',
+};
 
 /** EXIF sub line: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
 function formatShareImageDate(timestamp: string | undefined): string | undefined {
@@ -140,13 +150,16 @@ export function ChatShareImageDialog({
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
+  const [operation, setOperation] = useState<'copy' | 'export' | null>(null);
   const [assetsReady, setAssetsReady] = useState(false);
   const [exportError, setExportError] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleExport = async () => {
     if (!exportRef.current || exportingRef.current || !assetsReady) return;
     exportingRef.current = true;
     setExporting(true);
+    setOperation('export');
     setExportError(false);
     try {
       await exportChatShareImage(exportRef.current, session?.title);
@@ -155,6 +168,26 @@ export function ChatShareImageDialog({
     } finally {
       exportingRef.current = false;
       setExporting(false);
+      setOperation(null);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!exportRef.current || exportingRef.current || !assetsReady) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setOperation('copy');
+    setExportError(false);
+    setCopied(false);
+    try {
+      await copyChatShareImage(exportRef.current);
+      setCopied(true);
+    } catch {
+      setExportError(true);
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+      setOperation(null);
     }
   };
 
@@ -227,24 +260,55 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="chat-share-backdrop">
+              <Label className="mb-2 block">
                 {t('sessions.shareImage.backdrop', 'Background')}
               </Label>
-              <Select
-                value={backdrop}
-                onValueChange={(value) => setBackdrop(value as ChatShareCardBackdrop)}
-              >
-                <SelectTrigger id="chat-share-backdrop" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BACKDROPS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value === 'none' ? t('sessions.shareImage.backdropNone', 'None') : value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="grid grid-cols-5 gap-1.5" role="group">
+                <button
+                  type="button"
+                  aria-pressed={backdrop === 'none'}
+                  className={cn(
+                    'col-span-full flex h-9 items-center justify-center rounded-md border text-sm font-medium transition-colors',
+                    backdrop === 'none'
+                      ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/25'
+                      : 'border-border bg-muted/30 hover:bg-muted/60'
+                  )}
+                  onClick={() => setBackdrop('none')}
+                >
+                  {t('sessions.shareImage.backdropNone', 'None')}
+                </button>
+                {BACKDROPS.filter(
+                  (value): value is Exclude<ChatShareCardBackdrop, 'none'> => value !== 'none'
+                ).map((value) => {
+                  const selected = backdrop === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-label={t(
+                        `sessions.shareImage.backdrop${value[0].toUpperCase()}${value.slice(1)}`,
+                        value
+                      )}
+                      aria-pressed={selected}
+                      className={cn(
+                        'relative aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
+                        selected ? 'border-primary ring-2 ring-primary' : 'border-border/70'
+                      )}
+                      style={{
+                        background: BACKDROP_SWATCHES[value],
+                        ...(value === 'welcome' ? { backgroundSize: '88px 100%, auto' } : {}),
+                      }}
+                      onClick={() => setBackdrop(value)}
+                    >
+                      {selected ? (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white">
+                          <Check className="size-4 drop-shadow" />
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -389,20 +453,40 @@ export function ChatShareImageDialog({
             <p role="alert" className="mr-auto text-sm text-destructive">
               {t(
                 'sessions.shareImage.exportFailed',
-                'Could not export the image. Please try again.'
+                'Could not complete the image action. Please try again.'
               )}
             </p>
+          ) : copied ? (
+            <p role="status" className="mr-auto text-sm text-muted-foreground">
+              {t('sessions.shareImage.copied', 'Image copied to clipboard')}
+            </p>
           ) : null}
+          <Button
+            variant="secondary"
+            onClick={() => void handleCopy()}
+            disabled={exporting || !assetsReady || messages.length === 0}
+          >
+            {operation === 'copy' ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : copied ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            {operation === 'copy'
+              ? t('sessions.shareImage.copying', 'Copying...')
+              : t('sessions.shareImage.copyImage', 'Copy image')}
+          </Button>
           <Button
             onClick={() => void handleExport()}
             disabled={exporting || !assetsReady || messages.length === 0}
           >
-            {exporting ? (
+            {operation === 'export' ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Download className="size-4" />
             )}
-            {exporting
+            {operation === 'export'
               ? t('sessions.shareImage.exporting', 'Exporting...')
               : t('sessions.shareImage.exportPng', 'Export PNG')}
           </Button>

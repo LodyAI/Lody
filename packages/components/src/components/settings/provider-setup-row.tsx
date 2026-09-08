@@ -9,7 +9,7 @@ import {
 } from '@lody/shared';
 import { Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
 
-import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -115,81 +115,111 @@ export function ProviderSetupRow({
     }
   };
 
+  // A setup row sits in the same list as a published AgentConfig row, so it
+  // borrows that row's geometry exactly: the same mark, the same two-line text
+  // column, the same fixed action slots. Anything narrower here re-ragged every
+  // column the moment a pending setup appeared above the published agents.
+  const markReadiness: AgentReadiness =
+    setup.status === 'failed' ||
+    (setup.status === 'queued' &&
+      (!machineOnline || (machine !== undefined && !supportsSetupProtocol)))
+      ? 'cold'
+      : active
+        ? 'arriving'
+        : 'ready';
+
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/60 bg-card/40 px-3 py-3',
+        'rounded-lg border border-border/60 bg-card/40',
         setup.status === 'failed' && 'border-status-error/30',
         className
       )}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-          <AgentIcon
-            cliType={config.cliType}
-            agentType={config.agentType}
-            brandId={config.brandId}
-            env={config.env}
-            className="h-5 w-5"
-          />
-        </div>
+      <div className="flex min-w-0 items-center gap-3 py-3 pl-3">
+        <AgentReadinessMark
+          cliType={config.cliType}
+          agentType={config.agentType}
+          brandId={config.brandId}
+          env={config.env}
+          readiness={markReadiness}
+          percent={downloadPercent}
+          size="md"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{config.name}</div>
           <div className="truncate text-xs text-muted-foreground">
             {labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
-        {active ? (
-          <ProviderProgressButton
-            percent={downloadPercent}
-            label={
-              downloadPercent !== null
-                ? `${downloadPercent}%`
-                : setup.status === 'queued'
-                  ? t('onboarding.providers.waitingAction', 'Waiting')
-                  : t('onboarding.providers.workingAction', 'Working')
-            }
-            ariaLabel={statusText}
-          />
-        ) : setup.status === 'failed' ? (
-          <XCircle className="h-4 w-4 shrink-0 text-status-error" />
-        ) : null}
-        {setup.status === 'failed' ? (
+        {/* Status column, then action column, then delete — the same three
+            slots an AgentConfig row uses, in the same order, so a pending setup
+            above a published agent lines up with it instead of ragging the
+            list. The middle slot is empty here because a setup has nothing to
+            edit; the width stays reserved, which is what holds the column. */}
+        <div className="flex min-w-20 shrink-0 justify-end">
+          {setup.status === 'failed' ? (
+            <XCircle className="h-4 w-4 shrink-0 text-status-error" />
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1 pr-3">
+          <div className="w-12 shrink-0" />
+          <div className="flex w-20 shrink-0 items-center justify-end">
+            {active ? (
+              <ProviderProgressButton
+                className="w-full"
+                percent={downloadPercent}
+                label={
+                  downloadPercent !== null
+                    ? `${downloadPercent}%`
+                    : setup.status === 'queued'
+                      ? t('onboarding.providers.waitingAction', 'Waiting')
+                      : t('onboarding.providers.workingAction', 'Working')
+                }
+                ariaLabel={statusText}
+              />
+            ) : setup.status === 'failed' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                className="w-full"
+                disabled={actionPending !== null}
+                onClick={() => void runAction('retry', onRetry)}
+              >
+                {actionPending === 'retry' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                {t('common.retry', 'Retry')}
+              </Button>
+            ) : null}
+          </div>
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="small"
+            icon
+            tone="destructive"
+            className="shrink-0"
             disabled={actionPending !== null}
-            onClick={() => void runAction('retry', onRetry)}
+            aria-label={t('common.delete', 'Delete')}
+            onClick={() => void runAction('delete', onDelete)}
           >
-            {actionPending === 'retry' ? (
+            {actionPending === 'delete' ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <RotateCcw className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" />
             )}
-            {t('common.retry', 'Retry')}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          icon
-          tone="destructive"
-          className="shrink-0"
-          disabled={actionPending !== null}
-          aria-label={t('common.delete', 'Delete')}
-          onClick={() => void runAction('delete', onDelete)}
-        >
-          {actionPending === 'delete' ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
-        </Button>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">{statusText}</p>
+      {/* Aligned to the name above it, not to the card edge: the sentence is
+          about this agent, so it starts where the agent's text column starts. */}
+      <p className="ml-[3.25rem] pb-3 pr-3 text-xs text-muted-foreground">{statusText}</p>
       {setup.status === 'awaiting-auth' ? (
-        <div className="mt-3">
+        <div className="ml-[3.25rem] pb-3 pr-3">
           <AcpAuthenticationPanel
             machineId={setup.machineId}
             configId={config.id}

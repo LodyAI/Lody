@@ -5415,10 +5415,9 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5467,10 +5466,9 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}

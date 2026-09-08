@@ -4,6 +4,8 @@ import { fn } from 'storybook/test';
 import type { AgentConfigId, AgentConfigMeta, MachineId } from '@lody/shared';
 import {
   OnboardingBackdrop,
+  PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS,
+  PROVIDER_WAIT_MEASURED_AFTER_SECONDS,
   ProvidersScreenView,
   type ProviderTestActivity,
   type ProviderTestStatus,
@@ -222,6 +224,35 @@ export const DownloadingRuntime: Story = {
       [kimiConfig.id]: { phase: 'extracting-runtime' },
     },
     selectedProviderId: codexConfig.id,
+    noLocalMachine: false,
+  },
+};
+
+/**
+ * The three escalation tiers side by side. A wait that just started names its
+ * stage; one past the measured threshold adds the seconds it has taken; one
+ * past the exceptional threshold stops calling itself ordinary, says so, and
+ * offers the pasteable report — without inventing any progress it does not
+ * have. Kimi's row is the case that forced the copy to be request-scoped: the
+ * setup has run a full minute, but the handshake it is in may have started a
+ * second ago, so nothing on that row may claim the stage took the time.
+ */
+export const WaitEscalation: Story = {
+  args: {
+    configs: [claudeConfig, codexConfig, kimiConfig],
+    testStatuses: {},
+    testActivities: {
+      [claudeConfig.id]: { phase: 'probing-provider', startedAtMs: Date.now() },
+      [codexConfig.id]: {
+        phase: 'probing-provider',
+        startedAtMs: Date.now() - PROVIDER_WAIT_MEASURED_AFTER_SECONDS * 1000,
+      },
+      [kimiConfig.id]: {
+        phase: 'probing-provider',
+        startedAtMs: Date.now() - PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS * 1000,
+      },
+    },
+    selectedProviderId: kimiConfig.id,
     noLocalMachine: false,
   },
 };

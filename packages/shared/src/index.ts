@@ -23,6 +23,7 @@ export * from './ai';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';
+export * from './acp-startup-budget';
 export * from './image-file-types';
 export * from './custom-acp-command';
 export * from './session-image';

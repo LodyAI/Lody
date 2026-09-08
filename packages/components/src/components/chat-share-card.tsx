@@ -20,7 +20,7 @@ export interface ChatShareCardCodeOptions {
 }
 
 /** Gradient canvas presets behind the card. `none` removes only the canvas. */
-export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset';
+export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset' | 'welcome';
 
 /** Footer layout: centered stack, single row with QR at the end, or minimal line with the QR floating in the card corner. */
 export type ChatShareCardFooterVariant = 'stacked' | 'row' | 'minimal' | 'canvas' | 'exif';
@@ -84,6 +84,18 @@ const BACKDROP_STYLES: Record<Exclude<ChatShareCardBackdrop, 'none'>, CSSPropert
   },
   sunset: {
     background: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+  },
+  // Export-safe still of the opening ceremony's shallow-water field. The live
+  // onboarding scene uses a WebGL shader, which a DOM PNG capture cannot
+  // faithfully serialize.
+  welcome: {
+    background:
+      'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px),' +
+      'radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%),' +
+      'radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%),' +
+      'linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)),' +
+      '#dce5e7',
+    backgroundSize: '88px 100%, auto, auto, auto, auto',
   },
 };
 
@@ -239,9 +251,8 @@ export function ChatShareCard({
             'rounded-2xl border border-black/[0.06] bg-card text-card-foreground shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] dark:border-white/10'
           : // Keep the theme surface opaque even without a surrounding canvas.
             cn(
-              'rounded-[20px] border border-black/[0.08] bg-card',
-              'shadow-[0_16px_48px_-12px_rgba(16,24,40,0.18),inset_0_1px_0_rgba(255,255,255,0.7)]',
-              'dark:border-white/[0.09] dark:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)]',
+              'border border-black/[0.08] bg-card',
+              'dark:border-white/[0.09]',
               'text-card-foreground'
             ),
         className
@@ -347,7 +358,7 @@ export function ChatShareCard({
             // Camera-caption band: brighter than the conversation surface.
             framed
               ? 'border-t border-border bg-white dark:bg-white/[0.04]'
-              : 'border-t border-black/[0.05] bg-white/70 backdrop-blur-xl dark:border-white/[0.07] dark:bg-white/[0.04]'
+              : 'border-t border-black/[0.05] dark:border-white/[0.07]'
           )}
         >
           {meta?.icon ?? <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />}

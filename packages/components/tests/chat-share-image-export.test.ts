@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { exportChatShareImage } from '../src/lib/chat-share-image-export';
+import { copyChatShareImage, exportChatShareImage } from '../src/lib/chat-share-image-export';
 
 const mocks = vi.hoisted(() => ({ toBlob: vi.fn(), bridge: vi.fn() }));
 vi.mock('@zumer/snapdom', () => ({ snapdom: { toBlob: mocks.toBlob } }));
@@ -98,6 +98,70 @@ describe('chat share image export', () => {
     });
     mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: false, error: 'Disk full' }) });
     await expect(exportChatShareImage(document.createElement('div'))).rejects.toThrow('Disk full');
+  });
+
+  it('hands PNG bytes to Electron clipboard and propagates copy failure', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
+    const copyToClipboard = vi.fn(async () => ({ copied: true }));
+    mocks.toBlob.mockResolvedValue({
+      type: 'image/png',
+      size: bytes.byteLength,
+      arrayBuffer: async () => bytes,
+    });
+    mocks.bridge.mockReturnValue({ copyToClipboard });
+
+    await copyChatShareImage(document.createElement('div'));
+    expect(copyToClipboard).toHaveBeenCalledWith({ pngBytes: bytes });
+
+    mocks.bridge.mockReturnValue({
+      copyToClipboard: async () => ({ copied: false, error: 'Clipboard busy' }),
+    });
+    await expect(copyChatShareImage(document.createElement('div'))).rejects.toThrow(
+      'Clipboard busy'
+    );
+  });
+
+  it('writes the captured PNG with the browser clipboard when no native bridge exists', async () => {
+    const write = vi.fn(async () => undefined);
+    class TestClipboardItem {
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+    }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+
+    await copyChatShareImage(document.createElement('div'));
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
+    await expect(item.items['image/png']).resolves.toBeInstanceOf(Blob);
+  });
+
+  it('starts the browser clipboard write before the image capture resolves', async () => {
+    let releaseFonts: (() => void) | undefined;
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: {
+        ready: new Promise<void>((resolve) => {
+          releaseFonts = resolve;
+        }),
+      },
+    });
+    const write = vi.fn(async () => undefined);
+    class TestClipboardItem {
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+    }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+
+    const copy = copyChatShareImage(document.createElement('div'));
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
+    const png = item.items['image/png'];
+    expect(png).toBeInstanceOf(Promise);
+
+    releaseFonts?.();
+    await Promise.all([copy, png]);
   });
 
   it('rejects empty or non-PNG captures before saving', async () => {
