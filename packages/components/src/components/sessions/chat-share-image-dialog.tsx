@@ -19,7 +19,7 @@ import {
 } from '@/components/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
-const BACKDROPS: ChatShareCardBackdrop[] = ['none', 'lody', 'aurora', 'ocean', 'sunset'];
+const BACKDROPS: ChatShareCardBackdrop[] = ['none', 'lody', 'aurora', 'ocean', 'sunset', 'welcome'];
 const FOOTER_VARIANTS: ChatShareCardFooterVariant[] = [
   'stacked',
   'row',
@@ -33,6 +33,8 @@ const BACKDROP_SWATCHES: Record<Exclude<ChatShareCardBackdrop, 'none'>, string> 
   aurora: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)',
   ocean: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)',
   sunset: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+  welcome:
+    'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px), radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%), radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%), linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)), #dce5e7',
 };
 
 /** EXIF sub line: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
@@ -259,7 +261,7 @@ export function ChatShareImageDialog({
 
             <div className="space-y-2">
               <Label>{t('sessions.shareImage.backdrop', 'Background')}</Label>
-              <div className="grid grid-cols-4 gap-2" role="group">
+              <div className="grid grid-cols-5 gap-1.5" role="group">
                 <button
                   type="button"
                   aria-pressed={backdrop === 'none'}
@@ -290,7 +292,10 @@ export function ChatShareImageDialog({
                         'relative aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
                         selected ? 'border-primary ring-2 ring-primary' : 'border-border/70'
                       )}
-                      style={{ background: BACKDROP_SWATCHES[value] }}
+                      style={{
+                        background: BACKDROP_SWATCHES[value],
+                        ...(value === 'welcome' ? { backgroundSize: '88px 100%, auto' } : {}),
+                      }}
                       onClick={() => setBackdrop(value)}
                     >
                       {selected ? (

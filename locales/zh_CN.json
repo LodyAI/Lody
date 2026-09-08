@@ -2019,6 +2019,7 @@
   "sessions.shareImage.backdropLody": "Lody",
   "sessions.shareImage.backdropOcean": "海洋",
   "sessions.shareImage.backdropSunset": "日落",
+  "sessions.shareImage.backdropWelcome": "欢迎页",
   "sessions.shareImage.selectMessage": "选择消息",
   "sessions.shareImage.selectedCount": "已选 {{count}} 条",
   "sessions.shareImage.clearSelection": "取消全选",

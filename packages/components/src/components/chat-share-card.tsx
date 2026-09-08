@@ -20,7 +20,7 @@ export interface ChatShareCardCodeOptions {
 }
 
 /** Gradient canvas presets behind the card. `none` removes only the canvas. */
-export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset';
+export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset' | 'welcome';
 
 /** Footer layout: centered stack, single row with QR at the end, or minimal line with the QR floating in the card corner. */
 export type ChatShareCardFooterVariant = 'stacked' | 'row' | 'minimal' | 'canvas' | 'exif';
@@ -84,6 +84,18 @@ const BACKDROP_STYLES: Record<Exclude<ChatShareCardBackdrop, 'none'>, CSSPropert
   },
   sunset: {
     background: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+  },
+  // Export-safe still of the opening ceremony's shallow-water field. The live
+  // onboarding scene uses a WebGL shader, which a DOM PNG capture cannot
+  // faithfully serialize.
+  welcome: {
+    background:
+      'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px),' +
+      'radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%),' +
+      'radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%),' +
+      'linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)),' +
+      '#dce5e7',
+    backgroundSize: '88px 100%, auto, auto, auto, auto',
   },
 };
 

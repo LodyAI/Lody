@@ -22,7 +22,8 @@ Browser copying uses `ClipboardItem` and reports unsupported APIs as a recoverab
 failure rather than silently falling back to a file download.
 
 The existing background choices render as a visible swatch grid rather than a
-text-only menu. It shows only the five implemented canvas values, keeping the
+text-only menu. It shows only the implemented canvas values, including an
+export-safe still derived from the onboarding welcome background. This keeps the
 selection affordance aligned with the exported image instead of implying an
 unavailable wallpaper library.
 

@@ -17,7 +17,7 @@ const meta = {
   argTypes: {
     backdrop: {
       control: 'select',
-      options: ['none', 'lody', 'aurora', 'ocean', 'sunset'],
+      options: ['none', 'lody', 'aurora', 'ocean', 'sunset', 'welcome'],
       description: 'Gradient canvas framing the card (part of the exported image).',
     },
     footerVariant: {
@@ -161,6 +161,11 @@ export const NoBackdropDark: Story = {
 export const NoBackdropLight: Story = {
   ...NoBackdropDark,
   args: { ...NoBackdropDark.args, theme: 'light' },
+};
+
+export const WelcomeBackdrop: Story = {
+  ...Light,
+  args: { ...Light.args, backdrop: 'welcome' },
 };
 
 // Long code block with one very long line, to exercise wrap and collapse.

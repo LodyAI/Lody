@@ -2019,6 +2019,7 @@
   "sessions.shareImage.backdropLody": "Lody",
   "sessions.shareImage.backdropOcean": "Ocean",
   "sessions.shareImage.backdropSunset": "Sunset",
+  "sessions.shareImage.backdropWelcome": "Welcome",
   "sessions.shareImage.selectMessage": "Select message",
   "sessions.shareImage.selectedCount": "{{count}} selected",
   "sessions.shareImage.clearSelection": "Clear selection",
