@@ -6132,7 +6132,7 @@ const StandardToolContentBlock = ({
       if (
         'blob' in content.resource && 
         typeof content.resource.mimeType === 'string' &&
-        content.resource.mimeType.startsWith('image/')
+        content.resource.mimeType.toLowerCase().startsWith('image/')
       ) {
         const src = buildSafeBase64DataUrl(content.resource.mimeType, content.resource.blob);
         if (src) {
