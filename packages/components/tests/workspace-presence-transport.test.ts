@@ -177,6 +177,35 @@ describe('WorkspacePresenceTransport', () => {
     expect(presence.getSyncState()).toBe('idle');
     expect(transports[0]?.close).toHaveBeenCalledTimes(1);
     expect(stores[0]?.destroy).toHaveBeenCalledTimes(1);
+
+    presence.start({ baseUrl: 'https://streams.example.test', auth: async () => 'token' });
+    expect(snapshots.at(-1)).toEqual({
+      [key]: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: 100,
+      },
+    });
+    expect(stores).toHaveLength(2);
+
+    stores[1]?.setStates({
+      [key]: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: 200,
+      },
+    });
+    expect(snapshots.at(-1)).toEqual({
+      [key]: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: 200,
+      },
+    });
+    await presence.stop();
   });
 
   it('exposes the current ephemeral store on window for debugging', async () => {

@@ -129,7 +129,11 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected onStoreChange(store: PresenceStoreLike): void {
     this.lastSnapshotAtMs = Date.now();
-    this.options.onSnapshot?.(parseLodyPresenceStates(store.getAllStates()));
+    const states = parseLodyPresenceStates(store.getAllStates());
+    if (!Object.values(states).some((state) => state.kind === 'machine')) {
+      return;
+    }
+    this.options.onSnapshot?.(states);
   }
 
   protected override onRoomStarted(store: PresenceStoreLike): void {
