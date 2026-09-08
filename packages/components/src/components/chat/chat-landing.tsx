@@ -331,7 +331,6 @@ import {
   getEffectiveSessionActivitySummary,
   getLatestPullRequestInfo,
 } from '@/components/sessions/session-list-rows';
-import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { getLocalProjectVisibilityKey as buildLocalProjectKey } from '@/lib/visible-local-project-index';
 import {
   isThoughtLevelSelector,
@@ -3856,15 +3855,14 @@ function WorkspaceChatLanding({
      as Tabs since they're already inline. */
 
   /* ── Machine ── */
-  const mobileSheetOnlineMachines = useOnlineMachines();
   const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
-    return mobileSheetOnlineMachines.map((m) => ({
+    return Array.from(selectableMachines.values()).map((m) => ({
       value: m.id as MachineId,
       label: m.name,
       searchText: m.name,
       icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
     }));
-  }, [mobileSheetOnlineMachines]);
+  }, [selectableMachines]);
   const mobileSheetSelectedMachineLabel = useMemo(() => {
     if (!selectedMachineId) return null;
     return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
