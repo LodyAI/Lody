@@ -416,7 +416,7 @@ describe('getChatLandingInitialDataLoading', () => {
         localMachineStateAttempted: true,
         hasSelectableMachine: true,
       })
-    ).toBe(true);
+    ).toBe(false);
 
     expect(
       getChatLandingInitialDataLoading({
@@ -425,6 +425,18 @@ describe('getChatLandingInitialDataLoading', () => {
         isDocMetaCacheReady: true,
         localMachineStateAttempted: false,
         hasSelectableMachine: true,
+      })
+    ).toBe(true);
+  });
+
+  it('keeps loading while doc metadata is pending and no selectable machine exists', () => {
+    expect(
+      getChatLandingInitialDataLoading({
+        isRuntimeInitializing: false,
+        isVisibleMachinesLoading: false,
+        isDocMetaCacheReady: false,
+        localMachineStateAttempted: true,
+        hasSelectableMachine: false,
       })
     ).toBe(true);
   });
