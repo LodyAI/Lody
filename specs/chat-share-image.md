@@ -24,10 +24,16 @@ remains the session creation date; elapsed runtime is not displayed.
 
 Removing the backdrop retains an opaque card in the chosen theme. PNG export
 captures the full card and any backdrop, independent of preview scrolling or
-scaling. It waits for fonts and images, disables duplicate exports, and reports
-failures for retry. Electron uses its native save dialog; browsers download the
-file. Canceling the save dialog preserves the preview. Clipboard copying is
-outside this scope.
+scaling. It waits for fonts and images, disables duplicate export or copy actions,
+and reports failures for retry. Electron uses its native save dialog; browsers
+download the file. Canceling the save dialog preserves the preview.
+
+The preview also provides an explicit Copy image action. It captures the same PNG
+as export and writes it only to the local system clipboard: Electron delegates the
+PNG bytes to its native clipboard bridge, while browsers use the image Clipboard API.
+Browsers without image clipboard support report a recoverable failure; a failed
+copy leaves the preview open for retry. Copying does not publish the conversation
+or change the saved image behavior.
 
 Evidence: [selection tests](../packages/components/tests/message-selection.test.tsx),
 [metadata tests](../packages/shared/tests/conversation-markdown.test.ts), and

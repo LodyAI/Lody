@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Loader2 } from 'lucide-react';
+import { Check, Copy, Download, Loader2 } from 'lucide-react';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/ui/label';
 import { Input } from '@/ui/input';
 import { Button } from '@/ui/button';
-import { exportChatShareImage } from '@/lib/chat-share-image-export';
+import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import {
@@ -140,13 +140,16 @@ export function ChatShareImageDialog({
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
+  const [operation, setOperation] = useState<'copy' | 'export' | null>(null);
   const [assetsReady, setAssetsReady] = useState(false);
   const [exportError, setExportError] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleExport = async () => {
     if (!exportRef.current || exportingRef.current || !assetsReady) return;
     exportingRef.current = true;
     setExporting(true);
+    setOperation('export');
     setExportError(false);
     try {
       await exportChatShareImage(exportRef.current, session?.title);
@@ -155,6 +158,26 @@ export function ChatShareImageDialog({
     } finally {
       exportingRef.current = false;
       setExporting(false);
+      setOperation(null);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!exportRef.current || exportingRef.current || !assetsReady) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setOperation('copy');
+    setExportError(false);
+    setCopied(false);
+    try {
+      await copyChatShareImage(exportRef.current);
+      setCopied(true);
+    } catch {
+      setExportError(true);
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+      setOperation(null);
     }
   };
 
@@ -389,20 +412,40 @@ export function ChatShareImageDialog({
             <p role="alert" className="mr-auto text-sm text-destructive">
               {t(
                 'sessions.shareImage.exportFailed',
-                'Could not export the image. Please try again.'
+                'Could not complete the image action. Please try again.'
               )}
             </p>
+          ) : copied ? (
+            <p role="status" className="mr-auto text-sm text-muted-foreground">
+              {t('sessions.shareImage.copied', 'Image copied to clipboard')}
+            </p>
           ) : null}
+          <Button
+            variant="outline"
+            onClick={() => void handleCopy()}
+            disabled={exporting || !assetsReady || messages.length === 0}
+          >
+            {operation === 'copy' ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : copied ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            {operation === 'copy'
+              ? t('sessions.shareImage.copying', 'Copying...')
+              : t('sessions.shareImage.copyImage', 'Copy image')}
+          </Button>
           <Button
             onClick={() => void handleExport()}
             disabled={exporting || !assetsReady || messages.length === 0}
           >
-            {exporting ? (
+            {operation === 'export' ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Download className="size-4" />
             )}
-            {exporting
+            {operation === 'export'
               ? t('sessions.shareImage.exporting', 'Exporting...')
               : t('sessions.shareImage.exportPng', 'Export PNG')}
           </Button>

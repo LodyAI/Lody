@@ -24,7 +24,7 @@ function pinOrderedListValues(element: HTMLElement): () => void {
   };
 }
 
-export async function exportChatShareImage(element: HTMLElement, title?: string): Promise<void> {
+async function captureChatShareImage(element: HTMLElement): Promise<Blob> {
   await document.fonts.ready;
   await Promise.all(Array.from(element.querySelectorAll('img')).map((image) => image.decode()));
   const { snapdom } = await import('@zumer/snapdom');
@@ -54,6 +54,26 @@ export async function exportChatShareImage(element: HTMLElement, title?: string)
     restoreLists();
   }
   if (blob.type !== 'image/png' || blob.size === 0) throw new Error('PNG encoding failed');
+  return blob;
+}
+
+export async function copyChatShareImage(element: HTMLElement): Promise<void> {
+  const blob = await captureChatShareImage(element);
+  const bridge = getImagePreviewExportBridge();
+  if (bridge) {
+    const result = await bridge.copyToClipboard({ pngBytes: await blob.arrayBuffer() });
+    if (!result.copied) throw new Error(result.error || 'Image copy failed');
+    return;
+  }
+
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    throw new Error('Image clipboard is unavailable');
+  }
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
+export async function exportChatShareImage(element: HTMLElement, title?: string): Promise<void> {
+  const blob = await captureChatShareImage(element);
 
   const name =
     (title?.trim() || 'lody-conversation')
