@@ -68,15 +68,18 @@ describe('BillingSettingsRoute', () => {
   it.each([
     ['iOS Safari', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15'],
     ['Android Chrome', 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/130'],
-  ])('renders billing settings in mobile %s', (_browser, userAgent) => {
+  ])('renders billing settings in mobile %s', async (_browser, userAgent) => {
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
       value: userAgent,
     });
 
-    act(() => root.render(createElement(BillingSettingsRoute)));
-
-    expect(container.textContent).toBe('billing-settings');
+    await act(async () => {
+      root.render(createElement(BillingSettingsRoute));
+    });
+    await vi.waitFor(() => {
+      expect(container.textContent).toBe('billing-settings');
+    });
     expect(routerState.navigateProps).toBeNull();
   });
 
