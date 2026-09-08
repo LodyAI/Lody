@@ -62,6 +62,8 @@ document checks, and public-boundary checks passed.
 
 ## Integration
 
+- [Lody integration PR](https://github.com/LodyAI/Lody/pull/515)
+
 The DSH fix is based on its current main, preserving the already-merged independent
 Plan Mode support. Lody therefore also advances `acp-extension-core` to the merged
 0.1.1 contract required by DSH 0.1.2. The existing workspace override keeps Core
