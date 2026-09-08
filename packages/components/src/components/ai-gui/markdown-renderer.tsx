@@ -58,6 +58,7 @@ import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { useTaskImageUrl } from '@/hooks/use-task-image';
 import { MarkdownDiffBlock } from './markdown-diff-block';
+import { resolveMarkdownStreamdownMode } from './markdown-streamdown-mode';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer, type MermaidDiagramSelection } from './mermaid-diagram-viewer';
 
@@ -1409,7 +1410,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           // remount when raw-HTML mode or Mermaid theme changes so sanitized
           // rendering and diagram colors update correctly.
           key={streamdownKey}
-          mode="streaming"
+          mode={resolveMarkdownStreamdownMode(isStreaming)}
           className="space-y-0"
           controls={STREAMDOWN_CONTROLS}
           isAnimating={isStreaming}
