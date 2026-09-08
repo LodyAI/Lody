@@ -401,6 +401,7 @@
   "chat.mobileNewChat.planModeLabel": "计划",
   "chat.mobileNewChat.projectLabel": "项目",
   "chat.mobileNewChat.repoLabel": "仓库",
+  "chat.mobileNewChat.roleMachineLocked": "所选 Role 已固定运行机器",
   "chat.mobileNewChat.title": "新建对话",
   "chat.mobileNewChat.workLabel": "工作",
   "chat.mobileProject.chatTab": "对话",

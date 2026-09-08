@@ -49,6 +49,7 @@ import {
   Loader2,
   LockKeyhole,
   Monitor,
+  MessageSquare,
   PanelLeft,
   RefreshCw,
   X,
@@ -3815,15 +3816,29 @@ function WorkspaceChatLanding({
   const mobileSheetMachineNode = (
     <MobileNativeSelect<MachineId>
       value={selectedMachineId}
-      onChange={(id) => handleMachineChange(id)}
-      options={mobileSheetMachineOptions}
+      onChange={(id) => {
+        if (activeAgentRole && id !== activeAgentRole.machineId) return;
+        handleMachineChange(id);
+      }}
+      options={mobileSheetMachineOptions.map((option) =>
+        activeAgentRole && option.value !== activeAgentRole.machineId
+          ? {
+              ...option,
+              disabled: true,
+              label: `${option.label} — ${t('chat.mobileNewChat.roleMachineLocked')}`,
+            }
+          : option
+      )}
       disabled={hasNoMachine}
       loading={isInitialDataLoading}
       ariaLabel={t('chat.machineSelector.placeholder', 'Machine')}
       triggerContent={
         <>
           <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-          <span className="truncate">
+          <span
+            className="truncate"
+            title={activeAgentRole ? t('chat.mobileNewChat.roleMachineLocked') : undefined}
+          >
             {isInitialDataLoading
               ? t('chat.machineSelector.loading', 'Loading machine...')
               : (mobileSheetSelectedMachineLabel ??
@@ -3839,7 +3854,7 @@ function WorkspaceChatLanding({
      desktop. The encoded value is only a native-select key; the selection map
      keeps parsing and business behavior in the shared selection handler. */
   const mobileSheetProjectModel = useMemo(() => {
-    const selections = new Map<string, Exclude<UnifiedProjectSelection, { kind: 'none' }>>();
+    const selections = new Map<string, UnifiedProjectSelection>([['chat', { kind: 'none' }]]);
     const options: Array<MobileNativeSelectOption<string> & { lastUsedAt?: number }> = [];
     const localLabel = t('chat.contextSwitch.localProjects', 'Local');
     const githubLabel = t('chat.contextSwitch.github', 'GitHub');
@@ -3869,6 +3884,10 @@ function WorkspaceChatLanding({
       });
     }
     options.sort(compareUnifiedProjectOptions);
+    options.unshift({
+      value: 'chat',
+      label: t('chat.projectPicker.clear', "Don't work in a project"),
+    });
     return { options, selections };
   }, [desktopLocalProjectOptions, mobileSheetRecency.byRepo, repositories, t]);
   const mobileSheetSelectedProjectValue =
@@ -3879,7 +3898,9 @@ function WorkspaceChatLanding({
         )}`
       : unifiedProjectSelection.kind === 'github'
         ? `github:${unifiedProjectSelection.repoFullName}`
-        : null;
+        : contextType === 'chat'
+          ? 'chat'
+          : null;
   const mobileSheetSelectedProjectLabel =
     unifiedProjectSelection.kind === 'local'
       ? (desktopLocalProjectOptions.find(
@@ -3887,21 +3908,31 @@ function WorkspaceChatLanding({
         )?.name ?? t('chat.projectPicker.placeholder', 'Select a project'))
       : unifiedProjectSelection.kind === 'github'
         ? unifiedProjectSelection.repoFullName
-        : t('chat.projectPicker.placeholder', 'Select a project');
+        : contextType === 'chat'
+          ? t('chat.contextSwitch.chat', 'Chat')
+          : t('chat.projectPicker.placeholder', 'Select a project');
   const mobileSheetProjectNode = (
     <MobileNativeSelect<string>
       value={mobileSheetSelectedProjectValue}
       onChange={(value) => {
         const selection = mobileSheetProjectModel.selections.get(value);
-        if (selection) handleUnifiedProjectChange(selection);
+        if (!selection) return;
+        if (
+          selection.kind === 'local' &&
+          activeAgentRole &&
+          selection.machineId !== activeAgentRole.machineId
+        )
+          return;
+        handleUnifiedProjectChange(selection);
       }}
       options={mobileSheetProjectModel.options}
       ariaLabel={t('chat.projectPicker.placeholder', 'Select a project')}
-      showIndicator={false}
-      className="w-fit max-w-full"
+      className="h-11 w-fit max-w-full text-base font-semibold"
       triggerContent={
         <>
-          {unifiedProjectSelection.kind === 'github' ? (
+          {contextType === 'chat' ? (
+            <MessageSquare className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+          ) : unifiedProjectSelection.kind === 'github' ? (
             <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
           ) : (
             <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
@@ -4018,72 +4049,6 @@ function WorkspaceChatLanding({
   /* New-chat no longer needs a below-composer selector row — every run
      knob lives inside MobileSessionRunConfig. */
   const mobileSheetBelowComposerNode = null;
-
-  const mobileSheetLastWorkProjectRef = useRef<Exclude<
-    UnifiedProjectSelection,
-    { kind: 'none' }
-  > | null>(null);
-  useEffect(() => {
-    if (unifiedProjectSelection.kind !== 'none') {
-      mobileSheetLastWorkProjectRef.current = unifiedProjectSelection;
-    }
-  }, [unifiedProjectSelection]);
-  const handleMobileSheetModeChange = useCallback(
-    (mode: 'work' | 'chat') => {
-      if (mode === 'chat') {
-        setContextType('chat');
-        return;
-      }
-      if (contextType !== 'chat') return;
-      const remembered = mobileSheetLastWorkProjectRef.current;
-      const rememberedValue =
-        remembered?.kind === 'local'
-          ? `local:${buildLocalProjectKey(remembered.machineId, remembered.localProjectId)}`
-          : remembered?.kind === 'github'
-            ? `github:${remembered.repoFullName}`
-            : null;
-      const selection =
-        (rememberedValue ? mobileSheetProjectModel.selections.get(rememberedValue) : undefined) ??
-        mobileSheetProjectModel.selections.values().next().value;
-      if (selection) handleUnifiedProjectChange(selection);
-    },
-    [contextType, handleUnifiedProjectChange, mobileSheetProjectModel.selections]
-  );
-
-  /* Work / Chat is the only top-level mode. Local and GitHub are properties of
-     the unified project selection rather than separate modes. */
-  const mobileSheetContextSwitchNode = (
-    <div
-      role="group"
-      aria-label={t('chat.mobileNewChat.contextTypeLabel', 'Type')}
-      className="flex h-8 select-none items-center rounded-lg bg-muted/70 p-0.5 text-xs font-medium"
-    >
-      {(['work', 'chat'] as const).map((mode) => {
-        const active = mode === 'chat' ? contextType === 'chat' : contextType !== 'chat';
-        const disabled = mode === 'work' && mobileSheetProjectModel.options.length === 0;
-        return (
-          <button
-            key={mode}
-            type="button"
-            aria-pressed={active}
-            disabled={disabled}
-            onClick={() => handleMobileSheetModeChange(mode)}
-            className={cn(
-              'h-7 rounded-md px-2.5 transition-colors',
-              active
-                ? 'bg-background text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground',
-              disabled && 'cursor-not-allowed opacity-40'
-            )}
-          >
-            {mode === 'work'
-              ? t('chat.mobileNewChat.workLabel', 'Work')
-              : t('chat.contextSwitch.chat', 'Chat')}
-          </button>
-        );
-      })}
-    </div>
-  );
 
   // ── Hints ──
   const hasNoAgentConfig = executorConfigs.length === 0;
@@ -6004,13 +5969,12 @@ function WorkspaceChatLanding({
     },
     coordinator: MobileInlinePickerCoordinator,
     machineNode: mobileSheetMachineNode,
-    contextTypeNode: mobileSheetContextSwitchNode,
-    /* Local folders and GitHub repositories share this picker. Chat has no
-       project row; branch appears beside the selected project when relevant. */
-    perTypeNode: contextType === 'chat' ? null : mobileSheetProjectNode,
+    contextTypeNode: null,
+    /* The header picker includes Chat; only project contexts expose branch controls. */
+    perTypeNode: mobileSheetProjectNode,
     branchNode: contextType === 'chat' ? null : mobileSheetBranchNode,
     secondaryPerTypeNode: mobileSheetWorkdirModeNode,
-    composer: (
+    composer: (targetControls) => (
       <ErrorBoundary
         name="MobileNewChatSheetComposer"
         variant="section"
@@ -6019,6 +5983,7 @@ function WorkspaceChatLanding({
         <MobileInlinePickerRowSlot>
           {sessionLimitNoticeNode}
           <ChatComposer
+            fillSheet
             tone={tone}
             variant="session"
             mentionSource={mentionSource}
@@ -6051,7 +6016,14 @@ function WorkspaceChatLanding({
             onFileRemove={submitting ? undefined : handleRemoveFile}
             onFileRetry={submitting ? undefined : handleRetryFile}
             mcp={mcpSelection.menu}
-            footerSelector={mobileSheetFooterSelectorNode}
+            footerSelector={
+              <>
+                <div className="flex h-10 w-max max-w-[70vw] shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2">
+                  {mobileSheetFooterSelectorNode}
+                </div>
+                {targetControls}
+              </>
+            }
             statusMessage={visibleComposerStatus?.message}
             statusTone={visibleComposerStatus?.tone}
             primaryAction={
@@ -6067,7 +6039,7 @@ function WorkspaceChatLanding({
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
                 className={cn(
-                  'h-8 w-8 rounded-full shadow-xs transition-all',
+                  'h-10 w-10 rounded-full shadow-xs transition-all',
                   'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
                 )}
               >
@@ -6078,8 +6050,7 @@ function WorkspaceChatLanding({
                 )}
               </Button>
             }
-            autoResize
-            maxRows={6}
+            autoResize={false}
           />
         </MobileInlinePickerRowSlot>
       </ErrorBoundary>

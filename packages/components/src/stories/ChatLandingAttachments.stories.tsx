@@ -164,6 +164,7 @@ function MobileNewChatDemo() {
   const composer = (
     <MobileInlinePickerRowSlot>
       <ChatComposer
+        fillSheet
         tone="light"
         variant="session"
         promptId="chat-prompt-mobile-sheet"
@@ -195,8 +196,7 @@ function MobileNewChatDemo() {
             <ArrowUp className="h-5 w-5" />
           </Button>
         }
-        autoResize
-        maxRows={6}
+        autoResize={false}
       />
     </MobileInlinePickerRowSlot>
   );
@@ -218,7 +218,7 @@ function MobileNewChatDemo() {
     // a wide Storybook canvas. Mobile card sizing still keys off window width.
     <div className="flex min-h-screen justify-center bg-muted/40 py-6">
       <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
-        <MobileNewChatSheetContent {...contentProps} />
+        <MobileNewChatSheetContent {...contentProps} className="h-full" />
       </div>
     </div>
   );

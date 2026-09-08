@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
-import { ArrowUp, Folder, GitBranch, Github, Monitor, ShieldCheck, Sparkles } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ChatComposer } from '@/components/chat/chat-composer';
+import { ArrowUp, Folder, GitBranch, Github, Monitor } from 'lucide-react';
 
 import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
 import {
@@ -13,10 +14,6 @@ import {
   MobileNativeSelect,
   type MobileNativeSelectOption,
 } from '@/components/mobile/mobile-native-select';
-import {
-  MobileModelPickerLabel,
-  mobileModelPickerTriggerClassName,
-} from '@/components/mobile/mobile-session-composer-footer';
 import { WorktreeCheckboxPill } from '@/components/shared';
 import { Button } from '@/ui/button';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
@@ -78,54 +75,6 @@ const longModelOptions: MobileInlinePickerOption[] = [
   ...modelOptions,
 ];
 
-const thinkingOptions: MobileInlinePickerOption[] = [
-  { value: 'low', label: 'low' },
-  { value: 'medium', label: 'medium' },
-  { value: 'high', label: 'high' },
-];
-
-const agentOptions: MobileInlinePickerOption[] = [
-  { value: 'claude-code', label: 'Claude Code', icon: <Sparkles className="h-3.5 w-3.5" /> },
-  { value: 'codex', label: 'Codex', icon: <Sparkles className="h-3.5 w-3.5" /> },
-];
-
-const permissionOptions: MobileInlinePickerOption[] = [
-  {
-    value: 'askPermission',
-    label: 'Ask permission',
-    icon: <ShieldCheck className="h-3.5 w-3.5" />,
-  },
-];
-
-function MockWorkChatNode({
-  chat,
-  onChange,
-}: {
-  chat: boolean;
-  onChange: (chat: boolean) => void;
-}) {
-  return (
-    <div className="flex h-8 items-center rounded-lg bg-muted/70 p-0.5 text-xs font-medium">
-      {(['Work', 'Chat'] as const).map((label) => {
-        const active = label === 'Chat' ? chat : !chat;
-        return (
-          <button
-            key={label}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(label === 'Chat')}
-            className={`h-7 rounded-md px-2.5 ${
-              active ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function MockWorkdirModeNode({
   contextType,
   value,
@@ -146,14 +95,18 @@ function MockWorkdirModeNode({
 }
 
 function MockComposer({
+  initialPrompt = '',
+  targetControls,
   configOptionValues: _configOptionValues,
   onConfigOptionChange: _onConfigOptionChange,
   selectedModel,
   setSelectedModel,
   modelPickerOptions = modelOptions,
   selectedThinking,
-  setSelectedThinking,
+  setSelectedThinking: _setSelectedThinking,
 }: {
+  initialPrompt?: string;
+  targetControls?: ReactNode;
   configOptionValues: Record<string, AcpConfigOptionValue>;
   onConfigOptionChange: (configId: string, value: AcpConfigOptionValue) => void;
   selectedModel: string;
@@ -162,68 +115,69 @@ function MockComposer({
   selectedThinking: string;
   setSelectedThinking: (v: string) => void;
 }) {
+  const [prompt, setPrompt] = useState(initialPrompt);
   return (
     <MobileInlinePickerRowSlot>
-      <div className="rounded-2xl border border-input-border/70 bg-input/90 p-3">
-        <textarea
-          rows={2}
-          placeholder="描述你的需求。"
-          className="input-scrollbar w-full resize-none bg-transparent text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus:outline-none"
-        />
-        {/* Mirrors the real composer footer: the configOptions cluster
-            fills the row (`w-full` inside the `flex-1` wrapper) so each
-            config shows in full, and only the model shrinks/truncates
-            (keeping its tail) once the row is too narrow — thinking is
-            pinned `shrink-0`. The send button sits at the far right. */}
-        <div className="flex items-center pt-1">
-          <div className="flex min-w-0 flex-1 items-center">
-            <div className="flex w-full min-w-0 items-center">
-              <div className="min-w-0">
-                <MobileInlinePicker
-                  id="story-model"
-                  value={selectedModel}
-                  onChange={setSelectedModel}
-                  options={modelPickerOptions}
-                  ariaLabel="Model"
-                  triggerClassName={mobileModelPickerTriggerClassName}
-                  triggerContent={<MobileModelPickerLabel>{selectedModel}</MobileModelPickerLabel>}
-                />
-              </div>
-              <div className="ml-1 shrink-0">
-                <MobileInlinePicker
-                  id="story-thinking"
-                  value={selectedThinking}
-                  onChange={setSelectedThinking}
-                  options={thinkingOptions}
-                  ariaLabel="Thinking"
-                  triggerClassName="h-8 px-2 py-1 text-sm"
-                  triggerContent={<span className="truncate">{selectedThinking}</span>}
-                />
-              </div>
+      <ChatComposer
+        fillSheet
+        variant="session"
+        promptValue={prompt}
+        onPromptChange={setPrompt}
+        promptPlaceholder="Describe a coding task in lody"
+        onAttachmentAddClick={() => {}}
+        footerSelector={
+          <>
+            <div className="flex h-10 w-max max-w-[70vw] shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2">
+              <MobileInlinePicker
+                id="story-model"
+                value={selectedModel}
+                onChange={setSelectedModel}
+                options={modelPickerOptions}
+                ariaLabel="Model"
+                triggerContent={
+                  <span>
+                    {selectedModel} · {selectedThinking}
+                  </span>
+                }
+              />
             </div>
-          </div>
+            {targetControls}
+          </>
+        }
+        primaryAction={
           <Button
-            type="button"
             size="icon"
-            variant="ghost"
             aria-label="Send"
-            className="ml-2 h-8 w-8 shrink-0 rounded-full bg-foreground text-background shadow-xs transition-all hover:bg-foreground/90 hover:text-background"
+            disabled={!prompt.trim()}
+            onClick={() => setPrompt('')}
+            className="h-10 w-10 shrink-0 rounded-full bg-foreground text-background"
           >
             <ArrowUp className="h-5 w-5" />
           </Button>
-        </div>
-      </div>
+        }
+      />
     </MobileInlinePickerRowSlot>
   );
 }
 
 function StoryHarness({
+  keyboardHeight = 0,
+  initialPrompt = '',
   initialOpen = true,
   initialContextType = 'github' as 'local' | 'github' | 'chat',
   initialBranch = 'main',
   initialModel = 'claude-3.5-sonnet',
   modelPickerOptions = modelOptions,
 }) {
+  useEffect(() => {
+    const style = document.documentElement.style;
+    const previous = style.getPropertyValue('--native-keyboard-height');
+    style.setProperty('--native-keyboard-height', `${keyboardHeight}px`);
+    return () => {
+      if (previous) style.setProperty('--native-keyboard-height', previous);
+      else style.removeProperty('--native-keyboard-height');
+    };
+  }, [keyboardHeight]);
   const [open, setOpen] = useState(initialOpen);
   const [contextType, setContextType] = useState<'local' | 'github' | 'chat'>(initialContextType);
   const [configOptionValues, setConfigOptionValues] = useState<
@@ -236,15 +190,14 @@ function StoryHarness({
   const [workdirMode, setWorkdirMode] = useState<'local' | 'worktree'>('worktree');
   const [model, setModel] = useState(initialModel);
   const [thinking, setThinking] = useState('high');
-  const [agent, setAgent] = useState('claude-code');
-  const [permission, setPermission] = useState('askPermission');
   const selectedProject =
     contextType === 'local'
       ? `local:${localProject}`
       : contextType === 'github'
         ? `github:${repo}`
-        : null;
+        : 'chat';
   const projectOptions: MobileNativeSelectOption[] = [
+    { value: 'chat', label: "Don't work in a project" },
     ...localProjectOptions.map((option) => ({
       ...option,
       value: `local:${option.value}`,
@@ -285,43 +238,41 @@ function StoryHarness({
             }
           />
         }
-        contextTypeNode={
-          <MockWorkChatNode
-            chat={contextType === 'chat'}
-            onChange={(chat) => setContextType(chat ? 'chat' : 'local')}
-          />
-        }
+        contextTypeNode={null}
         perTypeNode={
-          contextType === 'chat' ? null : (
-            <MobileNativeSelect
-              value={selectedProject}
-              onChange={(value) => {
-                if (value.startsWith('local:')) {
-                  setLocalProject(value.slice('local:'.length));
-                  setContextType('local');
-                } else if (value.startsWith('github:')) {
-                  setRepo(value.slice('github:'.length));
-                  setContextType('github');
-                }
-              }}
-              options={projectOptions}
-              ariaLabel="Project"
-              showIndicator={false}
-              className="w-fit max-w-full"
-              triggerContent={
-                <>
-                  {contextType === 'github' ? (
-                    <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  ) : (
-                    <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  )}
-                  <span className="truncate">
-                    {contextType === 'github' ? repo : (localProject.split(':')[1] ?? 'lody')}
-                  </span>
-                </>
+          <MobileNativeSelect
+            value={selectedProject}
+            onChange={(value) => {
+              if (value === 'chat') {
+                setContextType('chat');
+              } else if (value.startsWith('local:')) {
+                setLocalProject(value.slice('local:'.length));
+                setContextType('local');
+              } else if (value.startsWith('github:')) {
+                setRepo(value.slice('github:'.length));
+                setContextType('github');
               }
-            />
-          )
+            }}
+            options={projectOptions}
+            ariaLabel="Project"
+            className="h-11 w-fit max-w-full text-base font-semibold"
+            triggerContent={
+              <>
+                {contextType === 'github' ? (
+                  <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                ) : (
+                  <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                )}
+                <span className="truncate">
+                  {contextType === 'chat'
+                    ? 'Chat'
+                    : contextType === 'github'
+                      ? repo
+                      : (localProject.split(':')[1] ?? 'lody')}
+                </span>
+              </>
+            }
+          />
         }
         branchNode={
           contextType === 'github' || (contextType === 'local' && workdirMode === 'worktree') ? (
@@ -349,8 +300,10 @@ function StoryHarness({
             />
           ) : null
         }
-        composer={
+        composer={(targetControls) => (
           <MockComposer
+            initialPrompt={initialPrompt}
+            targetControls={targetControls}
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
             selectedModel={model}
@@ -359,47 +312,7 @@ function StoryHarness({
             selectedThinking={thinking}
             setSelectedThinking={setThinking}
           />
-        }
-        belowComposerNode={
-          <MobileInlinePickerRowSlot>
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0">
-                <MobileInlinePicker
-                  id="story-agent"
-                  value={agent}
-                  onChange={setAgent}
-                  options={agentOptions}
-                  ariaLabel="Agent"
-                  triggerContent={
-                    <>
-                      <Sparkles className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
-                        {agentOptions.find((o) => o.value === agent)?.label ?? agent}
-                      </span>
-                    </>
-                  }
-                />
-              </div>
-              <div className="ml-auto min-w-0">
-                <MobileInlinePicker
-                  id="story-permission"
-                  value={permission}
-                  onChange={setPermission}
-                  options={permissionOptions}
-                  ariaLabel="Permission"
-                  triggerContent={
-                    <>
-                      <ShieldCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
-                        {permissionOptions.find((o) => o.value === permission)?.label ?? permission}
-                      </span>
-                    </>
-                  }
-                />
-              </div>
-            </div>
-          </MobileInlinePickerRowSlot>
-        }
+        )}
       />
     </div>
   );
@@ -464,6 +377,25 @@ export const LongModelName: Story = {
       initialContextType="chat"
       initialModel={longModelName}
       modelPickerOptions={longModelOptions}
+    />
+  ),
+};
+
+export const KeyboardOpen: Story = {
+  ...LocalContext,
+  render: () => <StoryHarness initialContextType="local" keyboardHeight={300} />,
+};
+
+export const LongPrompt: Story = {
+  ...LocalContext,
+  render: () => (
+    <StoryHarness
+      initialContextType="local"
+      keyboardHeight={300}
+      initialPrompt={Array.from(
+        { length: 40 },
+        (_, index) => `${index + 1}. Review the synthetic example and explain the proposed change.`
+      ).join('\n')}
     />
   ),
 };

@@ -401,6 +401,7 @@
   "chat.mobileNewChat.planModeLabel": "Plan",
   "chat.mobileNewChat.projectLabel": "Project",
   "chat.mobileNewChat.repoLabel": "Repo",
+  "chat.mobileNewChat.roleMachineLocked": "Machine is fixed by the selected Role",
   "chat.mobileNewChat.title": "New chat",
   "chat.mobileNewChat.workLabel": "Work",
   "chat.mobileProject.chatTab": "Chats",

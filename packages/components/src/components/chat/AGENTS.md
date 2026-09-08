@@ -29,9 +29,10 @@
   local projects and agent configs; changing away from a selected local project's
   machine clears that project instead of silently choosing another one. GitHub
   projects remain machine-independent. Mobile New Chat uses the same unified
-  Local/GitHub project model, grouped by source in its native picker, with Work/Chat as its only
-  top-level mode. Its local Worktree checkbox shares the project row; unchecked directly uses the
-  local folder without spelling out a redundant Local files mode. A single-member workspace never
+  Local/GitHub project model, grouped by source in its native header picker. Its first option
+  is no project (Chat), so there is no separate Work/Chat switch. Switching contexts preserves
+  the draft and run configuration; a selected Role prevents crossing machines. Machine,
+  branch, and Worktree join run config in the bottom scrolling rail. Unchecked Worktree directly uses the local folder without spelling out a redundant Local files mode. A single-member workspace never
   passes project-sharing state. In multi-member workspaces, local project options
   and the selected desktop trigger show only an effective `Private` status; Team
   and unresolved states stay hidden. Effective access still combines

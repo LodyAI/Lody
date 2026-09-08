@@ -99,6 +99,8 @@ export interface ChatComposerProps {
   title?: ReactNode;
   tone?: ChatComposerTone;
   variant?: ChatComposerVariant;
+  /** Fill a new-chat sheet with a borderless editor and a horizontally scrolling footer. */
+  fillSheet?: boolean;
   mentionSource?: MentionProjectSource;
   availableCommands?: AcpCommandSummary[];
   /** False while this retained composer is not the active command surface. */
@@ -234,6 +236,7 @@ export function ChatComposer({
   title,
   tone = 'light',
   variant = 'landing',
+  fillSheet = false,
   mentionSource,
   availableCommands,
   commandsEnabled = true,
@@ -652,6 +655,7 @@ export function ChatComposer({
         className={cn(
           'flex w-full flex-col',
           isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
+          fillSheet && 'min-h-0 flex-1',
           className
         )}
       >
@@ -662,7 +666,13 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          <div
+            className={cn(
+              'flex flex-col',
+              isLanding ? 'gap-2' : 'gap-1',
+              fillSheet && 'min-h-0 flex-1'
+            )}
+          >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -670,7 +680,13 @@ export function ChatComposer({
               </div>
             ) : null}
             <div
-              className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
+              className={cn(
+                boxContainerClassName,
+                imageDropClassName,
+                'group relative',
+                fillSheet &&
+                  'min-h-0 flex-1 gap-0 rounded-none border-0 bg-background p-0 dark:bg-background [--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:hsl(var(--background))]'
+              )}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
               onDragLeave={canHandleImageDrop ? handleImageDragLeave : undefined}
@@ -698,220 +714,230 @@ export function ChatComposer({
                   : undefined
               }
             >
-              {commentReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
-                  {commentReferenceItems.map((item) => (
-                    <CommentReferenceChip
-                      key={item.localId}
-                      item={item}
-                      onRemove={onCommentReferenceRemove}
-                      onClick={onCommentReferenceClick}
-                      revealRemoveOnClick={revealCommentReferenceRemoveOnClick}
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {visualAnnotationReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
-                  {visualAnnotationReferenceItems.map((item) => (
-                    <VisualAnnotationReferenceChip
-                      key={item.localId}
-                      item={item}
-                      onRemove={onVisualAnnotationReferenceRemove}
-                      revealRemoveOnClick={revealCommentReferenceRemoveOnClick}
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {imageItems.length > 0 || fileItems.length > 0 ? (
-                // Unified horizontal, scrollable attachment strip: image thumbnails
-                // and file cards share the same square-card shape and scroll
-                // sideways together (cards step up in size on mobile for touch).
-                <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
-                  {imageItems.map((image) => (
-                    <div
-                      key={image.id}
-                      title={
-                        image.status === 'failed' ? image.error || uploadFailedLabel : undefined
-                      }
-                      className={cn(
-                        'relative shrink-0 overflow-hidden rounded-xl border',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        image.status === 'failed' && 'border-destructive/50'
-                      )}
-                    >
-                      <button
-                        type="button"
-                        className="h-full w-full"
-                        onClick={() => setPreviewImageUrl(image.previewUrl)}
-                        aria-label={image.name}
+              <div className={fillSheet ? 'max-h-[30%] shrink-0 overflow-y-auto px-4' : 'contents'}>
+                {commentReferenceItems.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 pb-1">
+                    {commentReferenceItems.map((item) => (
+                      <CommentReferenceChip
+                        key={item.localId}
+                        item={item}
+                        onRemove={onCommentReferenceRemove}
+                        onClick={onCommentReferenceClick}
+                        revealRemoveOnClick={revealCommentReferenceRemoveOnClick}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {visualAnnotationReferenceItems.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 pb-1">
+                    {visualAnnotationReferenceItems.map((item) => (
+                      <VisualAnnotationReferenceChip
+                        key={item.localId}
+                        item={item}
+                        onRemove={onVisualAnnotationReferenceRemove}
+                        revealRemoveOnClick={revealCommentReferenceRemoveOnClick}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {imageItems.length > 0 || fileItems.length > 0 ? (
+                  // Unified horizontal, scrollable attachment strip: image thumbnails
+                  // and file cards share the same square-card shape and scroll
+                  // sideways together (cards step up in size on mobile for touch).
+                  <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
+                    {imageItems.map((image) => (
+                      <div
+                        key={image.id}
+                        title={
+                          image.status === 'failed' ? image.error || uploadFailedLabel : undefined
+                        }
+                        className={cn(
+                          'relative shrink-0 overflow-hidden rounded-xl border',
+                          isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
+                          image.status === 'failed' && 'border-destructive/50'
+                        )}
                       >
-                        <img
-                          src={image.previewUrl}
-                          alt={image.name}
-                          className={cn(
-                            'h-full w-full object-cover',
-                            image.status !== 'uploaded' && 'grayscale'
-                          )}
-                        />
-                        {image.status === 'uploading' ? (
-                          <div
-                            className="absolute inset-0 bg-black/45 transition-[clip-path]"
-                            style={{
-                              clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
-                            }}
+                        <button
+                          type="button"
+                          className="h-full w-full"
+                          onClick={() => setPreviewImageUrl(image.previewUrl)}
+                          aria-label={image.name}
+                        >
+                          <img
+                            src={image.previewUrl}
+                            alt={image.name}
+                            className={cn(
+                              'h-full w-full object-cover',
+                              image.status !== 'uploaded' && 'grayscale'
+                            )}
                           />
+                          {image.status === 'uploading' ? (
+                            <div
+                              className="absolute inset-0 bg-black/45 transition-[clip-path]"
+                              style={{
+                                clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
+                              }}
+                            />
+                          ) : null}
+                          {image.status === 'failed' ? (
+                            <div className="absolute inset-0 bg-black/45" />
+                          ) : null}
+                        </button>
+                        <div className="absolute right-1 top-1">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="icon"
+                            className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                            onClick={() => onImageRemove?.(image.id)}
+                            aria-label={removeImageLabel}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {image.status === 'uploading' ? (
+                          <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[10px] text-white">
+                            {image.progress}%
+                          </div>
                         ) : null}
                         {image.status === 'failed' ? (
-                          <div className="absolute inset-0 bg-black/45" />
+                          <button
+                            type="button"
+                            onClick={() => onImageRetry?.(image.id)}
+                            aria-label={retryUploadLabel}
+                            className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1 text-[10px] font-medium text-white transition hover:bg-black/75"
+                          >
+                            <RefreshCw className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{uploadFailedShortLabel}</span>
+                          </button>
                         ) : null}
-                      </button>
-                      <div className="absolute right-1 top-1">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
-                          onClick={() => onImageRemove?.(image.id)}
-                          aria-label={removeImageLabel}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
                       </div>
-                      {image.status === 'uploading' ? (
-                        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[10px] text-white">
-                          {image.progress}%
-                        </div>
-                      ) : null}
-                      {image.status === 'failed' ? (
-                        <button
-                          type="button"
-                          onClick={() => onImageRetry?.(image.id)}
-                          aria-label={retryUploadLabel}
-                          className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1 text-[10px] font-medium text-white transition hover:bg-black/75"
-                        >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                  {fileItems.map((file) => (
-                    <div
-                      key={file.id}
-                      title={file.status === 'failed' ? file.error || uploadFailedLabel : undefined}
-                      className={cn(
-                        'relative flex shrink-0 flex-col overflow-hidden rounded-xl border p-2',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        file.status === 'failed'
-                          ? 'border-destructive/45 bg-muted/60'
-                          : 'border-border/60 bg-muted/60'
-                      )}
-                    >
-                      <span
+                    ))}
+                    {fileItems.map((file) => (
+                      <div
+                        key={file.id}
+                        title={
+                          file.status === 'failed' ? file.error || uploadFailedLabel : undefined
+                        }
                         className={cn(
-                          'max-w-[64%] truncate font-semibold uppercase tracking-wide',
+                          'relative flex shrink-0 flex-col overflow-hidden rounded-xl border p-2',
+                          isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
                           file.status === 'failed'
-                            ? 'text-destructive/80'
-                            : 'text-muted-foreground',
-                          isMobile ? 'text-xs' : 'text-[10px]'
+                            ? 'border-destructive/45 bg-muted/60'
+                            : 'border-border/60 bg-muted/60'
                         )}
                       >
-                        {getFileTypeLabel(file.name)}
-                      </span>
-                      <span
-                        className={cn(
-                          'mt-1 break-words text-left font-medium text-input-foreground',
-                          isMobile ? 'line-clamp-3 text-sm' : 'line-clamp-2 text-xs'
-                        )}
-                      >
-                        {file.name}
-                      </span>
-                      {file.status === 'failed' ? (
-                        <button
-                          type="button"
-                          onClick={() => onFileRetry?.(file.id)}
-                          aria-label={retryUploadLabel}
-                          className="mt-auto flex w-fit items-center gap-1 pt-1 text-[10px] font-medium text-destructive transition hover:text-destructive/80"
+                        <span
+                          className={cn(
+                            'max-w-[64%] truncate font-semibold uppercase tracking-wide',
+                            file.status === 'failed'
+                              ? 'text-destructive/80'
+                              : 'text-muted-foreground',
+                            isMobile ? 'text-xs' : 'text-[10px]'
+                          )}
                         >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
-                        </button>
-                      ) : (
-                        <span className="mt-auto truncate pt-1 text-[10px] text-muted-foreground">
-                          {file.status === 'preparing'
-                            ? t('sessions.filePreparing', 'Preparing… {{progress}}%', {
-                                progress: file.progress,
-                              })
-                            : file.status === 'uploading'
-                              ? `${file.progress}%`
-                              : file.status === 'verifying'
-                                ? t('sessions.fileVerifying', 'Verifying…')
-                                : file.sizeLabel}
+                          {getFileTypeLabel(file.name)}
                         </span>
-                      )}
-                      {file.status === 'preparing' ||
-                      file.status === 'uploading' ||
-                      file.status === 'verifying' ? (
-                        <div className="absolute inset-x-0 bottom-0 h-1 bg-muted">
-                          <div
-                            className="h-full bg-primary transition-[width]"
-                            style={{
-                              width: `${Math.max(0, Math.min(100, file.progress))}%`,
-                            }}
-                          />
-                        </div>
-                      ) : null}
-                      <div className="absolute right-1 top-1">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
-                          onClick={() => onFileRemove?.(file.id)}
-                          aria-label={removeAttachmentLabel}
+                        <span
+                          className={cn(
+                            'mt-1 break-words text-left font-medium text-input-foreground',
+                            isMobile ? 'line-clamp-3 text-sm' : 'line-clamp-2 text-xs'
+                          )}
                         >
-                          <X className="h-3 w-3" />
-                        </Button>
+                          {file.name}
+                        </span>
+                        {file.status === 'failed' ? (
+                          <button
+                            type="button"
+                            onClick={() => onFileRetry?.(file.id)}
+                            aria-label={retryUploadLabel}
+                            className="mt-auto flex w-fit items-center gap-1 pt-1 text-[10px] font-medium text-destructive transition hover:text-destructive/80"
+                          >
+                            <RefreshCw className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{uploadFailedShortLabel}</span>
+                          </button>
+                        ) : (
+                          <span className="mt-auto truncate pt-1 text-[10px] text-muted-foreground">
+                            {file.status === 'preparing'
+                              ? t('sessions.filePreparing', 'Preparing… {{progress}}%', {
+                                  progress: file.progress,
+                                })
+                              : file.status === 'uploading'
+                                ? `${file.progress}%`
+                                : file.status === 'verifying'
+                                  ? t('sessions.fileVerifying', 'Verifying…')
+                                  : file.sizeLabel}
+                          </span>
+                        )}
+                        {file.status === 'preparing' ||
+                        file.status === 'uploading' ||
+                        file.status === 'verifying' ? (
+                          <div className="absolute inset-x-0 bottom-0 h-1 bg-muted">
+                            <div
+                              className="h-full bg-primary transition-[width]"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, file.progress))}%`,
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                        <div className="absolute right-1 top-1">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="icon"
+                            className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                            onClick={() => onFileRemove?.(file.id)}
+                            aria-label={removeAttachmentLabel}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              <CombinedMentionTextarea
-                id={promptId}
-                ref={promptRef}
-                mentionSource={mentionSource}
-                availableCommands={availableCommands}
-                commandsEnabled={commandsEnabled}
-                skillAgent={skillAgent}
-                currentSessionId={currentSessionId}
-                value={promptValue}
-                onValueChange={onPromptChange}
-                externalMentions={pastedTextMentions}
-                onExternalMentionsChange={handlePastedTextMentionsChange}
-                onMentionClick={handleMentionClick}
-                getMentionChip={getComposerMentionChip}
-                onMentionRangesChange={onMentionRangesChange}
-                persistedMentions={persistedMentions}
-                draftKey={draftKey}
-                mentionActionsRef={mentionActionsRef}
-                onKeyDown={onPromptKeyDown}
-                onPaste={onPromptPaste}
-                onCopy={handlePromptCopy}
-                disabled={promptDisabled}
-                rows={effectivePromptRows}
-                enterKeyHint={promptEnterKeyHint}
-                autoFocus={promptAutoFocus}
-                placeholder={resolvedPromptPlaceholder}
-                // While the ⌘L focus hint is shown the box is empty, so the (long)
-                // placeholder would otherwise run under the top-right ⌘L chip. Reserve
-                // room for it so the placeholder wraps before the chip; the padding is
-                // dropped once the user types (showFocusHint → false → full width).
-                className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
-                data-keyboard-nav="composer"
-              />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className={fillSheet ? 'min-h-0 flex-1 px-4 pt-3 [&>div]:h-full' : 'contents'}>
+                <CombinedMentionTextarea
+                  id={promptId}
+                  ref={promptRef}
+                  mentionSource={mentionSource}
+                  availableCommands={availableCommands}
+                  commandsEnabled={commandsEnabled}
+                  skillAgent={skillAgent}
+                  currentSessionId={currentSessionId}
+                  value={promptValue}
+                  onValueChange={onPromptChange}
+                  externalMentions={pastedTextMentions}
+                  onExternalMentionsChange={handlePastedTextMentionsChange}
+                  onMentionClick={handleMentionClick}
+                  getMentionChip={getComposerMentionChip}
+                  onMentionRangesChange={onMentionRangesChange}
+                  persistedMentions={persistedMentions}
+                  draftKey={draftKey}
+                  mentionActionsRef={mentionActionsRef}
+                  onKeyDown={onPromptKeyDown}
+                  onPaste={onPromptPaste}
+                  onCopy={handlePromptCopy}
+                  disabled={promptDisabled}
+                  rows={effectivePromptRows}
+                  enterKeyHint={promptEnterKeyHint}
+                  autoFocus={promptAutoFocus}
+                  placeholder={resolvedPromptPlaceholder}
+                  // While the ⌘L focus hint is shown the box is empty, so the (long)
+                  // placeholder would otherwise run under the top-right ⌘L chip. Reserve
+                  // room for it so the placeholder wraps before the chip; the padding is
+                  // dropped once the user types (showFocusHint → false → full width).
+                  containerClassName={fillSheet ? 'h-full' : undefined}
+                  className={cn(
+                    boxTextareaClassName,
+                    showFocusHint && 'pr-16',
+                    fillSheet && 'h-full min-h-0 px-0 text-base overflow-y-auto'
+                  )}
+                  data-keyboard-nav="composer"
+                />
+              </div>
 
               {showFocusHint ? (
                 <div
@@ -936,7 +962,13 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <div className={boxFooterClassName}>
+              <div
+                className={cn(
+                  boxFooterClassName,
+                  fillSheet &&
+                    'shrink-0 border-t border-border/60 px-3 py-2 [&>button]:h-10 [&>button]:w-10'
+                )}
+              >
                 {/* Single bottom-left "+" attachment entry (replaces the old
                     image + paperclip icons). Hidden when neither add callback
                     is provided. */}
@@ -952,7 +984,14 @@ export function ChatComposer({
                 {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-x-2 overflow-hidden">
+                <div
+                  className={cn(
+                    'flex min-w-0 flex-1 flex-nowrap items-center gap-x-2',
+                    fillSheet
+                      ? 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+                      : 'overflow-hidden'
+                  )}
+                >
                   {footerSelector ?? selector}
                 </div>
 
