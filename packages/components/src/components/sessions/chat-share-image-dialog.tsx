@@ -4,6 +4,7 @@ import { Check, Copy, Download, Loader2 } from 'lucide-react';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Label } from '@/ui/label';
 import { Input } from '@/ui/input';
@@ -26,6 +27,13 @@ const FOOTER_VARIANTS: ChatShareCardFooterVariant[] = [
   'canvas',
   'exif',
 ];
+
+const BACKDROP_SWATCHES: Record<Exclude<ChatShareCardBackdrop, 'none'>, string> = {
+  lody: 'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%), radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%), radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%), linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+  aurora: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)',
+  ocean: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)',
+  sunset: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+};
 
 /** EXIF sub line: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
 function formatShareImageDate(timestamp: string | undefined): string | undefined {
@@ -250,24 +258,50 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="chat-share-backdrop">
-                {t('sessions.shareImage.backdrop', 'Background')}
-              </Label>
-              <Select
-                value={backdrop}
-                onValueChange={(value) => setBackdrop(value as ChatShareCardBackdrop)}
-              >
-                <SelectTrigger id="chat-share-backdrop" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BACKDROPS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value === 'none' ? t('sessions.shareImage.backdropNone', 'None') : value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>{t('sessions.shareImage.backdrop', 'Background')}</Label>
+              <div className="grid grid-cols-4 gap-2" role="group">
+                <button
+                  type="button"
+                  aria-pressed={backdrop === 'none'}
+                  className={cn(
+                    'col-span-full flex h-9 items-center justify-center rounded-md border text-sm font-medium transition-colors',
+                    backdrop === 'none'
+                      ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/25'
+                      : 'border-border bg-muted/30 hover:bg-muted/60'
+                  )}
+                  onClick={() => setBackdrop('none')}
+                >
+                  {t('sessions.shareImage.backdropNone', 'None')}
+                </button>
+                {BACKDROPS.filter(
+                  (value): value is Exclude<ChatShareCardBackdrop, 'none'> => value !== 'none'
+                ).map((value) => {
+                  const selected = backdrop === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-label={t(
+                        `sessions.shareImage.backdrop${value[0].toUpperCase()}${value.slice(1)}`,
+                        value
+                      )}
+                      aria-pressed={selected}
+                      className={cn(
+                        'relative aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
+                        selected ? 'border-primary ring-2 ring-primary' : 'border-border/70'
+                      )}
+                      style={{ background: BACKDROP_SWATCHES[value] }}
+                      onClick={() => setBackdrop(value)}
+                    >
+                      {selected ? (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white">
+                          <Check className="size-4 drop-shadow" />
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="space-y-2">

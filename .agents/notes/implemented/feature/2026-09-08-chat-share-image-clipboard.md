@@ -21,6 +21,11 @@ process; the renderer produces bytes only after the user explicitly invokes copy
 Browser copying uses `ClipboardItem` and reports unsupported APIs as a recoverable
 failure rather than silently falling back to a file download.
 
+The existing background choices render as a visible swatch grid rather than a
+text-only menu. It shows only the five implemented canvas values, keeping the
+selection affordance aligned with the exported image instead of implying an
+unavailable wallpaper library.
+
 This extends the earlier [image export decision](2026-09-08-chat-share-image.md)
 and updates the [draft specification](../../../../specs/chat-share-image.md).
 
