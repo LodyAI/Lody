@@ -1035,6 +1035,9 @@ importers:
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
+      '@zumer/snapdom':
+        specifier: ^2.24.15
+        version: 2.24.15
       anser:
         specifier: ^2.3.3
         version: 2.3.5
@@ -1581,6 +1584,9 @@ importers:
         version: 2.8.2
 
 packages:
+
+  '@zumer/snapdom@2.24.15':
+    resolution: {integrity: sha512-4YE+3ekbBFEAxMyHr++wxOSGt/k+n721eeNT9N9Map27A+ra5sBut3qkYyheYlRj9dJ3HtZaUN1/yrh/aCiuKw==}
 
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
@@ -13039,6 +13045,8 @@ packages:
     resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
 
 snapshots:
+
+  '@zumer/snapdom@2.24.15': {}
 
   '@adobe/css-tools@4.4.4': {}
 

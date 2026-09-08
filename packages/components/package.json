@@ -70,6 +70,7 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@zumer/snapdom": "^2.24.15",
     "@assistant-ui/react": "^0.10.39",
     "@assistant-ui/react-markdown": "^0.10.8",
     "@better-auth/electron": "catalog:",

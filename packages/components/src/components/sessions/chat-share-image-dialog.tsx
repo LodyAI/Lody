@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Download, Loader2 } from 'lucide-react';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Label } from '@/ui/label';
 import { Input } from '@/ui/input';
+import { Button } from '@/ui/button';
+import { exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import {
@@ -105,8 +108,7 @@ export interface ChatShareImageDialogProps {
 
 /**
  * Preview/config dialog for "Share as image". Renders a live `ChatShareCard`
- * with a compact style panel. Export itself (PNG render, copy/save) is NOT
- * implemented yet — this dialog is intentionally preview-only.
+ * with a compact style panel and exports the complete card as PNG.
  */
 export function ChatShareImageDialog({
   open,
@@ -135,6 +137,26 @@ export function ChatShareImageDialog({
   const [showDate, setShowDate] = useState(true);
   const [wrapCode, setWrapCode] = useState(false);
   const [collapseAfter, setCollapseAfter] = useState(0);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const exportingRef = useRef(false);
+  const [exporting, setExporting] = useState(false);
+  const [assetsReady, setAssetsReady] = useState(false);
+  const [exportError, setExportError] = useState(false);
+
+  const handleExport = async () => {
+    if (!exportRef.current || exportingRef.current || !assetsReady) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setExportError(false);
+    try {
+      await exportChatShareImage(exportRef.current, session?.title);
+    } catch {
+      setExportError(true);
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
+  };
 
   const qrAvailable =
     footerVariant === 'stacked' || footerVariant === 'row' || footerVariant === 'canvas';
@@ -162,22 +184,27 @@ export function ChatShareImageDialog({
   }, [session, agentName, modelName, showDate, selectedTokenCount, intlLocale, t]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!exportingRef.current) onOpenChange(next);
+      }}
+    >
       <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
         <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
           <DialogTitle className="text-base">
             {t('sessions.shareImage.dialogTitle', 'Share as image')}
           </DialogTitle>
           <DialogDescription className="leading-5">
-            {t(
-              'sessions.shareImage.dialogDescription',
-              'Preview and style the conversation card. Image export is coming soon.'
-            )}
+            {t('sessions.shareImage.dialogDescription', 'PNG image')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 sm:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-5 border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5">
+          <fieldset
+            disabled={exporting}
+            className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
+          >
             <div className="space-y-2">
               <Label htmlFor="chat-share-backdrop">
                 {t('sessions.shareImage.backdrop', 'Background')}
@@ -330,22 +357,25 @@ export function ChatShareImageDialog({
                 />
               </div>
             </div>
-          </div>
+          </fieldset>
 
           <div className="min-h-0 bg-muted/40 p-4 sm:p-6">
             {messages.length > 0 ? (
               <FitPreview>
-                <ChatShareCard
-                  messages={messages}
-                  title={showTitle ? session?.title?.trim() || undefined : undefined}
-                  backdrop={backdrop}
-                  framePadding={framePadding}
-                  footerVariant={footerVariant}
-                  showQr={showQr}
-                  theme={theme === 'app' ? undefined : theme}
-                  code={{ wrap: wrapCode, collapseAfter }}
-                  meta={meta}
-                />
+                <div ref={exportRef} className="w-fit">
+                  <ChatShareCard
+                    onAssetsReadyChange={setAssetsReady}
+                    messages={messages}
+                    title={showTitle ? session?.title?.trim() || undefined : undefined}
+                    backdrop={backdrop}
+                    framePadding={framePadding}
+                    footerVariant={footerVariant}
+                    showQr={showQr}
+                    theme={theme === 'app' ? undefined : theme}
+                    code={{ wrap: wrapCode, collapseAfter }}
+                    meta={meta}
+                  />
+                </div>
               </FitPreview>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -353,6 +383,29 @@ export function ChatShareImageDialog({
               </div>
             )}
           </div>
+        </div>
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border/70 px-4 py-3 sm:px-5">
+          {exportError ? (
+            <p role="alert" className="mr-auto text-sm text-destructive">
+              {t(
+                'sessions.shareImage.exportFailed',
+                'Could not export the image. Please try again.'
+              )}
+            </p>
+          ) : null}
+          <Button
+            onClick={() => void handleExport()}
+            disabled={exporting || !assetsReady || messages.length === 0}
+          >
+            {exporting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
+            {exporting
+              ? t('sessions.shareImage.exporting', 'Exporting...')
+              : t('sessions.shareImage.exportPng', 'Export PNG')}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

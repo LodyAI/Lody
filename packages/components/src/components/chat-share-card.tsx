@@ -51,6 +51,7 @@ export interface ChatShareCardProps {
       replaces the Lody mark — e.g. pass an `AgentIcon` for the driving agent. */
   meta?: { title?: string; params?: string[]; sub?: string; icon?: ReactNode };
   className?: string;
+  onAssetsReadyChange?: (ready: boolean) => void;
 }
 
 const DEFAULT_SHARE_URL = 'https://lody.ai';
@@ -108,9 +109,18 @@ export function ChatShareCard({
   theme,
   meta,
   className,
+  onAssetsReadyChange,
 }: ChatShareCardProps) {
   const { t } = useTranslation();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const needsQr =
+    showQr &&
+    (footerVariant === 'stacked' ||
+      footerVariant === 'row' ||
+      (footerVariant === 'canvas' && backdrop !== 'none'));
+  useEffect(() => {
+    onAssetsReadyChange?.(!needsQr || qrDataUrl !== null);
+  }, [needsQr, qrDataUrl, onAssetsReadyChange]);
 
   useEffect(() => {
     if (!showQr || footerVariant === 'minimal' || footerVariant === 'exif') {
