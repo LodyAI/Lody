@@ -17,11 +17,12 @@ mobile surfaces. Background for the rules below:
 - Prefer shared primitives from `src/components/ui` over private replacements. Editable
   controls fill with `bg-input-field`, never `bg-input`; gray means disabled
   (`disabled:bg-muted`). Primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
-- Collapsed local-project and GitHub-repository rows aggregate fresh live Session and
-  child-Tab activity, including pinned Sessions and unread results, in a separate slot
-  that preserves the folder/repository disclosure. Expanded groups hide the aggregate.
-  Live activity plus unread uses a spinner with a centered solid dot; permission
-  requests take priority.
+- Collapsed local-project and GitHub-repository rows count fresh Session/child-Tab
+  activity (including pinned Sessions) at the row end, before actions. Show at most
+  two items: permission > unread > active; combine mixed remaining states as `+N`.
+  Omit single counts; initializing uses running. Expanded/removing groups hide the
+  aggregate. Preserve disclosure and Session end-slot status. See the
+  [draft contract](../../specs/collapsed-project-activity.zh.md).
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.

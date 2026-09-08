@@ -135,13 +135,10 @@ export function SessionRowStatusIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
-  showUnreadWithWorking,
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
-  /** Aggregate slots may show a completed unread result alongside live work. */
-  showUnreadWithWorking?: boolean;
 }) {
   let icon: ReactNode = null;
 
@@ -149,18 +146,10 @@ export function SessionRowStatusIndicator({
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
     icon = (
-      <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-        <Loader2
-          data-session-working-spinner=""
-          className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
-        />
-        {showUnreadWithWorking && hasUnreadMessages ? (
-          <span
-            data-session-unread-overlay=""
-            className="absolute h-1 w-1 rounded-full bg-primary"
-          />
-        ) : null}
-      </span>
+      <Loader2
+        data-session-working-spinner=""
+        className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
+      />
     );
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
@@ -853,10 +842,7 @@ export function SidebarListSkeleton({
         </div>
         <div className="flex flex-col gap-px">
           {SIDEBAR_SKELETON_ROW_WIDTHS.map((width, index) => (
-            <div
-              key={index}
-              className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2"
-            >
+            <div key={index} className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2">
               <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
               <Skeleton className={cn('h-3 min-w-0', width)} />
               <Skeleton className="ml-auto h-3 w-8 shrink-0" />

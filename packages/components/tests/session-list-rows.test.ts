@@ -156,21 +156,6 @@ describe('buildSessionListRows child-time aggregation', () => {
     );
 
     expect(tasks[0]?.isWorking).toBe(true);
-    expect(tasks[0]?.activityStatus).toBe('running');
-  });
-
-  test('preserves initializing presence for repository group aggregation', () => {
-    const session = makeSession({ id: 'session', title: 'Session' });
-    const tasks = buildSessionListRows([session], {
-      scope: 'my',
-      currentUserId: 'user-1',
-      defaultTitle: 'Untitled',
-      liveSessionStatuses: new Map([
-        [session.id, { type: 'initializing', stage: 'managed-runtime' }],
-      ]),
-    });
-
-    expect(tasks[0]?.activityStatus).toBe('initializing');
   });
 
   test('does not treat durable running status as working without live presence', () => {
@@ -188,7 +173,6 @@ describe('buildSessionListRows child-time aggregation', () => {
     });
 
     expect(tasks[0]?.isWorking).toBe(false);
-    expect(tasks[0]?.activityStatus).toBeNull();
   });
 });
 
@@ -300,75 +284,29 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
 });
 
 describe('getEffectiveProjectActivitySummary', () => {
-  test('reports running when any project session has live activity', () => {
-    const initializingSession = makeSession({ id: 'initializing' });
-    const runningSession = makeSession({ id: 'running' });
-    const liveSessionStatuses = new Map<string, SessionStatus>([
-      [initializingSession.id, { type: 'initializing' }],
-      [runningSession.id, { type: 'running' }],
-    ]);
-
-    expect(
-      getEffectiveProjectActivitySummary(
-        [initializingSession, runningSession],
-        new Map(),
-        liveSessionStatuses
-      )
-    ).toEqual({ status: 'running', hasUnreadMessages: false });
-  });
-
-  test('reports initializing when there is no running project session', () => {
-    const session = makeSession({ id: 'initializing' });
-    const liveSessionStatuses = new Map<string, SessionStatus>([
-      [session.id, { type: 'initializing', stage: 'managed-runtime' }],
-    ]);
-
-    expect(getEffectiveProjectActivitySummary([session], new Map(), liveSessionStatuses)).toEqual({
-      status: 'initializing',
-      hasUnreadMessages: false,
-    });
-  });
-
-  test('gives child-tab permission activity precedence over running', () => {
-    const runningSession = makeSession({ id: 'running' });
-    const child = makeSession({
-      id: 'permission-child',
-      parentSessionId: runningSession.id,
-    });
-    const children = buildChildSessionsByParent([runningSession, child]);
-    const liveSessionStatuses = new Map<string, SessionStatus>([
-      [runningSession.id, { type: 'running' }],
-      [child.id, { type: 'requestPermission' }],
-    ]);
-
-    expect(
-      getEffectiveProjectActivitySummary([runningSession], children, liveSessionStatuses)
-    ).toEqual({ status: 'requestPermission', hasUnreadMessages: false });
-  });
-
-  test('ignores durable status without live presence', () => {
-    const session = makeSession({ id: 'stale', status: { type: 'running' } });
-
-    expect(getEffectiveProjectActivitySummary([session])).toEqual({
-      status: null,
-      hasUnreadMessages: false,
-    });
-  });
-
-  test('keeps a child-tab unread result alongside live project activity', () => {
-    const parent = makeSession({ id: 'parent', lastMessageAt: 2_000, lastReadAt: 2_000 });
-    const child = makeSession({
-      id: 'child',
-      parentSessionId: parent.id,
-      lastMessageAt: 3_000,
+  test('counts unique live Sessions and child Tabs, preserving unread alongside active', () => {
+    const parent = makeSession({
+      id: 'parent',
+      isPinned: true,
+      lastMessageAt: 2_000,
       lastReadAt: 1_000,
     });
-    const children = buildChildSessionsByParent([parent, child]);
-    const liveSessionStatuses = new Map<string, SessionStatus>([[parent.id, { type: 'running' }]]);
-
-    expect(getEffectiveProjectActivitySummary([parent], children, liveSessionStatuses)).toEqual({
-      status: 'running',
-      hasUnreadMessages: true,
+    const child = makeSession({ id: 'child', parentSessionId: parent.id });
+    const archived = makeSession({ id: 'archived', parentSessionId: parent.id, isArchived: true });
+    const stale = makeSession({ id: 'stale', status: { type: 'running' } });
+    const live = new Map<string, SessionStatus>([
+      [parent.id, { type: 'running' }],
+      [child.id, { type: 'requestPermission' }],
+      [archived.id, { type: 'running' }],
+    ]);
+    const children = buildChildSessionsByParent([parent, child, archived]);
+    expect(
+      getEffectiveProjectActivitySummary([parent, parent, child, stale, archived], children, live)
+    ).toEqual({ permission: 1, unread: 1, active: 1 });
+    expect(getEffectiveProjectActivitySummary([stale])).toEqual({
+      permission: 0,
+      unread: 0,
+      active: 0,
     });
   });
 });

@@ -1,3 +1,4 @@
+import { getProjectActivityLabel, ProjectActivityIndicator } from './project-activity-indicator';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
@@ -169,7 +170,6 @@ import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
-  SessionRowStatusIndicator,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -1089,25 +1089,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       : removalState === 'removing'
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
-  const projectActivityLabel = !collapsed
-    ? null
-    : projectActivity.status === 'requestPermission'
-      ? t('sessions.status.requestPermission', 'Request Permission')
-      : projectActivity.status === 'initializing'
-        ? t('sessions.status.initializing', 'Initializing')
-        : projectActivity.status === 'running'
-          ? t('sessions.status.running', 'Running')
-          : projectActivity.hasUnreadMessages
-            ? t('sessions.unreadMessages', 'Unread messages')
-            : null;
-  const projectHasLiveActivity = projectActivity.status != null;
   const projectIndicatorLabel =
-    collapsed &&
-    projectActivity.status !== 'requestPermission' &&
-    projectHasLiveActivity &&
-    projectActivity.hasUnreadMessages
-      ? `${projectActivityLabel} · ${t('sessions.unreadMessages', 'Unread messages')}`
-      : projectActivityLabel;
+    collapsed && !removalState ? getProjectActivityLabel(projectActivity, t) : '';
   const ariaLabel = [baseAriaLabel, removalStateLabel, projectIndicatorLabel]
     .filter(Boolean)
     .join(' · ');
@@ -1229,19 +1212,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     </Tooltip>
                   ) : (
                     <>
-                      {collapsed &&
-                      (projectActivity.status || projectActivity.hasUnreadMessages) ? (
-                        <span
-                          data-sidebar-project-activity={projectActivity.status ?? 'unread'}
-                          className="flex h-5 w-5 shrink-0 items-center justify-center"
-                          aria-hidden="true"
-                        >
-                          <SessionRowStatusIndicator
-                            isWaitingPermission={projectActivity.status === 'requestPermission'}
-                            isWorking={projectHasLiveActivity}
-                            hasUnreadMessages={projectActivity.hasUnreadMessages}
-                            showUnreadWithWorking={projectActivity.status !== 'requestPermission'}
-                          />
+                      {projectIndicatorLabel ? (
+                        <span data-sidebar-project-activity="" className="shrink-0">
+                          <ProjectActivityIndicator counts={projectActivity} />
                         </span>
                       ) : null}
                       {showProjectMenu || showNewChatButton ? (
@@ -2931,6 +2904,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const sidebarSessionListProps = useMemo(
     () => ({
       sessions: githubWorktreesSectionCollapsed ? [] : workspaceRepoSessions,
+      activitySessions: repoSessions,
       repos: githubWorktreesSectionCollapsed ? [] : repos,
       isLoading: githubWorktreesSectionCollapsed ? false : sessionsListLoading,
       selectedSessionId: selectedSessionId,
@@ -2965,6 +2939,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       handleNavigateToSession,
       handleToggleRepoCollapsed,
       workspaceRepoSessions,
+      repoSessions,
       repos,
       selectedSessionId,
       sessionsListLoading,

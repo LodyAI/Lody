@@ -13,6 +13,7 @@ import {
   parseGitHubPrNumber,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
+import { getProjectActivityCounts } from '@/components/project-activity';
 import type { SessionListRow, SessionListRowOwner } from '@/components/session-list';
 import { getLineChangeDeltaForScope, type LineChangeScope } from '@/lib/file-change-category';
 
@@ -241,28 +242,28 @@ export function getEffectiveSessionActivitySummary(
   };
 }
 
-export type EffectiveProjectActivitySummary = {
-  status: ActiveSessionStatus;
-  hasUnreadMessages: boolean;
-};
-
-/** Aggregate live activity for a local-project sidebar row. */
+/** Count each Session/child Tab once per status; unread can coexist with live work. */
 export function getEffectiveProjectActivitySummary(
   sessions: SessionMeta[],
   childSessionsByParent?: Map<string, SessionMeta[]>,
   liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
-): EffectiveProjectActivitySummary {
-  let status: EffectiveProjectActivitySummary['status'] = null;
-  let hasUnreadMessages = false;
-
-  for (const session of sessions) {
-    for (const candidate of [session, ...(childSessionsByParent?.get(session.id) ?? [])]) {
-      status = mergeActiveSessionStatus(status, liveSessionStatuses?.get(candidate.id));
-      if (!hasUnreadMessages && sessionHasUnreadMessages(candidate)) hasUnreadMessages = true;
-    }
-  }
-
-  return { status, hasUnreadMessages };
+) {
+  const candidates = new Map(
+    sessions
+      .flatMap((session) => [session, ...(childSessionsByParent?.get(session.id) ?? [])])
+      .filter((session) => !session.isArchived)
+      .map((session) => [session.id, session] as const)
+  );
+  return getProjectActivityCounts(
+    [...candidates.values()].map((session) => {
+      const status = liveSessionStatuses?.get(session.id)?.type;
+      return {
+        isWaitingPermission: status === 'requestPermission',
+        isWorking: status === 'running' || status === 'initializing',
+        hasUnreadMessages: sessionHasUnreadMessages(session),
+      };
+    })
+  );
 }
 
 type LatestPullRequestInfo = {
@@ -368,7 +369,6 @@ export function mapSessionMetaToSessionListRow(
     addedLines: lineChange.add,
     deletedLines: lineChange.del,
     isWorking: liveStatus != null,
-    activityStatus: mergeActiveSessionStatus(null, liveStatus),
     hasUnreadMessages,
     isOffline,
     isWaitingPermission: liveStatus?.type === 'requestPermission',
@@ -404,19 +404,13 @@ function aggregateChildStatus(
       ? activity.latestMessageAt
       : task.latestMessageAt;
 
-  if (
-    activity.isWorking === task.isWorking &&
-    activity.status === task.activityStatus &&
-    activity.isWaitingPermission === task.isWaitingPermission &&
-    activity.hasUnreadMessages === task.hasUnreadMessages &&
-    latestMessageAt === task.latestMessageAt
-  ) {
-    return task;
-  }
-
   return {
     ...task,
-    activityStatus: activity.status,
+    projectActivityCounts: getEffectiveProjectActivitySummary(
+      [session],
+      childSessionsByParent,
+      liveSessionStatuses
+    ),
     isWorking: activity.isWorking,
     isWaitingPermission: activity.isWaitingPermission,
     hasUnreadMessages: activity.hasUnreadMessages,
