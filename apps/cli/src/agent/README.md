@@ -104,7 +104,10 @@ replacing) user Harness config and launches the pinned explicit package closure 
 `dsh-acp-demo`. The all-in-one `@deepseek-ai/dsh` product CLI is deliberately not used
 because this ACP host excludes product UI and telemetry packages. CLI production and dev
 builds copy the extension's pinned official presets beside `deepseek-acp.js`; the generated
-roster also discovers `$DSH_HOME/.agent-presets`. Harness JSONL roots are single-encoding
+roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
+provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
+capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` still uses
+the endpoint's `/models` list rather than local catalog additions. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
 
