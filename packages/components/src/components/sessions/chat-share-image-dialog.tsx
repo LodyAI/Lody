@@ -261,7 +261,7 @@ export function ChatShareImageDialog({
 
             <div className="space-y-2">
               <Label>{t('sessions.shareImage.backdrop', 'Background')}</Label>
-              <div className="grid grid-cols-5 justify-items-center gap-3" role="group">
+              <div className="grid grid-cols-5 gap-1.5" role="group">
                 <button
                   type="button"
                   aria-pressed={backdrop === 'none'}
@@ -289,7 +289,7 @@ export function ChatShareImageDialog({
                       )}
                       aria-pressed={selected}
                       className={cn(
-                        'relative size-8 overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
+                        'relative aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
                         selected ? 'border-primary ring-2 ring-primary' : 'border-border/70'
                       )}
                       style={{
