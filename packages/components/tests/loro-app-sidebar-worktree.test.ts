@@ -132,7 +132,7 @@ describe('LocalProjectItem session-type icon', () => {
     expect(plainIcon).toBeNull();
   });
 
-  it('renders the PR status icon for a local session linked to a GitHub PR', () => {
+  it('renders the PR status icon for a resting local session linked to a GitHub PR', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -142,6 +142,9 @@ describe('LocalProjectItem session-type icon', () => {
         ...baseSession,
         id: 'session-with-pr',
         title: 'Local session with PR',
+        // Read, so the end slot shows its resting metrics: a status mark would
+        // take that slot for itself (`sidebar-row-shared.tsx`).
+        lastReadAt: Date.parse('2026-05-09T11:45:00.000Z'),
         project: {
           kind: 'local',
           localProjectId,
@@ -154,6 +157,19 @@ describe('LocalProjectItem session-type icon', () => {
         ...baseSession,
         id: 'session-without-pr',
         title: 'Plain local session',
+        lastReadAt: Date.parse('2026-05-09T11:45:00.000Z'),
+      },
+      {
+        ...baseSession,
+        id: 'session-unread-with-pr',
+        title: 'Unread local session with PR',
+        project: {
+          kind: 'local',
+          localProjectId,
+          machineId,
+          githubRepoFullName: 'loro-dev/lody',
+        },
+        pullRequests: [{ url: 'https://github.com/loro-dev/lody/pull/43', status: 'open' }],
       },
     ];
 
@@ -202,5 +218,11 @@ describe('LocalProjectItem session-type icon', () => {
     const rowWithoutPr = container.querySelector('[data-sidebar-session-id="session-without-pr"]');
     expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
     expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
+
+    // An unread row spends its end slot on the status mark instead — the PR icon
+    // is one of the resting metrics that yields to it.
+    const unreadRow = container.querySelector('[data-sidebar-session-id="session-unread-with-pr"]');
+    expect(unreadRow?.querySelector('.lucide-git-pull-request')).toBeNull();
+    expect(unreadRow?.querySelector('[data-session-row-indicator]')).not.toBeNull();
   });
 });

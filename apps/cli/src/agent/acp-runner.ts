@@ -354,6 +354,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     agentType: options.agentType,
     customAcp: options.customAcp,
     runtimeOverrides: options.runtimeOverrides,
+    env: options.env,
     extraArgs: options.extraArgs,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress
       ? (event) => {

@@ -725,6 +725,71 @@ describe('acp history apply', () => {
     expect(toolCall?.schedulingTimeZone?.length).toBeGreaterThan(0);
   });
 
+  it('stamps a scheduling tool call with its first-persisted time and never moves it', () => {
+    // The scheduled-tasks deriver anchors a one-shot cron at this stamp; the turn entry's
+    // endedAt cannot serve (merged cron-fire turns push it past the fire minute).
+    const t0 = '2026-09-03T03:18:43.000+08:00';
+    const t1 = '2026-09-04T03:39:15.000+08:00';
+    const readCall = (history: ReturnType<typeof applyNotificationOnHistory>) =>
+      ((history[0]?.items ?? []) as MessageContent[]).find((i) => i.type === 'tool_call') as
+        | Extract<MessageContent, { type: 'tool_call' }>
+        | undefined;
+
+    const created = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cron-tc-3',
+          title: 'Scheduling one-shot 33 3 3 9 *',
+          status: 'in_progress',
+          rawInput: { cron: '33 3 3 9 *', recurring: false, prompt: 'p' },
+          _meta: { lody: { toolName: 'CronCreate' } },
+        }),
+      ],
+      undefined,
+      { now: () => t0 }
+    );
+    expect(readCall(created)?.recordedAtMs).toBe(Date.parse(t0));
+
+    // A later replayed/retried update for the same call must keep the original stamp.
+    const updated = applyNotificationOnHistory(
+      created,
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'cron-tc-3',
+          status: 'completed',
+        }),
+      ],
+      undefined,
+      { now: () => t1 }
+    );
+    expect(readCall(updated)?.recordedAtMs).toBe(Date.parse(t0));
+  });
+
+  it('does not stamp non-scheduling tool calls', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'read-tc-2',
+          kind: 'read',
+          status: 'in_progress',
+          title: 'Read',
+          _meta: { lody: { toolName: 'Read' } },
+        }),
+      ],
+      undefined,
+      { now: () => '2026-09-03T03:18:43.000+08:00' }
+    );
+    const toolCall = ((history[0]?.items ?? []) as MessageContent[]).find(
+      (i) => i.type === 'tool_call'
+    ) as Extract<MessageContent, { type: 'tool_call' }> | undefined;
+    expect(toolCall?.recordedAtMs).toBeUndefined();
+  });
+
   it('still strips rawInput/rawOutput for non-scheduling tools', () => {
     const notifications = [
       makeNotification({

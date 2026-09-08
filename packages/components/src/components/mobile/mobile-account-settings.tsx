@@ -87,6 +87,7 @@ export function MobileAccountSettings({
   members,
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
+  workspaceOwnershipSlot,
   accountMachinesSlot,
   memberLimit = null,
   memberLimitReached = false,
@@ -822,6 +823,7 @@ export function MobileAccountSettings({
 
       {isWorkspaceSurface ? (
         <MobileSettingsSection title={t('workspace.danger.title')}>
+          {role === 'owner' ? workspaceOwnershipSlot : null}
           {role !== 'owner' && (
             <MobileSettingsRow
               label={t('workspace.danger.leaveWorkspace.title')}

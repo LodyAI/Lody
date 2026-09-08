@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildConversationMarkdown,
+  collectConversationMessages,
   estimateTokenCount,
   CONVERSATION_MARKDOWN_MAX_CHARS,
   CONVERSATION_MARKDOWN_MAX_TOKENS,
@@ -68,6 +69,84 @@ describe('estimateTokenCount', () => {
 
   it('counts CJK at roughly one token per character', () => {
     expect(estimateTokenCount('中文测试'.repeat(100))).toBe(400);
+  });
+});
+
+describe('share message token estimates', () => {
+  it('preserves the recorded model instead of substituting another turn configuration', () => {
+    const recorded = entry('assistant', [textItem('Answer')]);
+    recorded.modelInfo = { modelId: 'recorded-model', name: 'Recorded Model' };
+    recorded.inputConfig = { modelId: 'requested-model' };
+    const legacy = entry('assistant', [textItem('Legacy answer')]);
+    legacy.inputConfig = { modelId: 'legacy-model' };
+    const unknown = entry('assistant', [textItem('Unknown model')]);
+    expect(
+      collectConversationMessages([recorded, legacy, unknown]).map((message) => message.modelName)
+    ).toEqual(['Recorded Model', 'legacy-model', undefined]);
+  });
+
+  it('keeps the card prose-only while counting folded thinking, plans and tool output', () => {
+    const history = [
+      entry('assistant', [
+        { type: 'thought', text: 't'.repeat(400) },
+        {
+          type: 'plan',
+          entries: [{ content: 'p'.repeat(40), status: 'completed', priority: 'medium' }],
+        },
+        {
+          type: 'proposed_plan',
+          turnId: 'turn',
+          markdown: 'm'.repeat(40),
+          status: 'completed',
+          isLatest: true,
+        },
+        toolCall('Read', 'o'.repeat(4000)),
+        textItem('Done'),
+      ]),
+    ];
+    const [message] = collectConversationMessages(history);
+    expect(message?.text).toBe('Done');
+    expect(message?.estimatedTokens).toBe(1122);
+    expect(JSON.stringify(message)).not.toContain('o'.repeat(40));
+  });
+
+  it('counts terminal and diff content without counting a duplicate raw output', () => {
+    const item: MessageContent = {
+      type: 'tool_call',
+      toolCallId: 'tool-count',
+      title: 'Edit',
+      status: 'completed',
+      rawInput: { command: 'test' },
+      rawOutput: { duplicate: 'x'.repeat(10000) },
+      content: [
+        { type: 'terminal_command', command: 'test' },
+        { type: 'terminal_output', output: 'o'.repeat(400) },
+        { type: 'diff', path: 'file', oldText: 'a'.repeat(40), newText: 'b'.repeat(80) },
+      ],
+    };
+    const [message] = collectConversationMessages([entry('assistant', [item, textItem('Done')])]);
+    expect(message?.estimatedTokens).toBe(
+      133 + estimateTokenCount(JSON.stringify({ command: 'test' }))
+    );
+  });
+
+  it('keeps estimates on their own messages and counts raw output without display blocks', () => {
+    const first = entry('assistant', [{ type: 'thought', text: '中文测试' }, textItem('Done')]);
+    const second = entry('assistant', [
+      {
+        type: 'tool_call',
+        toolCallId: 'raw',
+        title: 'Tool',
+        status: 'completed',
+        rawOutput: { result: 'x'.repeat(400) },
+      },
+      textItem('Next'),
+    ]);
+    const result = collectConversationMessages([first, second]);
+    expect(result[0]?.estimatedTokens).toBe(5);
+    expect(result[1]?.estimatedTokens).toBe(
+      2 + estimateTokenCount(JSON.stringify({ result: 'x'.repeat(400) }))
+    );
   });
 });
 

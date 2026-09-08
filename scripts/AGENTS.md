@@ -17,10 +17,25 @@ maintenance commands here.
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured
   transcript fixtures.
+- Root `specs/` and the `.agents/` tree may contain public client and protocol
+  documentation and may be linked from other documents. Root `docs/` stays a
+  closed path. Their contents still undergo the same private-path, internal-path,
+  and hosted-preset checks as other public text.
 
 ## Generated artifacts
 
-- `generate-acp-registry.mjs` produces the public ACP registry.
+- `docs/main.mjs` (exposed through `pnpm run docs <command>`) provides document queues and scoped content-hash
+  review. Errors fail `check`; warnings, such as an `AGENTS.md` above the 7000-byte
+  target but under the 8192-byte gate, never do. Status, check, and diff are read-only; only explicit `confirm` writes a
+  topic record. Confirmation requires recoverable committed inputs and evidence,
+  never changes Spec approval, and never auto-refreshes a stale baseline.
+  `docs/anchors.mjs` uses TypeScript to hash declarations below `@dec:`
+  markers. Check both directions against adjacent `.anchors.json` records;
+  unrelated declarations must not invalidate the reviewed block.
+
+- `generate-acp-registry.mjs` produces the public ACP registry and its bundled,
+  generation-time-validated SVG icon map. Use `--icons-only` when refreshing
+  icons without also updating Provider versions.
   `generate-open-source-attributions.mjs` produces the in-app attribution
   bundle and root `THIRD_PARTY_NOTICES.md`. Generated output must come only
   from public repository inputs.

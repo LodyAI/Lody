@@ -9,6 +9,14 @@ Lody Agents can use the built-in Lody MCP tools to work across conversations. Th
 Agent to split a task into focused conversations, check their progress, send follow-up work, and
 bring the completed results back to the original conversation.
 
+Starting several sessions yourself — isolated worktrees, mixed models, team visibility — is covered
+in [Parallel Coding Agents](/docs/parallel-agents). This page is the control path: one Agent
+coordinates the others.
+
+These tools are available when **Developer mode** and the **Tasks** beta are on
+(**Settings** -> **About**). Without that gate, a normal conversation cannot create or drive other
+sessions this way.
+
 ## Use it in a conversation
 
 Describe the outcome and the division of work in a normal prompt. For example:
@@ -44,3 +52,6 @@ Session control is deliberately bounded: an Agent can inspect only Lody-owned co
 cannot use it as an unbounded background scheduler. A delegated task may finish after its requested
 deadline; its output remains in that conversation even when the requester has already received a
 timeout result.
+
+To hand a live session to a teammate instead of coordinating other agents, see
+[Share a Coding Agent Session](/docs/session-handoff).

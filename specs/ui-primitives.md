@@ -1,0 +1,51 @@
+# Shared UI primitives
+
+Status: draft
+Translation: pending
+
+## Scenario
+
+A person should encounter the same control language across Lody's desktop and
+web surfaces. Buttons with the same role should share appearance, state feedback,
+and theme behavior even when they are composed by different product features.
+
+## Responsibilities
+
+`@lody/ui` owns reusable visual primitives and semantic design tokens. A primitive
+exposes named product choices instead of asking each caller to assemble its
+colors, dimensions, radius, shadow, and interaction states.
+
+The Button supports primary, secondary, ghost, destructive, and link variants;
+mini, small, medium, and large sizes; icon-only controls; destructive tone; and
+default or pill shapes. These choices define the redesigned interface. Migrated
+callers must not reproduce the appearance of the deleted Button implementation.
+
+Product surfaces own workflows, placement, responsive layout, and accessibility
+requirements. They may add layout or interaction classes when a local constraint
+cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
+viewer. Those classes must leave the primitive's visual identity under its props.
+
+## Theme behavior
+
+Semantic StyleX tokens provide light and dark values. A theme applies to a subtree
+so a primitive responds without product code selecting raw palette values. Token
+names describe meaning and interaction role; component tokens derive from those
+semantic values or documented fixed dimensions.
+
+## Migration
+
+Primitives move from `@lody/components` one at a time. A legacy primitive is
+removed once all in-repository callers use the new package and type checks show no
+remaining dependency. The migration does not expose an adapter for old Button
+variants or sizes.
+
+## Evidence
+
+Intended behavior: Issue [#304](https://github.com/LodyAI/Lody/issues/304) and PR
+[#305](https://github.com/LodyAI/Lody/pull/305).
+
+Inspected implementation: `packages/ui/src`, package compiler configuration, and
+migrated Button consumers in `packages/components`, Electron, and site docs.
+
+Executed validation is recorded in the linked PR and its
+[Agent Note](../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md).

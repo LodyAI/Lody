@@ -161,8 +161,9 @@ Lody 仍在走向完整的 local-first 支持。
 - `apps/cli` — 连接机器并运行 Coding Agents
 - `apps/electron` — Lody 桌面应用
 - `packages/components` — 工作空间共享 UI
+- `packages/ui` — Base UI 基础组件与 StyleX 设计令牌
 - `packages/platform` — 平台能力与集成
 - `packages/shared` — 共享 Schema、协议与工具
 - `site-docs` — 官网、文档与博客
 
-如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。

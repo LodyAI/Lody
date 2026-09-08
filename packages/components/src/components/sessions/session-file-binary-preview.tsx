@@ -6,6 +6,7 @@ import { SessionFileImagePreview } from './session-file-image-preview';
 interface SessionFileBinaryPreviewProps {
   readonly path: string;
   readonly bytes?: Uint8Array;
+  readonly url?: string;
 }
 
 /**
@@ -16,11 +17,12 @@ interface SessionFileBinaryPreviewProps {
 export const SessionFileBinaryPreview = memo(function SessionFileBinaryPreview({
   path,
   bytes,
+  url,
 }: SessionFileBinaryPreviewProps) {
   const { t } = useTranslation();
 
-  if (getImageMimeTypeForPath(path) && bytes && bytes.byteLength > 0) {
-    return <SessionFileImagePreview path={path} bytes={bytes} />;
+  if (getImageMimeTypeForPath(path) && (url || (bytes && bytes.byteLength > 0))) {
+    return <SessionFileImagePreview path={path} bytes={bytes} url={url} />;
   }
 
   return (

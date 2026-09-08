@@ -26,10 +26,16 @@ import { getSearchableMarkdownText } from './session-chat-search';
  *     and chunked.
  */
 
-/** Max rendered length of a round's title (the user's opening words). */
-export const OUTLINE_TITLE_MAX_LENGTH = 48;
-/** Max rendered length of a round's preview (the agent's opening words). */
-export const OUTLINE_PREVIEW_MAX_LENGTH = 160;
+/**
+ * Max rendered length of a round's title (the user's opening words).
+ * Sized to fill the hover card's 3-line clamp rather than starve it.
+ */
+export const OUTLINE_TITLE_MAX_LENGTH = 72;
+/**
+ * Max rendered length of a round's preview (the agent's opening words).
+ * Sized to fill the hover card's 6-line clamp rather than starve it.
+ */
+export const OUTLINE_PREVIEW_MAX_LENGTH = 240;
 
 /**
  * How much RAW text is fed to the markdown cleanup before truncation.
@@ -41,7 +47,7 @@ export const OUTLINE_PREVIEW_MAX_LENGTH = 160;
  * cost constant and independent of answer length. The window is generous
  * enough that markdown syntax removed by the cleanup cannot starve the result.
  */
-const SUMMARY_SOURCE_WINDOW = 640;
+const SUMMARY_SOURCE_WINDOW = 960;
 
 /**
  * Buckets for the tick width. A round's visual weight tracks how much was said
@@ -102,7 +108,7 @@ const truncateToLength = (value: string, maxLength: number): string => {
   return `${codePoints.slice(0, maxLength).join('').trimEnd()}…`;
 };
 
-/** Collapse to one line: the rail renders single-line title / clamped preview. */
+/** Collapse to one line so wrapping is left to the hover card's line clamps. */
 const collapseWhitespace = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const firstTextOf = (items: readonly MessageContent[]): string | null => {

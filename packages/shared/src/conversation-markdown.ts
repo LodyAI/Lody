@@ -47,6 +47,102 @@ export const CONVERSATION_MARKDOWN_MAX_TOKENS = 20_000;
 /** Trailing turns that keep full detail while older ones degrade first. */
 export const CONVERSATION_MARKDOWN_RECENT_ENTRIES = 4;
 
+/**
+ * A prose-only display message with an optional estimate for its full persisted
+ * turn. Thinking, plans and tools contribute to the estimate, not to `text`.
+ */
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** Includes stored working content; excludes binary media and unavailable
+   * output. Not provider usage or repeated context costs. Omitted for prose-only inputs. */
+  estimatedTokens?: number;
+  /** Model recorded on this turn; never the composer's current selection. */
+  modelName?: string;
+}
+
+/**
+ * Collect the plain-text conversation from session history. Entries with no
+ * text content (pure tool-call turns) are skipped; multiple text items in one
+ * entry join with a blank line.
+ */
+export function collectConversationMessages(history: SessionHistoryInput[]): ConversationMessage[] {
+  const messages: ConversationMessage[] = [];
+  for (const entry of history) {
+    if (entry.role !== 'user' && entry.role !== 'assistant') {
+      continue;
+    }
+    const texts: string[] = [];
+    for (const item of (entry.items ?? []) as MessageContent[]) {
+      if (item.type === 'text' && item.text?.trim()) {
+        texts.push(item.text);
+      }
+    }
+    if (texts.length > 0) {
+      messages.push({
+        id: entry.id,
+        role: entry.role,
+        text: texts.join('\n\n'),
+        estimatedTokens: estimateStoredMessageTokens((entry.items ?? []) as MessageContent[]),
+        modelName: entry.modelInfo?.name || entry.modelInfo?.modelId || entry.inputConfig?.modelId,
+      });
+    }
+  }
+  return messages;
+}
+
+function estimateStoredMessageTokens(items: readonly MessageContent[]): number {
+  let tokens = 0;
+  const count = (text: string | null | undefined) => {
+    tokens += estimateTokenCount(text ?? '');
+  };
+  for (const item of items) {
+    switch (item.type) {
+      case 'text':
+      case 'thought':
+        count(item.text);
+        break;
+      case 'plan':
+        for (const entry of item.entries) count(entry.content);
+        break;
+      case 'proposed_plan':
+        count(item.markdown);
+        break;
+      case 'tool_call': {
+        count(item.toolName ?? item.title);
+        if (item.rawInput) count(JSON.stringify(item.rawInput));
+        // Structured content is the display representation of rawOutput; count
+        // one representation so an adapter publishing both cannot double it.
+        const hasOutputContent = item.content?.some((block) => block.type !== 'terminal_command');
+        if (!hasOutputContent && item.rawOutput) count(JSON.stringify(item.rawOutput));
+        for (const block of item.content ?? []) {
+          switch (block.type) {
+            case 'terminal_command':
+              if (!item.rawInput) count([block.command, ...(block.args ?? [])].join(' '));
+              break;
+            case 'terminal_output':
+              count(block.output);
+              break;
+            case 'diff':
+              count(block.path);
+              count(block.oldText);
+              count(block.newText);
+              break;
+            case 'content':
+              if (block.content.type === 'text') count(block.content.text);
+              else if (block.content.type === 'resource' && 'text' in block.content.resource)
+                count(block.content.resource.text);
+              break;
+          }
+        }
+        break;
+      }
+    }
+  }
+  return tokens;
+}
+
 export interface ConversationMarkdownStats {
   /** Characters in the rendered Markdown. */
   chars: number;

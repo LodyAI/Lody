@@ -6,9 +6,11 @@ Base UI + StyleX component library that `packages/components/src/ui` migrates
 into one component at a time. Source-consumed; consumers compile it through
 `@stylexjs/unplugin` configured with `stylex-options.ts` from this package.
 
-- No Tailwind. No `className` prop, no `cn`, no `cva`, no `tailwind-merge`, no
-  `@source` scanning. Consumers customize through a `style` prop that takes a
-  StyleX style object, and through `stylex.createTheme` on a subtree.
+- Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge`, or
+  `@source` scanning inside this package. Component props own visual variants,
+  sizes, tones, and shapes. A plain `className` pass-through may carry caller
+  layout or interaction constraints during staged migration; do not use it to
+  reconstruct the deleted component's visual design.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only. Never on
   `@lody/components`, `@lody/platform`, or any cloud package.
 - No border token exists. Edges are wells, raised shadows, elevation shadows

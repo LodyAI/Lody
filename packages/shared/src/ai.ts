@@ -13,9 +13,7 @@ import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
-  DEEPSEEK_HARNESS_MODELS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
-  DEEPSEEK_HARNESS_REASONING_OPTIONS,
 } from './deepseek-harness';
 
 export const MANAGED_BUILTIN_RUNTIMES = [
@@ -279,7 +277,11 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+// 7: entries probed before the legacy `model[effort]` derivation became
+// Codex-only carry a bogus ladder for every agent that spells other variants
+// with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
+// per-model effort picker would rebuild that model's ladder from it.
+export const ACP_CAPABILITY_CACHE_VERSION = 7;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -391,6 +393,8 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
+  modelReasoningEfforts?: Record<string, string[]>;
 };
 
 /** Codex mode that routes approval requests to a model reviewer subagent. */
@@ -439,28 +443,6 @@ const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     type: 'select',
     currentValue: 'standard',
     options: DEEPSEEK_HARNESS_AGENT_PRESETS.map((preset) => ({ ...preset })),
-  },
-  {
-    id: 'model',
-    name: 'Model',
-    description: 'DeepSeek model used for the session',
-    category: 'model',
-    type: 'select',
-    currentValue: 'deepseek-v4-pro',
-    options: DEEPSEEK_HARNESS_MODELS.map((model) => ({
-      value: model.modelId,
-      name: model.name,
-      description: model.description,
-    })),
-  },
-  {
-    id: 'reasoning_effort',
-    name: 'Reasoning effort',
-    description: 'How much reasoning effort the model should use',
-    category: 'thought_level',
-    type: 'select',
-    currentValue: 'max',
-    options: DEEPSEEK_HARNESS_REASONING_OPTIONS.map((option) => ({ ...option })),
   },
 ];
 
@@ -930,10 +912,14 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: GROK_STATIC_MODES,
     models: GROK_STATIC_MODELS,
     configOptions: GROK_STATIC_CONFIG_OPTIONS,
+    modelReasoningEfforts: {
+      'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+      'grok-4.5': ['high', 'medium', 'low'],
+    },
   },
   deepseek: {
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
-    models: DEEPSEEK_HARNESS_MODELS.map((model) => ({ ...model })),
+    models: [],
     configOptions: DEEPSEEK_HARNESS_CONFIG_OPTIONS,
   },
 };
@@ -949,6 +935,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelReasoningEfforts
+    ? {
+        modelReasoningEfforts: Object.fromEntries(
+          Object.entries(capabilities.modelReasoningEfforts).map(([modelId, efforts]) => [
+            modelId,
+            [...efforts],
+          ])
+        ),
+      }
+    : {}),
 });
 
 /**
@@ -1489,6 +1485,15 @@ export type MessageContent =
        * for scheduling tool calls; see `collectPendingScheduledTasksFromHistory`.
        */
       schedulingTimeZone?: string;
+      /**
+       * Epoch ms when this tool call was first persisted by the machine that ran it.
+       * Only set for scheduling tool calls: the turn entry's timestamps are NOT a safe
+       * proxy for the creation moment (cron-fire follow-up turns are runtime-internal
+       * steers, so one history entry can aggregate several runtime turns and its
+       * `endedAt` keeps advancing past a one-shot's fire minute). See
+       * `collectPendingScheduledTasksFromHistory`.
+       */
+      recordedAtMs?: number;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];
@@ -1509,6 +1514,7 @@ export type MessageContent =
       meta?: SystemNoticeMeta[SystemNoticeName];
     }
   | OperationCompletionContent
+  | OperationProgressContent
   | {
       type: 'worktree_script';
       phase: WorktreeScriptPhase;
@@ -1615,4 +1621,4 @@ export type ACPSessionConfig = {
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
 export type SessionTurnInputConfig = Partial<ACPSessionConfig>;
-import type { OperationCompletionContent } from './session-orchestration';
+import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

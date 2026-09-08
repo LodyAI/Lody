@@ -12,6 +12,19 @@ By submitting a pull request, patch, or other contribution to Lody, you agree to
 - Lody may use contributions in open-source and commercial products and services, subject to the Apache License.
 - If you cannot agree to these terms, please do not submit the contribution. A separate written agreement with Lody takes precedence over these terms.
 
+## What we can review
+
+Thank you for wanting to help. Lody is a production codebase with invariants that are easy to break in a large diff and expensive to rediscover (the local/cloud boundary, catalog contracts, protocol capabilities). A large unsolicited patch often cannot be reviewed safely, even when the intent is generous.
+
+This is ordinary open-source practice: maintainers own the architecture. The most useful first contribution is often a clear Issue with reproduction or analysis, not a rewrite. Small, focused pull requests that change one thing are welcome. Closing a large PR is a statement about review capacity and risk, not about your effort.
+
+**Community contributors** (anyone who is not a Lody team member, and who has not been assigned the corresponding Issue by a maintainer):
+
+1. Keep the pull request under **1000 changed lines** (GitHub additions + deletions). We only review community PRs under that size.
+2. If the work would exceed 1000 lines, open an Issue with your analysis first. Those reports are welcome. Do not open a larger PR unless a maintainer assigns you that Issue.
+
+Lody team members work on same-repository branches and are not subject to this cap. A fork remains an external contribution even when the author is a team member.
+
 ## Before You Start
 
 1. Search existing issues and pull requests to avoid duplicate work.
@@ -68,6 +81,13 @@ This variable is optional. Never commit the generated data or credentials.
 
 ## Submitting Changes
 
+For changes to important behavior or architecture, follow the
+[document maintenance workflow](./.agents/README.md). Specs explain intent and require explicit human
+review. Significant decisions belong in an Agent Note; routine styling and local
+fixes normally need only a PR explanation. You may contribute in either English
+or Chinese; maintainers can arrange the counterpart after merge. Invariants
+continue to live in the nearest `AGENTS.md`.
+
 1. Create a clearly named branch from the latest code.
 2. Keep changes focused; avoid unrelated formatting or refactoring.
 3. Add or update tests for behavior changes, and make sure the existing tests pass.
@@ -83,7 +103,7 @@ This variable is optional. Never commit the generated data or credentials.
 
 If an Agent prepares a fork-based contribution, it must explain that the Context handoff is public and an invalid PR receives seven days to be corrected before closure. An Agent preparing a same-repository branch must not create an Issue solely to satisfy contribution intake.
 
-A fork-based pull request that does not meet the contribution requirements is marked `status:needs-pr-attention`. All findings share one comment and one seven-day correction period. A change over 200 additions plus deletions without its prior Issue reference adds a size-specific finding rather than a separate status. A valid edit clears the managed state automatically.
+A fork-based pull request that does not meet the contribution requirements is marked `status:needs-pr-attention`. All findings share one comment and one seven-day correction period. A change over 1000 additions plus deletions without a maintainer assignment on the linked Issue, or over 200 without its prior Issue reference, adds a size-specific finding rather than a separate status. A valid edit clears the managed state automatically.
 
 If the PR remains invalid after seven days, it is marked `status:pr-policy-expired` and closed. Continue through a new pull request using the current template. A maintainer may apply `status:pr-policy-bypass` for an exceptional PR; while present, automation does not modify its Issue reference or enforce contribution requirements, and it clears prior managed policy state. Removing the label resumes normal enforcement.
 

@@ -1,6 +1,11 @@
+import {
+  registerLocalFileResourceScheme,
+  installLocalFileResourceProtocol
+} from './services/local-file-resource-protocol'
 import { app, BrowserWindow, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
+import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
 import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
@@ -15,6 +20,7 @@ import { NotificationService } from './services/notification-service'
 import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
+import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -70,10 +76,33 @@ if (
   }
 }
 
+registerLocalFileResourceScheme()
+
 const LODY_PROTOCOL = desktopInstallationProfile.desktopProtocol
 const PRODUCT_NAME = desktopInstallationProfile.desktopProductName
 const DESKTOP_FILE_NAME = `${desktopInstallationProfile.desktopAppId}.desktop`
 const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
+const IS_E2E = !app.isPackaged && process.env.LODY_E2E === '1'
+
+type E2EBootDiagnostic = { stage: string; error?: string }
+type E2EGlobal = typeof globalThis & {
+  __LODY_E2E_BOOT_DIAGNOSTIC__?: E2EBootDiagnostic
+  __LODY_E2E_WRITE_HEAP_SNAPSHOT__?: (path: string) => string
+}
+
+if (IS_E2E) {
+  ;(globalThis as E2EGlobal).__LODY_E2E_WRITE_HEAP_SNAPSHOT__ = (path) => writeHeapSnapshot(path)
+}
+
+function recordE2EBootDiagnostic(stage: string, error?: unknown): void {
+  if (!IS_E2E) return
+  const diagnostic: E2EBootDiagnostic = { stage }
+  if (error !== undefined) {
+    diagnostic.error = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  }
+  const e2eGlobal = globalThis as E2EGlobal
+  e2eGlobal.__LODY_E2E_BOOT_DIAGNOSTIC__ = diagnostic
+}
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
   if (meta) {
@@ -153,7 +182,10 @@ if (hasSingleInstanceLock) {
 }
 
 if (hasSingleInstanceLock) {
-  void app.whenReady().then(() => {
+  recordE2EBootDiagnostic('waiting-for-app-ready')
+  const appReady = app.whenReady().then(() => {
+    installLocalFileResourceProtocol()
+    recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 
     logDeepLinkDebug('app.whenReady resolved', {
@@ -172,7 +204,12 @@ if (hasSingleInstanceLock) {
     )
     loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
 
-    const appUpdaterService = new AppUpdaterService({ enabled: !isLocalPlatform() })
+    const appUpdaterService = new AppUpdaterService({
+      enabled: shouldConstructUpdaterEnabled({
+        localPlatform: isLocalPlatform(),
+        forceEnable: process.env.LODY_ELECTRON_ENABLE_UPDATER === '1'
+      })
+    })
     const notificationService = new NotificationService(() => getMainWindow())
     const windowsTrayService = new WindowsTrayService({
       iconPath: icon,
@@ -245,7 +282,9 @@ if (hasSingleInstanceLock) {
       initialPath,
       hasInitialDeepLink: Boolean(extractDeepLinkFromArgv(process.argv))
     })
+    recordE2EBootDiagnostic('opening-main-window')
     openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
+    recordE2EBootDiagnostic('main-window-opened')
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,
       hideWindowOnAutoLaunch
@@ -303,6 +342,11 @@ if (hasSingleInstanceLock) {
       appUpdaterService.stop()
       publicBrowserService.destroyAll()
     })
+  })
+  void appReady.catch((error: unknown) => {
+    recordE2EBootDiagnostic('failed', error)
+    console.error('[Electron] Fatal error while creating the main window', error)
+    if (!IS_E2E) app.exit(1)
   })
 }
 

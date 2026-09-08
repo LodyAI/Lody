@@ -26,7 +26,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { SessionRowLeadingSlot } from '../src/components/sidebar-row-shared';
+import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { SessionSyncingIndicator } from '../src/components/sessions/session-syncing-indicator';
 import { MobileConnectionStatus } from '../src/components/mobile/mobile-connection-status';
 import { initI18n } from '../src/i18n';
@@ -61,12 +61,9 @@ function render(node: React.ReactElement) {
 
 describe('spinners rotate in place', () => {
   it('session row working indicator: square SVG is centered without a vertical nudge', () => {
-    render(
-      React.createElement(SessionRowLeadingSlot, {
-        isWorking: true,
-        menuLabel: 'More actions',
-      })
-    );
+    // The status mark lives in the row's END slot (`sidebar-row-shared.tsx`),
+    // which is where the spinner has to keep its square, centered box.
+    render(React.createElement(SidebarRowEndSlot, { isWorking: true }));
 
     const spinner = container.querySelector('[data-session-working-spinner]');
     expect(spinner).not.toBeNull();

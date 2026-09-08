@@ -39,19 +39,75 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Select CI scope
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          node .github/scripts/select-ci-scope.mjs \
+            --event "${{ github.event_name }}" \
+            --base-sha "${PR_BASE_SHA}" \
+            --head-sha "${{ github.sha }}" \
+            --workspace-root . \
+            --labels "${PR_LABELS}" \
+            --json-out "$RUNNER_TEMP/ci-scope.json"
+
+      - name: YAML fail-open override
+        id: override
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Identical block in Static checks and Tests. Write force_full once.
+          # Default fail-open; only a successful allowlist miss may set false.
+          force=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+              && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
+              force=false
+              while IFS= read -r -d '' f; do
+                [ -z "$f" ] && continue
+                case "$f" in
+                  package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.github/scripts/*|.github/workflows/*)
+                    force=true
+                    break
+                    ;;
+                esac
+              done < /tmp/ci-changed-files
+            fi
+          fi
+          echo "force_full=${force}" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Test contribution policy
         run: node --test .github/scripts/*.test.mjs
 
+      - name: Check document maintenance
+        env:
+          DOCS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$DOCS_BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin "$DOCS_BASE_SHA"
+            pnpm run docs check --base "$DOCS_BASE_SHA"
+          else
+            pnpm run docs check
+          fi
+
       - name: Check formatting
         run: pnpm format:check
 
-      - name: Typecheck
+      - name: Typecheck (forced full)
+        if: steps.override.outputs.force_full == 'true'
         run: pnpm typecheck
 
+      - name: Typecheck
+        if: steps.override.outputs.force_full != 'true' && steps.scope.outputs.run_typecheck != 'false'
+        run: node .github/scripts/run-ci-typecheck.mjs --scope "$RUNNER_TEMP/ci-scope.json"
+
       - name: Lint and check repository boundaries
+        if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_check_quick != 'false'
         run: pnpm check:quick
 
   tests:
@@ -74,15 +130,70 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Select CI scope
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          node .github/scripts/select-ci-scope.mjs \
+            --event "${{ github.event_name }}" \
+            --base-sha "${PR_BASE_SHA}" \
+            --head-sha "${{ github.sha }}" \
+            --workspace-root . \
+            --labels "${PR_LABELS}" \
+            --json-out "$RUNNER_TEMP/ci-scope.json"
+
+      - name: YAML fail-open override
+        id: override
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Must stay byte-identical to the Static checks override (do not
+          # move this floor into select-ci-scope.mjs — that script is untrusted).
+          force=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+              && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
+              force=false
+              while IFS= read -r -d '' f; do
+                [ -z "$f" ] && continue
+                case "$f" in
+                  package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.github/scripts/*|.github/workflows/*)
+                    force=true
+                    break
+                    ;;
+                esac
+              done < /tmp/ci-changed-files
+            fi
+          fi
+          echo "force_full=${force}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip tests for docs-only / empty affected set
+        if: steps.override.outputs.force_full != 'true' && steps.scope.outputs.run_tests == 'false'
+        run: |
+          echo "Skipping Tests install and suite: ${{ steps.scope.outputs.reason }}"
+
       - name: Install dependencies
+        if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_tests != 'false'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare ACP adapters
+        if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_tests != 'false'
         run: pnpm --filter lody prepare:acp-adapters
 
-      - name: Run tests
+      - name: Run tests (forced full)
+        if: steps.override.outputs.force_full == 'true'
         env:
           GIT_CONFIG_COUNT: 1
           GIT_CONFIG_KEY_0: commit.gpgSign
           GIT_CONFIG_VALUE_0: 'false'
         run: pnpm test:ci
+
+      - name: Run tests
+        if: steps.override.outputs.force_full != 'true' && steps.scope.outputs.run_tests != 'false'
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: commit.gpgSign
+          GIT_CONFIG_VALUE_0: 'false'
+        run: node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json"

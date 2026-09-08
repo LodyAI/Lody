@@ -63,7 +63,7 @@ function ContextMenuSubTrigger({
     >
       {icon ? <span className={menuItemIconClassName}>{icon}</span> : null}
       {children}
-      <span className={cn(menuItemIconClassName, 'ms-2 me-0 size-4 [&>svg]:size-3')}>
+      <span className={cn(menuItemIconClassName, 'ms-auto me-0 size-4 [&>svg]:size-3')}>
         <ChevronRightIcon />
       </span>
     </ContextMenuPrimitive.SubTrigger>

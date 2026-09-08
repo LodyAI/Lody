@@ -282,9 +282,10 @@ export const buildAssistantTurnRenderLayout = (
       return { key, blockRange, workBlockKeys: new Set<string>(), firstWorkBlockIndex: -1 };
     }
 
-    // The "keep the last item visible" rule is applied PER SEGMENT: each region
-    // has its own answer tail. Applied across the whole turn, the plan would be
-    // demoted to process output just because implementation followed it.
+    // The "keep the final contiguous text run visible" rule is applied PER
+    // SEGMENT: each region has its own answer tail. Applied across the whole
+    // turn, the plan would be demoted to process output just because
+    // implementation followed it.
     const segmentEntries = collectSegmentEntries(blocks, blockRange);
     const segmentContents = segmentEntries.map((entry) => entry.content);
     const collapsibleItemIndexes = new Set<number>();

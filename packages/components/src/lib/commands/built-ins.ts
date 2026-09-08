@@ -51,6 +51,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'View',
   },
   {
+    id: 'layout.toggleZenMode',
+    titleKey: 'commands.layout.toggleZenMode',
+    title: 'Toggle Zen Layout',
+    category: 'View',
+  },
+  {
     id: 'session.new',
     titleKey: 'commands.session.new',
     title: 'New Chat',

@@ -282,6 +282,22 @@ const historyMessageItemSchema = schema
             return Array.isArray(v.commands) ? true : 'Missing commands';
           case 'system_notice':
             return typeof v.name === 'string' ? true : 'Missing name';
+          case 'operation_progress':
+            return typeof v.operationId === 'string' &&
+              (v.operationKind === 'session_create' || v.operationKind === 'session_create_many') &&
+              Array.isArray(v.items) &&
+              v.items.every(
+                (item) =>
+                  isRecord(item) &&
+                  isRecord(item.target) &&
+                  typeof item.target.sessionId === 'string' &&
+                  typeof item.target.userTurnId === 'string' &&
+                  (item.label === undefined || typeof item.label === 'string') &&
+                  typeof item.status === 'string' &&
+                  ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
+              )
+              ? true
+              : 'Missing operation progress metadata';
           case 'operation_completion':
             return typeof v.deliveryId === 'string' &&
               typeof v.operationId === 'string' &&
@@ -741,9 +757,18 @@ export type PendingScheduledTask = {
   /** Stable id: cron job id, or a fixed key for the session's single pending wakeup. */
   id: string;
   kind: 'cron' | 'wakeup';
-  /** When this task set entry was last recorded, epoch ms. */
+  /**
+   * When this task set entry was last recorded, epoch ms. For calls persisted with
+   * `recordedAtMs` this is the tool call's own first-sighting stamp (the true creation
+   * moment); older history falls back to the owning turn's START — never its `endedAt`,
+   * which merged cron-fire turns can push past a one-shot's fire minute.
+   */
   createdAtMs: number;
-  /** Wakeup fire time (epoch ms). Absent for cron jobs (they use a schedule expression). */
+  /**
+   * Wakeup fire time (epoch ms); also the runtime-committed fire time of a one-shot cron
+   * whose CronCreate output carried a `nextFireAt` line. Absent for recurring cron jobs
+   * (they resolve from their schedule expression relative to now).
+   */
   scheduledForMs?: number;
   /** Cron schedule expression / human-readable schedule string. */
   humanSchedule?: string;

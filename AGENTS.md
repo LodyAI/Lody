@@ -1,131 +1,80 @@
 # Repository guidelines
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+Repository map and entry points: [README.md](README.md#repository).
 
-## Context maintenance
+## Context and documentation
 
-Read every `AGENTS.md` from the repository root to the file being changed.
-Before PR or Issue work, read `.github/AGENTS.md`. Record public contributor
-invariants in the narrowest relevant `AGENTS.md` (under 8 KiB; add a `CLAUDE.md`
-symlink for new scoped files). Internal context, plans, specifications, and
-task records stay in the private repository.
+- Read the applicable ancestor/scoped `AGENTS.md` files and task-relevant Specs,
+  active notes, `.agents/docs/`, and module READMEs. Follow the required topic
+  links below when their trigger applies, including changes outside the owner's
+  directory. Archives are history, not current authority.
+- Specs express intent, docs explain implementation, notes record decisions.
+  Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
+  never change a Spec to justify a bug.
+- Changed intent/guarantees require a [Spec](specs/AGENTS.md) updated as `draft`.
+  `approved` requires linked human approval of that revision; `outdated` needs
+  review. Only meaning-preserving editorial edits may retain approval.
+- Non-trivial work MUST add/update the owning [Agent Note](.agents/notes/AGENTS.md#when-to-write)
+  in the same PR; substantial research/design also requires a note without a PR.
+  Only mechanical/local edits without changed decisions are exempt. Link different
+  decisions; proposals stay `proposed`. Read-only tasks report deferred updates.
+- Update affected docs/READMEs. Run `pnpm run docs status` at start and
+  `pnpm run docs check` at finish; review SHA-protected changes before confirming.
+  Checks and translations prove neither correctness nor approval. Translation may
+  follow later. Details: [document maintenance](.agents/README.md).
+- Keep binding rules in the nearest `AGENTS.md` (<8 KiB; new scopes need a
+  `CLAUDE.md` symlink). Keep explanations and rationale in their owning docs/notes.
 
 ## Repository boundary
 
-Standalone public source tree: `apps/{cli,electron}` and the packages they
-consume. Excludes hosted backends, operator/billing config, private secrets,
-and Web/mobile app sources.
+- Public source: `apps/{cli,electron}` and their packages. Exclude hosted backends,
+  operator/billing config, private secrets/records, and Web/mobile app sources.
+  Never commit captured user/agent transcripts; fixtures must be synthetic.
+- Never depend on `@lody/convex`, private workspace packages, or generated backend
+  API declarations. Optional-cloud protocol names/DTOs belong in `packages/cloud-api`;
+  shared product code uses `packages/platform` capabilities and ports.
+- The OSS desktop is local-only; authenticated product-cloud requests are forbidden.
+  Public managed-runtime downloads are the exception. Shared packages stay
+  platform-neutral; local telemetry is hard-disabled.
+- Before changing composition, capability-gated settings, telemetry, or runtime
+  downloads, read [platform contracts](packages/platform/AGENTS.md).
+- Before changing daemon protocol negotiation, MCP/Role catalogs or their UI
+  consumers, per-turn MCP selection, or Role creation/dispatch, read [shared contracts](packages/shared/AGENTS.md).
+- `packages/acp-extension-kimi` stays outside the root pnpm graph in its isolated
+  submodule workspace; consume only its separately built, checksummed managed-runtime
+  artifact and versioned ACP contract. Shared ACP extension contracts belong in the
+  public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
+  never duplicate them locally.
+- Viewer packaging/version changes must follow its [rules](packages/code-review-viewer/AGENTS.md).
+  Package-scope or cloud/local composition changes require `pnpm check:public-boundary`.
 
-- Never add a dependency on `@lody/convex`, a private workspace package, or a
-  generated backend API declaration.
-- Public optional-cloud protocol names/DTOs live in `packages/cloud-api`.
-- Shared product code uses `packages/platform` capabilities and ports.
-- Settings must represent real platform support: local hides cloud usage and
-  PR-driven auto-archive, and omits machine selection when `remoteMachines` is
-  absent. Gate entries and their background work through capabilities rather
-  than build-kind or environment checks.
-- Shared packages stay platform-neutral. The public Electron composition
-  selects `local` explicitly; private Web/mobile entries and cloud composition
-  roots may inject `cloud` without forking those shared packages.
-- The code-review-viewer build accepts `LODY_RELEASE_VERSION` for downstream
-  immutable packaging; without it, the public package version is authoritative.
-- The OSS desktop entry is local-only and must not make authenticated product-cloud requests;
-  public managed-runtime artifact downloads are the explicit exception.
-- An absent platform selector resolves to `local`; public build scripts must
-  not accept or discover staging/production deployment presets.
-- Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
-  unrelated PostHog variables exist in the caller's shell.
-- Client workflows that require daemon support negotiate integer protocol versions through
-  `MachineMeta.protocolCapabilities`; never infer support from the CLI release version. Missing
-  capabilities mean legacy/unsupported. Advertised set and version checks share one binding in
-  `packages/shared/src/machine-protocol-capabilities.ts` so a key never travels without its version.
-- Managed runtime downloads default to the public R2-backed channel owned by
-  `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
-  same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
-- `packages/acp-extension-kimi` is an isolated submodule workspace. Do not add it
-  to the root pnpm dependency graph; Lody consumes only its separately built,
-  checksummed managed-runtime artifact and versioned ACP extension contract.
-- `packages/acp-extension-core` is a public submodule workspace sourced from
-  `LodyAI/acp-extension-core`. Keep shared ACP extension contracts there and consume
-  them through the root pnpm workspace; do not duplicate those contracts locally.
-- Never commit captured user/agent transcripts; fixtures must be synthetic.
-- Workspace MCP has exactly two durable layers: catalog entries in the workspace Flock
-  document and selected ids in each user turn input config. Do not add machine bindings.
-  Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
-  driving turn's selection into ACP startup rather than rereading session history.
-- Workspace catalog mutations (MCP servers and Agent Roles) are durable on the local
-  Flock write and shared by an explicit upload that follows it. Settings surfaces resolve
-  on durability and do not wait on or report that upload: the row already exists, the
-  joined room carries the document when a one-shot upload cannot, and a banner about it is
-  something the user can neither act on nor dismiss. What is forbidden is the opposite —
-  reporting a durable write as failed, or rolling one back, because the upload did not go
-  through. The CLI still reports its own sync result to the terminal.
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+## Contributions and checks
 
-`pnpm check:public-boundary` is the executable repository boundary and must pass
-after changing package scope or cloud/local composition.
-
-## Project map
-
-`apps/cli` (agent, persistence, Machine RPC), `apps/electron` (desktop +
-bundled CLI), `packages/{components,ui}` (shared UI), `packages/platform`
-(ports), `packages/cloud-api` (optional-cloud DTOs), `packages/shared`
-(schemas), `packages/loro-streams-rpc`, `packages/acp-extension-{core,kimi}`,
-`site-docs`.
-
-## Checks and commits
-
-Use Node.js 22+ and the pnpm version pinned in `package.json`. Install with
-`pnpm install`. A parent pnpm workspace owns nested checkouts; the public
-preinstall guard rejects a second install. Use a separate clone for standalone
-public development. `pnpm start:local` is the canonical desktop command; root
-`pnpm build` is the same local composition. Before committing, normally run
-`pnpm check` and `pnpm format`. If asked to skip tests, report the narrower
-type/build/static validation instead. Conventional Commits (`feat:`, `fix:`,
-`docs:`, `chore:`, `test:`); AI commits end with `Model: <runtime-model-id>`.
-CI uses `pnpm install --frozen-lockfile`, so manifest changes update
-`pnpm-lock.yaml`.
-
-## Test quality
-
-No real sleeps, wall-clock races, network, machine load, or scheduler luck.
-Use explicit signals, injected clocks, fake timers, and deterministic fixtures.
-Assert observable behavior, not mock call counts.
-
-## Editing discipline
-
-Keep changes traceable to the request. Preserve unrelated user work. Prefer a
-small explicit contract over hidden fallbacks, and remove only code the change
-makes unused. Update the nearest public `AGENTS.md` when an invariant or
-repository boundary changes. Do not copy internal design records here.
+- Identify once: Lody team if the user says so or GitHub login is `zxch3n`,
+  `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
+  contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
+  Read it before any PR/Issue work as well.
+- Node.js 22+; use the pnpm in `package.json`. `pnpm install` (nested checkouts
+  skip it); standalone work uses a separate clone. `pnpm start:local` starts the
+  desktop; root `pnpm build` uses the same local composition.
+- Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
+  type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits
+  end with `Model: <runtime-model-id>`.
+- Tests use explicit signals, injected clocks, fake timers, and deterministic
+  fixtures; no real sleeps, wall-clock races, network, machine load, or scheduler
+  luck. Assert observable behavior, not mock call counts.
+- Keep edits traceable to the request and preserve unrelated work. Prefer explicit
+  contracts over hidden fallbacks; remove only unused code. Update the nearest
+  public `AGENTS.md` when an invariant or boundary changes.
 
 ## Code Review Rules
 
-Report only P0/P1. Security first. If the PR solves the linked Issue and no
-P0/P1 remains, react 👍. See `.github/codex-review.md`.
+Report only P0/P1, security first. If the PR solves the linked Issue and no P0/P1
+remains, react 👍. Details: [.github/codex-review.md](.github/codex-review.md).
 
-- P0: exploitable security, secret leak, auth/capability bypass, data loss, or
-  a broken public/cloud/local boundary.
+- P0: exploitable security, secret leak, auth/capability bypass, data loss, or a
+  broken public/cloud/local boundary.
 - P1: likely shipped breakage or a durable catalog/session contract violation.
-- Skip style, nits, P2+, extreme edge cases, extra tests, and duplication
-  under 100 lines of near-identical code in this diff. Leave lint to CI.
+- Skip style, nits, P2+, extra tests, and duplication under 100 lines.
