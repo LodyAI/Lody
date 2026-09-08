@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/514
 
 [English](2026-09-08-desktop-daily-platform-bootstrap.md) | 中文
 
