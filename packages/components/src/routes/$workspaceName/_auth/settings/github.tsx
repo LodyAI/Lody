@@ -1,6 +1,20 @@
+import { lazy } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
-import { IntegrationsSettingsComponent } from '@/components/settings/integrations-setting';
+import { RouteSuspense } from '@/components/route-suspense';
+
+const LazyIntegrationsSettings = lazy(async () => {
+  const module = await import('@/components/settings/integrations-setting');
+  return { default: module.IntegrationsSettingsComponent };
+});
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings/github')({
-  component: IntegrationsSettingsComponent,
+  component: GithubSettingsRoute,
 });
+
+function GithubSettingsRoute() {
+  return (
+    <RouteSuspense>
+      <LazyIntegrationsSettings />
+    </RouteSuspense>
+  );
+}

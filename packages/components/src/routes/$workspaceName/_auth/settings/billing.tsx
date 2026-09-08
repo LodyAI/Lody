@@ -1,6 +1,12 @@
+import { lazy } from 'react';
 import { createFileRoute, Navigate } from '@tanstack/react-router';
-import { BillingSettingsComponent } from '@/components/settings/billing-setting';
 import { isNativeAppShell } from '@/lib/native-platform';
+import { RouteSuspense } from '@/components/route-suspense';
+
+const LazyBillingSettings = lazy(async () => {
+  const module = await import('@/components/settings/billing-setting');
+  return { default: module.BillingSettingsComponent };
+});
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings/billing')({
   component: BillingSettingsRoute,
@@ -20,5 +26,9 @@ export function BillingSettingsRoute() {
     );
   }
 
-  return <BillingSettingsComponent />;
+  return (
+    <RouteSuspense>
+      <LazyBillingSettings />
+    </RouteSuspense>
+  );
 }
