@@ -58,9 +58,9 @@ async function captureChatShareImage(element: HTMLElement): Promise<Blob> {
 }
 
 export async function copyChatShareImage(element: HTMLElement): Promise<void> {
-  const blob = await captureChatShareImage(element);
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
+    const blob = await captureChatShareImage(element);
     const result = await bridge.copyToClipboard({ pngBytes: await blob.arrayBuffer() });
     if (!result.copied) throw new Error(result.error || 'Image copy failed');
     return;
@@ -69,7 +69,11 @@ export async function copyChatShareImage(element: HTMLElement): Promise<void> {
   if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
     throw new Error('Image clipboard is unavailable');
   }
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+
+  // WebKit revokes transient user activation after an await. Start the clipboard
+  // write synchronously and let ClipboardItem await the PNG capture itself.
+  const png = captureChatShareImage(element);
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
 }
 
 export async function exportChatShareImage(element: HTMLElement, title?: string): Promise<void> {

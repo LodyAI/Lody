@@ -124,7 +124,7 @@ describe('chat share image export', () => {
   it('writes the captured PNG with the browser clipboard when no native bridge exists', async () => {
     const write = vi.fn(async () => undefined);
     class TestClipboardItem {
-      constructor(readonly items: Record<string, Blob>) {}
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
     }
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
     vi.stubGlobal('ClipboardItem', TestClipboardItem);
@@ -133,7 +133,35 @@ describe('chat share image export', () => {
 
     expect(write).toHaveBeenCalledTimes(1);
     const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
-    expect(item.items['image/png']).toBeInstanceOf(Blob);
+    await expect(item.items['image/png']).resolves.toBeInstanceOf(Blob);
+  });
+
+  it('starts the browser clipboard write before the image capture resolves', async () => {
+    let releaseFonts: (() => void) | undefined;
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: {
+        ready: new Promise<void>((resolve) => {
+          releaseFonts = resolve;
+        }),
+      },
+    });
+    const write = vi.fn(async () => undefined);
+    class TestClipboardItem {
+      constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+    }
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+
+    const copy = copyChatShareImage(document.createElement('div'));
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
+    const png = item.items['image/png'];
+    expect(png).toBeInstanceOf(Promise);
+
+    releaseFonts?.();
+    await Promise.all([copy, png]);
   });
 
   it('rejects empty or non-PNG captures before saving', async () => {
