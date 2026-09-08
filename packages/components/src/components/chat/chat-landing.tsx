@@ -756,8 +756,10 @@ function WorkspaceChatLanding({
   const presenceSyncState = useAtomValue(lodyPresenceSyncStateAtom);
   const isPresenceMachineOnline = useCallback(
     (machineId: string) =>
-      onlineMachineIds.has(machineId as MachineId) || presenceSyncState !== 'synced',
-    [onlineMachineIds, presenceSyncState]
+      machineId === localProbeResult?.machineId ||
+      onlineMachineIds.has(machineId as MachineId) ||
+      presenceSyncState !== 'synced',
+    [localProbeResult?.machineId, onlineMachineIds, presenceSyncState]
   );
   const freshRepositories = useCloudQuery(
     cloudOperations.github.getWorkspaceRepositories,

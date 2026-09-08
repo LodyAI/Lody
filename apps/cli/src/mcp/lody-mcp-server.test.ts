@@ -1131,7 +1131,23 @@ describe('session MCP input schemas', () => {
       createMcpContext()
     );
 
-    await expect(isMachineOnline('remote-unseen' as never)).resolves.toBe(true);
+    await expect(isMachineOnline('remote-unseen' as MachineId)).resolves.toBe(true);
+  });
+
+  it('still reports a remote machine offline after presence has joined', async () => {
+    const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a']));
+    const isMachineOnline = makeMachineOnlineLookupForMcp(
+      { getOnlineMachineIds } as never,
+      createMcpContext()
+    );
+
+    await expect(
+      Promise.all([
+        isMachineOnline('machine-id' as MachineId),
+        isMachineOnline('remote-a' as MachineId),
+        isMachineOnline('remote-missing' as MachineId),
+      ])
+    ).resolves.toEqual([true, true, false]);
   });
 
   it('truncates history text on Unicode boundaries with exact omitted bytes', () => {
