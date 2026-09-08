@@ -260,7 +260,9 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>{t('sessions.shareImage.backdrop', 'Background')}</Label>
+              <Label className="mb-2 block">
+                {t('sessions.shareImage.backdrop', 'Background')}
+              </Label>
               <div className="grid grid-cols-5 gap-1.5" role="group">
                 <button
                   type="button"
