@@ -128,6 +128,7 @@ export interface AccountSettingsPureProps {
   members: AccountMember[];
   pendingInvitations: Invitation[];
   workspaceJoinRequestsSlot?: ReactNode;
+  workspaceOwnershipSlot?: ReactNode;
   /** Account-only machine overview supplied by the runtime-aware container. */
   accountMachinesSlot?: ReactNode;
   memberLimit?: number | null;
@@ -187,6 +188,7 @@ export function AccountSettingsPure({
   members,
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
+  workspaceOwnershipSlot,
   accountMachinesSlot,
   memberLimit = null,
   memberLimitReached = false,
@@ -476,6 +478,7 @@ export function AccountSettingsPure({
         members={members}
         pendingInvitations={initialPendingInvitations}
         workspaceJoinRequestsSlot={workspaceJoinRequestsSlot}
+        workspaceOwnershipSlot={workspaceOwnershipSlot}
         memberLimit={memberLimit}
         memberLimitReached={memberLimitReached}
         billingUiAvailable={billingUiAvailable}
@@ -1064,6 +1067,7 @@ export function AccountSettingsPure({
       {/* Danger Zone */}
       {isWorkspaceSurface ? (
         <CompactSection title={t('workspace.danger.title')} className="border-destructive/20">
+          {role === 'owner' ? workspaceOwnershipSlot : null}
           {role !== 'owner' && (
             <CompactRow
               label={t('workspace.danger.leaveWorkspace.title')}
