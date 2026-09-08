@@ -1,5 +1,6 @@
 'use client';
 
+import '@site/components/app-preview-shims/pierre-diffs-web-components';
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,

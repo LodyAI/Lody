@@ -71,11 +71,12 @@ function apiError(status) {
   return Object.assign(new Error(`HTTP ${status}`), { status });
 }
 
-function createGithub({ comments = [], latestPullRequest = null } = {}) {
+function createGithub({ comments = [], latestPullRequest = null, issues = new Map() } = {}) {
   const activity = {
     addedLabels: [],
     createdComments: [],
     deletedComments: [],
+    issueReads: [],
     pullUpdates: [],
     removedLabels: [],
     updatedComments: [],
@@ -86,6 +87,14 @@ function createGithub({ comments = [], latestPullRequest = null } = {}) {
     paginate: async () => comments,
     rest: {
       issues: {
+        get: async (input) => {
+          activity.issueReads.push(input);
+          const issue = issues.get(input.issue_number);
+          if (!issue) {
+            throw apiError(404);
+          }
+          return { data: issue };
+        },
         addLabels: async (input) => activity.addedLabels.push(input),
         createComment: async (input) => {
           const comment = {
@@ -172,6 +181,49 @@ void describe('pull request validation', () => {
     assert.equal(result.state, 'invalid');
     assert.ok(result.validation.findings.some((finding) => finding.includes('PR body is empty')));
     assert.ok(result.validation.findings.some((finding) => finding.includes('changes 201 lines')));
+    assert.ok(
+      result.validation.findings.some((finding) =>
+        finding.includes('require the prior Lody Issue reference')
+      )
+    );
+  });
+
+  void it('rejects community PRs over 1000 lines without an Issue assignment', async () => {
+    const { activity, github } = createGithub();
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body: validBody, additions: 900, deletions: 101 },
+      defaultBranch: 'main',
+    });
+
+    assert.equal(result.state, 'invalid');
+    assert.ok(
+      result.validation.findings.some((finding) =>
+        finding.includes('require a maintainer assignment on the linked Issue')
+      )
+    );
+    assert.deepEqual(activity.issueReads, [
+      { owner: 'LodyAI', repo: 'Lody', issue_number: 121 },
+    ]);
+  });
+
+  void it('accepts community PRs over 1000 lines when the author is assigned', async () => {
+    const issues = new Map([
+      [121, { assignees: [{ login: 'contributor' }] }],
+    ]);
+    const { github } = createGithub({ issues });
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body: validBody, additions: 900, deletions: 101 },
+      defaultBranch: 'main',
+    });
+
+    assert.equal(result.state, 'valid');
+    assert.equal(result.validation.ok, true);
   });
 });
 
@@ -192,6 +244,7 @@ void describe('pull request reconciliation', () => {
       addedLabels: [],
       createdComments: [],
       deletedComments: [],
+      issueReads: [],
       pullUpdates: [],
       removedLabels: [],
       updatedComments: [],

@@ -42,13 +42,26 @@ import type { LandingLocale } from './landing';
 import { LandingHeroDownload } from './landing-hero-download';
 import { RotatingWords } from './landing-interactions';
 import type { PlatformDownloadLabels } from './landing-platform-download';
+import { scheduleAfterLoadIdle } from '@site/lib/after-first-paint';
 
 // The point-cloud background (and with it all of three.js) stays out of the
-// landing's critical chunk: the hero copy hydrates without parsing three, while
-// this module-eval import() starts fetching the chunk in parallel. Until it
-// mounts, the container's CSS gradient (kept in sync with the BG shader) shows.
-const underwaterBackgroundModule = import('./underwater-background');
-const UnderwaterPointCloudBackground = lazy(() => underwaterBackgroundModule);
+// landing's critical chunk: the hero copy hydrates without parsing three.
+// The dynamic import starts only when this experience mounts — not at module
+// evaluation — so docs/marketing routes that share the route graph do not
+// download the 3D chunk. On the client the fetch then waits for load + idle
+// so the hero H1 (the LCP element) is not competing with it.
+function loadUnderwaterBackground() {
+  return import('./underwater-background');
+}
+
+const UnderwaterPointCloudBackground = lazy(() => {
+  if (typeof window === 'undefined') return loadUnderwaterBackground();
+  return new Promise<typeof import('./underwater-background')>((resolve) => {
+    scheduleAfterLoadIdle(() => {
+      resolve(loadUnderwaterBackground());
+    });
+  });
+});
 
 // The product stage sits below the 100dvh hero, but `landing-app-preview` is the
 // landing's single heaviest module: it mounts REAL product UI and drags the chat
@@ -57,18 +70,16 @@ const UnderwaterPointCloudBackground = lazy(() => underwaterBackgroundModule);
 // visitor cannot even see yet. Lazy + armed on approach instead.
 //
 // Unlike three.js above, this one is NOT module-eval — the fetch is deferred to
-// `armPreview()` so the hero copy and the WebGL scene get the first-paint
-// bandwidth to themselves. Arming is deliberately EARLY (a viewport of
-// rootMargin, plus an idle fallback for visitors who never scroll), so by the
-// time the stage is reached the chunk is parsed and the frame is never empty.
+// `armPreview()` so the hero copy gets first-paint bandwidth. Arming waits
+// until the stage enters the viewport (or a long post-load idle) so the
+// preview chunk cannot contend with H1 LCP.
 const LandingAppPreview = lazy(() =>
   import('./landing-app-preview').then((m) => ({ default: m.LandingAppPreview }))
 );
 
 /** Preview chunk is armed at most once per page session. */
-const PREVIEW_ARM_ROOT_MARGIN = '100% 0px';
-/** Fallback for visitors who never scroll — still warm, just not on the hot path. */
-const PREVIEW_ARM_IDLE_TIMEOUT_MS = 2_500;
+/** Fallback for visitors who never scroll — after load, not on the LCP path. */
+const PREVIEW_ARM_IDLE_TIMEOUT_MS = 8_000;
 
 const TAB_DURATIONS: readonly number[] = [
   WORKTREE_DEMO_DURATION_MS,
@@ -184,8 +195,12 @@ export function UnderwaterExperience({
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add('underwater-landing-page');
+    const cancelMotion = scheduleAfterLoadIdle(() => {
+      root.classList.add('uw-motion-ready');
+    });
     return () => {
-      root.classList.remove('underwater-landing-page');
+      cancelMotion();
+      root.classList.remove('underwater-landing-page', 'uw-motion-ready');
     };
   }, []);
 
@@ -213,31 +228,27 @@ export function UnderwaterExperience({
     return () => io.disconnect();
   }, []);
 
-  // Arm the lazy preview chunk one viewport ahead of the stage, so scrolling down
-  // never lands on an unmounted frame. Idle timer is the no-scroll fallback.
+  // Arm the lazy preview chunk only once the stage has entered the viewport
+  // (or after a long post-load idle). A 100% rootMargin used to match the
+  // 100dvh hero and start the ~1.4MB preview download during hero LCP.
   useEffect(() => {
     const el = stageRef.current;
+    const cancelIdle = scheduleAfterLoadIdle(armPreview, {
+      timeoutMs: PREVIEW_ARM_IDLE_TIMEOUT_MS,
+    });
     if (!el || typeof IntersectionObserver === 'undefined') {
-      armPreview();
-      return undefined;
+      return cancelIdle;
     }
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) armPreview();
-      },
-      { rootMargin: PREVIEW_ARM_ROOT_MARGIN }
-    );
+    const io = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      if (entry.boundingClientRect.top >= window.innerHeight - 24) return;
+      armPreview();
+    });
     io.observe(el);
-
-    const hasIdle = typeof window.requestIdleCallback === 'function';
-    const idle = hasIdle
-      ? window.requestIdleCallback(armPreview, { timeout: PREVIEW_ARM_IDLE_TIMEOUT_MS })
-      : window.setTimeout(armPreview, PREVIEW_ARM_IDLE_TIMEOUT_MS);
 
     return () => {
       io.disconnect();
-      if (hasIdle) window.cancelIdleCallback(idle as number);
-      else window.clearTimeout(idle as number);
+      cancelIdle();
     };
   }, []);
 

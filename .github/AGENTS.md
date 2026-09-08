@@ -4,16 +4,16 @@
 
 ## Ownership
 
-| Area                | Source of truth                                                | Contract                                                                         |
-| ------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                            |
-| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                |
-| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.  |
-| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                     |
-| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
-| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                           |
-| Code checks         | `workflows/ci.yml`                                             | Preserve the stable `Static checks` and `Tests` jobs used as required checks.    |
-| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.           |
+| Area                | Source of truth                                                | Contract                                                                             |
+| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                                |
+| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                    |
+| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.      |
+| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                         |
+| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler.     |
+| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                               |
+| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. |
+| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.               |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -25,6 +25,16 @@ Workflow-file security constraints live in
 
 ## Contribution contract
 
+- One-shot identity: Lody team if the user says so, or GitHub login is
+  `zxch3n`, `Leeeon233`, or `wibus-wee` (`gh api user --jq .login`, or git
+  `user.name` Zixuan Chen, Leon Zhao, or Wibus Wu). Otherwise community; do
+  not keep checking. Same-repository branches stay `internal` regardless of
+  login.
+- Community PRs stay under 1000 changed lines (additions + deletions) unless a
+  maintainer assigned the linked Issue to the author. Larger work: file an
+  Issue with analysis and wait to be assigned; do not open the PR. Maintainers
+  review small focused changes; large unsolicited patches hide invariant breaks.
+  Humans: `CONTRIBUTING.md`.
 - `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
   body from the template and validate it with
   `node .github/scripts/check-pr-body.mjs --body-file <file>`.
@@ -82,12 +92,13 @@ valid <-> status:needs-pr-attention (invalid-since) -> status:pr-policy-expired 
 ```
 
 All template and size findings share the same comment, label, timestamp, and
-seven-day correction period. A change over 200 additions plus deletions without
-its prior Issue reference adds a size-specific finding; it does not create a
-second status. A valid edit or a skipped disposition clears managed enforcement
-state. An expired external PR is closed again when reopened; bypass or internal
-classification clears the expired state instead. Before closing an overdue PR,
-the audit must re-read and revalidate the latest PR.
+seven-day correction period. A change over 1000 additions plus deletions
+without a maintainer assignment on the linked Issue adds a size-specific
+finding; over 200 without its prior Issue reference still does. Neither
+creates a second status. A valid edit or a skipped disposition clears managed
+enforcement state. An expired external PR is closed again when reopened;
+bypass or internal classification clears the expired state instead. Before
+closing an overdue PR, the audit must re-read and revalidate the latest PR.
 
 Issue-link normalization and cleanup after a valid or skipped disposition are
 best-effort feedback. The current validation result alone decides whether an

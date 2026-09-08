@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
+const CANONICAL_DAILY_OS = 'macos-15';
 
 export function isActionsBot(record) {
   return record?.user?.login === ACTIONS_BOT_LOGIN && record.user.type === 'Bot';
@@ -33,18 +34,32 @@ export function hasCompleteOwnedComment(comments, marker, expectedVideos) {
 }
 
 export function findDailyEvidenceArtifact(artifacts, runId) {
-  const supported = new Map([
+  if (!/^\d+$/u.test(String(runId))) throw new Error('runId must be numeric');
+  const legacy = new Map([
     [`desktop-e2e-daily-full-${runId}`, 'full'],
     [`desktop-e2e-daily-smoke-${runId}`, 'smoke'],
     [`desktop-e2e-daily-${runId}`, 'unknown'],
   ]);
-  const matches = artifacts.filter(
-    (artifact) => !artifact.expired && supported.has(String(artifact.name ?? ''))
-  );
-  if (matches.length !== 1) return undefined;
+  const perOs = new RegExp(`^desktop-e2e-daily-(full|smoke)-([a-z0-9-]+)-${runId}$`, 'u');
+  const matches = [];
+  for (const artifact of artifacts) {
+    if (artifact.expired) continue;
+    const name = String(artifact.name ?? '');
+    if (legacy.has(name)) {
+      matches.push({ artifact, suite: legacy.get(name), os: null });
+      continue;
+    }
+    const parsed = perOs.exec(name);
+    if (parsed) matches.push({ artifact, suite: parsed[1], os: parsed[2] });
+  }
+  // The macOS leg is the canonical Daily evidence while the Linux and Windows
+  // legs are a trial lane; prefer it when the matrix uploaded several.
+  const canonical = matches.filter((match) => match.os === CANONICAL_DAILY_OS);
+  const candidates = canonical.length > 0 ? canonical : matches;
+  if (candidates.length !== 1) return undefined;
   return {
-    artifact: matches[0],
-    suite: supported.get(matches[0].name),
+    artifact: candidates[0].artifact,
+    suite: candidates[0].suite,
   };
 }
 

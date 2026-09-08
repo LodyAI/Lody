@@ -5,10 +5,23 @@ maintenance and publication rules come from the [parent instructions](../AGENTS.
 
 ## When to write
 
-Write or update a note when a future maintainer could reasonably choose another
-approach and missing its rationale could cause material harm. Routine styling,
-local keyboard/focus fixes, and mechanical edits normally need only a PR summary.
-Updating an affected Spec is separate, even when no note is needed.
+Every non-trivial change MUST add or update an Agent Note in the same PR.
+Non-trivial work changes behavior, architecture, cross-file or package contracts,
+storage/wire/configuration formats, process/tooling, testing strategy, or another
+decision a maintainer may reasonably revisit. A short diff is not an exemption.
+Only mechanical or local edits that change none of these decisions or their
+rationale need only a PR summary.
+
+Research and design that produce a substantial proposal, a consequential finding,
+or a correction to an earlier conclusion also require a note, even without code
+changes or a PR. Record proposals as `proposed`; do not invent approval or completed
+verification. If the task explicitly forbids file writes, report the intended note
+and defer the write rather than overriding that restriction.
+
+Search for the existing owning note first; updating it satisfies this requirement.
+Use a new linked note for a different decision rather than duplicating the owner
+or rewriting a historical decision into its opposite. Updating an affected Spec
+is separate, even when no note is needed.
 
 Record the problem, responsibilities, evidence-backed discoveries, genuine
 alternatives, trade-offs, outcome, verification limits, and PR link when available.
@@ -60,14 +73,14 @@ Lifecycle and the `Status:` line agree:
 
 Types:
 
-| Folder | Decision concerns |
-| --- | --- |
-| `architecture` | Module responsibilities, ownership, and communication |
-| `feature` | Important new user or agent capability |
-| `bug-fix` | A defect exposing a consequential, non-obvious constraint |
-| `simplification` | Removing complexity or capability and its trade-offs |
-| `process` | Contributor workflows, tooling, and repository policy |
-| `testing` | Verification strategy or test infrastructure |
+| Folder           | Decision concerns                                         |
+| ---------------- | --------------------------------------------------------- |
+| `architecture`   | Module responsibilities, ownership, and communication     |
+| `feature`        | Important new user or agent capability                    |
+| `bug-fix`        | A defect exposing a consequential, non-obvious constraint |
+| `simplification` | Removing complexity or capability and its trade-offs      |
+| `process`        | Contributor workflows, tooling, and repository policy     |
+| `testing`        | Verification strategy or test infrastructure              |
 
 Pick the type of the decision, not every affected surface. Small fixes remain
 exempt even though a bug-fix folder exists. A lifecycle move updates paths,

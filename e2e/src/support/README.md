@@ -13,3 +13,7 @@
 | `pages/session-page.ts`                   | Deterministic ACP conversation and Stop lifecycle                   |
 | `pages/work-session-page.ts`              | Worktree Session, terminal, deletion, and cleanup contract          |
 | `fixtures/work-session-fixture.ts`        | Synthetic Git workspace and scripted ACP evidence                   |
+
+The harness passes only an explicit environment allowlist into Electron. Linux
+runs under `xvfb-run`, so both its `DISPLAY` endpoint and generated `XAUTHORITY`
+file must cross that isolation boundary.

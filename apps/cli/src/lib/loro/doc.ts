@@ -1800,6 +1800,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.mirror = new Mirror({
       doc: handle.doc,
       schema: sessionDocSchema,
+      // Temporary availability hotfix: old history must not reject unrelated writes.
+      // Remove only with a reviewed changed-input validation boundary (PR #460).
+      validateUpdates: false,
       // Tolerate root keys written by peers running a newer schema version.
       ignoreUnknownProperties: true,
       // Type assertion needed because InferInputType makes plan required even though

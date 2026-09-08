@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const membershipSyncMocks = vi.hoisted(() => ({
   fingerprint: undefined as string | null | undefined,
   updateSession: vi.fn<() => Promise<void>>(),
+  notify: vi.fn(),
   useQuery: vi.fn(),
   isAuthenticated: true,
 }));
@@ -28,6 +29,7 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 vi.mock('../src/providers/convex-provider', () => ({
   useAuthClient: () => ({
     updateSession: membershipSyncMocks.updateSession,
+    $store: { notify: membershipSyncMocks.notify },
   }),
 }));
 
@@ -54,6 +56,7 @@ describe('useDesktopWorkspaceMembershipSync', () => {
     root = createRoot(container);
     membershipSyncMocks.fingerprint = undefined;
     membershipSyncMocks.isAuthenticated = true;
+    membershipSyncMocks.notify.mockReset();
     membershipSyncMocks.updateSession.mockReset();
     membershipSyncMocks.updateSession.mockResolvedValue();
     membershipSyncMocks.useQuery.mockReset();
@@ -90,9 +93,20 @@ describe('useDesktopWorkspaceMembershipSync', () => {
     membershipSyncMocks.fingerprint = 'workspace-1\nworkspace-2';
     await render('user-1');
     expect(membershipSyncMocks.updateSession).toHaveBeenCalledTimes(1);
+    expect(membershipSyncMocks.notify).toHaveBeenCalledWith('$activeOrgSignal');
 
     await render('user-1');
     expect(membershipSyncMocks.updateSession).toHaveBeenCalledTimes(1);
+    expect(membershipSyncMocks.notify).toHaveBeenCalledWith('$activeOrgSignal');
+  });
+
+  it('refreshes permissions when only the role changes in the same workspace', async () => {
+    membershipSyncMocks.fingerprint = '["workspace-1","member"]';
+    await render('user-1');
+    membershipSyncMocks.fingerprint = '["workspace-1","owner"]';
+    await render('user-1');
+    expect(membershipSyncMocks.updateSession).toHaveBeenCalledTimes(1);
+    expect(membershipSyncMocks.notify).toHaveBeenCalledWith('$activeOrgSignal');
   });
 
   it('resets the baseline when the authenticated user changes', async () => {

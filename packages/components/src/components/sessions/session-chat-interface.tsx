@@ -1,4 +1,9 @@
 import {
+  MessageSelectionContext,
+  MessageSelectionToolbar,
+  useMessageSelection,
+} from '@/components/ai-gui/message-selection';
+import {
   startTransition,
   forwardRef,
   memo,
@@ -29,6 +34,7 @@ import {
   GitFork,
   Github,
   History,
+  Image,
   Loader2,
   LockKeyhole,
   MessageCircle,
@@ -87,6 +93,8 @@ import {
   buildConversationMarkdown,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  collectConversationMessages,
+  type ConversationMessage,
   countBillableSessionTurns,
   deriveSessionPullRequestReadiness,
   evaluateBillingQuota,
@@ -1006,6 +1014,7 @@ export function SessionHeaderMenu({
   onCopyUrl,
   sharing,
   onShareWithTeam,
+  onShareAsImage,
   onOpenSearch,
   onFork,
   isForking = false,
@@ -1031,6 +1040,8 @@ export function SessionHeaderMenu({
   onCopyUrl: () => void | Promise<void>;
   sharing?: SessionSharingState;
   onShareWithTeam?: () => void | Promise<void>;
+  /** Opens the share-as-image preview dialog. Pure local feature; no gating. */
+  onShareAsImage?: () => void;
   onOpenSearch?: () => void | Promise<void>;
   onFork?: (destination?: SessionForkDestination) => void | Promise<void>;
   isForking?: boolean;
@@ -1497,6 +1508,16 @@ export function SessionHeaderMenu({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
 
+          <DropdownMenuItem
+            disabled={!onShareAsImage}
+            onClick={() => {
+              onShareAsImage?.();
+            }}
+          >
+            <Image className="h-3.5 w-3.5 shrink-0" />
+            {t('sessions.shareAsImage', 'Share as image…')}
+          </DropdownMenuItem>
+
           <AutoReviewMenuItem
             sessionId={session.id}
             meta={session}
@@ -1790,6 +1811,8 @@ interface SessionChatInterfaceProps {
   sharing?: SessionSharingState;
   /** Request the parent-owned confirmation flow for a private session. */
   onShareWithTeam?: () => void | Promise<void>;
+  /** Opens the parent-owned share-as-image preview dialog. */
+  onShareAsImage?: () => void;
   /** Called when the user clicks the PR badge and wants to open the in-app PR tab. */
   onOpenPrTab?: (args: { prNumber: number; repoFullName: string; headCommitSha?: string }) => void;
   /** Session associated with the header Browser button. Defaults to `session`. */
@@ -1841,6 +1864,13 @@ export type SessionChatInterfaceHandle = {
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   copyConversationHistory: () => Promise<void>;
+  /** Plain-text conversation snapshot for the share-as-image card; null while
+   * durable history has not loaded. */
+  getShareImageData: () => { messages: ConversationMessage[]; agentName?: string } | null;
+  startShareImageSelection: (
+    messages: ConversationMessage[],
+    onConfirm: (messages: ConversationMessage[]) => void
+  ) => void;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
   insertSessionMention: (sessionId: string) => boolean;
@@ -1935,6 +1965,7 @@ export const SessionChatInterface = memo(
       onForkSession: onForkSessionExternal,
       sharing,
       onShareWithTeam,
+      onShareAsImage,
       onOpenPrTab,
       browserActionSession,
       onOpenBrowser,
@@ -2324,6 +2355,7 @@ export const SessionChatInterface = memo(
       command: GoalCommand;
     } | null>(null);
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
+    const shareSelection = useMessageSelection(session.id);
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
@@ -4772,13 +4804,33 @@ export const SessionChatInterface = memo(
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
         copyConversationHistory: handleCopyConversationHistory,
+        getShareImageData: () => {
+          const history = sessionDoc?.history;
+          if (!history?.length) return null;
+          const messages = collectConversationMessages(
+            history as Parameters<typeof collectConversationMessages>[0]
+          );
+          return {
+            messages,
+            agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
+          };
+        },
+        startShareImageSelection: shareSelection.start,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
         insertSessionMention: (sessionId: string) => {
           return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
         },
       }),
-      [handleCopyConversationHistory, lastCompletedAssistantMessageId, openSearch]
+      [
+        handleCopyConversationHistory,
+        shareSelection.start,
+        lastCompletedAssistantMessageId,
+        openSearch,
+        session.cliType,
+        sessionAgentConfig?.name,
+        sessionDoc,
+      ]
     );
 
     const [prevSessionIdForActionReset, setPrevSessionIdForActionReset] = useState(session.id);
@@ -5687,6 +5739,7 @@ export const SessionChatInterface = memo(
         }}
         sharing={sharing}
         onShareWithTeam={onShareWithTeam}
+        onShareAsImage={onShareAsImage}
         onOpenSearch={hideMessageArea ? onOpenSearchExternal : openSearch}
         onFork={canForkFromMenu ? handleForkFromMenu : undefined}
         isForking={forkingAssistantMessageId !== null && forkingAssistantMessageId !== undefined}
@@ -5837,43 +5890,47 @@ export const SessionChatInterface = memo(
                     >
                       {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                       <MessageSendStatusContext.Provider value={sendingMessageIds}>
-                        <SessionChatStream
-                          key={session.id}
-                          ref={chatStreamRef}
-                          sessionId={session?.id}
-                          workspaceId={workspaceId}
-                          sessionDoc={sessionDoc}
-                          sessionCreatedAt={session?.createdAt}
-                          dividerLabel={sessionDividerLabel}
-                          className="h-full"
-                          leadingContent={openedByConversationStart}
-                          emptyState={chatStreamEmptyState}
-                          agentActivityLabel={agentActivityLabel}
-                          agentActivityTone={agentActivityTone}
-                          onFileDiffClick={onFileDiffClick}
-                          onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
-                          onOpenHtmlFile={handleOpenHtmlAttachment}
-                          messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
-                          assistantActions={assistantQuickActions}
-                          assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
-                          onForkLastAssistant={onForkLastAssistant}
-                          forkWorktreeAvailability={forkWorktreeAvailability}
-                          onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                          onEditLastUser={
-                            editableLastUserMessageId ? handleEditLastUser : undefined
-                          }
-                          onResendUndelivered={handleResendUndelivered}
-                          capacityRetry={capacityRetry ?? undefined}
-                          forkingAssistantMessageId={forkingAssistantMessageId}
-                          onNavigateSession={onNavigateSession}
-                          onLastCompletedAssistantMessageIdChange={
-                            handleLastCompletedAssistantMessageIdChange
-                          }
-                          conversationFontSize={conversationFontSize}
-                          skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
-                          suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
-                          outlineOverlayRoot={outlineOverlayRoot}
-                        />
+                        <MessageSelectionContext.Provider value={shareSelection.context}>
+                          <SessionChatStream
+                            key={session.id}
+                            ref={chatStreamRef}
+                            sessionId={session?.id}
+                            workspaceId={workspaceId}
+                            sessionDoc={sessionDoc}
+                            sessionCreatedAt={session?.createdAt}
+                            dividerLabel={sessionDividerLabel}
+                            className="h-full"
+                            leadingContent={openedByConversationStart}
+                            emptyState={chatStreamEmptyState}
+                            agentActivityLabel={agentActivityLabel}
+                            agentActivityTone={agentActivityTone}
+                            onFileDiffClick={onFileDiffClick}
+                            onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
+                            onOpenHtmlFile={handleOpenHtmlAttachment}
+                            messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
+                            assistantActions={assistantQuickActions}
+                            assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                            onForkLastAssistant={onForkLastAssistant}
+                            forkWorktreeAvailability={forkWorktreeAvailability}
+                            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                            onEditLastUser={
+                              editableLastUserMessageId ? handleEditLastUser : undefined
+                            }
+                            onResendUndelivered={handleResendUndelivered}
+                            capacityRetry={capacityRetry ?? undefined}
+                            forkingAssistantMessageId={forkingAssistantMessageId}
+                            onNavigateSession={onNavigateSession}
+                            onLastCompletedAssistantMessageIdChange={
+                              handleLastCompletedAssistantMessageIdChange
+                            }
+                            conversationFontSize={conversationFontSize}
+                            skipNextViewportResizeAutoScrollRef={
+                              skipNextViewportResizeAutoScrollRef
+                            }
+                            suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                            outlineOverlayRoot={outlineOverlayRoot}
+                          />
+                        </MessageSelectionContext.Provider>
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
                   </div>
@@ -5992,74 +6049,81 @@ export const SessionChatInterface = memo(
                   {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
-                  {shouldReplaceComposerWithPermission ? null : (
-                    <SessionChatInputArea
-                      claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
-                      ref={inputAreaRef}
-                      session={session}
-                      sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
-                      isMachineRemoved={isMachineRemoved}
-                      isAgentBusy={isAgentBusy}
-                      canStopAgent={canStopAgent}
-                      isExternalHistoryRefreshing={isExternalHistoryRefreshing}
-                      externalHistorySyncLabel={externalHistorySyncLabel}
-                      isDark={isDark}
-                      isEmptyConversation={isEmptyConversation}
-                      selectedModeId={selectedModeId}
-                      selectedModelId={selectedModelId}
-                      durableAgentRoleId={sessionConversationConfig.agentRoleId}
-                      durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
-                      durableAgentRoleSourceTurnKey={sessionConversationSourceFence.currentTurnKey}
-                      durableAgentRoleKnownTurnKeys={sessionConversationSourceFence.knownTurnKeys}
-                      durableAgentRoleReady={sessionDocReady}
-                      runConfigHasUserEdits={sessionRunConfigHasUserEdits}
-                      modeOptions={modeOptions}
-                      modelOptions={modelOptions}
-                      rateLimits={sessionRateLimits}
-                      showCodexResetForecast={showCodexResetForecast}
-                      isContextCompacting={isContextCompacting}
-                      configOptionSelectors={configOptionSelectors}
-                      configOptionValues={configOptionValues}
-                      isRepoPublic={isRepoPublic}
-                      availableCommands={availableCommands}
-                      commandsEnabled={isVisible}
-                      freeTurnLimitNotice={freeSessionTurnNotice}
-                      queueDisplay={
-                        messageQueue.length > 0 ? (
-                          <MessageQueueDisplay
-                            sessionId={session.id}
-                            items={messageQueue}
-                            onRemove={handleRemoveQueueItem}
-                            onReorder={handleReorderQueueItem}
-                            onEditStart={handleStartQueueItemEdit}
-                            onEditCancel={handleCancelQueueItemEdit}
-                            onEditSave={handleSaveQueueItemEdit}
-                            onSteer={handleSteerQueuedMessage}
-                            showSteerAction={
-                              isSessionActive &&
-                              !!activeAssistantTurnId &&
-                              !isExternalHistoryRefreshing
-                            }
-                          />
-                        ) : null
-                      }
-                      mcp={mcpSelection.menu}
-                      skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
-                      onModeChange={handleModeChange}
-                      onModelChange={handleModelChange}
-                      onConfigOptionChange={handleConfigOptionChange}
-                      onSendMessage={handleSendMessage}
-                      onStop={() => {
-                        void handleStop();
-                      }}
-                      onRemoveQueueItem={handleRemoveQueueItem}
-                      onAgentConfigChange={isChildSession ? handleAgentConfigChange : undefined}
-                      onNavigateToComment={onNavigateToComment}
-                      onCommentReferencesChange={onCommentReferencesChange}
-                      onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
-                      onVisualAnnotationReferencesSubmitted={onVisualAnnotationReferencesSubmitted}
-                    />
-                  )}
+                  <MessageSelectionToolbar selection={shareSelection} />
+                  <div className={shareSelection.active ? 'hidden' : 'contents'}>
+                    {shouldReplaceComposerWithPermission ? null : (
+                      <SessionChatInputArea
+                        claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
+                        ref={inputAreaRef}
+                        session={session}
+                        sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
+                        isMachineRemoved={isMachineRemoved}
+                        isAgentBusy={isAgentBusy}
+                        canStopAgent={canStopAgent}
+                        isExternalHistoryRefreshing={isExternalHistoryRefreshing}
+                        externalHistorySyncLabel={externalHistorySyncLabel}
+                        isDark={isDark}
+                        isEmptyConversation={isEmptyConversation}
+                        selectedModeId={selectedModeId}
+                        selectedModelId={selectedModelId}
+                        durableAgentRoleId={sessionConversationConfig.agentRoleId}
+                        durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
+                        durableAgentRoleSourceTurnKey={
+                          sessionConversationSourceFence.currentTurnKey
+                        }
+                        durableAgentRoleKnownTurnKeys={sessionConversationSourceFence.knownTurnKeys}
+                        durableAgentRoleReady={sessionDocReady}
+                        runConfigHasUserEdits={sessionRunConfigHasUserEdits}
+                        modeOptions={modeOptions}
+                        modelOptions={modelOptions}
+                        rateLimits={sessionRateLimits}
+                        showCodexResetForecast={showCodexResetForecast}
+                        isContextCompacting={isContextCompacting}
+                        configOptionSelectors={configOptionSelectors}
+                        configOptionValues={configOptionValues}
+                        isRepoPublic={isRepoPublic}
+                        availableCommands={availableCommands}
+                        commandsEnabled={isVisible}
+                        freeTurnLimitNotice={freeSessionTurnNotice}
+                        queueDisplay={
+                          messageQueue.length > 0 ? (
+                            <MessageQueueDisplay
+                              sessionId={session.id}
+                              items={messageQueue}
+                              onRemove={handleRemoveQueueItem}
+                              onReorder={handleReorderQueueItem}
+                              onEditStart={handleStartQueueItemEdit}
+                              onEditCancel={handleCancelQueueItemEdit}
+                              onEditSave={handleSaveQueueItemEdit}
+                              onSteer={handleSteerQueuedMessage}
+                              showSteerAction={
+                                isSessionActive &&
+                                !!activeAssistantTurnId &&
+                                !isExternalHistoryRefreshing
+                              }
+                            />
+                          ) : null
+                        }
+                        mcp={mcpSelection.menu}
+                        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
+                        onModeChange={handleModeChange}
+                        onModelChange={handleModelChange}
+                        onConfigOptionChange={handleConfigOptionChange}
+                        onSendMessage={handleSendMessage}
+                        onStop={() => {
+                          void handleStop();
+                        }}
+                        onRemoveQueueItem={handleRemoveQueueItem}
+                        onAgentConfigChange={isChildSession ? handleAgentConfigChange : undefined}
+                        onNavigateToComment={onNavigateToComment}
+                        onCommentReferencesChange={onCommentReferencesChange}
+                        onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
+                        onVisualAnnotationReferencesSubmitted={
+                          onVisualAnnotationReferencesSubmitted
+                        }
+                      />
+                    )}
+                  </div>
                 </SessionPinContext.Provider>
               </SessionSearchProvider>
             </>

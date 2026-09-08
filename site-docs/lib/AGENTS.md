@@ -13,5 +13,9 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 - `metadata.ts` creates canonical, alternate/hreflang, Open Graph, Twitter, robots, and
   article metadata records for TanStack `head()`.
 - `docs-faq.ts` emits FAQPage JSON-LD through `pageHead`.
+- `after-first-paint.ts` schedules post-`load` idle work so the landing hero H1
+  can become LCP without WebGL, rotating copy, or below-fold preview chunks.
+- `module-preload.ts` is the HTML-only `modulepreload` allowlist. JS hosts keep
+  extracted route CSS so client nav to `/price` or legal is not unstyled.
 - `blog-reading-time.generated.ts` and `docs-faq.generated.ts` are generated and
   ignored. Do not edit or format them.

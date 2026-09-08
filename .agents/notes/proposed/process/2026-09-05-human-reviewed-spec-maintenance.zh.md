@@ -15,6 +15,8 @@ Translation: current
 
 ## 决定与发现
 
+[明确的 note 更新条件](../../implemented/process/2026-09-07-explicit-agent-note-triggers.zh.md)细化了本提案的记录门槛，包含纯设计结论；本提案其他部分仍待评审。
+
 notes 按生命周期和决策类型归档，本篇属于待 review 的 process 提案；不要求普通小修复写 note。
 
 本次引入 [公开文档维护流程](../../../README.md)，从 [通讯架构草案](../../../../specs/communication-architecture.zh.md) 试点。Spec 由人类复核，agent 提供实现证据和开放问题；重要工作写 note，普通局部修复不强制。双语异步补齐；重点文档和关键代码引入有范围的 SHA 复核保护，普通引用不强制。本次增加开工、收尾和领域巡检工作流，以及状态汇总、分类/链接检查和定向 SHA 工具；正式范围与基线仍待登记，不进行全量迁移。

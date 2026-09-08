@@ -1196,6 +1196,13 @@
   }
 }
 
+/* First-screen decorative motion stays paused until load + idle so the H1
+   LCP box is not competing with looping CSS. Reduced-motion still wins. */
+html:not(.uw-motion-ready) .underwater-hero__scroll-chevron,
+html:not(.uw-motion-ready) .uw-agents__banner-track {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .underwater-btn {
     transition: none;

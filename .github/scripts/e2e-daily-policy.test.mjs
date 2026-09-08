@@ -101,6 +101,45 @@ void test('rejects ambiguous and expired Daily evidence artifacts', () => {
   );
 });
 
+void test('prefers the macOS artifact from a per-OS Daily matrix upload', () => {
+  const artifacts = [
+    { id: 7, name: 'desktop-e2e-daily-full-macos-15-123', expired: false },
+    { id: 8, name: 'desktop-e2e-daily-full-ubuntu-latest-123', expired: false },
+    { id: 9, name: 'desktop-e2e-daily-full-windows-latest-123', expired: false },
+  ];
+  assert.deepEqual(findDailyEvidenceArtifact(artifacts, 123), {
+    artifact: artifacts[0],
+    suite: 'full',
+  });
+});
+
+void test('accepts a single non-macOS Daily artifact and rejects same-OS ambiguity', () => {
+  assert.equal(
+    findDailyEvidenceArtifact(
+      [{ id: 8, name: 'desktop-e2e-daily-smoke-ubuntu-latest-123', expired: false }],
+      123
+    )?.suite,
+    'smoke'
+  );
+  assert.equal(
+    findDailyEvidenceArtifact(
+      [
+        { id: 7, name: 'desktop-e2e-daily-full-macos-15-123', expired: false },
+        { id: 8, name: 'desktop-e2e-daily-smoke-macos-15-123', expired: false },
+      ],
+      123
+    ),
+    undefined
+  );
+  assert.equal(
+    findDailyEvidenceArtifact(
+      [{ id: 7, name: 'desktop-e2e-daily-full-macos-15-123', expired: true }],
+      123
+    ),
+    undefined
+  );
+});
+
 void test('only a successful full Daily can close the shared failure Issue', () => {
   assert.equal(canCloseDailyFailureIssue('success', 'full'), true);
   assert.equal(canCloseDailyFailureIssue('success', 'smoke'), false);

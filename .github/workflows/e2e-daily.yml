@@ -25,9 +25,13 @@ env:
 
 jobs:
   regression:
-    name: Desktop E2E daily (${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }})
-    runs-on: macos-15
-    timeout-minutes: 45
+    name: Desktop E2E daily (${{ matrix.os }}, ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 45 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,7 +57,18 @@ jobs:
       - name: Build OSS desktop and bundled CLI
         run: pnpm --dir apps/electron build
 
+      - name: Run desktop journeys (Linux under Xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}
+        run: |
+          set -o pipefail
+          mkdir -p e2e/artifacts
+          xvfb-run -a pnpm --filter @lody/e2e "$SUITE" 2>&1 | tee e2e/artifacts/cucumber-output.log
+
       - name: Run desktop journeys
+        if: matrix.os != 'ubuntu-latest'
         shell: bash
         env:
           SUITE: ${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}
@@ -72,7 +87,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-e2e-daily-${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}-${{ github.run_id }}
+          # The artifact name carries the OS. The Daily failure reconciler uses
+          # the macOS artifact as its canonical evidence; Linux and Windows
+          # evidence stays in Actions artifacts until the lane proves stable.
+          name: desktop-e2e-daily-${{ github.event.inputs.suite == 'smoke' && 'smoke' || 'full' }}-${{ matrix.os }}-${{ github.run_id }}
           path: e2e/artifacts/
           if-no-files-found: warn
           retention-days: 30
