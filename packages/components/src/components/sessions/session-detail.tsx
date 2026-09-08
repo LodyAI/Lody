@@ -25,6 +25,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
+import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
   buildPendingUserHistoryEntry,
@@ -160,6 +161,8 @@ import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
 import { FileTreeView } from './components/file-tree-view';
+import { useSessionFileActions } from '@/hooks/use-session-file-actions';
+import { SessionFileActionsMenu } from './session-file-actions-menu';
 import {
   MobileProjectFileBrowser,
   type MobileProjectFileBrowserHandle,
@@ -699,6 +702,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
   const isZenLayoutMode = useAtomValue(zenLayoutModeAtom);
@@ -3745,6 +3749,14 @@ const SessionDetail = ({
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
+  // One resolver for what this client can do with the session's files, shared
+  // by the Files tree's right-click menu and the side panel's ⋯ menu so the two
+  // can never offer different sets. It decides local-host vs remote itself.
+  const activeSessionFileActions = useSessionFileActions({
+    session: activeSession,
+    fileProvider: activeSessionFileProvider,
+  });
+  const activeViewerFilePath = activeViewerTab?.type === 'file' ? activeViewerTab.filePath : null;
   const handleSaveCurrentFile = useCallback(() => {
     if (!effectiveActiveViewerTabId || activeViewerTab?.type !== 'file') {
       return;
@@ -5088,6 +5100,9 @@ const SessionDetail = ({
               >
                 <SessionChatInterface
                   ref={(el) => setChatTabRef(tabSession.id, el)}
+                  claimNavigationFocus={
+                    isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+                  }
                   session={tabSession}
                   workspaceSession={activeSession}
                   className="h-full"
@@ -5504,6 +5519,7 @@ const SessionDetail = ({
         fileProviderPending={activeSessionFileProviderPending}
         fileProviderMessage={activeSessionFileProviderMessage}
         autoCodeCollab={false}
+        fileMenuItems={activeSessionFileActions.menuItems}
         changedFilePaths={changeFilePaths}
         // Opening a file selects its viewer tab, which unmounts this tree. Key
         // its expanded folders per session so returning to Files restores them.
@@ -5717,6 +5733,8 @@ const SessionDetail = ({
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
       ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
+      claimNavigationFocus:
+        isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
       className: 'h-full',
@@ -5867,6 +5885,12 @@ const SessionDetail = ({
         addPanelLabel={t('sessions.sidebar.addPanel', 'Add panel')}
         closeTabLabel={(tabLabel) =>
           t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
+        }
+        moreSlot={
+          <SessionFileActionsMenu
+            filePath={activeViewerFilePath}
+            items={activeSessionFileActions.menuItems}
+          />
         }
         endSlot={sidebarToggleButton}
         className={cn(

@@ -7,6 +7,11 @@ export type Price = {
 }
 
 export const PRICE_DATA: { [key: string]: Price } = {
+    'gpt-6-astra': {
+        inputCostPerToken: 1e-05,
+        cacheReadInputTokenCost: 1e-06,
+        outputCostPerToken: 5e-05
+    },
     'gpt-5.6': {
         inputCostPerToken: 5e-06,
         cacheReadInputTokenCost: 5e-07,

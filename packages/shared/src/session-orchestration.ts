@@ -34,6 +34,26 @@ export type LodyOperationKind =
   | 'session_chat'
   | 'session_chat_many';
 
+export type OperationProgressKind = Extract<
+  LodyOperationKind,
+  'session_create' | 'session_create_many'
+>;
+
+export type OperationProgressStatus = 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export type OperationProgressItem = {
+  target: LodyOperationItemTarget;
+  label?: string;
+  status: OperationProgressStatus;
+};
+
+export type OperationProgressContent = {
+  type: 'operation_progress';
+  operationId: string;
+  operationKind: OperationProgressKind;
+  items: OperationProgressItem[];
+};
+
 /**
  * Durable batch Operations intentionally bypass the cooperative session quotas;
  * single-target Commands stay subject to them (specs/session-orchestration.md).
@@ -120,6 +140,8 @@ export type LodyOperationSnapshot =
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;
   inputConfig: SessionTurnInputConfig;
+  /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
+  sourceTurnId?: string;
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.
@@ -164,6 +186,10 @@ export type StoredLodyDelivery = {
   deliveryId: string;
   systemTurnId: string;
   state: 'pending' | 'consumed';
+  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
+  attemptCount: number;
+  activeClaimId?: string;
+  activeClaimWorkerBootId?: string;
   initiatorChainDepth: number;
   completion: LodyOperationCompletion;
   consumedAt?: string;
@@ -174,11 +200,16 @@ export type OperationCompletionContent = {
   deliveryId: string;
   operationId: string;
   operationKind: LodyOperationKind;
+  /** Stable system history entry id for the matching operation_progress card, when one exists. */
+  progressMessageId?: string;
   completion: LodyOperationCompletion;
   continuation?: {
-    status: 'not_started';
+    status: 'not_started' | 'uncertain';
     reason: {
-      code: 'CONFIGURATION_UNAVAILABLE';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
       message: string;
     };
   };

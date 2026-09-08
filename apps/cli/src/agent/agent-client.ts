@@ -75,6 +75,7 @@ import {
 } from './acknowledged-steer';
 import type { SessionMcpCatalogSelector } from './session-mcp-resolver';
 import {
+  getBuiltinToolPermissionOutcome,
   parseLodyExtensionCapabilities,
   parseLodyExtensionMessage,
   parseRateLimitsSnapshot,
@@ -647,6 +648,7 @@ export class AgentClient implements acp.Client {
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
+  private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
@@ -1650,6 +1652,7 @@ export class AgentClient implements acp.Client {
     } else {
       this.currentModel = undefined;
     }
+    for (const listener of this.configOptionsListeners) listener();
   }
 
   private retainLegacyConfigOptionValue(configId: string, value: AcpConfigOptionValue): void {
@@ -1664,6 +1667,7 @@ export class AgentClient implements acp.Client {
       }
       return option;
     });
+    for (const listener of this.configOptionsListeners) listener();
   }
 
   async startSession(
@@ -2557,6 +2561,26 @@ export class AgentClient implements acp.Client {
   /** Returns the config options currently known for this session. */
   getConfigOptions(): acp.SessionConfigOption[] {
     return this.configOptions;
+  }
+
+  subscribeConfigOptions(listener: () => void): () => void {
+    this.configOptionsListeners.add(listener);
+    return () => {
+      this.configOptionsListeners.delete(listener);
+    };
+  }
+
+  getAutomaticToolPermissionOutcome(
+    request: acp.RequestPermissionRequest,
+    pending: boolean
+  ): acp.RequestPermissionResponse['outcome'] | undefined {
+    if (request.sessionId !== this.acpSessionId) return undefined;
+    return getBuiltinToolPermissionOutcome({
+      agentConfig: this.options.agentConfig,
+      configOptions: this.configOptions,
+      request,
+      pending,
+    });
   }
 
   /**

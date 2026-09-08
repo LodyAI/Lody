@@ -19,11 +19,18 @@ Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
 complete and rejected bodies locally.
 
+Workflow-file security constraints live in
+[`workflow-security.md`](workflow-security.md) and bind every change under
+`workflows/`.
+
 ## Contribution contract
 
 - `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
   body from the template and validate it with
   `node .github/scripts/check-pr-body.mjs --body-file <file>`.
+- An Agent opens every pull request as a draft (`gh pr create --draft`) and then
+  tells its user to mark it ready for review once they judge it ready for
+  maintainers. An Agent leaves draft state only when its user asks.
 - Every fork-based PR references a Lody Issue and retains the complete Context
   handoff block and its markers. Use `Closes #123` when merging the PR should
   close the Issue and `Refs #123` only when it must stay open. A bare `#123` or
@@ -57,6 +64,10 @@ whose authorization comes from GitHub's label permissions; the workflow does
 not infer identity from PR text. Removing the label immediately resumes normal
 classification and enforcement.
 
+Re-read PR details through the API before classification. Body, labels,
+repository ids, changed-line totals, and open state must come from the same
+current response.
+
 Issue normalization is a stateless, idempotent body edit on human PRs targeting
 the default branch. It operates only on exact references in
 `## Related issue`; never infer an Issue from a title, branch name, another body
@@ -83,24 +94,6 @@ best-effort feedback. The current validation result alone decides whether an
 event-driven external PR check passes. Creating invalid state and completing
 expiry are required reconciliation writes; scheduled and manual audits surface
 their failures and perform expiry.
-
-## Workflow security
-
-- `workflows/pr-policy.yml` is the only PR policy event entry point.
-  `workflows/pr-policy-reconcile.yml` is callable only through `workflow_call`.
-- Workflows that pass signing or update keys to a third-party Action must pin that
-  Action to a reviewed full commit SHA. Scope signing secrets to the exact trusted
-  preparation, packaging, or signing step that consumes them; never place them in a
-  job-level environment inherited by unrelated actions and dependency scripts.
-- `pull_request_target` provides a write-capable token. For PR events, checkout
-  policy from trusted `github.sha`; scheduled and manual audits use
-  `github.event.repository.default_branch`. Never checkout or execute the PR
-  head, and never use the possibly stale `pull_request.base.sha`.
-- Re-read PR details through the API before classification. Body, labels,
-  repository ids, changed-line totals, and open state must come from the same
-  current response.
-- Code CI runs on `pull_request` with read-only repository permissions and
-  checks out all public submodules recursively.
 
 ## Other automation
 

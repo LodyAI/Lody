@@ -1523,14 +1523,14 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
     options.signal?.throwIfAborted();
-    await this.machine.updateAcpCapabilities(
+    return await this.machine.updateAcpCapabilities(
       configId,
       cliType,
       agentType,
@@ -3119,6 +3119,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     modes: entry.modes,
     models: entry.models,
     configOptions: entry.configOptions,
+    modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -3208,7 +3209,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
       id: mode.id,
@@ -3250,7 +3251,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       serializeAcpCapabilityWithoutFetchTime(existing) ===
         serializeAcpCapabilityWithoutFetchTime(entry)
     ) {
-      return;
+      return existing;
     }
     options.signal?.throwIfAborted();
     const changed = writeMachineFlockRowToFlock(handle.flock, {
@@ -3265,6 +3266,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
+    return entry;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

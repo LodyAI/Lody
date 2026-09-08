@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalProjectControlService } from '../src/lib/local-project-control-service';
 import type { LocalProjectId } from '@lody/shared';
@@ -130,5 +131,59 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
 
     expect(secondPage.entries).toHaveLength(1);
     expect(secondPage.entries[0]?.name).toBe('ignored-dir');
+  });
+});
+
+describe('LocalProjectControlService.readProjectFile', () => {
+  let rootPath: string;
+  let service: LocalProjectControlService;
+
+  beforeEach(async () => {
+    rootPath = await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-read-'));
+    service = new LocalProjectControlService(noopLogger);
+    await mkdir(path.join(rootPath, '.git'));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(rootPath, { recursive: true, force: true });
+  });
+
+  /**
+   * The read sizes its buffer from `fstat`, so a file APPENDED between the stat
+   * and the read fills that buffer exactly. Under-reporting the size is the
+   * deterministic way to reproduce that race: it is the same state the read
+   * observes, without racing a writer.
+   */
+  const understateSize = (byBytes: number): void => {
+    const realFstat = fs.fstatSync.bind(fs);
+    vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, options?: unknown) => {
+      const stat = realFstat(fd, options as never);
+      if (!stat.isFile()) return stat;
+      Object.defineProperty(stat, 'size', { value: Math.max(0, stat.size - byBytes) });
+      return stat;
+    }) as typeof fs.fstatSync);
+  };
+
+  it('reads the whole file when it grew past the stat-sized buffer', async () => {
+    const content = 'x'.repeat(5_000);
+    await writeFile(path.join(rootPath, 'grows.txt'), content);
+    understateSize(4_900);
+
+    const result = service.readProjectFile(rootPath, 'grows.txt', { maxBytes: 1024 * 1024 });
+
+    // A full buffer is not proof of EOF; the prefix must not be served as the file.
+    expect(result?.content).toBe(content);
+    expect(result?.truncated).toBe(false);
+  });
+
+  it('still reports truncation when a grown file passes the budget', async () => {
+    await writeFile(path.join(rootPath, 'grows-past-budget.txt'), 'y'.repeat(5_000));
+    understateSize(4_900);
+
+    const result = service.readProjectFile(rootPath, 'grows-past-budget.txt', { maxBytes: 200 });
+
+    expect(result?.content).toHaveLength(200);
+    expect(result?.truncated).toBe(true);
   });
 });

@@ -382,16 +382,18 @@ describe('AgentConfigDialog', () => {
       createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'deepseek',
-        env: {
-          DEEPSEEK_API_KEY: 'sk-deepseek-test',
-          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
-        },
-      })
-    );
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env: {
+            DEEPSEEK_API_KEY: 'sk-deepseek-test',
+            DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          },
+        })
+      );
+    });
   });
 
   it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {
@@ -413,6 +415,10 @@ describe('AgentConfigDialog', () => {
 
     const endpointInput = getVisibleDeepSeekEndpointInput();
     expect(endpointInput).not.toBeNull();
+    expect(document.body.querySelector('#deepseek-models')).toBeNull();
+    expect(document.body.textContent).toContain(
+      'Available models are discovered automatically from the endpoint when this provider is verified.'
+    );
     await act(async () => {
       setNativeInputValue(endpointInput!, 'not-a-url');
     });
@@ -432,16 +438,18 @@ describe('AgentConfigDialog', () => {
       createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'deepseek',
-        env: {
-          DEEPSEEK_API_KEY: 'sk-deepseek-test',
-          DEEPSEEK_BASE_URL: 'https://llm.example.com/open/v1',
-        },
-      })
-    );
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'deepseek',
+          env: {
+            DEEPSEEK_API_KEY: 'sk-deepseek-test',
+            DEEPSEEK_BASE_URL: 'https://llm.example.com/open/v1',
+          },
+        })
+      );
+    });
   });
 
   it.each([
@@ -472,10 +480,11 @@ describe('AgentConfigDialog', () => {
     );
   });
 
-  it('opens the custom DeepSeek tab and fills a stored non-official endpoint', async () => {
+  it('opens the custom DeepSeek tab, fills its endpoint, and drops the legacy model override', async () => {
     await renderDeepSeekEdit({
       DEEPSEEK_API_KEY: 'sk-old',
       DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+      ACP_EXTENSION_DSH_MODELS: '["gateway-model","reasoning-model"]',
     });
 
     expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
@@ -483,6 +492,7 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
       'sk-old'
     );
+    expect(document.body.querySelector('#deepseek-models')).toBeNull();
   });
 
   it('keeps DeepSeek key and custom endpoint drafts when switching tabs, and official save drops the custom URL', async () => {
@@ -547,6 +557,7 @@ describe('AgentConfigDialog', () => {
         [
           'DEEPSEEK_API_KEY=sk-from-textarea',
           'DEEPSEEK_BASE_URL=https://evil.example.com',
+          'ACP_EXTENSION_DSH_MODELS=["evil-model"]',
           'EXTRA_FLAG=1',
         ].join('\n')
       );
@@ -554,6 +565,7 @@ describe('AgentConfigDialog', () => {
     expect(envTextArea.value).toContain('EXTRA_FLAG=1');
     expect(envTextArea.value).not.toContain('DEEPSEEK_API_KEY');
     expect(envTextArea.value).not.toContain('DEEPSEEK_BASE_URL');
+    expect(envTextArea.value).not.toContain('ACP_EXTENSION_DSH_MODELS');
 
     await act(async () => {
       getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));

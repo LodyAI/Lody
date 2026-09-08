@@ -60,6 +60,14 @@
       "types": "./src/local-loro-transport.ts",
       "import": "./src/local-loro-transport.ts"
     },
+    "./image-file-types": {
+      "types": "./src/image-file-types.ts",
+      "import": "./src/image-file-types.ts"
+    },
+    "./local-file-preview": {
+      "types": "./src/local-file-preview.ts",
+      "import": "./src/local-file-preview.ts"
+    },
     "./local-machine-rpc": {
       "types": "./src/local-machine-rpc.ts",
       "import": "./src/local-machine-rpc.ts"

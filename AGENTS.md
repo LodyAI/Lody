@@ -4,11 +4,11 @@
 
 ## Context maintenance
 
-Read every `AGENTS.md` from the repository root to the file being changed.
-Before PR or Issue work, read `.github/AGENTS.md`. Record public contributor
-invariants in the narrowest relevant `AGENTS.md` (under 8 KiB; add a `CLAUDE.md`
-symlink for new scoped files). Internal context, plans, specifications, and
-task records stay in the private repository.
+Read every `AGENTS.md` from root to the changed file; read `.github/AGENTS.md`
+before PR/Issue work. Invariants live in the nearest `AGENTS.md` (under 8 KiB;
+new scopes need `CLAUDE.md` symlinks). Per
+[document maintenance](.agents/README.md), Specs need human review while
+`.agents/` and directory READMEs explain. Private records stay private.
 
 ## Repository boundary
 

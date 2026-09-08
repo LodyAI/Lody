@@ -1845,6 +1845,24 @@
   line-height: var(--uw-body-lh);
 }
 
+.uw-section-docs {
+  margin: 0.7rem 0 0;
+}
+
+.uw-section-docs a {
+  color: hsl(var(--landing-ink-muted));
+  font-family: var(--lody-docs-font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.uw-section-docs a:hover {
+  color: hsl(var(--landing-ink));
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 /* Team beats under power header — plain list, not chips or a second banner. */
 .uw-power__points {
   display: flex;

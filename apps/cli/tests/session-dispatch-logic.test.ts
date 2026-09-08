@@ -229,6 +229,31 @@ describe('findNextDispatchableUserTurn', () => {
     expect(findNextDispatchableUserTurn([entry], baseMeta)).toBeNull();
   });
 
+  it('does not dispatch operation progress system entries', () => {
+    const entry: SessionHistoryInput = {
+      id: 'operation-progress:session-1:op-1',
+      role: 'system',
+      timestamp: new Date().toISOString(),
+      userId: 'user-1',
+      items: [
+        {
+          type: 'operation_progress',
+          operationId: 'op-1',
+          operationKind: 'session_create',
+          items: [
+            {
+              target: { sessionId: 'created-session', userTurnId: 'created-turn' },
+              status: 'created',
+            },
+          ],
+        },
+      ],
+      fileDiff: [],
+      finished: true,
+    };
+    expect(findNextDispatchableUserTurn([entry], baseMeta)).toBeNull();
+  });
+
   it('returns turn with status=pending', () => {
     const turn = pendingTurn('t-1');
     expect(findNextDispatchableUserTurn([turn], baseMeta)).toEqual(turn);

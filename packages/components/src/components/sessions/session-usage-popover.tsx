@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
   getContextWindowUsageData,
@@ -185,7 +186,11 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
                     key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                    label={formatWindowLabel(window.windowDurationSeconds)}
+                    label={formatAgentRateLimitWindowLabel(
+                      window,
+                      formatWindowLabel(window.windowDurationSeconds),
+                      t
+                    )}
                     value={window.usedPercent}
                     detail={formatReset(window.resetsAtEpochSeconds)}
                   />

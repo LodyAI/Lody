@@ -1723,6 +1723,7 @@ export function SessionSearchBar({
 }
 
 interface SessionChatInterfaceProps {
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
   className?: string;
@@ -1917,6 +1918,7 @@ export const SessionChatInterface = memo(
       hideMessageArea = false,
       syncEnabled = !hideMessageArea,
       isVisible = true,
+      claimNavigationFocus,
       isExternalHistoryRefreshing = false,
       externalHistoryProviderLabel,
       onNavigateToComment,
@@ -2129,6 +2131,7 @@ export const SessionChatInterface = memo(
       machineFlockRows,
       modeOptions,
       modelOptions,
+      modelReasoningEfforts,
       sessionMachine,
     } = useSessionAcpSelectorContext({
       machineId: session.machineId,
@@ -2147,6 +2150,7 @@ export const SessionChatInterface = memo(
         defaultModelId,
         modeOptions,
         modelOptions,
+        modelReasoningEfforts,
       }),
       [
         capabilityAuthority,
@@ -2155,6 +2159,7 @@ export const SessionChatInterface = memo(
         defaultModelId,
         modeOptions,
         modelOptions,
+        modelReasoningEfforts,
       ]
     );
     const { selectedModeId, selectedModelId, configOptionValues } =
@@ -3337,23 +3342,29 @@ export const SessionChatInterface = memo(
     // being mounted is not evidence the user saw this conversation: only the
     // visible surface may clear unread state. Otherwise opening a parent session
     // marks every one of its sub-sessions read at once.
-    const shouldMarkRead = useMemo(
-      () =>
-        shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible,
-          lastMessageAt: parseTimestamp(session.lastMessageAt),
-          lastReadAt: parseTimestamp(session.lastReadAt),
-        }),
-      [hideMessageArea, isVisible, session.lastMessageAt, session.lastReadAt]
-    );
+    const lastReadAtForReceiptRef = useRef(parseTimestamp(session.lastReadAt));
+    lastReadAtForReceiptRef.current = parseTimestamp(session.lastReadAt);
 
     useEffect(() => {
-      if (!shouldMarkRead) return;
+      const lastMessageAt = parseTimestamp(session.lastMessageAt);
+      if (
+        !shouldMarkSessionRead({
+          rendersConversation: !hideMessageArea,
+          isVisible,
+          lastMessageAt,
+          lastReadAt: lastReadAtForReceiptRef.current,
+        })
+      ) {
+        return;
+      }
       void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-    }, [markSessionRead, session.id, session.lastMessageAt, shouldMarkRead]);
+      // A receipt gets a new opportunity when this surface becomes visible or
+      // a new message arrives. Deliberately do not depend on lastReadAt: moving
+      // that receipt backwards is the user's explicit "Mark as unread" action,
+      // which must remain visible until they leave and reopen the conversation.
+    }, [hideMessageArea, isVisible, markSessionRead, session.id, session.lastMessageAt]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -3999,11 +4010,7 @@ export const SessionChatInterface = memo(
         });
         const accepted = await handleSendMessage(inputBlocks, currentAgentRole);
         if (accepted) {
-          // Supersede the abandoned delivery attempt. The ordinary send clears
-          // the missing-history marker, and without a terminal status the stale
-          // pending entry would become dispatchable again (duplicating the just
-          // resent content). 'canceled' is the truthful terminal state and also
-          // hides the row's not-delivered label independent of the marker.
+          // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
             await updateHistoryEntry(userTurnId, (entry) => ({
               ...entry,
@@ -5987,6 +5994,7 @@ export const SessionChatInterface = memo(
                       the bottom surface; chat queue is bypassed for the same reason. */}
                   {shouldReplaceComposerWithPermission ? null : (
                     <SessionChatInputArea
+                      claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
                       ref={inputAreaRef}
                       session={session}
                       sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}

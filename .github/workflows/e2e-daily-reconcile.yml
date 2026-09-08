@@ -1,0 +1,222 @@
+name: Desktop E2E Daily failure
+
+on:
+  workflow_run:
+    workflows: [Desktop E2E Daily]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+
+concurrency:
+  group: desktop-e2e-daily-failure
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile Daily failure evidence
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted reporting code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Find Daily evidence
+        id: evidence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const policy = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/e2e-daily-policy.mjs`
+            )
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+              per_page: 100
+            })
+            const evidence = policy.findDailyEvidenceArtifact(
+              artifacts,
+              context.payload.workflow_run.id
+            )
+            core.setOutput('available', String(Boolean(evidence)))
+            core.setOutput('suite', evidence?.suite ?? 'unknown')
+            core.setOutput('artifact-name', evidence?.artifact.name ?? '')
+            if (!evidence) core.warning('No unique, unexpired Daily evidence artifact is available.')
+
+      - name: Reconcile Daily failure Issue
+        id: issue
+        uses: actions/github-script@v7
+        env:
+          DAILY_SUITE: ${{ steps.evidence.outputs.suite }}
+        with:
+          script: |
+            const policy = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/e2e-daily-policy.mjs`
+            )
+            const marker = '<!-- desktop-e2e-daily-failure -->'
+            const title = '[E2E] Daily desktop journey failure'
+            const conclusion = context.payload.workflow_run.conclusion
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            })
+            const existing = policy.findOwnedDailyFailureIssue(issues, marker)
+
+            if (policy.canCloseDailyFailureIssue(conclusion, process.env.DAILY_SUITE)) {
+              if (existing?.state === 'open') {
+                const runUrl = context.payload.workflow_run.html_url
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `Desktop Daily recovered: ${runUrl}`
+                })
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                })
+              }
+              core.setOutput('report', 'false')
+              return
+            }
+            if (conclusion === 'success') {
+              core.notice(
+                `Daily ${process.env.DAILY_SUITE} succeeded without covering the full failure state.`
+              )
+              core.setOutput('report', 'false')
+              return
+            }
+            if (conclusion === 'cancelled' || conclusion === 'skipped') {
+              core.setOutput('report', 'false')
+              return
+            }
+
+            const body = [
+              marker,
+              'The default-branch Desktop Daily regression is failing.',
+              '',
+              'Each failed round is appended as a comment with inline WebM recordings when available. Full traces, screenshots, logs, and runtime evidence remain in the linked Actions artifact.'
+            ].join('\n')
+            let issueNumber
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                title,
+                body,
+                state: 'open'
+              })
+              issueNumber = existing.number
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body
+              })
+              issueNumber = created.data.number
+            }
+            core.setOutput('issue-number', String(issueNumber))
+            core.setOutput('report', 'true')
+
+      - name: Download Daily evidence
+        if: steps.issue.outputs.report == 'true' && steps.evidence.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.evidence.outputs.artifact-name }}
+          path: daily-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Prepare bounded failure comments
+        if: steps.issue.outputs.report == 'true'
+        id: report
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          mkdir -p daily-evidence daily-report
+          manifest=$(node .github/scripts/e2e-daily-failure.mjs \
+            --evidence-root daily-evidence \
+            --output-root daily-report \
+            --run-id "$RUN_ID" \
+            --run-url "$RUN_URL" \
+            --head-sha "$HEAD_SHA")
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Install GitHub CLI attachment support
+        if: steps.issue.outputs.report == 'true'
+        id: gh
+        shell: bash
+        env:
+          GH_ARCHIVE_SHA256: e4d4bb4498e8d007abe545b6568926793ace1b6447da598294a610018cb164be
+          GH_VERSION: 2.100.0
+        run: |
+          archive="$RUNNER_TEMP/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$GH_ARCHIVE_SHA256" "$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          binary="$RUNNER_TEMP/gh_${GH_VERSION}_linux_amd64/bin/gh"
+          "$binary" issue comment --help | grep --fixed-strings --quiet -- '--attach'
+          echo "binary=$binary" >> "$GITHUB_OUTPUT"
+
+      - name: Attach all failed scenario videos
+        if: steps.issue.outputs.report == 'true'
+        shell: bash
+        env:
+          GH_ATTACH_BIN: ${{ steps.gh.outputs.binary }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue-number }}
+          MANIFEST: ${{ steps.report.outputs.manifest }}
+        run: |
+          comments="$RUNNER_TEMP/daily-failure-comments.json"
+          "$GH_ATTACH_BIN" api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" > "$comments"
+          batch_count=$(jq '.batches | length' "$MANIFEST")
+          for ((index = 0; index < batch_count; index += 1)); do
+            marker=$(jq -r --argjson index "$index" '.batches[$index].marker' "$MANIFEST")
+            expected_videos=$(
+              jq --argjson index "$index" '.batches[$index].videos | length' "$MANIFEST"
+            )
+            complete=$(
+              node .github/scripts/e2e-daily-policy.mjs comment-complete \
+                --comments "$comments" \
+                --marker "$marker" \
+                --expected "$expected_videos"
+            )
+            if [[ "$complete" == 'true' ]]; then
+              echo "Skipping previously attached batch: $marker"
+              continue
+            fi
+            body_path=$(jq -r --argjson index "$index" '.batches[$index].bodyPath' "$MANIFEST")
+            mapfile -t videos < <(
+              jq -r --argjson index "$index" '.batches[$index].videos[]' "$MANIFEST"
+            )
+            attachment_args=()
+            for video in "${videos[@]}"; do
+              attachment_args+=(--attach "$video")
+            done
+            "$GH_ATTACH_BIN" issue comment "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body-file "$body_path" \
+              "${attachment_args[@]}"
+          done

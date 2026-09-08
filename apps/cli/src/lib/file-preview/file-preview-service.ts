@@ -1,3 +1,4 @@
+import type { LocalFileResolution } from '@lody/shared/local-file-preview';
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { promisify } from 'node:util';
@@ -10,6 +11,7 @@ import {
   isBinaryImagePath,
   type FilePreviewV3Content,
   type FilePreviewV3Digest,
+  type FilePreviewV3Limits,
   type FilePreviewV3Request,
   type FilePreviewV3Response,
   type FilePreviewV3TextFormat,
@@ -55,15 +57,6 @@ export type FilePreviewServiceOptions = {
   readonly extraRoots?: readonly string[];
 };
 
-export type FilePreviewRequestOptions = {
-  /**
-   * Available exclusively to the Electron same-machine IPC handler. This is
-   * intentionally transport context, not part of File Preview v3's request
-   * schema, so a Loro Streams request can never widen its readable roots.
-   */
-  readonly allowArbitraryPaths?: boolean;
-};
-
 /**
  * File Preview v3: read one file and return it.
  *
@@ -81,10 +74,32 @@ export class FilePreviewService {
     this.limits = { ...FILE_PREVIEW_V3_LIMITS, ...deps.limits };
   }
 
-  async previewFile(
-    request: FilePreviewV3Request,
-    options: FilePreviewRequestOptions = {}
-  ): Promise<FilePreviewV3Response> {
+  /** Local IPC resolves identity; Electron owns content IO and resource lifetime. */
+  async resolveLocalFile(
+    request: FilePreviewV3Request
+  ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
+    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    if (!workspace.ok) return filePreviewV3Error(workspace.code, { message: workspace.message });
+    const resolution = resolveFilePreviewPath({
+      workspaceRoot: workspace.workspaceRoot,
+      requestedPath: request.path,
+      options: { ...this.deps.pathPolicy, allowArbitraryPaths: true },
+    });
+    if (!resolution.ok)
+      return filePreviewV3Error(resolution.rejection.code, {
+        message: resolution.rejection.message,
+        path: request.path,
+      });
+    return {
+      status: 'local-file',
+      path: resolution.resolved.reportedPath,
+      absolutePath: resolution.resolved.absolutePath,
+      external: resolution.resolved.external,
+    };
+  }
+
+  async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
+    const limits = this.limits;
     const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) {
       return filePreviewV3Error(workspace.code, {
@@ -100,7 +115,6 @@ export class FilePreviewService {
       ...(this.deps.extraRoots === undefined ? {} : { extraRoots: this.deps.extraRoots }),
       options: {
         ...this.deps.pathPolicy,
-        ...(options.allowArbitraryPaths ? { allowArbitraryPaths: true } : {}),
       },
     });
     if (!resolution.ok) {
@@ -122,7 +136,7 @@ export class FilePreviewService {
     // source view and the editing it has today, so SVG must stay on the text path.
     const isImageByName = isBinaryImagePath(resolved.reportedPath);
     const limitBytes = Math.min(
-      isImageByName ? this.limits.maxBinaryBytes : this.limits.maxTextBytes,
+      isImageByName ? limits.maxBinaryBytes : limits.maxTextBytes,
       request.maxBytes ?? Number.MAX_SAFE_INTEGER
     );
     if (resolved.sizeBytes > limitBytes) {
@@ -182,7 +196,7 @@ export class FilePreviewService {
     // extension also forces the binary path so an image whose header happens to
     // avoid NULs still ships as bytes rather than as mojibake text.
     if (isImageByName || hasBinaryNul(bytes)) {
-      return this.binaryOk(resolved, bytes, digest);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let text: string;
@@ -191,18 +205,18 @@ export class FilePreviewService {
     } catch {
       // Not valid UTF-8 and no NUL in the sniff window: still not previewable as
       // text, so hand it back as binary bytes and let the viewer decide.
-      return this.binaryOk(resolved, bytes, digest);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let content: FilePreviewV3Content;
     try {
-      content = await this.encodeTextContent(bytes, text);
+      content = await this.encodeTextContent(bytes, text, limits);
     } catch (error) {
       return filePreviewV3Error('too_large', {
         message: formatErrorMessage(error),
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
-        limitBytes: this.limits.maxCompressedBytes,
+        limitBytes: limits.maxCompressedBytes,
       });
     }
 
@@ -225,16 +239,18 @@ export class FilePreviewService {
   private binaryOk(
     resolved: ResolvedPreviewPath,
     bytes: Uint8Array,
-    digest: FilePreviewV3Digest
+    digest: FilePreviewV3Digest,
+    limits: FilePreviewV3Limits
   ): FilePreviewV3Response {
-    if (bytes.byteLength > this.limits.maxBinaryBytes) {
+    if (bytes.byteLength > limits.maxBinaryBytes) {
       return filePreviewV3Error('too_large', {
         message: 'Binary file is too large to preview.',
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
-        limitBytes: this.limits.maxBinaryBytes,
+        limitBytes: limits.maxBinaryBytes,
       });
     }
+    const data = Buffer.from(bytes).toString('base64');
     const mimeType = getImageMimeTypeForPath(resolved.reportedPath);
     return {
       status: 'ok',
@@ -243,26 +259,24 @@ export class FilePreviewService {
       ...(resolved.external ? { external: true } : {}),
       digest,
       kind: 'binary',
-      content: {
-        encoding: 'base64',
-        data: Buffer.from(bytes).toString('base64'),
-        rawBytes: bytes.byteLength,
-      },
+      content: { encoding: 'base64', data, rawBytes: bytes.byteLength },
       mimeType: mimeType ?? 'application/octet-stream',
       sizeBytes: bytes.byteLength,
       readonly: true,
     };
   }
 
-  private async encodeTextContent(bytes: Uint8Array, text: string): Promise<FilePreviewV3Content> {
-    if (bytes.byteLength <= this.limits.plainTextBytes) {
+  private async encodeTextContent(
+    bytes: Uint8Array,
+    text: string,
+    limits: FilePreviewV3Limits
+  ): Promise<FilePreviewV3Content> {
+    if (bytes.byteLength <= limits.plainTextBytes) {
       return { encoding: 'utf8-plain', text, rawBytes: bytes.byteLength };
     }
     const compressed = await gzipAsync(bytes);
-    if (compressed.byteLength > this.limits.maxCompressedBytes) {
-      throw new Error(
-        `Compressed preview payload exceeds ${this.limits.maxCompressedBytes} bytes.`
-      );
+    if (compressed.byteLength > limits.maxCompressedBytes) {
+      throw new Error(`Compressed preview payload exceeds ${limits.maxCompressedBytes} bytes.`);
     }
     return {
       encoding: 'utf8-gzip-base64',

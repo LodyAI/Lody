@@ -373,6 +373,7 @@ export type SessionActions = {
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
+  markSessionUnread: (sessionId: SessionId) => Promise<void>;
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -857,7 +858,6 @@ export function useSessionActions(): SessionActions {
       try {
         await runtime.writer.upsertDocMeta(roomId, {
           latestUserMsgId: userTurnId,
-          lastMissingHistoryUserMsgId: undefined,
         } as Partial<SessionMeta>);
       } catch (error) {
         // The RPC fast path may already have delivered this turn to the CLI; a
@@ -1067,6 +1067,34 @@ export function useSessionActions(): SessionActions {
       await touchSessionActivityMeta(runtime, sessionId, { lastReadAt: readAt });
     },
     [runtime]
+  );
+
+  const markSessionUnread = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(existing)) return;
+      // Prefer the repo read, but fall back to the same rendered metadata cache
+      // as Archive. A sidebar row can arrive before the repo read hydrates; an
+      // action offered on that visible row must not become a silent no-op.
+      const repoMeta = existing?.meta as SessionMeta | undefined;
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const lastMessageAt =
+        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+        getFiniteTimestamp(cachedMeta?.lastMessageAt);
+      if (lastMessageAt === null) return;
+
+      // Unread is the durable comparison `lastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known message; do not touch the
+      // activity timestamp, which would reorder the sidebar.
+      await runtime.writer.upsertDocMeta(roomId, {
+        lastReadAt: lastMessageAt - 1,
+      } as Partial<SessionMeta>);
+    },
+    [runtime, store]
   );
 
   const invalidateExternalHistoryCatalog = useCallback(
@@ -1412,6 +1440,7 @@ export function useSessionActions(): SessionActions {
     updateSessionTitle,
     transferSessionOwner,
     markSessionRead,
+    markSessionUnread,
     deleteSessions,
     archiveSession,
     restoreSession,
