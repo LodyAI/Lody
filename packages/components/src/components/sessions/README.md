@@ -27,6 +27,7 @@ What each file in this directory is responsible for. Binding rules live in
 | File | Responsibility |
 | --- | --- |
 | `session-chat-interface.tsx` | Conversation surface: stream, header variants, read receipts, launchers |
+| [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx) | Selected-message card preview, style options, and historical model/token metadata; [draft contract](../../../../../specs/chat-share-image.md) |
 | `draft-session-chat-interface.tsx` | Draft variant of the conversation surface |
 | `session-chat-input-area.tsx` | Composer: attachments, run-config footer, submit |
 | `message-queue/` | Queued turns ([scope AGENTS.md](message-queue/AGENTS.md)) |
