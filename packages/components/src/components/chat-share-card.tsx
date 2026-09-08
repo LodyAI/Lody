@@ -251,8 +251,9 @@ export function ChatShareCard({
             'rounded-2xl border border-black/[0.06] bg-card text-card-foreground shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] dark:border-white/10'
           : // Keep the theme surface opaque even without a surrounding canvas.
             cn(
-              'border border-black/[0.08] bg-card',
-              'dark:border-white/[0.09]',
+              'rounded-[20px] border border-black/[0.08] bg-card',
+              'shadow-[0_16px_48px_-12px_rgba(16,24,40,0.18),inset_0_1px_0_rgba(255,255,255,0.7)]',
+              'dark:border-white/[0.09] dark:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)]',
               'text-card-foreground'
             ),
         className
