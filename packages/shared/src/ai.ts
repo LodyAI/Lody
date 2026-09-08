@@ -6,6 +6,7 @@ import {
   ToolCallStatus,
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
+import type { LodyNotice } from 'acp-extension-core';
 import type { PermissionOutcome } from './message';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
@@ -1151,6 +1152,7 @@ export type ChatFailedMeta = {
 export type AgentWarningMeta = {
   message: string;
   source?: string;
+  level?: LodyNotice['level'];
 };
 
 export type SessionForkOriginMeta = {

@@ -36,6 +36,7 @@ import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-d
 import { selectAtom } from 'jotai/utils';
 import { Virtualizer, type VirtualizerHandle } from 'virtua';
 import {
+  type AgentWarningMeta,
   type AgentConfigCliType,
   type ChatFailedCode,
   type ClientToServer,
@@ -2512,21 +2513,37 @@ const AgentWarningNoticeView = ({
   notice: Extract<MessageContent, { type: 'system_notice' }>;
 }) => {
   const { t } = useTranslation();
-  const meta = notice.meta as { message?: string; source?: string } | undefined;
+  const meta = notice.meta as AgentWarningMeta | undefined;
   if (!meta?.message) {
     return null;
   }
+  const isInfo = meta.level === 'info';
+  const icon = isInfo ? (
+    <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+  ) : (
+    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
+  );
 
   return (
     <div className="py-1 @[640px]:pl-3">
       <div
-        role="alert"
-        className="flex w-fit max-w-full items-start gap-2 rounded-md border border-status-warning/30 bg-status-warning/10 px-2.5 py-1.5"
+        role={isInfo ? 'status' : 'alert'}
+        className={cn(
+          'flex w-fit max-w-full items-start gap-2 rounded-md border px-2.5 py-1.5',
+          isInfo ? 'border-border/60 bg-muted/30' : 'border-status-warning/30 bg-status-warning/10'
+        )}
       >
-        <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
+        {icon}
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-xs font-medium leading-4 text-status-warning">
-            {t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
+          <span
+            className={cn(
+              'text-xs font-medium leading-4',
+              isInfo ? 'text-muted-foreground' : 'text-status-warning'
+            )}
+          >
+            {isInfo
+              ? t('sessions.systemNotices.agentWarning.infoTitle', 'Agent notice')
+              : t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
           </span>
           <span className="min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
             {meta.message}

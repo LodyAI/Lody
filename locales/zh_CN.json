@@ -2155,6 +2155,7 @@
   "sessions.systemNotices.resumeFromExternalChatHistory.tooltip": "原生 ACP 恢复尚未支持（开发中）。当前上下文来自聊天记录。",
   "sessions.systemNotices.resumeFromExternalChatHistory.truncatedSuffix": "（由于长度限制，聊天记录已截断）",
   "sessions.systemNotices.agentWarning.title": "Agent 警告",
+  "sessions.systemNotices.agentWarning.infoTitle": "Agent 提示",
   "sessions.tabs.archivedTabs": "已归档标签页",
   "sessions.tabs.archivedCount": "已归档（{{count}}）",
   "sessions.tabs.closeConfirm": "关闭此标签页？",

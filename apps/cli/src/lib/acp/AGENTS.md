@@ -74,3 +74,8 @@ first `await awaitTurnHistoryGate(sessionId)` — see
 `../../session/turn-history-gate.ts`. Add the same await to any NEW code path that
 appends or positions history entries during a turn; map-keyed status/meta writes stay
 ungated.
+
+Core notices use the existing session notice queue and history gate. Preserve each
+`info` occurrence and its level; legacy notices without a level remain warnings.
+Keep notice text out of assistant prose, and do not weaken silent-model failure
+checks to accept a command whose completion the adapter has not established.

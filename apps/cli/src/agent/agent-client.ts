@@ -10,6 +10,7 @@ import {
   LODY_TOOL_NAMES,
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
+  type LodyNotice,
   type LodySubagentTask,
   type RateLimit,
   type RateLimitsGetRequest,
@@ -415,6 +416,7 @@ const LodySessionTitleSchema = z.object({
 export type AgentSessionWarning = {
   message: string;
   source?: string;
+  level?: LodyNotice['level'];
 };
 
 const LodySubagentTaskSchema = z.object({
@@ -1036,12 +1038,7 @@ export class AgentClient implements acp.Client {
     const lodyMeta = notification.update._meta?.lody;
     const canonical = LodyNoticeSchema.safeParse(lodyMeta);
     if (canonical.success) {
-      if (canonical.data.notice.level === 'warning' || canonical.data.notice.level === 'error') {
-        this.options.onAgentWarning?.({
-          message: canonical.data.notice.message,
-          ...(canonical.data.notice.source ? { source: canonical.data.notice.source } : {}),
-        });
-      }
+      this.options.onAgentWarning?.(canonical.data.notice);
       return;
     }
 

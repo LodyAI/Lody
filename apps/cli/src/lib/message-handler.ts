@@ -8941,6 +8941,7 @@ export class MessageHandler {
         meta: {
           message: warning.message,
           ...(warning.source ? { source: warning.source } : {}),
+          ...(warning.level ? { level: warning.level } : {}),
         },
       };
       const systemNotice: SessionHistoryInput = {
@@ -8953,14 +8954,17 @@ export class MessageHandler {
         items: [noticeItem],
       };
       await sessionDoc.updateHistory((prevHistory) => {
-        const alreadyRecorded = prevHistory.some((entry) =>
-          entry.items?.some(
-            (item) =>
-              item?.type === 'system_notice' &&
-              item.name === 'agent_warning' &&
-              (item.meta as AgentWarningMeta | undefined)?.message === warning.message
-          )
-        );
+        const alreadyRecorded =
+          warning.level !== 'info' &&
+          prevHistory.some((entry) =>
+            entry.items?.some((item) => {
+              if (item?.type !== 'system_notice' || item.name !== 'agent_warning') {
+                return false;
+              }
+              const meta = item.meta as AgentWarningMeta | undefined;
+              return meta?.level !== 'info' && meta?.message === warning.message;
+            })
+          );
         return alreadyRecorded ? prevHistory : [...prevHistory, systemNotice];
       });
     } catch (error) {

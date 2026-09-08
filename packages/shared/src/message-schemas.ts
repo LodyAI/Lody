@@ -3089,6 +3089,7 @@ export const ResumeFromExternalChatHistoryMetaSchema = z.object({
 export const AgentWarningMetaSchema = z.object({
   message: z.string(),
   source: z.string().optional(),
+  level: z.enum(['info', 'warning', 'error']).optional(),
 });
 
 // Who authored a history item; agent-authored content cannot use turn-level userId.

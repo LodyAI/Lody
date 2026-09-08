@@ -2155,6 +2155,7 @@
   "sessions.systemNotices.resumeFromExternalChatHistory.tooltip": "Native ACP resume is not yet supported (WIP). Context is restored from chat history.",
   "sessions.systemNotices.resumeFromExternalChatHistory.truncatedSuffix": "(History truncated due to length)",
   "sessions.systemNotices.agentWarning.title": "Agent warning",
+  "sessions.systemNotices.agentWarning.infoTitle": "Agent notice",
   "sessions.tabs.archivedTabs": "Archived tabs",
   "sessions.tabs.archivedCount": "Archived ({{count}})",
   "sessions.tabs.closeConfirm": "Close this tab?",
