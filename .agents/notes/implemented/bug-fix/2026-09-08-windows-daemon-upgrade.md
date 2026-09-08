@@ -23,8 +23,9 @@ shell on every platform. Package name, registry, target-version validation,
 timeouts, cancellation, and watchdog handoff remain unchanged. This fixes the
 existing Windows behavior rather than changing product intent or the protocol.
 
-The separate lifecycle response-append failure that can leave an operation pending
-is not part of this patch. No existing owning note was found for the upgrade launcher.
+The lifecycle response-append failure is handled by the separate
+[ACK fix](2026-09-08-machine-lifecycle-ack.md) in the same PR.
+No existing owning note was found for the upgrade launcher.
 
 ## Evidence and verification
 

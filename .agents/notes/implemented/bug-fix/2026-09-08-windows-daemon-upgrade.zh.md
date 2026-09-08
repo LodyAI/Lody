@@ -19,7 +19,8 @@ Windows 命令脚本的解析和转义。测试使用合成 npm 可执行文件�
 启用 shell。包名、registry、目标版本校验、超时、取消和 watchdog 交接代码保持不变。
 这是对现有 Windows 行为的修复，不改变产品意图或协议。
 
-生命周期确认响应发送失败后可能卡在 pending 的问题留待单独修复。
+生命周期确认响应发送失败后可能卡在 pending 的问题，由同一 PR 中单独的
+[ACK 修复](2026-09-08-machine-lifecycle-ack.md)处理。
 未找到升级启动器的现有归属 Note。
 
 ## 证据与验证
