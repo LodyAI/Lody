@@ -41,6 +41,7 @@ import type {
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
   MachineId,
+  McpServerId,
   MessageContent,
   SessionContextWindowUsage,
   SessionId,
@@ -80,6 +81,7 @@ export type CreateAcpClientOptions = {
   };
   configOptionValues?: AgentClientOptions['configOptionValues'];
   taskToolsEnabled?: boolean;
+  mcpServerIds?: readonly McpServerId[];
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   resumeSessionId?: ACPSessionId;
@@ -128,6 +130,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
     taskToolsEnabled: options.taskToolsEnabled,
+    mcpServerIds: options.mcpServerIds,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,

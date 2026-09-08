@@ -43,6 +43,7 @@ export function getBuiltinToolPermissionOutcome(args: {
 }
 
 const VersionOneSchema = z.object({ version: z.literal(1) });
+const McpCapabilitySchema = VersionOneSchema.extend({ supported: z.literal(false) });
 const LodyCapabilitiesSchema = z
   .object({
     usage: VersionOneSchema.optional(),
@@ -159,7 +160,11 @@ export function parseLodyExtensionCapabilities(
 ): LodyExtensionCapabilities {
   const lody = meta?.lody;
   const parsed = LodyCapabilitiesSchema.safeParse(lody);
-  const capabilities = parsed.success ? parsed.data : {};
+  const parsedMcp = z.object({ mcp: McpCapabilitySchema }).safeParse(lody);
+  const capabilities: LodyExtensionCapabilities = {
+    ...(parsed.success ? parsed.data : {}),
+    ...(parsedMcp.success ? { mcp: parsedMcp.data.mcp } : {}),
+  };
   const legacyKimi = meta?.['lody.ai/kimi'];
   const legacyKimiParsed = z
     .object({

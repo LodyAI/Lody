@@ -36,6 +36,7 @@ function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>
     agentProcess: {} as never,
     client: {
       supportsAcknowledgedSteer: () => false,
+      supportsMcp: () => true,
     } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
@@ -133,12 +134,14 @@ describe('fetchAcpCapabilities', () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
       supportsAcknowledgedSteer: () => true,
+      supportsMcp: () => false,
     } as never;
     mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
 
     const result = await fetchAcpCapabilities('registry', 'steering-agent', createSilentLogger());
 
     expect(result.acknowledgedSteer).toBe(true);
+    expect(result.mcpSupported).toBe(false);
   });
 
   it('uses commands from NewSessionResponse and ignores command update notifications', async () => {

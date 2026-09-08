@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import { AttachmentAddMenu } from '../src/components/chat/attachment-add-menu';
 import { initI18n } from '../src/i18n';
 
@@ -65,5 +66,86 @@ describe('AttachmentAddMenu', () => {
 
     await act(async () => items[0]!.click());
     expect(onAddAttachment).toHaveBeenCalledOnce();
+  });
+
+  it('keeps unsupported MCP visible so existing selections can be removed but not added', async () => {
+    const selectedServerId = 'selected' as McpServerId;
+    const unavailableServerId = 'unavailable' as McpServerId;
+    const missingServerId = 'missing' as McpServerId;
+    const servers = [
+      {
+        id: selectedServerId,
+        name: 'Selected server',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'selected' },
+      },
+      {
+        id: unavailableServerId,
+        name: 'Unavailable server',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'unavailable' },
+      },
+    ] as WorkspaceMcpServerMeta[];
+
+    function UnsupportedMcpMenu() {
+      const [selectedIds, setSelectedIds] = useState<McpServerId[]>([
+        selectedServerId,
+        missingServerId,
+      ]);
+      return (
+        <AttachmentAddMenu
+          isMobile
+          mcp={{
+            servers,
+            selectedIds,
+            onSelectedIdsChange: setSelectedIds,
+            mcpSupported: false,
+          }}
+        />
+      );
+    }
+
+    await act(async () => root.render(<UnsupportedMcpMenu />));
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add attachment"]'
+    );
+    await act(async () => {
+      trigger!.dispatchEvent(
+        new TestPointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerType: 'mouse',
+        })
+      );
+    });
+
+    const unsupportedEntry = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent?.includes('MCP unavailable'));
+    expect(unsupportedEntry).toBeDefined();
+    await act(async () => unsupportedEntry!.click());
+
+    expect(document.body.textContent).toContain(
+      "This agent doesn't support MCP. Workspace MCP servers and Lody's built-in tools are unavailable."
+    );
+    const checkboxes = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]'),
+    ];
+    const selectedRow = checkboxes.find((item) => item.textContent?.includes('Selected server'));
+    const unavailableRow = checkboxes.find((item) =>
+      item.textContent?.includes('Unavailable server')
+    );
+    expect(selectedRow?.hasAttribute('data-disabled')).toBe(false);
+    expect(unavailableRow?.hasAttribute('data-disabled')).toBe(true);
+
+    await act(async () => selectedRow!.click());
+    expect(selectedRow?.getAttribute('data-state')).toBe('unchecked');
+
+    const clear = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === 'Clear MCP selection'
+    );
+    expect(clear).toBeDefined();
+    await act(async () => clear!.click());
+    expect(document.body.textContent).not.toContain('Clear MCP selection');
   });
 });

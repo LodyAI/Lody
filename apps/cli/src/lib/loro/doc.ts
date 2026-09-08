@@ -1522,6 +1522,7 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    mcpSupported?: boolean,
     options: { signal?: AbortSignal } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
@@ -1542,6 +1543,7 @@ export class LoroDocumentManager {
       sourceVersion,
       modelReasoningEfforts,
       acknowledgedSteer,
+      mcpSupported,
       options
     );
   }
@@ -3126,6 +3128,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
+    mcpSupported: entry.mcpSupported,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
 
@@ -3211,6 +3214,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    mcpSupported?: boolean,
     options: { signal?: AbortSignal } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
@@ -3236,6 +3240,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       availableCommands: availableCommands?.length ? availableCommands : undefined,
       sessionFork,
       acknowledgedSteer,
+      mcpSupported,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0

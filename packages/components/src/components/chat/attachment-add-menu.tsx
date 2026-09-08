@@ -22,6 +22,8 @@ export interface AttachmentAddMenuMcp {
   servers: readonly WorkspaceMcpServerMeta[];
   selectedIds: readonly McpServerId[];
   onSelectedIdsChange: (ids: McpServerId[]) => void;
+  /** False means this agent explicitly cannot accept MCP servers. */
+  mcpSupported?: boolean;
   /** Existing conversation: the change applies the next time the agent starts. */
   existingSession?: boolean;
   disabled?: boolean;
@@ -39,7 +41,7 @@ export interface AttachmentAddMenuProps {
    * intentionally unfiltered; its owner routes the selected files by MIME. */
   onAddAttachment?: () => void;
   attachmentDisabled?: boolean;
-  /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
+  /** Omit (or pass an empty supported catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
 }
 
@@ -72,7 +74,7 @@ export function AttachmentAddMenu({
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
-  const hasMcp = mcpServers.length > 0;
+  const hasMcp = !!mcp && (mcpServers.length > 0 || mcp.mcpSupported === false);
   if (!onAddAttachment && !hasMcp) {
     return null;
   }
@@ -84,9 +86,11 @@ export function AttachmentAddMenu({
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
     : 0;
   const mcpLabel =
-    selectedCount > 0
-      ? t('session.mcp.loadCount', { count: selectedCount })
-      : t('session.mcp.loadNone');
+    mcp?.mcpSupported === false
+      ? t('session.mcp.unsupportedTitle')
+      : selectedCount > 0
+        ? t('session.mcp.loadCount', { count: selectedCount })
+        : t('session.mcp.loadNone');
 
   return (
     <DropdownMenu
@@ -211,6 +215,11 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
 
   return (
     <>
+      {mcp.mcpSupported === false ? (
+        <p className="select-none px-2.5 pb-2 pt-1 text-xs leading-snug text-muted-foreground">
+          {t('session.mcp.unsupportedDescription')}
+        </p>
+      ) : null}
       {mcp.servers.map((server) => {
         const detail =
           server.description ??
@@ -220,7 +229,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
           <DropdownMenuCheckboxItem
             key={server.id}
             checked={selected.has(server.id)}
-            disabled={mcp.disabled}
+            disabled={mcp.disabled || (mcp.mcpSupported === false && !selected.has(server.id))}
             // Stays `items-center` (the shared selection-item default): the check
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
@@ -242,6 +251,21 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
           </DropdownMenuCheckboxItem>
         );
       })}
+      {mcp.mcpSupported === false && mcp.selectedIds.length > 0 ? (
+        <>
+          {mcp.servers.length > 0 ? <DropdownMenuSeparator /> : null}
+          <DropdownMenuItem
+            className={cn('cursor-pointer', isMobile && 'py-2.5 text-[15px]')}
+            disabled={mcp.disabled}
+            onSelect={(event) => {
+              event.preventDefault();
+              mcp.onSelectedIdsChange([]);
+            }}
+          >
+            {t('session.mcp.clearSelection')}
+          </DropdownMenuItem>
+        </>
+      ) : null}
       {mcp.existingSession ? (
         <p className="select-none px-2.5 pb-1.5 pt-2 text-[11px] leading-snug text-muted-foreground">
           {t('session.mcp.nextStartHint')}

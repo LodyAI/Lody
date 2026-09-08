@@ -92,6 +92,7 @@ export async function fetchAcpCapabilities(
       ...normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
         acknowledgedSteer: client.supportsAcknowledgedSteer(),
+        mcpSupported: client.supportsMcp(),
         agent: { cliType, agentType },
       }),
       capabilitySourceVersion,

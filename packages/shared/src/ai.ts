@@ -277,11 +277,13 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
+// 8: entries probed before explicit MCP opt-out lack `mcpSupported`, so the
+// renderer would keep offering MCP for an unchanged runtime source version.
 // 7: entries probed before the legacy `model[effort]` derivation became
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 7;
+export const ACP_CAPABILITY_CACHE_VERSION = 8;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -315,6 +317,8 @@ export type AcpCapabilityCacheEntry = {
   sessionFork?: boolean;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
+  /** False only when the runtime explicitly opts out of all MCP. */
+  mcpSupported?: boolean;
   /** True when this Lody machine supports durable asynchronous forks into a new worktree. */
   sessionForkWorktree?: boolean;
   fetchedAt: number;

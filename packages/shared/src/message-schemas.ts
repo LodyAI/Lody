@@ -1226,6 +1226,7 @@ const AcpCapabilityCacheEntrySchema = z
       .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
+    mcpSupported: z.boolean().optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
   })

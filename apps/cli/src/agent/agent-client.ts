@@ -20,6 +20,7 @@ import {
   ACPSessionId,
   MODEL_THOUGHT_LEVEL_META_KEY,
   type MachineId,
+  type McpServerId,
   type AcpConfigOptionValue,
   type AcpSessionNotification,
   type AgentConfigCliType,
@@ -585,6 +586,8 @@ export interface AgentClientOptions {
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Whether this Agent session mounts the built-in Lody Task MCP tools. */
   taskToolsEnabled?: boolean;
+  /** Workspace MCP ids selected by the driving turn. */
+  mcpServerIds?: readonly McpServerId[];
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
@@ -759,6 +762,14 @@ export class AgentClient implements acp.Client {
     workdir: string,
     externalLoad: Promise<SessionMcpCatalogSelector> | undefined
   ): Promise<acp.McpServer[]> {
+    if (!this.supportsMcp()) {
+      if ((this.options.mcpServerIds?.length ?? 0) > 0) {
+        throw new Error(
+          '[ACP_MCP_UNSUPPORTED] This agent does not support MCP. Deselect the selected MCP servers and try again.'
+        );
+      }
+      return [];
+    }
     const builtin = this.buildBuiltinMcpServers(workdir);
     if (!externalLoad) {
       return builtin;
@@ -1208,6 +1219,10 @@ export class AgentClient implements acp.Client {
 
   supportsAcknowledgedSteer(): boolean {
     return this.acknowledgedSteerCapability !== null;
+  }
+
+  supportsMcp(): boolean {
+    return this.lodyExtensionCapabilities.mcp?.supported !== false;
   }
 
   getAuthMethods(): readonly acp.AuthMethod[] {

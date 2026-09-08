@@ -1042,7 +1042,6 @@ function WorkspaceChatLanding({
   const [selectedMachineId, setSelectedMachineId] = useState<MachineId | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const mcpSelection = useSessionMcpSelection(undefined, { disabled: submitting });
   // The project selector always uses the machine-aware picker so multi-machine
   // workspaces can choose the target explicitly. Standalone Electron entry
   // points such as the sidebar and onboarding may still use the native dialog.
@@ -1683,6 +1682,10 @@ function WorkspaceChatLanding({
     configOptionValues: sessionConfigCandidates.configOptionValues,
     runtimeOverrides: selectedConfig?.runtimeOverrides,
     machine: selectedMachine,
+  });
+  const mcpSelection = useSessionMcpSelection(undefined, {
+    disabled: submitting,
+    mcpSupported: selectorOptions.mcpSupported,
   });
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
   const {

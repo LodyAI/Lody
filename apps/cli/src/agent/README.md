@@ -40,6 +40,14 @@ context/message-flow.md "Upstream".
 
 ## Background
 
+### Agents without MCP
+
+The Core MCP opt-out lets an adapter explicitly reject all MCP transports.
+`agent-client.ts` uses the live declaration before building builtin servers and
+rejects a nonempty turn selection outside its best-effort catalog fallback.
+The capability cache is only a UI projection; it never overrides live startup
+validation. See the [behavior draft](../../../../specs/acp-mcp-opt-out.md).
+
 ### Grok permission handling
 
 Grok's TUI combines the runtime YOLO setting with client-side `AllowOnce` responses.

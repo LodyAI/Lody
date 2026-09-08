@@ -163,6 +163,24 @@ export const MobileWithMcp: Story = {
   ),
 };
 
+export const McpUnavailable: Story = {
+  args: {
+    isMobile: false,
+    onAddAttachment: noop,
+    mcp: {
+      servers: mcpServers,
+      selectedIds: [mcpServers[0].id],
+      onSelectedIdsChange: noop,
+      mcpSupported: false,
+    },
+  },
+  render: (args) => (
+    <Frame>
+      <WithMcp {...args} />
+    </Frame>
+  ),
+};
+
 export const McpOnly: Story = {
   args: {
     isMobile: false,

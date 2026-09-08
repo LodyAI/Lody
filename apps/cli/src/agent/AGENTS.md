@@ -23,8 +23,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the requested value, updating both replacement startup state and `currentValue`.
 - Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
   `limited` to the durable `blocked` status.
-- Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the
-  daemon process.
+- MCP tools stay outside the daemon. Keep builtin HTTP/stdio; recognized Core MCP
+  opt-out mounts neither and rejects selected workspace MCP.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
   unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. The stdio config is an explicit env

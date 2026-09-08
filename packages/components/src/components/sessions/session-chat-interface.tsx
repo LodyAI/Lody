@@ -2129,6 +2129,7 @@ export const SessionChatInterface = memo(
       defaultModeId,
       defaultModelId,
       machineFlockRows,
+      mcpSupported,
       modeOptions,
       modelOptions,
       modelReasoningEfforts,
@@ -2471,6 +2472,7 @@ export const SessionChatInterface = memo(
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
+      mcpSupported,
     });
     const executionTurnConfigOverrides = useMemo(
       () =>

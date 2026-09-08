@@ -8400,6 +8400,7 @@ export class MessageHandler {
     availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
     sessionFork: boolean;
     acknowledgedSteer: boolean;
+    mcpSupported: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }> {

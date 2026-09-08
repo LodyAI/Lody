@@ -512,6 +512,67 @@ describe('AgentClient session preparation gate', () => {
     });
   });
 
+  it('starts without MCP when the agent explicitly opts out', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: {
+        _meta: { lody: { mcp: { version: 1, supported: false } } },
+      },
+    });
+    const selectExternal = vi.fn(() => ({ servers: [], problems: [] }));
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-no-mcp' as SessionId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      terminalManager: {} as never,
+      mcpServerIds: [],
+      taskToolsEnabled: true,
+      loadExternalMcpServers: async () => selectExternal,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir');
+
+    expect(connectionMocks.newSession).toHaveBeenCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+    });
+    expect(selectExternal).not.toHaveBeenCalled();
+
+    connectionMocks.newSession.mockResolvedValueOnce({ sessionId: 'acp-session-2' });
+    await client.prepareReplacementSession();
+    expect(connectionMocks.newSession).toHaveBeenLastCalledWith({
+      cwd: '/workdir',
+      mcpServers: [],
+    });
+    expect(selectExternal).not.toHaveBeenCalled();
+  });
+
+  it('rejects selected workspace MCP servers when the agent opts out', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: {
+        _meta: { lody: { mcp: { version: 1, supported: false } } },
+      },
+    });
+    const selectExternal = vi.fn(() => ({ servers: [], problems: [] }));
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-no-selected-mcp' as SessionId,
+      terminalManager: {} as never,
+      mcpServerIds: ['server-1' as never],
+      loadExternalMcpServers: async () => selectExternal,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await expect(client.startSession({} as never, '/workdir')).rejects.toThrow(
+      '[ACP_MCP_UNSUPPORTED] This agent does not support MCP. Deselect the selected MCP servers and try again.'
+    );
+    expect(connectionMocks.newSession).not.toHaveBeenCalled();
+    expect(selectExternal).not.toHaveBeenCalled();
+  });
+
   it('aborts while waiting for a claim without creating an ACP session', async () => {
     const target = deferred<{ workdir: string }>();
     const startupAbort = deferred<never>();

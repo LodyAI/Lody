@@ -19,7 +19,10 @@ const agentConfigId = 'config-1' as AgentConfigId;
 const machineWithCapabilities = (acpCapabilities: MachineViewMeta['acpCapabilities']) =>
   ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities'>;
 
-const codexMachineWithConfigOptions = (configOptions: AcpConfigOptionSummary[]) =>
+const codexMachineWithConfigOptions = (
+  configOptions: AcpConfigOptionSummary[],
+  mcpSupported?: boolean
+) =>
   machineWithCapabilities({
     [agentConfigId]: {
       cliType: 'builtin',
@@ -29,6 +32,7 @@ const codexMachineWithConfigOptions = (configOptions: AcpConfigOptionSummary[]) 
       modes: [],
       models: [],
       configOptions,
+      mcpSupported,
       fetchedAt: 1,
     },
   });
@@ -380,7 +384,7 @@ describe('buildAcpSelectorOptions', () => {
       configId: agentConfigId,
       cliType: 'builtin',
       agentType: 'codex',
-      machine: codexMachineWithConfigOptions(configOptions),
+      machine: codexMachineWithConfigOptions(configOptions, false),
     });
     const legacy = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -400,7 +404,9 @@ describe('buildAcpSelectorOptions', () => {
     });
 
     expect(runtime.capabilityAuthority).toBe('authoritative');
+    expect(runtime.mcpSupported).toBe(false);
     expect(legacy.capabilityAuthority).toBe('provisional');
+    expect(legacy.mcpSupported).toBeUndefined();
   });
 
   it('keeps a provisional persisted value visible until runtime validation', () => {
@@ -508,12 +514,14 @@ describe('buildAcpSelectorOptions', () => {
               options: [],
             },
           ],
+          mcpSupported: false,
           fetchedAt: 1,
         },
       }),
     });
 
     expect(options.configOptionSelectors).toEqual([]);
+    expect(options.mcpSupported).toBeUndefined();
   });
 
   it('provides no mode options before registry capabilities have loaded', () => {

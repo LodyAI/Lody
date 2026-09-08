@@ -183,6 +183,8 @@ export const isThoughtLevelSelector = (selector: AcpConfigOptionSelector): boole
 
 export type AcpSelectorOptions = {
   capabilityAuthority: AcpCapabilityAuthority;
+  /** Explicit runtime capability. Undefined preserves legacy agent behavior. */
+  mcpSupported?: boolean;
   modeOptions: AcpSessionSelectOption[];
   modelOptions: AcpSessionSelectOption[];
   defaultModeId: string | null;
@@ -211,6 +213,7 @@ export type AcpSelectorTarget = {
  */
 type ResolvedConfigOptions = {
   authority: AcpCapabilityAuthority;
+  mcpSupported?: boolean;
   configOptions?: AcpConfigOptionSummary[];
   modelReasoningEfforts: Record<string, string[]> | undefined;
 };
@@ -226,8 +229,14 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
+      const mcpSupported = capability.mcpSupported;
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions, modelReasoningEfforts };
+        return {
+          authority,
+          mcpSupported,
+          configOptions: capability.configOptions,
+          modelReasoningEfforts,
+        };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -260,6 +269,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       }
       return {
         authority,
+        mcpSupported,
         configOptions: synthesized.length > 0 ? synthesized : undefined,
         modelReasoningEfforts,
       };
@@ -571,8 +581,12 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions, modelReasoningEfforts } =
-    resolveConfigOptions(target);
+  const {
+    authority: capabilityAuthority,
+    mcpSupported,
+    configOptions,
+    modelReasoningEfforts,
+  } = resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -614,6 +628,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
 
   return {
     capabilityAuthority,
+    mcpSupported,
     modeOptions,
     modelOptions,
     defaultModeId: resolveDefaultModeId(target, modeConfigOption),

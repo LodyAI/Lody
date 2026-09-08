@@ -2267,6 +2267,7 @@ describe('SessionExecutionService', () => {
         availableCommands: [{ name: 'review', description: 'Review changes' }],
         sessionFork: false,
         acknowledgedSteer: true,
+        mcpSupported: false,
       }),
       terminalManager: {} as unknown,
       getWorkdir: () => '/local/repo',
@@ -2361,7 +2362,8 @@ describe('SessionExecutionService', () => {
         // Per-model reasoning efforts: absent for this agent, which publishes no
         // legacy `model[effort]` combination list.
         undefined,
-        true
+        true,
+        false
       )
     );
   });
@@ -6021,6 +6023,7 @@ describe('SessionExecutionService', () => {
       modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
       sessionFork: false,
       acknowledgedSteer: true,
+      mcpSupported: false,
       sessionForkWorktree: false,
       fetchedAt: 1,
     };
@@ -6032,6 +6035,7 @@ describe('SessionExecutionService', () => {
       availableCommands: [{ name: 'review', description: 'Review changes' }],
       sessionFork: false,
       acknowledgedSteer: true,
+      mcpSupported: false,
       modelReasoningEfforts: capability.modelReasoningEfforts,
     }));
 
@@ -6084,6 +6088,7 @@ describe('SessionExecutionService', () => {
       'registry:deepseek:unknown',
       capability.modelReasoningEfforts,
       true,
+      false,
       { signal: expect.any(AbortSignal) }
     );
     expect(result).toEqual(

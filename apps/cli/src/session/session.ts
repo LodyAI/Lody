@@ -626,6 +626,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           },
           configOptionValues: this.config.configOptionValues,
           taskToolsEnabled: this.config.taskToolsEnabled,
+          mcpServerIds: this.config.mcpServerIds,
           launcher,
           workspaceId: this.config.workspaceId,
           machineId: this.config.machineId as MachineId,
@@ -658,6 +659,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
+          mcpSupported: started.client.supportsMcp(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {

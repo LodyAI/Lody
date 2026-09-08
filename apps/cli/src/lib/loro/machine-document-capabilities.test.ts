@@ -120,6 +120,44 @@ describe('MachineDocument ACP capabilities', () => {
     });
   });
 
+  it('persists a capability change that only updates MCP support', async () => {
+    const flock = new FakeMachineFlock();
+    const flush = vi.fn(async () => undefined);
+    const markDirty = vi.fn();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush,
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      markDirty
+    );
+    const write = (mcpSupported: boolean) =>
+      document.updateAcpCapabilities(
+        'config-1' as AgentConfigId,
+        'registry',
+        'pi',
+        [],
+        [],
+        undefined,
+        undefined,
+        false,
+        'registry:pi:test',
+        undefined,
+        false,
+        mcpSupported
+      );
+
+    await write(true);
+    await write(false);
+
+    expect(
+      (await document.getAcpCapabilities('config-1' as AgentConfigId))?.mcpSupported
+    ).toBe(false);
+  });
+
   it('does not write capabilities when cancelled while opening the Machine Flock', async () => {
     const flock = new FakeMachineFlock();
     let markOpenStarted!: () => void;
@@ -159,6 +197,7 @@ describe('MachineDocument ACP capabilities', () => {
       'builtin:codex:test',
       undefined,
       false,
+      undefined,
       { signal: controller.signal }
     );
     await openStarted;

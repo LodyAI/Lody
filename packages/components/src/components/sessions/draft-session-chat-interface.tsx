@@ -174,10 +174,6 @@ export const DraftSessionChatInterface = memo(
       }, [composerAgentRoleItems, draft.agentConfigId, draft.agentRoleId]);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
       const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
-      // The draft composer has no MCP picker yet, so the first turn carries the
-      // workspace default selection — the same set the promoted child composer
-      // resolves for an empty session doc.
-      const mcpSelection = useSessionMcpSelection(undefined, {});
       // Same resolution the composer uses: a local project may carry its repo
       // only in project.githubRepoFullName, not in repoFullName.
       const parentRepoFullName = resolveSessionRepoFullName(parentSession);
@@ -260,6 +256,7 @@ export const DraftSessionChatInterface = memo(
         defaultModeId,
         defaultModelId,
         machineFlockRows,
+        mcpSupported,
         modeOptions,
         modelOptions,
         modelReasoningEfforts,
@@ -273,6 +270,7 @@ export const DraftSessionChatInterface = memo(
         selectedModelId: sessionConfigCandidates.modelId,
         configOptionValues: sessionConfigCandidates.configOptionValues,
       });
+      const mcpSelection = useSessionMcpSelection(undefined, { mcpSupported });
       const selectorOptions = useMemo(
         () => ({
           capabilityAuthority,
@@ -652,6 +650,7 @@ export const DraftSessionChatInterface = memo(
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             availableCommands={availableCommands}
+            mcp={mcpSelection.menu}
             onModeChange={selectMode}
             onModelChange={selectModel}
             onConfigOptionChange={selectConfigOption}

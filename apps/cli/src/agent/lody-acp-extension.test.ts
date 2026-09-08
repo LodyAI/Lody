@@ -3,9 +3,23 @@ import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import type { RequestPermissionRequest, SessionConfigOption } from '@agentclientprotocol/sdk';
 import {
   getBuiltinToolPermissionOutcome,
+  parseLodyExtensionCapabilities,
   parseRateLimitsSnapshot,
   parseLodyExtensionMessage,
 } from './lody-acp-extension';
+
+describe('Lody capability parsing', () => {
+  it('preserves an MCP opt-out beside independently versioned future capabilities', () => {
+    expect(
+      parseLodyExtensionCapabilities({
+        lody: {
+          mcp: { version: 1, supported: false },
+          steering: { version: 2 },
+        },
+      })
+    ).toEqual({ mcp: { version: 1, supported: false } });
+  });
+});
 
 describe('Grok TUI permission compatibility', () => {
   const request: RequestPermissionRequest = {
