@@ -157,7 +157,6 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected override onBeforeStop(): void {
     this.lastSnapshotAtMs = null;
-    this.options.onSnapshot?.({});
   }
 
   private startViewingHeartbeat(): void {

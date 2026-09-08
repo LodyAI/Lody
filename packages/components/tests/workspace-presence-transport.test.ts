@@ -117,7 +117,7 @@ describe('WorkspacePresenceTransport', () => {
     }
   });
 
-  it('emits parsed snapshots from the ephemeral store and clears them on stop', async () => {
+  it('emits parsed snapshots from the ephemeral store and keeps them on stop', async () => {
     const stores: FakePresenceStore[] = [];
     const transports: FakePresenceTransport[] = [];
     const snapshots: unknown[] = [];
@@ -166,7 +166,15 @@ describe('WorkspacePresenceTransport', () => {
 
     await presence.stop();
 
-    expect(snapshots.at(-1)).toEqual({});
+    expect(snapshots.at(-1)).toEqual({
+      [key]: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: 100,
+      },
+    });
+    expect(presence.getSyncState()).toBe('idle');
     expect(transports[0]?.close).toHaveBeenCalledTimes(1);
     expect(stores[0]?.destroy).toHaveBeenCalledTimes(1);
   });
