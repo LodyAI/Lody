@@ -39,6 +39,16 @@ export async function exportChatShareImage(element: HTMLElement, title?: string)
       dpr: 1,
       embedFonts: true,
       compress: false,
+      plugins: [
+        {
+          name: 'chat-share-hide-scrollbars',
+          beforeRender(context) {
+            // Replace copied scrollbar rules only in the serialized image.
+            context.scrollbarCSS =
+              '*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}';
+          },
+        },
+      ],
     });
   } finally {
     restoreLists();
