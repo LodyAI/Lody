@@ -242,31 +242,26 @@ describe('readAgentAcpCapability', () => {
     }
   );
 
-  it.each([{ legacy: true }, { current: true }, { agentType: 'synthetic-other-agent' }])(
-    'reads a compatible older row without probing (%o)',
-    async (options) => {
-      const fixture = setup({ ...options, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 });
-      const dispatch = vi
-        .spyOn(commandRuntime, 'dispatchLocalControl')
-        .mockRejectedValue(new Error('unexpected probe'));
-      try {
-        await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(
-          options.current ? fixture.freshEntry : fixture.legacyEntry
-        );
-      } finally {
-        dispatch.mockRestore();
-      }
-    }
-  );
-
-  it.each([false, true])('reads a current row without probing (legacy=%s)', async (legacy) => {
-    const fixture = setup({ legacy, current: !legacy });
+  it.each([
+    [{ legacy: true, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 }, false],
+    [{ current: true, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 }, true],
+    [
+      {
+        agentType: 'synthetic-other-agent',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+      },
+      false,
+    ],
+    [{ current: true }, true],
+    [{ legacy: true }, false],
+  ])('reads a compatible row without probing (%o)', async (options, expectsFresh) => {
+    const fixture = setup(options);
     const dispatch = vi
       .spyOn(commandRuntime, 'dispatchLocalControl')
       .mockRejectedValue(new Error('unexpected probe'));
     try {
       await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(
-        legacy ? fixture.legacyEntry : fixture.freshEntry
+        expectsFresh ? fixture.freshEntry : fixture.legacyEntry
       );
     } finally {
       dispatch.mockRestore();
@@ -391,15 +386,6 @@ const cursorFastSelect = (): AcpConfigOptionSummary => ({
   ],
 });
 
-const cursorContextSelect = (): AcpConfigOptionSummary => ({
-  id: 'context',
-  name: 'Context',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-});
-
 const createCursorAcpCapability = (): AcpCapabilityCacheEntry => ({
   cliType: 'custom',
   agentType: 'cursor',
@@ -422,14 +408,12 @@ const createCursorAcpCapability = (): AcpCapabilityCacheEntry => ({
     cursorThinkingSelect(),
     cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
     cursorFastSelect(),
-    cursorContextSelect(),
   ],
   configOptionsByModel: {
     opus: [
       cursorThinkingSelect(),
       cursorEffortSelect(['low', 'medium', 'high', 'xhigh', 'max'], 'medium'),
       cursorFastSelect(),
-      cursorContextSelect(),
     ],
     sonnet: [
       cursorThinkingSelect(),
@@ -452,7 +436,6 @@ const createCursorAcpCapability = (): AcpCapabilityCacheEntry => ({
       },
       cursorFastSelect(),
     ],
-    empty: [],
   },
   fetchedAt: 1,
 });
