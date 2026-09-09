@@ -10,6 +10,8 @@ import {
   CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
   MACHINE_PROTOCOL_CAPABILITIES,
   getAcpCapabilityCacheKey,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
+  serializeCustomAcpLaunchSpec,
   getLodyMachinePresenceKey,
   machineFlockKeys,
   selectMentionableAgentRoles,
@@ -143,13 +145,13 @@ describe('useAgentRoleAvailability', () => {
     ]);
   }
 
-  async function publishAgentConfig() {
+  async function publishAgentConfig(config: AgentConfigMeta = agentConfig) {
     const key = machineFlockKeys.agentConfig(configId);
     await act(async () => {
       store.set(setMachineFlockRowsForMachineAtom, {
         workspaceId,
         machineId,
-        rows: { [serializeMachineFlockKey(key)]: { key, value: agentConfig } },
+        rows: { [serializeMachineFlockKey(key)]: { key, value: config } },
       });
     });
   }
@@ -217,6 +219,46 @@ describe('useAgentRoleAvailability', () => {
       expect(savedRole.runConfig).toEqual(selection(legacyModelId));
     }
   );
+
+  it.each([currentModelId, 'new-model'])(
+    'keeps Role %s unknown after a custom provider command changes',
+    async (modelId) => {
+      const oldLaunch = { command: '/synthetic/old-acp', args: ['--acp'] };
+      const newLaunch = { command: '/synthetic/new-acp', args: ['--acp'] };
+      const config: AgentConfigMeta = { ...agentConfig, cliType: 'custom', customAcp: newLaunch };
+      const savedRole = role({ modelId });
+      await publishAgentConfig(config);
+      const oldEntry: AcpCapabilityCacheEntry = {
+        ...capability(), cliType: 'custom',
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(oldLaunch)}`,
+      };
+      publishCapability(oldEntry);
+      await render(savedRole);
+      expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+
+      publishCapability({
+        ...oldEntry,
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(newLaunch)}`,
+        models: [{ modelId, name: modelId }],
+        configOptions: [],
+      });
+      await render(savedRole);
+      expect(snapshot).toEqual({
+        availability: { kind: 'available' }, mentionableIds: [savedRole.id],
+      });
+    }
+  );
+
+  it('withholds a Role after removing its builtin runtime override', async () => {
+    await publishAgentConfig({ ...agentConfig, cliType: 'builtin', agentType: 'codex' });
+    const savedRole = role({ modelId: currentModelId });
+    publishCapability({
+      ...capability(), cliType: 'builtin', agentType: 'codex',
+      sourceVersion: `builtin-codex:test${getBuiltinRuntimeOverrideSourceVersionSuffix({ codexPath: '/synthetic/codex' })}`,
+    });
+    await render(savedRole);
+    expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+  });
 
   it('keeps a compatible older capability cache available while a fresh snapshot arrives', async () => {
     const savedRole = role({ modelId: currentModelId });

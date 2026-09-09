@@ -420,6 +420,39 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
     : undefined;
 };
 
+/** A readable row can describe a launch configuration that the user has since replaced. */
+export const getReadableAcpCapabilityCacheEntryForConfig = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  config: {
+    cliType: AgentConfigCliType;
+    agentType: string;
+    customAcp?: CustomAcpLaunchSpec;
+    runtimeOverrides?: BuiltinRuntimeOverrides;
+  },
+  machine: AcpCapabilityMachine
+): AcpCapabilityCacheEntry | undefined => {
+  const readable = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry, config.runtimeOverrides, machine
+  );
+  if (!readable || readable.cliType !== config.cliType || readable.agentType !== config.agentType) {
+    return undefined;
+  }
+  if (config.cliType === 'custom') {
+    return config.customAcp &&
+      readable.sourceVersion === `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`
+      ? readable
+      : undefined;
+  }
+  if (
+    config.cliType === 'builtin' &&
+    !hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
+    readable.sourceVersion?.includes('+override:')
+  ) {
+    return undefined;
+  }
+  return readable;
+};
+
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
   runtimeOverrides: BuiltinRuntimeOverrides | undefined,

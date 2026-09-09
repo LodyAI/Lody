@@ -194,7 +194,10 @@ this page is the full text of the rules summarised there.
   means "not loaded yet", so the stored id must not be overwritten with null. Manual model, mode,
   and config-option edits end a pending landing Role restore synchronously through
   the selection hook's `onUserChange`; later capability arrival cannot replace
-  those edits with the saved Role.
+  those edits with the saved Role. Capability evidence for Role availability
+  must also match the current provider kind, agent, custom launch spec, and builtin
+  override selection; the shared configuration-aware reader rejects replaced
+  configurations without rejecting readable older cache formats.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of
