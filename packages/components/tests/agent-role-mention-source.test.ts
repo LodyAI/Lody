@@ -61,7 +61,6 @@ describe('agent role mention work context', () => {
           workspaceId: 'w' as WorkspaceId,
           localProjectId: 'p' as LocalProjectId,
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-2' });
   });
@@ -77,7 +76,6 @@ describe('agent role mention work context', () => {
           },
           githubRepoFullName: 'loro-dev/lody',
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-2' });
   });
@@ -85,7 +83,6 @@ describe('agent role mention work context', () => {
   it('lets a github project reach every authorized machine', () => {
     const context = buildAgentRoleMentionContext({
       mentionSource: { kind: 'github', repoFullName: 'loro-dev/lody' },
-      currentMachineId: machineId,
     });
     expect(context).toEqual({ kind: 'authorized_machines' });
     const authorized = new Set([machineId, 'machine-2' as MachineId]);
@@ -107,18 +104,17 @@ describe('agent role mention work context', () => {
             sessionId: 's' as SessionId,
           },
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-3' });
   });
 
-  it('opens plain chat to authorized machines, with or without a current machine', () => {
-    expect(
-      buildAgentRoleMentionContext({ mentionSource: undefined, currentMachineId: machineId })
-    ).toEqual({ kind: 'authorized_machines' });
+  it('opens plain chat to authorized machines', () => {
+    expect(buildAgentRoleMentionContext({ mentionSource: undefined })).toEqual({
+      kind: 'authorized_machines',
+    });
     expect(
       resolveAgentRoleMentionScope(
-        buildAgentRoleMentionContext({ mentionSource: undefined, currentMachineId: undefined }),
+        buildAgentRoleMentionContext({ mentionSource: undefined }),
         new Set([machineId])
       )
     ).toEqual({ kind: 'authorized_machines', machineIds: new Set([machineId]) });

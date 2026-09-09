@@ -740,12 +740,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       [mentionSource]
     );
     const agentRoleContext = React.useMemo(
-      () =>
-        buildAgentRoleMentionContext({
-          mentionSource,
-          currentMachineId: skillAgent?.machineId,
-        }),
-      [mentionSource, skillAgent?.machineId]
+      () => buildAgentRoleMentionContext({ mentionSource }),
+      [mentionSource]
     );
     const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
     // A committed range carries only the Role id, so the caller's chip resolver

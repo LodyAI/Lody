@@ -90,8 +90,6 @@ export type AgentRoleMentionContext =
  */
 export const buildAgentRoleMentionContext = (options: {
   mentionSource: MentionProjectSource | undefined;
-  /** The machine this chat runs on, when it has one. */
-  currentMachineId: string | null | undefined;
 }): AgentRoleMentionContext => {
   const { mentionSource } = options;
   if (mentionSource?.kind === 'local') {
@@ -102,13 +100,12 @@ export const buildAgentRoleMentionContext = (options: {
   }
   // A GitHub project whose files are being read out of a live worktree is
   // already checked out on one machine, so it is pinned like a local project.
-  if (mentionSource?.kind === 'github' && mentionSource.repoFullName) {
-    return mentionSource.localWorktree
-      ? { kind: 'machine', machineId: mentionSource.localWorktree.machineId }
-      : { kind: 'authorized_machines' };
-  }
-  if (mentionSource?.kind === 'provider' && mentionSource.githubRepoFullName) {
-    return { kind: 'authorized_machines' };
+  if (
+    mentionSource?.kind === 'github' &&
+    mentionSource.repoFullName &&
+    mentionSource.localWorktree
+  ) {
+    return { kind: 'machine', machineId: mentionSource.localWorktree.machineId };
   }
   return { kind: 'authorized_machines' };
 };
