@@ -107,7 +107,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import {
   ContextMenu,
@@ -425,7 +425,7 @@ export function RemoveLocalProjectDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isRemoving}>
+          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isRemoving}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button

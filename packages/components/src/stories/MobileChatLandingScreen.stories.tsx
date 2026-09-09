@@ -3,7 +3,7 @@ import { fn } from 'storybook/test';
 import { ArrowUp } from 'lucide-react';
 
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 function MockComposer() {
   return (
@@ -17,10 +17,11 @@ function MockComposer() {
         <span className="text-xs text-muted-foreground">claude-3.5-sonnet · zx-macbook</span>
         <Button
           type="button"
-          size="icon"
-          variant="ghost"
+          variant="primary"
           aria-label="Send"
-          className="ml-auto h-8 w-8 rounded-full bg-foreground text-background shadow-xs hover:bg-foreground/90 hover:text-background"
+          icon
+          shape="pill"
+          className="ml-auto"
         >
           <ArrowUp className="h-4 w-4" />
         </Button>

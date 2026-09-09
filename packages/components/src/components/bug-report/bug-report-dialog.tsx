@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Label } from '@/ui/label';
 import { Textarea } from '@/ui/textarea';
 import { CopyButton } from '@/ui/copy-button';
@@ -197,7 +197,7 @@ export function BugReportDialog({
               ) : null}
             </div>
             <DialogFooter>
-              <Button variant="outline" disabled={submitting} onClick={onClose}>
+              <Button variant="secondary" disabled={submitting} onClick={onClose}>
                 {t('common.cancel', 'Cancel')}
               </Button>
               <Button

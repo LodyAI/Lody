@@ -4,7 +4,7 @@ import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
 import { Alert, AlertDescription } from '@/ui/alert';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@/ui/input';
 

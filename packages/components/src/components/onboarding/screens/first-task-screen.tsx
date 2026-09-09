@@ -21,7 +21,7 @@ import { useSessionActions } from '@/hooks/use-session-actions';
 import { buildAgentPrompt } from '@/lib';
 import { cn } from '@/lib/utils';
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Textarea } from '@/ui/textarea';
 import { getFirstTaskPrimaryAction } from '../first-task-primary-action';
@@ -248,12 +248,7 @@ export function FirstTaskScreen({
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.firstTask.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton

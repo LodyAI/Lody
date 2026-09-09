@@ -75,6 +75,7 @@
     "bench:conversation": "vitest bench benchmarks/conversation-window.bench.ts --run"
   },
   "dependencies": {
+    "@lody/ui": "workspace:*",
     "@zumer/snapdom": "^2.24.15",
     "@assistant-ui/react": "^0.10.39",
     "@assistant-ui/react-markdown": "^0.10.8",
@@ -200,6 +201,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@stylexjs/unplugin": "0.19.0",
     "@lody/configs": "workspace:*",
     "@playwright/test": "^1.58.2",
     "@radix-ui/react-avatar": "^1.1.10",

@@ -13,7 +13,7 @@ import type { CommentReferencePayload } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { Badge } from '@/ui/badge';
 import { cn } from '@/lib/utils';
@@ -176,8 +176,7 @@ export function GitHubCommentThread({
         {onSendToChat && (
           <Button
             variant="ghost"
-            size="sm"
-            className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground hover:bg-muted"
+            size="small"
             onClick={(e) => {
               e.stopPropagation();
               handleSendToChat();
@@ -246,9 +245,8 @@ export function GitHubCommentThread({
                     </span>
                     <div className="ml-auto flex items-center gap-1.5">
                       <Button
-                        size="sm"
                         variant="ghost"
-                        className="h-6 text-xs px-2"
+                        size="small"
                         disabled={isSubmittingReply}
                         onClick={() => {
                           setIsReplying(false);
@@ -258,8 +256,7 @@ export function GitHubCommentThread({
                         {t('comments.cancel', 'Cancel')}
                       </Button>
                       <Button
-                        size="sm"
-                        className="h-6 gap-1 text-xs px-2"
+                        size="small"
                         disabled={!replyBody.trim() || isSubmittingReply}
                         onClick={() => void handleSubmitReply()}
                       >

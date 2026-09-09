@@ -51,7 +51,7 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { UnifiedLocalProjectOption } from '@/components/chat/unified-project-selector';
 import { getChatLandingProjectRecency } from '@/components/chat/chat-landing-derived';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { TooltipProvider } from '@/ui/tooltip';
 import {
@@ -711,7 +711,7 @@ export function TaskDetailView({ embedded = false }: TaskDetailViewProps) {
   const mobileStatusMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button variant="secondary" size="small">
           <presentation.Icon className={`h-3.5 w-3.5 ${presentation.className}`} />
           {t(presentation.labelKey, presentation.labelFallback)}
         </Button>
@@ -753,9 +753,9 @@ export function TaskDetailView({ embedded = false }: TaskDetailViewProps) {
             leading={
               isMobile ? null : (
                 <Button
-                  size="icon"
                   variant="ghost"
                   aria-label={t('common.back', 'Back')}
+                  icon
                   onClick={() => {
                     if (workspaceSlug) {
                       void router.navigate({

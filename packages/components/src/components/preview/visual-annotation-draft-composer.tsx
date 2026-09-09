@@ -4,7 +4,7 @@ import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 
 export type VisualAnnotationDraftComposerProps = {
@@ -51,8 +51,9 @@ export function VisualAnnotationDraftComposer({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
+          size="mini"
+          icon
+          className="shrink-0"
           aria-label={t('common.cancel', 'Cancel')}
           onClick={onCancel}
         >

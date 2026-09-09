@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
 
 import { cn } from '@/lib/utils';
-import { buttonVariants } from './button';
+import { Button, type ButtonVariant } from '@lody/ui/button';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
 function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
@@ -108,20 +108,30 @@ function AlertDialogDescription({
 
 function AlertDialogAction({
   className,
+  children,
+  variant,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
-  return <AlertDialogPrimitive.Action className={cn(buttonVariants(), className)} {...props} />;
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> & { variant?: ButtonVariant }) {
+  return (
+    <AlertDialogPrimitive.Action asChild {...props}>
+      <Button variant={variant} className={className}>
+        {children}
+      </Button>
+    </AlertDialogPrimitive.Action>
+  );
 }
 
 function AlertDialogCancel({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
   return (
-    <AlertDialogPrimitive.Cancel
-      className={cn(buttonVariants({ variant: 'outline' }), className)}
-      {...props}
-    />
+    <AlertDialogPrimitive.Cancel asChild {...props}>
+      <Button variant="secondary" className={className}>
+        {children}
+      </Button>
+    </AlertDialogPrimitive.Cancel>
   );
 }
 

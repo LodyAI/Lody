@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Bot, Folder } from 'lucide-react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Switch } from '@/ui/switch';
 import type { ProjectSettingsRow } from './project-settings';
 
@@ -166,7 +166,7 @@ function MachineConnectedResourcesContent({
             </h3>
           </div>
           {!readOnly ? (
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onManageAgents}>
+            <Button variant="secondary" size="small" onClick={onManageAgents}>
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}

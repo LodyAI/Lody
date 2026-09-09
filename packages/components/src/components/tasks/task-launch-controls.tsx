@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Bot, ChevronRight, FolderGit2, Play } from 'lucide-react';
 import type { MachineOnlineStatus } from '@/atoms/presence';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,9 +89,7 @@ function SlotChip({
         >
           <Icon className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{label}</span>
-          {secondary ? (
-            <span className="truncate text-muted-foreground">· {secondary}</span>
-          ) : null}
+          {secondary ? <span className="truncate text-muted-foreground">· {secondary}</span> : null}
         </button>
       </DropdownMenuTrigger>
       {children}
@@ -129,11 +127,11 @@ export function TaskLaunchControls({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
-        size="sm"
-        variant={hasActiveSession ? 'outline' : 'default'}
+        variant={hasActiveSession ? 'secondary' : 'primary'}
         // Without `canRun` the dispatch would reject on missing fields and the
         // click would look like nothing happened. The hint below says what is
         // missing; the button must not invite a no-op press.
+        size="small"
         disabled={running || !canRun}
         onClick={onRun}
       >
@@ -164,7 +162,10 @@ export function TaskLaunchControls({
                 onClick={() => onSelectAgent(option.agentConfigId)}
               >
                 <span
-                  className={cn('h-1.5 w-1.5 shrink-0 rounded-full', presenceDotClass(option.presence))}
+                  className={cn(
+                    'h-1.5 w-1.5 shrink-0 rounded-full',
+                    presenceDotClass(option.presence)
+                  )}
                 />
                 <span className="truncate">{option.name}</span>
                 <span className="ml-auto truncate text-xs text-muted-foreground">

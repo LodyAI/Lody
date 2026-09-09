@@ -9,7 +9,7 @@ import {
   McpTransportIcon,
 } from '@/components/shared/mcp-transport';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Switch } from '@/ui/switch';
@@ -327,7 +327,13 @@ export function McpConnectionForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={submitting}
+          onClick={onCancel}
+        >
           {t('common.cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || draft.name.trim().length === 0}>
@@ -400,13 +406,7 @@ function ListEditor({
     <Field label={label} hint={hint}>
       <div className="space-y-1.5">
         {children}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
-          onClick={onAdd}
-        >
+        <Button type="button" variant="ghost" size="small" onClick={onAdd}>
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           {addLabel}
         </Button>
@@ -420,9 +420,10 @@ function RemoveRowButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       type="button"
-      size="icon"
       variant="ghost"
-      className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      icon
+      tone="destructive"
+      className="shrink-0"
       aria-label={t('common.remove')}
       onClick={onClick}
     >

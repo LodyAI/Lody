@@ -4,7 +4,7 @@ import { Mail } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
 import { Alert, AlertDescription } from '@/ui/alert';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -43,7 +43,7 @@ export function CompleteEmailPage({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="small"
               onClick={onSignOut}
               disabled={signingOut || submitting}
             >

@@ -434,8 +434,7 @@ function SessionTable({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            <AlertDialogAction variant="destructive"
               disabled={!confirmSession}
               onClick={() => {
                 const session = confirmSession;
@@ -470,12 +469,9 @@ function SessionActionButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="icon"
           variant="ghost"
-          className={cn(
-            'h-8 w-8 md:h-7 md:w-7',
-            destructive && 'text-destructive hover:text-destructive'
-          )}
+          icon
+          tone={destructive ? 'destructive' : 'neutral'}
           disabled={disabled}
           onClick={onClick}
           aria-label={label}

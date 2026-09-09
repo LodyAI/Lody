@@ -9,7 +9,7 @@ import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from 'sonner';
 import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { cn } from '@/lib/utils';
@@ -313,9 +313,8 @@ export function WorkspaceScreenView({
                   <p className="break-words font-mono opacity-90">{newSlugCheckError}</p>
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
+                    variant="secondary"
+                    size="small"
                     onClick={onRetryNewSlugCheck}
                   >
                     <RotateCcw className="size-3.5" />
@@ -405,11 +404,10 @@ export function WorkspaceScreenView({
                 </div>
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   disabled={retryingWorkspaces}
                   onClick={onRetryWorkspaces}
-                  className="gap-2"
                 >
                   <Spinner icon={RotateCcw} spinning={retryingWorkspaces} className="size-3.5" />
                   {t('common.retry', 'Retry')}

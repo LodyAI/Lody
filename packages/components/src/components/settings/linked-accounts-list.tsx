@@ -6,7 +6,7 @@ import type { IconType } from 'react-icons';
 import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
 import { FcGoogle } from 'react-icons/fc';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -203,15 +203,15 @@ export function LinkedAccountsList({
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               onClick={() => setPendingProviderId(null)}
               disabled={isConnecting}
             >
               {t('common.cancel')}
             </Button>
             <Button
-              size="sm"
+              size="small"
               onClick={() => {
                 void handleConfirmConnect();
               }}

@@ -2426,21 +2426,17 @@ export const SessionChatInputArea = memo(
         ) : null}
       </div>
     ) : null;
-    /* Keep desktop actions compact while preserving the mobile touch target. */
-    const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
     const primaryActionNode = showStopButton ? (
       <Button
+        type="button"
+        variant="primary"
+        size="medium"
+        shape="pill"
+        icon
         onClick={() => {
           void onStop();
         }}
-        variant="ghost"
-        size="icon"
         aria-label={t('sessions.stop')}
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
       >
         <span
           className={cn('rounded-[3px] bg-current', isMobile ? 'h-3 w-3' : 'h-2.5 w-2.5')}
@@ -2450,8 +2446,10 @@ export const SessionChatInputArea = memo(
     ) : (
       <Button
         type="button"
-        size="icon"
-        variant="ghost"
+        variant="primary"
+        size="medium"
+        shape="pill"
+        icon
         onClick={() => void sendMessage()}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
@@ -2459,11 +2457,6 @@ export const SessionChatInputArea = memo(
             ? externalHistorySyncLabel
             : t('sessions.send')
         }
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
       >
         {submissionPending || hasBlockingImages || isExternalHistoryRefreshing ? (
           <Spinner className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />

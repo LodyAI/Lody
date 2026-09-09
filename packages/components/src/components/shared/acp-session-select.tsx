@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
 import {
   DropdownMenu,
@@ -73,14 +73,11 @@ export function AcpSessionSelect({
     <Button
       type="button"
       variant="ghost"
-      size={iconOnly ? 'icon' : 'sm'}
+      size="mini"
+      icon={iconOnly}
       className={cn(
-        'min-w-0 select-none gap-1 text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
+        'min-w-0 select-none focus-visible:ring-0 focus-visible:ring-offset-0',
         variant === 'compact' && compactClassName(isDark, iconOnly),
-        variant !== 'compact' && iconOnly && 'h-6 w-6 rounded-[4px]',
-        variant !== 'compact' && !iconOnly && 'h-8 px-2',
-        variant === 'default' && !iconOnly && 'rounded-full hover:bg-foreground/10',
-        variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
         className
       )}
       aria-label={ariaLabel}

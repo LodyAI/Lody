@@ -136,9 +136,9 @@ export function GitHubPersonalIdentitySettingsCard({
         </div>
         {!authorizationReady && canAuthorize && (
           <Button
-            size="sm"
             variant="ghost"
-            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
+            size="small"
+            className="shrink-0 self-start sm:self-auto"
             onClick={onAuthorize}
             disabled={!workspaceReady || authorizing}
           >
@@ -228,9 +228,9 @@ export function GitHubPersonalIdentitySettingsCard({
           </div>
           {!authorizationReady && canAuthorize && (
             <Button
-              size="sm"
               variant="ghost"
-              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] hover:bg-foreground/[0.1]"
+              size="small"
+              className="shrink-0"
               onClick={onAuthorize}
               disabled={!workspaceReady || authorizing}
             >
@@ -553,9 +553,8 @@ function CloudIntegrationsSettings() {
             <div className="flex shrink-0 items-center gap-2">
               {canManage && (
                 <Button
-                  size="sm"
-                  className="inline-flex items-center gap-1 whitespace-nowrap bg-foreground/[0.05] text-foreground hover:bg-foreground/[0.08]"
                   variant="ghost"
+                  size="small"
                   onClick={() => {
                     void handleConnectGitHub();
                   }}

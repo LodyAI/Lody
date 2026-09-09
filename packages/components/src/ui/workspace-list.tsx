@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Cloud, LogIn, CloudOff, Upload, MoreHorizontal, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from './button';
+import { Button } from '@lody/ui/button';
 import { Separator } from './separator';
 import { useTranslation } from 'react-i18next';
 import {
@@ -67,7 +67,7 @@ interface ActionButtonProps {
   icon: React.ReactNode;
   label: string;
   onClick?: () => void;
-  variant?: 'outline' | 'ghost';
+  variant?: 'secondary' | 'ghost';
   className?: string;
   title?: string;
 }
@@ -76,17 +76,14 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   icon,
   label,
   onClick,
-  variant = 'outline',
+  variant = 'secondary',
   className,
   title,
 }) => {
   return (
     <Button
       variant={variant}
-      className={cn(
-        'flex-1 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground text-sm',
-        className
-      )}
+      className={cn('flex-1 flex', className)}
       onClick={onClick}
       title={title}
     >
@@ -131,7 +128,7 @@ const WorkspaceItemRow: React.FC<WorkspaceItemRowProps> = ({
         <div className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+              <Button variant="ghost" size="mini" icon>
                 <MoreHorizontal className="h-4 w-4" />
                 <span className="sr-only">More options</span>
               </Button>

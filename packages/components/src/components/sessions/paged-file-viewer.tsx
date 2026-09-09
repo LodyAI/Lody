@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { VList } from 'virtua';
 import type { PagedFileSource } from '@/lib/paged-file-source';
 import { Input } from '@/ui/input';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /** One bounded page, virtual rows, no editor/LSP/HTML execution or accumulated cache. */
 export function PagedFileViewer({
@@ -45,7 +45,7 @@ export function PagedFileViewer({
         <span>{t('sessions.fileViewer.paged', 'Large file · read-only')}</span>
         <Button
           variant="ghost"
-          size="sm"
+          size="small"
           disabled={current === 0}
           onClick={() => setPage(current - 1)}
         >
@@ -70,14 +70,14 @@ export function PagedFileViewer({
         </label>
         <Button
           variant="ghost"
-          size="sm"
+          size="small"
           disabled={current + 1 >= pages}
           onClick={() => setPage(current + 1)}
         >
           {t('sessions.fileViewer.nextPage', 'Next page')}
         </Button>
         {onOpenExternal ? (
-          <Button variant="ghost" size="sm" onClick={onOpenExternal}>
+          <Button variant="ghost" size="small" onClick={onOpenExternal}>
             {t('sessions.fileActions.openInDefaultApp', 'Open in default app')}
           </Button>
         ) : null}

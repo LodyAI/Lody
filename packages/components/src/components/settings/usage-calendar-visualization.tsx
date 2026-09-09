@@ -1633,10 +1633,11 @@ function UsageDayDetailPanel({
         className="relative rounded-lg bg-muted/40 p-4"
       >
         <Button
-          size="icon"
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          size="mini"
+          icon
+          className="absolute right-2 top-2"
           onClick={onClose}
         >
           <X className="h-3.5 w-3.5" />
@@ -2339,21 +2340,21 @@ export function UsageCalendarVisualization({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      size="icon"
                       variant="ghost"
+                      icon
                       onClick={() => void copyAscii()}
                       aria-label={t('workspace.usage.skyline.copyAscii')}
                     >
-                      <Copy />
+                      <Copy className="size-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{t('workspace.usage.skyline.copyAscii')}</TooltipContent>
                 </Tooltip>
-                <Button size="sm" variant="outline" onClick={exportAscii}>
+                <Button variant="secondary" size="small" onClick={exportAscii}>
                   <Download className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadAscii')}
                 </Button>
-                <Button size="sm" onClick={exportStl}>
+                <Button size="small" onClick={exportStl}>
                   <Box className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadBinaryStl')}
                 </Button>

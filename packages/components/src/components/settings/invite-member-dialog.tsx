@@ -182,8 +182,8 @@ export function InviteMemberDialog({
 
         <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
           <Button
-            variant="outline"
-            size="sm"
+            variant="secondary"
+            size="small"
             onClick={() => onOpenChange(false)}
             disabled={inviting}
           >
@@ -194,7 +194,7 @@ export function InviteMemberDialog({
             billingUiAvailable &&
             onOpenBilling && (
               <Button
-                size="sm"
+                size="small"
                 onClick={() => {
                   onOpenChange(false);
                   onOpenBilling();

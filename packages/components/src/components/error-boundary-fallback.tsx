@@ -10,7 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -207,14 +207,14 @@ export function ErrorBoundaryFallback({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={resetErrorBoundary}>
+          <Button type="button" size="small" onClick={resetErrorBoundary}>
             <RotateCcw className="size-3.5" aria-hidden="true" />
             {t('errorBoundary.tryAgain', 'Try again')}
           </Button>
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            variant="secondary"
+            size="small"
             onClick={() => {
               reloadApp();
             }}
@@ -222,7 +222,7 @@ export function ErrorBoundaryFallback({
             <RefreshCw className="size-3.5" aria-hidden="true" />
             {t('errorBoundary.reload', 'Reload Lody')}
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleCopy}>
+          <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
             {copied ? (
               <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
             ) : (
@@ -301,9 +301,9 @@ export function ErrorBoundaryFallback({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3">
           <Button
             type="button"
-            size="sm"
             variant="ghost"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            size="small"
+            tone="destructive"
             onClick={() => setHardResetOpen(true)}
           >
             <Trash2 className="size-3.5" aria-hidden="true" />
@@ -368,7 +368,7 @@ export function HardResetConfirmDialog({
               onConfirm();
             }}
             disabled={isResetting}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            variant="destructive"
           >
             <Trash2 className="mr-1.5 size-3.5" aria-hidden="true" />
             {isResetting

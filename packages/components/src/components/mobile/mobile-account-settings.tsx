@@ -452,8 +452,8 @@ export function MobileAccountSettings({
           ) : null}
           <MobileSettingsRow label={t('settings.account.signOut')} hasDivider>
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               onClick={() => {
                 void onSignOut();
               }}
@@ -529,12 +529,7 @@ export function MobileAccountSettings({
           title={t('workspace.members.title')}
           actions={
             hasAdminPermission ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 px-2.5"
-                onClick={() => setInviteDialogOpen(true)}
-              >
+              <Button variant="secondary" size="small" onClick={() => setInviteDialogOpen(true)}>
                 <UserPlus className="mr-1.5 h-3.5 w-3.5" />
                 {t('workspace.members.invite')}
               </Button>
@@ -615,9 +610,10 @@ export function MobileAccountSettings({
                   {isEditable && (
                     <Button
                       variant="ghost"
-                      size="icon"
                       aria-label={t('workspace.removeMember.title')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                      size="large"
+                      icon
+                      tone="destructive"
                       onClick={() => {
                         setUserToDelete(member.id);
                         setDeleteUserDialogOpen(true);
@@ -664,9 +660,9 @@ export function MobileAccountSettings({
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="icon"
                     aria-label={t('workspace.invitations.copyLink')}
-                    className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                    size="large"
+                    icon
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
                     }}
@@ -676,9 +672,10 @@ export function MobileAccountSettings({
                   {hasAdminPermission && (
                     <Button
                       variant="ghost"
-                      size="icon"
                       aria-label={t('common.cancel')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                      size="large"
+                      icon
+                      tone="destructive"
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
                         void (async () => {
@@ -730,8 +727,7 @@ export function MobileAccountSettings({
           description={t('settings.account.cliAuth.description')}
           actions={
             <Button
-              size="sm"
-              className="h-8 px-2.5"
+              size="small"
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
@@ -804,9 +800,9 @@ export function MobileAccountSettings({
                   </div>
                   <div>
                     <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      variant="secondary"
+                      size="small"
+                      tone="destructive"
                       onClick={() => setCliApiKeyToRevoke(apiKey)}
                       disabled={revokingCliApiKeyId === apiKey.id}
                     >
@@ -835,9 +831,9 @@ export function MobileAccountSettings({
               stack
             >
               <Button
-                variant="outline"
-                size="sm"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                variant="secondary"
+                size="small"
+                tone="destructive"
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {t('workspace.danger.leaveWorkspace.button')}
@@ -851,9 +847,9 @@ export function MobileAccountSettings({
               stack
             >
               <Button
-                variant="outline"
-                size="sm"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                variant="secondary"
+                size="small"
+                tone="destructive"
                 onClick={() => {
                   // A live subscription blocks deletion; explain instead of
                   // letting the backend reject the delete.
@@ -879,9 +875,9 @@ export function MobileAccountSettings({
             stack
           >
             <Button
-              variant="outline"
-              size="sm"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              variant="secondary"
+              size="small"
+              tone="destructive"
               onClick={() => setDeleteAccountDialogOpen(true)}
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
@@ -910,8 +906,8 @@ export function MobileAccountSettings({
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => {
                     void onCopyGeneratedCliApiKey?.();
                   }}
@@ -938,8 +934,8 @@ export function MobileAccountSettings({
             )}
             <DialogFooter>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 onClick={() => handleCliApiKeyDialogOpenChange(false)}
                 disabled={isCreatingCliApiKey}
               >
@@ -947,7 +943,7 @@ export function MobileAccountSettings({
               </Button>
               {!hasGeneratedCliApiKey && (
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleCreateCliApiKey();
                   }}
@@ -991,7 +987,7 @@ export function MobileAccountSettings({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                variant="destructive"
               >
                 {revokingCliApiKeyId ? (
                   <Spinner className="mr-1.5 h-3.5 w-3.5" />
@@ -1036,7 +1032,7 @@ export function MobileAccountSettings({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {t('common.remove')}
             </AlertDialogAction>
@@ -1070,7 +1066,7 @@ export function MobileAccountSettings({
                 })();
               }}
               disabled={isLeaving}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {isLeaving ? (
                 <>
@@ -1157,7 +1153,7 @@ export function MobileAccountSettings({
           </div>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteAccountDialogOpen(false);
                 setDeleteAccountConfirmText('');

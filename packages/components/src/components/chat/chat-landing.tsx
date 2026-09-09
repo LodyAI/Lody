@@ -3435,12 +3435,13 @@ function WorkspaceChatLanding({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="h-6 w-6 rounded-md px-0 text-status-error hover:text-status-error [&_svg]:size-3.5"
+            size="mini"
+            icon
+            className="text-status-error hover:text-status-error"
             onClick={handleLocalGitStateRetry}
             aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
           >
-            <RefreshCw aria-hidden="true" />
+            <RefreshCw aria-hidden="true" className="size-4" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
@@ -6136,19 +6137,15 @@ function WorkspaceChatLanding({
             primaryAction={
               <Button
                 type="button"
-                size="icon"
-                variant="ghost"
+                variant="primary"
+                size="medium"
+                shape="pill"
+                icon
                 onClick={() => {
                   void handleSubmit();
                 }}
                 disabled={submitDisabled}
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
-                /* Match the in-session mobile composer send face: solid
-                   foreground disc + ArrowUp (not the old primary-tint chip). */
-                className={cn(
-                  'h-8 w-8 rounded-full shadow-xs transition-all',
-                  'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-                )}
               >
                 {submitting ? <Spinner className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
               </Button>
@@ -6603,10 +6600,11 @@ function WorkspaceChatLanding({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="small"
+              icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              className="shrink-0"
             >
               <PanelLeft className="h-4 w-4" />
             </Button>

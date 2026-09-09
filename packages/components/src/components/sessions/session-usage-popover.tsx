@@ -6,7 +6,7 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
 import { Spinner } from '@/ui/spinner';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   CodexResetForecastDialogHost,
   CodexResetForecastUsageRow,
@@ -125,11 +125,8 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 select-none gap-1 rounded-md px-1.5 font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
-              className
-            )}
+            size="small"
+            className={cn('select-none focus-visible:ring-1 focus-visible:ring-ring', className)}
             aria-label={triggerLabel}
             title={triggerLabel}
           >

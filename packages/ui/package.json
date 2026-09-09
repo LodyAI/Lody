@@ -1,0 +1,38 @@
+{
+  "name": "@lody/ui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens/colors.stylex": "./src/tokens/colors.stylex.ts",
+    "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
+    "./theme": "./src/theme/theme.tsx",
+    "./button": "./src/button/button.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-dom": "*"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.7.0",
+    "@stylexjs/stylex": "0.19.0"
+  },
+  "devDependencies": {
+    "@stylexjs/unplugin": "0.19.0",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "jsdom": "^26.1.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  }
+}

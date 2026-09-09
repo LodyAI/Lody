@@ -64,7 +64,7 @@ export function SidebarUpdateBanner({
         {t('sidebar.updateReady.changelog', 'View changelog')}
       </button>
       <div className="mt-2 flex items-center justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5" onClick={onLater}>
+        <Button type="button" variant="ghost" size="small" onClick={onLater}>
           {t('sidebar.updateReady.later', 'Later')}
         </Button>
         {isDownloading ? null : (

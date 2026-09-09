@@ -16,8 +16,7 @@ import {
   MobileInlinePickerCoordinator,
   MobileInlinePickerRowSlot,
 } from '@/components/mobile/mobile-inline-picker';
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
 import { registerBuiltInCommands } from '@/lib/commands';
 
 // So the composer's ⌘L focus hint has a command binding to read.
@@ -182,16 +181,7 @@ function MobileNewChatDemo() {
           <span className="text-xs text-muted-foreground">claude-opus-4-8 · Thinking</span>
         }
         primaryAction={
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Send"
-            className={cn(
-              'h-8 w-8 rounded-full shadow-xs transition-all',
-              'bg-foreground text-background hover:bg-foreground/90 hover:text-background'
-            )}
-          >
+          <Button type="button" variant="primary" aria-label="Send" icon shape="pill">
             <ArrowUp className="h-5 w-5" />
           </Button>
         }

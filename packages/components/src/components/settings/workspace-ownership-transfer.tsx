@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import {
@@ -89,8 +89,8 @@ export function WorkspaceOwnershipTransfer({
         </p>
       </div>
       <Button
-        variant="outline"
-        size="sm"
+        variant="secondary"
+        size="small"
         disabled={!candidates.length}
         onClick={() => changeOpen(true)}
       >
@@ -145,7 +145,7 @@ export function WorkspaceOwnershipTransfer({
             ) : null}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" disabled={busy} onClick={() => changeOpen(false)}>
+            <Button variant="secondary" disabled={busy} onClick={() => changeOpen(false)}>
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" disabled={!canConfirm} onClick={() => void submit()}>

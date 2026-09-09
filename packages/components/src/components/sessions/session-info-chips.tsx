@@ -32,7 +32,7 @@ import {
   type SessionPullRequestMeta,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
 import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
@@ -273,11 +273,12 @@ export function GoalChip({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="small"
+                    icon
                     onClick={() => onDismiss?.(goal)}
                     aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                     title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    className="shrink-0"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>

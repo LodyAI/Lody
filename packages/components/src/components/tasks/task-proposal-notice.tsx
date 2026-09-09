@@ -7,7 +7,7 @@ import { ListTodo } from 'lucide-react';
 import type { SessionId, TaskProposalMeta } from '@lody/shared';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { useTaskActions } from '@/hooks/use-task-actions';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
 export type TaskProposalNoticeProps = {
@@ -100,7 +100,7 @@ export function TaskProposalNotice({
         <span>{t('tasks.proposal.created', 'Task created')}</span>
         <span className="min-w-0 flex-1 truncate text-foreground">{meta.title}</span>
         {meta.taskId ? (
-          <Button size="sm" variant="ghost" onClick={() => openTask(meta.taskId as string)}>
+          <Button variant="ghost" size="small" onClick={() => openTask(meta.taskId as string)}>
             {t('tasks.proposal.openTask', 'Open task')}
           </Button>
         ) : null}
@@ -136,10 +136,10 @@ export function TaskProposalNotice({
         </div>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="ghost" disabled={busy} onClick={handleDismiss}>
+        <Button variant="ghost" size="small" disabled={busy} onClick={handleDismiss}>
           {t('tasks.proposal.dismiss', 'Ignore')}
         </Button>
-        <Button size="sm" disabled={busy} onClick={handleCreate}>
+        <Button size="small" disabled={busy} onClick={handleCreate}>
           {t('tasks.proposal.create', 'Create task')}
         </Button>
       </div>

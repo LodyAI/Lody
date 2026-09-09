@@ -60,8 +60,8 @@ import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { useMachineMonitor } from '@/hooks/use-machine-monitor';
 import { useMachineLifecycleCapability } from '@/hooks/use-machine-lifecycle-capability';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import {
@@ -1452,8 +1452,7 @@ export function MachineAgentSettings({
                 <div className="mt-2">
                   <Button
                     variant="link"
-                    size="sm"
-                    className="h-auto px-0 text-xs"
+                    size="small"
                     onClick={() => setFilter({ onlineOnly: false, mineOnly: false })}
                   >
                     {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
@@ -1570,8 +1569,8 @@ function OwnPrivateMachines({
             <Button
               key={item.machine.id}
               variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-between px-2 text-xs font-normal"
+              size="small"
+              className="w-full justify-between"
               onClick={() => onOpen(item.machine.id)}
             >
               <span className="truncate">{item.machine.name || item.machine.id}</span>

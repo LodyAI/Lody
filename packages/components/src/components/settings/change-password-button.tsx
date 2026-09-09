@@ -5,7 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { validateNewPassword } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Label } from '@/ui/label';
 import { PasswordInput } from '@/ui/password-input';
 import {
@@ -155,13 +155,7 @@ export function ChangePasswordButton({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="ghost" size="small" disabled={disabled} onClick={() => setOpen(true)}>
         {hasPassword
           ? t('settings.profile.password.changeButton')
           : t('settings.profile.password.setupButton')}
@@ -267,15 +261,15 @@ export function ChangePasswordButton({
                 {step === 0 ? (
                   <>
                     <Button
-                      variant="outline"
-                      size="sm"
+                      variant="secondary"
+                      size="small"
                       onClick={() => handleOpenChange(false)}
                       disabled={isVerifying}
                     >
                       {t('common.cancel')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void goToNewStep();
                       }}
@@ -287,12 +281,17 @@ export function ChangePasswordButton({
                   </>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" onClick={goBack} disabled={isSubmitting}>
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={goBack}
+                      disabled={isSubmitting}
+                    >
                       <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
                       {t('common.back')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void handleSubmit();
                       }}
@@ -315,15 +314,15 @@ export function ChangePasswordButton({
               </DialogHeader>
               <DialogFooter>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => handleOpenChange(false)}
                   disabled={isSubmitting}
                 >
                   {t('common.cancel')}
                 </Button>
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleSetup();
                   }}

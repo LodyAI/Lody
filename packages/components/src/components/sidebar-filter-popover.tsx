@@ -5,7 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -123,13 +123,14 @@ export function SidebarFilterPopover({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
             aria-label={merged.triggerAriaLabel}
             data-state-open={open || undefined}
+            size="small"
+            icon
             className={cn(
               // Match section-header muted chrome (Pinned / Chats); full
               // contrast on hover/open so the control still feels interactive.
-              'h-7 w-7 rounded-md text-sidebar-foreground-muted',
+              'text-sidebar-foreground-muted',
               'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
               'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
               'data-[state=open]:bg-sidebar-hover data-[state=open]:text-sidebar-hover-foreground',

@@ -18,7 +18,7 @@ import {
   type AgentRoleRunConfigIssue,
 } from '@/lib/agent-role-form';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
@@ -315,7 +315,13 @@ export function AgentRoleForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={submitting}
+          onClick={onCancel}
+        >
           {t('common.cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || errors.length > 0}>

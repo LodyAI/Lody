@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { usePostHog } from '@posthog/react';
 import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import {
@@ -220,9 +220,10 @@ export function PathLaunchersSettings({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
                         tabIndex={-1}
-                        className="pointer-events-none absolute right-7 top-1/2 size-6 -translate-y-1/2 opacity-0 transition-opacity group-hover/path-launcher:pointer-events-auto group-hover/path-launcher:opacity-100 group-focus/path-launcher:pointer-events-auto group-focus/path-launcher:opacity-100"
+                        size="mini"
+                        icon
+                        className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover/path-launcher:pointer-events-auto group-hover/path-launcher:opacity-100 group-focus/path-launcher:pointer-events-auto group-focus/path-launcher:opacity-100"
                         aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
                         title={t('settings.pathLaunchers.editAction', 'Edit')}
                         onPointerDown={(event) => {
@@ -386,8 +387,9 @@ function LauncherFormDialog({
           <Button
             type="button"
             variant="destructive"
-            size="icon"
-            className="size-9 shrink-0"
+            size="large"
+            icon
+            className="shrink-0"
             aria-label={t('common.delete')}
             title={t('common.delete')}
             onClick={onDelete}

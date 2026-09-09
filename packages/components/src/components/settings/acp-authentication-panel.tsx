@@ -24,7 +24,7 @@ import {
   type MachineAcpAuthenticationArgs,
 } from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { isElectronRenderer } from '@/lib/electron';
@@ -581,7 +581,7 @@ export function AcpAuthenticationPanel({
                 provider,
               })}
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={handleCancel}>
+            <Button type="button" variant="ghost" size="small" onClick={handleCancel}>
               <Square className="h-3.5 w-3.5" />
               {t('common.cancel', 'Cancel')}
             </Button>
@@ -589,8 +589,8 @@ export function AcpAuthenticationPanel({
         ) : (
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            variant="secondary"
+            size="small"
             disabled={!authArgs || !interactiveProtocolSupported}
             onClick={handleStart}
           >
@@ -697,8 +697,8 @@ export function AcpAuthenticationAuthorizationView({
         </div>
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          variant="secondary"
+          size="small"
           disabled={authorizationConsentPending}
           onClick={onOpenAuthorization}
         >
@@ -730,7 +730,7 @@ export function AcpAuthenticationAuthorizationView({
                 {authorization.userCode}
               </code>
             </div>
-            <Button type="button" size="sm" variant="ghost" onClick={onCopyUserCode}>
+            <Button type="button" variant="ghost" size="small" onClick={onCopyUserCode}>
               {userCodeCopied ? (
                 <Check className="h-3.5 w-3.5" />
               ) : (
@@ -779,7 +779,7 @@ export function AcpAuthenticationAuthorizationView({
             />
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={
                 authorizationCodeSubmitted ||
                 submittingAuthorizationCode ||
@@ -842,8 +842,8 @@ export function AcpAuthenticationInteractionView({
             <Button
               key={method.id}
               type="button"
-              variant="outline"
-              className="h-auto justify-start px-3 py-2 text-left"
+              variant="secondary"
+              className="justify-start text-left"
               disabled={submitting}
               onClick={() => onSubmit({ action: 'accept', methodId: method.id })}
             >
@@ -917,7 +917,7 @@ export function AcpAuthenticationInteractionView({
       ))}
       <Button
         type="button"
-        size="sm"
+        size="small"
         disabled={submitting || invalid}
         onClick={() => onSubmit({ action: 'accept', content: values })}
       >

@@ -5,7 +5,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { useOrganization } from '../../hooks/useOrganization';
@@ -244,7 +244,7 @@ export function MobileCreateWorkspaceSheet({
           >
             <Button
               type="button"
-              variant={creationBlocked ? 'default' : 'outline'}
+              variant={creationBlocked ? 'primary' : 'secondary'}
               className="flex-1"
               onClick={() => handleClose(false)}
               disabled={creating}

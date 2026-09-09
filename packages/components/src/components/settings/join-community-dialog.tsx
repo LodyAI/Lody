@@ -100,7 +100,7 @@ export function JoinCommunityButton() {
 
   return (
     <>
-      <Button size="sm" className="h-7 px-2.5" onClick={() => setOpen(true)}>
+      <Button size="small" onClick={() => setOpen(true)}>
         <Users className="mr-1 h-3.5 w-3.5" />
         {t('settings.about.joinCommunity', 'Join community')}
       </Button>

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Quote } from 'lucide-react';
 import { MeowdownEditor, type EditorHandle } from '@meowdown/react';
 import { toast } from 'sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { useKeyScope } from '@/lib/commands';
 import { shouldAdoptRemoteBody, type TaskBodyEditorProps } from './task-body-editor';
@@ -406,7 +406,7 @@ export default function TaskBodyEditorSurface({
          menu also exposes Quote when the host provides it. */}
       <div className="absolute right-0 top-0 z-[1] flex items-center gap-0.5">
         {onQuoteSelection && hasSelection ? (
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleQuote}>
+          <Button variant="ghost" size="small" onClick={handleQuote}>
             <Quote className="h-3.5 w-3.5" />
             {t('tasks.body.quote', 'Quote selection')}
           </Button>

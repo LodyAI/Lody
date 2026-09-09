@@ -25,7 +25,7 @@ import type {
   LocalProjectBrowseRootsResult,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Skeleton } from '@/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
@@ -330,8 +330,9 @@ function BrowseStep({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
+              size="small"
+              icon
+              className="shrink-0"
               title={t('localProjects.add.go', 'Go')}
               onClick={onPathSubmit}
             >
@@ -378,8 +379,9 @@ function BrowseStep({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
+              size="small"
+              icon
+              className="shrink-0"
               title={t('localProjects.add.editPath', 'Edit path')}
               onClick={onStartEditPath}
               disabled={!current}
@@ -397,9 +399,8 @@ function BrowseStep({
             <Button
               key={drive}
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 gap-1 px-2 text-xs"
+              variant="secondary"
+              size="small"
               onClick={() => onNavigate(drive)}
             >
               <HardDrive className="h-3 w-3" />
@@ -420,13 +421,7 @@ function BrowseStep({
             title={errorView.title}
             description={errorView.description}
             action={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onRetry}
-                className="gap-1.5"
-              >
+              <Button type="button" variant="secondary" size="small" onClick={onRetry}>
                 <RefreshCw className="h-3.5 w-3.5" />
                 {t('common.retry', 'Retry')}
               </Button>
@@ -470,8 +465,8 @@ function BrowseStep({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  className="w-full text-muted-foreground"
+                  size="small"
+                  className="w-full"
                   disabled={loadingMore}
                   onClick={onLoadMore}
                 >
@@ -517,13 +512,12 @@ function BrowseStep({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={adding}>
+            <Button type="button" variant="ghost" size="small" onClick={onCancel} disabled={adding}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
               type="button"
-              size="sm"
-              className="gap-1.5"
+              size="small"
               disabled={!current || status !== 'ready' || adding}
               onClick={onAddCurrentFolder}
             >

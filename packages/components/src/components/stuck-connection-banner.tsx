@@ -59,8 +59,9 @@ export function StuckConnectionBanner({
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
           <Button
             variant="ghost"
-            size="icon"
-            className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground"
+            size="mini"
+            icon
+            className="-mr-1 shrink-0"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
@@ -74,11 +75,7 @@ export function StuckConnectionBanner({
           <p className="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
             {labels.description}
           </p>
-          <Button
-            size="sm"
-            className="h-7 shrink-0 rounded-full px-3 text-xs"
-            onClick={onClearCache}
-          >
+          <Button size="small" shape="pill" className="shrink-0" onClick={onClearCache}>
             {labels.clearCache}
           </Button>
         </div>

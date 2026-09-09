@@ -40,7 +40,7 @@ import {
   isPullRequestMergeabilityPending,
 } from '@/lib/github-pr-details-state';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@/ui/skeleton';
 import { Textarea } from '@/ui/textarea';
@@ -314,13 +314,7 @@ function ChecksPermissionNotice({
         </p>
       </div>
       {onGrantChecksPermission && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={onGrantChecksPermission}
-          className="h-6 gap-1 text-[11px]"
-        >
+        <Button type="button" variant="secondary" size="small" onClick={onGrantChecksPermission}>
           <Github className="h-3 w-3" />
           {t('sessions.prTab.checksPermissionCta', 'Update permissions')}
         </Button>
@@ -700,10 +694,10 @@ function PrHeaderActionButton({
       <div data-pr-merge-action="" className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMerge(mergeMethod)}
           disabled={busy}
-          className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN, 'rounded-r-none border-transparent')}
+          className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN)}
         >
           {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
           {mergeMethodShortLabel(mergeMethod, t)}
@@ -712,10 +706,10 @@ function PrHeaderActionButton({
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={busy}
               aria-label={t('sessions.prTab.moreActions', 'More actions')}
-              className={cn('h-7 rounded-l-none px-1.5', PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
+              className={cn(PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
             >
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
@@ -771,12 +765,12 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          variant="secondary"
+          size="small"
           onClick={canResolve ? onResolveConflicts : undefined}
           disabled={!canResolve}
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {resolving ? (
             <Spinner className="h-3.5 w-3.5" />
@@ -790,11 +784,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="secondary"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className="h-7 rounded-l-none border-l px-1.5"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -821,11 +814,11 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          variant="secondary"
+          size="small"
           disabled
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {kind === 'checking' ? (
             <Spinner className="h-3.5 w-3.5" />
@@ -839,11 +832,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                variant="secondary"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className="h-7 rounded-l-none border-l px-1.5"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -863,10 +855,10 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMarkReadyForReview()}
           disabled={busy}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && '')}
         >
           {isMarkingReady ? (
             <Spinner className="h-3.5 w-3.5" />
@@ -880,10 +872,10 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
-                className={cn('h-7 rounded-l-none px-1.5', PR_SPLIT_DIVIDER)}
+                className={cn(PR_SPLIT_DIVIDER)}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -902,8 +894,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onSetState?.('open')}
         disabled={busy}
         className={PR_ACTION_BTN}
@@ -926,8 +918,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onDeleteBranch?.()}
         disabled={busy}
         className={PR_ACTION_BTN}
@@ -947,8 +939,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        variant="secondary"
+        size="small"
         onClick={() => void onSetState?.('closed')}
         disabled={busy}
         className={cn(PR_ACTION_BTN, 'text-status-danger')}
@@ -1176,13 +1168,7 @@ export const PrTabView = memo(function PrTabView({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {onRefresh && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onRefresh}
-                className="h-6 text-[11px]"
-              >
+              <Button type="button" variant="secondary" size="small" onClick={onRefresh}>
                 {t('sessions.prTab.retry', 'Retry')}
               </Button>
             )}
@@ -1356,8 +1342,8 @@ export const PrTabView = memo(function PrTabView({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  size="small"
+                  icon
                   onClick={onRefresh}
                   aria-label={t('sessions.prTab.refresh', 'Refresh')}
                   title={t('sessions.prTab.refresh', 'Refresh')}
@@ -1370,20 +1356,20 @@ export const PrTabView = memo(function PrTabView({
                 </Button>
               )}
               <Button
-                asChild
+                render={
+                  <a
+                    href={badgeMeta.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+                  />
+                }
                 variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground"
                 title={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+                size="small"
+                icon
               >
-                <a
-                  href={badgeMeta.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
-                >
-                  <Github className="h-3.5 w-3.5" />
-                </a>
+                <Github className="h-3.5 w-3.5" />
               </Button>
               {mergeAction}
             </div>

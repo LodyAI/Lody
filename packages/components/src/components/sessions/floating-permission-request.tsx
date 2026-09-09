@@ -279,12 +279,12 @@ export function PermissionRequestCard({
             return (
               <Button
                 key={option.optionId}
-                size="sm"
                 type="button"
+                size="small"
                 disabled={disabled}
                 variant="ghost"
                 className={cn(
-                  'h-auto min-h-8 w-full min-w-0 items-start justify-start gap-2 whitespace-normal break-words rounded-md px-3 py-1.5 text-left text-xs leading-5 transition-colors',
+                  'w-full min-w-0 items-start justify-start whitespace-normal break-words text-left',
                   toneClass
                 )}
                 onClick={() => onSelect(option.optionId)}

@@ -33,6 +33,7 @@ const config: StorybookConfig = {
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
+    viteConfig.plugins.push(stylex.vite(stylexOptions));
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),

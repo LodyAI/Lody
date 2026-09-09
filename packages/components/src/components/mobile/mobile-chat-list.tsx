@@ -1383,7 +1383,7 @@ export function MobileChatList({
                 void handleDelete();
               }}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {selectionLabels?.confirmDelete ?? '删除'}
             </AlertDialogAction>

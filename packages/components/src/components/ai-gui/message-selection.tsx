@@ -12,7 +12,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
 import type { ConversationMessage } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 
@@ -366,15 +366,15 @@ export function MessageSelectionToolbar({
           count: selection.messages.length,
         })}
       </span>
-      <Button variant="ghost" size="sm" onClick={selection.toggleAll}>
+      <Button variant="ghost" size="small" onClick={selection.toggleAll}>
         {selection.allSelected
           ? t('sessions.shareImage.clearSelection', 'Clear selection')
           : t('sessions.shareImage.selectAll', 'Select all')}
       </Button>
-      <Button variant="ghost" size="sm" onClick={selection.cancel}>
+      <Button variant="ghost" size="small" onClick={selection.cancel}>
         {t('common.cancel', 'Cancel')}
       </Button>
-      <Button size="sm" disabled={!selection.messages.length} onClick={selection.confirm}>
+      <Button size="small" disabled={!selection.messages.length} onClick={selection.confirm}>
         <ImageIcon className="size-4" />
         {t('sessions.shareImage.preview', 'Preview image')}
       </Button>

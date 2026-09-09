@@ -6,7 +6,7 @@ import {
   type GlobalShortcutId,
   type GlobalShortcutSetError,
 } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import {
   canonicalizeBinding,
@@ -93,13 +93,7 @@ export function KeyboardShortcutsSetting() {
         <p className="text-xs text-muted-foreground">
           {t('settings.keyboardShortcuts.description')}
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!anyOverridden}
-          onClick={handleResetAll}
-          className="h-7"
-        >
+        <Button variant="secondary" size="small" disabled={!anyOverridden} onClick={handleResetAll}>
           {t('settings.keyboardShortcuts.resetAll')}
         </Button>
       </div>
@@ -227,15 +221,16 @@ function GlobalShortcutRow({
           {!recording && binding && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive [&_svg]:size-3.5"
+              size="small"
+              icon
+              tone="destructive"
               onClick={() => {
                 setError(null);
                 void onSet(id, null);
               }}
               title={t('settings.keyboardShortcuts.unbindTooltip')}
             >
-              <Trash2 />
+              <Trash2 className="size-4" />
             </Button>
           )}
         </div>
@@ -355,12 +350,13 @@ function ShortcutRow({
           {!recording && primary && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive [&_svg]:size-3.5"
+              size="small"
+              icon
+              tone="destructive"
               onClick={handleUnbind}
               title={t('settings.keyboardShortcuts.unbindTooltip')}
             >
-              <Trash2 />
+              <Trash2 className="size-4" />
             </Button>
           )}
         </div>

@@ -3,7 +3,7 @@ import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,7 +77,7 @@ export function PrMergeButton({
   const { t } = useTranslation();
   const isDisabled = disabled || isMerging || !onMerge;
   const buttonVariant =
-    tone === 'ready' ? 'default' : tone === 'conflict' ? 'destructive' : 'outline';
+    tone === 'ready' ? 'primary' : tone === 'conflict' ? 'destructive' : 'secondary';
   // The full (non-compact) ready button uses GitHub's green so "merge" reads as
   // the positive terminal action, matching the compact info-bar merge control.
   const readyGreen = tone === 'ready' && !compact;
@@ -110,11 +110,11 @@ export function PrMergeButton({
       ) : (
         <Button
           type="button"
-          size="sm"
           variant={buttonVariant}
+          size="small"
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className={cn('h-8 gap-1 rounded-r-none border-transparent', readyGreen && greenClasses)}
+          className={cn(readyGreen && greenClasses)}
         >
           {mainContent}
         </Button>
@@ -133,14 +133,11 @@ export function PrMergeButton({
           ) : (
             <Button
               type="button"
-              size="sm"
               variant={buttonVariant}
+              size="small"
               disabled={isMerging || !onSelectMethod}
               aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-              className={cn(
-                'h-8 rounded-l-none border-l border-black/10 px-1.5',
-                readyGreen && cn(greenClasses, 'border-l-white/25')
-              )}
+              className={cn(readyGreen && greenClasses)}
             >
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>

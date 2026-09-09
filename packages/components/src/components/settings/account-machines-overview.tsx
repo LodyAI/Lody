@@ -25,7 +25,7 @@ import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { isElectronRenderer } from '@/lib/electron';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 
 export type AccountMachineDirectory = {
@@ -177,8 +177,9 @@ export function AccountMachinesOverviewView({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 text-muted-foreground"
+                size="small"
+                icon
+                className="shrink-0"
                 aria-label={t('settings.account.machines.privacyHelpLabel', 'About private access')}
               >
                 <CircleHelp className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -268,8 +269,8 @@ export function AccountMachinesOverviewView({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    className="h-8 justify-between gap-2 bg-foreground/[0.04] px-2 text-xs hover:bg-foreground/[0.08]"
+                    size="small"
+                    className="justify-between"
                     onClick={() => toggleDirectories(item.id)}
                     aria-expanded={expanded}
                   >
@@ -295,8 +296,8 @@ export function AccountMachinesOverviewView({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        className="hidden h-8 w-8 text-muted-foreground md:inline-flex"
+                        icon
+                        className="hidden"
                         onClick={() => onManageMachine(item.id)}
                         aria-label={t('settings.account.machines.manageMachine', {
                           name: item.name,
@@ -324,8 +325,7 @@ export function AccountMachinesOverviewView({
                         </span>
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
+                          size="small"
                           onClick={() => onOpenDirectories(item.id)}
                         >
                           {t('settings.account.machines.openProjects', 'Open Projects')}
@@ -387,8 +387,8 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className="h-8 min-w-0 justify-between gap-2 bg-foreground/[0.04] px-2 hover:bg-foreground/[0.08]"
+          size="small"
+          className="min-w-0 justify-between"
           onClick={onClick}
           aria-label={t('settings.account.machines.configureAgents', 'Configure Agents')}
         >

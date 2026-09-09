@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -102,7 +102,7 @@ export function AttachmentAddMenu({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           disabled={disabled}
           aria-label={triggerLabel}
           className={cn(
@@ -110,8 +110,6 @@ export function AttachmentAddMenu({
             // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
             // `bg-accent`/`bg-muted`) because those equal the background in the
             // dark theme and paint nothing.
-            'rounded-full text-foreground transition-colors',
-            'hover:bg-hover hover:text-foreground',
             'data-[state=open]:bg-hover data-[state=open]:text-foreground'
           )}
         >
