@@ -38,6 +38,7 @@ import { DEFAULT_CONVERSATION_FONT_SIZE, tasksFeatureEnabledAtom } from '@/atoms
 import { FileIcon } from '@/components/icons/file-icons';
 import {
   isMarkdownAgentFileHref,
+  normalizeMarkdownAgentFilePath,
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -914,14 +915,15 @@ const AgentFileLink = ({
   const [didCopy, setDidCopy] = useState(false);
   const hasOpenAction = Boolean(onFilePathClick);
   const filePath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
+  const copyFilePath = normalizeMarkdownAgentFilePath(filePath);
 
   const handleCopy = useCallback(async () => {
-    const ok = await writeTextToClipboard(filePath);
+    const ok = await writeTextToClipboard(copyFilePath);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [filePath]);
+  }, [copyFilePath]);
 
   const copyButtonContent = didCopy ? (
     <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-hidden="true" />

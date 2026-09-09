@@ -107,4 +107,27 @@ describe('agent file links in finished turns', () => {
       'Copied: /srv/workspaces/demo-app/README.md'
     );
   });
+
+  it('decodes escaped path characters exactly once when copying', async () => {
+    const onAgentFileLinkClick = vi.fn();
+    const href = '/srv/workspaces/demo-app/docs/My%20File%2520Name.md:8';
+    await act(async () => {
+      root?.render(
+        createElement(MarkdownRenderer, {
+          text: `[icon](${href})`,
+          isStreaming: false,
+          onAgentFileLinkClick,
+        })
+      );
+    });
+
+    const copyButton = [...(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+      (button) => button.getAttribute('aria-label')?.startsWith('Copy agent file path:')
+    );
+
+    expect(copyButton).toBeTruthy();
+    await act(async () => copyButton?.click());
+    expect(writeText).toHaveBeenCalledWith('/srv/workspaces/demo-app/docs/My File%20Name.md');
+    expect(onAgentFileLinkClick).not.toHaveBeenCalled();
+  });
 });
