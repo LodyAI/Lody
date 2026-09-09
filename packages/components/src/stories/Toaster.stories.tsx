@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { toast } from 'sonner';
 import { Toaster } from '@/ui/sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /**
  * The global toast surface. Close is always on the far right. Title stays
@@ -17,27 +17,19 @@ const meta: Meta<typeof Toaster> = {
     <div className="flex min-h-[60vh] flex-col items-start gap-3 p-8">
       <Toaster {...args} />
       <Button
-        variant="outline"
-        onClick={() =>
-          toast.success('Base branch name copied to clipboard')
-        }
+        variant="secondary"
+        onClick={() => toast.success('Base branch name copied to clipboard')}
       >
         Show success toast
       </Button>
-      <Button
-        variant="outline"
-        onClick={() => toast.info('Issue URL copied to clipboard')}
-      >
+      <Button variant="secondary" onClick={() => toast.info('Issue URL copied to clipboard')}>
         Show info toast
       </Button>
-      <Button
-        variant="outline"
-        onClick={() => toast.error('Unable to copy link')}
-      >
+      <Button variant="secondary" onClick={() => toast.error('Unable to copy link')}>
         Show error toast
       </Button>
       <Button
-        variant="outline"
+        variant="secondary"
         onClick={() =>
           toast('Session updated', {
             description: 'Your changes were saved to the workspace.',
@@ -47,7 +39,7 @@ const meta: Meta<typeof Toaster> = {
         Show toast with description
       </Button>
       <Button
-        variant="outline"
+        variant="secondary"
         onClick={() =>
           toast.success('cursor connected successfully.', {
             description:

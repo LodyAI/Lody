@@ -11,7 +11,7 @@ import {
   useWindowsCaptionPadClass,
 } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,22 +84,18 @@ export function WebArchiveScreen({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="small"
+              icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-              className="-ml-1 h-7 w-7 shrink-0 text-muted-foreground"
+              className="-ml-1 shrink-0"
             >
               <PanelLeft className="h-4 w-4" />
             </Button>
           ) : null}
           {isMultiSelectMode ? (
             <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                onClick={onExitMultiSelect}
-              >
+              <Button variant="ghost" icon onClick={onExitMultiSelect}>
                 <X className="h-4 w-4" />
                 <span className="sr-only">{t('archive.multiSelect.exit', 'Exit selection')}</span>
               </Button>
@@ -110,22 +106,20 @@ export function WebArchiveScreen({
               </span>
               <div className="flex-1" />
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
                 title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
-                className="gap-1.5"
               >
                 <Undo2 className="h-3.5 w-3.5" />
                 {t('archive.multiSelect.restore', 'Restore')}
               </Button>
               <Button
                 variant="destructive"
-                size="sm"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy}
                 onClick={onRequestBulkDelete}
-                className="gap-1.5"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('archive.multiSelect.delete', 'Delete')}

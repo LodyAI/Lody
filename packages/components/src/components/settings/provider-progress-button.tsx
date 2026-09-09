@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 export function ProviderProgressButton({
@@ -31,16 +31,13 @@ export function ProviderProgressButton({
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
+      variant="secondary"
+      size="small"
       disabled={!onClick}
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
-      className={cn(
-        'relative min-w-[4.5rem] gap-1 overflow-hidden px-2 disabled:opacity-100',
-        className
-      )}
+      className={cn('relative min-w-[4.5rem] overflow-hidden disabled:opacity-100', className)}
     >
       {boundedPercent !== null ? (
         <span

@@ -48,7 +48,7 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Button, type ButtonProps } from '@/ui/button';
+import { Button, type ButtonProps } from '@lody/ui/button';
 import {
   Dialog,
   DialogClose,
@@ -827,8 +827,9 @@ export function ChatComposer({
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
@@ -923,8 +924,9 @@ export function ChatComposer({
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >

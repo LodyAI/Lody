@@ -16,7 +16,7 @@
 
 import { type ReactNode } from 'react';
 import { Check, Send, SendHorizontal, X } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { SessionBrowserToolbar } from '@/components/sessions/session-browser-toolbar';
 import { cn } from '@/lib/utils';
@@ -117,11 +117,7 @@ function MockPreviewLoading() {
 // ---- The previewed page: a mock Lody landing hero -----------------------------
 
 function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
-  const lines = [
-    PAGE_LINES[0],
-    PAGE_LINES[1],
-    state.edited ? PAGE_LINE_2_EDITED : PAGE_LINES[2],
-  ];
+  const lines = [PAGE_LINES[0], PAGE_LINES[1], state.edited ? PAGE_LINE_2_EDITED : PAGE_LINES[2]];
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#071a2c_0%,#03090f_78%,#02060b_100%)] text-slate-100">
       {/* Mock site nav */}
@@ -183,7 +179,11 @@ function CopyLine({
     <div className="relative w-fit max-w-full" data-demo={`pv-line-${index}`}>
       {children}
       {hovered || draft ? (
-        <span aria-hidden className="pointer-events-none absolute inset-0" style={HOVER_BOX_STYLE} />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={HOVER_BOX_STYLE}
+        />
       ) : null}
       {saved ? (
         // Anchor pin — visual-annotation-comments-overlay.tsx pin dot.
@@ -227,10 +227,10 @@ function DraftCommentCard({ text }: { text: string }) {
         className="min-h-20 resize-none bg-background text-xs"
       />
       <div className="mt-2 flex justify-end gap-1.5">
-        <Button type="button" size="sm" variant="ghost">
+        <Button type="button" variant="ghost" size="small">
           Cancel
         </Button>
-        <Button type="button" size="sm" data-demo="pv-draft-send" disabled={text.length === 0}>
+        <Button type="button" data-demo="pv-draft-send" size="small" disabled={text.length === 0}>
           <Send className="h-3.5 w-3.5" />
           Add comment
         </Button>
@@ -282,7 +282,11 @@ function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
               : 'text-muted-foreground hover:bg-hover hover:text-hover-foreground'
           )}
         >
-          {staged ? <Check className="h-3 w-3" /> : <SendHorizontal className="h-3 w-3 -scale-x-100" />}
+          {staged ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <SendHorizontal className="h-3 w-3 -scale-x-100" />
+          )}
           {staged ? 'Added' : 'Send'}
         </button>
         <button

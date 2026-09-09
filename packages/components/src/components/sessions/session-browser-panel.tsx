@@ -24,7 +24,7 @@ import {
 
 import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1033,8 +1033,8 @@ function SessionBrowserPanelController({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
+            size="small"
+            className="ml-auto"
             onClick={() => setError(null)}
           >
             {t('common.dismiss', 'Dismiss')}

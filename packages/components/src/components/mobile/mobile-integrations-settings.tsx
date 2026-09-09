@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Badge } from '@/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -352,9 +352,7 @@ function MobileCloudIntegrationsSettings() {
           >
             {canManage ? (
               <Button
-                size="sm"
-                className="inline-flex items-center gap-1 whitespace-nowrap"
-                variant="default"
+                size="small"
                 onClick={() => {
                   void handleConnectGitHub();
                 }}

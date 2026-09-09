@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react';
 import { Archive, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TooltipProvider } from '@/ui/tooltip';
 
 export type MobileArchiveScreenProps = {
@@ -45,12 +44,7 @@ export function MobileArchiveScreen({
         <header className="flex h-[calc(56px+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]">
           {isMultiSelectMode ? (
             <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-11 w-11 text-muted-foreground hover:text-foreground"
-                onClick={onExitMultiSelect}
-              >
+              <Button variant="ghost" size="large" icon onClick={onExitMultiSelect}>
                 <X className="h-4 w-4" />
                 <span className="sr-only">{t('archive.multiSelect.exit', 'Exit selection')}</span>
               </Button>
@@ -61,22 +55,20 @@ export function MobileArchiveScreen({
               </span>
               <div className="flex-1" />
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
                 title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
-                className="gap-1.5"
               >
                 <Undo2 className="h-3.5 w-3.5" />
                 {t('archive.multiSelect.restore', 'Restore')}
               </Button>
               <Button
                 variant="destructive"
-                size="sm"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy}
                 onClick={onRequestBulkDelete}
-                className="gap-1.5"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('archive.multiSelect.delete', 'Delete')}
@@ -84,15 +76,7 @@ export function MobileArchiveScreen({
             </>
           ) : (
             <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-11 w-11 rounded-xl',
-                  'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                )}
-                onClick={onOpenMobileDrawer}
-              >
+              <Button variant="ghost" size="large" icon onClick={onOpenMobileDrawer}>
                 <PanelLeft className="h-4 w-4" />
                 <span className="sr-only">Open sidebar</span>
               </Button>

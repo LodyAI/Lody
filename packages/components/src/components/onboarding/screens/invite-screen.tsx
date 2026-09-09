@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Mail, Plus, Send, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { cn } from '@/lib/utils';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -62,13 +62,12 @@ export function InviteScreenView({
       secondaryAction={<OnboardingBackButton onClick={onBack} disabled={sending} />}
       primaryAction={
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="lg" onClick={onSkip} disabled={sending}>
+          <Button variant="ghost" size="large" onClick={onSkip} disabled={sending}>
             {t('onboarding.invite.skip', 'Skip')}
           </Button>
           <Button
-            size="lg"
+            size="large"
             onClick={onSendAndContinue}
-            className="gap-2"
             disabled={!hasAnything || sending || pendingCount === 0}
           >
             {sending ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
@@ -101,7 +100,7 @@ export function InviteScreenView({
               disabled={sending}
             />
           </div>
-          <Button type="submit" variant="outline" disabled={!email.trim() || sending}>
+          <Button type="submit" variant="secondary" disabled={!email.trim() || sending}>
             <Plus className="h-4 w-4" />
             {t('onboarding.invite.add', 'Add')}
           </Button>
@@ -133,9 +132,10 @@ export function InviteScreenView({
                   ) : (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       aria-label={t('common.remove', 'Remove')}
+                      size="small"
+                      icon
+                      tone="destructive"
                       onClick={() => onRemove(invite.id)}
                       disabled={sending}
                     >

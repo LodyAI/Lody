@@ -6,7 +6,7 @@ import type {
 } from '@lody/shared';
 import { Trash2 } from 'lucide-react';
 import { Loading } from '@/ui';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { toast } from 'sonner';
@@ -811,7 +811,7 @@ export function GeneralSettingsComponent() {
             label={t('settings.cache.clearCache.label')}
             helper={t('settings.cache.clearCache.description')}
           >
-            <Button variant="outline" size="sm" onClick={() => clearCache.setDialogOpen(true)}>
+            <Button variant="secondary" size="small" onClick={() => clearCache.setDialogOpen(true)}>
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               {t('settings.cache.clearCache.button')}
             </Button>

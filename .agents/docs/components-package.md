@@ -58,6 +58,12 @@ button for a file the machine will refuse, and the user would lose the edit at s
 
 ## Theming and fields
 
+Reusable visual primitives and semantic design tokens are owned by
+[`@lody/ui`](../../packages/ui/README.md). `@lody/components` composes those
+primitives into product surfaces and may add layout or interaction constraints,
+while the primitive's props remain the owner of its visual variant, size, tone,
+and shape.
+
 `--input` is the theme's raw `input.background` and doubles as a muted chip/composer
 slab, so in a light theme it can sit below the page color and read as a disabled field.
 `--input-field` is derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of

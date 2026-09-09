@@ -837,23 +837,6 @@ declare module '@/ui/tooltip' {
   export function TooltipProvider(props: TooltipProviderProps): ReactElement | null;
 }
 
-declare module '@/ui/button' {
-  import type { ButtonHTMLAttributes, ForwardRefExoticComponent, RefAttributes } from 'react';
-
-  export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-    asChild?: boolean;
-    variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
-    size?: 'default' | 'sm' | 'lg' | 'icon';
-  }
-
-  export const Button: ForwardRefExoticComponent<ButtonProps & RefAttributes<HTMLButtonElement>>;
-  export function buttonVariants(options?: {
-    variant?: ButtonProps['variant'];
-    size?: ButtonProps['size'];
-    className?: string;
-  }): string;
-}
-
 declare module '@/ui/badge' {
   import type { HTMLAttributes, ReactElement } from 'react';
 

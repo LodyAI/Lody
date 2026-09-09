@@ -11,7 +11,7 @@ import { RotateCcw, Trash2 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/native-browser';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -187,9 +187,9 @@ export function ProviderSetupRow({
             ) : setup.status === 'failed' ? (
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                className="w-full gap-1 px-0"
+                variant="secondary"
+                size="small"
+                className="w-full"
                 disabled={actionPending !== null}
                 onClick={() => void runAction('retry', onRetry)}
               >
@@ -205,8 +205,10 @@ export function ProviderSetupRow({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+            size="small"
+            icon
+            tone="destructive"
+            className="shrink-0"
             disabled={actionPending !== null}
             aria-label={t('common.delete', 'Delete')}
             onClick={() => void runAction('delete', onDelete)}

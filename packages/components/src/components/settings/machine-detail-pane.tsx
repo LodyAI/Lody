@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Input } from '@/ui/input';
 import { Switch } from '@/ui/switch';
 import {
@@ -100,8 +100,8 @@ export function MachineProvidersSection({
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          size="small"
+          icon
           onClick={onAddConfig}
           aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
         >
@@ -124,7 +124,7 @@ export function MachineProvidersSection({
             <p className="mt-2 text-muted-foreground">
               {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
             </p>
-            <Button size="sm" className="mt-3" onClick={onAddConfig}>
+            <Button size="small" className="mt-3" onClick={onAddConfig}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {t('settings.agent.provider.addProvider', 'Add provider')}
             </Button>
@@ -448,12 +448,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   />
                 ) : externalAccordionHeader ? (
                   manageableOwnMachine ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setRenaming(true)}
-                    >
+                    <Button variant="ghost" size="small" onClick={() => setRenaming(true)}>
                       <Pencil className="h-3 w-3" />
                       {t('workspace.machines.editName', 'Edit machine name')}
                     </Button>
@@ -472,8 +467,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     {!isMobile && manageableOwnMachine && (
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                        size="mini"
+                        icon
+                        className="shrink-0"
                         aria-label={t('workspace.machines.editName', 'Edit machine name')}
                         onClick={() => setRenaming(true)}
                       >
@@ -492,8 +488,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 >
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 bg-muted/40 px-2 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    size="small"
                     disabled={pinging}
                     onClick={() => void handlePing()}
                   >
@@ -537,8 +532,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                      size="small"
+                      icon
+                      className="shrink-0"
                       aria-label={t(
                         'settings.agent.machineLifecycle.restartButton',
                         'Restart daemon'
@@ -566,8 +562,10 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      size="small"
+                      icon
+                      tone="destructive"
+                      className="shrink-0"
                       aria-label={t(
                         'settings.devices.credentials.disconnect',
                         'Revoke machine access'
@@ -588,8 +586,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     <span className="inline-flex shrink-0">
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="h-7 gap-1.5 px-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed"
+                        size="small"
+                        tone="destructive"
+                        className="disabled:cursor-not-allowed"
                         aria-label={t(
                           'workspace.machines.removeFromWorkspace',
                           'Remove from workspace'
@@ -617,8 +616,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
+                      size="small"
+                      icon
+                      className="shrink-0"
                       aria-label={t('workspace.machines.moreActions', 'Machine options')}
                     >
                       {sharing ? (
@@ -768,8 +768,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                  size="small"
+                  icon
+                  className="shrink-0"
                   aria-label={t('settings.machines.collapseMachine', {
                     machine: machine.name || machine.id,
                     defaultValue: 'Collapse {{machine}}',
@@ -819,8 +820,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
               </div>
               <div className="shrink-0">
                 <Button
-                  size="sm"
-                  className="h-8 px-3"
+                  size="small"
                   disabled={restartingDaemon || upgradingDaemon}
                   onClick={() => void handleUpgradeDaemon()}
                 >
@@ -897,7 +897,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 event.preventDefault();
                 void handleDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('workspace.machines.removeAction', 'Remove')}
@@ -937,7 +937,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   })
                   .finally(() => setRevoking(false));
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
@@ -962,7 +962,7 @@ function EmptyProviders({ onAdd, flush = false }: { onAdd: () => void; flush?: b
       <p className="mt-2 text-muted-foreground">
         {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
       </p>
-      <Button size="sm" className="mt-3" onClick={onAdd}>
+      <Button size="small" className="mt-3" onClick={onAdd}>
         <Plus className="mr-1.5 h-3.5 w-3.5" />
         {t('settings.agent.provider.addProvider', 'Add provider')}
       </Button>

@@ -66,7 +66,7 @@ import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
 import { Input } from '@/ui/input';
@@ -2211,8 +2211,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
+                  size="small"
                   disabled={!parsedCustomAcp || probing}
                   onClick={() => void runCustomProbe()}
                 >
@@ -2285,8 +2285,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               <div className="mt-3 flex items-center gap-2">
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
+                  size="small"
                   disabled={!hasBuiltinRuntimeOverride || probing}
                   onClick={() => {
                     setProbeError(null);
@@ -2419,8 +2419,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   (binaryStatus === 'not-installed' || binaryStatus === 'error') ? (
                     <Button
                       type="button"
-                      size="sm"
                       variant="secondary"
+                      size="small"
                       disabled={installingBinary || probing}
                       onClick={() => void handleInstallBinary()}
                     >
@@ -2565,10 +2565,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         </div>
         <div className="flex gap-2">
           <Button
-            variant="outline"
+            variant="secondary"
+            size="small"
             onClick={() => onOpenChange(false)}
             disabled={submitting}
-            size="sm"
           >
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -2576,6 +2576,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             <TooltipTrigger asChild>
               <span>
                 <Button
+                  size="small"
                   onClick={() => void submit()}
                   disabled={
                     !!disableReason ||
@@ -2583,7 +2584,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     waitingForBubSetup ||
                     (builtinCreationPending && !probeError)
                   }
-                  size="sm"
                 >
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
                     <Spinner className="mr-2 h-4 w-4" />
@@ -2845,9 +2845,9 @@ function ProbeStatus({
     return (
       <Button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 gap-1 px-2 text-xs text-status-warning"
+        variant="secondary"
+        size="small"
+        className="text-status-warning"
         onClick={onRetry}
         disabled={disabled}
         aria-label={t('settings.agent.dialog.retryProbe', 'Retry capability probe')}
@@ -2896,8 +2896,7 @@ function ProbeStatus({
     <Button
       type="button"
       variant="secondary"
-      size="sm"
-      className="h-7 gap-1 px-2 text-xs"
+      size="small"
       onClick={onRetry}
       disabled={disabled}
       aria-label={t('settings.agent.dialog.testCapabilities', 'Test agent capabilities')}
@@ -3307,8 +3306,9 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
     <Button
       type="button"
       variant="ghost"
-      size="icon"
-      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+      size="small"
+      icon
+      className="shrink-0"
       aria-label={ariaLabel}
       onClick={(event) => {
         event.stopPropagation();
@@ -3348,8 +3348,8 @@ function TitleGenerationFields({
               <Label className="text-xs text-muted-foreground">{sel.label}</Label>
               <Button
                 type="button"
-                variant="outline"
-                className="h-8 w-fit gap-1 rounded-md px-2 text-xs"
+                variant="secondary"
+                className="w-fit"
                 onClick={() => onChange(sel.configId, !isEnabled)}
                 aria-pressed={isEnabled}
               >

@@ -4,7 +4,7 @@ import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
 import type { MachineVisibilityAccess } from '@/hooks/use-visible-machine-metas';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -120,8 +120,7 @@ export function MachineTabList({
                 <div className="mt-2">
                   <Button
                     variant="link"
-                    size="sm"
-                    className="h-auto px-0 text-xs"
+                    size="small"
                     onClick={() => onFilterChange({ onlineOnly: false, mineOnly: false })}
                   >
                     {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
@@ -150,12 +149,10 @@ export function MachineListFilterButton({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            'h-7 w-7 shrink-0 border-0 shadow-none',
-            isFilterActive && 'bg-hover text-foreground'
-          )}
+          variant={isFilterActive ? 'secondary' : 'ghost'}
+          size="small"
+          icon
+          className="shrink-0"
           aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
         >
           <ListFilter className="h-3.5 w-3.5" />

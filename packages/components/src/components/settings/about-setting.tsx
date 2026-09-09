@@ -4,7 +4,7 @@ import { useAtom } from 'jotai';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Switch } from '@/ui/switch';
 import { BetaFeaturesSection } from './beta-features-setting';
 import { CompactRow, CompactSection } from './compact-layout';
@@ -286,18 +286,13 @@ export function AboutSettingsComponent() {
           <JoinCommunityButton />
         </CompactRow>
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5"
-            onClick={handleOpenDownloadPage}
-          >
+          <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
             <ExternalLink className="mr-1 h-3.5 w-3.5" />
             {t('settings.about.openDownloadPage', 'Open download page')}
           </Button>
         </CompactRow>
         <CompactRow label={t('settings.about.website', 'Website')}>
-          <Button variant="outline" size="sm" className="h-7 px-2.5" onClick={handleOpenWebsite}>
+          <Button variant="secondary" size="small" onClick={handleOpenWebsite}>
             <ExternalLink className="mr-1 h-3.5 w-3.5" />
             {t('settings.about.visitWebsite', 'Visit website')}
           </Button>
@@ -347,8 +342,7 @@ export function AboutSettingsComponent() {
             )}
             {isDownloaded ? (
               <Button
-                size="sm"
-                className="h-7 px-2.5"
+                size="small"
                 onClick={() => {
                   void handleQuitAndInstall();
                 }}
@@ -363,9 +357,8 @@ export function AboutSettingsComponent() {
               </Button>
             ) : (
               <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5"
+                variant="secondary"
+                size="small"
                 onClick={() => {
                   void handleCheckForUpdates();
                 }}

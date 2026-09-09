@@ -19,7 +19,7 @@ import {
   type ProviderSetupTask,
 } from '@lody/shared';
 import { toast } from 'sonner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Badge } from '@/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -309,12 +309,7 @@ export function ProvidersScreenView({
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
@@ -438,8 +433,8 @@ export function ProvidersScreenView({
                       <div className="flex shrink-0 items-center gap-1 py-3 pr-3">
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="w-12 shrink-0 px-0"
+                          size="small"
+                          className="w-12 shrink-0"
                           onClick={() => onEdit(config)}
                         >
                           {t('common.edit', 'Edit')}
@@ -448,17 +443,13 @@ export function ProvidersScreenView({
                           {activity ? (
                             <ProviderActivityAction activity={activity} config={config} />
                           ) : status !== 'needs-auth' ? (
-                            // Always outline, passed or not. Ghosting the
-                            // button once a test succeeded emptied the slot of
-                            // everything but a word, so the one row that had
-                            // been verified read as a hole in the column while
-                            // its neighbours kept a bordered control. A fixed
-                            // slot only holds the column if what sits in it
-                            // keeps its shape too.
+                            // Keep the same visual role after success. Changing
+                            // the action to a ghost made the verified row read
+                            // as a hole in this fixed-width column.
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full px-0"
+                              variant="secondary"
+                              size="small"
+                              className="w-full"
                               disabled={noLocalMachine}
                               onClick={() => onTest(config)}
                             >
@@ -470,9 +461,11 @@ export function ProvidersScreenView({
                         </div>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                          size="small"
+                          className="shrink-0"
                           aria-label={t('common.delete', 'Delete')}
+                          icon
+                          tone="destructive"
                           onClick={() => onDelete(config)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1318,7 +1311,7 @@ export function ProvidersScreen({
                 event.preventDefault();
                 void handleConfirmDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}

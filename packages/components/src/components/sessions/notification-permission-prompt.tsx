@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue } from 'jotai';
 import { notificationPromptDismissedAtom, userAtom, currentWorkspaceSlugAtom } from '@/atoms';
@@ -133,14 +133,14 @@ export function NotificationPermissionPrompt({
             {t('notifications.prompt.description', 'Get notified when your AI tasks complete.')}
           </p>
           <div className="mt-2 flex items-center gap-2">
-            <Button variant="default" size="sm" onClick={handleEnable} className="h-7 px-3 text-xs">
+            <Button size="small" onClick={handleEnable}>
               {t('notifications.prompt.enable', 'Enable')}
             </Button>
             <Button
               variant="ghost"
-              size="sm"
+              size="small"
               onClick={handleDismiss}
-              className="h-7 px-3 text-xs text-status-info hover:bg-status-info/10 hover:text-status-info"
+              className="text-status-info hover:bg-status-info/10 hover:text-status-info"
             >
               {t('notifications.prompt.dontRemind', "Don't remind me")}
             </Button>
@@ -148,9 +148,10 @@ export function NotificationPermissionPrompt({
         </div>
         <Button
           variant="ghost"
-          size="icon"
+          size="mini"
+          icon
           onClick={handleClose}
-          className="h-6 w-6 shrink-0 text-status-info/70 hover:bg-status-info/10 hover:text-status-info"
+          className="shrink-0 text-status-info/70 hover:bg-status-info/10 hover:text-status-info"
           aria-label={t('common.close', 'Close')}
         >
           <X className="h-3.5 w-3.5" />
