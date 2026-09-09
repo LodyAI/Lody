@@ -17,6 +17,10 @@ The other refreshed pins are Claude `414718e`, DSH `5d79d5b`, Grok `c962338`, an
 
 Validation limit: root typecheck passes, but `pnpm check` stops at `typescript-eslint(no-floating-promises)` in DSH main's `scripts/settings-profile-smoke.mjs:39`. That main snapshot omits the `await test(...)` present in the previous host pin. The requested main pin is retained; this host update does not modify or publish a new DSH commit. Documentation, i18n, Code Collab, platform, and public-boundary checks pass.
 
+## CI correction (2026-09-09)
+
+The Static checks failure confirmed the DSH lint issue above. Upstream [DSH #14](https://github.com/LodyAI/acp-extension-dsh/pull/14) restores `await test(...)` and is now merged into main as `ce194fd`. The host pin advances to that main commit, superseding the temporary `5d79d5b` validation limitation. The merged tree matches the verified fix exactly: DSH build, 11 unit tests, formatting, and host `check:quick` pass. No runtime implementation or lint rules change.
+
 ## Original decision
 
 - Host gitlink `packages/acp-extension-codex` moves from main's `f9dbc8c` to `fc91dce` (open adapter PR #37, based on already-merged #35 / `400384e`).

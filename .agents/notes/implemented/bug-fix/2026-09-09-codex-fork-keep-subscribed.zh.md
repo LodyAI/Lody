@@ -17,6 +17,10 @@ Codex 分叉会立刻退订子 thread。宿主把这个子会话当活 Session�
 
 验证限制：根类型检查通过，但 `pnpm check` 在 DSH main 的 `scripts/settings-profile-smoke.mjs:39` 因 `typescript-eslint(no-floating-promises)` 中断。该 main 快照缺少旧宿主 pin 中的 `await test(...)`。保留用户要求的 main pin，本次宿主更新不修改或发布新的 DSH 提交。文档、i18n、Code Collab、平台和公开仓库边界检查通过。
 
+## CI 修正（2026-09-09）
+
+Static checks 失败确认了上述 DSH lint 问题。上游 [DSH #14](https://github.com/LodyAI/acp-extension-dsh/pull/14) 恢复 `await test(...)`，现已作为 `ce194fd` 合入 main。宿主 pin 更新到该 main 提交，取代 `5d79d5b` 的临时验证限制。合并后的文件树与已验证的修复完全一致：DSH 构建、11 项单元测试、格式检查和宿主 `check:quick` 均通过。运行时实现和 lint 规则均未修改。
+
 ## 原始决策
 
 - 宿主 gitlink `packages/acp-extension-codex` 从 main 的 `f9dbc8c` 移到 `fc91dce`（未合的 adapter PR #37，基线是已合的 #35 / `400384e`）。
