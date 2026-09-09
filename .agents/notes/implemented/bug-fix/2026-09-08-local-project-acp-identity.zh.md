@@ -9,7 +9,7 @@ Translation: pending
 丢失。此次通过 Core 的版本化 `worktreeProject` 扩展传递原始根目录，由适配器
 使用原生项目 API 保存线程归属，同时保留 Worktree 执行目录。实现覆盖创建、
 load/resume 补归属、fork 和宿主能力协商，真实 Codex 0.153.4 的隔离验证已确认
-保存结果。改动已进入关联草稿 PR，未发布；项目级历史查询和桌面 Worktree 生命周期
+保存结果。改动已进入关联 PR，Core 0.1.2 已发布，适配器尚未发布；项目级历史查询和桌面 Worktree 生命周期
 功能不属于此次实现。
 
 ## 问题与责任
@@ -42,10 +42,12 @@ API 一致的窄类型补充，不重生成整个实验协议树。旧 `CODEX_PA
 重开时补齐空归属，不批量扫描或迁移，也不覆盖既有用户项目选择。项目根元数据
 不增加可信/可写目录，不改变 cwd，不触碰 SQLite 或桌面全局状态文件。
 
-Core 和 Codex 的改动当前通过根工作区的 `acp-extension-core: workspace:*`
-override 联合验证。对外发布时必须先发布包含新契约的 Core，再更新 Codex 的
-独立 npm 依赖及 lockfile，再发布适配器。Lody 草稿引用两个子模块的 PR 提交；
-当前没有进行包发布，也没有伪造未发布包的 lockfile 完整性信息。
+Core 和 Codex 最初通过根工作区的 `acp-extension-core: workspace:*` override
+联合验证。Core 0.1.2 发布后，Codex 的独立 npm 依赖已精确更新到 0.1.2，
+lockfile 使用注册表中的真实 tarball 和 integrity；同时修正 lockfile 根条目中
+既有 Codex 版本声明，使其与 manifest 的 ^0.153.4 一致，未升级其他依赖。
+独立临时 checkout 通过 npm ci、类型检查、构建及完整测试（579 通过、27 跳过），
+确认新契约可直接从已发布的 Core 获取。Lody 草稿同步适配器引用；未发布适配器。
 
 关联草稿：[Lody #534](https://github.com/LodyAI/Lody/pull/534)、
 [Core #6](https://github.com/LodyAI/acp-extension-core/pull/6)、
