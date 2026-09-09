@@ -18,5 +18,6 @@ GitHub 行保留子 Tab 的分项计数，并从包含置顶 Session 的集合�
 components 全量 443 个文件、3337 个测试通过；相关 6 个文件、132 个测试通过。
 浏览器验证 32 个 Storybook 场景，以及 tooltip、展开/折叠和行尾空间。
 补充折叠状态对照页，本地/GitHub 各 18 组，覆盖无活动、单项、两项、三项及较大计数；浅色/深色共 72 组浏览器检查通过。
+对照页与独立 stories 共用 Session 数据生成和项目参数定义，避免重复维护；场景与测试覆盖保持完整。
 `pnpm check` 全量通过（含 typecheck、lint、test:ci、i18n 与边界检查）；format 和 docs check 通过。
 Spec 尚未获得修订级审批，翻译待补。

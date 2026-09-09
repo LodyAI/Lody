@@ -40,14 +40,6 @@ import type {
 const NOW = Date.now();
 const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
 
-const DEMO_CHILD_PERMISSION_SESSION_STATUSES = new Map<string, SessionStatus>([
-  ['local-sess-child-tab', { type: 'requestPermission' }],
-]);
-const DEMO_REMOTE_SESSION_STATUSES = new Map<string, SessionStatus>([
-  ['remote-sess-running', { type: 'running' }],
-]);
-const DEMO_REMOTE_PROJECT_KEY = 'machine-remote:proj-lody';
-
 const codexHistoryProvider = {
   cliType: 'builtin',
   agentType: 'codex',
@@ -934,8 +926,6 @@ const demoChildTabSession: SessionMeta = {
   lastReadAt: NOW - 40 * 60 * 1000,
 };
 
-const demoChildSessionsByParent = buildChildSessionsByParent([demoChildTabSession]);
-
 const demoRemoteSessions: SessionMeta[] = [
   {
     id: 'remote-sess-running' as SessionId,
@@ -956,15 +946,24 @@ const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
   demoChildTabSession,
 ]);
 
+type ProjectStoryOptions = {
+  localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
+  localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
+  localProjectSessions?: SessionMeta[];
+  remoteProjectSessions?: SessionMeta[];
+  initiallyCollapseRemoteProject?: boolean;
+  initiallyCollapseLocalProjects?: boolean;
+};
+
 function ProductionLikeTopContent({
   chatSessions,
   githubWorktreeCount,
-  localProjectLiveSessionStatuses,
-  localProjectChildSessionsByParent,
-  localProjectSessions,
-  remoteProjectSessions,
-  initiallyCollapseRemoteProject,
-  initiallyCollapseLocalProjects,
+  localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
+  localProjectChildSessionsByParent = new Map(),
+  localProjectSessions = demoLocalSessions,
+  remoteProjectSessions = [],
+  initiallyCollapseRemoteProject = false,
+  initiallyCollapseLocalProjects = true,
   selectedSessionId,
   onSelectSession,
   onArchiveSession,
@@ -974,19 +973,13 @@ function ProductionLikeTopContent({
 }: {
   chatSessions: SessionListRow[];
   githubWorktreeCount: number;
-  localProjectLiveSessionStatuses: ReadonlyMap<string, SessionStatus>;
-  localProjectChildSessionsByParent: Map<string, SessionMeta[]>;
-  localProjectSessions: SessionMeta[];
-  remoteProjectSessions: SessionMeta[];
-  initiallyCollapseRemoteProject: boolean;
-  initiallyCollapseLocalProjects: boolean;
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
   onArchiveSession: (id: string) => void;
   onNew: (repoFullName?: string) => void;
   chatsCollapsed: boolean;
   onToggleChatsCollapsed: () => void;
-}) {
+} & ProjectStoryOptions) {
   const isMobile = useIsMobile();
   const [localProjectsCollapsed, setLocalProjectsCollapsed] = useState(false);
   const [githubCollapsed, setGithubCollapsed] = useState(false);
@@ -994,7 +987,7 @@ function ProductionLikeTopContent({
     () =>
       Object.fromEntries([
         ...demoProjects.map((p) => [`${demoMachineId}:${p.id}`, initiallyCollapseLocalProjects]),
-        ...(initiallyCollapseRemoteProject ? [[DEMO_REMOTE_PROJECT_KEY, true]] : []),
+        ...(initiallyCollapseRemoteProject ? [['machine-remote:proj-lody', true]] : []),
       ]),
     [initiallyCollapseRemoteProject, initiallyCollapseLocalProjects]
   );
@@ -1166,22 +1159,7 @@ function ProductionLikeTopContent({
   );
 }
 
-function WithProjectsLayout({
-  localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
-  localProjectChildSessionsByParent = new Map(),
-  localProjectSessions = demoLocalSessions,
-  remoteProjectSessions = [],
-  initiallyCollapseRemoteProject = false,
-  initiallyCollapseLocalProjects = true,
-  ...args
-}: Parameters<typeof LoroSidebar>[0] & {
-  localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
-  localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
-  localProjectSessions?: SessionMeta[];
-  remoteProjectSessions?: SessionMeta[];
-  initiallyCollapseRemoteProject?: boolean;
-  initiallyCollapseLocalProjects?: boolean;
-}) {
+function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0] & ProjectStoryOptions) {
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
@@ -1242,14 +1220,9 @@ function WithProjectsLayout({
       currentWorkspaceId={workspaceId}
       topContent={
         <ProductionLikeTopContent
+          {...args}
           chatSessions={chatSessions}
           githubWorktreeCount={repos.length}
-          localProjectLiveSessionStatuses={localProjectLiveSessionStatuses}
-          localProjectChildSessionsByParent={localProjectChildSessionsByParent}
-          localProjectSessions={localProjectSessions}
-          remoteProjectSessions={remoteProjectSessions}
-          initiallyCollapseRemoteProject={initiallyCollapseRemoteProject}
-          initiallyCollapseLocalProjects={initiallyCollapseLocalProjects}
           selectedSessionId={selectedSessionId}
           onSelectSession={setSelectedSessionId}
           onArchiveSession={archiveTask}
@@ -1356,40 +1329,49 @@ type ActivityCounts = [permission: number, unread: number, active: number];
 
 function projectActivityFixture(
   [permission, unread, active]: ActivityCounts,
-  project: SessionMeta['project'],
-  prefix = 'activity',
-  initializing = false
+  {
+    project = demoProjects[0]!,
+    repoFullName = 'loro-dev/lody',
+    prefix = 'activity',
+    initializing = false,
+  } = {}
 ) {
+  const baseSession: SessionMeta = {
+    ...demoLocalSessions[0]!,
+    project: { kind: 'local', localProjectId: project.id },
+    lastReadAt: NOW,
+  };
   const liveSessionStatuses = new Map<string, SessionStatus>();
   const sessions = Object.entries({ permission, unread, active }).flatMap(([status, count]) =>
     Array.from({ length: count }, (_, index): SessionMeta => {
       const id = `${prefix}-${status}-${index}` as SessionId;
+      const activeStatus = initializing || index % 2 ? 'initializing' : 'running';
       if (status !== 'unread')
         liveSessionStatuses.set(id, {
-          type:
-            status === 'permission'
-              ? 'requestPermission'
-              : initializing || index % 2
-                ? 'initializing'
-                : 'running',
+          type: status === 'permission' ? 'requestPermission' : activeStatus,
         });
       return {
-        ...demoLocalSessions[0]!,
+        ...baseSession,
         id,
         title: `${status} ${index + 1}`,
-        project,
         lastReadAt: status === 'unread' ? 0 : NOW,
       };
     })
   );
-  if (!sessions.length)
-    sessions.push({
-      ...demoLocalSessions[0]!,
-      id: `${prefix}-idle` as SessionId,
-      project,
-      lastReadAt: NOW,
-    });
-  return { sessions, liveSessionStatuses };
+  if (!sessions.length) sessions.push({ ...baseSession, id: `${prefix}-idle` as SessionId });
+  return {
+    project,
+    repoFullName,
+    sessions,
+    liveSessionStatuses,
+    rows: buildSessionListRows(
+      sessions.map((session) => ({
+        ...session,
+        project: { kind: 'github', repoFullName, branch: 'demo' },
+      })),
+      { scope: 'my', currentUserId: 'user-demo', defaultTitle: '', liveSessionStatuses }
+    ),
+  };
 }
 
 /** The same status cases exercise both production project renderers. */
@@ -1399,14 +1381,9 @@ function projectActivityStory(
   collapsed = true,
   initializing = false
 ): Story {
-  const { sessions, liveSessionStatuses } = projectActivityFixture(
-    counts,
-    kind === 'repo'
-      ? { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'demo' }
-      : { kind: 'local', localProjectId: 'proj-lody' as LocalProjectId },
-    'activity',
-    initializing
-  );
+  const { sessions, liveSessionStatuses, repoFullName, rows } = projectActivityFixture(counts, {
+    initializing,
+  });
   return {
     render: (args) => (
       <WithProjectsLayout
@@ -1420,20 +1397,10 @@ function projectActivityStory(
     ),
     args: {
       ...Default.args!,
-      ...(kind === 'repo'
-        ? {
-            sessionListProps: {
-              ...demoTaskListProps,
-              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
-              sessions: buildSessionListRows(sessions, {
-                scope: 'my',
-                currentUserId: 'user-demo',
-                defaultTitle: '',
-                liveSessionStatuses,
-              }),
-            },
-          }
-        : {}),
+      sessionListProps:
+        kind === 'repo'
+          ? { ...demoTaskListProps, repos: [{ repoFullName, collapsed }], sessions: rows }
+          : demoTaskListProps,
     },
   };
 }
@@ -1496,27 +1463,12 @@ const activityComparisonCases: [string, ActivityCounts][] = [
   ['Larger counts', [12, 20, 30]],
 ];
 const activityComparison = activityComparisonCases.map(([name, counts], index) => {
-  const id = `activity-case-${index}` as LocalProjectId;
-  const project = { ...demoProjects[0]!, id, name };
-  const repoFullName = `demo/${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`;
-  const { sessions, liveSessionStatuses } = projectActivityFixture(
-    counts,
-    { kind: 'local', localProjectId: id },
-    id
-  );
-  return {
-    project,
-    sessions,
-    liveSessionStatuses,
-    repoFullName,
-    rows: buildSessionListRows(
-      sessions.map((session) => ({
-        ...session,
-        project: { kind: 'github', repoFullName, branch: 'demo' },
-      })),
-      { scope: 'my', currentUserId: 'user-demo', defaultTitle: '', liveSessionStatuses }
-    ),
-  };
+  const prefix = `activity-case-${index}`;
+  return projectActivityFixture(counts, {
+    prefix,
+    project: { ...demoProjects[0]!, id: prefix as LocalProjectId, name },
+    repoFullName: `demo/${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
+  });
 });
 
 function CollapsedActivityComparisonLayout(args: Parameters<typeof LoroSidebar>[0]) {
@@ -1591,14 +1543,12 @@ export const CollapsedRemoteProjectRunning: Story = {
   render: (args) => (
     <WithProjectsLayout
       {...args}
-      localProjectLiveSessionStatuses={DEMO_REMOTE_SESSION_STATUSES}
+      localProjectLiveSessionStatuses={new Map([['remote-sess-running', { type: 'running' }]])}
       remoteProjectSessions={demoRemoteSessions}
       initiallyCollapseRemoteProject
     />
   ),
-  args: {
-    ...Default.args!,
-  },
+  args: Default.args,
 };
 
 export const CollapsedProjectChildPermissionRequired: Story = {
@@ -1606,13 +1556,13 @@ export const CollapsedProjectChildPermissionRequired: Story = {
   render: (args) => (
     <WithProjectsLayout
       {...args}
-      localProjectLiveSessionStatuses={DEMO_CHILD_PERMISSION_SESSION_STATUSES}
-      localProjectChildSessionsByParent={demoChildSessionsByParent}
+      localProjectLiveSessionStatuses={
+        new Map([['local-sess-child-tab', { type: 'requestPermission' }]])
+      }
+      localProjectChildSessionsByParent={buildChildSessionsByParent([demoChildTabSession])}
     />
   ),
-  args: {
-    ...Default.args!,
-  },
+  args: Default.args,
 };
 
 /** 180 conversations across chats and eight worktree repositories for scrolling and density checks. */
