@@ -22,6 +22,14 @@ into one component at a time. Source-consumed; consumers compile it through
   `.stylex` (`@lody/ui/tokens/colors.stylex`), never through a barrel.
 - Component tokens live beside the component as
   `<name>/<name>.tokens.stylex.ts` and reference semantic tokens or literal px.
+  A component token that points at a semantic colour also belongs in that file's
+  `createTheme` palette theme, which `ThemeRoot` applies with every forced
+  palette; a custom property declared only at the document root keeps the root
+  palette inside a themed subtree.
+- `src/gallery` is the visual reference for the package. A new token, variant,
+  size, tone or shape lands with its board entry in the same change, and the
+  board reads sample values back off the rendered node instead of repeating a
+  literal. `test/gallery.test.tsx` fails when a token has no entry.
 - `corner.shape` is applied wherever a radius is applied. Round corners outside
   Chromium are the accepted fallback.
 - A Radix file in `packages/components/src/ui` is deleted when its in-repo

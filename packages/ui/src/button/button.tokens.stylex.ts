@@ -26,3 +26,21 @@ export const button = stylex.defineVars({
   ghostLabel: colors.secondaryLabel,
   ghostHover: colors.hoverFill,
 });
+
+/**
+ * The colour-valued tokens above are declared once at the document root, so a
+ * custom property that points at a semantic token resolves against the palette
+ * in force there and inherits that resolved value. A theme applied to a subtree
+ * would leave a button carrying the root palette. This theme re-declares those
+ * tokens on the element that carries the palette, where they resolve again.
+ * `ThemeRoot` applies it with every forced palette.
+ */
+export const buttonPaletteTheme = stylex.createTheme(button, {
+  primaryBackground: colors.label,
+  primaryLabel: colors.background,
+  primaryEdge: shadow.inkEdge,
+  secondaryBackground: colors.raisedBackground,
+  secondaryShadow: shadow.raised,
+  ghostLabel: colors.secondaryLabel,
+  ghostHover: colors.hoverFill,
+});
