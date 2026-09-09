@@ -95,9 +95,9 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
   the dispatch write.
 - MCP create takes run config semantically (`modelId`/`reasoningEffort`/`fastMode`/`planMode`),
   never raw ACP ids. Resolve the inherited target model BEFORE mapping through shared
-  `acp-run-config.ts`. CLI and MCP read current capabilities through `readAgentAcpCapability`;
-  a parameterized Cursor daemon with a stale row is probed once automatically, then its complete
-  Flock row is reread. Legacy support follows Machine protocol capabilities. Reject unsupported
+  `acp-run-config.ts`. CLI/MCP use `readAgentAcpCapability`: version skew stays readable; incompatible Cursor
+  pre-picker rows trigger one probe and await the full Flock row. Machine protocol governs
+  legacy support. Reject unsupported
   selections before Operation acceptance; freeze each target's effective dispatch config so
   recovery never inherits again from mutable history.
 - Local daemon IPC sends the real control request once; do not restore a health preflight. Native

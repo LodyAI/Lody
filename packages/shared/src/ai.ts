@@ -361,6 +361,14 @@ export const CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX =
  */
 export type AcpCapabilityMachine = MachineProtocolCapabilityCarrier | null | undefined;
 
+const hasIncompatibleCursorModelIds = (
+  entry: AcpCapabilityCacheEntry,
+  machine: AcpCapabilityMachine
+): boolean =>
+  isRegistryCursorAgent(entry) &&
+  machineSupportsCursorParameterizedModelPicker(machine) &&
+  entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true;
+
 export const isAcpCapabilityCacheEntryCurrent = (
   entry: AcpCapabilityCacheEntry | undefined,
   machine: AcpCapabilityMachine
@@ -368,14 +376,48 @@ export const isAcpCapabilityCacheEntryCurrent = (
   if (entry?.cacheVersion !== ACP_CAPABILITY_CACHE_VERSION) {
     return false;
   }
-  if (
-    isRegistryCursorAgent(entry) &&
-    machineSupportsCursorParameterizedModelPicker(machine) &&
-    entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true
-  ) {
-    return false;
+  return !hasIncompatibleCursorModelIds(entry, machine);
+};
+
+/**
+ * A parsed capability entry remains readable regardless of the producer's cache version.
+ * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
+ * keep using fields they understand while a newer probe converges the stored entry.
+ */
+export const getReadableAcpCapabilityCacheEntry = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  machine: AcpCapabilityMachine
+): AcpCapabilityCacheEntry | undefined => {
+  if (!entry || hasIncompatibleCursorModelIds(entry, machine)) {
+    return undefined;
   }
-  return true;
+  // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
+  // non-Codex agents. Preserve every other understood field from older entries,
+  // but do not revive the known-bad derived map while waiting for a fresh probe.
+  if (
+    (entry.cacheVersion ?? 0) < 7 &&
+    (entry.cliType !== 'builtin' || entry.agentType !== 'codex') &&
+    entry.modelReasoningEfforts
+  ) {
+    const { modelReasoningEfforts: _incompatibleModelReasoningEfforts, ...compatible } = entry;
+    return compatible;
+  }
+  return entry;
+};
+
+export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
+): AcpCapabilityCacheEntry | undefined => {
+  const readableEntry = getReadableAcpCapabilityCacheEntry(entry, machine);
+  if (!readableEntry) {
+    return undefined;
+  }
+  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
+  return !sourceVersionSuffix || readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+    ? readableEntry
+    : undefined;
 };
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
@@ -395,10 +437,15 @@ export const getAcpCapabilityCacheEntryAuthority = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined,
   machine: AcpCapabilityMachine
 ): AcpCapabilityAuthority => {
-  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides, machine)) {
+  const readableEntry = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    runtimeOverrides,
+    machine
+  );
+  if (!readableEntry) {
     return 'unavailable';
   }
-  return entry.provenance === 'runtime' ? 'authoritative' : 'provisional';
+  return readableEntry.provenance === 'runtime' ? 'authoritative' : 'provisional';
 };
 
 export type AcpCapabilityCacheStaleReason =

@@ -9,9 +9,21 @@ const REQUIRED_HEADINGS = [
   '## Related issue',
   '## Problem / pressure',
   '## Summary',
+  '## Visual explanation',
   '## Test plan',
   '## Context handoff',
 ];
+export const COMPLEX_CHANGE_LINE_THRESHOLD = 200;
+const STRUCTURAL_VIEW_LANGUAGES = new Set([
+  'diff',
+  'javascript',
+  'jsx',
+  'mermaid',
+  'text',
+  'ts',
+  'tsx',
+  'typescript',
+]);
 const CONTEXT_HANDOFF_BEGIN = '<!-- context-handoff:begin -->';
 const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
 const REQUIRED_CONTEXT_HEADINGS = [
@@ -39,6 +51,7 @@ function parseArgs(argv) {
   const options = {
     body: process.env.PR_BODY ?? '',
     bodyFile: null,
+    changedLines: null,
     eventFile: null,
   };
 
@@ -48,6 +61,12 @@ function parseArgs(argv) {
       options.body = argv[++index] ?? '';
     } else if (argument === '--body-file') {
       options.bodyFile = argv[++index] ?? null;
+    } else if (argument === '--changed-lines') {
+      const value = Number(argv[++index]);
+      if (!Number.isInteger(value) || value < 0) {
+        throw new Error('--changed-lines must be a non-negative integer.');
+      }
+      options.changedLines = value;
     } else if (argument === '--event-file') {
       options.eventFile = argv[++index] ?? null;
     } else if (argument === '--help' || argument === '-h') {
@@ -108,11 +127,27 @@ function isCompleteContext(value) {
   return isFilledSection(normalized) && !WITHHELD_CONTEXT.test(normalized);
 }
 
+function hasStructuralView(section) {
+  if (!section) {
+    return false;
+  }
+  for (const match of section.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)) {
+    const language = match[1].trim().toLowerCase();
+    if (STRUCTURAL_VIEW_LANGUAGES.has(language) && match[2].trim()) {
+      return true;
+    }
+  }
+  if (/!\[[^\]]*\]\([^\s)]+\)/.test(section)) {
+    return true;
+  }
+  return /\[[^\]]+\]\([^\s)]+\.html(?:[?#][^\s)]*)?\)/i.test(section);
+}
+
 export function hasRelatedIssueReference(body) {
   return hasRelatedIssueLink(body);
 }
 
-export function checkPullRequestBody(body) {
+export function checkPullRequestBody(body, { changedLines = null } = {}) {
   const text = (body ?? '').replace(/\r\n/g, '\n');
   const findings = [];
 
@@ -142,12 +177,28 @@ export function checkPullRequestBody(body) {
     );
   }
 
-  for (const heading of ['## Problem / pressure', '## Summary', '## Test plan']) {
+  for (const heading of [
+    '## Problem / pressure',
+    '## Summary',
+    '## Visual explanation',
+    '## Test plan',
+  ]) {
     if (requiredHeadingCounts.get(heading) === 1 && !isFilledSection(sectionBody(text, heading))) {
       findings.push(
         `${heading} must contain meaningful content, not only comments or placeholders.`
       );
     }
+  }
+
+  const visualExplanation = sectionBody(text, '## Visual explanation');
+  if (
+    Number.isInteger(changedLines) &&
+    changedLines > COMPLEX_CHANGE_LINE_THRESHOLD &&
+    !hasStructuralView(visualExplanation)
+  ) {
+    findings.push(
+      `## Visual explanation must include a structural view because this PR changes ${changedLines} lines, above the ${COMPLEX_CHANGE_LINE_THRESHOLD}-line complexity floor.`
+    );
   }
 
   const contextHeadingCounts = new Map();
@@ -198,15 +249,21 @@ export function checkPullRequestBody(body) {
   return { ok: findings.length === 0, findings };
 }
 
-function bodyFromOptions(options) {
+function inputFromOptions(options) {
   if (options.eventFile) {
     const event = JSON.parse(readFileSync(options.eventFile, 'utf8'));
-    return event.pull_request?.body ?? '';
+    const pullRequest = event.pull_request ?? {};
+    return {
+      body: pullRequest.body ?? '',
+      changedLines:
+        options.changedLines ??
+        Number(pullRequest.additions ?? 0) + Number(pullRequest.deletions ?? 0),
+    };
   }
   if (options.bodyFile) {
-    return readFileSync(options.bodyFile, 'utf8');
+    return { body: readFileSync(options.bodyFile, 'utf8'), changedLines: options.changedLines };
   }
-  return options.body;
+  return { body: options.body, changedLines: options.changedLines };
 }
 
 function main() {
@@ -220,12 +277,13 @@ function main() {
 
   if (options.help) {
     console.log(
-      'Usage: node .github/scripts/check-pr-body.mjs [--event-file event.json | --body-file body.md | --body text]'
+      'Usage: node .github/scripts/check-pr-body.mjs [--event-file event.json | --body-file body.md | --body text] [--changed-lines count]'
     );
     return;
   }
 
-  const result = checkPullRequestBody(bodyFromOptions(options));
+  const input = inputFromOptions(options);
+  const result = checkPullRequestBody(input.body, { changedLines: input.changedLines });
   if (result.ok) {
     console.log('PR body format OK');
     return;

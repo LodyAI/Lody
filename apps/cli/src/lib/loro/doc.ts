@@ -2180,15 +2180,20 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
-    this.mirror.setState((prev) => {
-      if (operation) {
-        // Mirror exposes readonly state to callers, but setState supplies its mutable draft.
-        // @ts-expect-error mutable Mirror draft
-        prev.forkOperation = operation;
-      } else {
-        // @ts-expect-error mutable Mirror draft
-        delete prev.forkOperation;
+    if (!operation) {
+      if (!this.handle) {
+        throw new Error('SessionDocument not initialized');
       }
+      // Loro root containers are permanent. Clear the operation's fields while
+      // keeping the root map available for a later fork on this Session.
+      this.handle.doc.getMap('forkOperation').clear();
+      this.handle.doc.commit();
+      return;
+    }
+    this.mirror.setState((prev) => {
+      // Mirror exposes readonly state to callers, but setState supplies its mutable draft.
+      // @ts-expect-error mutable Mirror draft
+      prev.forkOperation = operation;
       return prev;
     });
   }

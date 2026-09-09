@@ -46,7 +46,7 @@ describe('resolveInitialOnboardingProviderStatus', () => {
     ).toBe('untested');
   });
 
-  it('only treats a current runtime probe as verified', () => {
+  it('treats parsed runtime probes as verified across cache versions', () => {
     expect(
       resolveInitialOnboardingProviderStatus(config, machineWithCapabilities(runtimeEntry))
     ).toBe('passed');
@@ -55,7 +55,7 @@ describe('resolveInitialOnboardingProviderStatus', () => {
         config,
         machineWithCapabilities({ ...runtimeEntry, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 })
       )
-    ).toBe('untested');
+    ).toBe('passed');
   });
 
   it('applies the same authoritative-probe rule to existing builtins', () => {

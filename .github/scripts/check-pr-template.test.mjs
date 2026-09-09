@@ -6,6 +6,22 @@ import { checkPullRequestBody } from './check-pr-body.mjs';
 const templateUrl = new URL('../PULL_REQUEST_TEMPLATE.md', import.meta.url);
 const template = readFileSync(templateUrl, 'utf8');
 
+function completedTemplate(visualExplanation) {
+  return template
+    .replace('## Related issue', '## Related issue\n\nRefs #123')
+    .replace(
+      '## Problem / pressure',
+      '## Problem / pressure\n\nRepeated routing errors obscure ownership.'
+    )
+    .replace('## Summary', '## Summary\n\nDocument the local route and state owner.')
+    .replace('## Visual explanation', `## Visual explanation\n\n${visualExplanation}`)
+    .replace('## Test plan', '## Test plan\n\nChecked the routing example against source.')
+    .replace(
+      /(- \*\*[^\n]+?:\*\*)\s*<!--[^\n]*-->/g,
+      '$1 Reviewed local routing only; no runtime behavior changes.'
+    );
+}
+
 void test('the unedited template is not a valid PR body', () => {
   const result = checkPullRequestBody(template);
   assert.equal(result.ok, false);
@@ -28,18 +44,26 @@ void test('every repository path the template names resolves', () => {
 });
 
 void test('an author who fills every required field passes', () => {
-  const body = template
-    .replace('## Related issue', '## Related issue\n\nRefs #123')
-    .replace(
-      '## Problem / pressure',
-      '## Problem / pressure\n\nRepeated routing errors obscure ownership.'
-    )
-    .replace('## Summary', '## Summary\n\nDocument the local route and state owner.')
-    .replace('## Test plan', '## Test plan\n\nChecked the routing example against source.')
-    .replace(
-      /(- \*\*[^\n]+?:\*\*)\s*<!--[^\n]*-->/g,
-      '$1 Reviewed local routing only; no runtime behavior changes.'
-    );
+  const body = completedTemplate('Simple change: one documentation sentence changed.');
   const result = checkPullRequestBody(body);
+  assert.equal(result.ok, true, result.findings.join('\n'));
+});
+
+void test('a large change requires a structural visual', () => {
+  const body = completedTemplate('Simple change: one documentation sentence changed.');
+  const boundary = checkPullRequestBody(body, { changedLines: 200 });
+  assert.equal(boundary.ok, true, boundary.findings.join('\n'));
+
+  const result = checkPullRequestBody(body, { changedLines: 201 });
+  assert.equal(result.ok, false);
+  assert.ok(result.findings.some((finding) => finding.includes('structural view')));
+});
+
+void test('a Mermaid view satisfies the large-change requirement', () => {
+  const body = completedTemplate(`\`\`\`mermaid
+flowchart LR
+    UI --> Daemon
+\`\`\``);
+  const result = checkPullRequestBody(body, { changedLines: 201 });
   assert.equal(result.ok, true, result.findings.join('\n'));
 });

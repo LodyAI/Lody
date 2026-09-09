@@ -125,15 +125,23 @@ const createMachineMeta = (overrides: Partial<MachineMeta> = {}): MachineMeta =>
 });
 
 describe('readAgentAcpCapability', () => {
-  const setup = (options: { legacy?: boolean; missing?: boolean; current?: boolean } = {}) => {
+  const setup = (
+    options: {
+      legacy?: boolean;
+      missing?: boolean;
+      current?: boolean;
+      cacheVersion?: number;
+      agentType?: string;
+    } = {}
+  ) => {
     const configId = 'cursor-config' as AgentConfigId;
     const machine = createMachineMeta({
       protocolCapabilities: options.legacy ? undefined : CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     });
     const legacyEntry: AcpCapabilityCacheEntry = {
       cliType: 'registry',
-      agentType: 'cursor',
-      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      agentType: options.agentType ?? 'cursor',
+      cacheVersion: options.cacheVersion ?? ACP_CAPABILITY_CACHE_VERSION,
       sourceVersion: 'cursor@test',
       modes: [],
       models: [],
@@ -194,7 +202,7 @@ describe('readAgentAcpCapability', () => {
       machineId: machine.id,
       configId,
       cliType: 'registry' as const,
-      agentType: 'cursor',
+      agentType: options.agentType ?? 'cursor',
       success: true,
       capability: { ...freshEntry, configOptionsByModel: undefined },
     };
@@ -228,6 +236,23 @@ describe('readAgentAcpCapability', () => {
       try {
         await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(fixture.freshEntry);
         expect(fixture.released()).toBe(true);
+      } finally {
+        dispatch.mockRestore();
+      }
+    }
+  );
+
+  it.each([{ legacy: true }, { current: true }, { agentType: 'synthetic-other-agent' }])(
+    'reads a compatible older row without probing (%o)',
+    async (options) => {
+      const fixture = setup({ ...options, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 });
+      const dispatch = vi
+        .spyOn(commandRuntime, 'dispatchLocalControl')
+        .mockRejectedValue(new Error('unexpected probe'));
+      try {
+        await expect(readAgentAcpCapability(fixture.args)).resolves.toEqual(
+          options.current ? fixture.freshEntry : fixture.legacyEntry
+        );
       } finally {
         dispatch.mockRestore();
       }

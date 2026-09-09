@@ -218,12 +218,15 @@ describe('useAgentRoleAvailability', () => {
     }
   );
 
-  it('keeps an expired capability cache unknown until a current snapshot arrives', async () => {
+  it('keeps a compatible older capability cache available while a fresh snapshot arrives', async () => {
     const savedRole = role({ modelId: currentModelId });
     await publishAgentConfig();
     publishCapability({ ...capability(), cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 });
     await render(savedRole);
-    expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+    expect(snapshot).toEqual({
+      availability: { kind: 'available' },
+      mentionableIds: [savedRole.id],
+    });
 
     publishCapability(capability());
     await render(savedRole);

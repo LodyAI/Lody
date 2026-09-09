@@ -35,8 +35,8 @@ Workflow-file security constraints live in
   Issue with analysis and wait to be assigned; do not open the PR. Maintainers
   review small focused changes; large unsolicited patches hide invariant breaks.
   Humans: `CONTRIBUTING.md`.
-- `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
-  body from the template and validate it with
+- Draft every PR from `PULL_REQUEST_TEMPLATE.md`; complex changes use `$show-me`.
+  Validate external bodies with
   `node .github/scripts/check-pr-body.mjs --body-file <file>`.
 - An Agent opens every pull request as a draft (`gh pr create --draft`) and then
   tells its user to mark it ready for review once they judge it ready for

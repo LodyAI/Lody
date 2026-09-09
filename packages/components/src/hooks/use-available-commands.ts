@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import {
   getAcpCapabilityCacheKey,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   type AcpCommandSummary,
 } from '@lody/shared';
 import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options';
@@ -19,12 +19,11 @@ export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSumm
   return useMemo(() => {
     if (!configId || !cliType || !agentType) return [];
     const key = getAcpCapabilityCacheKey(configId);
-    const capability = machine?.acpCapabilities?.[key];
-    if (
-      !isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, runtimeOverrides, machine)
-    ) {
-      return [];
-    }
-    return capability.availableCommands ?? [];
+    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+      machine?.acpCapabilities?.[key],
+      runtimeOverrides,
+      machine
+    );
+    return capability?.availableCommands ?? [];
   }, [configId, cliType, agentType, runtimeOverrides, machine]);
 }

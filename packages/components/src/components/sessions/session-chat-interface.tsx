@@ -5896,6 +5896,7 @@ export const SessionChatInterface = memo(
                             ref={chatStreamRef}
                             sessionId={session?.id}
                             workspaceId={workspaceId}
+                            showSenderIdentity={isMultiMember}
                             sessionDoc={sessionDoc}
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}

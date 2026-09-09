@@ -23,6 +23,13 @@ Policy state was duplicated.
 
 Use one policy state.
 
+## Visual explanation
+
+\`\`\`mermaid
+flowchart LR
+    Event --> Policy
+\`\`\`
+
 ## Test plan
 
 Run policy tests.

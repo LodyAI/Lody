@@ -122,5 +122,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   dialog resends the same content as a new ordinary message, then marks the old
   entry `canceled` while retaining the marker as a tombstone. Never automatically
   dispatch or revive the old turn.
+- User rows show names right of time; desktop avatars open accessible name/email
+  cards, mobile avatars do not.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).

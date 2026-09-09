@@ -33,7 +33,7 @@ import {
   formatSessionQuotaRejection,
   FREE_SESSION_TURN_LIMIT,
   isBillingQuotaExempt,
-  isAcpCapabilityCacheEntryCurrent,
+  getReadableAcpCapabilityCacheEntry,
   isRegistryCursorAgent,
   machineSupportsCursorParameterizedModelPicker,
   MachineAcpCapabilitiesRefreshResponseSchema,
@@ -131,6 +131,7 @@ import { captureSessionCommandEvent } from './analytics-events';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { getCliHttpFetch } from '@/utils/http-transport';
+import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 
 type CommonOptions = CommonCommandOptions;
 
@@ -1677,17 +1678,15 @@ export async function readAgentAcpCapability(args: {
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
-  const readCurrent = () => {
+  const readReadable = () => {
     const entry = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[getAcpCapabilityCacheKey(configId)];
-    return entry?.cliType === args.agent.cliType &&
-      entry.agentType === args.agent.agentType &&
-      isAcpCapabilityCacheEntryCurrent(entry, machine)
-      ? entry
+    return entry?.cliType === args.agent.cliType && entry.agentType === args.agent.agentType
+      ? getReadableAcpCapabilityCacheEntry(entry, machine)
       : undefined;
   };
-  const current = readCurrent();
+  const current = readReadable();
   if (
     current ||
     !isRegistryCursorAgent(args.agent) ||
@@ -1703,7 +1702,7 @@ export async function readAgentAcpCapability(args: {
     resolveCurrent = resolve;
   });
   const observeCurrent = () => {
-    const entry = readCurrent();
+    const entry = readReadable();
     if (entry) resolveCurrent(entry);
   };
   const unsubscribeFlock = handle.flock.subscribe(observeCurrent);
@@ -2070,22 +2069,25 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  try {
-    const readAccess = args.requester.isDelegated
-      ? canUseMachineForCliToken
-      : canRequestMachineForCliToken;
-    return await readAccess({
-      token: args.auth.token,
-      workspaceId: args.workspaceId,
-      machineId: args.machineId,
-      requesterUserId: args.requester.userId,
-      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
-    });
-  } catch (error) {
-    throw new Error(`Could not verify machine access: ${formatErrorMessage(error)}`, {
-      cause: error,
-    });
-  }
+  const readAccess = args.requester.isDelegated
+    ? canUseMachineForCliToken
+    : canRequestMachineForCliToken;
+  return await readMachineAccessWithBoundedRetry({
+    verify: async () =>
+      await readAccess({
+        token: args.auth.token,
+        workspaceId: args.workspaceId,
+        machineId: args.machineId,
+        requesterUserId: args.requester.userId,
+        ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+      }),
+    onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+      getLogger('session').warn(
+        `Machine access verification unavailable; retrying ` +
+          `(attempt=${attempt}/${maxAttempts} delayMs=${delayMs}): ${error}`
+      );
+    },
+  });
 }
 
 async function assertMachineAccess(args: {

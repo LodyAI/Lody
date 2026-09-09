@@ -33,6 +33,11 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Renderer and window integration
 
+- Desktop devbar diagnostics stay runtime opt-in (`LODY_DEVBAR=true`) and local to
+  memory. The compact GPU field identifies process CPU/RSS in its hover text;
+  never describe these measurements as hardware GPU usage or VRAM.
+  Enable precise Chromium heap reporting before app readiness only for devbar.
+
 - Generic update metadata may carry localized Markdown under
   `vendor.lodyChangelog.locales.{en,zh_CN}` in addition to the standard English
   `releaseNotes` fallback. Main validates and bounds those remote strings before

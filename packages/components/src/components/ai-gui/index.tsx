@@ -74,6 +74,8 @@ export { MarkdownRenderer, type MarkdownRendererSize } from './markdown-renderer
 export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
+  /** Shows sender names and desktop profile cards in multi-member workspaces. */
+  showSenderIdentity?: boolean;
   sessionDoc: SessionDoc;
   sessionCreatedAt?: string;
   dividerLabel?: string;
@@ -117,6 +119,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message,
   sessionId,
   workspaceId,
+  showSenderIdentity,
   onNavigateSession,
   onEditLastUser,
   onResendUndelivered,
@@ -126,6 +129,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
+  showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
@@ -144,6 +148,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       message={message}
       sessionId={sessionId}
       user={userInfo}
+      showSenderIdentity={showSenderIdentity}
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
       onResendUndelivered={onResendUndelivered}
@@ -158,6 +163,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     {
       sessionId,
       workspaceId,
+      showSenderIdentity = false,
       sessionDoc,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
@@ -245,6 +251,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             message={message}
             sessionId={messageSessionId}
             workspaceId={workspaceId}
+            showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
             onResendUndelivered={onResendUndelivered}
@@ -261,6 +268,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onResendUndelivered,
         capacityRetry,
         stableOnNavigateSession,
+        showSenderIdentity,
         workspaceId,
       ]
     );

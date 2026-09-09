@@ -36,13 +36,12 @@ export function useDesktopWorkspaceMembershipSync(userId: string | null): void {
     }
 
     observedMembershipRef.current = { userId, fingerprint };
-    void authClient
-      .updateSession()
-      .then(() => {
-        authClient.$store.notify('$activeOrgSignal');
-      })
-      .catch((error) => {
-        console.warn('[Auth] Failed to refresh workspaces after membership change', error);
-      });
+    try {
+      // Better Auth's cross-domain action synchronously notifies the session store.
+      void authClient.updateSession();
+      authClient.$store.notify('$activeOrgSignal');
+    } catch (error) {
+      console.warn('[Auth] Failed to refresh workspaces after membership change', error);
+    }
   }, [authClient, fingerprint, userId]);
 }

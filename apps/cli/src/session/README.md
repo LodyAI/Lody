@@ -38,7 +38,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`
   workspaces, or return `remote` to preserve the existing Convex three-state path. Catalog read
   failures degrade to `remote`, never to an error.
-- `session-access-retry.ts` — remote machine access verification with transient retry.
+- `session-access-retry.ts` — remote machine access verification: bounded retries at command
+  validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
   ([AGENTS.md](worktree/AGENTS.md)).
