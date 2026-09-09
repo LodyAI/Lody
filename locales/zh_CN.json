@@ -3892,6 +3892,7 @@
   "settings.agentRoles.visibility.workspace": "工作区",
   "settings.agentRoles.status.offline": "离线",
   "settings.agentRoles.status.checking": "正在检查可用性…",
+  "mention.agentRole.unavailable.workContext": "当前工作区只能使用同一机器的角色",
   "settings.agentRoles.unavailable.label": "不可用：{{reason}}",
   "settings.agentRoles.unavailable.machineOffline": "所在机器已离线",
   "settings.agentRoles.unavailable.machineUnknown": "你无法访问它所在的机器",

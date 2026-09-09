@@ -3892,6 +3892,7 @@
   "settings.agentRoles.visibility.workspace": "Workspace",
   "settings.agentRoles.status.offline": "offline",
   "settings.agentRoles.status.checking": "Checking availability…",
+  "mention.agentRole.unavailable.workContext": "this workspace requires a role on the same machine",
   "settings.agentRoles.unavailable.label": "Unavailable: {{reason}}",
   "settings.agentRoles.unavailable.machineOffline": "its machine is offline",
   "settings.agentRoles.unavailable.machineUnknown": "its machine is not available to you",
