@@ -29,7 +29,7 @@ import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import {
   collectConversationMessages,
   getAgentConfigRoomId,
@@ -125,6 +125,7 @@ const STORY_AGENT_CONFIG_ID = 'agent-storybook-session-page' as AgentConfigId;
 const STORY_LOCAL_PROJECT_ID = 'local:lody' as LocalProjectId;
 const STORY_AUTH_TOKEN = 'storybook-token';
 const STORY_USER_ID = 'user-storybook-session-page';
+const STORY_COLLABORATOR_ID = 'user-storybook-collaborator';
 
 const storyPlatform = createLocalPlatformProvider({
   session: createStaticStore({
@@ -226,6 +227,11 @@ const usersById: Record<
     name: 'Zixuan',
     image: null,
     email: 'zixuan@example.com',
+  },
+  [STORY_COLLABORATOR_ID]: {
+    name: 'Maya Chen',
+    image: null,
+    email: 'maya.chen@example.com',
   },
 };
 
@@ -401,6 +407,46 @@ const baseMessages = (): SessionHistoryParsed[] => [
           '',
           'I will keep the story wired to those components instead of making a separate mock page.',
         ].join('\n'),
+      },
+    ],
+  }),
+];
+
+const collaborativeMessages = (): SessionHistoryParsed[] => [
+  buildMessage({
+    id: 'collaborative-user-zixuan',
+    role: 'user',
+    userId: STORY_USER_ID,
+    timestamp: '2026-07-09T09:31:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: 'Could you keep the sender visible next to the timestamp in shared conversations?',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'collaborative-assistant',
+    role: 'assistant',
+    timestamp: '2026-07-09T09:31:20.000Z',
+    finished: true,
+    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    items: [
+      {
+        type: 'text',
+        text: 'Yes. Each user message now keeps its sender name in the metadata row.',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'collaborative-user-maya',
+    role: 'user',
+    userId: STORY_COLLABORATOR_ID,
+    timestamp: '2026-07-09T09:33:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: 'And clicking my avatar on desktop should show my contact card.',
       },
     ],
   }),
@@ -884,17 +930,21 @@ const buildHistory = (
 const toStreamItems = (sessionId: SessionId, messages: SessionHistoryParsed[]) =>
   messages.map((message) => ({ type: 'message', sessionId, message }) as const);
 
-const renderMessageRow = ({
-  message,
-  sessionId,
-}: {
-  message: SessionHistoryParsed;
-  sessionId: SessionId;
-}) => (
+const renderMessageRow = (
+  {
+    message,
+    sessionId,
+  }: {
+    message: SessionHistoryParsed;
+    sessionId: SessionId;
+  },
+  showSenderIdentity = false
+) => (
   <MessageRowView
     message={message}
     sessionId={sessionId}
     user={message.userId ? usersById[message.userId] : undefined}
+    showSenderIdentity={showSenderIdentity}
     capacityRetry={
       message.id === 'capacity-failure'
         ? {
@@ -1042,21 +1092,27 @@ function StoryShell({
   dropActive = false,
   showCapacityRetry = false,
   shareImage = false,
+  showCollaborators = false,
 }: {
   state: PageState;
   frame: DeviceFrame;
   dropActive?: boolean;
   showCapacityRetry?: boolean;
   shareImage?: boolean;
+  showCollaborators?: boolean;
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
   const session = useMemo(
     () => ({
       ...buildSession(state, frame),
-      ...(shareImage ? { title: 'Product list rendering performance' } : {}),
+      ...(shareImage
+        ? { title: 'Product list rendering performance' }
+        : showCollaborators
+          ? { title: 'Shared conversation' }
+          : {}),
     }),
-    [frame, state, shareImage]
+    [frame, state, shareImage, showCollaborators]
   );
   const selection = useMessageSelection(session.id);
   const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
@@ -1082,8 +1138,10 @@ function StoryShell({
     () =>
       shareImage
         ? [...buildShareHistory(), ...sentMessages]
-        : buildHistory(state, streamChunkCount, showCapacityRetry),
-    [shareImage, sentMessages, showCapacityRetry, state, streamChunkCount]
+        : showCollaborators
+          ? collaborativeMessages()
+          : buildHistory(state, streamChunkCount, showCapacityRetry),
+    [shareImage, sentMessages, showCapacityRetry, showCollaborators, state, streamChunkCount]
   );
   const permissionHistory = history as unknown as SessionDoc['history'];
   const liveStatus =
@@ -1357,7 +1415,7 @@ function StoryShell({
                           <SessionChatStreamView
                             sessionId={session.id}
                             items={toStreamItems(session.id, history)}
-                            renderMessageRow={renderMessageRow}
+                            renderMessageRow={(row) => renderMessageRow(row, showCollaborators)}
                             className="h-full"
                             agentActivityLabel={
                               isWorking
@@ -1569,6 +1627,23 @@ type Story = StoryObj<typeof meta>;
 export const DesktopIdle: Story = {
   globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
+};
+
+export const DesktopMultipleSenders: Story = {
+  args: { showCollaborators: true },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopSenderProfileCard: Story = {
+  args: { showCollaborators: true },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', { name: 'View profile for Maya Chen' })
+    );
+  },
 };
 
 export const DesktopShareImage: Story = {

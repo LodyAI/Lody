@@ -561,6 +561,9 @@ importers:
       '@cucumber/cucumber':
         specifier: ^13.2.1
         version: 13.2.1
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.3.6)
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2

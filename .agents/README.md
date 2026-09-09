@@ -150,4 +150,6 @@ Place visuals beside short explanations, mark conceptual sketches, and keep real
 paths accurate. Diagrams are maintained facts too. Use HTML only when a static
 view cannot explain the point; prose must remain independently understandable.
 Worked examples live in [visual explanations](docs/visual-explanations.md); the
-PR template points there so outside authors need nothing installed.
+PR template points there so outside authors need nothing installed. Every PR fills
+its visual-explanation section; changes over 200 lines must include a structural
+view, while semantic complexity remains a reviewer judgment.

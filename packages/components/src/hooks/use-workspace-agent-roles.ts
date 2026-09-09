@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
   getAcpCapabilityCacheKey,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   listAccessibleAgentRoles,
   resolveAgentRoleAvailability,
   type AcpCapabilityCacheEntry,
@@ -108,14 +108,12 @@ export function useAgentRoleAvailability(
       if (!config.machineId) continue;
       agentConfigMachineIds.set(config.id, config.machineId);
       const machine = machines.get(config.machineId);
-      const capability = machine?.acpCapabilities?.[getAcpCapabilityCacheKey(config.id)];
-      if (
-        isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(
-          capability,
-          config.runtimeOverrides,
-          machine
-        )
-      ) {
+      const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+        machine?.acpCapabilities?.[getAcpCapabilityCacheKey(config.id)],
+        config.runtimeOverrides,
+        machine
+      );
+      if (capability) {
         agentConfigCapabilities.set(config.id, capability);
       }
     }

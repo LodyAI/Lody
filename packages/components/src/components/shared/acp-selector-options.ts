@@ -4,6 +4,7 @@ import {
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   isAcpToggleSelectEnabledValue,
@@ -12,7 +13,6 @@ import {
   getAcpCapabilityCacheEntryAuthority,
   getBuiltinDefaultModeId,
   getStaticBuiltinAcpCapabilities,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
   resolveAcpConfigOptionsForModel,
   toggleAcpSelectOptionValue,
   type AcpCapabilityAuthority,
@@ -245,19 +245,13 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
 
   if (target.configId) {
     const key = getAcpCapabilityCacheKey(target.configId);
-    const capability = target.machine?.acpCapabilities?.[key];
-    if (
-      isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(
-        capability,
-        target.runtimeOverrides,
-        target.machine
-      )
-    ) {
-      const authority = getAcpCapabilityCacheEntryAuthority(
-        capability,
-        target.runtimeOverrides,
-        target.machine
-      );
+    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+      target.machine?.acpCapabilities?.[key],
+      target.runtimeOverrides,
+      target.machine
+    );
+    if (capability) {
+      const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides, target.machine);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
         return {

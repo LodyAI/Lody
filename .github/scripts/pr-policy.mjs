@@ -135,9 +135,9 @@ function changedLines(pullRequest) {
 }
 
 function checkPullRequestPolicy(pullRequest, { authorAssignedToRelatedIssue = false } = {}) {
-  const result = checkPullRequestBody(pullRequest.body);
-  const findings = [...result.findings];
   const lines = changedLines(pullRequest);
+  const result = checkPullRequestBody(pullRequest.body, { changedLines: lines });
+  const findings = [...result.findings];
   if (lines > MAX_COMMUNITY_REVIEW_LINES && !authorAssignedToRelatedIssue) {
     findings.push(
       `PR changes ${lines} lines; community PRs over ${MAX_COMMUNITY_REVIEW_LINES} lines require a maintainer assignment on the linked Issue before review.`

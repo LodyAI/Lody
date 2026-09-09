@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
+import { DesktopDevbar } from './desktop-devbar'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -139,6 +140,10 @@ try {
   }
 
   const isFileProtocol = window.location.protocol === 'file:'
+  const devbar = await getIpcServices()
+    ?.app.getDevbarConfig()
+    .catch(() => null)
+  if (devbar?.enabled) document.documentElement.setAttribute('data-desktop-devbar', '')
   const router = createRouter({
     authClient,
     desktopAuth: {
@@ -161,6 +166,7 @@ try {
           <RouterProvider router={router} />
         </Provider>
       </ErrorBoundary>
+      {devbar?.enabled && <DesktopDevbar />}
     </>
   )
 } catch (error) {

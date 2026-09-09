@@ -133,6 +133,7 @@ import type {
   SessionTurnOutputEvent,
   StructuredSessionOutputMode,
 } from '@/commands/session-output';
+import { toMachineAccessMcpError } from '@/mcp/machine-access-error';
 import { MAX_AGENT_FEEDBACK_LENGTH, submitAgentFeedback } from '@/lib/feedback';
 import {
   getLodyOperationStorePath,
@@ -1018,6 +1019,14 @@ const normalizeMcpError = (error: unknown) => {
   }
   if (error instanceof WorkspaceSyncUnavailableError) {
     return error.toLodyError();
+  }
+  const machineAccessError = toMachineAccessMcpError(error);
+  if (machineAccessError) {
+    return makeLodyError(
+      machineAccessError.code,
+      machineAccessError.message,
+      machineAccessError.retryable
+    );
   }
   return makeLodyError('INTERNAL_ERROR', formatMcpErrorMessage(error), false);
 };
@@ -2737,6 +2746,14 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       if (error instanceof LocalDaemonAvailabilityError) {
         throw error;
       }
+      const machineAccessError = toMachineAccessMcpError(error);
+      if (machineAccessError) {
+        throw new LodyOperationStoreError(
+          machineAccessError.code,
+          machineAccessError.message,
+          machineAccessError.retryable
+        );
+      }
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
     const preallocatedSessionId = randomUUID() as SessionId;
@@ -2882,6 +2899,14 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     } catch (error) {
       if (error instanceof WorkspaceSyncUnavailableError) {
         throw error;
+      }
+      const machineAccessError = toMachineAccessMcpError(error);
+      if (machineAccessError) {
+        throw new LodyOperationStoreError(
+          machineAccessError.code,
+          machineAccessError.message,
+          machineAccessError.retryable
+        );
       }
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
@@ -3259,6 +3284,18 @@ const startSessionCreateManyOperation = async (
               dispatchConfig: null,
             };
           }
+          const machineAccessError = toMachineAccessMcpError(error);
+          if (machineAccessError) {
+            return {
+              operationItem: batchFailure(
+                machineAccessError.code,
+                machineAccessError.message,
+                machineAccessError.retryable,
+                label
+              ),
+              dispatchConfig: null,
+            };
+          }
           return {
             operationItem: batchFailure('INVALID_ITEM', formatMcpErrorMessage(error), false, label),
             dispatchConfig: null,
@@ -3456,6 +3493,15 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
             throw error;
+          }
+          const machineAccessError = toMachineAccessMcpError(error);
+          if (machineAccessError) {
+            return batchFailure(
+              machineAccessError.code,
+              machineAccessError.message,
+              machineAccessError.retryable,
+              item.label
+            );
           }
           return batchFailure('INVALID_ITEM', formatMcpErrorMessage(error), false, item.label);
         }
