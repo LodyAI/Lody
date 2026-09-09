@@ -191,7 +191,10 @@ this page is the full text of the rules summarised there.
   `chatLandingDefaults.agentRoleId` on Chat Landing and
   `DraftSessionTab.agentRoleId` in a non-empty child-tab draft. It is restored
   only once the workspace catalog can answer — before that, "not in the list"
-  means "not loaded yet", so the stored id must not be overwritten with null.
+  means "not loaded yet", so the stored id must not be overwritten with null. Manual model, mode,
+  and config-option edits end a pending landing Role restore synchronously through
+  the selection hook's `onUserChange`; later capability arrival cannot replace
+  those edits with the saved Role.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of

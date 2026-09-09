@@ -1686,6 +1686,7 @@ function WorkspaceChatLanding({
       ? `role:${activeAgentRolePreference.role.id}:${activeAgentRolePreference.role.revision}:${activeAgentRolePreference.token}`
       : (selectedAgent?.agentId ?? 'none'),
     preferences: selectedAgentDefaults,
+    onUserChange: settleAgentRoleRestore,
   });
   const selectorOptions = useAcpSelectorOptions({
     configId: selectedConfig?.id,

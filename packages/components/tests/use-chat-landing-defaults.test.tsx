@@ -128,7 +128,7 @@ describe('chat landing saved Role restoration', () => {
     visibility: 'private',
     machineId,
     agentConfigId: agentId,
-    runConfig: { modelId: 'supported-model' },
+    runConfig: { modelId: 'supported-model', modeId: 'role-mode', configOptionValues: { effort: 'high' } },
     promptPrefix: 'Review the requested change.',
     createdAt: 1,
     updatedAt: 1,
@@ -140,6 +140,12 @@ describe('chat landing saved Role restoration', () => {
   function RoleRestoreProbe({ items }: { items: ComposerAgentRoleItem[] }) {
     const [restored, setRestored] = useState(false);
     const [selectedRoleId, setSelectedRoleId] = useState<AgentRoleId | null>(null);
+    const controller = useAcpSessionConfigSelectionState({
+      targetKey: `${machineId}:${agentId}`,
+      preferenceRevision: selectedRoleId ? `role:${selectedRoleId}:1:1` : agentId,
+      preferences: selectedRoleId === savedRole.id ? savedRole.runConfig : {},
+      onUserChange: () => setRestored(true),
+    });
     const { defaultsReady } = useChatLandingDefaults({
       workspaceId,
       shouldRestoreContextType: false,
@@ -173,7 +179,22 @@ describe('chat landing saved Role restoration', () => {
     });
     return (
       <>
-        <output data-restored={restored} data-role={selectedRoleId ?? ''} />
+        <output
+          data-restored={restored}
+          data-role={selectedRoleId ?? ''}
+          data-model={controller.candidates.modelId ?? ''}
+          data-mode={controller.candidates.modeId ?? ''}
+          data-effort={String(controller.candidates.configOptionValues.effort ?? '')}
+        />
+        <button type="button" data-action="model" onClick={() => controller.selectModel('user-model')}>
+          Change model
+        </button>
+        <button type="button" data-action="mode" onClick={() => controller.selectMode('plan')}>
+          Change mode
+        </button>
+        <button type="button" data-action="effort" onClick={() => controller.selectConfigOption('effort', 'low')}>
+          Change effort
+        </button>
         <button
           type="button"
           data-action="pick-other"
@@ -227,6 +248,23 @@ describe('chat landing saved Role restoration', () => {
     expect(container.querySelector('output')?.dataset.restored).toBe('true');
     expect(container.querySelector('output')?.dataset.role).toBe(savedRole.id);
     expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBe(savedRole.id);
+  });
+
+  it.each([
+    ['model', 'user-model'],
+    ['mode', 'plan'],
+    ['effort', 'low'],
+  ])('preserves an explicit %s change while the saved Role is unknown', (field, value) => {
+    render({ kind: 'unknown' });
+    act(() => {
+      container.querySelector<HTMLButtonElement>(`[data-action="${field}"]`)?.click();
+    });
+    expect(container.querySelector('output')?.dataset[field]).toBe(value);
+
+    render({ kind: 'available' });
+    expect(container.querySelector('output')?.dataset[field]).toBe(value);
+    expect(container.querySelector('output')?.dataset.role).toBe('');
+    expect(readChatLandingDefaults(workspaceId)?.agentRoleId).toBeNull();
   });
 
   it('finishes restoration without selecting a Role whose saved model is unsupported', () => {
