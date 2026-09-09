@@ -47,7 +47,8 @@ override 联合验证。对外发布时必须先发布包含新契约的 Core，
 独立 npm 依赖及 lockfile，再发布适配器。Lody 草稿引用两个子模块的 PR 提交；
 当前没有进行包发布，也没有伪造未发布包的 lockfile 完整性信息。
 
-关联草稿：[Core #6](https://github.com/LodyAI/acp-extension-core/pull/6)、
+关联草稿：[Lody #534](https://github.com/LodyAI/Lody/pull/534)、
+[Core #6](https://github.com/LodyAI/acp-extension-core/pull/6)、
 [Codex #35](https://github.com/LodyAI/acp-extension-codex/pull/35)。
 
 ## 验证
@@ -55,7 +56,7 @@ override 联合验证。对外发布时必须先发布包含新契约的 Core，
 - Core build/typecheck、Codex 适配器 build/typecheck，以及全仓 `pnpm typecheck`
   通过。最初单独检查 CLI 时发现尚未构建 Claude 适配器；执行标准适配器准备流程
   后，全仓类型检查通过。
-- Codex 完整测试集：578 通过、27 跳过。ACP 协商和 new/load/resume/fork 请求验证
+- Codex 精简后完整测试集：579 通过、27 跳过。ACP 协商和 new/load/resume/fork 请求验证
   检查最终 Worktree cwd 和原始根元数据同时存在；未宣告能力时不运行项目解析。
 - 项目映射测试覆盖原生项目复用、目录别名、分页、并发幂等键、恢复保留用户选择、
   fork 只改子线程、无元数据兼容和无效/歧义元数据拒绝。
@@ -64,6 +65,40 @@ override 联合验证。对外发布时必须先发布包含新契约的 Core，
   history item 使线程落盘；创建、恢复空归属、fork 三个线程均经只读 SQL 确认
   保留 Worktree cwd 且指向同一项目，项目总数为一。
 - 未运行真实模型推理，未修改用户历史；未验证桌面徽标、Handoff 或项目级历史列表。
+
+## 消融：2026-09-09
+
+先创建关联 PR，再以 Codex 适配器提交 `55b48510` 为固定基线，每次只修改
+`src/WorktreeProject.ts` 中一项实现并运行 13 项行为测试。每轮恢复基线，
+最后组合通过的删减再测；禁用测试重试，避免把偶发通过当成证据。
+
+```sh
+./node_modules/.bin/vitest run --no-file-parallelism --retry=0 src/__tests__/CodexACPAgent/worktree-project.test.ts
+```
+
+| 变体 | 结果 | 决定 |
+| --- | --- | --- |
+| 原始基线 | 13 通过 | 对照 |
+| 移除 pending Map 及其 get/set/finally，直接返回项目查找 | 13 通过 | 删除缓存 |
+| 移除原生更新后的 thread.projectId 写回 | 13 通过 | 删除本地写回 |
+| 跳过输入路径的 realpath | 1 失败：目录别名产生不同项目身份 | 保留 |
+| 只查询第一页项目 | 1 失败：无法复用后续页的已登记项目 | 保留 |
+| 去掉恢复时已有项目的保护条件 | 1 失败：尝试重写已有用户归属 | 保留 |
+| 同时删除缓存和本地写回 | 13 通过 | 采用，模块从 98 行减为 87 行 |
+
+缓存只合并同一适配器进程内的同时查询；原生确定性 idempotencyKey 才负责
+跨进程项目身份。删除缓存可能增加同进程并发时的查询次数，未作性能收益声明。
+原生更新成功后各调用者不依赖被改写的临时 Thread 对象：load 重新读取线程，
+resume/fork 返回的会话元数据不使用该字段。
+
+为避免只依赖 mock，精简前后分别运行独立 CODEX_HOME 下的真实 Codex 0.153.4：
+同一解析器的两个并发调用及另一个解析器的调用均返回同一项目；随后创建、恢复
+空归属及 fork 的三个落盘线程仍保留 Worktree cwd，并指向唯一项目。两组均通过，
+使用合成 Git 仓库和注入的 history item，不读取用户历史、不发起模型推理。
+
+全仓 `pnpm check` 通过，包括类型检查、lint、CI 测试和边界检查；初次沙箱运行
+因 IPC socket 的 EPERM 中断，在允许本地 socket 的环境重跑通过。`pnpm format`
+和文档检查也已执行，格式化产生的无关 Electron 测试改动已恢复。
 
 ## 入口
 
