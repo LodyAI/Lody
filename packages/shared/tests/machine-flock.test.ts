@@ -9,6 +9,7 @@ import {
   deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
+  getMachineFlockAcpCapabilitySources,
   getMachineFlockAgentConfigs,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
@@ -771,4 +772,14 @@ describe('machine Flock helpers', () => {
       });
     });
   });
+});
+
+it('round trips the independent source snapshot and rejects malformed versions', () => {
+  const flock = new FakeMachineFlock();
+  const key = machineFlockKeys.acpCapabilitySources();
+  const value = { epoch: 'daemon-1', versions: { 'config-1': 'runtime-2' } };
+  writeMachineFlockRowToFlock(flock, { key, value });
+  expect(getMachineFlockAcpCapabilitySources(readMachineFlockRowsFromFlock(flock))).toEqual(value);
+  flock.set(key, { epoch: 'daemon-1', versions: { 'config-1': 2 } });
+  expect(getMachineFlockAcpCapabilitySources(readMachineFlockRowsFromFlock(flock))).toBeUndefined();
 });

@@ -19,6 +19,10 @@ per-turn MCP selection, or Role-based session creation and dispatch.
   matching remains a separate applicability gate. Registry Cursor rows without the picker
   source marker are incompatible only when their owning Machine advertises the picker
   protocol; readers and freshness checks share that applicability rule.
+- Role capability evidence on an `acpCapabilitySources` daemon requires matching owner
+  `sourceVersion` and daemon epoch. Expected sources live in a Machine Flock snapshot,
+  independently of probe/session observations; MachineMeta holds only its epoch. Missing
+  or mismatching evidence means unknown. Legacy daemons retain readable-cache behavior.
 
 ## Workspace MCP and Agent Roles
 

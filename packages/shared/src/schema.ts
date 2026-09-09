@@ -31,7 +31,7 @@ import {
   WorktreeSetupScriptConfig,
 } from '.';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
-import type { ModelInfo } from './ai';
+import type { AcpCapabilitySources, ModelInfo } from './ai';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
@@ -1152,6 +1152,8 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
+  /** Binds the independently published source snapshot to this daemon lifetime. */
+  acpCapabilitySourceEpoch?: string;
 };
 
 /**
@@ -1175,6 +1177,7 @@ export type MachineLegacyMetaFields = {
  */
 export type MachineViewMeta = MachineMeta &
   Omit<MachineLegacyMetaFields, 'raceLimits'> & {
+    acpCapabilitySources?: AcpCapabilitySources;
     raceLimits: Record<string, RateLimit>;
   };
 

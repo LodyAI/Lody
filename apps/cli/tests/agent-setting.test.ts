@@ -15,6 +15,7 @@ import {
 
 import {
   getAcpCapabilitySourceVersion,
+  getExpectedAcpCapabilitySourceVersion,
   mergeLoginShellEnv,
   resolveACPSetting,
   resolveBuiltinAuthenticationProcessLaunch,
@@ -649,4 +650,42 @@ describe('mergeLoginShellEnv', () => {
     // ...while vars only the login shell defines are added.
     expect(merged.LANG).toBe('en_US.UTF-8');
   });
+});
+
+it('uses the owner-selected fallback runtime for source discovery, without launching it', async () => {
+  const manager = managedRuntime.configureManagedAgentRuntimeManager({ runtimeBaseUrl: null });
+  const status = vi.spyOn(manager, 'getRuntimeStatus').mockResolvedValue({
+    kind: 'installed',
+    platformArch: 'linux-x64',
+    version: '0.1.0',
+    targetVersion: '0.2.0',
+    command: '/synthetic/codex',
+    updateAvailable: true,
+  });
+  const launch = vi.spyOn(manager, 'resolveRuntimeForLaunch').mockImplementation(async () => {
+    throw new Error('must not launch');
+  });
+  try {
+    const input = { cliType: 'builtin', agentType: 'codex' } as const;
+    expect(await getExpectedAcpCapabilitySourceVersion(input)).toBe(
+      getAcpCapabilitySourceVersion(input, '0.1.0')
+    );
+    status.mockResolvedValue({
+      kind: 'not-installed',
+      platformArch: 'linux-x64',
+      version: '0.2.0',
+    });
+    expect(await getExpectedAcpCapabilitySourceVersion(input)).toBeUndefined();
+    const custom = {
+      cliType: 'custom',
+      agentType: 'custom',
+      customAcp: { command: '/synthetic/acp' },
+    } as const;
+    expect(await getExpectedAcpCapabilitySourceVersion(custom)).toBe(
+      getAcpCapabilitySourceVersion(custom)
+    );
+  } finally {
+    status.mockRestore();
+    launch.mockRestore();
+  }
 });

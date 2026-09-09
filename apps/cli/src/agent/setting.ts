@@ -1,3 +1,4 @@
+import { getManagedBuiltinRuntimeByAgentType, hasBuiltinRuntimeOverrideValues } from '@lody/shared';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -242,6 +243,21 @@ export function getAcpCapabilitySourceVersion(
   return isRegistryCursorAgent({ cliType: 'registry', agentType: agent.id })
     ? `${registrySourceVersion}${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`
     : registrySourceVersion;
+}
+
+/** Resolve the owning daemon's selected runtime without installing or launching it. */
+export async function getExpectedAcpCapabilitySourceVersion(
+  input: ResolveACPSettingInput
+): Promise<string | undefined> {
+  const runtime =
+    input.cliType === 'builtin' ? getManagedBuiltinRuntimeByAgentType(input.agentType) : undefined;
+  if (!runtime || hasBuiltinRuntimeOverrideValues(input.runtimeOverrides)) {
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const status = await getManagedAgentRuntimeManager().getRuntimeStatus(runtime.runtimeName);
+  return status.kind === 'installed'
+    ? getAcpCapabilitySourceVersion(input, status.version)
+    : undefined;
 }
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {

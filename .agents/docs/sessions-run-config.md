@@ -197,7 +197,10 @@ this page is the full text of the rules summarised there.
   those edits with the saved Role. Capability evidence for Role availability
   must also match the current provider kind, agent, custom launch spec, and builtin
   override selection; the shared configuration-aware reader rejects replaced
-  configurations without rejecting readable older cache formats.
+  configurations without rejecting readable older cache formats. On daemons advertising
+  `acpCapabilitySources`, the reader also matches the independent owner source snapshot and
+  daemon epoch. Missing or stale evidence keeps the Role unknown. Legacy daemons retain
+  existing cache behavior; renderer package versions never stand in for remote runtime identity.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of

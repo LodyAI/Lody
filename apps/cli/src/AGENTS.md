@@ -45,3 +45,12 @@ because the agent confirmed it publishes none, and a map (including `{}`)
 replaces it. `null` is consumed before the entry is built and never reaches the
 Flock row or the wire schema. A session snapshot must not drop a catalog it did
 not observe, and a probe that observed "none" must not leave a stale one behind.
+
+## Expected ACP sources
+
+`lib/acp-capability-source-publisher.ts` publishes the daemon's expected source versions in
+Machine Flock independently of probe results. Registration advertises the same lifetime
+epoch; config changes, authoritative room rejoin, and committed runtime installations
+invalidate and rescan. Resolve installed current/fallback versions without downloading or
+launching agents. Generation and shutdown fences prevent late scans from restoring obsolete
+expectations; observed capability writes must never update the expectation snapshot.
