@@ -7,6 +7,7 @@ import {
   isCustomAcpLaunchSpec,
   isManagedBuiltinAgentType,
   type AcpCapabilityCacheEntry,
+  type AcpCapabilitySources,
   type AgentConfigCliType,
   type AgentType,
   type CliType,
@@ -246,6 +247,7 @@ export type MachineFlockAgentConfigKey = ['agentConfig', AgentConfigId];
 export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
+export type MachineFlockAcpCapabilitySourcesKey = ['acpCapabilitySources'];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
 export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBuiltinAgentType];
@@ -262,12 +264,14 @@ export type MachineFlockKey =
   | MachineFlockProviderSetupKey
   | MachineFlockProviderSetupCancellationKey
   | MachineFlockAgentConfigIndexKey
+  | MachineFlockAcpCapabilitySourcesKey
   | MachineFlockAcpCapabilityKey
   | MachineFlockRateLimitKey
   | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
 
 export type ParsedMachineFlockKey =
+  | { kind: 'acpCapabilitySources'; key: MachineFlockAcpCapabilitySourcesKey }
   | { kind: 'dotlodyPath'; key: MachineFlockDotlodyPathKey }
   | {
       kind: 'archiveSessionCommand';
@@ -324,6 +328,7 @@ export type ParsedMachineFlockKey =
     };
 
 export const machineFlockKeys = {
+  acpCapabilitySources: (): MachineFlockAcpCapabilitySourcesKey => ['acpCapabilitySources'],
   dotlodyPath: (): MachineFlockDotlodyPathKey => ['dotlodyPath'],
   archiveSessionCommand: (sessionId: SessionId): MachineFlockArchiveSessionCommandKey => [
     'cmd',
@@ -380,6 +385,9 @@ export const machineFlockKeys = {
 export const parseMachineFlockKey = (
   key: readonly unknown[]
 ): ParsedMachineFlockKey | undefined => {
+  if (key.length === 1 && key[0] === 'acpCapabilitySources') {
+    return { kind: 'acpCapabilitySources', key: machineFlockKeys.acpCapabilitySources() };
+  }
   if (key.length === 1 && key[0] === 'dotlodyPath') {
     return { kind: 'dotlodyPath', key: machineFlockKeys.dotlodyPath() };
   }
@@ -530,6 +538,7 @@ export type MachineFlockRow =
       value: ProviderSetupCancellation;
     }
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
+  | { key: MachineFlockAcpCapabilitySourcesKey; value: AcpCapabilitySources }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
   | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
@@ -572,6 +581,7 @@ export type MachineFlockRowFamily =
   | 'providerSetup'
   | 'providerSetupCancellation'
   | 'agentConfigIndex'
+  | 'acpCapabilitySources'
   | 'acpCapability'
   | 'rateLimit'
   | 'builtinAgentOptOut'
@@ -588,6 +598,7 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   providerSetupCancellation: ['providerSetupCancellation'],
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
+  acpCapabilitySources: ['acpCapabilitySources'],
   rateLimit: ['rateLimit'],
   builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
@@ -721,6 +732,13 @@ export function getMachineFlockDeleteLocalProjectIds(
   return new Set(
     getMachineFlockDeleteLocalProjectEntries(rows).map(([localProjectId]) => localProjectId)
   );
+}
+
+export function getMachineFlockAcpCapabilitySources(
+  rows: MachineFlockRowMap
+): AcpCapabilitySources | undefined {
+  const row = rows[serializeMachineFlockKey(machineFlockKeys.acpCapabilitySources())];
+  return row?.key[0] === 'acpCapabilitySources' ? (row.value as AcpCapabilitySources) : undefined;
 }
 
 export function getMachineFlockAcpCapabilities(
@@ -1149,6 +1167,10 @@ export function parseMachineFlockRow(
       const summary = normalizeAgentConfigListSummary(value);
       return summary ? { key: parsedKey.key, value: summary } : undefined;
     }
+    case 'acpCapabilitySources':
+      return isRecord(value) && isNonEmptyString(value.epoch) && isStringRecord(value.versions)
+        ? { key: parsedKey.key, value: { epoch: value.epoch, versions: value.versions } }
+        : undefined;
     case 'acpCapability':
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':

@@ -72,6 +72,7 @@ const MACHINE_META_VISIBLE_KEYS: readonly (keyof MachineViewMeta)[] = [
   'rpcVersion',
   'supportsLocalProjectHistoryRpc',
   'protocolCapabilities',
+  'acpCapabilitySourceEpoch',
   'raceLimits',
 ] as const;
 

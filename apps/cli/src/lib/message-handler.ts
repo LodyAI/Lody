@@ -1,3 +1,7 @@
+import { AcpCapabilitySourcePublisher } from './acp-capability-source-publisher';
+import { listMergedAgentConfigs } from './agent-config-machine-flock';
+import { getExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
+import { subscribeManagedRuntimeInstallationChanges } from '@/agent/managed-agent-runtime';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -840,6 +844,9 @@ export class MessageHandler {
   private readonly deleteInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
+  private readonly acpCapabilitySourceEpoch = uuidV4();
+  private acpCapabilitySourcePublisher: AcpCapabilitySourcePublisher;
+  private unsubscribeRuntimeInstallation: () => void;
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
   // so a file is never backfilled by two concurrent workers (re-enqueue dedupe).
@@ -3199,15 +3206,65 @@ export class MessageHandler {
       sync: this.workspaceDocument,
       logger: this.logger,
     });
+    this.acpCapabilitySourcePublisher = new AcpCapabilitySourcePublisher({
+      epoch: this.acpCapabilitySourceEpoch,
+      resolveVersions: async () => {
+        const configs = await listMergedAgentConfigs(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          [this.machineId]
+        );
+        const versions: Record<string, string> = {};
+        // Bounded disk reads; no agent launches or additional room subscriptions.
+        for (const providerConfig of configs) {
+          if (providerConfig.machineId !== this.machineId) continue;
+          try {
+            const version = await getExpectedAcpCapabilitySourceVersion(providerConfig);
+            if (version) versions[providerConfig.id] = version;
+          } catch {
+            /* An unresolved source is unknown, not evidence from an old probe. */
+          }
+        }
+        return versions;
+      },
+      publish: async (snapshot, isCurrent) => {
+        const handle = await this.workspaceDocument.repo.openFlockDoc(
+          this.getMachineFlockDocIdForMachine()
+        );
+        if (!isCurrent()) return;
+        if (
+          writeMachineFlockRowToFlock(handle.flock, {
+            key: machineFlockKeys.acpCapabilitySources(),
+            value: snapshot,
+          })
+        ) {
+          await this.workspaceDocument.repo.flush();
+          this.workspaceDocument.markMachineFlockDocDirty(this.machineId, {
+            reason: 'acp-capability-sources',
+          });
+        }
+      },
+      onError: (error) =>
+        this.logger.debug(`ACP source publication failed: ${formatErrorMessage(error)}`),
+    });
+    this.unsubscribeRuntimeInstallation = subscribeManagedRuntimeInstallationChanges(() =>
+      this.acpCapabilitySourcePublisher.refresh()
+    );
     this.machineFlockCommandWatcher = new MachineFlockCommandWatcher({
       repo: this.workspaceDocument.repo,
       docId: this.getMachineFlockDocIdForMachine(),
       logContext: this.getMachineFlockLogContext(),
       waitForRemoteAuthority: this.cloudPort.kind !== 'local',
       logger: this.logger,
-      onEvents: (events, { authoritative }) =>
-        this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
-      onReady: () => this.rescanMachineCommands(),
+      onEvents: (events, { authoritative }) => {
+        if (events.some((event) => event.key[0] === 'agentConfig'))
+          this.acpCapabilitySourcePublisher.refresh();
+        this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative);
+      },
+      onReady: () => {
+        this.acpCapabilitySourcePublisher.refresh();
+        this.rescanMachineCommands();
+      },
     });
     this.previewService = new PreviewService({
       logger: this.logger,
@@ -3585,6 +3642,7 @@ export class MessageHandler {
    */
   async ensureMachineRegistered(): Promise<void> {
     try {
+      await this.acpCapabilitySourcePublisher.start();
       const machineRoomId = getMachineRoomId(this.machineId);
       const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
         | MachineMeta
@@ -3610,6 +3668,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        acpCapabilitySourceEpoch: this.acpCapabilitySourceEpoch,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -6076,6 +6135,7 @@ export class MessageHandler {
    */
   async registerMachine(): Promise<void> {
     try {
+      await this.acpCapabilitySourcePublisher.start();
       const supportsStreamsRpc = !!this.machineRpcServer;
       // Restore the machine document first to ensure it's marked as online
       await this.workspaceDocument.restoreMachineDocument(this.machineId);
@@ -6101,6 +6161,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        acpCapabilitySourceEpoch: this.acpCapabilitySourceEpoch,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });
@@ -9638,6 +9699,8 @@ export class MessageHandler {
     this.deleteWatchHandle?.unsubscribe();
     this.deleteWatchHandle = null;
     this.machineFlockCommandWatcher.stop();
+    this.unsubscribeRuntimeInstallation();
+    await this.acpCapabilitySourcePublisher.stop();
     this.providerSetupManager.stop();
     this.sessionActivePresence.clearAll();
     // Terminating sessions is the producer barrier: agent callbacks may still

@@ -209,3 +209,27 @@ describe('machine Flock machine meta overlay', () => {
     expect(mergeMachineFlockMachineMeta(machines, new Map())).toBe(machines);
   });
 });
+
+it('overlays source-only publications independently of capability rows', () => {
+  const machineId = 'machine-1' as MachineId;
+  const machine: MachineViewMeta = {
+    id: machineId,
+    name: 'Machine',
+    cliVersion: '',
+    os: '',
+    sessions: [],
+    raceLimits: {},
+    acpCapabilitySourceEpoch: 'daemon-2',
+  };
+  const row = {
+    key: machineFlockKeys.acpCapabilitySources(),
+    value: { epoch: 'daemon-2', versions: { config: 'runtime-2' } },
+  };
+  const next = mergeMachineFlockMachineMeta(
+    new Map([[machineId, machine]]),
+    new Map([[machineId, { [serializeMachineFlockKey(row.key)]: row }]])
+  );
+  expect(next.get(machineId)?.acpCapabilitySources).toEqual(row.value);
+  expect(next.get(machineId)?.acpCapabilitySourceEpoch).toBe('daemon-2');
+  expect(machine.acpCapabilitySources).toBeUndefined();
+});

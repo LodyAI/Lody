@@ -13,6 +13,7 @@ import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
   machineSupportsCursorParameterizedModelPicker,
+  machineSupportsAcpCapabilitySources,
   type MachineProtocolCapabilityCarrier,
 } from './machine-protocol-capabilities';
 import {
@@ -418,6 +419,66 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
   return !sourceVersionSuffix || readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
     ? readableEntry
     : undefined;
+};
+
+/** Owner-generated snapshot; epoch binds it to the daemon advertised in MachineMeta. */
+export type AcpCapabilitySources = {
+  epoch: string;
+  versions: Record<string, string>;
+};
+
+/** A readable row can describe a launch configuration that the user has since replaced. */
+export const getReadableAcpCapabilityCacheEntryForConfig = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  config: {
+    id: AgentConfigId;
+    cliType: AgentConfigCliType;
+    agentType: string;
+    customAcp?: CustomAcpLaunchSpec;
+    runtimeOverrides?: BuiltinRuntimeOverrides;
+  },
+  machine:
+    | (MachineProtocolCapabilityCarrier & {
+        acpCapabilitySourceEpoch?: string;
+        acpCapabilitySources?: AcpCapabilitySources;
+      })
+    | null
+    | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  const readable = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    config.runtimeOverrides,
+    machine
+  );
+  if (!readable || readable.cliType !== config.cliType || readable.agentType !== config.agentType) {
+    return undefined;
+  }
+  if (machineSupportsAcpCapabilitySources(machine)) {
+    const sources = machine?.acpCapabilitySources;
+    if (
+      !sources ||
+      !machine?.acpCapabilitySourceEpoch ||
+      sources.epoch !== machine.acpCapabilitySourceEpoch ||
+      !Object.hasOwn(sources.versions, config.id) ||
+      sources.versions[config.id] !== readable.sourceVersion
+    ) {
+      return undefined;
+    }
+  }
+  if (config.cliType === 'custom') {
+    return config.customAcp &&
+      readable.sourceVersion === `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`
+      ? readable
+      : undefined;
+  }
+  if (
+    config.cliType === 'builtin' &&
+    !hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
+    readable.sourceVersion?.includes('+override:')
+  ) {
+    return undefined;
+  }
+  return readable;
 };
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (

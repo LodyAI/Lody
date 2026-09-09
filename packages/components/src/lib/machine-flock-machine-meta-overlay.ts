@@ -1,5 +1,6 @@
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockAcpCapabilitySources,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getMachineFlockRateLimits,
@@ -81,8 +82,10 @@ export function mergeMachineFlockMachineMeta(
     const localProjects = getMachineFlockLocalProjects(rows);
     const deletedLocalProjectIds = getMachineFlockDeleteLocalProjectIds(rows);
     const acpCapabilities = getMachineFlockAcpCapabilities(rows);
+    const acpCapabilitySources = getMachineFlockAcpCapabilitySources(rows);
     const rateLimits = getMachineFlockRateLimits(rows);
     if (
+      !acpCapabilitySources &&
       Object.keys(localProjects).length === 0 &&
       deletedLocalProjectIds.size === 0 &&
       Object.keys(acpCapabilities).length === 0 &&
@@ -94,6 +97,7 @@ export function mergeMachineFlockMachineMeta(
     nextMachines ??= new Map(rawMachines);
     nextMachines.set(machineId, {
       ...machine,
+      ...(acpCapabilitySources ? { acpCapabilitySources } : {}),
       ...(Object.keys(localProjects).length > 0 || deletedLocalProjectIds.size > 0
         ? {
             localProjects: mergeLocalProjects(

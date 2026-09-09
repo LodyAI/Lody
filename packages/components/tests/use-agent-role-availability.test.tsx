@@ -6,10 +6,13 @@ import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION,
   CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
   MACHINE_PROTOCOL_CAPABILITIES,
   getAcpCapabilityCacheKey,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
+  serializeCustomAcpLaunchSpec,
   getLodyMachinePresenceKey,
   machineFlockKeys,
   selectMentionableAgentRoles,
@@ -124,12 +127,14 @@ describe('useAgentRoleAvailability', () => {
     protocolCapabilities: MachineViewMeta['protocolCapabilities'] | null = {
       [MACHINE_PROTOCOL_CAPABILITIES.cursorParameterizedModelPicker]:
         CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION,
-    }
+    },
+    sourceState: Pick<MachineViewMeta, 'acpCapabilitySourceEpoch' | 'acpCapabilitySources'> = {}
   ) {
     visibleMachines.machines = new Map([
       [
         machineId,
         {
+          ...sourceState,
           id: machineId,
           name: 'Cursor machine',
           cliVersion: '0.0.0',
@@ -143,13 +148,13 @@ describe('useAgentRoleAvailability', () => {
     ]);
   }
 
-  async function publishAgentConfig() {
+  async function publishAgentConfig(config: AgentConfigMeta = agentConfig) {
     const key = machineFlockKeys.agentConfig(configId);
     await act(async () => {
       store.set(setMachineFlockRowsForMachineAtom, {
         workspaceId,
         machineId,
-        rows: { [serializeMachineFlockKey(key)]: { key, value: agentConfig } },
+        rows: { [serializeMachineFlockKey(key)]: { key, value: config } },
       });
     });
   }
@@ -217,6 +222,117 @@ describe('useAgentRoleAvailability', () => {
       expect(savedRole.runConfig).toEqual(selection(legacyModelId));
     }
   );
+
+  it.each([currentModelId, 'new-model'])(
+    'keeps Role %s unknown after a custom provider command changes',
+    async (modelId) => {
+      const oldLaunch = { command: '/synthetic/old-acp', args: ['--acp'] };
+      const newLaunch = { command: '/synthetic/new-acp', args: ['--acp'] };
+      const config: AgentConfigMeta = { ...agentConfig, cliType: 'custom', customAcp: newLaunch };
+      const savedRole = role({ modelId });
+      await publishAgentConfig(config);
+      const oldEntry: AcpCapabilityCacheEntry = {
+        ...capability(),
+        cliType: 'custom',
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(oldLaunch)}`,
+      };
+      publishCapability(oldEntry);
+      await render(savedRole);
+      expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+
+      publishCapability({
+        ...oldEntry,
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(newLaunch)}`,
+        models: [{ modelId, name: modelId }],
+        configOptions: [],
+      });
+      await render(savedRole);
+      expect(snapshot).toEqual({
+        availability: { kind: 'available' },
+        mentionableIds: [savedRole.id],
+      });
+    }
+  );
+
+  it('withholds a Role after removing its builtin runtime override', async () => {
+    await publishAgentConfig({ ...agentConfig, cliType: 'builtin', agentType: 'codex' });
+    const savedRole = role({ modelId: currentModelId });
+    publishCapability({
+      ...capability(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      sourceVersion: `builtin-codex:test${getBuiltinRuntimeOverrideSourceVersionSuffix({ codexPath: '/synthetic/codex' })}`,
+    });
+    await render(savedRole);
+    expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+  });
+
+  it.each([currentModelId, 'new-model'])(
+    'keeps %s unknown across runtime changes until a matching observation arrives',
+    async (modelId) => {
+      await publishAgentConfig();
+      const savedRole = role({ modelId });
+      const expected = `new-runtime${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`;
+      const sourceState = {
+        acpCapabilitySourceEpoch: 'new-daemon',
+        acpCapabilitySources: { epoch: 'new-daemon', versions: { [configId]: expected } },
+      };
+      publishCapability(capability(), CURRENT_MACHINE_PROTOCOL_CAPABILITIES, sourceState);
+      await render(savedRole);
+      expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+
+      const fresh = {
+        ...capability(),
+        sourceVersion: expected,
+        models: [{ modelId, name: modelId }],
+        configOptions: [],
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+      };
+      publishCapability(fresh, CURRENT_MACHINE_PROTOCOL_CAPABILITIES, sourceState);
+      await render(savedRole);
+      expect(snapshot).toEqual({
+        availability: { kind: 'available' },
+        mentionableIds: [savedRole.id],
+      });
+
+      // A session from the previous runtime can finish after the new probe.
+      publishCapability(capability(), CURRENT_MACHINE_PROTOCOL_CAPABILITIES, sourceState);
+      await render(savedRole);
+      expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+    }
+  );
+
+  it.each([
+    undefined,
+    { epoch: 'previous-daemon', versions: { [configId]: capability().sourceVersion! } },
+    { epoch: 'new-daemon', versions: {} },
+  ])(
+    'keeps new-daemon Roles unknown while source discovery is missing or pending: %j',
+    async (sources) => {
+      await publishAgentConfig();
+      const savedRole = role({ modelId: currentModelId });
+      publishCapability(capability(), CURRENT_MACHINE_PROTOCOL_CAPABILITIES, {
+        acpCapabilitySourceEpoch: 'new-daemon',
+        acpCapabilitySources: sources,
+      });
+      await render(savedRole);
+      expect(snapshot).toEqual({ availability: { kind: 'unknown' }, mentionableIds: [] });
+    }
+  );
+
+  it('retains old-daemon behavior even if a previous new-daemon snapshot remains', async () => {
+    await publishAgentConfig();
+    const savedRole = role({ modelId: currentModelId });
+    publishCapability(capability(), null, {
+      acpCapabilitySourceEpoch: 'old',
+      acpCapabilitySources: { epoch: 'new', versions: {} },
+    });
+    await render(savedRole);
+    expect(snapshot).toEqual({
+      availability: { kind: 'available' },
+      mentionableIds: [savedRole.id],
+    });
+  });
 
   it('keeps a compatible older capability cache available while a fresh snapshot arrives', async () => {
     const savedRole = role({ modelId: currentModelId });
