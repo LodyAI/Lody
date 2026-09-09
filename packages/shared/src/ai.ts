@@ -47,6 +47,40 @@ export const usesAcpProvidedSessionTitle = (
   agentType: AgentType | null | undefined
 ): boolean => cliType === 'builtin' && agentType === 'claude';
 
+const isLegacyBuiltinAgentName = (value: string): value is 'claude' | 'codex' =>
+  value === 'claude' || value === 'codex';
+
+/**
+ * Resume-time session meta can still carry pre-#1221 encodings: only
+ * `agentType: claude|codex`, or `cliType: claude|codex` with no agentType.
+ * `getMetaState()` returns that raw shape. Same cases as
+ * `normalizeAcpTarget` in local-session-control.
+ */
+export const resolveSessionAgentIdentity = (
+  cliTypeValue: AgentConfigCliType | string | null | undefined,
+  agentTypeValue: AgentType | string | null | undefined
+): { cliType: AgentConfigCliType; agentType: string } | null => {
+  const cliType = typeof cliTypeValue === 'string' ? cliTypeValue.trim() : '';
+  const agentType = typeof agentTypeValue === 'string' ? agentTypeValue.trim() : '';
+
+  if (
+    (cliType === 'builtin' || cliType === 'registry' || cliType === 'custom') &&
+    agentType.length > 0
+  ) {
+    return { cliType, agentType };
+  }
+  if (!cliType && isLegacyBuiltinAgentName(agentType)) {
+    return { cliType: 'builtin', agentType };
+  }
+  if (isLegacyBuiltinAgentName(cliType) && !agentType) {
+    return { cliType: 'builtin', agentType: cliType };
+  }
+  if (isLegacyBuiltinAgentName(cliType) && isLegacyBuiltinAgentName(agentType)) {
+    return { cliType: 'builtin', agentType };
+  }
+  return null;
+};
+
 /**
  * User-defined ACP launch spec for `cliType: 'custom'` providers: the exact
  * executable + args the CLI spawns on the owning machine. Env vars come from

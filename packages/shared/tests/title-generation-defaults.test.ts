@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeTitleGenerationDefaults,
   getBuiltinTitleGenerationDefaults,
+  resolveSessionAgentIdentity,
   usesAcpProvidedSessionTitle,
   type AcpConfigOptionSummary,
 } from '../src/ai';
@@ -128,5 +129,53 @@ describe('usesAcpProvidedSessionTitle', () => {
     expect(usesAcpProvidedSessionTitle('builtin', 'kimi')).toBe(false);
     expect(usesAcpProvidedSessionTitle('registry', 'codex')).toBe(false);
     expect(usesAcpProvidedSessionTitle('custom', 'claude')).toBe(false);
+  });
+});
+
+describe('resolveSessionAgentIdentity', () => {
+  it('keeps current builtin/registry/custom encodings', () => {
+    expect(resolveSessionAgentIdentity('builtin', 'claude')).toEqual({
+      cliType: 'builtin',
+      agentType: 'claude',
+    });
+    expect(resolveSessionAgentIdentity('registry', 'codex')).toEqual({
+      cliType: 'registry',
+      agentType: 'codex',
+    });
+  });
+
+  it('maps pre-#1221 agentType-only Claude/Codex to builtin', () => {
+    expect(resolveSessionAgentIdentity(undefined, 'claude')).toEqual({
+      cliType: 'builtin',
+      agentType: 'claude',
+    });
+    expect(resolveSessionAgentIdentity('', 'codex')).toEqual({
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+  });
+
+  it('maps transitional cliType=claude|codex with no agentType to builtin', () => {
+    expect(resolveSessionAgentIdentity('claude', undefined)).toEqual({
+      cliType: 'builtin',
+      agentType: 'claude',
+    });
+    expect(resolveSessionAgentIdentity('codex', '')).toEqual({
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+  });
+
+  it('maps both-legacy encodings to builtin using agentType', () => {
+    expect(resolveSessionAgentIdentity('claude', 'codex')).toEqual({
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+  });
+
+  it('returns null for unknown or incomplete identities', () => {
+    expect(resolveSessionAgentIdentity(undefined, undefined)).toBeNull();
+    expect(resolveSessionAgentIdentity('builtin', '')).toBeNull();
+    expect(resolveSessionAgentIdentity('kimi', undefined)).toBeNull();
   });
 });

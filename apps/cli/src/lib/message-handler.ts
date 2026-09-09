@@ -41,6 +41,7 @@ import {
   isManagedBuiltinAgentType,
   sanitizeLodyInternalInstructions,
   usesAcpProvidedSessionTitle,
+  resolveSessionAgentIdentity,
   SessionCreateResponse,
   SessionChatResponse,
   SessionStatusFactory,
@@ -8934,9 +8935,11 @@ export class MessageHandler {
         return;
       }
       const allowedSources: SessionTitleSource[] = ['draft'];
-      // SessionMeta.cliType/agentType are required; agentConfigId is optional on
-      // legacy sessions. Policy must not depend on a catalog lookup.
-      if (usesAcpProvidedSessionTitle(meta?.cliType, meta?.agentType)) {
+      // getMetaState() is a raw cast: resume-time docs can still store
+      // agentType-only or cliType=claude|codex. Normalize before the Claude
+      // title predicate. Do not look up the agent-config catalog.
+      const identity = resolveSessionAgentIdentity(meta?.cliType, meta?.agentType);
+      if (usesAcpProvidedSessionTitle(identity?.cliType, identity?.agentType)) {
         allowedSources.push('generated');
       }
       const applied = await sessionDoc.setTitleIfSourceIn(sanitized, 'generated', allowedSources);

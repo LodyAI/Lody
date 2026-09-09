@@ -527,4 +527,47 @@ describe('MessageHandler title generation', () => {
     ]);
     expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
   });
+
+  it('still lets a legacy Claude session with only agentType replace a generated title', async () => {
+    const { handler, sessionDoc } = await createHandler(
+      'Earlier generated title',
+      'generated',
+      undefined,
+      { sessionAgentType: 'claude' }
+    );
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle(
+      's-claude-agent-only' as SessionId,
+      'Fix login bug'
+    );
+
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix login bug', 'generated', [
+      'draft',
+      'generated',
+    ]);
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
+  });
+
+  it('still lets a legacy Claude session with cliType claude and no agentType replace a generated title', async () => {
+    const { handler, sessionDoc } = await createHandler(
+      'Earlier generated title',
+      'generated',
+      undefined,
+      { sessionCliType: 'claude' }
+    );
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle('s-claude-cli-only' as SessionId, 'Fix login bug');
+
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix login bug', 'generated', [
+      'draft',
+      'generated',
+    ]);
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
+  });
 });
