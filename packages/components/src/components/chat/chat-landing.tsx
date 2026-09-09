@@ -6120,6 +6120,7 @@ function WorkspaceChatLanding({
               <Button
                 type="button"
                 variant="primary"
+                size="medium"
                 shape="pill"
                 icon
                 onClick={() => {

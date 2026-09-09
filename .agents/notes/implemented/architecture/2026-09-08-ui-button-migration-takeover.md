@@ -33,6 +33,12 @@ those primitives and may pass classes for layout or interaction constraints.
 Caller classes must not recreate the deleted Button's colors, typography,
 shadows, radii, or state styling.
 
+Composer submit and stop actions use the Button's `primary`, `medium`, `pill`,
+and icon choices directly. Their former `ghost` variant plus Tailwind color,
+size, radius, shadow, and press-state overrides bypassed the primitive and could
+leave the stop glyph with insufficient contrast. Landing, session, mobile-sheet,
+and Storybook compositions now select the same token-owned control treatment.
+
 ## Integration evidence
 
 The original PR is commit `11ef421f86c29fe50773c6c101bf129839368c3c`,

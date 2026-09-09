@@ -257,11 +257,6 @@ export function ChatLandingView({
     'border-border bg-background/70 text-foreground hover:bg-muted/60'
   );
 
-  const primaryActionButtonClassName = cn(
-    'h-8 w-8 rounded-full shadow-xs transition-all',
-    'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px] focus-visible:ring-ring focus-visible:ring-offset-background'
-  );
-
   // No-agent-config hint shown in scrollable area (not as overlay)
   const agentConfigHintNode =
     hintType === 'no-agent-config' ? (
@@ -343,13 +338,13 @@ export function ChatLandingView({
     <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
       <Button
         type="button"
-        variant="ghost"
-        size="mini"
+        variant="primary"
+        size="medium"
+        shape="pill"
         icon
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
-        className={cn(primaryActionButtonClassName, isMobile ? '' : '')}
       >
         {submissionPending ? (
           <Loader2 className="h-4 w-4 animate-spin" />
