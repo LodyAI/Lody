@@ -8939,9 +8939,7 @@ export class MessageHandler {
           const agentConfigMeta = await this.workspaceDocument.getAgentConfigById(
             meta.agentConfigId
           );
-          if (
-            usesAcpProvidedSessionTitle(agentConfigMeta?.cliType, agentConfigMeta?.agentType)
-          ) {
+          if (usesAcpProvidedSessionTitle(agentConfigMeta?.cliType, agentConfigMeta?.agentType)) {
             allowedSources.push('generated');
           }
         } catch (error) {
@@ -8950,11 +8948,7 @@ export class MessageHandler {
           );
         }
       }
-      const applied = await sessionDoc.setTitleIfSourceIn(
-        sanitized,
-        'generated',
-        allowedSources
-      );
+      const applied = await sessionDoc.setTitleIfSourceIn(sanitized, 'generated', allowedSources);
       if (applied) {
         this.logger.debug(`[${sessionId}] Session title updated from agent: ${sanitized}`);
       }
