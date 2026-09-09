@@ -36,6 +36,8 @@ const createHandler = async (
   latestMeta?: { title?: string; titleSource?: SessionTitleSource },
   options?: {
     agentConfigId?: string;
+    sessionCliType?: string;
+    sessionAgentType?: string;
     agentConfigMeta?: {
       titleGeneration?: { configOptionValues: Record<string, string> };
       cliType?: string;
@@ -52,6 +54,8 @@ const createHandler = async (
         title: metaTitle ?? undefined,
         titleSource,
         agentConfigId: options?.agentConfigId,
+        cliType: options?.sessionCliType,
+        agentType: options?.sessionAgentType,
       })
       .mockResolvedValue(latestMeta ?? { title: metaTitle ?? undefined, titleSource }),
     setTitle: vi.fn(async () => {}),
@@ -414,7 +418,9 @@ describe('MessageHandler title generation', () => {
   it('does not let a Codex explicit title replace an already generated title', async () => {
     const { handler, sessionDoc, workspaceDocument } = await createHandler(
       'Exact ping5 reply',
-      'generated'
+      'generated',
+      undefined,
+      { sessionCliType: 'builtin', sessionAgentType: 'codex' }
     );
     const titleHost = handler as unknown as {
       maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
@@ -435,7 +441,10 @@ describe('MessageHandler title generation', () => {
   });
 
   it('still lets a Codex explicit title name a draft new session', async () => {
-    const { handler, sessionDoc } = await createHandler(undefined, 'draft');
+    const { handler, sessionDoc } = await createHandler(undefined, 'draft', undefined, {
+      sessionCliType: 'builtin',
+      sessionAgentType: 'codex',
+    });
     const titleHost = handler as unknown as {
       maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
     };
@@ -479,6 +488,8 @@ describe('MessageHandler title generation', () => {
       undefined,
       {
         agentConfigId: 'agent-config-1',
+        sessionCliType: 'builtin',
+        sessionAgentType: 'claude',
         agentConfigMeta: { cliType: 'builtin', agentType: 'claude' },
       }
     );
@@ -488,7 +499,28 @@ describe('MessageHandler title generation', () => {
 
     await titleHost.maybeStoreAgentSessionTitle('s-claude' as SessionId, 'Fix login bug');
 
-    expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
+    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
+    expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix login bug', 'generated', [
+      'draft',
+      'generated',
+    ]);
+    expect(await sessionDoc.setTitleIfSourceIn.mock.results[0]?.value).toBe(true);
+  });
+
+  it('still lets a legacy Claude session without agentConfigId replace a generated title', async () => {
+    const { handler, sessionDoc, workspaceDocument } = await createHandler(
+      'Earlier generated title',
+      'generated',
+      undefined,
+      { sessionCliType: 'builtin', sessionAgentType: 'claude' }
+    );
+    const titleHost = handler as unknown as {
+      maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+    };
+
+    await titleHost.maybeStoreAgentSessionTitle('s-claude-legacy' as SessionId, 'Fix login bug');
+
+    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Fix login bug', 'generated', [
       'draft',
       'generated',

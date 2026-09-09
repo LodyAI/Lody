@@ -8934,19 +8934,10 @@ export class MessageHandler {
         return;
       }
       const allowedSources: SessionTitleSource[] = ['draft'];
-      if (meta?.agentConfigId) {
-        try {
-          const agentConfigMeta = await this.workspaceDocument.getAgentConfigById(
-            meta.agentConfigId
-          );
-          if (usesAcpProvidedSessionTitle(agentConfigMeta?.cliType, agentConfigMeta?.agentType)) {
-            allowedSources.push('generated');
-          }
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to load agent config ${meta.agentConfigId} for title source policy: ${formatErrorMessage(error)}`
-          );
-        }
+      // SessionMeta.cliType/agentType are required; agentConfigId is optional on
+      // legacy sessions. Policy must not depend on a catalog lookup.
+      if (usesAcpProvidedSessionTitle(meta?.cliType, meta?.agentType)) {
+        allowedSources.push('generated');
       }
       const applied = await sessionDoc.setTitleIfSourceIn(sanitized, 'generated', allowedSources);
       if (applied) {
