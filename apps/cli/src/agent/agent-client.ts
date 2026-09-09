@@ -1,3 +1,4 @@
+import type { LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -572,6 +573,8 @@ function extractImageGenerationContentFields(content: unknown): {
  * Synchronous: everything that needs I/O already happened in the load phase.
  */
 export interface AgentClientOptions {
+  /** Resolve logical project identity only after worktreeProject capability negotiation. */
+  resolveWorktreeProject?: () => Promise<LodyWorktreeProject>;
   sessionId: SessionId;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
@@ -636,6 +639,7 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
   private acknowledgedSteerCapability: AcknowledgedSteerCapability | null = null;
@@ -1580,6 +1584,7 @@ export class AgentClient implements acp.Client {
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
+      ...(this.worktreeProject ? { worktreeProject: this.worktreeProject } : {}),
       ...(forkSessionTurnId !== undefined
         ? { forkAtTurn: { version: 1 as const, turnId: forkSessionTurnId } }
         : {}),
@@ -1681,7 +1686,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
-    const sessionStartMeta = this.getSessionStartMeta();
+    this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
         resumeSessionId ?? 'none'
@@ -1823,6 +1828,14 @@ export class AgentClient implements acp.Client {
       workdir = target.workdir;
       resumeSessionId = target.resumeSessionId;
     }
+
+    if (
+      this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&
+      this.options.resolveWorktreeProject
+    ) {
+      this.worktreeProject = await withAbort(this.options.resolveWorktreeProject(), startupAbort);
+    }
+    const sessionStartMeta = this.getSessionStartMeta();
 
     this.logger.debug(`[${this.options.sessionId}] About to establish ACP session`);
     const newSessionStart = performance.now();

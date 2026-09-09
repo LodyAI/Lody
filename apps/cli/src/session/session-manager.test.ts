@@ -19,7 +19,7 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { Session, getDefaultSessionWorkdir } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
@@ -184,6 +184,50 @@ const createSessionInner = async (
       ): Promise<ISession>;
     }
   ).createSessionInner(config, undefined, preparedWorktree);
+
+describe('SessionManager ACP project identity', () => {
+  it.each([undefined, 'parent-session' as SessionId])(
+    'resolves the registered root for local worktree sessions, including child %s',
+    async (parentSessionId) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const localProjectId = 'local-project' as LocalProjectId;
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) => {
+        if (id !== localProjectId) throw new Error('wrong project');
+        return '/registered-project';
+      });
+      const config = createSessionConfig({
+        sessionId: 'session-project' as SessionId,
+        parentSessionId,
+        project: { kind: 'local', localProjectId, useWorktree: true },
+        workdir: '/execution-worktree',
+      });
+      const session = new Session(config, createLogger(), '/execution-worktree');
+      const callbacks = (
+        manager as unknown as {
+          buildCreateAgentConfig(
+            session: Session,
+            config: SessionConfig,
+            launch: { command: string; args: string[] }
+          ): import('./session-manager').CreateAgentConfig;
+        }
+      ).buildCreateAgentConfig(session, config, { command: 'agent', args: [] });
+      expect(await callbacks.resolveWorktreeProject?.()).toEqual({
+        version: 1,
+        originProjectPath: '/registered-project',
+      });
+    }
+  );
+});
 
 describe('SessionManager cleanup phases', () => {
   it('stops session producers before closing the workspace document', async () => {
