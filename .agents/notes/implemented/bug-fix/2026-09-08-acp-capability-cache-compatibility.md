@@ -41,7 +41,14 @@ marked rows across cache versions. A legacy daemon still accepts its unmarked ro
 commands, Role availability, and CLI dispatch share this rule. CLI refreshes the incompatible row
 and waits for the complete Flock publication before accepting its catalog.
 
+Renderer refresh catch-up uses that same owning-Machine boundary. A successfully read legacy
+Machine without the picker capability may immediately overlay Cursor's complete RPC response when
+its Flock replica is still behind. A picker-aware Machine keeps the complete Flock row instead,
+because the compatibility RPC response omits the per-model catalog; missing or unreadable Machine
+metadata also preserves that row without turning an already successful refresh into an error.
+
 Keeping exact cache-version checks in those readers would restore the original version-skew
 failure; accepting all Cursor rows would instead dispatch legacy variant IDs to the new picker.
-Regression tests cover both boundaries with synthetic cache rows and explicit publication signals.
+Regression tests cover both boundaries with synthetic cache rows, stale replicas, metadata failure,
+and explicit publication signals.
 These tests do not establish compatibility with a live Cursor service or Windows desktop runtime.
