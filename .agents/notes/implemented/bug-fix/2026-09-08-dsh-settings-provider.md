@@ -79,3 +79,12 @@ The source integration does not upgrade an already running desktop or daemon.
 After DSH #13 merged, the host pin was updated to its squash commit `5d79d5b`.
 Its tree matches the previously tested implementation commit. Synchronization with
 Lody main required no conflict resolution because main was already an ancestor.
+
+PR #515's complete Static checks log and check annotations identified one lint
+error: the settings smoke script did not await the Promise returned by `test()`.
+[DSH CI fix](https://github.com/LodyAI/acp-extension-dsh/pull/14) adds that await;
+the host now pins `38e7ee2`. Build, 11 unit tests, four runtime smoke tests, and
+extension formatting passed. Full local `pnpm check` and `pnpm format` remain
+blocked by missing workspace dependencies; scoped lint cannot reproduce the
+original type-aware diagnostic in this partial checkout. GitHub CI validates the
+complete dependency environment.
