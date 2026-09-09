@@ -7,6 +7,7 @@ import { Provider, createStore } from 'jotai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getMachineRoomId,
   machineFlockKeys,
   serializeMachineFlockKey,
@@ -300,7 +301,12 @@ describe('useMachineFlockRows', () => {
     const runtime = {
       workspaceId,
       workspaceSlug,
-      repo: { openFlockDoc: vi.fn(async () => handle) },
+      repo: {
+        getDocMeta: vi.fn(async (docId) =>
+          docId === getMachineRoomId(machineId) ? { meta: { id: machineId } } : undefined
+        ),
+        openFlockDoc: vi.fn(async () => handle),
+      },
     } as unknown as WorkspaceRuntime;
     store.set(runtimeAtom, runtime);
     store.set(currentWorkspaceIdAtom, workspaceId);
@@ -329,6 +335,18 @@ describe('useMachineFlockRows', () => {
 
     const capabilityRowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
     expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(capability);
+
+    const legacyCursorCapability = {
+      ...capability,
+      agentType: 'cursor',
+      sourceVersion: 'registry:cursor:legacy-test',
+    };
+    await resyncMachineFlockRows(runtime, machineId, {
+      requireRemoteSync: true,
+      refreshedCapability: { configId, value: legacyCursorCapability },
+    });
+    await flushMicrotasks();
+    expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(legacyCursorCapability);
   });
 
   it('keeps the complete Cursor row on refresh and observes a subsequent catalog clear', async () => {
@@ -361,10 +379,16 @@ describe('useMachineFlockRows', () => {
       },
       syncOnce: async () => ({ ok: true, transports: [] }),
     };
+    const getDocMeta = vi.fn(async () => ({
+      meta: { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+    }));
     const runtime = {
       workspaceId,
       workspaceSlug: workspaceId,
-      repo: { openFlockDoc: async () => handle },
+      repo: {
+        getDocMeta,
+        openFlockDoc: async () => handle,
+      },
     } as unknown as WorkspaceRuntime;
     store.set(runtimeAtom, runtime);
     store.set(currentWorkspaceIdAtom, workspaceId);
@@ -393,6 +417,7 @@ describe('useMachineFlockRows', () => {
 
     // An RPC can finish before the room delivers its row. The later Flock
     // observation must replace the catalog without another manual refresh.
+    getDocMeta.mockRejectedValueOnce(new Error('machine metadata temporarily unavailable'));
     await act(async () => {
       await resyncMachineFlockRows(runtime, machineId, {
         refreshedCapability: { configId, value: { ...stripped, fetchedAt: 3 } },
