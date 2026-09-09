@@ -1,0 +1,33 @@
+# Preserve ACP capabilities across cache versions
+
+Status: implemented
+Translation: pending
+
+## Abstract
+
+A newer renderer discarded a successful GPT-6 capability probe from an older local daemon because
+their cache versions differed, then silently showed a static model list. Capability readability is
+now independent from refresh freshness: parsed entries keep serving understood data while version
+or source checks may still schedule a replacement probe. Runtime-override source matching remains
+strict, and structurally invalid data remains rejected by the existing parsing boundary.
+
+## Decision
+
+- `cacheVersion` remains an exact-match freshness signal so startup and explicit refresh paths can
+  converge old entries to the current representation.
+- UI selectors, available commands, and runtime-probe authority consume any successfully parsed
+  entry, including entries with missing, older, or newer cache versions.
+- Version-specific readers adapt known incompatible fields instead of rejecting the entry. The v7
+  reader omits the pre-v7 non-Codex reasoning map whose bracket suffixes could describe context
+  windows rather than effort, while retaining that entry's models and other capabilities.
+- Runtime override matching remains an applicability gate independent of cache freshness.
+- Updating static model tables was rejected as the fix because it would only mask the same failure
+  for the currently known models and leave all other probed capabilities vulnerable to version skew.
+
+## Evidence and limits
+
+Local logs showed the Codex adapter returning GPT-6 and syncing the Machine Flock row successfully;
+the stored config-scoped row carried cache version 6 while the renderer expected version 7. Unit
+coverage separates readability from freshness and exercises missing, older, and newer version
+markers. This does not make unknown future fields readable: entries must still pass the client's
+wire or storage schema. See the [draft compatibility contract](../../../../specs/acp-capability-cache-compatibility.md).

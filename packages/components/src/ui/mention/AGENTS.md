@@ -54,7 +54,9 @@ Shared mention primitive used by composer autocomplete surfaces.
   its whitespace resolved against the INPUT's value
   (`resolveMentionInsertPrefix`), not the caller's copy of it, which can trail
   by a keystroke. Stays product-neutral: text, payload, and kind are all
-  arguments.
+  arguments. Pass an array to insert multiple mentions in one transaction; each
+  index and separator is resolved against the preceding result, then text, ranges,
+  selected values, and caret are committed together.
 - `MentionKind` stays product-neutral: `pasted_text` is the only member the
   primitive branches on, and every other kind is an opaque tag the menu chooses.
   Adding a mention category must not edit this package.

@@ -86,6 +86,16 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   When repairing skipped entries, distinguish directory read failures and account for
   `openFile` retaining index `readonly`; an openable result must not become uneditable.
 
+## Dropped files and folders
+
+- `file-drop.ts` splits one OS drop into `files` and `directories` by
+  `webkitGetAsEntry().isDirectory`; a folder is never an upload candidate.
+  `dropped-local-path.ts` is the ONE path bridge (Electron
+  `webUtils.getPathForFile`, absolute, forward-slash); web/mobile have no path,
+  so a directory drop inserts nothing. A drop commits all paths together via
+  `mentionActionsRef.insertPathMentions`, with one `dir` range per path. Preserve
+  POSIX and Windows drive roots (`/`, `C:/`) during normalization and insertion.
+
 ## ACP dispatch
 
 - Display every provider-supplied rate-limit window name with localized duration via

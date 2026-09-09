@@ -3775,6 +3775,11 @@ export class SessionExecutionService {
         );
       });
 
+    const applyTurnGitIdentity = (nextSession: ISession): boolean =>
+      nextSession.updateGitIdentity(userName, userEmail, message.userId, {
+        preferMachineIdentity: message.userId === self.deps.userId,
+      });
+
     const runReadySessionTurn = (
       readySession: ISession,
       ctx: VisibleSessionTurnContext
@@ -3790,7 +3795,7 @@ export class SessionExecutionService {
           activeSession = nextSession;
           session = nextSession;
           ctx.bindSession(nextSession);
-          nextSession.updateGitIdentity(userName, userEmail, message.userId);
+          applyTurnGitIdentity(nextSession);
         };
 
         const sessionInputBlocks = normalizeSessionInputBlocks(
@@ -4284,7 +4289,7 @@ export class SessionExecutionService {
           // After restoreMissingSession (always succeeds with ISession) or the else branch,
           // readySession is guaranteed non-null. TypeScript cannot narrow `let` through `yield*`,
           // so we assert here.
-          const resolvedSession = readySession as ISession;
+          let resolvedSession = readySession as ISession;
 
           if (!resolvedSession.agentClient?.isCreated() || !resolvedSession.acpSessionId) {
             yield* ctx.abortIfCancelled();
@@ -4304,6 +4309,28 @@ export class SessionExecutionService {
               reason: 'acp_not_ready',
               message: 'Agent session was not ready. Please try again.',
             });
+          }
+
+          if (applyTurnGitIdentity(resolvedSession)) {
+            self.deps.logger.info(
+              `[${sessionId}] Restarting ACP process to apply the turn Git identity before prompt`
+            );
+            yield* self.tryPromise(() =>
+              self.deps.sessionManager.terminateSessionForRestart(sessionId)
+            );
+            session = null;
+            resolvedSession = yield* restoreMissingSession(ctx);
+            yield* ctx.abortIfCancelled({ terminateSession: true });
+            if (!resolvedSession.agentClient?.isCreated() || !resolvedSession.acpSessionId) {
+              yield* acpReplaySuppression.release;
+              yield* self.recordKnownChatFailureAndHaltEffect({
+                sessionId,
+                sessionDoc,
+                userTurnId: executionUserTurnId,
+                reason: 'acp_not_ready',
+                message: 'Agent session was not ready after applying the turn identity.',
+              });
+            }
           }
 
           yield* runReadySessionTurn(resolvedSession, ctx);

@@ -4,13 +4,13 @@ import {
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   getAcpCapabilityCacheKey,
   getAcpCapabilityCacheEntryAuthority,
   getBuiltinDefaultModeId,
   getStaticBuiltinAcpCapabilities,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
   type AcpCapabilityAuthority,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -222,8 +222,11 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
 
   if (target.configId) {
     const key = getAcpCapabilityCacheKey(target.configId);
-    const capability = target.machine?.acpCapabilities?.[key];
-    if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
+    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+      target.machine?.acpCapabilities?.[key],
+      target.runtimeOverrides
+    );
+    if (capability) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
@@ -571,8 +574,11 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions, modelReasoningEfforts } =
-    resolveConfigOptions(target);
+  const {
+    authority: capabilityAuthority,
+    configOptions,
+    modelReasoningEfforts,
+  } = resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.

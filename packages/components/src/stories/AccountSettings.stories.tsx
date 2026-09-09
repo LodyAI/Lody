@@ -1,3 +1,4 @@
+import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
 import type { Meta, StoryObj } from '@storybook/react';
 import { AccountSettingsPure } from '@/components/settings';
 import type { AccountSettingsPureProps } from '@/components/settings';
@@ -219,5 +220,31 @@ export const DarkModeWithInvitations: Story = {
   },
   args: {
     pendingInvitations: mockPendingInvitations,
+  },
+};
+
+export const OwnershipTransfer: Story = {
+  args: {
+    surface: 'workspace',
+    workspaceOwnershipSlot: (
+      <WorkspaceOwnershipTransfer
+        workspaceName={mockOrganization.name}
+        currentUserId={mockCurrentUser.id}
+        members={mockMembers}
+        onTransfer={noop}
+      />
+    ),
+  },
+};
+
+export const AfterOwnershipTransfer: Story = {
+  args: {
+    surface: 'workspace',
+    role: 'member',
+    hasAdminPermission: false,
+    members: mockMembers.map((member) => ({
+      ...member,
+      role: member.userId === 'user-2' ? 'owner' : 'member',
+    })),
   },
 };

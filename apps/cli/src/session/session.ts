@@ -112,6 +112,12 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private agentProcess: SessionProcessHandle | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
+  private agentGitIdentitySnapshot: {
+    authorName: string;
+    authorEmail: string;
+    committerName: string;
+    committerEmail: string;
+  } | null = null;
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
@@ -238,7 +244,19 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async terminate(force: boolean = false): Promise<void> {
-    this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
+    await this.terminateInternal(force, true);
+  }
+
+  async terminateForRestart(force: boolean = true): Promise<void> {
+    await this.terminateInternal(force, false);
+  }
+
+  private async terminateInternal(force: boolean, publishLifecycle: boolean): Promise<void> {
+    this.logger.debug(
+      `[${this.sessionId}] Terminating session${force ? ' (force)' : ''}${
+        publishLifecycle ? '' : ' for internal restart'
+      }`
+    );
     this.status = 'stopping';
 
     if (this.acpSessionId && this.terminalManager.disposeAll) {
@@ -295,17 +313,20 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     this.activeProcess = null;
     this.agentProcess = null;
+    this.agentGitIdentitySnapshot = null;
     this.agentClient = null;
     this.acpSessionId = null;
     this.acpCapabilities = null;
 
     this.status = 'terminated';
 
-    const event: SessionExitEvent = {
-      sessionId: this.sessionId,
-      exitCode: activeProcess?.child.exitCode ?? 0,
-    };
-    this.emit('terminated', event);
+    if (publishLifecycle) {
+      const event: SessionExitEvent = {
+        sessionId: this.sessionId,
+        exitCode: activeProcess?.child.exitCode ?? 0,
+      };
+      this.emit('terminated', event);
+    }
   }
 
   /**
@@ -369,13 +390,20 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
    */
-  updateGitIdentity(userName: string, userEmail: string, userId?: string): void {
+  updateGitIdentity(
+    userName: string,
+    userEmail: string,
+    userId: string | undefined,
+    options: { preferMachineIdentity: boolean }
+  ): boolean {
     const configEnv = this.config.env ?? {};
     // Set git identity using Git's recognized environment variables directly
     const { name, email } = resolveSessionGitIdentity(
       { name: userName, email: userEmail },
-      undefined,
-      this.getWorkdir()
+      {
+        preferMachineIdentity: options.preferMachineIdentity,
+        cwd: this.getWorkdir(),
+      }
     );
     configEnv.GIT_AUTHOR_NAME = name;
     configEnv.GIT_COMMITTER_NAME = name;
@@ -388,6 +416,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       email,
     };
     this.logger.debug(`[${this.sessionId}] Git identity updated: ${name} <${email}>`);
+    return (
+      this.agentGitIdentitySnapshot !== null &&
+      (this.agentGitIdentitySnapshot.authorName !== name ||
+        this.agentGitIdentitySnapshot.authorEmail !== email ||
+        this.agentGitIdentitySnapshot.committerName !== name ||
+        this.agentGitIdentitySnapshot.committerEmail !== email)
+    );
   }
 
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
@@ -485,6 +520,12 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       callbacks.command,
       this.buildShellEnv(callbacks.env, loginShellEnv)
     );
+    this.agentGitIdentitySnapshot = {
+      authorName: env.GIT_AUTHOR_NAME ?? '',
+      authorEmail: env.GIT_AUTHOR_EMAIL ?? '',
+      committerName: env.GIT_COMMITTER_NAME ?? '',
+      committerEmail: env.GIT_COMMITTER_EMAIL ?? '',
+    };
     const launcher: AcpLauncher = resolveAcpLauncher(callbacks.command);
     const spawnAnalyticsProps = {
       cliType: callbacks.cliType,

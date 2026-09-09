@@ -1144,6 +1144,109 @@ describe('SessionExecutionService', () => {
     expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
   });
 
+  it('restores the ACP process before prompting when the turn Git identity changed', async () => {
+    const sessionId = 'session-requester-switch' as SessionId;
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-2', role: 'user', status: 'pending', read: false },
+    ];
+    const oldPrompt = vi.fn(async () => ({}));
+    const oldSession = {
+      sessionId,
+      acpSessionId: 'acp-owner' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: oldPrompt,
+        currentModel: undefined,
+      },
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(() => true),
+      createAgent: vi.fn(async () => 'acp-owner'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const restoredPrompt = vi.fn(async () => ({}));
+    const restoredSession = {
+      ...oldSession,
+      acpSessionId: 'acp-owner' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: restoredPrompt,
+        currentModel: undefined,
+      },
+      updateGitIdentity: vi.fn(() => false),
+    };
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        isArchived: false,
+        acpSessionId: 'acp-owner' as ACPSessionId,
+      })),
+      setStatus: vi.fn(async () => {}),
+      setLastMessageAt: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const terminateSession = vi.fn(async () => {});
+    const terminateSessionForRestart = vi.fn(async () => {});
+    const createSession = vi.fn(async () => restoredSession);
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => oldSession),
+        getPendingSession: vi.fn(() => null),
+        createSession,
+        setSessionError: vi.fn(),
+        terminateSession,
+        terminateSessionForRestart,
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrOpenSessionCode: vi.fn(async () => null),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'continue', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-user-2',
+      userId: 'user-2',
+      userName: 'Teammate',
+      userEmail: 'teammate@example.com',
+    });
+
+    expect(terminateSessionForRestart).toHaveBeenCalledWith(sessionId);
+    expect(terminateSession).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterUserId: 'user-2',
+        userEmail: 'teammate@example.com',
+      }),
+      { resumeSessionId: 'acp-owner' }
+    );
+    expect(oldPrompt).not.toHaveBeenCalled();
+    expect(restoredPrompt).toHaveBeenCalledOnce();
+    expect(terminateSessionForRestart.mock.invocationCallOrder[0]).toBeLessThan(
+      restoredPrompt.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+  });
+
   // An adapter that swallows an upstream failure (an over-context request answered
   // with HTTP 400 is the observed case) resolves the prompt as if the turn had
   // succeeded. Without the no-output guard that walked the whole success path and

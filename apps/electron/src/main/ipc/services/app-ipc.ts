@@ -13,6 +13,7 @@ import {
   type WindowBadgeInput
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
+import { getDevbarConfig, getDevbarMetrics } from '../../services/devbar-service'
 import { setMenuLanguage } from '../../menu'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
 import { parseWindowBadge } from '../../services/window-badge-service'
@@ -90,6 +91,16 @@ export function installNativeThemeWatch(): void {
 
 export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
+
+  @IpcMethod()
+  async getDevbarConfig() {
+    return getDevbarConfig()
+  }
+
+  @IpcMethod()
+  async getDevbarMetrics() {
+    return getDevbarMetrics()
+  }
 
   @IpcMethod()
   async getFullscreen() {

@@ -29,8 +29,9 @@ import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import {
+  collectConversationMessages,
   getAgentConfigRoomId,
   getLodySessionPresenceKey,
   getMachineRoomId,
@@ -39,6 +40,7 @@ import {
   SESSION_GOAL_COMMANDS,
   type AgentConfigId,
   type AgentConfigMeta,
+  type ConversationMessage,
   type LodyPresenceInstanceId,
   type LocalProjectId,
   type MachineId,
@@ -61,6 +63,12 @@ import {
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import {
+  MessageSelectionContext,
+  MessageSelectionToolbar,
+  useMessageSelection,
+} from '@/components/ai-gui/message-selection';
+import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import {
   FloatingPermissionRequest,
   hasPendingPermissionRequest,
@@ -117,6 +125,7 @@ const STORY_AGENT_CONFIG_ID = 'agent-storybook-session-page' as AgentConfigId;
 const STORY_LOCAL_PROJECT_ID = 'local:lody' as LocalProjectId;
 const STORY_AUTH_TOKEN = 'storybook-token';
 const STORY_USER_ID = 'user-storybook-session-page';
+const STORY_COLLABORATOR_ID = 'user-storybook-collaborator';
 
 const storyPlatform = createLocalPlatformProvider({
   session: createStaticStore({
@@ -218,6 +227,11 @@ const usersById: Record<
     name: 'Zixuan',
     image: null,
     email: 'zixuan@example.com',
+  },
+  [STORY_COLLABORATOR_ID]: {
+    name: 'Maya Chen',
+    image: null,
+    email: 'maya.chen@example.com',
   },
 };
 
@@ -397,6 +411,112 @@ const baseMessages = (): SessionHistoryParsed[] => [
     ],
   }),
 ];
+
+const collaborativeMessages = (): SessionHistoryParsed[] => [
+  buildMessage({
+    id: 'collaborative-user-zixuan',
+    role: 'user',
+    userId: STORY_USER_ID,
+    timestamp: '2026-07-09T09:31:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: 'Could you keep the sender visible next to the timestamp in shared conversations?',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'collaborative-assistant',
+    role: 'assistant',
+    timestamp: '2026-07-09T09:31:20.000Z',
+    finished: true,
+    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    items: [
+      {
+        type: 'text',
+        text: 'Yes. Each user message now keeps its sender name in the metadata row.',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'collaborative-user-maya',
+    role: 'user',
+    userId: STORY_COLLABORATOR_ID,
+    timestamp: '2026-07-09T09:33:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: 'And clicking my avatar on desktop should show my contact card.',
+      },
+    ],
+  }),
+];
+
+const buildShareHistory = (): SessionHistoryParsed[] => {
+  const turns: [string, string][] = [
+    [
+      'Why does searching the product list rerender every row?',
+      'The filter runs on every render and creates a new array. Keep the query as state and derive the visible products with `useMemo`.\n\n```tsx\nconst visibleProducts = useMemo(\n  () => products.filter(product => product.name.includes(query)),\n  [products, query],\n);\n```',
+    ],
+    [
+      'What about the row components?',
+      'Wrap `ProductRow` in `memo` and keep its props stable. Use the product ID as the key, and pass a stable selection callback.',
+    ],
+    [
+      'Will that also help when I select a product?',
+      'Only rows whose selected state changes should rerender. Pass a boolean to each row instead of the entire selection set.\n\n```tsx\n<ProductRow\n  key={product.id}\n  product={product}\n  selected={selectedIds.has(product.id)}\n  onSelect={onSelect}\n/>\n```',
+    ],
+    [
+      'How should we verify the change?',
+      'Record the same search interaction in the React Profiler before and after the change.\n\n| Interaction | Expected result |\n| --- | --- |\n| Update search | Filter recomputes |\n| Select a product | Changed rows render |\n| Open a toolbar menu | Product rows stay stable |',
+    ],
+    [
+      'Are there any tradeoffs?',
+      'Memoization retains the previous result and compares dependencies. Keep the optimization where profiling shows a benefit; do not add custom equality functions without measuring them.',
+    ],
+    [
+      'Give me the final checklist.',
+      '1. Keep the original products unchanged.\n2. Derive filtered products from `products` and `query`.\n3. Memoize rows with stable props.\n4. Compare profiler recordings for the same interactions.',
+    ],
+  ];
+  return turns.flatMap(([question, answer], index) => [
+    buildMessage({
+      id: `share-user-${index}`,
+      role: 'user',
+      userId: STORY_USER_ID,
+      items: [{ type: 'text', text: question }],
+    }),
+    buildMessage({
+      id: `share-assistant-${index}`,
+      finished: true,
+      modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+      items: [
+        {
+          type: 'thought',
+          text: 'Inspect the product list and compare the props passed to each row.',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: `share-read-${index}`,
+          title: 'Read src/ProductList.tsx',
+          kind: 'read',
+          status: 'completed',
+          rawInput: { path: 'src/ProductList.tsx' },
+          content: [
+            {
+              type: 'content',
+              content: {
+                type: 'text',
+                text: 'const visibleProducts = products.filter(product => product.name.includes(query));',
+              },
+            },
+          ],
+        },
+        { type: 'text', text: answer },
+      ],
+    }),
+  ]);
+};
 
 const buildWorkingHistory = (streamChunkCount: number): SessionHistoryParsed[] => {
   const messages = baseMessages();
@@ -810,17 +930,21 @@ const buildHistory = (
 const toStreamItems = (sessionId: SessionId, messages: SessionHistoryParsed[]) =>
   messages.map((message) => ({ type: 'message', sessionId, message }) as const);
 
-const renderMessageRow = ({
-  message,
-  sessionId,
-}: {
-  message: SessionHistoryParsed;
-  sessionId: SessionId;
-}) => (
+const renderMessageRow = (
+  {
+    message,
+    sessionId,
+  }: {
+    message: SessionHistoryParsed;
+    sessionId: SessionId;
+  },
+  showSenderIdentity = false
+) => (
   <MessageRowView
     message={message}
     sessionId={sessionId}
     user={message.userId ? usersById[message.userId] : undefined}
+    showSenderIdentity={showSenderIdentity}
     capacityRetry={
       message.id === 'capacity-failure'
         ? {
@@ -910,7 +1034,17 @@ function StoryInfoBar({ session }: { session: SessionMeta }) {
   );
 }
 
-function StoryComposer({ session, isAgentBusy }: { session: SessionMeta; isAgentBusy: boolean }) {
+function StoryComposer({
+  session,
+  isAgentBusy,
+  onSendMessage,
+  initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
+}: {
+  session: SessionMeta;
+  isAgentBusy: boolean;
+  onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
+  initialInputText?: string;
+}) {
   const [mode, setMode] = useState<string | null>(selectorOptions.modeOptions[0]?.value ?? null);
   const [model, setModel] = useState<string | null>(selectorOptions.modelOptions[0]?.value ?? null);
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
@@ -943,10 +1077,10 @@ function StoryComposer({ session, isAgentBusy }: { session: SessionMeta; isAgent
       onConfigOptionChange={(configId, value) =>
         setConfigValues((prev) => ({ ...prev, [configId]: value }))
       }
-      onSendMessage={async () => true}
+      onSendMessage={onSendMessage ?? (async () => true)}
       onStop={action}
       onRemoveQueueItem={async () => undefined}
-      initialInputText="Tighten the mobile spacing after the permission flow is stable."
+      initialInputText={initialInputText}
       disableImageUpload
     />
   );
@@ -957,15 +1091,32 @@ function StoryShell({
   frame,
   dropActive = false,
   showCapacityRetry = false,
+  shareImage = false,
+  showCollaborators = false,
 }: {
   state: PageState;
   frame: DeviceFrame;
   dropActive?: boolean;
   showCapacityRetry?: boolean;
+  shareImage?: boolean;
+  showCollaborators?: boolean;
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
-  const session = useMemo(() => buildSession(state, frame), [frame, state]);
+  const session = useMemo(
+    () => ({
+      ...buildSession(state, frame),
+      ...(shareImage
+        ? { title: 'Product list rendering performance' }
+        : showCollaborators
+          ? { title: 'Shared conversation' }
+          : {}),
+    }),
+    [frame, state, shareImage, showCollaborators]
+  );
+  const selection = useMessageSelection(session.id);
+  const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
+  const [sentMessages, setSentMessages] = useState<SessionHistoryParsed[]>([]);
   const store = useMemo(() => createStoryStore(session, state), [session, state]);
   useEffect(() => {
     setStreamChunkCount(0);
@@ -984,8 +1135,13 @@ function StoryShell({
     return () => window.clearInterval(interval);
   }, [state]);
   const history = useMemo(
-    () => buildHistory(state, streamChunkCount, showCapacityRetry),
-    [showCapacityRetry, state, streamChunkCount]
+    () =>
+      shareImage
+        ? [...buildShareHistory(), ...sentMessages]
+        : showCollaborators
+          ? collaborativeMessages()
+          : buildHistory(state, streamChunkCount, showCapacityRetry),
+    [shareImage, sentMessages, showCapacityRetry, showCollaborators, state, streamChunkCount]
   );
   const permissionHistory = history as unknown as SessionDoc['history'];
   const liveStatus =
@@ -1148,6 +1304,17 @@ function StoryShell({
       onCopyUrl={action}
       sharing={storySharing}
       onShareWithTeam={action}
+      onShareAsImage={
+        shareImage
+          ? () =>
+              selection.start(
+                collectConversationMessages(
+                  history.map((message) => ({ ...message, fileDiff: message.fileDiff ?? [] }))
+                ),
+                setPreview
+              )
+          : undefined
+      }
       onOpenSearch={action}
       onFork={action}
       onRename={action}
@@ -1169,11 +1336,16 @@ function StoryShell({
                 'text-foreground',
                 // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
                 // h-full resolves and the conversation fills the real height.
-                frame === 'mobile' ? 'h-dvh w-full bg-background' : 'h-dvh bg-muted/35 p-4 sm:p-6'
+                frame === 'mobile' || shareImage
+                  ? 'h-dvh w-full bg-background'
+                  : 'h-dvh bg-muted/35 p-4 sm:p-6'
               )}
             >
               <div
-                className={cn('overflow-hidden bg-background', frameClassName)}
+                className={cn(
+                  'overflow-hidden bg-background',
+                  shareImage ? 'h-full w-full' : frameClassName
+                )}
                 style={
                   frame === 'mobile'
                     ? ({ '--conversation-top-inset': '3rem' } as CSSProperties)
@@ -1218,7 +1390,7 @@ function StoryShell({
                       <SessionTabBar
                         variant="session"
                         parentSession={session}
-                        childSessions={[childSession]}
+                        childSessions={shareImage ? [] : [childSession]}
                         draftTabs={[]}
                         archivedChildSessions={[]}
                         activeTabSessionId={session.id}
@@ -1239,20 +1411,22 @@ function StoryShell({
                   bodySlot={
                     <SessionConversationPageBody
                       streamSlot={
-                        <SessionChatStreamView
-                          sessionId={session.id}
-                          items={toStreamItems(session.id, history)}
-                          renderMessageRow={renderMessageRow}
-                          className="h-full"
-                          agentActivityLabel={
-                            isWorking
-                              ? translate('sessions.statusIndicator.thinking', 'Thinking')
-                              : shouldShowPermissionSurface
-                                ? 'Waiting for your response'
-                                : null
-                          }
-                          agentActivityTone={shouldShowPermissionSurface ? 'warning' : 'primary'}
-                        />
+                        <MessageSelectionContext.Provider value={selection.context}>
+                          <SessionChatStreamView
+                            sessionId={session.id}
+                            items={toStreamItems(session.id, history)}
+                            renderMessageRow={(row) => renderMessageRow(row, showCollaborators)}
+                            className="h-full"
+                            agentActivityLabel={
+                              isWorking
+                                ? translate('sessions.statusIndicator.thinking', 'Thinking')
+                                : shouldShowPermissionSurface
+                                  ? 'Waiting for your response'
+                                  : null
+                            }
+                            agentActivityTone={shouldShowPermissionSurface ? 'warning' : 'primary'}
+                          />
+                        </MessageSelectionContext.Provider>
                       }
                       permissionSlot={
                         <FloatingPermissionRequest
@@ -1264,14 +1438,58 @@ function StoryShell({
                       composerSlot={
                         shouldShowPermissionSurface ? null : (
                           <>
-                            {/* Mirrors the production info bar (cluster + stage)
+                            <div hidden={selection.active}>
+                              {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
-                            <StoryInfoBar session={session} />
-                            <StoryComposer session={session} isAgentBusy={isWorking} />
+                              <StoryInfoBar session={session} />
+                              <StoryComposer
+                                session={session}
+                                isAgentBusy={isWorking}
+                                initialInputText={
+                                  shareImage
+                                    ? 'Can we compare the profiler results next?'
+                                    : undefined
+                                }
+                                onSendMessage={
+                                  shareImage
+                                    ? async (blocks) => {
+                                        const text = blocks
+                                          .filter((block) => block.type === 'text')
+                                          .map((block) => block.text)
+                                          .join('\n');
+                                        if (!text.trim()) return false;
+                                        setSentMessages((current) => [
+                                          ...current,
+                                          buildMessage({
+                                            id: `share-sent-${current.length}`,
+                                            role: 'user',
+                                            userId: STORY_USER_ID,
+                                            items: [{ type: 'text', text }],
+                                          }),
+                                        ]);
+                                        return true;
+                                      }
+                                    : undefined
+                                }
+                              />
+                            </div>
+                            <MessageSelectionToolbar selection={selection} />
                           </>
                         )
                       }
                     />
+                  }
+                  trailingSlot={
+                    shareImage ? (
+                      <ChatShareImageDialog
+                        open={preview !== null}
+                        onOpenChange={(open) => {
+                          if (!open) setPreview(null);
+                        }}
+                        session={session}
+                        messages={preview ?? []}
+                      />
+                    ) : undefined
                   }
                 />
                 {frame === 'mobile' ? (
@@ -1407,6 +1625,35 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DesktopIdle: Story = {
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopMultipleSenders: Story = {
+  args: { showCollaborators: true },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopSenderProfileCard: Story = {
+  args: { showCollaborators: true },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', { name: 'View profile for Maya Chen' })
+    );
+  },
+};
+
+export const DesktopShareImage: Story = {
+  args: { shareImage: true },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopShareImageDark: Story = {
+  args: { shareImage: true },
   globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
 };

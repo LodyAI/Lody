@@ -4,6 +4,14 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Workspace membership refresh
+
+The cross-domain Better Auth `updateSession()` action returns `void`: it notifies
+the session store synchronously. Chaining `.then()` crashes after a successful
+ownership transfer, before organization permissions refresh. The membership hook
+therefore calls it directly and separately notifies `$activeOrgSignal`. Its tests
+use the plugin's actual action so a Promise-returning mock cannot hide this error.
+
 ## Conversation scrolling (`use-sticky-scroll.ts`)
 
 `virtua` owns mounted rows, measurement, and index navigation. `use-stick-to-bottom`

@@ -124,6 +124,7 @@ import { captureSessionCommandEvent } from './analytics-events';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { getCliHttpFetch } from '@/utils/http-transport';
+import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 
 type CommonOptions = CommonCommandOptions;
 
@@ -1919,22 +1920,25 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  try {
-    const readAccess = args.requester.isDelegated
-      ? canUseMachineForCliToken
-      : canRequestMachineForCliToken;
-    return await readAccess({
-      token: args.auth.token,
-      workspaceId: args.workspaceId,
-      machineId: args.machineId,
-      requesterUserId: args.requester.userId,
-      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
-    });
-  } catch (error) {
-    throw new Error(`Could not verify machine access: ${formatErrorMessage(error)}`, {
-      cause: error,
-    });
-  }
+  const readAccess = args.requester.isDelegated
+    ? canUseMachineForCliToken
+    : canRequestMachineForCliToken;
+  return await readMachineAccessWithBoundedRetry({
+    verify: async () =>
+      await readAccess({
+        token: args.auth.token,
+        workspaceId: args.workspaceId,
+        machineId: args.machineId,
+        requesterUserId: args.requester.userId,
+        ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+      }),
+    onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+      getLogger('session').warn(
+        `Machine access verification unavailable; retrying ` +
+          `(attempt=${attempt}/${maxAttempts} delayMs=${delayMs}): ${error}`
+      );
+    },
+  });
 }
 
 async function assertMachineAccess(args: {

@@ -8,7 +8,7 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 
 - `combined-mention-textarea.tsx` combines sources, hydrators, triggers, and
   `MentionInput` for chat composer usage, and exposes `mentionActionsRef`
-  (`insertSessionMention`) for drop-time insertion.
+  (`insertSessionMention` and `insertPathMentions`) for drop-time insertion.
 - `mention-registry.ts` holds the two-level menu contract: category definitions,
   candidate building, and `selectMentionMenuView`.
 - `mention-two-level-menu.tsx` renders that contract as the single `@` menu and

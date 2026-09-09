@@ -29,12 +29,20 @@ normalized to `Closes #123` by the PR policy workflow.
 
 <!-- What changed in response to that pressure. Keep this about the change set, not the motivation. -->
 
+## Visual explanation
+
 <!--
-Optional: a diagram, tree, or structural diff often explains a change faster than
-prose. Put it directly in Summary or Before / after. Examples and the rules for
-choosing a view: .agents/docs/visual-explanations.md
+Required. Agents: invoke `$show-me` and place its smallest useful view here.
+
+Complex changes must include a structural view: Mermaid, pseudocode/call tree,
+component/file tree, structural diff, image, or a linked reviewable HTML artifact.
+A change is complex when it crosses component/runtime/authority boundaries, changes
+multi-step control or data flow, or exceeds 200 changed lines. The automated policy
+enforces the 200-line floor; reviewers enforce the semantic cases.
+
+For a simple change, write `Simple change: <why a visual would not help review>`.
+Examples and selection rules: .agents/docs/visual-explanations.md
 Any supporting artifact must be reachable by reviewers; a local HTML file is not.
-Small fixes need no visual. Do not add one for ceremony.
 -->
 
 ## Before / after

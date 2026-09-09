@@ -1,0 +1,57 @@
+html[data-desktop-devbar] #root {
+  height: calc(100% - 28px);
+}
+
+html[data-desktop-devbar] #root :is(.h-screen, .h-dvh, .h-svh) {
+  height: calc(100dvh - 28px);
+}
+
+html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
+  min-height: calc(100dvh - 28px);
+}
+
+.desktop-devbar {
+  position: fixed;
+  inset: auto 0 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font:
+    10px/1.2 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-devbar-label {
+  color: var(--foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.desktop-devbar-metrics {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+}
+
+.desktop-devbar-metrics > span {
+  flex-shrink: 0;
+  text-align: right;
+  width: 13ch;
+}
+
+.desktop-devbar-metrics > span:nth-child(-n + 2) {
+  width: 9ch;
+}
+
+.desktop-devbar-metrics > span:last-child {
+  width: 23ch;
+}

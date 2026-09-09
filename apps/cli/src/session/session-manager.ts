@@ -321,7 +321,12 @@ export interface ISession {
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
    */
-  updateGitIdentity(userName: string, userEmail: string, userId?: string): void;
+  updateGitIdentity(
+    userName: string,
+    userEmail: string,
+    userId: string | undefined,
+    options: { preferMachineIdentity: boolean }
+  ): boolean;
   /**
    * Return the already-resolved effective git identity only when it belongs to
    * the requested user. Forks use this as an optimistic local fast path.
@@ -1201,7 +1206,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         sessionId
       );
       session.ghTokenInjected = prepared.session.ghTokenInjected;
-      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+      const identityRequiresRestart = session.updateGitIdentity(
+        config.userName,
+        config.userEmail,
+        config.requesterUserId,
+        {
+          preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+        }
+      );
+      if (identityRequiresRestart) {
+        this.logger.debug(
+          `[${sessionId}] Discarding prepared ACP process because its Git identity snapshot is stale`
+        );
+        await this.terminateSessionForRestart(sessionId);
+        return await this.createSessionInnerWithAgent(config, agentStart);
+      }
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1348,7 +1367,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     session.ghTokenInjected = ghTokenInjected;
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
-    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+      preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+    });
     let acpSessionId: string | undefined;
 
     const launchResolutionStartedAt = performance.now();
@@ -2078,6 +2099,25 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     await session.terminate(force);
     this.logger.debug(`[${sessionId}] Session terminated`);
+  }
+
+  /**
+   * Dispose a stale runtime so the same durable session can be restored without
+   * publishing the user-visible termination lifecycle for the in-flight turn.
+   */
+  async terminateSessionForRestart(sessionId: SessionId): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      this.logger.debug(`Session ${sessionId} not found for internal restart`);
+      return;
+    }
+
+    await session.terminateForRestart(true);
+    if (this.sessions.get(sessionId) === session) {
+      this.sessions.delete(sessionId);
+    }
+    await this.rebalanceSessionSandboxes();
+    this.logger.debug(`[${sessionId}] Session runtime terminated for internal restart`);
   }
 
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {

@@ -326,6 +326,45 @@ export const isAcpCapabilityCacheEntryCurrent = (
   entry: AcpCapabilityCacheEntry | undefined
 ): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
 
+/**
+ * A parsed capability entry remains readable regardless of the producer's cache version.
+ * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
+ * keep using fields they understand while a newer probe converges the stored entry.
+ */
+export const getReadableAcpCapabilityCacheEntry = (
+  entry: AcpCapabilityCacheEntry | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  if (!entry) {
+    return undefined;
+  }
+  // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
+  // non-Codex agents. Preserve every other understood field from older entries,
+  // but do not revive the known-bad derived map while waiting for a fresh probe.
+  if (
+    (entry.cacheVersion ?? 0) < 7 &&
+    (entry.cliType !== 'builtin' || entry.agentType !== 'codex') &&
+    entry.modelReasoningEfforts
+  ) {
+    const { modelReasoningEfforts: _incompatibleModelReasoningEfforts, ...compatible } = entry;
+    return compatible;
+  }
+  return entry;
+};
+
+export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  const readableEntry = getReadableAcpCapabilityCacheEntry(entry);
+  if (!readableEntry) {
+    return undefined;
+  }
+  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
+  return !sourceVersionSuffix || readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+    ? readableEntry
+    : undefined;
+};
+
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
@@ -341,10 +380,14 @@ export const getAcpCapabilityCacheEntryAuthority = (
   entry: AcpCapabilityCacheEntry | undefined,
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): AcpCapabilityAuthority => {
-  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides)) {
+  const readableEntry = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    runtimeOverrides
+  );
+  if (!readableEntry) {
     return 'unavailable';
   }
-  return entry.provenance === 'runtime' ? 'authoritative' : 'provisional';
+  return readableEntry.provenance === 'runtime' ? 'authoritative' : 'provisional';
 };
 
 export type AcpCapabilityCacheStaleReason =

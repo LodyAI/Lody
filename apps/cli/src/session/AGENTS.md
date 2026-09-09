@@ -19,8 +19,8 @@ Contract: specs/session-orchestration.md.
   exists; retries and recovery never reread mutable history.
 - Machine and Provider credentials stay execution-host scoped; attribution, authorization,
   GitHub, and Git identity use the frozen identity, never the Session owner.
-- Commit identity MUST resolve through `CloudPort.access.resolveWorkspaceUser` before host git
-  config; a missing-email placeholder is never one, and every minting path resolves it.
+- Git identity: owner prefers machine then requester; others never read machine identity. Restart
+  stale ACP pre-prompt without lifecycle events. Resolve via `CloudPort`; reject placeholders.
 
 ## Dispatch
 

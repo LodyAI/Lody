@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import type { CliRuntimeStartupStage, ElectronCliPhase, ElectronCliState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
@@ -29,6 +29,7 @@ export function OnboardingLoadingView({
   bypassed = false,
 }: OnboardingLoadingViewProps) {
   const { t } = useTranslation();
+  const shouldReduceMotion = useReducedMotion();
 
   const reachedIndex = useMemo(() => {
     if (phase === 'running') return STARTUP_STAGES.length - 1;
@@ -94,6 +95,7 @@ export function OnboardingLoadingView({
         {STARTUP_STAGES.map((s, i) => {
           const reached = i <= reachedIndex;
           const active = i === reachedIndex && phase !== 'running';
+          const stalledProbe = bypassed && active && i < STARTUP_STAGES.length - 1;
           return (
             <li
               key={s}
@@ -102,15 +104,36 @@ export function OnboardingLoadingView({
                 reached ? 'text-foreground' : 'text-muted-foreground/60'
               )}
             >
-              <span
+              <motion.span
                 className={cn(
                   'inline-flex h-2 w-2 shrink-0 rounded-full transition-colors',
                   active
-                    ? 'animate-pulse bg-primary'
+                    ? stalledProbe || shouldReduceMotion
+                      ? 'bg-primary'
+                      : 'animate-pulse bg-primary'
                     : reached
                       ? 'bg-primary'
                       : 'bg-muted-foreground/30'
                 )}
+                data-onboarding-stalled-probe={stalledProbe ? '' : undefined}
+                animate={
+                  stalledProbe && !shouldReduceMotion
+                    ? { y: 7, scaleY: 1.35, opacity: 0.68 }
+                    : { y: 0, scaleY: 1, opacity: 1 }
+                }
+                transition={
+                  stalledProbe && !shouldReduceMotion
+                    ? {
+                        type: 'spring',
+                        stiffness: 190,
+                        damping: 9,
+                        mass: 0.55,
+                        repeat: Infinity,
+                        repeatType: 'reverse',
+                        repeatDelay: 0.35,
+                      }
+                    : { duration: 0.2 }
+                }
                 aria-hidden
               />
               <span>{stageLabel(s)}</span>

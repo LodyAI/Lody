@@ -256,4 +256,52 @@ describe('Session buildShellEnv', () => {
       (spawnedEnv?.PATH ?? '').split(delimiter).indexOf('/usr/bin')
     );
   });
+
+  it('detects when a running ACP process snapshotted a different Git identity', async () => {
+    const stopAfterCapture = new Error('stop after capturing ACP spawn environment');
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'test',
+      applyLimits: async () => {},
+      readResourceAccounting: async () => ({ kind: 'unavailable', reason: 'test' }),
+      spawn: vi.fn(async () => {
+        throw stopAfterCapture;
+      }),
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    const session = new Session(
+      createConfig({
+        env: {
+          GIT_AUTHOR_NAME: 'Machine Owner',
+          GIT_COMMITTER_NAME: 'Machine Owner',
+          GIT_AUTHOR_EMAIL: 'owner@example.com',
+          GIT_COMMITTER_EMAIL: 'owner@example.com',
+        },
+      }),
+      createSilentLogger(),
+      process.cwd(),
+      sandbox
+    );
+
+    await expect(
+      session.createAgent({
+        cliType: 'registry',
+        agentType: 'opencode',
+        command: 'opencode',
+        args: ['acp'],
+      } as CreateAgentConfig)
+    ).rejects.toBe(stopAfterCapture);
+
+    expect(
+      session.updateGitIdentity('Machine Owner', 'owner@example.com', 'user-1', {
+        preferMachineIdentity: false,
+      })
+    ).toBe(false);
+    expect(
+      session.updateGitIdentity('Teammate', 'teammate@example.com', 'user-2', {
+        preferMachineIdentity: false,
+      })
+    ).toBe(true);
+  });
 });

@@ -47,7 +47,9 @@ Core 和 Codex 最初通过根工作区的 `acp-extension-core: workspace:*` ove
 lockfile 使用注册表中的真实 tarball 和 integrity；同时修正 lockfile 根条目中
 既有 Codex 版本声明，使其与 manifest 的 ^0.153.4 一致，未升级其他依赖。
 独立临时 checkout 通过 npm ci、类型检查、构建及完整测试（579 通过、27 跳过），
-确认新契约可直接从已发布的 Core 获取。Lody 草稿同步适配器引用；未发布适配器。
+确认新契约可直接从已发布的 Core 获取。两个子模块 PR 合并后，Lody 固定到
+Core 0.1.2 发布提交 `9c47fec`，以及基于 Codex 合并提交 `400384e` 的测试修复
+提交 `89b1208`，保留 Codex 主分支新增的 goal 生命周期修复；未发布适配器。
 
 关联草稿：[Lody #534](https://github.com/LodyAI/Lody/pull/534)、
 [Core #6](https://github.com/LodyAI/acp-extension-core/pull/6)、
@@ -101,6 +103,23 @@ resume/fork 返回的会话元数据不使用该字段。
 全仓 `pnpm check` 通过，包括类型检查、lint、CI 测试和边界检查；初次沙箱运行
 因 IPC socket 的 EPERM 中断，在允许本地 socket 的环境重跑通过。`pnpm format`
 和文档检查也已执行，格式化产生的无关 Electron 测试改动已恢复。
+
+## 主分支同步与 CI
+
+主分支同步时，Lody PR 最新提交的 CI 未触发，原因是 Codex 子模块与
+session-manager 测试导入顺序的合并冲突；此前一版 CI 和 Desktop E2E 已通过。
+合入主分支、选用已合并的子模块提交并保留双方测试后恢复可合并状态；
+不修改工作流或跳过检查来规避冲突。
+
+更新后的 Codex 完整测试另发现一个测试夹具错误：`setupPromptFixture` 的
+`awaitTurnCompleted` 固定返回 `turn-id`，与 review 实际等待的 `review-turn-id`
+不一致。goal 生命周期正确地保留未完成的 turn，导致该用例超时。修复让 mock
+返回调用参数中的 threadId 和 turnId，保持每个原生 turn 的关联；不放宽运行时
+完成条件、不延长测试超时。
+
+该修复在 [Codex #36](https://github.com/LodyAI/acp-extension-codex/pull/36) 单独审查，
+Codex 完整测试从 599 通过、1 超时变为 600 通过，27 项跳过。合并后的全仓
+`pnpm check` 通过；Lody 子模块引用包含此测试修复。
 
 ## 入口
 

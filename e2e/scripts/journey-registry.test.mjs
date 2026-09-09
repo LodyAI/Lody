@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  coverageMatchesRegistry,
   journeyFingerprint,
   ownerPathMatches,
   renderCoverage,
@@ -182,5 +183,16 @@ void describe('journey registry', () => {
     });
     assert.ok(markdown.indexOf('LODY-BACKLOG-001') < markdown.indexOf('LODY-BACKLOG-002'));
     assert.match(markdown, /This file is generated from/u);
+  });
+
+  void it('accepts CRLF checkout line endings in generated coverage', () => {
+    const registry = {
+      schemaVersion: 1,
+      scoring,
+      journeys: [journey()],
+    };
+    const coverage = renderCoverage(registry);
+    assert.equal(coverageMatchesRegistry(coverage.replaceAll('\n', '\r\n'), registry), true);
+    assert.equal(coverageMatchesRegistry(`${coverage}stale`, registry), false);
   });
 });
