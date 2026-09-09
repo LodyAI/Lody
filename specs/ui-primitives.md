@@ -32,6 +32,20 @@ so a primitive responds without product code selecting raw palette values. Token
 names describe meaning and interaction role; component tokens derive from those
 semantic values or documented fixed dimensions.
 
+A forced theme applies to the subtree it is placed on, including the primitives
+inside it. A component token that derives from a semantic colour resolves against
+the palette in force on that subtree, not the palette of the document root, so two
+palettes can be shown at once on one page.
+
+## Gallery
+
+`@lody/ui` carries a gallery of its own tokens and primitives. It presents each
+semantic token, each elevation rung, and each state a primitive exposes through
+its props, rendered in both palettes from the tokens themselves rather than from
+copied values. The gallery is the reference a person reads when choosing a token
+or a prop, and the place a new token or primitive state becomes visible; a token
+that no sample presents is a gap the package reports.
+
 ## Migration
 
 Primitives move from `@lody/components` one at a time. A legacy primitive is
@@ -49,3 +63,6 @@ migrated Button consumers in `packages/components`, Electron, and site docs.
 
 Executed validation is recorded in the linked PR and its
 [Agent Note](../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md).
+
+The gallery and the subtree palette behavior are recorded in the
+[UI token gallery note](../.agents/notes/implemented/feature/2026-09-09-ui-token-gallery.md).

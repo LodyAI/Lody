@@ -9,7 +9,8 @@
     "./tokens/colors.stylex": "./src/tokens/colors.stylex.ts",
     "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
     "./theme": "./src/theme/theme.tsx",
-    "./button": "./src/button/button.tsx"
+    "./button": "./src/button/button.tsx",
+    "./gallery": "./src/gallery/gallery.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
