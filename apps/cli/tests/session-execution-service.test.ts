@@ -14,6 +14,7 @@ import {
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
+  type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
   type AgentConfigId,
   type LocalProjectId,
@@ -6344,53 +6345,62 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('forwards a confirmed missing Cursor model catalog as a null capability write', async () => {
-    const capability = {
-      cliType: 'registry' as const,
+  const refreshCursorCapabilities = async (
+    models: AcpCapabilityCacheEntry['models'],
+    configOptionsByModel: AcpCapabilityCacheEntry['configOptionsByModel'] | null
+  ) => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'registry',
       agentType: 'cursor',
       cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-      provenance: 'runtime' as const,
+      provenance: 'runtime',
       sourceVersion: 'registry:cursor:unknown',
       modes: [],
-      models: [{ modelId: 'auto', name: 'Auto' }],
+      models,
       sessionFork: false,
       acknowledgedSteer: false,
       sessionForkWorktree: false,
       fetchedAt: 1,
+      ...(configOptionsByModel === null ? {} : { configOptionsByModel }),
     };
     const updateAcpCapabilities = vi.fn(async () => capability);
     const fetchAcpCapabilities = vi.fn(async () => ({
       modes: [],
       models: capability.models,
-      configOptionsByModel: null,
+      configOptionsByModel,
       sessionFork: false,
       acknowledgedSteer: false,
     }));
-
-    const deps = createBaseDeps({
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta: vi.fn(async () => {}),
-          getDocMeta: vi.fn(async () => undefined),
-        },
-        getOrCreateSessionDoc: vi.fn(),
-        updateAcpCapabilities,
-        getAgentConfigForMachineLaunch: vi.fn(async () =>
-          createLaunchConfig({
-            agentType: 'cursor',
-          })
-        ),
-      } as unknown as LoroDocumentManager,
-      fetchAcpCapabilities,
-    });
-
-    const service = new SessionExecutionService(deps);
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(),
+          updateAcpCapabilities,
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ agentType: 'cursor' })
+          ),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+      })
+    );
     const result = await service.refreshMachineAcpCapabilities({
       type: 'machine/acp-capabilities-refresh',
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       configId: capabilityConfigId,
     });
+    return { capability, result, updateAcpCapabilities };
+  };
+
+  it('forwards a confirmed missing Cursor model catalog as a null capability write', async () => {
+    const { capability, result, updateAcpCapabilities } = await refreshCursorCapabilities(
+      [{ modelId: 'auto', name: 'Auto' }],
+      null
+    );
 
     expect(updateAcpCapabilities).toHaveBeenCalledWith(
       'machine-1',
@@ -6431,56 +6441,17 @@ describe('SessionExecutionService', () => {
       ],
       'model-b': [],
     };
-    const storedCapability = {
-      cliType: 'registry' as const,
-      agentType: 'cursor',
-      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-      provenance: 'runtime' as const,
-      sourceVersion: 'registry:cursor:unknown',
-      modes: [],
-      models: [
+    const {
+      capability: storedCapability,
+      result,
+      updateAcpCapabilities,
+    } = await refreshCursorCapabilities(
+      [
         { modelId: 'model-a', name: 'Model A' },
         { modelId: 'model-b', name: 'Model B' },
       ],
-      sessionFork: false,
-      acknowledgedSteer: false,
-      sessionForkWorktree: false,
-      fetchedAt: 1,
-      configOptionsByModel: catalog,
-    };
-    const updateAcpCapabilities = vi.fn(async () => storedCapability);
-    const fetchAcpCapabilities = vi.fn(async () => ({
-      modes: [],
-      models: storedCapability.models,
-      configOptionsByModel: catalog,
-      sessionFork: false,
-      acknowledgedSteer: false,
-    }));
-
-    const deps = createBaseDeps({
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta: vi.fn(async () => {}),
-          getDocMeta: vi.fn(async () => undefined),
-        },
-        getOrCreateSessionDoc: vi.fn(),
-        updateAcpCapabilities,
-        getAgentConfigForMachineLaunch: vi.fn(async () =>
-          createLaunchConfig({
-            agentType: 'cursor',
-          })
-        ),
-      } as unknown as LoroDocumentManager,
-      fetchAcpCapabilities,
-    });
-
-    const service = new SessionExecutionService(deps);
-    const result = await service.refreshMachineAcpCapabilities({
-      type: 'machine/acp-capabilities-refresh',
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      configId: capabilityConfigId,
-    });
+      catalog
+    );
 
     // The catalog is written durably...
     expect(updateAcpCapabilities).toHaveBeenCalledWith(

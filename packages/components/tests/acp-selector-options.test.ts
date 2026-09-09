@@ -1375,13 +1375,17 @@ describe('plan mode selector value semantics', () => {
 });
 
 describe('per-model catalog composition', () => {
-  it('composes model b options from the catalog and keeps the snapshot model list', () => {
-    const options = buildCursorRegistryOptions({ configOptionValues: { model: 'b' } });
-    expect(selectorIds(options)).toEqual(['model', 'mode', 'reasoning', 'fast']);
-    const modelSelector = options.configOptionSelectors.find(
-      (selector) => selector.configId === 'model'
-    );
-    expect(modelSelector?.options.map((option) => option.value)).toEqual(['a', 'b', 'c']);
+  it.each([
+    ['b', ['model', 'mode', 'reasoning', 'fast']],
+    ['c', ['model', 'mode']],
+  ] as const)('composes model %s options from its catalog entry', (model, expectedIds) => {
+    const options = buildCursorRegistryOptions({ configOptionValues: { model } });
+    expect(selectorIds(options)).toEqual(expectedIds);
+    expect(
+      options.configOptionSelectors
+        .find((selector) => selector.configId === 'model')
+        ?.options.map((option) => option.value)
+    ).toEqual(['a', 'b', 'c']);
   });
 
   it('prefers the registry model config option over a stale selectedModelId', () => {
@@ -1390,11 +1394,6 @@ describe('per-model catalog composition', () => {
       configOptionValues: { model: 'b' },
     });
     expect(selectorIds(options)).toEqual(['model', 'mode', 'reasoning', 'fast']);
-  });
-
-  it('drops per-model options for a known model with an empty catalog entry', () => {
-    const options = buildCursorRegistryOptions({ configOptionValues: { model: 'c' } });
-    expect(selectorIds(options)).toEqual(['model', 'mode']);
   });
 
   it('returns the probe snapshot when the target has no model', () => {

@@ -307,20 +307,9 @@ describe('applyAcpSessionRunConfig', () => {
       logger: createLogger(),
     });
 
-    const firstCall = calls[0];
-    expect(firstCall).toEqual({ method: 'unstable_setSessionModel', value: 'model-b' });
-    const optionCalls = calls.filter((call) => call.method === 'setSessionConfigOption');
-    const modelCallIndex = calls.findIndex((call) => call.method === 'unstable_setSessionModel');
-    expect(
-      optionCalls.every((call) => {
-        const callIndex = calls.indexOf(call);
-        return callIndex > modelCallIndex && call.configId !== 'model';
-      })
-    ).toBe(true);
-    expect(optionCalls.filter((call) => call.configId === 'thinking')).toEqual([
+    expect(calls).toEqual([
+      { method: 'unstable_setSessionModel', value: 'model-b' },
       { method: 'setSessionConfigOption', configId: 'thinking', value: 'true' },
-    ]);
-    expect(optionCalls.filter((call) => call.configId === 'fast')).toEqual([
       { method: 'setSessionConfigOption', configId: 'fast', value: 'true' },
     ]);
   });
@@ -344,22 +333,10 @@ describe('applyAcpSessionRunConfig', () => {
       logger: createLogger(),
     });
 
-    expect(calls.filter((call) => call.method === 'unstable_setSessionModel')).toEqual([
+    expect(calls).toEqual([
       { method: 'unstable_setSessionModel', value: 'model-b' },
+      { method: 'setSessionConfigOption', configId: 'thinking', value: 'true' },
     ]);
-    expect(calls[0]).toEqual({ method: 'unstable_setSessionModel', value: 'model-b' });
-    const thinkingCallIndex = calls.findIndex(
-      (call) => call.method === 'setSessionConfigOption' && call.configId === 'thinking'
-    );
-    expect(thinkingCallIndex).toBeGreaterThan(0);
-    expect(calls[thinkingCallIndex]).toEqual({
-      method: 'setSessionConfigOption',
-      configId: 'thinking',
-      value: 'true',
-    });
-    expect(
-      calls.some((call) => call.method === 'setSessionConfigOption' && call.configId === 'model')
-    ).toBe(false);
   });
 
   it('keeps a failed config-option model switch debug-only and still applies remaining options', async () => {

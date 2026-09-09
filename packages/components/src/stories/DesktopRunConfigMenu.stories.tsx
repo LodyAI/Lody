@@ -7,10 +7,8 @@ import { PlatformContext } from '@lody/platform/react';
 import {
   type AgentConfigId,
   type AgentConfigMeta,
-  type AcpConfigOptionSummary,
   type MachineId,
   getAgentConfigRoomId,
-  resolveAcpConfigOptionsForModel,
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
@@ -24,6 +22,10 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+} from './cursor-parameterized-model-fixture';
 
 /**
  * The desktop composer's two consolidated footer buttons: the run-config
@@ -208,107 +210,6 @@ const grokSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
-const cursorThinking: AcpConfigOptionSummary = {
-  id: 'thinking',
-  name: 'Thinking',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'true',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorEffort: AcpConfigOptionSummary = {
-  id: 'effort',
-  name: 'Effort',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'low',
-  options: [
-    { value: 'low', name: 'Low' },
-    { value: 'high', name: 'High' },
-  ],
-};
-const cursorContext: AcpConfigOptionSummary = {
-  id: 'context',
-  name: 'Context',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-};
-const cursorFast: AcpConfigOptionSummary = {
-  id: 'fast',
-  name: 'Fast',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorReasoning: AcpConfigOptionSummary = {
-  id: 'reasoning',
-  name: 'Reasoning',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'minimal',
-  options: [
-    { value: 'minimal', name: 'Minimal' },
-    { value: 'full', name: 'Full' },
-  ],
-};
-const cursorModel: AcpConfigOptionSummary = {
-  id: 'model',
-  name: 'Model',
-  category: 'model',
-  type: 'select',
-  currentValue: 'a',
-  options: [
-    { value: 'a', name: 'A' },
-    { value: 'b', name: 'B' },
-  ],
-};
-const cursorCatalogEntry = {
-  configOptions: [cursorModel, cursorThinking, cursorEffort, cursorContext, cursorFast],
-  configOptionsByModel: {
-    a: [cursorThinking, cursorEffort, cursorContext, cursorFast],
-    b: [cursorReasoning],
-  },
-};
-const cursorModelOptions: AcpSessionSelectOption[] = [
-  { value: 'a', label: 'A' },
-  { value: 'b', label: 'B' },
-];
-
-function selectorsFromCatalog(modelId: string): AcpConfigOptionSelector[] {
-  return (resolveAcpConfigOptionsForModel(cursorCatalogEntry, modelId) ?? []).map((option) =>
-    option.type === 'boolean'
-      ? {
-          type: 'boolean' as const,
-          configId: option.id,
-          label: option.name,
-          category: option.category,
-          currentValue: option.currentValue === true,
-          options: [] as [],
-        }
-      : {
-          type: 'select' as const,
-          configId: option.id,
-          label: option.name,
-          category: option.category,
-          currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
-          options: option.options.map((entry) => ({
-            value: entry.value,
-            label: entry.name,
-            description: entry.description,
-          })),
-        }
-  );
-}
-
 function StoryShell({
   isEmptyConversation,
   machineSelected = true,
@@ -484,7 +385,7 @@ function CursorCatalogShell() {
     context: 'default',
     fast: 'false',
   });
-  const catalogSelectors = selectorsFromCatalog(model);
+  const catalogSelectors = cursorParameterizedModelSelectors(model);
 
   return (
     <Provider store={store}>
@@ -494,7 +395,7 @@ function CursorCatalogShell() {
             agentSelection={{ agentId: cursorId, machineId }}
             availableAgentConfigs={[cursorAgent]}
             agentLocked
-            modelOptions={cursorModelOptions}
+            modelOptions={cursorParameterizedModelOptions}
             selectedModelId={model}
             onModelChange={setModel}
             configOptionSelectors={catalogSelectors}

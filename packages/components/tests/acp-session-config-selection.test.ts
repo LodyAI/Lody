@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  ACP_CAPABILITY_CACHE_VERSION,
-  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
-  type AgentConfigId,
-  type MachineViewMeta,
-} from '@lody/shared';
+import { type AgentConfigId } from '@lody/shared';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
   areAcpSessionConfigPreferencesEqual,
@@ -16,6 +11,7 @@ import {
   type AcpSessionSelectorOptionsInput,
   type AcpSessionUserConfigEdits,
 } from '../src/lib/acp-session-config-selection';
+import { cursorParameterizedModelCapabilityEntry } from './helpers/cursor-parameterized-model';
 
 const emptyEdits = EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
@@ -503,64 +499,6 @@ describe('fenceAcpSessionUserEdits', () => {
 describe('filterAcpSessionConfigOptionValuesForTarget', () => {
   const configId = 'config-1' as AgentConfigId;
 
-  const cursorThinkingOption = {
-    id: 'thinking',
-    name: 'Thinking',
-    category: 'thought_level',
-    type: 'select' as const,
-    currentValue: 'false',
-    options: [
-      { value: 'false', name: 'False' },
-      { value: 'true', name: 'True' },
-    ],
-  };
-  const cursorReasoningOption = {
-    id: 'reasoning',
-    name: 'Reasoning',
-    category: 'thought_level',
-    type: 'select' as const,
-    currentValue: 'low',
-    options: [
-      { value: 'low', name: 'Low' },
-      { value: 'medium', name: 'Medium' },
-      { value: 'high', name: 'High' },
-    ],
-  };
-  const cursorModelOption = {
-    id: 'model',
-    name: 'Model',
-    category: 'model',
-    type: 'select' as const,
-    currentValue: 'a',
-    options: [
-      { value: 'a', name: 'A' },
-      { value: 'b', name: 'B' },
-    ],
-  };
-
-  const cursorCapabilityEntry = (
-    cliType: 'registry' | 'builtin',
-    agentType: string
-  ): NonNullable<MachineViewMeta['acpCapabilities']>[string] => ({
-    cliType,
-    agentType,
-    cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-    provenance: 'runtime',
-    ...(cliType === 'registry' && agentType === 'cursor'
-      ? {
-          sourceVersion: `cursor@2026.08.31${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`,
-        }
-      : {}),
-    modes: [],
-    models: [],
-    configOptions: [cursorModelOption, cursorThinkingOption],
-    configOptionsByModel: {
-      a: [cursorThinkingOption],
-      b: [cursorReasoningOption],
-    },
-    fetchedAt: 1,
-  });
-
   const registryTarget = (
     configOptionValues: Record<string, string>
   ): Parameters<typeof filterAcpSessionConfigOptionValuesForTarget>[0] => ({
@@ -569,7 +507,9 @@ describe('filterAcpSessionConfigOptionValuesForTarget', () => {
     agentType: 'cursor',
     configOptionValues,
     machine: {
-      acpCapabilities: { [configId]: cursorCapabilityEntry('registry', 'cursor') },
+      acpCapabilities: {
+        [configId]: cursorParameterizedModelCapabilityEntry('registry', 'cursor'),
+      },
     },
   });
 
@@ -597,7 +537,7 @@ describe('filterAcpSessionConfigOptionValuesForTarget', () => {
               protocolCapabilities: { cursorParameterizedModelPicker: 1 },
               acpCapabilities: {
                 [configId]: {
-                  ...cursorCapabilityEntry('registry', 'cursor'),
+                  ...cursorParameterizedModelCapabilityEntry('registry', 'cursor'),
                   sourceVersion: 'cursor@before-picker',
                 },
               },
@@ -617,7 +557,9 @@ describe('filterAcpSessionConfigOptionValuesForTarget', () => {
 
   it('selects the model through selectedModelId for a builtin target', () => {
     const machine = {
-      acpCapabilities: { [configId]: cursorCapabilityEntry('builtin', 'claude') },
+      acpCapabilities: {
+        [configId]: cursorParameterizedModelCapabilityEntry('builtin', 'claude'),
+      },
     };
     expect(
       filterAcpSessionConfigOptionValuesForTarget({

@@ -180,6 +180,28 @@ function ReviewerMachineRow({
     [commitReviewer, machine, machineAgentConfigs]
   );
 
+  const handleConfigOptionChange = (configId: string, value: AcpConfigOptionValue) => {
+    if (!reviewerConfig) {
+      return;
+    }
+    const merged = {
+      ...reviewerConfig.reviewer.configOptionValues,
+      [configId]: value,
+    };
+    const isModelSelector = selectorOptions.configOptionSelectors.some(
+      (selector) => selector.configId === configId && selector.category === 'model'
+    );
+    commitReviewer({
+      ...reviewerConfig.reviewer,
+      configOptionValues: isModelSelector
+        ? filterAcpSessionConfigOptionValuesForTarget({
+            ...selectorTarget,
+            configOptionValues: merged,
+          })
+        : merged,
+    });
+  };
+
   const selection: AgentSelection | null = selectedAgent
     ? { agentId: selectedAgent.id, machineId: machine.id }
     : null;
@@ -261,29 +283,7 @@ function ReviewerMachineRow({
               }
               configOptionSelectors={selectorOptions.configOptionSelectors}
               configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-              onConfigOptionChange={
-                reviewerConfig
-                  ? (configId: string, value: AcpConfigOptionValue) => {
-                      const merged = {
-                        ...reviewerConfig.reviewer.configOptionValues,
-                        [configId]: value,
-                      };
-                      const isModelSelector = selectorOptions.configOptionSelectors.some(
-                        (selector) =>
-                          selector.configId === configId && selector.category === 'model'
-                      );
-                      commitReviewer({
-                        ...reviewerConfig.reviewer,
-                        configOptionValues: isModelSelector
-                          ? filterAcpSessionConfigOptionValuesForTarget({
-                              ...selectorTarget,
-                              configOptionValues: merged,
-                            })
-                          : merged,
-                      });
-                    }
-                  : undefined
-              }
+              onConfigOptionChange={reviewerConfig ? handleConfigOptionChange : undefined}
             />
 
             {selectedAgent ? (
@@ -297,26 +297,7 @@ function ReviewerMachineRow({
                 }}
                 configOptionSelectors={selectorOptions.configOptionSelectors}
                 configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-                onConfigOptionChange={(configId, value) => {
-                  if (reviewerConfig) {
-                    const merged = {
-                      ...reviewerConfig.reviewer.configOptionValues,
-                      [configId]: value,
-                    };
-                    const isModelSelector = selectorOptions.configOptionSelectors.some(
-                      (selector) => selector.configId === configId && selector.category === 'model'
-                    );
-                    commitReviewer({
-                      ...reviewerConfig.reviewer,
-                      configOptionValues: isModelSelector
-                        ? filterAcpSessionConfigOptionValuesForTarget({
-                            ...selectorTarget,
-                            configOptionValues: merged,
-                          })
-                        : merged,
-                    });
-                  }
-                }}
+                onConfigOptionChange={handleConfigOptionChange}
               />
             ) : null}
 

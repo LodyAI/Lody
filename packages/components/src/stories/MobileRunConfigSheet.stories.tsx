@@ -8,12 +8,10 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
-  type AcpConfigOptionSummary,
   type MachineId,
   type SessionId,
   type SessionMeta,
   getAgentConfigRoomId,
-  resolveAcpConfigOptionsForModel,
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
@@ -24,6 +22,10 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+} from './cursor-parameterized-model-fixture';
 
 /**
  * The mobile composer's consolidated run-config bottom sheet, opened by
@@ -178,111 +180,7 @@ const codexSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
-const cursorThinking: AcpConfigOptionSummary = {
-  id: 'thinking',
-  name: 'Thinking',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'true',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorEffort: AcpConfigOptionSummary = {
-  id: 'effort',
-  name: 'Effort',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'low',
-  options: [
-    { value: 'low', name: 'Low' },
-    { value: 'high', name: 'High' },
-  ],
-};
-const cursorContext: AcpConfigOptionSummary = {
-  id: 'context',
-  name: 'Context',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-};
-const cursorFast: AcpConfigOptionSummary = {
-  id: 'fast',
-  name: 'Fast',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorCatalogEntry = {
-  configOptions: [
-    {
-      id: 'model',
-      name: 'Model',
-      category: 'model',
-      type: 'select' as const,
-      currentValue: 'a',
-      options: [
-        { value: 'a', name: 'A' },
-        { value: 'b', name: 'B' },
-      ],
-    },
-    cursorThinking,
-    cursorEffort,
-    cursorContext,
-    cursorFast,
-  ],
-  configOptionsByModel: {
-    a: [cursorThinking, cursorEffort, cursorContext, cursorFast],
-    b: [
-      {
-        id: 'reasoning',
-        name: 'Reasoning',
-        category: 'thought_level',
-        type: 'select' as const,
-        currentValue: 'minimal',
-        options: [
-          { value: 'minimal', name: 'Minimal' },
-          { value: 'full', name: 'Full' },
-        ],
-      },
-    ],
-  },
-};
-const cursorSelectorsForModel = (modelId: string | null): AcpConfigOptionSelector[] =>
-  (resolveAcpConfigOptionsForModel(cursorCatalogEntry, modelId ?? undefined) ?? []).map((option) =>
-    option.type === 'boolean'
-      ? {
-          type: 'boolean' as const,
-          configId: option.id,
-          label: option.name,
-          category: option.category,
-          currentValue: option.currentValue === true,
-          options: [] as [],
-        }
-      : {
-          type: 'select' as const,
-          configId: option.id,
-          label: option.name,
-          category: option.category,
-          currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
-          options: option.options.map((entry) => ({
-            value: entry.value,
-            label: entry.name,
-            description: entry.description,
-          })),
-        }
-  );
-const cursorSelectors = cursorSelectorsForModel('a');
-const cursorModelOptions: AcpSessionSelectOption[] = [
-  { value: 'a', label: 'A' },
-  { value: 'b', label: 'B' },
-];
+const cursorSelectors = cursorParameterizedModelSelectors('a');
 
 const claudeSelectors: AcpConfigOptionSelector[] = [
   {
@@ -357,7 +255,9 @@ function StoryShell({
           selectedModeId={null}
           onModeChange={fn()}
           configOptionSelectors={
-            session.agentConfigId === cursorAgent.id ? cursorSelectorsForModel(model) : selectors
+            session.agentConfigId === cursorAgent.id
+              ? cursorParameterizedModelSelectors(model)
+              : selectors
           }
           configOptionValues={values}
           onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
@@ -399,7 +299,7 @@ export const Claude: Story = {
 export const RegistryCursorCatalog: Story = {
   args: {
     session: cursorSession,
-    modelOptions: cursorModelOptions,
+    modelOptions: cursorParameterizedModelOptions,
     selectors: cursorSelectors,
   },
 };

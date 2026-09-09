@@ -391,83 +391,48 @@ describe('agent run config selection', () => {
   });
 });
 
-const modelSelect = (currentValue = 'a'): AcpConfigOptionSummary => ({
-  id: 'model',
-  name: 'Model',
-  category: 'model',
+const select = (
+  id: string,
+  name: string,
+  category: AcpConfigOptionSummary['category'],
+  currentValue: string,
+  values: readonly string[],
+  optionNames: readonly string[] = values
+): AcpConfigOptionSummary => ({
+  id,
+  name,
+  ...(category === undefined ? {} : { category }),
   type: 'select',
   currentValue,
-  options: [
-    { value: 'a', name: 'A' },
-    { value: 'b', name: 'B' },
-    { value: 'c', name: 'C' },
-  ],
+  options: values.map((value, index) => ({ value, name: optionNames[index] ?? value })),
 });
 
-const modeSelect = (): AcpConfigOptionSummary => ({
-  id: 'mode',
-  name: 'Mode',
-  category: 'mode',
-  type: 'select',
-  currentValue: 'agent',
-  options: [{ value: 'agent', name: 'Agent' }],
-});
+const modelSelect = (currentValue = 'a') =>
+  select('model', 'Model', 'model', currentValue, ['a', 'b', 'c'], ['A', 'B', 'C']);
 
-const thinkingSelect = (): AcpConfigOptionSummary => ({
-  id: 'thinking',
-  name: 'Thinking',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-});
+const modeSelect = () => select('mode', 'Mode', 'mode', 'agent', ['agent'], ['Agent']);
 
-const effortSelect = (): AcpConfigOptionSummary => ({
-  id: 'effort',
-  name: 'Effort',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'low',
-  options: [
-    { value: 'low', name: 'Low' },
-    { value: 'high', name: 'High' },
-  ],
-});
+const thinkingSelect = () =>
+  select('thinking', 'Thinking', 'thought_level', 'false', ['true', 'false'], ['On', 'Off']);
 
-const fastSelect = (): AcpConfigOptionSummary => ({
-  id: 'fast',
-  name: 'Fast',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-});
+const effortSelect = () =>
+  select('effort', 'Effort', 'thought_level', 'low', ['low', 'high'], ['Low', 'High']);
 
-const reasoningSelect = (): AcpConfigOptionSummary => ({
-  id: 'reasoning',
-  name: 'Reasoning',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'minimal',
-  options: [
-    { value: 'minimal', name: 'Minimal' },
-    { value: 'full', name: 'Full' },
-  ],
-});
+const fastSelect = () =>
+  select('fast', 'Fast', 'model_config', 'false', ['true', 'false'], ['On', 'Off']);
 
-const contextSelect = (): AcpConfigOptionSummary => ({
-  id: 'context',
-  name: 'Context',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-});
+const reasoningSelect = () =>
+  select(
+    'reasoning',
+    'Reasoning',
+    'thought_level',
+    'minimal',
+    ['minimal', 'full'],
+    ['Minimal', 'Full']
+  );
+
+const contextSelect = () =>
+  select('context', 'Context', undefined, 'default', ['default'], ['Default']);
 
 const catalogCompositionEntry = (): Pick<
   AcpCapabilityCacheEntry,
@@ -565,54 +530,20 @@ describe('resolveAcpConfigOptionsForModel', () => {
 });
 
 describe('resolveAcpTargetModelId', () => {
-  it('prefers an explicit model id over config values and the current value', () => {
-    expect(
-      resolveAcpTargetModelId({
-        modelId: 'explicit',
-        configOptionValues: { model: 'from-values' },
-        configOptions: [modelSelect('from-current')],
-      })
-    ).toBe('explicit');
-  });
+  const resolveTarget = (modelId?: string, modelValue?: string | boolean) =>
+    resolveAcpTargetModelId({
+      ...(modelId === undefined ? {} : { modelId }),
+      ...(modelValue === undefined ? {} : { configOptionValues: { model: modelValue } }),
+      configOptions: [modelSelect('from-current')],
+    });
 
-  it('reads the model-category select from config option values before currentValue', () => {
-    expect(
-      resolveAcpTargetModelId({
-        configOptionValues: { model: 'from-values' },
-        configOptions: [modelSelect('from-current')],
-      })
-    ).toBe('from-values');
-    expect(resolveAcpTargetModelId({ configOptions: [modelSelect('from-current')] })).toBe(
-      'from-current'
-    );
-  });
-
-  it('treats an empty-string modelId as not explicit', () => {
-    expect(
-      resolveAcpTargetModelId({
-        modelId: '',
-        configOptionValues: { model: 'from-values' },
-        configOptions: [modelSelect('from-current')],
-      })
-    ).toBe('from-values');
-  });
-
-  it('ignores a non-string model option value', () => {
-    expect(
-      resolveAcpTargetModelId({
-        configOptionValues: { model: true },
-        configOptions: [modelSelect('from-current')],
-      })
-    ).toBe('from-current');
-  });
-
-  it('treats an empty-string model option value as not selected', () => {
-    expect(
-      resolveAcpTargetModelId({
-        configOptionValues: { model: '' },
-        configOptions: [modelSelect('from-current')],
-      })
-    ).toBe('from-current');
+  it('resolves explicit, configured, and current model values in priority order', () => {
+    expect(resolveTarget('explicit', 'from-values')).toBe('explicit');
+    expect(resolveTarget(undefined, 'from-values')).toBe('from-values');
+    expect(resolveTarget()).toBe('from-current');
+    expect(resolveTarget('', 'from-values')).toBe('from-values');
+    expect(resolveTarget(undefined, true)).toBe('from-current');
+    expect(resolveTarget(undefined, '')).toBe('from-current');
   });
 });
 
@@ -642,79 +573,39 @@ describe('ACP toggle select predicates', () => {
   });
 });
 
-const cursorThinkingSelect = (): AcpConfigOptionSummary => ({
-  id: 'thinking',
-  name: 'Thinking',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'false', name: 'Off' },
-    { value: 'true', name: 'On' },
-  ],
-});
+const cursorThinkingSelect = () =>
+  select('thinking', 'Thinking', 'thought_level', 'false', ['false', 'true'], ['Off', 'On']);
 
 const cursorEffortSelect = (
   values: readonly string[],
   currentValue: string
-): AcpConfigOptionSummary => ({
-  id: 'effort',
-  name: 'Effort',
-  category: 'thought_level',
-  type: 'select',
-  currentValue,
-  options: values.map((value) => ({ value, name: value })),
-});
+): AcpConfigOptionSummary => select('effort', 'Effort', 'thought_level', currentValue, values);
 
-const cursorFastSelect = (): AcpConfigOptionSummary => ({
-  id: 'fast',
-  name: 'Fast',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'false', name: 'Off' },
-    { value: 'true', name: 'On' },
-  ],
-});
+const cursorFastSelect = () =>
+  select('fast', 'Fast', 'model_config', 'false', ['false', 'true'], ['Off', 'On']);
 
-const cursorContextSelect = (): AcpConfigOptionSummary => ({
-  id: 'context',
-  name: 'Context',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-});
+const cursorContextSelect = () =>
+  select('context', 'Context', 'model_config', 'default', ['default'], ['Default']);
 
-const cursorReasoningSelect = (): AcpConfigOptionSummary => ({
-  id: 'reasoning',
-  name: 'Reasoning',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'low',
-  options: [
-    { value: 'low', name: 'Low' },
-    { value: 'medium', name: 'Medium' },
-    { value: 'high', name: 'High' },
-    { value: 'extra-high', name: 'Extra high' },
-  ],
-});
+const cursorReasoningSelect = () =>
+  select(
+    'reasoning',
+    'Reasoning',
+    'thought_level',
+    'low',
+    ['low', 'medium', 'high', 'extra-high'],
+    ['Low', 'Medium', 'High', 'Extra high']
+  );
 
-const cursorModelSelect = (): AcpConfigOptionSummary => ({
-  id: 'model',
-  name: 'Model',
-  category: 'model',
-  type: 'select',
-  currentValue: 'opus',
-  options: [
-    { value: 'opus', name: 'Opus' },
-    { value: 'sonnet', name: 'Sonnet' },
-    { value: 'gemini', name: 'Gemini' },
-    { value: 'gpt', name: 'GPT' },
-    { value: 'empty', name: 'Empty' },
-  ],
-});
+const cursorModelSelect = () =>
+  select(
+    'model',
+    'Model',
+    'model',
+    'opus',
+    ['opus', 'sonnet', 'gemini', 'gpt', 'empty'],
+    ['Opus', 'Sonnet', 'Gemini', 'GPT', 'Empty']
+  );
 
 const cursorOpusSnapshotOptions = (): AcpConfigOptionSummary[] => [
   cursorModelSelect(),

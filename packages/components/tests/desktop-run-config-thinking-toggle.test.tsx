@@ -3,12 +3,21 @@
 import { act, createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { type AgentConfigId, type AgentConfigMeta, type MachineId } from '@lody/shared';
+import {
+  AGENT_ROLE_VERSION,
+  type AgentConfigId,
+  type AgentConfigMeta,
+  type AgentRole,
+  type AgentRoleId,
+  type MachineId,
+} from '@lody/shared';
 
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
 
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
+import { MobileRunConfigButton } from '../src/components/mobile/mobile-run-config-button';
 import type { AcpConfigOptionSelector } from '../src/components/shared/acp-selector-options';
+import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
 import { TooltipProvider } from '../src/ui/tooltip';
 
@@ -71,6 +80,11 @@ const cursorSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
+const selectorsWithThinkingDefault = (thinking: 'true' | 'false') =>
+  cursorSelectors.map((selector) =>
+    selector.configId === 'thinking' ? { ...selector, currentValue: thinking } : selector
+  );
+
 type MenuProps = ComponentProps<typeof DesktopRunConfigMenu>;
 
 const baseProps: MenuProps = {
@@ -90,6 +104,27 @@ const baseProps: MenuProps = {
     fast: 'false',
   },
   onConfigOptionChange: () => undefined,
+};
+
+const role: AgentRole = {
+  v: AGENT_ROLE_VERSION,
+  id: 'role-1' as AgentRoleId,
+  ownerUserId: 'user-1',
+  visibility: 'private',
+  name: 'Code Reviewer',
+  emoji: '🔍',
+  machineId,
+  agentConfigId: agentConfig.id,
+  runConfig: { modelId: 'a', configOptionValues: { thinking: 'true' } },
+  revision: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
+const roleItem: ComposerAgentRoleItem = {
+  role,
+  availability: { kind: 'available' },
+  agentConfig,
 };
 
 describe('DesktopRunConfigMenu thinking toggle', () => {
@@ -158,5 +193,55 @@ describe('DesktopRunConfigMenu thinking toggle', () => {
     });
     expect(onConfigOptionChange).toHaveBeenCalledWith('thinking', 'false');
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it('shows the desktop Brain mark when thinking is true and hides it when false', async () => {
+    const view = await render({ configOptionSelectors: selectorsWithThinkingDefault('false') });
+    expect(
+      view.querySelector('button[aria-label="Run configuration"]')?.querySelector('.lucide-brain')
+    ).not.toBeNull();
+
+    await render({
+      configOptionSelectors: selectorsWithThinkingDefault('true'),
+      configOptionValues: { ...baseProps.configOptionValues, thinking: 'false' },
+    });
+    expect(
+      view.querySelector('button[aria-label="Run configuration"]')?.querySelector('.lucide-brain')
+    ).toBeNull();
+  });
+
+  it('keeps the desktop Brain mark on the Role inert face, not inside the trigger', async () => {
+    const view = await render({
+      configOptionSelectors: selectorsWithThinkingDefault('false'),
+      agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },
+    });
+    const trigger = view.querySelector('button[aria-label="Run configuration"]');
+    expect(trigger?.textContent).toContain('Code Reviewer');
+    expect(trigger?.querySelector('.lucide-brain')).toBeNull();
+    expect(view.querySelector('.lucide-brain')).not.toBeNull();
+    expect(view.querySelector('.lucide-brain')?.closest('button')).toBeNull();
+  });
+
+  it('shows the mobile Brain mark when thinking is on and hides it when off', async () => {
+    const renderMobile = async (thinking: 'true' | 'false') => {
+      await act(async () => {
+        root?.render(
+          createElement(MobileRunConfigButton, {
+            modelOptions: [{ value: 'a', label: 'A' }],
+            selectedModelId: 'a',
+            modeOptions: [],
+            selectedModeId: null,
+            configOptionSelectors: selectorsWithThinkingDefault(
+              thinking === 'true' ? 'false' : 'true'
+            ),
+            configOptionValues: { thinking, effort: 'low' },
+          })
+        );
+      });
+      return container?.querySelector('button[aria-label="Run configuration"]');
+    };
+
+    expect((await renderMobile('true'))?.querySelector('.lucide-brain')).not.toBeNull();
+    expect((await renderMobile('false'))?.querySelector('.lucide-brain')).toBeNull();
   });
 });

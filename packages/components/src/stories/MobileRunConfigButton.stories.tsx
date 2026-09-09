@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 
-import { resolveAcpConfigOptionsForModel, type AcpConfigOptionSummary } from '@lody/shared';
-
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { MobileRunConfigButton } from '@/components/mobile/mobile-run-config-button';
 import type {
@@ -10,6 +8,11 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+  cursorParameterizedModelValues,
+} from './cursor-parameterized-model-fixture';
 
 const codexIcon = <AgentIcon cliType="builtin" agentType="codex" />;
 const claudeIcon = <AgentIcon cliType="builtin" agentType="claude" />;
@@ -78,117 +81,7 @@ const claudeModeSelector: AcpConfigOptionSelector = {
   ],
 };
 
-const cursorThinking: AcpConfigOptionSummary = {
-  id: 'thinking',
-  name: 'Thinking',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'true',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorEffort: AcpConfigOptionSummary = {
-  id: 'effort',
-  name: 'Effort',
-  category: 'thought_level',
-  type: 'select',
-  currentValue: 'low',
-  options: [
-    { value: 'low', name: 'Low' },
-    { value: 'high', name: 'High' },
-  ],
-};
-const cursorContext: AcpConfigOptionSummary = {
-  id: 'context',
-  name: 'Context',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'default',
-  options: [{ value: 'default', name: 'Default' }],
-};
-const cursorFast: AcpConfigOptionSummary = {
-  id: 'fast',
-  name: 'Fast',
-  category: 'model_config',
-  type: 'select',
-  currentValue: 'false',
-  options: [
-    { value: 'true', name: 'On' },
-    { value: 'false', name: 'Off' },
-  ],
-};
-const cursorCatalogEntry = {
-  configOptions: [
-    {
-      id: 'model',
-      name: 'Model',
-      category: 'model',
-      type: 'select' as const,
-      currentValue: 'a',
-      options: [
-        { value: 'a', name: 'A' },
-        { value: 'b', name: 'B' },
-      ],
-    },
-    cursorThinking,
-    cursorEffort,
-    cursorContext,
-    cursorFast,
-  ],
-  configOptionsByModel: {
-    a: [cursorThinking, cursorEffort, cursorContext, cursorFast],
-    b: [
-      {
-        id: 'reasoning',
-        name: 'Reasoning',
-        category: 'thought_level',
-        type: 'select' as const,
-        currentValue: 'minimal',
-        options: [
-          { value: 'minimal', name: 'Minimal' },
-          { value: 'full', name: 'Full' },
-        ],
-      },
-    ],
-  },
-};
-const cursorSelectors: AcpConfigOptionSelector[] = (
-  resolveAcpConfigOptionsForModel(cursorCatalogEntry, 'a') ?? []
-).map((option) =>
-  option.type === 'boolean'
-    ? {
-        type: 'boolean' as const,
-        configId: option.id,
-        label: option.name,
-        category: option.category,
-        currentValue: option.currentValue === true,
-        options: [] as [],
-      }
-    : {
-        type: 'select' as const,
-        configId: option.id,
-        label: option.name,
-        category: option.category,
-        currentValue: typeof option.currentValue === 'string' ? option.currentValue : '',
-        options: option.options.map((entry) => ({
-          value: entry.value,
-          label: entry.name,
-          description: entry.description,
-        })),
-      }
-);
-const cursorValues: Record<string, AcpConfigOptionValue> = {
-  thinking: 'true',
-  effort: 'low',
-  context: 'default',
-  fast: 'false',
-};
-const cursorModelOptions: AcpSessionSelectOption[] = [
-  { value: 'a', label: 'A' },
-  { value: 'b', label: 'B' },
-];
+const cursorSelectors = cursorParameterizedModelSelectors('a');
 
 type Case = {
   label: string;
@@ -267,9 +160,9 @@ const CASES: Case[] = [
     label: 'Registry Cursor catalog',
     model: 'a',
     agentIcon: cursorIcon,
-    modelOptions: cursorModelOptions,
+    modelOptions: cursorParameterizedModelOptions,
     selectors: cursorSelectors,
-    values: cursorValues,
+    values: cursorParameterizedModelValues,
   },
   {
     label: 'Unknown third-party mode — hidden',
@@ -337,12 +230,12 @@ export const RegistryCursorCatalog: Story = {
   render: () => (
     <MobileRunConfigButton
       agentIcon={cursorIcon}
-      modelOptions={cursorModelOptions}
+      modelOptions={cursorParameterizedModelOptions}
       selectedModelId="a"
       modeOptions={[]}
       selectedModeId={null}
       configOptionSelectors={cursorSelectors}
-      configOptionValues={cursorValues}
+      configOptionValues={cursorParameterizedModelValues}
     />
   ),
 };

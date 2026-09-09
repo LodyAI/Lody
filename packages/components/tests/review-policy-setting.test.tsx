@@ -5,8 +5,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ACP_CAPABILITY_CACHE_VERSION,
-  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
   DEFAULT_REVIEW_POLICY,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -27,6 +25,7 @@ import {
   ReviewPolicySection,
 } from '../src/components/settings/review-policy-setting';
 import { initI18n } from '../src/i18n';
+import { cursorParameterizedModelCapabilityEntry } from './helpers/cursor-parameterized-model';
 
 Element.prototype.scrollIntoView = () => undefined;
 
@@ -136,41 +135,6 @@ describe('ReviewerMachineConfigTable model change', () => {
   const machineId = 'machine-reviewer' as MachineId;
   const agentConfigId = 'config-cursor' as AgentConfigId;
 
-  const cursorThinkingOption = {
-    id: 'thinking',
-    name: 'Thinking',
-    category: 'thought_level',
-    type: 'select' as const,
-    currentValue: 'false',
-    options: [
-      { value: 'false', name: 'False' },
-      { value: 'true', name: 'True' },
-    ],
-  };
-  const cursorReasoningOption = {
-    id: 'reasoning',
-    name: 'Reasoning',
-    category: 'thought_level',
-    type: 'select' as const,
-    currentValue: 'low',
-    options: [
-      { value: 'low', name: 'Low' },
-      { value: 'medium', name: 'Medium' },
-      { value: 'high', name: 'High' },
-    ],
-  };
-  const cursorModelOption = {
-    id: 'model',
-    name: 'Model',
-    category: 'model',
-    type: 'select' as const,
-    currentValue: 'a',
-    options: [
-      { value: 'a', name: 'A' },
-      { value: 'b', name: 'B' },
-    ],
-  };
-
   const machine = {
     id: machineId,
     name: 'Dev machine',
@@ -180,19 +144,7 @@ describe('ReviewerMachineConfigTable model change', () => {
     raceLimits: {},
     acpCapabilities: {
       [agentConfigId]: {
-        cliType: 'registry',
-        agentType: 'cursor',
-        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-        provenance: 'runtime',
-        sourceVersion: `cursor@2026.08.31${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`,
-        modes: [],
-        models: [],
-        configOptions: [cursorModelOption, cursorThinkingOption],
-        configOptionsByModel: {
-          a: [cursorThinkingOption],
-          b: [cursorReasoningOption],
-        },
-        fetchedAt: 1,
+        ...cursorParameterizedModelCapabilityEntry('registry', 'cursor'),
       },
     },
   } as MachineViewMeta;
