@@ -625,6 +625,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         const started = await createAcpClient({
           stream,
           workdir: this.getWorkdir(),
+          resolveWorktreeProject: callbacks.resolveWorktreeProject,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {

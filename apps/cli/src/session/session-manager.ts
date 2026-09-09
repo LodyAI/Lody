@@ -359,6 +359,7 @@ export type SessionMonitorRuntimeInfo = {
 };
 
 export interface CreateAgentConfig {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   cliType: AgentConfigCliType;
   agentType: string;
   command: string;
@@ -1235,12 +1236,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
     const dispatchEvent = options?.dispatchEvent ?? ((event: () => void) => event());
+    const localProjectId =
+      config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
       cliType: config.agentCliType,
       agentType: config.agentType,
       command: launch.command,
       args: launch.args,
       env: launch.env,
+      resolveWorktreeProject: localProjectId
+        ? async () => {
+            const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
+            if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
+            return { version: 1, originProjectPath };
+          }
+        : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,

@@ -71,6 +71,7 @@ import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 
 export type CreateAcpClientOptions = {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   stream: Stream;
   workdir: string;
   logger: Logger;
@@ -128,6 +129,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     terminalManager: options.terminalManager,
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
+    resolveWorktreeProject: options.resolveWorktreeProject,
     taskToolsEnabled: options.taskToolsEnabled,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,

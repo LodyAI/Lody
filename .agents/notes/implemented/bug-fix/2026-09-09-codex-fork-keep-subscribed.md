@@ -7,9 +7,17 @@ Translation: current
 
 ## Abstract
 
-Forking a Codex Session immediately unsubscribed the child thread. The host treats that child as a live Session and waits for `turn/completed` notifications, so the first prompt never finished, Stop reported no active turn, and the next prompt was `already active`. This host change pins `acp-extension-codex` to `fc91dce` (adapter #37) so a successful fork keeps the child subscribed, and pins `acp-extension-core` 0.1.2 because that adapter already requires it. It does not take Lody #534's host worktree-identity changes. Adapter #37 is not merged yet; this pin must not ship until that merge.
+Forking a Codex Session immediately unsubscribed the child thread. The host treats that child as a live Session and waits for `turn/completed` notifications, so the first prompt never finished, Stop reported no active turn, and the next prompt was `already active`. This host change now pins `acp-extension-codex` to merged adapter #37 (`e472d56`) so a successful fork keeps the child subscribed, with `acp-extension-core` 0.1.2. The conflict refresh incorporates Lody main, including #534, and updates all submodules to their current main snapshots. Codex fork tests pass; the refreshed DSH main has a lint failure detailed below, and this change does not publish a desktop release.
 
-## Decision
+## Merge update (2026-09-09)
+
+The initial pins and merge-order warnings below describe the original proposal. Adapter #37 has now merged as `e472d56` on Codex main, after the worktree ownership fix (#35) and review completion fixture correction (#36). PR [#544](https://github.com/LodyAI/Lody/pull/544) merges current Lody main, which already includes #534, and resolves the competing Codex gitlinks by selecting latest adapter main. `SessionFork.ts` is identical to the original fix commit `fc91dce`. All submodules are refreshed to their current main commits at the user's request; Core remains `9c47fec`. No adapter publication or desktop release is performed by this update.
+
+The other refreshed pins are Claude `414718e`, DSH `5d79d5b`, Grok `c962338`, and Kimi `d3f218c`; Kimi remains outside the root workspace. Frozen-lockfile installation succeeds without changing the root lockfile. The updated Codex adapter passes both `session-fork.test.ts` and `CodexAcpClient.test.ts` (112 tests). This refresh does not repeat the real Codex or desktop UI probes recorded below.
+
+Validation limit: root typecheck passes, but `pnpm check` stops at `typescript-eslint(no-floating-promises)` in DSH main's `scripts/settings-profile-smoke.mjs:39`. That main snapshot omits the `await test(...)` present in the previous host pin. The requested main pin is retained; this host update does not modify or publish a new DSH commit. Documentation, i18n, Code Collab, platform, and public-boundary checks pass.
+
+## Original decision
 
 - Host gitlink `packages/acp-extension-codex` moves from main's `f9dbc8c` to `fc91dce` (open adapter PR #37, based on already-merged #35 / `400384e`).
 - Host gitlink `packages/acp-extension-core` moves from `1aa2431` to published 0.1.2 `9c47fec`. Root `pnpm-lock.yaml` stays `workspace:*` and did not need a rewrite; the adapter's own npm lock inside the submodule already names Core 0.1.2.
