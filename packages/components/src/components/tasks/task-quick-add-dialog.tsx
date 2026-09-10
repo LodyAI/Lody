@@ -16,7 +16,7 @@ import { taskLabelPillStyle } from './task-label-presentation';
 import type { UnifiedLocalProjectOption } from '@/components/chat/unified-project-selector';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import {
   DropdownMenu,
@@ -444,7 +444,7 @@ export function TaskQuickAddDialog({
             <Checkbox
               checked={createMore}
               disabled={submitting}
-              onCheckedChange={(checked) => onCreateMoreChange(checked === true)}
+              onCheckedChange={(checked) => onCreateMoreChange(checked)}
             />
             {t('tasks.quickAdd.createMore', 'Create more')}
           </label>

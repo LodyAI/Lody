@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect } from 'react';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { useTheme } from '@/theme-provider';
 import { Field as UiField } from '@lody/ui/field';
 

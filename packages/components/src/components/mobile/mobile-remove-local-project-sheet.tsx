@@ -5,7 +5,7 @@ import { Loader2, X } from 'lucide-react';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 export type MobileRemoveLocalProjectSheetProps = {
@@ -197,7 +197,7 @@ export function MobileRemoveLocalProjectSheet({
                   className="mt-0.5"
                   checked={cleanupWorktrees}
                   disabled={!canCleanupWorktrees || isRemoving}
-                  onCheckedChange={(checked) => void handleCleanupChange(checked === true)}
+                  onCheckedChange={(checked) => void handleCleanupChange(checked)}
                 />
                 <span>
                   <span className="block font-medium text-foreground">

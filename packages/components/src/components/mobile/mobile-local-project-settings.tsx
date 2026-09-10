@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
 import { ChevronRight, Loader2, Wrench } from 'lucide-react';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';

@@ -31,7 +31,7 @@ import {
 import { Badge } from '@/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { settingContainerClass } from '.';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
@@ -310,7 +310,7 @@ export function McpServerRow({
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2 py-2 pl-2 pr-2">
-          {/* The switch keeps its own Radix `data-state`, so the label sits
+          {/* The switch carries its own state attributes, so the label sits
               beside it rather than wrapping it in a tooltip trigger. */}
           <label
             className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"

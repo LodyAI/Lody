@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/ui/dropdown-menu';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { useAutoReview } from '@/hooks/use-auto-review';
@@ -126,7 +126,7 @@ export function AutoReviewMenuItem({
         </Popover>
         <Switch
           checked={enabled}
-          className="pointer-events-none scale-75"
+          className="pointer-events-none"
           aria-label={t('sessions.autoReview.menuLabel', 'Auto review and merge')}
         />
       </DropdownMenuItem>

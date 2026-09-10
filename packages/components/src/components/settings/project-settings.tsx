@@ -46,14 +46,14 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { Button, type ButtonProps } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { Textarea } from '@lody/ui/textarea';
@@ -1528,11 +1528,7 @@ export function ProjectHistoryImportPanel({
   const someSelectableSelected = selectableSessions.some((session) =>
     selectedSet.has(session.acpSessionId)
   );
-  const selectAllChecked = allSelectableSelected
-    ? true
-    : someSelectableSelected
-      ? 'indeterminate'
-      : false;
+  const someButNotAllSelected = someSelectableSelected && !allSelectableSelected;
   const lastListedAtDate =
     typeof state.catalog?.lastListedAt === 'number' ? new Date(state.catalog.lastListedAt) : null;
   const statusLabel = lastListedAtDate
@@ -1685,7 +1681,8 @@ export function ProjectHistoryImportPanel({
               }}
             >
               <Checkbox
-                checked={selectAllChecked}
+                checked={allSelectableSelected}
+                indeterminate={someButNotAllSelected}
                 disabled={selectableSessions.length === 0 || !canManageCatalog}
                 onCheckedChange={toggleSelectAll}
                 onClick={(event) => event.stopPropagation()}

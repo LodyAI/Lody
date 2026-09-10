@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
 import type { ConversationMessage } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 
 type SelectionGesture = {

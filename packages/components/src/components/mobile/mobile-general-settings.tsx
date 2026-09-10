@@ -6,7 +6,7 @@ import type {
 } from '@lody/shared';
 import { useAtom, useAtomValue } from 'jotai';
 import { Loading } from '@/ui';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { toast } from 'sonner';
 import {
   autoArchiveOnPrClosedAtom,

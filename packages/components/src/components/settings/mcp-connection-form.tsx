@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { Field, Section } from './form-primitives';
 

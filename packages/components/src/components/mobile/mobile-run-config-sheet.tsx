@@ -33,7 +33,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   classifyPermissionModeFace,
   getAgentRoleEmoji,

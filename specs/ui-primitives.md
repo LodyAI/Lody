@@ -25,9 +25,9 @@ control's name, whether it is disabled, and whether it is valid; the label, the
 control, the help text, and the error message read that state from the root
 instead of receiving their own copies of it. A caller therefore states a field is
 invalid in one place, and cannot leave a control and its message disagreeing.
-The composition provides a text input in small, medium, and large sizes and a
-multi-line control, and associates the label with the control without the caller
-naming an identifier.
+The composition provides a text input in small, medium, and large sizes, a
+multi-line control, a checkbox, a group of radio options, and a switch, and
+associates the label with the control without the caller naming an identifier.
 
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
@@ -35,6 +35,14 @@ on focus, a destructive ring while invalid that persists when the control is
 focused, and reduced opacity on the whole control when disabled. The states are
 defined once for the family, so a control added later inherits them rather than
 choosing its own.
+
+A control that stores a value — a ticked checkbox, the selected radio option, a
+switch that is on — shows that as ink, because the accent colour marks live
+state rather than a stored one. A checkbox can also stand for a partial
+selection, which it announces as mixed rather than as ticked. Each of these
+controls is a button to the platform: the keyboard reaches it, a screen reader
+is told which kind of control it is and whether it holds a value, and a form
+receives that value under the name the field root gave it.
 
 Product surfaces own workflows, placement, responsive layout, and accessibility
 requirements. They may add layout or interaction classes when a local constraint
@@ -87,3 +95,6 @@ The gallery and the subtree palette behavior are recorded in the
 The field composition, the state mapping it settles, and the outstanding focus
 ring suppression in the desktop shell are recorded in the
 [UI field primitives note](../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
+The checkbox, radio and switch that join that family, and the ink they use for a
+stored value, are recorded in the
+[UI choice controls note](../.agents/notes/implemented/feature/2026-09-10-ui-choice-controls.md).

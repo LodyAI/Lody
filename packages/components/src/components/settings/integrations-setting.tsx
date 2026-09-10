@@ -18,7 +18,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
 import { ScrollArea } from '@/ui/scroll-area';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';

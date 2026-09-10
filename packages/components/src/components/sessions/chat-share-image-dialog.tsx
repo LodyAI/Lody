@@ -10,7 +10,7 @@ import { Field as UiField } from '@lody/ui/field';
 import { Input } from '@lody/ui/input';
 import { Button } from '@lody/ui/button';
 import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import {
   ChatShareCard,

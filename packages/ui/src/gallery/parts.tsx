@@ -272,7 +272,7 @@ export const dyn = stylex.create({
     boxShadow: box,
   }),
   text: (value: string) => ({ color: value }),
-  radius: (value: string) => ({ borderRadius: value, cornerShape: corner.shape }),
+  radius: (value: string, shape: string) => ({ borderRadius: value, cornerShape: shape }),
   height: (value: string) => ({ height: value }),
   width: (value: string) => ({ width: value }),
   type: (size: string, leading: string) => ({ fontSize: size, lineHeight: leading }),

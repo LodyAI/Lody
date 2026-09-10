@@ -2,9 +2,12 @@ import * as stylex from '@stylexjs/stylex';
 import { Fragment, type ReactNode } from 'react';
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
+import { Checkbox } from '../field/checkbox';
 import { Field } from '../field/field';
 import { field } from '../field/field.tokens.stylex';
 import { Input } from '../field/input';
+import { Radio, RadioGroup } from '../field/radio';
+import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
 import { colors, shadow } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
@@ -342,11 +345,28 @@ const SHADOWS = [
 ];
 
 const RADII = [
-  { name: 'radius.mini', value: radius.mini, note: '16px things' },
-  { name: 'radius.small', value: radius.small, note: '28px controls, tooltips' },
-  { name: 'radius.medium', value: radius.medium, note: '32 and 36px controls' },
-  { name: 'radius.large', value: radius.large, note: 'surfaces' },
-  { name: 'radius.full', value: radius.full, note: 'pills' },
+  { name: 'radius.mini', value: radius.mini, shape: corner.shape, note: '16px things' },
+  {
+    name: 'radius.small',
+    value: radius.small,
+    shape: corner.shape,
+    note: '28px controls, tooltips',
+  },
+  {
+    name: 'radius.medium',
+    value: radius.medium,
+    shape: corner.shape,
+    note: '32 and 36px controls',
+  },
+  { name: 'radius.large', value: radius.large, shape: corner.shape, note: 'surfaces' },
+  // A squircle at this radius is a rounded rectangle, so a pill takes the round
+  // shape and the board shows the two side by side rather than claiming one.
+  {
+    name: 'radius.full',
+    value: radius.full,
+    shape: corner.round,
+    note: 'pills; the one round shape',
+  },
 ];
 
 const CONTROL_SIZES = [
@@ -405,6 +425,12 @@ const FIELD_COLORS = [
   { name: 'field.invalidRing', value: field.invalidRing, note: 'invalid' },
 ];
 
+const CHOICE_COLORS = [
+  { name: 'field.checkedFill', value: field.checkedFill, note: 'a control that holds a value' },
+  { name: 'field.checkedMark', value: field.checkedMark, note: 'the tick and the dot on it' },
+  { name: 'field.thumb', value: field.thumb, note: 'the switch thumb, on both tracks' },
+];
+
 const FIELD_SIZES = [
   { name: 'small · 28', size: 'small' as const },
   { name: 'medium · 32', size: 'medium' as const },
@@ -459,11 +485,21 @@ function ShadowChip({
   );
 }
 
-function RadiusChip({ name, value, note }: { name: string; value: string; note: string }) {
+function RadiusChip({
+  name,
+  value,
+  shape,
+  note,
+}: {
+  name: string;
+  value: string;
+  shape: string;
+  note: string;
+}) {
   const { ref, value: measured } = useMeasured<HTMLDivElement>('border-radius');
   return (
     <Sample name={name} note={note} measured={measured}>
-      <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value))} />
+      <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value, shape))} />
     </Sample>
   );
 }
@@ -571,6 +607,53 @@ function InvalidFieldRow() {
         <Field.Error match>Enter a title before starting the session.</Field.Error>
       </Field.Root>
     </FieldRow>
+  );
+}
+
+/** A choice control with the label it belongs to, the way a surface writes it. */
+function ChoiceRow({
+  legend,
+  readout,
+  children,
+}: {
+  legend: string;
+  readout?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Row>
+      <LegendKey>{legend}</LegendKey>
+      <Cluster>{children}</Cluster>
+      {readout ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+    </Row>
+  );
+}
+
+function CheckedInkRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('box-shadow');
+  return (
+    <ChoiceRow legend={'checked \u00b7 ink edge'} readout={value}>
+      <Field.Label>
+        <Checkbox ref={ref} defaultChecked />
+        Include diffs
+      </Field.Label>
+    </ChoiceRow>
+  );
+}
+
+function SwitchTrackRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('width');
+  return (
+    <ChoiceRow legend="switch" readout={value}>
+      <Field.Label>
+        <Switch ref={ref} />
+        Auto review
+      </Field.Label>
+      <Field.Label>
+        <Switch defaultChecked />
+        Auto review
+      </Field.Label>
+    </ChoiceRow>
   );
 }
 
@@ -730,7 +813,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Corners"
-        rule="corner.shape (squircle) rides along with every radius; round corners outside Chromium are the accepted fallback. Nested radius is outer minus inset."
+        rule="corner.shape (squircle) rides along with every radius except radius.full, which is a pill or a circle and takes corner.round: a squircle at that radius is a superellipse, not a stadium, so it would turn a switch track into a rounded rectangle and a radio into a squircle. Round corners outside Chromium are the accepted fallback. Nested radius is outer minus inset."
       >
         <PaletteSplit palettes={palettes}>
           <Grid>
@@ -987,6 +1070,84 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Field.Root>
             </FieldRow>
           </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · Checkbox, Radio, Switch"
+        rule="The same well, ring and disabled treatment as the text controls, drawn as a 16px box and a 28px track. Stored state is ink: the label fill with the background mark and the primary button's own top highlight, because accent stays on live state and is never a fill. A mixed box announces mixed and draws the dash rather than falling back to a tick it does not hold."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ChoiceRow legend="checkbox">
+              <Field.Label>
+                <Checkbox />
+                Include diffs
+              </Field.Label>
+              <Field.Label>
+                <Checkbox indeterminate />
+                Some files
+              </Field.Label>
+            </ChoiceRow>
+            <CheckedInkRow />
+            <ChoiceRow legend={'checkbox \u00b7 invalid'}>
+              <Field.Root invalid>
+                <Field.Label>
+                  <Checkbox />
+                  Accept the terms
+                </Field.Label>
+                <Field.Error match>Tick this to continue.</Field.Error>
+              </Field.Root>
+            </ChoiceRow>
+            <ChoiceRow legend={'checkbox \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>
+                  <Checkbox defaultChecked />
+                  Include diffs
+                </Field.Label>
+              </Field.Root>
+            </ChoiceRow>
+            <ChoiceRow legend="radio">
+              <RadioGroup name="gallery-review" defaultValue="ask">
+                <Field.Label>
+                  <Radio value="ask" />
+                  Ask before reviewing
+                </Field.Label>
+                <Field.Label>
+                  <Radio value="auto" />
+                  Review every push
+                </Field.Label>
+              </RadioGroup>
+            </ChoiceRow>
+            <SwitchTrackRow />
+            <ChoiceRow legend={'switch \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>
+                  <Switch defaultChecked />
+                  Auto review
+                </Field.Label>
+              </Field.Root>
+            </ChoiceRow>
+          </Rows>
+          <Grid>
+            {CHOICE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="field.checkedEdge"
+              box={field.checkedEdge}
+              fill={field.checkedFill}
+              ink
+              note="the ink highlight a checked control carries"
+            />
+            <ShadowChip
+              name="field.thumbShadow"
+              box={field.thumbShadow}
+              fill={field.thumb}
+              ink={false}
+              note="the thumb is raised on both tracks"
+            />
+          </Grid>
         </PaletteSplit>
       </Section>
     </Board>
