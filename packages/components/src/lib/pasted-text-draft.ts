@@ -8,7 +8,7 @@ export interface PastedTextDraft {
   end: number;
 }
 
-export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 5000;
+export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
 
 export const createPastedTextDraftId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -20,7 +20,7 @@ export const createPastedTextDraftId = (): string => {
 export const normalizePastedTextDraft = (text: string): string => text.replace(/\r\n?/g, '\n');
 
 export const getPastedTextCharacterCount = (text: string): number =>
-  normalizePastedTextDraft(text).length;
+  normalizePastedTextDraft(text).trim().length;
 
 export const getPastedTextLineCount = (text: string): number => {
   const normalized = normalizePastedTextDraft(text).trim();
@@ -85,7 +85,7 @@ export const insertPastedTextDraft = ({
   selectionStart: number | null;
   selectionEnd: number | null;
 }): { nextValue: string; draft: PastedTextDraft } | null => {
-  const normalizedText = normalizePastedTextDraft(pastedText);
+  const normalizedText = normalizePastedTextDraft(pastedText).trim();
   if (!normalizedText) {
     return null;
   }
@@ -211,40 +211,31 @@ export const updatePastedTextDraftContent = ({
   return { nextValue, nextDrafts };
 };
 
-/** Stable names connect the inline references to their separately sent files. */
-export const getPastedTextFileName = (draft: PastedTextDraft): string => `pasted-${draft.id}.txt`;
-
-/** File references replace chips; the full text is uploaded separately at send. */
+/**
+ * The placeholder -> full-blob rewrites these drafts imply.
+ *
+ * Takes no text: a draft already carries its own absolute range, and
+ * `applyTextRewrites` is what validates those ranges against the string.
+ *
+ * The span is what makes the blob survivable in a transcript: the agent still
+ * receives all four thousand characters, and the bubble collapses them back to
+ * the same `Pasted N chars` label the composer showed.
+ */
 export const buildPastedTextRewrites = (drafts: readonly PastedTextDraft[]): TextRewrite[] =>
   [...drafts]
     .sort((a, b) => a.start - b.start)
     .map((draft) => ({
       start: draft.start,
       end: draft.end,
-      replacement: `[${getPastedTextFileName(draft)}]`,
+      replacement: normalizePastedTextDraft(draft.text),
+      span: {
+        kind: 'pasted_text' as const,
+        // Trimmed: the composer pads the label with figure spaces so its inline
+        // chip has an icon gutter, and a message chip has real padding instead.
+        label: draft.displayText.trim(),
+        target: draft.id,
+      },
     }));
-
-/** Replace one chip with editable prose (or remove it) without shifting others incorrectly. */
-export function replacePastedTextDraftWithText(
-  value: string,
-  drafts: readonly PastedTextDraft[],
-  id: string,
-  text: string
-): { nextValue: string; nextDrafts: PastedTextDraft[] } | null {
-  const draft = drafts.find((entry) => entry.id === id);
-  if (!draft || value.slice(draft.start, draft.end) !== draft.displayText) return null;
-  const delta = text.length - (draft.end - draft.start);
-  return {
-    nextValue: value.slice(0, draft.start) + text + value.slice(draft.end),
-    nextDrafts: drafts
-      .filter((entry) => entry.id !== id)
-      .map((entry) =>
-        entry.start >= draft.end
-          ? { ...entry, start: entry.start + delta, end: entry.end + delta }
-          : entry
-      ),
-  };
-}
 
 export const getPastedTextClipboardTextForSelection = ({
   value,

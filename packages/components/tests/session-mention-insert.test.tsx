@@ -1,28 +1,8 @@
 // @vitest-environment jsdom
 
-import { File as NodeFile } from 'node:buffer';
-import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
-import { usePastedTextAttachments } from '../src/hooks/use-pasted-text-attachments';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-const uploadedFiles = vi.hoisted(() => [] as File[]);
-vi.mock('@lody/platform/react', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  usePlatformCapability: () => false,
-}));
-vi.mock('../src/atoms/local-probe', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  localMachineIdAtom: (await import('jotai')).atom('local'),
-}));
-vi.mock('../src/lib/electron-session-file-sender', () => ({
-  canUseElectronLocalFileSend: () => true,
-  sendSessionFileToLocalRuntime: async ({ file }: { file: File }) => {
-    uploadedFiles.push(file);
-    return { ok: true, files: [{ type: 'file', fileName: file.name, transport: 'local' }] };
-  },
-}));
 
 let sessionItems: Array<{ sessionId: string; title: string; slug: string; activityAt: number }> =
   [];
@@ -62,10 +42,6 @@ import {
   type CombinedMentionTextareaHandle,
 } from '../src/components/mentions/combined-mention-textarea';
 import type { Mention as MentionRange } from '../src/ui/mention/index';
-import { ChatComposer } from '../src/components/chat/chat-composer';
-import { applyTextRewrites } from '@lody/shared';
-import { buildSessionMentionRewrites } from '../src/components/mentions/mention-session-source';
-import { buildPastedTextRewrites, type PastedTextDraft } from '../src/lib/pasted-text-draft';
 import { initI18n } from '../src/i18n';
 
 (
@@ -106,8 +82,6 @@ describe('inserting a session mention from outside the composer', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
-    vi.unstubAllGlobals();
-    uploadedFiles.length = 0;
   });
 
   async function render(next = value) {
@@ -184,105 +158,4 @@ describe('inserting a session mention from outside the composer', () => {
     expect(value).toBe('hello');
     expect(ranges).toHaveLength(0);
   });
-  it.each(['Convert to message text', 'Remove attachment'])(
-    'keeps final send text consistent after file conversion, editing and %s',
-    async (action) => {
-      vi.stubGlobal('File', NodeFile);
-      let send!: ReturnType<typeof usePastedTextAttachments>;
-      let drafts: PastedTextDraft[] = [];
-      function Harness() {
-        send = usePastedTextAttachments('workspace' as WorkspaceId, 'local' as MachineId);
-        const [text, setText] = React.useState('@fix-ci explain this');
-        const [files, setFiles] = React.useState<PastedTextDraft[]>([]);
-        value = text;
-        drafts = files;
-        return (
-          <ChatComposer
-            promptValue={text}
-            onPromptChange={setText}
-            pastedTextDrafts={files}
-            onPastedTextDraftsChange={setFiles}
-            mentionActionsRef={(next) => {
-              handle = next;
-            }}
-            onMentionRangesChange={(next) => {
-              ranges = next;
-            }}
-          />
-        );
-      }
-      await act(async () => root.render(<Harness />));
-      expect(ranges).toEqual([{ value: 'sess_ci', start: 0, end: 7, kind: 'session' }]);
-      const click = async (element: Element | null | undefined) => {
-        expect(element).toBeTruthy();
-        await act(async () => (element as HTMLElement).click());
-      };
-      const button = (label: string) =>
-        [...document.querySelectorAll('button, [role="menuitem"]')].find(
-          (element) => element.textContent?.trim() === label
-        );
-      const trigger = container.querySelector('[aria-label="Add attachment"]');
-      await act(async () =>
-        trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-      );
-      await click(button('Convert message text to file'));
-      expect(drafts[0]?.text).toBe('@fix-ci explain this');
-      expect(ranges.filter((range) => range.kind === 'session')).toEqual([]);
-      const expanded = () =>
-        applyTextRewrites(value, [
-          ...buildPastedTextRewrites(drafts),
-          ...buildSessionMentionRewrites(value, ranges),
-        ]).text;
-      expect(expanded()).toBe(`[pasted-${drafts[0]!.id}.txt]`);
-      // A later mention must survive label length changes and move with the splice.
-      await act(async () => {
-        handle?.replaceText(value.length, value.length, ' ');
-      });
-      await act(async () => {
-        handle?.insertSessionMention('sess_docs');
-      });
-      const chip = container.querySelector('[data-mention-kind="pasted_text"]')!;
-      vi.spyOn(chip, 'getClientRects').mockReturnValue([
-        { left: 0, right: 100, top: 0, bottom: 20 },
-      ] as unknown as DOMRectList);
-      const input = container.querySelector('textarea')!;
-      input.setSelectionRange(0, 0);
-      await click(input);
-      const editor = document.querySelector('[role="dialog"] textarea') as HTMLTextAreaElement;
-      expect(editor).toBeTruthy();
-      await act(async () => {
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-          editor,
-          'edited context'
-        );
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      expect(drafts[0]!.text).toBe('edited context');
-      expect(expanded()).toBe(
-        `[pasted-${drafts[0]!.id}.txt] use lody mcp to query session[id: sess_docs] history `
-      );
-      const blocks = [
-        { type: 'text', text: expanded() },
-        ...(await send(drafts, 'session' as SessionId)),
-      ];
-      expect(blocks).toEqual([
-        {
-          type: 'text',
-          text: `[pasted-${drafts[0]!.id}.txt] use lody mcp to query session[id: sess_docs] history `,
-        },
-        { type: 'file', fileName: `pasted-${drafts[0]!.id}.txt`, transport: 'local' },
-      ]);
-      expect(await uploadedFiles[0]!.text()).toBe('edited context');
-      await click(button(action));
-      expect(drafts).toEqual([]);
-      expect(expanded()).toBe(
-        `${action === 'Remove attachment' ? '' : 'edited context'} use lody mcp to query session[id: sess_docs] history `
-      );
-      expect(
-        ranges
-          .filter((range) => range.kind === 'session')
-          .map((range) => value.slice(range.start, range.end))
-      ).toEqual(['@docs-pass']);
-    }
-  );
 });

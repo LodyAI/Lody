@@ -79,7 +79,9 @@ describe('before-send mention rewrite', () => {
       mentions: [{ value: 'review', start: 4, end: 11, kind: 'skill' }],
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
     });
-    expect(result.text).toBe('run use /review [Skill Path](.claude/skills/review/SKILL.md) on it');
+    expect(result.text).toBe(
+      'run use /review [Skill Path](.claude/skills/review/SKILL.md) on it'
+    );
     expect(result.spans).toHaveLength(1);
     expect(result.spans?.[0]).toMatchObject({ kind: 'skill', label: '$review' });
     expectSpansAddressOutput(result);
@@ -101,37 +103,28 @@ describe('before-send mention rewrite', () => {
       drafts,
       skills: [skillItem('review', '.claude/skills/review/SKILL.md')],
       mentions: [
-        {
-          value: 'src/a.ts',
-          start: text.indexOf('@src/a.ts'),
-          end: text.indexOf('@src/a.ts') + 9,
-          kind: 'file',
-        },
-        {
-          value: 'sess-9f2c',
-          start: text.indexOf('@my-run'),
-          end: text.indexOf('@my-run') + 7,
-          kind: 'session',
-        },
+        { value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' },
+        { value: 'sess-9f2c', start: text.indexOf('@my-run'), end: text.indexOf('@my-run') + 7, kind: 'session' },
         { value: '42', start: text.indexOf('#42'), end: text.indexOf('#42') + 3, kind: 'issue' },
       ],
     });
 
     // The agent sees every expansion.
-    expect(result.text).not.toContain(PASTED_BLOB);
-    expect(result.text).toContain('[pasted-paste-1.txt]');
+    expect(result.text).toContain(PASTED_BLOB);
     expect(result.text).toContain('use /review [Skill Path](.claude/skills/review/SKILL.md)');
     expect(result.text).toContain('use lody mcp to query session[id: sess-9f2c] history');
 
     // The transcript sees what the user typed, in order, addressing the output.
     expect(result.spans?.map((span) => [span.kind, span.label])).toEqual([
       ['file', '@src/a.ts'],
+      ['pasted_text', '[Pasted]'],
       ['skill', '$review'],
       ['session', 'my-run'],
       ['issue', '#42'],
     ]);
     expectSpansAddressOutput(result);
-    expect(result.text.slice(result.spans![3]!.start, result.spans![3]!.end)).toBe('#42');
+    expect(result.text.slice(result.spans![1]!.start, result.spans![1]!.end)).toBe(PASTED_BLOB);
+    expect(result.text.slice(result.spans![4]!.start, result.spans![4]!.end)).toBe('#42');
   });
 
   it('leaves a session token with no committed range alone', () => {
@@ -163,14 +156,7 @@ describe('before-send mention rewrite', () => {
     const text = '\n  see @src/a.ts  \n';
     const result = expand({
       text,
-      mentions: [
-        {
-          value: 'src/a.ts',
-          start: text.indexOf('@src/a.ts'),
-          end: text.indexOf('@src/a.ts') + 9,
-          kind: 'file',
-        },
-      ],
+      mentions: [{ value: 'src/a.ts', start: text.indexOf('@src/a.ts'), end: text.indexOf('@src/a.ts') + 9, kind: 'file' }],
     });
     const trimmed = result.text.trim();
     const spans = reanchorMessageTextSpansForTrim(result.text, trimmed, result.spans);

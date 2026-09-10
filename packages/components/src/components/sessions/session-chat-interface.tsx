@@ -1,7 +1,4 @@
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
-import { usePastedTextAttachments } from '@/hooks/use-pasted-text-attachments';
-import { buildPastedTextRewrites, type PastedTextDraft } from '@/lib/pasted-text-draft';
-import { applyTextRewrites } from '@lody/shared';
 import {
   MessageSelectionContext,
   MessageSelectionToolbar,
@@ -2004,7 +2001,6 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-    const uploadPastedTextAttachments = usePastedTextAttachments(workspaceId, session.machineId);
     const currentUser = useAtomValue(userAtom);
     const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
@@ -2955,15 +2951,8 @@ export const SessionChatInterface = memo(
       sessionMachine?.acpCapabilities,
     ]);
     const handleEditLastUser = useCallback(
-      async (
-        message: SessionHistoryParsed,
-        text: string,
-        pastedTextDrafts: readonly PastedTextDraft[] = []
-      ): Promise<boolean> => {
-        const nextText = applyTextRewrites(
-          text,
-          buildPastedTextRewrites(pastedTextDrafts)
-        ).text.trim();
+      async (message: SessionHistoryParsed, text: string): Promise<boolean> => {
+        const nextText = text.trim();
         const requesterUserId = currentUser?.id ?? session.userId;
         if (
           !runtime ||
@@ -2992,18 +2981,6 @@ export const SessionChatInterface = memo(
           inputBlocks.push({ type: 'text', text: nextText });
         }
 
-        try {
-          inputBlocks.push(
-            ...(await uploadPastedTextAttachments(pastedTextDrafts, session.id, inputBlocks))
-          );
-        } catch (error) {
-          toast.error(
-            error instanceof Error
-              ? error.message
-              : t('sessions.fileUploadFailed', 'File upload failed')
-          );
-          return false;
-        }
         const originalConfig = normalizeSessionTurnInputConfig(message.inputConfig) ?? {};
         const inputConfig: SessionTurnInputConfig = {
           ...originalConfig,
@@ -3048,7 +3025,6 @@ export const SessionChatInterface = memo(
         captureSessionEvent,
         currentUser?.id,
         editableLastUserMessageId,
-        uploadPastedTextAttachments,
         guardNewBillableTurn,
         runtime,
         session.agentType,

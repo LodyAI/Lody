@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, createRef, type RefObject, type ComponentProps } from 'react';
+import { act, createElement, createRef, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
@@ -16,29 +16,6 @@ const sessionAgentRoleState = vi.hoisted(() => ({
     onSelect: (roleId: AgentRoleId | null) => void;
   },
 }));
-
-const attachmentUpload = vi.hoisted(() => ({
-  run: null as
-    | null
-    | ((options?: {
-        onProgress?: (
-          progress: import('../src/components/chat/submission/pending-attachment-submission').AttachmentProgress
-        ) => void;
-      }) => Promise<SessionInputBlock[]>),
-}));
-vi.mock('../src/hooks/use-pasted-text-attachments', () => ({
-  usePastedTextAttachments:
-    () =>
-    async (
-      drafts: unknown[],
-      _sessionId: string,
-      _blocks: unknown[],
-      options?: Parameters<NonNullable<typeof attachmentUpload.run>>[0]
-    ) => (drafts.length > 0 && attachmentUpload.run ? attachmentUpload.run(options) : []),
-}));
-beforeEach(() => {
-  attachmentUpload.run = null;
-});
 
 vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
 
@@ -83,18 +60,10 @@ vi.mock('../src/hooks/use-code-collab-session-file-provider', () => ({
 }));
 
 import {
-  SessionChatInputArea as UnwrappedSessionChatInputArea,
+  SessionChatInputArea,
   setSessionChatInputTextDraft,
   type SessionChatInputAreaHandle,
 } from '../src/components/sessions/session-chat-input-area';
-import { TestCloudPlatformProvider } from './test-platform';
-function SessionChatInputArea(props: ComponentProps<typeof UnwrappedSessionChatInputArea>) {
-  return (
-    <TestCloudPlatformProvider>
-      <UnwrappedSessionChatInputArea {...props} />
-    </TestCloudPlatformProvider>
-  );
-}
 import { initI18n } from '../src/i18n';
 
 (
@@ -682,77 +651,5 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
-  });
-  it('shows unsent upload progress before accepting an existing-session message', async () => {
-    let resolveUpload!: (blocks: SessionInputBlock[]) => void;
-    const transfer = new Promise<SessionInputBlock[]>((resolve) => {
-      resolveUpload = resolve;
-    });
-    attachmentUpload.run = (options) => {
-      options?.onProgress?.({
-        phase: 'uploading',
-        percent: 35,
-        loadedBytes: 350,
-        totalBytes: 1000,
-        fileName: 'context.txt',
-        index: 0,
-        count: 1,
-      });
-      return transfer;
-    };
-    let accepted: SessionInputBlock[] | null = null;
-    const textarea = await renderComposer({
-      onSendMessage: async (blocks) => {
-        accepted = blocks;
-        return true;
-      },
-    });
-    const paste = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(paste, 'clipboardData', {
-      value: { getData: () => 'x'.repeat(6000), items: [] },
-    });
-    await act(async () => textarea.dispatchEvent(paste));
-    await submit('keyboard');
-    expect(container?.textContent).toContain('Your message has not been sent yet');
-    expect(container?.querySelector('progress')?.value).toBe(35);
-    expect(accepted).toBeNull();
-    const fileBlock = {
-      type: 'file',
-      fileName: 'context.txt',
-      fileId: 'synthetic-file',
-    } as SessionInputBlock;
-    await act(async () => resolveUpload([fileBlock]));
-    expect(accepted).toContainEqual(fileBlock);
-    expect(container?.querySelector('progress')).toBeNull();
-    expect(container?.querySelector('textarea')?.value).toBe('');
-  });
-  it('retires an existing-session upload when switching away and does not revive stale progress', async () => {
-    let finish!: (blocks: SessionInputBlock[]) => void;
-    const transfer = new Promise<SessionInputBlock[]>((resolve) => {
-      finish = resolve;
-    });
-    attachmentUpload.run = () => transfer;
-    let accepted = false;
-    const props = {
-      sessionId: `upload-owner-${++nextSession}`,
-      onSendMessage: async () => {
-        accepted = true;
-        return true;
-      },
-    };
-    const textarea = await renderComposer(props);
-    const paste = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(paste, 'clipboardData', {
-      value: { getData: () => 'x'.repeat(6000), items: [] },
-    });
-    await act(async () => textarea.dispatchEvent(paste));
-    await submit('keyboard');
-    expect(container?.textContent).toContain('Your message has not been sent yet');
-    await renderComposer({ onSendMessage: async () => true });
-    await renderComposer(props);
-    expect(container?.textContent).not.toContain('Your message has not been sent yet');
-    await act(async () => finish([]));
-    expect(accepted).toBe(false);
-    expect(container?.querySelector('textarea')?.value).not.toBe('');
   });
 });

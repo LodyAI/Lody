@@ -1,4 +1,3 @@
-import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import {
   forwardRef,
   memo,
@@ -99,11 +98,7 @@ export interface SessionChatStreamProps {
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
-  onEditLastUser?: (
-    message: SessionHistoryParsed,
-    text: string,
-    pastedTextDrafts?: readonly PastedTextDraft[]
-  ) => Promise<boolean>;
+  onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
@@ -137,11 +132,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   workspaceId?: WorkspaceId | null;
   showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
-  onEditLastUser?: (
-    message: SessionHistoryParsed,
-    text: string,
-    pastedTextDrafts?: readonly PastedTextDraft[]
-  ) => Promise<boolean>;
+  onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;

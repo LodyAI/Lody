@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, FileText, Paperclip, Plug, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@/ui/button';
@@ -38,7 +38,6 @@ export interface AttachmentAddMenuProps {
   /** Omit the callback to hide the attachment item entirely. The picker is
    * intentionally unfiltered; its owner routes the selected files by MIME. */
   onAddAttachment?: () => void;
-  onConvertTextToFile?: () => void;
   attachmentDisabled?: boolean;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
@@ -63,7 +62,6 @@ export function AttachmentAddMenu({
   isLanding,
   disabled,
   onAddAttachment,
-  onConvertTextToFile,
   attachmentDisabled,
   mcp,
 }: AttachmentAddMenuProps) {
@@ -75,7 +73,7 @@ export function AttachmentAddMenu({
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !onConvertTextToFile && !hasMcp) {
+  if (!onAddAttachment && !hasMcp) {
     return null;
   }
 
@@ -162,12 +160,6 @@ export function AttachmentAddMenu({
                 {triggerLabel}
               </DropdownMenuItem>
             ) : null}
-            {onConvertTextToFile && (
-              <DropdownMenuItem onSelect={onConvertTextToFile} className={itemClass}>
-                <FileText className={iconClass} />
-                {t('composer.textToFile', 'Convert message text to file')}
-              </DropdownMenuItem>
-            )}
             {hasMcp && mcp ? (
               <>
                 {onAddAttachment ? <DropdownMenuSeparator /> : null}

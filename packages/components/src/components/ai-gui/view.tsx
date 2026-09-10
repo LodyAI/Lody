@@ -1,4 +1,3 @@
-import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -1853,11 +1852,7 @@ export const MessageRowView = memo(function MessageRowView({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
-  onEdit?: (
-    message: SessionHistoryParsed,
-    text: string,
-    pastedTextDrafts?: readonly PastedTextDraft[]
-  ) => Promise<boolean>;
+  onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
@@ -2723,11 +2718,7 @@ const UserMessageRowView = ({
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
-  onEdit?: (
-    message: SessionHistoryParsed,
-    text: string,
-    pastedTextDrafts?: readonly PastedTextDraft[]
-  ) => Promise<boolean>;
+  onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
@@ -2814,20 +2805,17 @@ const UserMessageRowView = ({
     }
   }, [isResending, message, onResendUndelivered, sessionId, t]);
 
-  const handleSaveEdit = useCallback(
-    async (drafts: PastedTextDraft[]) => {
-      if (!onEdit || isSavingEdit || !editText.trim()) return;
-      setIsSavingEdit(true);
-      try {
-        if (await onEdit(message, editText, drafts)) {
-          setIsEditing(false);
-        }
-      } finally {
-        setIsSavingEdit(false);
+  const handleSaveEdit = useCallback(async () => {
+    if (!onEdit || isSavingEdit || !editText.trim()) return;
+    setIsSavingEdit(true);
+    try {
+      if (await onEdit(message, editText)) {
+        setIsEditing(false);
       }
-    },
-    [editText, isSavingEdit, message, onEdit]
-  );
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }, [editText, isSavingEdit, message, onEdit]);
 
   return (
     <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
@@ -2845,7 +2833,7 @@ const UserMessageRowView = ({
           data-testid="user-message-metadata"
         >
           {showSenderIdentity && user?.name ? (
-            <span className="max-w-40 truncate font-medium text-foreground/70" title={user.name}>
+            <span className="max-w-40 truncate font-medium" title={user.name}>
               {user.name}
             </span>
           ) : null}
@@ -2922,7 +2910,7 @@ const UserMessageRowView = ({
                       value={editText}
                       onChange={setEditText}
                       onCancel={() => setIsEditing(false)}
-                      onSave={(drafts) => void handleSaveEdit(drafts)}
+                      onSave={() => void handleSaveEdit()}
                       isSaving={isSavingEdit}
                       conversationFontSize={conversationFontSize}
                     />
@@ -2943,7 +2931,15 @@ const UserMessageRowView = ({
         {(hasTextContent || copyContext) && !isEditing ? (
           <div className="flex gap-0.5">
             {copyContext && (
-              <AssistantForkButton turnId={message.id} worktreeAvailability="hidden" />
+              <AssistantForkButton
+                turnId={message.id}
+                worktreeAvailability="hidden"
+                className={cn(
+                  'transition-opacity',
+                  !isMobile &&
+                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                )}
+              />
             )}
             {onEdit ? (
               <TooltipProvider>
@@ -3581,12 +3577,14 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 const AssistantForkButton = ({
   turnId,
+  className,
   isForking,
   worktreeAvailability,
   onFork,
   onWorktreeMenuOpen,
 }: {
   turnId: string;
+  className?: string;
   isForking?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
@@ -3600,7 +3598,10 @@ const AssistantForkButton = ({
       type="button"
       variant="ghost"
       size="icon"
-      className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+      className={cn(
+        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
+        className
+      )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
       {isForking ? (
@@ -3807,6 +3808,7 @@ const AssistantTurnFooter = ({
               {(showFinishedMetadata && onFork) || copyContext ? (
                 <AssistantForkButton
                   turnId={message.id}
+                  className="mr-2"
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
                   onFork={showFinishedMetadata ? onFork : undefined}

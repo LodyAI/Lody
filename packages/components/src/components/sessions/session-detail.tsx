@@ -1,5 +1,3 @@
-import { usePendingAttachmentSubmissions } from '../chat/submission/pending-attachment-submission';
-import { AttachmentSubmissionStatus } from '../chat/submission/attachment-submission-status';
 import {
   Archive,
   ArchiveRestore,
@@ -6035,28 +6033,4 @@ const SessionDetail = ({
   );
 };
 
-function SessionDetailWithPendingUpload(props: Parameters<typeof SessionDetail>[0]) {
-  const pending = usePendingAttachmentSubmissions();
-  const user = useAtomValue(userAtom);
-  const router = useRouter();
-  const upload = pending.find(
-    (item) => item.sessionId === props.sessionId && item.ownerId === user?.id
-  );
-  if (!upload) return <SessionDetail {...props} />;
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-auto px-4 py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-      <AttachmentSubmissionStatus
-        text={upload.text}
-        progress={upload.progress}
-        phase={upload.phase}
-        onRetry={upload.retry}
-        onEdit={() => {
-          upload.cancel();
-          void router.navigate({ href: upload.returnHref });
-        }}
-      />
-    </div>
-  );
-}
-
-export default SessionDetailWithPendingUpload;
+export default SessionDetail;

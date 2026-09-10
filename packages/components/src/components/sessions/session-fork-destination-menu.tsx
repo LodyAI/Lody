@@ -134,7 +134,7 @@ export function SessionForkDestinationList({
             label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
             hint={t(
               'sessions.copyContextMarkdownHint',
-              'Copy the conversation from the beginning through this message, including this message'
+              'Copy the conversation through this message'
             )}
             disabled={false}
             onSelect={onCopyContext}

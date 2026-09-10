@@ -1,30 +1,34 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 
 import { Button } from '@/ui/button';
-import { ChatComposer } from '../chat/chat-composer';
-import {
-  insertPastedTextDraft,
-  getPastedTextDraftsAfterInsertion,
-  shouldCapturePastedTextDraft,
-  type PastedTextDraft,
-} from '@/lib/pasted-text-draft';
-import { wrapPastedTextChipLabel } from '../mentions/mention-chips';
-import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
+import { Textarea } from '@/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { ConversationFontSize } from '@/atoms/settings';
+import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
+
+/** Grows with the text instead of reserving a fixed empty block. */
+const MAX_TEXTAREA_HEIGHT_PX = 320;
 
 export type UserMessageEditorProps = {
   value: string;
   onChange: (value: string) => void;
   onCancel: () => void;
-  onSave: (drafts: PastedTextDraft[]) => void;
+  onSave: () => void;
   isSaving: boolean;
   conversationFontSize: ConversationFontSize;
 };
 
-/** Edit/resend shares the normal composer's editable pasted-file controls. */
+/**
+ * In-place editor that takes the last user bubble's spot when resending.
+ *
+ * One surface only: the card carries the border, and the field inside is
+ * transparent and chrome-free — the shared `Textarea` is what suppresses the
+ * global `:focus-visible` inset ring (`@layer base` in tailwind/index.css) that
+ * would otherwise draw a second rectangle around the text. Send matches the
+ * composer's black pill so the two writing surfaces read as the same control.
+ */
 export function UserMessageEditor({
   value,
   onChange,
@@ -37,7 +41,17 @@ export function UserMessageEditor({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const canSave = value.trim().length > 0 && !isSaving;
 
-  const [drafts, setDrafts] = useState<PastedTextDraft[]>([]);
+  // Auto-size to the content: reset first so the box can also shrink when text
+  // is deleted, then cap it and let the textarea scroll past the cap.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT_PX ? 'auto' : 'hidden';
+  }, [value]);
+
   // Put the caret at the end rather than selecting everything, so the common
   // case (appending a clarification) needs no extra click.
   const focusAtEnd = useCallback((el: HTMLTextAreaElement | null) => {
@@ -58,56 +72,30 @@ export function UserMessageEditor({
       )}
       aria-busy={isSaving || undefined}
     >
-      <ChatComposer
-        promptRef={focusAtEnd}
-        promptValue={value}
-        promptStyle={conversationTextFontSizeStyle(conversationFontSize)}
-        onPromptChange={onChange}
-        promptDisabled={isSaving}
-        primaryAction={null}
-        autoResize
-        pastedTextDrafts={drafts}
-        onPastedTextDraftsChange={setDrafts}
-        onPromptPaste={(event) => {
-          const text = event.clipboardData.getData('text/plain');
-          if (isSaving || !shouldCapturePastedTextDraft(text)) return;
-          const start = event.currentTarget.selectionStart;
-          const end = event.currentTarget.selectionEnd;
-          const displayText = wrapPastedTextChipLabel(
-            t('composer.pastedFileInlineLabel', '[Text file · {{charCount}} chars]', {
-              charCount: text.length,
-            })
-          );
-          const result = insertPastedTextDraft({
-            currentValue: value,
-            pastedText: text,
-            displayText,
-            selectionStart: start,
-            selectionEnd: end,
-          });
-          if (!result) return;
-          event.preventDefault();
-          onChange(result.nextValue);
-          setDrafts(
-            getPastedTextDraftsAfterInsertion({
-              drafts,
-              draft: result.draft,
-              editStart: start,
-              editEnd: end,
-            })
-          );
-        }}
-        onPromptKeyDown={(event) => {
+      <Textarea
+        ref={focusAtEnd}
+        value={value}
+        rows={1}
+        readOnly={isSaving}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault();
             if (!isSaving) onCancel();
+            return;
           }
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
-            if (canSave) onSave(drafts);
+            if (canSave) onSave();
           }
         }}
-        promptPlaceholder={t('sessions.editMessage', 'Edit message')}
+        className={cn(
+          'input-scrollbar resize-none rounded-none border-transparent bg-transparent p-0',
+          'leading-relaxed text-foreground',
+          isSaving && 'text-muted-foreground'
+        )}
+        style={conversationTextFontSizeStyle(conversationFontSize)}
+        aria-label={t('sessions.editMessage', 'Edit message')}
       />
       <div className="mt-2 flex items-center justify-end gap-1">
         <Button
@@ -125,7 +113,7 @@ export function UserMessageEditor({
           variant="ghost"
           size="sm"
           disabled={!canSave}
-          onClick={() => onSave(drafts)}
+          onClick={onSave}
           className={cn(
             'h-7 rounded-full px-3.5 text-xs font-medium shadow-xs transition-all',
             'bg-foreground text-background hover:bg-foreground/90 hover:text-background',

@@ -25,10 +25,3 @@
 - Automatic composer focus is desktop-only. Narrow mobile layouts and native
   shells (including wide iPads) must not focus on entry or submission completion,
   whether the submission succeeds or fails. Explicit user focus actions still work.
-
-- New-session text-file uploads explicitly hand off from the mounted composer to
-  `pending-attachment-submission.ts` before route navigation. Its pending page is
-  client-local, never a durable Session or history entry. Only successful upload
-  releases atomic first-turn acceptance; retry is upload-only. Cancellation and
-  account/workspace changes must prevent late acceptance. Other composer submits
-  retain the mounted-scope lifetime above.

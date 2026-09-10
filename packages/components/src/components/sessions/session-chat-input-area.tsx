@@ -1,6 +1,3 @@
-import { AttachmentSubmissionStatus } from '../chat/submission/attachment-submission-status';
-import type { AttachmentProgress } from '../chat/submission/pending-attachment-submission';
-import { usePastedTextAttachments } from '@/hooks/use-pasted-text-attachments';
 import {
   useState,
   useCallback,
@@ -580,15 +577,6 @@ export const SessionChatInputArea = memo(
       runtimeWorkspaceId: workspaceRuntime?.workspaceId,
     });
     const authToken = useAtomValue(authTokenAtom);
-    const uploadPastedTextAttachments = usePastedTextAttachments(workspaceId, session.machineId);
-    const [attachmentSubmission, setAttachmentSubmission] = useState<{
-      sessionId: string;
-      text: string;
-      progress?: AttachmentProgress;
-      phase: 'uploading' | 'submitting' | 'upload-failed' | 'submit-failed';
-    } | null>(null);
-    if (attachmentSubmission && attachmentSubmission.sessionId !== session.id)
-      setAttachmentSubmission(null);
     const currentUser = useAtomValue(userAtom);
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
@@ -1563,7 +1551,7 @@ export const SessionChatInputArea = memo(
         if (isArchived) {
           return false;
         }
-        const normalizedText = normalizePastedTextDraft(text);
+        const normalizedText = normalizePastedTextDraft(text).trim();
         if (!normalizedText) {
           return false;
         }
@@ -1575,7 +1563,7 @@ export const SessionChatInputArea = memo(
           currentValue,
           pastedText: normalizedText,
           displayText: wrapPastedTextChipLabel(
-            t('composer.pastedFileInlineLabel', '[Text file · {{charCount}} chars]', {
+            t('composer.pastedTextInlineLabel', '[Pasted {{charCount}} chars]', {
               charCount: numberFormatter.format(getPastedTextCharacterCount(normalizedText)),
             })
           ),
@@ -1901,37 +1889,8 @@ export const SessionChatInputArea = memo(
       };
       const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
       if (!submission) return;
-      const submittedAgentRole = agentRoleTurnSelectionRef.current;
-      let filesReady = false;
       try {
-        setAttachmentSubmission(
-          pastedTextDrafts.length > 0
-            ? { sessionId: session.id, text: userInput, phase: 'uploading' }
-            : null
-        );
-        inputBlocks.push(
-          ...(await uploadPastedTextAttachments(pastedTextDrafts, session.id, inputBlocks, {
-            onProgress: (progress) => {
-              if (submission.isCurrent())
-                setAttachmentSubmission({
-                  sessionId: session.id,
-                  text: userInput,
-                  phase: 'uploading',
-                  progress,
-                });
-            },
-          }))
-        );
-        if (!submission.isCurrent()) return;
-        filesReady = true;
-        setAttachmentSubmission((previous) =>
-          previous ? { ...previous, phase: 'submitting' } : null
-        );
-        const accepted = await onSendMessage(inputBlocks, submittedAgentRole);
-        if (submission.isCurrent())
-          setAttachmentSubmission((previous) =>
-            accepted ? null : previous ? { ...previous, phase: 'submit-failed' } : null
-          );
+        const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
         if (accepted) {
           if (submission.isCurrent()) {
             clearInput();
@@ -1955,20 +1914,11 @@ export const SessionChatInputArea = memo(
             void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
           }
         }
-      } catch (error) {
-        if (submission.isCurrent()) {
-          setAttachmentSubmission((previous) =>
-            previous ? { ...previous, phase: filesReady ? 'submit-failed' : 'upload-failed' } : null
-          );
-          toast.error(error instanceof Error ? error.message : fileUploadFailedLabel);
-        }
       } finally {
         submission.finish();
       }
     }, [
       beginSubmission,
-      uploadPastedTextAttachments,
-      fileUploadFailedLabel,
       clearInput,
       clearPendingImages,
       clearPendingFiles,
@@ -2597,22 +2547,6 @@ export const SessionChatInputArea = memo(
               className="hidden"
               onChange={handleAttachmentInputChange}
             />
-          ) : null}
-          {attachmentSubmission?.sessionId === session.id ? (
-            <div className="mb-3">
-              <AttachmentSubmissionStatus
-                {...attachmentSubmission}
-                onRetry={() => {
-                  void sendMessage();
-                }}
-                onEdit={
-                  attachmentSubmission.phase === 'upload-failed' ||
-                  attachmentSubmission.phase === 'submit-failed'
-                    ? () => setAttachmentSubmission(null)
-                    : undefined
-                }
-              />
-            </div>
           ) : null}
           {composerNode}
         </ConversationColumn>

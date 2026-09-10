@@ -215,7 +215,7 @@ const zhCnPastedText = [
   '补充说明：',
   '这类日志在实际使用里通常会更长，里面还会包含堆栈、请求参数、环境信息和用户自己的描述。',
 ].join('\n');
-const zhCnPastedTextLabel = `[文本文件 · ${new Intl.NumberFormat('zh-CN').format(
+const zhCnPastedTextLabel = `[已粘贴 ${new Intl.NumberFormat('zh-CN').format(
   getPastedTextCharacterCount(zhCnPastedText)
 )} 字符]`;
 const zhCnPromptPrefix = '报错 ';

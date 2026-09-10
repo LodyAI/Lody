@@ -498,8 +498,6 @@ function AgentRoleMentionHydrator({
  * re-slugging every visible session on every session-list tick.
  */
 export type CombinedMentionTextareaHandle = {
-  /** Replace text and move or remove every affected committed mention. */
-  replaceText: (start: number, end: number, text: string) => void;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -528,11 +526,10 @@ function MentionActionsBridge({
   items: readonly SessionMentionItem[];
 }) {
   const context = useMentionContext('MentionActionsBridge');
-  const { mentions, onMentionInsert, onTextSplice } = context;
+  const { mentions, onMentionInsert } = context;
   React.useImperativeHandle(
     actionsRef,
     () => ({
-      replaceText: onTextSplice,
       insertSessionMention: (sessionId: string) => {
         // Session mentions being disabled IS an empty list, so the lookup is
         // also the enablement check — there is nothing to mention.
@@ -562,7 +559,7 @@ function MentionActionsBridge({
         return true;
       },
     }),
-    [items, mentions, onMentionInsert, onTextSplice]
+    [items, mentions, onMentionInsert]
   );
 
   return null;

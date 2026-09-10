@@ -21,8 +21,7 @@ reasoning behind those rules.
   state and rendering for references attached to outgoing messages.
 - `context-switch.tsx`, `machine-pairing-dialog.tsx`, `web-chat-landing-screen.tsx`
   — landing chrome and host-specific entry points.
-- [`submission/`](submission/AGENTS.md) — the composer submission lifecycle and
-  pending text-file upload status before first-turn acceptance
+- [`submission/`](submission/AGENTS.md) — the composer submission lifecycle
   (its own scope, with its own rules).
 - Landing attachment uploads live in two sibling hooks under `src/hooks/`:
   `use-chat-landing-image-draft.ts` (images) and `use-chat-landing-file-draft.ts`
@@ -56,11 +55,3 @@ reasoning behind those rules.
   nothing.
 - Draft ACP preparation has a longer contract that remains in the private
   architecture context.
-
-## Pasted text files
-
-All message composers share the editable pasted-file UI in `ChatComposer`.
-`use-pasted-text-attachments.ts` transfers the current bytes only at submission;
-`pasted-text-draft.ts` handles the 5000-character threshold, editing, restoring
-prose and small outgoing file references. See the
-[Spec](../../../../../specs/conversation-context-copy-and-text-attachments.md).
