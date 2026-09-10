@@ -80,22 +80,72 @@ function parseArgs(argv) {
   return options;
 }
 
+/**
+ * Return line indexes that match `predicate` while ignoring fenced code payloads.
+ *
+ * Markdown headings inside the original-prompt fence are source text, not PR
+ * structure. Track CommonMark-style backtick/tilde fences so section discovery
+ * and duplicate-heading checks agree on the same structural lines.
+ */
+function lineIndexesOutsideFences(lines, predicate) {
+  const indexes = [];
+  let fence = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
+      if (
+        closing &&
+        closing[1][0] === fence.marker &&
+        closing[1].length >= fence.length
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (opening) {
+      const marker = opening[1];
+      const info = opening[2] ?? '';
+      // CommonMark does not allow a backtick in a backtick fence's info string.
+      if (marker[0] !== '`' || !info.includes('`')) {
+        fence = { marker: marker[0], length: marker.length };
+        continue;
+      }
+    }
+
+    if (predicate(line, index)) {
+      indexes.push(index);
+    }
+  }
+
+  return indexes;
+}
+
 function headingCount(markdown, heading) {
-  return markdown.split('\n').filter((line) => line.trimEnd() === heading).length;
+  const lines = markdown.split('\n');
+  return lineIndexesOutsideFences(lines, (line) => line.trimEnd() === heading).length;
 }
 
 function sectionBody(markdown, heading) {
   const lines = markdown.split('\n');
-  const start = lines.findIndex((line) => line.trimEnd() === heading);
+  const starts = lineIndexesOutsideFences(lines, (line) => line.trimEnd() === heading);
+  const start = starts[0] ?? -1;
   if (start === -1) {
     return null;
   }
 
   const level = heading.startsWith('### ') ? 3 : 2;
   const nextHeading = level === 3 ? /^#{2,3}(?:\s|$)/ : /^##(?:\s|$)/;
-  const next = lines.findIndex((line, index) => index > start && nextHeading.test(line));
+  const next = lineIndexesOutsideFences(
+    lines,
+    (line, index) => index > start && nextHeading.test(line)
+  )[0];
   return lines
-    .slice(start + 1, next === -1 ? undefined : next)
+    .slice(start + 1, next === undefined ? undefined : next)
     .join('\n')
     .trim();
 }
