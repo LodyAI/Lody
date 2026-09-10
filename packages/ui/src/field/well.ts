@@ -54,6 +54,61 @@ export const well = stylex.create({
     },
   },
   /**
+   * A well that wraps its own control rather than being one: the Combobox shell
+   * holding an input beside a chevron. The ring follows `:focus-within`, since
+   * the element that takes focus is the input inside it, not the shell; a text
+   * control is always focus-visible, so this covers pointer focus too. Disabled
+   * cannot be `:disabled` on a `<div>`, so it is read from Base UI's state and
+   * `dimmed` is applied instead.
+   */
+  shell: {
+    display: 'flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    width: '100%',
+    minWidth: 0,
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: field.background,
+    boxShadow: { default: field.well, ':focus-within': `${field.well}, ${RING}` },
+    color: field.value,
+    cornerShape: corner.shape,
+    outlineStyle: 'none',
+    cursor: 'text',
+    transitionProperty: 'box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  shellInvalid: {
+    boxShadow: {
+      default: `${field.well}, ${INVALID_RING}`,
+      ':focus-within': `${field.well}, ${INVALID_RING}`,
+    },
+  },
+  /** The control inside a shell: the shell already is the well. */
+  bare: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    outlineStyle: 'none',
+    cursor: { default: 'auto', ':disabled': 'default' },
+    '::placeholder': { color: field.placeholder, opacity: 1 },
+  },
+  /** The family's one disabled value, for a part `:disabled` cannot reach. */
+  dimmed: { opacity: field.disabledOpacity },
+  /**
    * The same well as a box rather than a line of text: the tick box of a
    * Checkbox and a Radio, and the track of a Switch. It takes no width, no font
    * and no placeholder, and it carries the mark colour so an indicator inside

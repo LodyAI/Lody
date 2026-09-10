@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import { buttonPaletteTheme } from '../button/button.tokens.stylex';
 import { fieldPaletteTheme } from '../field/field.tokens.stylex';
+import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { darkShadowTheme, darkTheme, lightShadowTheme, lightTheme } from '../tokens/colors.stylex';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
@@ -11,7 +12,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * re-declared on the element carrying a forced palette so they resolve against
  * it; a group declared only at the document root keeps the root palette.
  */
-const componentPaletteThemes = [buttonPaletteTheme, fieldPaletteTheme];
+const componentPaletteThemes = [buttonPaletteTheme, fieldPaletteTheme, popupPaletteTheme];
 
 const styles = stylex.create({
   system: { colorScheme: 'light dark' },
