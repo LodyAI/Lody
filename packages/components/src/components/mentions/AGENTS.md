@@ -74,27 +74,16 @@ hydration, persisted ranges, session/Role addressing, or transcript semantics.
   must keep the original invocation data. Accepted sends clear before promotion.
   Landing/session owners mask Shortcut-bearing cached
   text from foreign account/workspace domains without replacing normal caches.
-- A chip carries its filled values in its own text (`shortcutChipText`), applied
-  on tray close through `applyShortcutChipLabel` — a draft of three identical
-  `/review` chips is not something anyone can check before sending. Capped by
-  CODE POINTS so a truncation cannot split a surrogate pair. Both forms of the
-  text are valid (`isShortcutChipText`): bare before any value exists, labelled
-  after, so a stored draft written before its values still restores.
-- A chip with missing values is coloured, nothing more: no badge painted over
-  the text. The tray names the values, and two markers for one fact is one too
-  many. While the tray is open the composer stops reserving its blank writing
-  rows (`onShortcutParametersOpenChange`), because those rows would otherwise
-  sit between the `/command` and the fields that belong to it.
-- `shortcut-parameters.tsx` edits one invocation at a time in a desktop tray or
-  mobile sheet, in the settings variable editor's own grammar: the `!{name}`
-  token beside its value, a missing value tinting that token rather than adding
-  a marker of its own. Whitespace-only values are missing; defaults never refill
-  an explicitly cleared value. Both send entry points gate on live missing
-  values, and dismissing the tray is the only action in it — values are already
-  on the invocation as they are typed.
+- An invocation chip is atomic and carries only `/slug`. A Shortcut has no
+  variables, so there is nothing to fill in and no parameter surface at all;
+  `!{name}` inside a template is ordinary text, stored and sent as written.
+- `shortcut-invocation-status.tsx` says why an inserted chip cannot be sent. The
+  snapshot is frozen, so what changes under it is the live context — machine
+  offline, project changed, reference no longer readable — and it reports that
+  upward so the send button and the notice cannot disagree.
 - `shortcut-composer-state.ts` derives scope from composer project/provider identity.
-  Invocation snapshots and values live on each `prompt_shortcut` range, keyed by
-  invocation id; never reconstruct them from the visible slug or live catalog.
+  Invocation snapshots live on each `prompt_shortcut` range, keyed by invocation
+  id; never reconstruct them from the visible slug or the live catalog.
 - `mention-chips.tsx` owns the kind -> glyph and kind -> colour tables for BOTH
   chip surfaces. The composer's resolver decides only slot geometry and the
   transcript's chip only its layout, so `@src/a.ts` cannot look like two

@@ -106,7 +106,6 @@ function PromptShortcutsSettingContent({
         prompt: '',
         scope: {},
         mentions: [],
-        variables: [],
         createdAt: now,
         updatedAt: now,
       },
@@ -452,16 +451,8 @@ export function PromptShortcutRow({
                   {t('settings.promptShortcuts.readOnly', 'Read-only')}
                 </Badge>
               )}
-              <span className="ms-auto flex shrink-0 items-center gap-1.5">
+              <span className="ms-auto shrink-0">
                 <ScopePills scope={entry.scope} options={options} />
-                {entry.variableCount > 0 ? (
-                  <span className="text-[11px] leading-4 text-muted-foreground/80">
-                    {t('settings.promptShortcuts.variableCount', {
-                      defaultValue: '{{count}} variables',
-                      count: entry.variableCount,
-                    })}
-                  </span>
-                ) : null}
               </span>
             </span>
             {entry.description || outOfScope ? (
@@ -552,22 +543,6 @@ export function PromptShortcutReadOnlyView({
             {shortcut.prompt}
           </div>
         </Section>
-        {shortcut.variables.length > 0 ? (
-          <Section title={t('settings.promptShortcuts.defaults', 'Variables')}>
-            <ul className="space-y-1.5">
-              {shortcut.variables.map((variable) => (
-                <li key={variable.name} className="flex min-w-0 items-start gap-2 text-xs">
-                  <code className="shrink-0 rounded-sm bg-status-warning/12 px-1 py-0.5 font-mono text-[11px] text-status-warning">
-                    {`!{${variable.name}}`}
-                  </code>
-                  <span className="min-w-0 break-words text-muted-foreground">
-                    {variable.defaultValue ?? t('settings.promptShortcuts.noDefault', 'No default')}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
       </div>
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>

@@ -31,7 +31,6 @@ const initial: PromptShortcut = {
   name: 'Review',
   slug: 'review',
   prompt: 'Review !{topic}',
-  variables: [{ name: 'topic' }],
   mentions: [],
   scope: {},
   createdAt: 1,
@@ -118,7 +117,6 @@ describe('Prompt Shortcut editor', () => {
           initial={{
             ...initial,
             prompt,
-            variables: [],
             scope: { project },
             mentions: [
               {
@@ -186,7 +184,7 @@ describe('Prompt Shortcut editor', () => {
     expect(editor!.initialRanges).toEqual([range]);
   });
 
-  it('keeps scope empty by default, derives variables and saves multiline literal defaults', async () => {
+  it('keeps scope empty by default and saves the prompt verbatim', async () => {
     let saved: PromptShortcut | undefined;
     await act(async () =>
       root.render(
@@ -208,22 +206,19 @@ describe('Prompt Shortcut editor', () => {
         (id) => scopeTrigger(id).textContent
       )
     ).toEqual(['ProjectNone', 'MachineNone', 'AgentNone']);
-    await edit('#shortcut-prompt', 'Review !{topic}\nExplain !{reason}');
-    await edit('#shortcut-variable-topic', 'line one\n$literal @literal !{literal}');
+    // `!{name}` is ordinary text now: it is stored and sent exactly as written.
+    await edit('#shortcut-prompt', 'Review !{topic}\nExplain the plan');
     await submitForm();
     expect(saved?.scope).toEqual({});
     expect(saved?.visibility).toBe('private');
-    expect(saved?.variables).toEqual([
-      { name: 'topic', defaultValue: 'line one\n$literal @literal !{literal}' },
-      { name: 'reason' },
-    ]);
+    expect(saved?.prompt).toBe('Review !{topic}\nExplain the plan');
   });
 
   it('derives the slash command from the name only while the author has not written one', async () => {
     await act(async () =>
       root.render(
         <PromptShortcutForm
-          initial={{ ...initial, name: '', slug: '', prompt: '', variables: [] }}
+          initial={{ ...initial, name: '', slug: '', prompt: '' }}
           isNew
           options={options}
           canShare

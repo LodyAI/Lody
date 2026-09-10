@@ -9,9 +9,7 @@ export const PROMPT_SHORTCUT_LIMITS = {
   promptBytes: 256 * 1024,
   documentBytes: 512 * 1024,
   indexBytes: 8 * 1024,
-  variableValueBytes: 8 * 1024,
   mentions: 50,
-  variables: 20,
 } as const;
 
 /**
@@ -38,7 +36,6 @@ export const normalizeShortcutEmoji = (value: unknown): string | undefined => {
 const utf8 = new TextEncoder();
 export const shortcutByteLength = (value: string): number => utf8.encode(value).byteLength;
 const identifier = z.string().min(1).max(200);
-const variableName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/);
 const projectSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('github'), repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/) })
@@ -99,19 +96,6 @@ export const PromptShortcutMentionSchema = z
   })
   .strict();
 
-export const PromptShortcutVariableSchema = z
-  .object({
-    name: variableName,
-    defaultValue: z
-      .string()
-      .refine(
-        (value) => shortcutByteLength(value) <= PROMPT_SHORTCUT_LIMITS.variableValueBytes,
-        'Variable default exceeds the byte limit'
-      )
-      .optional(),
-  })
-  .strict();
-
 export const PromptShortcutSchema = z
   .object({
     v: z.literal(1),
@@ -135,7 +119,6 @@ export const PromptShortcutSchema = z
         'Prompt exceeds the byte limit'
       ),
     mentions: z.array(PromptShortcutMentionSchema).max(PROMPT_SHORTCUT_LIMITS.mentions),
-    variables: z.array(PromptShortcutVariableSchema).max(PROMPT_SHORTCUT_LIMITS.variables),
     scope: PromptShortcutScopeSchema,
     revision: identifier,
     createdAt: z.number().int().nonnegative(),
@@ -151,7 +134,6 @@ export type PromptShortcutScope = z.infer<typeof PromptShortcutScopeSchema>;
 export type PromptShortcutProject = z.infer<typeof projectSchema>;
 export type PromptShortcutTarget = z.infer<typeof PromptShortcutTargetSchema>;
 export type PromptShortcutMention = z.infer<typeof PromptShortcutMentionSchema>;
-export type PromptShortcutVariable = z.infer<typeof PromptShortcutVariableSchema>;
 
 export class PromptShortcutError extends Error {
   constructor(
@@ -159,7 +141,6 @@ export class PromptShortcutError extends Error {
       | 'invalid_template'
       | 'missing_scope'
       | 'scope_mismatch'
-      | 'missing_variables'
       | 'invalid_ranges'
       | 'size_limit'
       | 'conflict'

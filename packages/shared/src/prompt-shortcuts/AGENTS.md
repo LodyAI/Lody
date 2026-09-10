@@ -6,9 +6,9 @@
 
 - `model.ts` owns strict saved-state schemas, explicit scope and dependency
   eligibility. Scope is author input, never inferred from mentions or active UI.
-- `compiler.ts` freezes invocation snapshots, derives variables and compiles
+- `compiler.ts` freezes invocation snapshots and compiles
   ordered inline segments. Injected values are literal; never hydrate/parse them
-  again as mentions, shortcuts or variables. The optional semantic renderer lowers
+  again as mentions or shortcuts. The optional semantic renderer lowers
   stable targets during the same segment pass and contributes to the byte budget.
   Offsets are UTF-16, byte quotas UTF-8.
 - `document.ts` saves coherent immutable revisions with explicit parent ancestry.

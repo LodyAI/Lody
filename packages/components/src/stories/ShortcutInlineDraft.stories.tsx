@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createShortcutInvocation, type PromptShortcut } from '@lody/shared/prompt-shortcuts';
-import { Mention, MentionInput, useMentionContext } from '@/ui/mention';
+import { Mention, MentionInput } from '@/ui/mention';
 import { getComposerMentionChip } from '@/components/mentions/mention-chips';
-import {
-  applyShortcutChipLabel,
-  ShortcutParameters,
-} from '@/components/mentions/shortcut-parameters';
-import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
+
+/**
+ * Several invocations inside one ordinary draft.
+ *
+ * A chip is an atomic reference with its own frozen snapshot, and the text
+ * around it stays ordinary Prompt — that is the whole point of inserting one
+ * rather than expanding it.
+ */
 const body: PromptShortcut = {
   v: 1,
   id: 'review',
@@ -16,57 +19,16 @@ const body: PromptShortcut = {
   visibility: 'private',
   name: 'Review',
   slug: 'review',
-  prompt: 'Review !{topic}\n  Keep !{focus}',
-  variables: [{ name: 'topic' }, { name: 'focus', defaultValue: '$literal !{unchanged}' }],
+  prompt: 'Review the change\n  Keep the team checklist in mind',
   mentions: [],
   scope: {},
   revision: 'r1',
   createdAt: 1,
   updatedAt: 1,
 };
-function Editor({
-  activeId,
-  onActive,
-  mobile,
-}: {
-  activeId: string | null;
-  onActive: (id: string | null) => void;
-  mobile: boolean;
-}) {
-  const context = useMentionContext('story');
-  const chip = context.mentions.find(
-    (range) => range.value === activeId && isShortcutMention(range)
-  );
-  return (
-    <>
-      {chip && isShortcutMention(chip) ? (
-        <ShortcutParameters
-          invocation={chip.data}
-          mobile={mobile}
-          onClose={() => {
-            onActive(null);
-            if (!applyShortcutChipLabel(context, chip)) context.inputRef.current?.focus();
-          }}
-          onChange={(name, value) =>
-            context.onMentionsChange((ranges) =>
-              ranges.map((range) =>
-                range.value === chip.value && isShortcutMention(range)
-                  ? {
-                      ...range,
-                      data: { ...range.data, values: { ...range.data.values, [name]: value } },
-                    }
-                  : range
-              )
-            )
-          }
-        />
-      ) : null}
-    </>
-  );
-}
-function Harness({ mobile = false }: { mobile?: boolean }) {
+
+function Harness() {
   const [text, setText] = useState('Before /review and /review after');
-  const [active, setActive] = useState<string | null>('one');
   const [mentions] = useState(() => [
     {
       start: 7,
@@ -80,10 +42,7 @@ function Harness({ mobile = false }: { mobile?: boolean }) {
       end: 26,
       value: 'two',
       kind: 'prompt_shortcut',
-      data: {
-        ...createShortcutInvocation('two', body),
-        values: { topic: 'Second invocation', focus: 'Tests' },
-      },
+      data: createShortcutInvocation('two', body),
     },
   ]);
   return (
@@ -94,18 +53,17 @@ function Harness({ mobile = false }: { mobile?: boolean }) {
         onInputValueChange={setText}
         defaultMentions={mentions}
         getMentionChip={getComposerMentionChip}
-        onMentionClick={(range) => setActive(range.value)}
       >
         <MentionInput
           value={text}
           aria-label="Prompt"
           className="w-full resize-none bg-transparent p-2"
         />
-        <Editor activeId={active} onActive={setActive} mobile={mobile} />
       </Mention>
     </div>
   );
 }
+
 const meta = {
   title: 'Chat/Shortcut Inline Draft',
   component: Harness,
@@ -114,7 +72,3 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const MultipleChips: Story = {};
-export const MobileSheet: Story = {
-  args: { mobile: true },
-  parameters: { viewport: { defaultViewport: 'mobile1' } },
-};

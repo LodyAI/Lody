@@ -3,21 +3,17 @@ import { LoroDoc } from 'loro-crdt';
 import {
   canAccessShortcutDomain,
   createShortcutInvocation,
-  deriveShortcutVariables,
   expandShortcut,
   expandShortcutComposer,
   getShortcutBodyStreamId,
   getShortcutIndexStreamId,
   getShortcutMentionGate,
   getShortcutMentionScopeIssues,
-  isShortcutChipText,
   parsePromptShortcut,
   projectShortcutIndex,
-  shortcutChipText,
   PromptShortcutDocument,
   PromptShortcutError,
   resolveShortcutAvailability,
-  updateShortcutInvocation,
   type PromptShortcut,
   type PromptShortcutScope,
   type PromptShortcutTarget,
@@ -34,7 +30,6 @@ function template(overrides: Partial<PromptShortcut> = {}): PromptShortcut {
     slug: 'review',
     prompt: 'Review !{topic}',
     mentions: [],
-    variables: [{ name: 'topic' }],
     scope: {},
     revision: 'r1',
     createdAt: 1,
@@ -54,51 +49,6 @@ function errorCode(run: () => unknown): string {
 }
 
 describe('shortcut template and scope', () => {
-  it('labels a chip with its filled values, capped on code points', () => {
-    const body = {
-      v: 1 as const,
-      id: 's',
-      workspaceId: 'w',
-      ownerUserId: 'u',
-      visibility: 'private' as const,
-      name: 'Review',
-      slug: 'review',
-      prompt: 'Review !{topic} for !{focus}',
-      mentions: [],
-      variables: [{ name: 'topic' }, { name: 'focus' }],
-      scope: {},
-      revision: 'r',
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    const invocation = createShortcutInvocation('one', body);
-    // Nothing filled yet: the chip is the bare command.
-    expect(shortcutChipText(invocation)).toBe('/review');
-    expect(isShortcutChipText('/review', invocation)).toBe(true);
-
-    const filled = { ...invocation, values: { topic: '  auth\n flow ', focus: 'tests' } };
-    expect(shortcutChipText(filled)).toBe('/review auth flow · tests');
-    expect(isShortcutChipText('/review auth flow · tests', filled)).toBe(true);
-    // The bare form stays valid so a draft stored before its values restores.
-    expect(isShortcutChipText('/review', filled)).toBe(true);
-    expect(isShortcutChipText('/review stale', filled)).toBe(false);
-
-    // Capped by code points, so a truncation never splits a surrogate pair.
-    const long = { ...invocation, values: { topic: '👩‍💻'.repeat(20) } };
-    const label = shortcutChipText(long).slice('/review '.length);
-    expect(Array.from(label)).toHaveLength(24);
-    expect(label.endsWith('…')).toBe(true);
-  });
-
-  it('derives required variables in first occurrence order and removes obsolete defaults', () => {
-    expect(
-      deriveShortcutVariables('!{b} !{a} !{b} \\!{literal}', [
-        { name: 'unused', defaultValue: 'gone' },
-        { name: 'a', defaultValue: 'preserved' },
-      ])
-    ).toEqual([{ name: 'b' }, { name: 'a', defaultValue: 'preserved' }]);
-  });
-
   it('allows a context-neutral Role without assuming its execution provider', () => {
     const prompt = '@Reviewer !{topic}';
     const role: PromptShortcutTarget = { kind: 'agent_role', agentRoleId: 'role-1' };
@@ -145,7 +95,7 @@ describe('shortcut template and scope', () => {
     expect(scope).toEqual({});
   });
 
-  it('rejects absent scope, wrong machine, stale labels, placeholder overlaps and malformed variables', () => {
+  it('rejects absent scope, wrong machine and stale labels', () => {
     const target: PromptShortcutTarget = {
       kind: 'file',
       path: 'a.ts',
@@ -153,7 +103,6 @@ describe('shortcut template and scope', () => {
     };
     const file = template({
       prompt: '@a.ts',
-      variables: [],
       mentions: [{ start: 0, end: 5, label: '@a.ts', target }],
     });
     expect(errorCode(() => parsePromptShortcut(file))).toBe('missing_scope');
@@ -162,21 +111,11 @@ describe('shortcut template and scope', () => {
         parsePromptShortcut({ ...file, scope: { project: target.project, machineId: 'other' } })
       )
     ).toBe('scope_mismatch');
-    expect(errorCode(() => parsePromptShortcut(template({ variables: [] })))).toBe(
-      'invalid_template'
-    );
     const role = { kind: 'agent_role' as const, agentRoleId: 'role' };
     expect(
       errorCode(() =>
         parsePromptShortcut(
           template({ mentions: [{ start: 0, end: 6, label: 'Wrong!', target: role }] })
-        )
-      )
-    ).toBe('invalid_ranges');
-    expect(
-      errorCode(() =>
-        parsePromptShortcut(
-          template({ mentions: [{ start: 7, end: 15, label: '!{topic}', target: role }] })
         )
       )
     ).toBe('invalid_ranges');
@@ -188,7 +127,6 @@ describe('shortcut template and scope', () => {
         parsePromptShortcut(
           template({
             prompt: '$review',
-            variables: [],
             scope: { providerKey: 'codex:codex' },
             mentions: [
               {
@@ -234,74 +172,30 @@ describe('shortcut template and scope', () => {
 });
 
 describe('shortcut compilation', () => {
-  it('budgets repeated variable expansion in UTF-8 before constructing the expanded text', () => {
-    const large = createShortcutInvocation('large', template({ prompt: '!{topic}'.repeat(1000) }));
-    large.values.topic = '界'.repeat(300);
-    expect(errorCode(() => expandShortcut(large))).toBe('size_limit');
-    const exact = createShortcutInvocation('exact', template({ prompt: '!{topic}'.repeat(3) }));
-    exact.values.topic = '界';
-    expect(errorCode(() => expandShortcut(exact, false, 8))).toBe('size_limit');
-    expect(expandShortcut(exact, false, 9).text).toBe('界界界');
-  });
-
-  it('substitutes repeated variables once and treats injected syntax literally', () => {
-    const invocation = createShortcutInvocation(
-      'i1',
-      template({ prompt: '!{topic} / !{topic} / \\!{literal}' })
-    );
-    invocation.values.topic = '!{x} @Role $skill\nline two';
-    expect(expandShortcut(invocation)).toEqual({
-      text: '!{x} @Role $skill\nline two / !{x} @Role $skill\nline two / !{literal}',
-      mentions: [],
-      unresolved: [],
-    });
-  });
-
-  it('tracks only expanded missing variables and allows empty/default clearing', () => {
-    const invocation = createShortcutInvocation(
-      'i1',
-      template({
-        prompt: '!{topic} \\!{literal}',
-        variables: [{ name: 'topic', defaultValue: 'default' }],
-      })
-    );
-    expect(expandShortcut(invocation).text).toBe('default !{literal}');
-    invocation.values.topic = ' ';
-    expect(errorCode(() => expandShortcut(invocation))).toBe('missing_variables');
-    expect(expandShortcut(invocation, true)).toEqual({
-      text: '!{topic} !{literal}',
-      mentions: [],
-      unresolved: [{ start: 0, end: 8, name: 'topic', invocationId: 'i1' }],
-    });
-  });
-
-  it('preserves mention offsets after multiline Unicode values', () => {
-    const prompt = '!{topic} @Reviewer';
+  it('preserves mention offsets after multiline Unicode text', () => {
+    const prompt = '中文🙂\nsecond line @Reviewer';
     const invocation = createShortcutInvocation(
       'i1',
       template({
         prompt,
         mentions: [
           {
-            start: 9,
-            end: 18,
+            start: prompt.indexOf('@Reviewer'),
+            end: prompt.indexOf('@Reviewer') + 9,
             label: '@Reviewer',
             target: { kind: 'agent_role', agentRoleId: 'role' },
           },
         ],
       })
     );
-    invocation.values.topic = '中文🙂\nsecond line';
     const output = expandShortcut(invocation);
     expect(output.text).toBe('中文🙂\nsecond line @Reviewer');
     expect(output.text.slice(output.mentions[0]!.start, output.mentions[0]!.end)).toBe('@Reviewer');
   });
 
-  it('expands multiple chips in place without adding separators or sharing values', () => {
+  it('expands multiple chips in place without adding separators', () => {
     const first = createShortcutInvocation('i1', template());
     const second = createShortcutInvocation('i2', template());
-    first.values.topic = 'first';
-    second.values.topic = 'second';
     expect(
       expandShortcutComposer({
         text: 'Before /review between /review after !{literal}',
@@ -312,40 +206,18 @@ describe('shortcut compilation', () => {
         ],
         maxBytes: 1000,
       }).text
-    ).toBe('Before Review first between Review second after !{literal}');
-  });
-
-  it('retains same-name values including intentional empty values on reload, but resets on replacement', () => {
-    const original = createShortcutInvocation('i1', template());
-    original.values.topic = '';
-    const updated = template({
-      prompt: '!{topic} !{new}',
-      revision: 'r2',
-      variables: [
-        { name: 'topic', defaultValue: 'not used' },
-        { name: 'new', defaultValue: 'seed' },
-      ],
-    });
-    expect(updateShortcutInvocation(original, updated).values).toEqual({ topic: '', new: 'seed' });
-    expect(updateShortcutInvocation(original, { ...updated, id: 'different' }).values).toEqual({
-      topic: 'not used',
-      new: 'seed',
-    });
-    expect(original.snapshot.revision).toBe('r1');
+    ).toBe('Before Review !{topic} between Review !{topic} after !{literal}');
   });
 
   it('snapshots do not alias mutable catalog objects', () => {
     const source = template();
     const invocation = createShortcutInvocation('i1', source);
     source.prompt = 'changed';
-    source.variables[0]!.defaultValue = 'changed';
     expect(invocation.snapshot.prompt).toBe('Review !{topic}');
-    expect(invocation.snapshot.variables).toEqual([{ name: 'topic' }]);
   });
 
   it('rejects stale ranges, overlapping chips and oversized UTF-8 output without truncating', () => {
-    const invocation = createShortcutInvocation('i1', template());
-    invocation.values.topic = '中文';
+    const invocation = createShortcutInvocation('i1', template({ prompt: '中'.repeat(6) }));
     expect(
       errorCode(() =>
         expandShortcutComposer({
@@ -383,9 +255,9 @@ describe('shortcut compilation', () => {
 });
 
 describe('LoroDoc saved revisions', () => {
-  it('survives binary export/import with text, mentions and variables coherent', () => {
+  it('survives binary export/import with text and mentions coherent', () => {
     const original = new PromptShortcutDocument(new LoroDoc());
-    original.save(template({ prompt: '长'.repeat(50_000), variables: [] }), []);
+    original.save(template({ prompt: '长'.repeat(50_000) }), []);
     const restored = new PromptShortcutDocument(new LoroDoc());
     restored.doc.import(original.doc.export({ mode: 'snapshot' }));
     expect(restored.read()).toEqual(original.read());
@@ -433,8 +305,8 @@ describe('LoroDoc saved revisions', () => {
 
   it('publishes only the current state, never earlier private revisions', () => {
     const original = new PromptShortcutDocument(new LoroDoc());
-    original.save(template({ prompt: 'private draft', variables: [] }), []);
-    original.save(template({ revision: 'r2', prompt: 'publishable', variables: [] }), ['r1']);
+    original.save(template({ prompt: 'private draft' }), []);
+    original.save(template({ revision: 'r2', prompt: 'publishable' }), ['r1']);
     const published = PromptShortcutDocument.fromPublishedState({
       ...original.read()!,
       visibility: 'workspace',

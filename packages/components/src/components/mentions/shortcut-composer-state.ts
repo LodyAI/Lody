@@ -23,20 +23,6 @@ export function isShortcutDraftRange(mention: Mention): boolean {
   return isShortcutMention(mention);
 }
 
-export function missingShortcutVariables(invocation: ShortcutInvocation): string[] {
-  return invocation.snapshot.variables
-    .filter(({ name }) => !invocation.values[name]?.trim())
-    .map(({ name }) => name);
-}
-
-export function shortcutDraftMissingVariables(mentions: readonly Mention[]): string[] {
-  return mentions
-    .filter(isShortcutMention)
-    .flatMap(({ data }) =>
-      missingShortcutVariables(data).map((name) => `${data.snapshot.name}: ${name}`)
-    );
-}
-
 export function shortcutComposerScope(
   source?: MentionProjectSource,
   agent?: SkillMentionAgent

@@ -11,11 +11,9 @@ import {
 export const PromptShortcutIndexSchema = PromptShortcutSchema.omit({
   prompt: true,
   mentions: true,
-  variables: true,
 })
   .extend({
     bodyDocId: z.string().min(1).max(200),
-    variableCount: z.number().int().min(0).max(PROMPT_SHORTCUT_LIMITS.variables),
     dependencySummary: z.array(PromptShortcutTargetSchema).max(PROMPT_SHORTCUT_LIMITS.mentions),
   })
   .strict();
@@ -36,14 +34,13 @@ export function projectShortcutIndex(
   shortcut: PromptShortcut,
   bodyDocId: string
 ): PromptShortcutIndexEntry {
-  const { prompt: _prompt, mentions, variables, ...summary } = shortcut;
+  const { prompt: _prompt, mentions, ...summary } = shortcut;
   const targets = new Map(
     mentions.map((mention) => [JSON.stringify(mention.target), mention.target])
   );
   return parseShortcutIndex({
     ...summary,
     bodyDocId,
-    variableCount: variables.length,
     dependencySummary: [...targets.values()],
   });
 }

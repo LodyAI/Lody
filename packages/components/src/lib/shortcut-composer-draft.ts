@@ -1,4 +1,4 @@
-import { isShortcutChipText, parseShortcutInvocation } from '@lody/shared/prompt-shortcuts';
+import { parseShortcutInvocation } from '@lody/shared/prompt-shortcuts';
 import type { Mention } from '@/ui/mention/index';
 import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
 import {
@@ -32,7 +32,9 @@ export function captureShortcutDraft(
     .map(({ start, end, value, data }) => ({ start, end, value, data }));
   if (
     !invocations.length ||
-    invocations.some((range) => !isShortcutChipText(text.slice(range.start, range.end), range.data))
+    invocations.some(
+      (range) => text.slice(range.start, range.end) !== `/${range.data.snapshot.slug}`
+    )
   )
     return null;
   return { v: 1, text, mentions: toPersistedMentionRanges(mentions), invocations };
@@ -61,7 +63,7 @@ export function parseShortcutDraft(
         range.data.snapshot.workspaceId !== identity.workspaceId ||
         range.value !== range.data.id ||
         ids.has(range.value) ||
-        !isShortcutChipText(record.text.slice(range.start, range.end), range.data)
+        record.text.slice(range.start, range.end) !== `/${range.data.snapshot.slug}`
       )
         return null;
       ids.add(range.value);

@@ -25,7 +25,6 @@ const body: PromptShortcut = {
   name: 'Review',
   slug: 'review',
   prompt,
-  variables: [{ name: 'topic' }],
   mentions: [
     semantic('$tool', {
       kind: 'skill',
@@ -46,9 +45,7 @@ const context = { userId: 'user', workspaceId: 'ws', scope };
 function fixture() {
   const text = 'pré\n/review middle /review @external !{ordinary}';
   const first = createShortcutInvocation('first', body);
-  first.values.topic = '😀 $literal !{still-literal}';
   const second = createShortcutInvocation('second', body);
-  second.values.topic = 'second\n  line';
   return {
     text,
     mentions: [
@@ -67,14 +64,13 @@ function fixture() {
     resolveDependency: () => ({ kind: 'available' as const }),
   };
 }
-it('compiles multiple snapshots and ordinary rewrites in source order with literal variables and UTF-16 spans', () => {
+it('compiles multiple snapshots and ordinary rewrites in source order with UTF-16 spans', () => {
   const input = fixture();
   const result = compileShortcutPrompt(input);
-  const expected = (topic: string) =>
-    `  Start ${topic}\n  use /tool [Skill Path](.codex/skills/tool/SKILL.md) use lody mcp to create a session with agent role[id: stable-role, name: helper] @file\nEnd  `;
-  expect(result.text).toBe(
-    `pré\n${expected('😀 $literal !{still-literal}')} middle ${expected('second\n  line')} external-session !{ordinary}`
-  );
+  // `!{topic}` and `!{ordinary}` are ordinary text on both sides of the chip.
+  const expanded =
+    '  Start !{topic}\n  use /tool [Skill Path](.codex/skills/tool/SKILL.md) use lody mcp to create a session with agent role[id: stable-role, name: helper] @file\nEnd  ';
+  expect(result.text).toBe(`pré\n${expanded} middle ${expanded} external-session !{ordinary}`);
   expect(result.spans?.map((span) => result.text.slice(span.start, span.end))).toEqual([
     'use /tool [Skill Path](.codex/skills/tool/SKILL.md)',
     'use lody mcp to create a session with agent role[id: stable-role, name: helper]',
@@ -89,7 +85,7 @@ it('compiles multiple snapshots and ordinary rewrites in source order with liter
   ]);
   expect(inputBlocksToHistoryItems(blocks)[0]).toMatchObject({ type: 'text', text: result.text });
 });
-it('fails closed for unknown dependencies, scope changes, missing values and overlapping ranges', () => {
+it('fails closed for unknown dependencies, scope changes and overlapping ranges', () => {
   const input = fixture();
   expect(() => compileShortcutPrompt({ ...input, resolveDependency: undefined })).toThrow();
   expect(() => compileShortcutPrompt({ ...input, context: { ...context, scope: {} } })).toThrow();
@@ -99,8 +95,6 @@ it('fails closed for unknown dependencies, scope changes, missing values and ove
       mentions: [...input.mentions, { start: 5, end: 8, value: 'bad', kind: 'file' }],
     })
   ).toThrow();
-  input.mentions[0]!.data.values.topic = '   ';
-  expect(() => compileShortcutPrompt(input)).toThrow();
 });
 it('enforces the final prompt byte budget including semantic rewrites', () => {
   const input = fixture();

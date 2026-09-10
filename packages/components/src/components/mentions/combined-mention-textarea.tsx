@@ -2,7 +2,7 @@ import { isShortcutDraftRange } from './shortcut-composer-state';
 import { useShortcutComposerDraft } from './use-shortcut-composer-draft';
 import { shortcutDraftMentions } from '@/lib/shortcut-composer-draft';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
-import { ShortcutInvocationEditor } from './shortcut-parameters';
+import { ShortcutInvocationStatus } from './shortcut-invocation-status';
 import { isShortcutMention, shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -703,8 +703,6 @@ export interface CombinedMentionTextareaProps extends Omit<
    */
   onMentionRangesChange?: (ranges: MentionRange[]) => void;
   onShortcutAvailabilityChange?: (blocked: boolean) => void;
-  /** True while a Shortcut parameter tray is open under the prompt. */
-  onShortcutParametersOpenChange?: (open: boolean) => void;
   /**
    * Lets a surface outside the composer write a mention into it — the drop
    * target of a dragged sidebar session, today.
@@ -744,7 +742,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       getMentionChip,
       onMentionRangesChange,
       onShortcutAvailabilityChange,
-      onShortcutParametersOpenChange,
       persistedMentions,
       draftKey,
       mentionActionsRef,
@@ -754,12 +751,6 @@ export const CombinedMentionTextarea = React.forwardRef<
     ref
   ) => {
     const { t } = useTranslation();
-    const [activeShortcutId, setActiveShortcutId] = React.useState<string | null>(null);
-    // The tray renders below the prompt, so while it is open the prompt no
-    // longer needs to reserve its blank writing rows above it.
-    React.useEffect(() => {
-      onShortcutParametersOpenChange?.(activeShortcutId !== null);
-    }, [activeShortcutId, onShortcutParametersOpenChange]);
     const liveShortcutSource = useShortcutMentionSource(
       enablePromptShortcuts && !templateScope
         ? shortcutComposerScope(mentionSource, skillAgent)
@@ -984,7 +975,6 @@ export const CombinedMentionTextarea = React.forwardRef<
     const [renderedDraftKey, setRenderedDraftKey] = React.useState(effectiveDraftKey);
     if (renderedDraftKey !== effectiveDraftKey) {
       setRenderedDraftKey(effectiveDraftKey);
-      setActiveShortcutId(null);
       setInternalMentions([]);
       setInstanceKey((k) => k + 1);
       // The swap is not an edit, so it must not read as one: an incoming empty
@@ -1109,10 +1099,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         }}
         mentions={mergedMentions}
         onMentionsChange={handleMentionsChange}
-        onMentionClick={(mention) => {
-          if (isShortcutMention(mention)) setActiveShortcutId(mention.value);
-          else onMentionClick?.(mention);
-        }}
+        onMentionClick={onMentionClick}
         getMentionChip={resolveMentionChip}
         value={mentionValues}
         onValueChange={handleMentionValuesChange}
@@ -1181,11 +1168,9 @@ export const CombinedMentionTextarea = React.forwardRef<
           </p>
         ) : null}
         {shortcutHistory && !templateScope && !draftSuspended ? (
-          <ShortcutInvocationEditor
+          <ShortcutInvocationStatus
             scope={shortcutComposerScope(mentionSource, skillAgent)}
             onAvailabilityChange={onShortcutAvailabilityChange}
-            activeId={activeShortcutId}
-            onActiveIdChange={setActiveShortcutId}
           />
         ) : null}
         <TwoLevelMentionMenu

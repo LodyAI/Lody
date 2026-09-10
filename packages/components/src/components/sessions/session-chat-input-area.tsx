@@ -1,7 +1,6 @@
 import { isShortcutDraftRange } from '@/components/mentions/shortcut-composer-state';
 import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
 import { shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
-import { shortcutDraftMissingVariables } from '@/components/mentions/shortcut-composer-state';
 import {
   useState,
   useCallback,
@@ -810,7 +809,6 @@ export const SessionChatInputArea = memo(
      * `expandPromptMentionsRef` beside it.
      */
     const mentionRangesRef = useRef<MentionRange[]>([]);
-    const [shortcutMissing, setShortcutMissing] = useState<string[]>([]);
     const [shortcutUnavailable, setShortcutUnavailable] = useState(false);
     // Handle into the composer's mention machinery, for mentions that originate
     // outside it (a sidebar session dropped on the conversation).
@@ -823,7 +821,6 @@ export const SessionChatInputArea = memo(
         if (ranges.some(isShortcutDraftRange))
           sessionShortcutDraftOwners.set(session.id, draftOwnerKey);
         mentionRangesRef.current = ranges;
-        setShortcutMissing(shortcutDraftMissingVariables(ranges));
         setSessionMentionRanges(session.id, toPersistedMentionRanges(ranges));
       },
       [session.id, draftOwnerKey]
@@ -846,7 +843,6 @@ export const SessionChatInputArea = memo(
       // Cleared with the rest of the draft: the incoming session's own ranges
       // arrive from its hydrators, and until they do there must be none.
       mentionRangesRef.current = [];
-      setShortcutMissing([]);
       commentReferencesRef.current = [];
       setCommentReferences([]);
       visualAnnotationReferencesRef.current = [];
@@ -1752,7 +1748,6 @@ export const SessionChatInputArea = memo(
 
     const sendMessage = useCallback(
       async (source: 'keyboard' | 'button' = 'button') => {
-        if (shortcutDraftMissingVariables(mentionRangesRef.current).length) return;
         if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
           capturePostHogEvent(postHog, 'session/input_blocked', {
             reason: 'free_session_turn_limit_reached',
@@ -2500,12 +2495,7 @@ export const SessionChatInputArea = memo(
         size="icon"
         variant="ghost"
         onClick={() => void sendMessage('button')}
-        disabled={
-          !hasSendableContent ||
-          isSendActionDisabled ||
-          shortcutMissing.length > 0 ||
-          shortcutUnavailable
-        }
+        disabled={!hasSendableContent || isSendActionDisabled || shortcutUnavailable}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel

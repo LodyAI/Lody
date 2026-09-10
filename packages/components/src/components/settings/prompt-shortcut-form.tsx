@@ -1,10 +1,7 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import {
-  deriveShortcutVariables,
-  parsePromptShortcut,
-} from '@lody/shared/prompt-shortcuts/compiler';
+import { parsePromptShortcut } from '@lody/shared/prompt-shortcuts/compiler';
 import {
   DEFAULT_PROMPT_SHORTCUT_EMOJI,
   getShortcutMentionScopeIssues,
@@ -26,7 +23,7 @@ import {
   shortcutTemplateMentions,
 } from '@/components/mentions/shortcut-template-ranges';
 import { EmojiField } from './emoji-field';
-import { AutoGrowTextarea, FormMessage, Section } from './form-primitives';
+import { FormMessage, Section } from './form-primitives';
 import {
   describeShortcutProject,
   ScopeAxisIcon,
@@ -99,10 +96,6 @@ export function PromptShortcutForm({
   // A slug the author has typed is theirs; only an untouched one follows the
   // name, so renaming an existing Shortcut never silently moves its command.
   const [slugTouched, setSlugTouched] = useState(() => !isNew || initial.slug.length > 0);
-  const variables = useMemo(
-    () => deriveShortcutVariables(value.prompt, value.variables),
-    [value.prompt, value.variables]
-  );
   const scopeIssues = useMemo(() => {
     try {
       return shortcutTemplateMentions(value.prompt, ranges).flatMap((mention) => {
@@ -122,15 +115,13 @@ export function PromptShortcutForm({
   };
   const updateScope = (scope: PromptShortcutScope) =>
     setValue((previous) => ({ ...previous, scope }));
-  const tooManyVariables = variables.length > PROMPT_SHORTCUT_LIMITS.variables;
-  const blocked = scopeIssues.length > 0 || tooManyVariables;
+  const blocked = scopeIssues.length > 0;
   const submit = async () => {
     if (saving || blocked) return;
     setError(undefined);
     try {
       const parsed = parsePromptShortcut({
         ...value,
-        variables,
         mentions: shortcutTemplateMentions(value.prompt, ranges),
       });
       await onSave(parsed);
@@ -241,7 +232,7 @@ export function PromptShortcutForm({
           title={t('settings.promptShortcuts.prompt', 'Prompt')}
           hint={t(
             'settings.promptShortcuts.promptHelp',
-            'One message. @ mentions a file or Role, $ a skill, # an issue; write !{name} where the caller fills in a value. The selectors below say where this Shortcut can be called and what @ completes against — None on every axis means anywhere in this workspace.'
+            'One message. @ mentions a file or Role, $ a skill, # an issue. The selectors below say where this Shortcut can be called and what @ completes against — None on every axis means anywhere in this workspace.'
           )}
         >
           {/* Scope sits with the prompt rather than in a section of its own: it
@@ -348,63 +339,6 @@ export function PromptShortcutForm({
             </FormMessage>
           )}
         </Section>
-
-        {variables.length > 0 && (
-          <Section
-            title={t('settings.promptShortcuts.defaults', 'Variables')}
-            hint={t(
-              'settings.promptShortcuts.variablesHelp',
-              'Every !{name} in the prompt. The same name twice shares one value, and every value is required when the Shortcut is called. A default is optional — never store a secret in one.'
-            )}
-          >
-            <fieldset disabled={saving} className="space-y-2">
-              {variables.slice(0, PROMPT_SHORTCUT_LIMITS.variables).map((variable) => (
-                // Name beside its default, not above it: the name is short and
-                // fixed, so stacking them spent a whole row on one token.
-                <div key={variable.name} className="flex items-start gap-2">
-                  {/* Fixed column so the names line up; the chip itself hugs
-                      its token rather than painting an empty 7rem block. */}
-                  <div className="w-28 shrink-0 pt-1.5">
-                    <Label
-                      htmlFor={`shortcut-variable-${variable.name}`}
-                      className="inline-block max-w-full truncate rounded-sm bg-status-warning/12 px-1 py-0.5 font-mono text-[11px] font-normal text-status-warning"
-                      title={`!{${variable.name}}`}
-                    >
-                      {`!{${variable.name}}`}
-                    </Label>
-                  </div>
-                  <AutoGrowTextarea
-                    id={`shortcut-variable-${variable.name}`}
-                    className="min-w-0 flex-1 py-1.5 text-xs leading-5"
-                    placeholder={t(
-                      'settings.promptShortcuts.defaultPlaceholder',
-                      'Default value (optional)'
-                    )}
-                    value={variable.defaultValue ?? ''}
-                    onChange={(event) =>
-                      setValue({
-                        ...value,
-                        variables: variables.map((item) =>
-                          item.name === variable.name
-                            ? { ...item, defaultValue: event.target.value }
-                            : item
-                        ),
-                      })
-                    }
-                  />
-                </div>
-              ))}
-            </fieldset>
-            {tooManyVariables && (
-              <FormMessage tone="error">
-                {t('settings.promptShortcuts.tooManyVariables', {
-                  defaultValue: 'A Shortcut can define at most {{count}} variables.',
-                  count: PROMPT_SHORTCUT_LIMITS.variables,
-                })}
-              </FormMessage>
-            )}
-          </Section>
-        )}
 
         {canShare && (
           <div className="space-y-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">

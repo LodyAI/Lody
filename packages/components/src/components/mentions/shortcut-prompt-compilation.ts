@@ -5,7 +5,6 @@ import { shortcutAvailabilityMessage } from './mention-prompt-shortcut-source';
 import { applyTextRewrites, type TextRewrite } from '@lody/shared';
 import {
   expandShortcut,
-  isShortcutChipText,
   parseShortcutInvocation,
   PromptShortcutError,
   PROMPT_SHORTCUT_LIMITS,
@@ -42,7 +41,7 @@ export function compileShortcutPrompt(input: {
     if (
       chip.value !== invocation.id ||
       ids.has(invocation.id) ||
-      !isShortcutChipText(input.text.slice(chip.start, chip.end), invocation)
+      input.text.slice(chip.start, chip.end) !== `/${invocation.snapshot.slug}`
     )
       throw new PromptShortcutError('invalid_ranges', 'Incomplete or stale invocation range');
     ids.add(invocation.id);
@@ -52,7 +51,7 @@ export function compileShortcutPrompt(input: {
       input.resolveDependency
     );
     if (availability.kind !== 'available') throw new ShortcutSelectionUnavailable(availability);
-    const expanded = expandShortcut(invocation, false, maxBytes, renderShortcutSemanticMention);
+    const expanded = expandShortcut(invocation, maxBytes, renderShortcutSemanticMention);
     return {
       start: chip.start,
       end: chip.end,
@@ -72,8 +71,6 @@ export function compileShortcutPrompt(input: {
 export function shortcutCompilationErrorMessage(error: unknown, t: TFunction): string {
   if (error instanceof ShortcutSelectionUnavailable)
     return shortcutAvailabilityMessage(error.availability, t);
-  if (error instanceof PromptShortcutError && error.code === 'missing_variables')
-    return t('promptShortcut.variablesRequired');
   if (error instanceof PromptShortcutError && error.code === 'size_limit')
     return t('promptShortcut.promptTooLarge');
   return t('promptShortcut.invalidDraft');

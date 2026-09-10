@@ -33,6 +33,8 @@ to read as one drift apart a padding value at a time.
   in `shared/prompt-shortcuts/model.ts`) and projected into the index, so the
   list can show it without loading a body. Unset renders
   `DEFAULT_PROMPT_SHORTCUT_EMOJI` rather than an empty tile.
+- A Shortcut is a Prompt and a scope, nothing more: no variables, no defaults,
+  no call-time parameters. Do not reintroduce `!{name}` parsing anywhere.
 - `prompt-shortcut-scope.tsx` owns the axis order (Project → Machine → Agent),
   their icons, the `None` sentinel a Radix `Select` needs, and the read-only
   pills. All axes unset prints one muted `Workspace` pill — that is scope, never

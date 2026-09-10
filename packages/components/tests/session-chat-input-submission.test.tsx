@@ -235,7 +235,6 @@ describe('SessionChatInputArea submission feedback', () => {
               name: 'Review',
               slug: 'review',
               prompt: 'Private prompt',
-              variables: [],
               mentions: [],
               scope: {},
               revision: 'r1',
@@ -609,8 +608,7 @@ describe('SessionChatInputArea submission feedback', () => {
       visibility: 'private',
       name: 'Review',
       slug: 'review',
-      prompt: '  !{topic}\n  end  ',
-      variables: [{ name: 'topic' }],
+      prompt: '  $literal !{unchanged}\n  end  ',
       mentions: [],
       scope: {},
       revision: 'r1',
@@ -618,7 +616,6 @@ describe('SessionChatInputArea submission feedback', () => {
       updatedAt: 1,
     };
     const invocation = createShortcutInvocation('invocation', body);
-    invocation.values.topic = '$literal !{unchanged}';
     const onSendMessage = vi.fn(async () => false);
     container = document.createElement('div');
     document.body.append(container);

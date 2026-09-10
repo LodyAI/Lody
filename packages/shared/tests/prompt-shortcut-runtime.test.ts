@@ -28,7 +28,6 @@ const value: PromptShortcut = {
   slug: 'review',
   prompt: 'Inspect !{topic}',
   mentions: [],
-  variables: [{ name: 'topic' }],
   scope: {},
   revision: 'r1',
   createdAt: 1,
@@ -309,7 +308,7 @@ describe('workspace Prompt Shortcut runtime', () => {
     });
     await started;
     const latest = await runtime.save({
-      value: { ...value, revision: 'r2', prompt: 'NEW PRIVATE SECRET', variables: [] },
+      value: { ...value, revision: 'r2', prompt: 'NEW PRIVATE SECRET' },
       base: first,
       bodyDocId: 'working-private',
     });
@@ -458,7 +457,7 @@ describe('workspace Prompt Shortcut runtime', () => {
     expect(base.bodyDocId).not.toBe(legacy.entry.bodyDocId);
     expect(instance.runtime.store.publication(value.id)).toEqual(legacy);
     const edited = await instance.runtime.save({
-      value: { ...value, revision: 'r2', prompt: 'LATER PRIVATE WORK', variables: [] },
+      value: { ...value, revision: 'r2', prompt: 'LATER PRIVATE WORK' },
       base,
       bodyDocId: base.bodyDocId,
     });
@@ -669,13 +668,13 @@ describe('workspace Prompt Shortcut runtime', () => {
     const remote = await cloud();
     const { runtime, repo } = await openRuntime(await disk(), remote);
     let entry = await runtime.save({
-      value: { ...value, prompt: 'old secret', variables: [] },
+      value: { ...value, prompt: 'old secret' },
       base: null,
       bodyDocId: 'private-1',
     });
     await runtime.flush();
     entry = await runtime.save({
-      value: { ...value, revision: 'r2', prompt: 'publishable', variables: [] },
+      value: { ...value, revision: 'r2', prompt: 'publishable' },
       base: entry,
       bodyDocId: 'private-1',
     });
@@ -686,7 +685,7 @@ describe('workspace Prompt Shortcut runtime', () => {
       ['workspace', 'shared-2', 'r5'],
     ] as const) {
       entry = await runtime.save({
-        value: { ...value, visibility, revision, prompt: 'publishable', variables: [] },
+        value: { ...value, visibility, revision, prompt: 'publishable' },
         base: entry,
         bodyDocId,
       });

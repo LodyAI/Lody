@@ -1,4 +1,4 @@
-import { isShortcutMention, missingShortcutVariables } from './shortcut-composer-state';
+import { isShortcutMention } from './shortcut-composer-state';
 import * as React from 'react';
 import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
 
@@ -149,16 +149,7 @@ const getMentionPath = (mention: Mention, text: string): string =>
 export const getComposerMentionChip: MentionChipResolver = (mention: Mention, text: string) => {
   const kind = mention.kind ?? 'mention';
   if (kind === 'pasted_text') return pastedTextChip(text);
-  if (isShortcutMention(mention)) {
-    // Colour only: the tray names the missing values, and a badge floating over
-    // the text was a second marker for the same fact.
-    return {
-      iconSlots: 0,
-      className: missingShortcutVariables(mention.data).length
-        ? 'text-destructive'
-        : MENTION_CHIP_CLASS_NAME,
-    };
-  }
+  if (isShortcutMention(mention)) return { iconSlots: 0, className: MENTION_CHIP_CLASS_NAME };
   if (!CHIP_KINDS.has(kind)) return null;
 
   const icon = getMentionKindIcon(kind, { path: getMentionPath(mention, text) });

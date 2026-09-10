@@ -1,6 +1,5 @@
 import { isShortcutDraftRange } from '@/components/mentions/shortcut-composer-state';
 import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
-import { shortcutDraftMissingVariables } from '@/components/mentions/shortcut-composer-state';
 import {
   useCallback,
   useEffect,
@@ -979,15 +978,11 @@ function WorkspaceChatLanding({
    * drift, which is the bug `session-chat-input-area.tsx` documents.
    */
   const persistedMentionRanges = foreignShortcutDraft ? undefined : sessionState.mentionRanges;
-  const shortcutMissingRef = useRef<string[]>([]);
   const shortcutRangesRef = useRef<MentionRange[]>([]);
-  const [shortcutMissing, setShortcutMissing] = useState<string[]>([]);
   const [shortcutUnavailable, setShortcutUnavailable] = useState(false);
   const handleMentionRangesChange = useCallback(
     (ranges: MentionRange[]) => {
       shortcutRangesRef.current = ranges.filter(isShortcutDraftRange);
-      shortcutMissingRef.current = shortcutDraftMissingVariables(ranges);
-      setShortcutMissing(shortcutMissingRef.current);
       // Stored with the prompt so a returning draft does not have to have its
       // mentions recognised again from the text — which only works once each
       // source has loaded, and not at all for one that never does.
@@ -2919,7 +2914,7 @@ function WorkspaceChatLanding({
 
   // ── Submit ──
   const handleSubmit = async () => {
-    if (submitting || shortcutMissingRef.current.length) return;
+    if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
       captureSessionInputBlocked('image_upload_in_progress');
@@ -4332,7 +4327,6 @@ function WorkspaceChatLanding({
 
   const hasSendableContent = prompt.trim().length > 0 || hasUploadedImages || hasUploadedFiles;
   const submitDisabled =
-    shortcutMissing.length > 0 ||
     shortcutUnavailable ||
     getChatLandingSubmitDisabled({
       submitting,

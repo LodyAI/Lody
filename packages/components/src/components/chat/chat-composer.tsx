@@ -298,12 +298,7 @@ export function ChatComposer({
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
-  // A Shortcut parameter tray renders inside the box, under the prompt. The
-  // prompt's minimum rows are room reserved for WRITING, and reserving them
-  // above the tray left a band of empty box between the `/command` and the
-  // fields it belongs to. The prompt still grows back as soon as it is typed in.
-  const [shortcutParametersOpen, setShortcutParametersOpen] = useState(false);
-  const effectivePromptRows = singleLineMobile || shortcutParametersOpen ? 1 : promptRows;
+  const effectivePromptRows = singleLineMobile ? 1 : promptRows;
   // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
   // AND non-mobile layout so phone frames / narrow viewports never show a
   // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
@@ -900,7 +895,6 @@ export function ChatComposer({
                 getMentionChip={getComposerMentionChip}
                 onMentionRangesChange={onMentionRangesChange}
                 onShortcutAvailabilityChange={onShortcutAvailabilityChange}
-                onShortcutParametersOpenChange={setShortcutParametersOpen}
                 persistedMentions={persistedMentions}
                 draftKey={draftKey}
                 mentionActionsRef={mentionActionsRef}
@@ -1006,7 +1000,6 @@ export function ChatComposer({
               getMentionChip={getComposerMentionChip}
               onMentionRangesChange={onMentionRangesChange}
               onShortcutAvailabilityChange={onShortcutAvailabilityChange}
-              onShortcutParametersOpenChange={setShortcutParametersOpen}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
               mentionActionsRef={mentionActionsRef}

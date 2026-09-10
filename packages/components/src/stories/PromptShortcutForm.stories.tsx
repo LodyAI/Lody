@@ -26,7 +26,6 @@ const base: PromptShortcut = {
     'Review !{topic}.\n\nFocus on correctness, security and missing tests.\nReport concrete findings with file references.',
   scope: {},
   mentions: [],
-  variables: [{ name: 'topic' }],
   revision: 'r1',
   createdAt: 1,
   updatedAt: 1,
@@ -93,13 +92,13 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** The default a new Shortcut starts from: private, no scope, no variables. */
+/** The default a new Shortcut starts from: private, no scope. */
 export const NewShortcut: Story = {
   parameters: { shortcutDialog: true },
   args: {
     renderPrompt: (editor) => <ShortcutPromptField editor={editor} disabled={false} />,
     isNew: true,
-    initial: { ...base, name: '', slug: '', description: undefined, prompt: '', variables: [] },
+    initial: { ...base, name: '', slug: '', description: undefined, prompt: '' },
   },
 };
 
@@ -118,29 +117,12 @@ export const SharedWithScope: Story = {
   },
 };
 
-/** Several variables, including a multi-line default. */
-export const Variables: Story = {
-  args: {
-    initial: {
-      ...base,
-      prompt:
-        'Review !{topic} in !{area}.\n\nAcceptance criteria:\n!{criteria}\n\nMention !{topic} again to reuse the same value.',
-      variables: [
-        { name: 'topic' },
-        { name: 'area', defaultValue: 'the changed files' },
-        { name: 'criteria', defaultValue: '- Tests cover the new branch\n- No secret is logged' },
-      ],
-    },
-  },
-};
-
 /** A reference the declared scope cannot satisfy: named, and Save is blocked. */
 export const OutOfScopeMention: Story = {
   args: {
     initial: {
       ...base,
       prompt: 'Review @src/app.ts',
-      variables: [],
       mentions: [
         {
           start: 7,
@@ -180,7 +162,6 @@ export const RealPromptField: Story = {
     initial: {
       ...base,
       prompt: 'Review !{topic} in @src/app.ts before merging.',
-      variables: [{ name: 'topic' }],
     },
   },
 };

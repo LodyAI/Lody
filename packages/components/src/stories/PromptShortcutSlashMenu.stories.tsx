@@ -20,7 +20,6 @@ const entry: PromptShortcutIndexEntry = {
   createdAt: 1,
   updatedAt: 1,
   bodyDocId: 'body',
-  variableCount: 2,
   dependencySummary: [],
 };
 function Harness({

@@ -13,7 +13,6 @@ const body: PromptShortcut = {
   name: 'Review',
   slug: 'review',
   prompt: 'Review !{topic}',
-  variables: [{ name: 'topic', defaultValue: 'code' }],
   mentions: [],
   scope: {},
   revision: 'r1',
@@ -47,7 +46,7 @@ function fixture() {
   };
   return { input, entries, read, controller, resolve: (value: PromptShortcut) => resolve(value) };
 }
-it('freezes one coherent body and its defaults only after the authorized read', async () => {
+it('freezes one coherent body only after the authorized read', async () => {
   const f = fixture();
   const pending = prepareShortcutSelection(f.input);
   f.resolve(body);
@@ -55,7 +54,7 @@ it('freezes one coherent body and its defaults only after the authorized read', 
     value: 'invocation',
     text: '/review',
     kind: 'prompt_shortcut',
-    data: { id: 'invocation', snapshot: body, values: { topic: 'code' } },
+    data: { id: 'invocation', snapshot: body },
   });
 });
 it('rejects an index update or a mismatching body instead of mixing revisions', async () => {

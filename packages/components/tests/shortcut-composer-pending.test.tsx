@@ -66,8 +66,7 @@ const body: PromptShortcut = {
   visibility: 'private',
   name: 'Review',
   slug: 'review',
-  prompt: '!{topic}',
-  variables: [{ name: 'topic' }],
+  prompt: 'Review the change',
   mentions: [],
   scope: {},
   revision: 'r1',
@@ -75,7 +74,6 @@ const body: PromptShortcut = {
   updatedAt: 1,
 };
 const invocation = createShortcutInvocation('invocation', body);
-invocation.values.topic = 'Preserved value';
 const originalText = 'Before /review after';
 const ranges: Mention[] = [
   { start: 7, end: 14, value: invocation.id, kind: 'prompt_shortcut', data: invocation },

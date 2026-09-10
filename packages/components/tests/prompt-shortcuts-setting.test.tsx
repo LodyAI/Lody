@@ -45,7 +45,6 @@ const shortcut: PromptShortcut = {
   prompt: 'Private content',
   scope: {},
   mentions: [],
-  variables: [],
   createdAt: 1,
   updatedAt: 1,
 };

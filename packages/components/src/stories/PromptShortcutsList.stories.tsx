@@ -30,7 +30,6 @@ const shortcut = (patch: Partial<PromptShortcut>): PromptShortcut => ({
   prompt: 'Review the pull request against our conventions.',
   scope: {},
   mentions: [],
-  variables: [],
   revision: 'r1',
   createdAt: 1,
   updatedAt: 1,
@@ -45,7 +44,6 @@ const entries: PromptShortcutIndexEntry[] = [
     id: 'review-pr',
     emoji: '🔍',
     description: 'Review a pull request with the team conventions.',
-    variables: [{ name: 'pr_url' }, { name: 'focus' }],
     prompt: 'Review !{pr_url} focusing on !{focus}.',
   }),
   entry({
@@ -66,7 +64,6 @@ const entries: PromptShortcutIndexEntry[] = [
       machineId: 'laptop',
       providerKey: 'builtin:codex',
     },
-    variables: [{ name: 'target' }],
     prompt: 'Benchmark !{target} and compare with main.',
   }),
   // Saved with a file in one project, then the scope was moved to another: the
@@ -149,7 +146,6 @@ export const ReadOnlyShared: StoryObj<typeof PromptShortcutReadOnlyView> = {
           scope: { project: { kind: 'github', repository: 'loro-dev/lody' } },
           prompt:
             'Write an incident review for !{incident}.\n\nCover impact, root cause, and the follow-up actions we agreed on.',
-          variables: [{ name: 'incident', defaultValue: 'the latest production incident' }],
         })}
       />
     </div>

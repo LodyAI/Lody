@@ -17,7 +17,6 @@ const body: PromptShortcut = {
   name: 'Review',
   slug: 'review',
   prompt: '!{topic}',
-  variables: [{ name: 'topic' }],
   mentions: [],
   scope: {},
   revision: 'r1',
@@ -25,7 +24,7 @@ const body: PromptShortcut = {
   updatedAt: 1,
 };
 function fixture() {
-  const invocation = { ...createShortcutInvocation('invocation', body), values: { topic: '  ' } };
+  const invocation = createShortcutInvocation('invocation', body);
   return captureShortcutDraft('Before /review @file', [
     { start: 7, end: 14, value: invocation.id, kind: 'prompt_shortcut', data: invocation },
     { start: 15, end: 20, value: 'file', kind: 'file' },
