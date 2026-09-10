@@ -211,7 +211,7 @@ describe('MessageHandler title generation', () => {
   });
 
   type BranchNameHost = {
-    generateBranchNameWithTimeout: (
+    deriveWorktreeBranchName: (
       taskPrompt: string,
       timeoutMs: number,
       reusableTitlePromise?: Promise<string | null>
@@ -220,7 +220,7 @@ describe('MessageHandler title generation', () => {
 
   it('prefers an already-available session title over the prompt', async () => {
     const { handler } = await createHandler(undefined);
-    const branch = await (handler as unknown as BranchNameHost).generateBranchNameWithTimeout(
+    const branch = await (handler as unknown as BranchNameHost).deriveWorktreeBranchName(
       'Fallback prompt',
       1_000,
       Promise.resolve('Fix title races')
@@ -231,7 +231,7 @@ describe('MessageHandler title generation', () => {
 
   it('names the branch from the prompt when no title is available', async () => {
     const { handler } = await createHandler(undefined);
-    const branch = await (handler as unknown as BranchNameHost).generateBranchNameWithTimeout(
+    const branch = await (handler as unknown as BranchNameHost).deriveWorktreeBranchName(
       'Add a retry to the upload queue',
       1_000
     );
@@ -245,7 +245,7 @@ describe('MessageHandler title generation', () => {
   // to a meaningless timestamp.
   it('returns no name when the prompt has no ASCII words', async () => {
     const { handler } = await createHandler(undefined);
-    const branch = await (handler as unknown as BranchNameHost).generateBranchNameWithTimeout(
+    const branch = await (handler as unknown as BranchNameHost).deriveWorktreeBranchName(
       '把标题生成迁移到会话协议',
       1_000
     );
@@ -255,7 +255,7 @@ describe('MessageHandler title generation', () => {
 
   it('falls back to the prompt when the title does not arrive in time', async () => {
     const { handler } = await createHandler(undefined);
-    const branch = await (handler as unknown as BranchNameHost).generateBranchNameWithTimeout(
+    const branch = await (handler as unknown as BranchNameHost).deriveWorktreeBranchName(
       'Fix the flaky login redirect',
       10,
       new Promise<string | null>(() => {})
@@ -384,59 +384,36 @@ describe('MessageHandler title generation', () => {
     );
   });
 
-  it('skips isolated generation for builtin Claude', async () => {
-    const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
-      agentConfigId: 'agent-config-1',
-    });
+  // Claude asks the Agent SDK, Codex generates on an ephemeral thread and Grok's
+  // runtime pushes one per session; either way the isolated generator would only
+  // duplicate that work, and must not read the agent config to do it.
+  it.each(['claude', 'codex', 'grok'])(
+    'skips isolated generation for builtin %s',
+    async (agentType) => {
+      const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
+        agentConfigId: 'agent-config-1',
+        agentConfigMeta: { titleGeneration: { configOptionValues: { model: 'stale-model' } } },
+      });
 
-    const titleHost = handler as unknown as {
-      maybeGenerateAndStoreSessionTitle: (
-        sessionId: SessionId,
-        cliType: string,
-        agentType: string,
-        taskPrompt: string
-      ) => Promise<void>;
-    };
-    await titleHost.maybeGenerateAndStoreSessionTitle(
-      's-8' as SessionId,
-      'builtin',
-      'claude',
-      'Do something cool'
-    );
+      const titleHost = handler as unknown as {
+        maybeGenerateAndStoreSessionTitle: (
+          sessionId: SessionId,
+          cliType: string,
+          agentType: string,
+          taskPrompt: string
+        ) => Promise<void>;
+      };
+      await titleHost.maybeGenerateAndStoreSessionTitle(
+        's-acp-owned' as SessionId,
+        'builtin',
+        agentType,
+        'Do something cool'
+      );
 
-    expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
-    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
-  });
-
-  // Codex generates its title on an ephemeral thread and Grok's runtime pushes one
-  // per session; either way the isolated generator would only duplicate that work,
-  // and must not read the agent config to do it.
-  it.each(['codex', 'grok'])('skips isolated generation for builtin %s', async (agentType) => {
-    const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
-      agentConfigId: 'agent-config-1',
-      agentConfigMeta: {
-        titleGeneration: { configOptionValues: { model: 'gpt-5.1-codex' } },
-      },
-    });
-
-    const titleHost = handler as unknown as {
-      maybeGenerateAndStoreSessionTitle: (
-        sessionId: SessionId,
-        cliType: string,
-        agentType: string,
-        taskPrompt: string
-      ) => Promise<void>;
-    };
-    await titleHost.maybeGenerateAndStoreSessionTitle(
-      's-acp-owned' as SessionId,
-      'builtin',
-      agentType,
-      'Do something cool'
-    );
-
-    expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
-    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
-  });
+      expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
+      expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
+    }
+  );
 
   it('filters Lody internal prompt instructions before storing an ACP title', async () => {
     const { handler, sessionDoc } = await createHandler(undefined);

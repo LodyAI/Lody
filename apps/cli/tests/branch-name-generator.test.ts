@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   titleToBranchName,
   isValidGitBranchName,
-  ensureValidBranchName,
+  tryBranchName,
 } from '../src/agent/branch-name-generator';
 
 describe('branch-name-generator', () => {
@@ -96,19 +96,19 @@ describe('branch-name-generator', () => {
     });
   });
 
-  describe('ensureValidBranchName', () => {
-    it('returns generated branch name when valid', () => {
-      expect(ensureValidBranchName('Fix login bug')).toBe('fix/login-bug');
+  describe('tryBranchName', () => {
+    it('returns the generated branch name when valid', () => {
+      expect(tryBranchName('Fix login bug')).toBe('fix/login-bug');
     });
 
-    it('returns fallback for invalid input', () => {
-      const result = ensureValidBranchName('');
-      expect(result).toMatch(/^task\/[a-z0-9]+$/);
+    it('returns null for empty input', () => {
+      expect(tryBranchName('')).toBeNull();
     });
 
-    it('uses custom fallback prefix', () => {
-      const result = ensureValidBranchName('', 'session');
-      expect(result).toMatch(/^session\/[a-z0-9]+$/);
+    // Kebab conversion strips every non-ASCII character, leaving nothing to name
+    // the branch after; the caller keeps the branch it already has.
+    it('returns null when the input has no ASCII words', () => {
+      expect(tryBranchName('把标题生成迁移到会话协议')).toBeNull();
     });
   });
 });

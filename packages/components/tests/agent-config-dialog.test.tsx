@@ -53,7 +53,8 @@ const createMachine = (
   },
 });
 
-const createKimiMachine = (): MachineViewMeta => ({
+/** A machine whose cached capabilities expose title-eligible config options. */
+const createTitleConfigMachine = (): MachineViewMeta => ({
   ...createMachine('Kimi workstation'),
   acpCapabilities: {
     [getAcpCapabilityCacheKey(kimiConfigId)]: {
@@ -102,6 +103,18 @@ const createKimiMachine = (): MachineViewMeta => ({
     },
   },
 });
+
+const createBuiltinConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta =>
+  ({
+    id: kimiConfigId,
+    machineId,
+    name: 'Kimi',
+    description: undefined,
+    cliType: 'builtin',
+    agentType: 'kimi',
+    env: {},
+    ...overrides,
+  }) as AgentConfigMeta;
 
 const getOptionButtons = (): HTMLButtonElement[] =>
   Array.from(document.body.querySelectorAll<HTMLButtonElement>('button[role="option"]'));
@@ -1025,17 +1038,10 @@ describe('AgentConfigDialog', () => {
   it.each(['claude', 'codex', 'grok'])(
     'hides the title generation section for builtin %s',
     async (agentType) => {
-      const config = {
-        id: kimiConfigId,
-        machineId,
-        name: 'ACP-owned',
-        description: undefined,
-        cliType: 'builtin',
-        agentType,
-        env: {},
-      } as AgentConfigMeta;
-
-      await renderDialog({ kind: 'edit', config }, createKimiMachine());
+      await renderDialog(
+        { kind: 'edit', config: createBuiltinConfig({ name: 'ACP-owned', agentType }) },
+        createTitleConfigMachine()
+      );
 
       expect(document.body.textContent).not.toContain('Title generation');
     }
@@ -1043,23 +1049,16 @@ describe('AgentConfigDialog', () => {
 
   it('saves a normalized title reasoning effort after the title model changes', async () => {
     const onSubmit = vi.fn(async () => {});
-    const config = {
-      id: kimiConfigId,
-      machineId,
-      name: 'Kimi',
-      description: undefined,
-      cliType: 'builtin',
-      agentType: 'kimi',
-      env: {},
+    const config = createBuiltinConfig({
       titleGeneration: {
         configOptionValues: {
           model: 'kimi-k2-turbo',
           reasoning_effort: 'ultra',
         },
       },
-    } as AgentConfigMeta;
+    });
 
-    await renderDialog({ kind: 'edit', config }, createKimiMachine(), onSubmit);
+    await renderDialog({ kind: 'edit', config }, createTitleConfigMachine(), onSubmit);
 
     expect(document.body.textContent).toContain('Title generation');
 

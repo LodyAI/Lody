@@ -187,36 +187,27 @@ override entries still apply only when their source-version suffix matches the s
 ### Session titles
 
 Builtin Claude, Codex and Grok own session title generation through ACP
-`session_info_update`. acp-extension-claude asks the Agent SDK for a title via its
-`generate_session_title` control request; acp-extension-codex (>= 1.8.0) runs a cheap-model
-turn on an ephemeral thread and persists the result as the codex thread name; Grok's official
-runtime generates the title inside its own ACP session impl
-(`xai-grok-shell/src/session/acp_session_impl/title_refresh.rs`) and pushes one update per
-session, which the `acp-extension-grok` proxy forwards untouched. The shared
-`acpOwnsSessionTitleGeneration()` predicate keeps `title-generator.ts`'s isolated session out
-of their title path and hides the obsolete provider title settings for all three.
+`session_info_update`; Kimi and the DeepSeek Harness still use `title-generator.ts` /
+`response-utils.ts` and the `titleGeneration` config. `BUILTIN_ACP_TITLE_OWNERSHIP` in
+`packages/shared/src/ai.ts` is the single table behind both facts, and its doc comment
+carries the per-adapter mechanism; the audit evidence and what each remaining gap would
+cost to close live in the [decision note](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
-How a title is labelled decides whether Lody may trust it, and that is a separate,
-narrower set. Claude and Grok both send a bare `session_info_update` with no `_meta`, so they
-need the `trustsUntaggedAcpSessionTitle()` allowlist. Codex tags every title and emits a
-first-prompt `fallback` preview before its generated `explicit` one, so it must stay outside
-that allowlist even though it does own its generation — otherwise the preview wins.
+Two predicates read that table, and the difference between them is the part worth knowing.
+`acpOwnsSessionTitleGeneration()` keeps the isolated session out of an agent's title path
+and hides its obsolete title settings. `trustsUntaggedAcpSessionTitle()` is narrower: it
+answers whether a pushed title may be stored without a `_meta.lody.titleSource` tag, which
+is true only for the adapters that send no tag at all. Codex owns its generation but tags
+every title and previews the raw first prompt as `fallback`, so trusting it untagged would
+make that preview the session title.
 
 Branch naming never starts an isolated session. `titleToBranchName` is a pure transform, so
 the only thing an agent ever added was compressing the prompt into a shorter title first.
-`generateBranchNameWithTimeout` now prefers a title that is already stored or in flight for
-the session and otherwise converts the prompt directly, falling back to the prompt if a
-pending title misses its budget. When no valid name can be derived — kebab conversion drops
-every non-ASCII character, so this is the normal outcome for a Chinese prompt — the managed
-`session/<id>` branch is left alone rather than renamed to a timestamp.
-
-Kimi and the DeepSeek Harness still use `title-generator.ts` / `response-utils.ts` and the
-`titleGeneration` config. Neither gap is a missing upstream feature: Kimi's
-`session_info_update` carries the first prompt truncated to 200 chars with no `_meta` while
-its real `SessionTitleService` stays reachable only from kap-server and the node SDK (the
-engine's `SessionMeta.titleKind` is discarded at the ACP boundary), and the DeepSeek Harness
-pins `@deepseek-ai/dsh-session-title` in its dependency closure but never mounts it in
-`createDeepSeekHarnessCordisConfig`.
+`deriveWorktreeBranchName` prefers a title already stored or in flight for the session and
+otherwise converts the prompt directly, falling back to the prompt if a pending title misses
+its budget. When no valid name can be derived — kebab conversion drops every non-ASCII
+character, so this is the normal outcome for a Chinese prompt — the managed `session/<id>`
+branch is left alone rather than renamed to a timestamp.
 
 ### Local project identity
 

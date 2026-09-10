@@ -254,7 +254,7 @@ import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/a
 import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
-import { isValidGitBranchName, titleToBranchName } from '@/agent/branch-name-generator';
+import { tryBranchName } from '@/agent/branch-name-generator';
 import {
   SessionActivePresenceController,
   type SessionActivePresencePhase,
@@ -8990,8 +8990,8 @@ export class MessageHandler {
     runtimeOverrides?: BuiltinRuntimeOverrides,
     titleConfig?: TitleGenerationConfig
   ): Promise<void> {
-    // Builtin Claude and Codex generate their own titles and publish them as
-    // session_info_update; starting the isolated agent would only duplicate them.
+    // Builtin Claude, Codex and Grok generate their own titles and publish them
+    // as session_info_update; the isolated agent would only duplicate that work.
     if (acpOwnsSessionTitleGeneration(cliType, agentType)) {
       return;
     }
@@ -9705,7 +9705,7 @@ export class MessageHandler {
       );
     }
 
-    const branchName = await this.generateBranchNameWithTimeout(
+    const branchName = await this.deriveWorktreeBranchName(
       trimmedPrompt,
       20_000,
       reusableTitlePromise
@@ -9762,45 +9762,25 @@ export class MessageHandler {
    * ever added here was compressing the prompt into a shorter title first. A title
    * is still preferred when one is already stored or in flight for this session
    * (agents that keep the local generator produce one anyway); otherwise the prompt
-   * names the branch directly.
-   *
-   * Returns null when no valid name can be derived — a prompt with no ASCII words
-   * (kebab conversion strips everything else) leaves the managed `session/<id>`
-   * branch alone rather than renaming it to a meaningless timestamp.
+   * names the branch directly. A slow or failed title never blocks or cancels the
+   * rename, because the prompt is always an acceptable naming input.
    */
-  private async generateBranchNameWithTimeout(
+  private async deriveWorktreeBranchName(
     taskPrompt: string,
     timeoutMs: number,
     reusableTitlePromise?: Promise<string | null>
   ): Promise<string | null> {
-    const toBranchName = (base: string): string | null => {
-      const candidate = titleToBranchName(base);
-      return candidate && isValidGitBranchName(candidate) ? candidate : null;
-    };
-
-    if (!reusableTitlePromise) {
-      return toBranchName(taskPrompt);
-    }
-
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    const timeoutPromise = new Promise<null>((resolve) => {
-      timeoutHandle = setTimeout(() => resolve(null), timeoutMs);
-    });
-    try {
-      // A slow or failed title must not hold up (or cancel) the rename: the prompt
-      // is always available as the naming input.
-      const title = await Promise.race([reusableTitlePromise, timeoutPromise]);
-      return toBranchName(title?.trim() || taskPrompt);
-    } catch (error) {
-      this.logger.debug(
-        `[branch-name] Falling back to the prompt after title generation failed: ${formatErrorMessage(error)}`
-      );
-      return toBranchName(taskPrompt);
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+    let title: string | null | undefined;
+    if (reusableTitlePromise) {
+      try {
+        title = await withTimeoutOrUndefined(reusableTitlePromise, timeoutMs);
+      } catch (error) {
+        this.logger.debug(
+          `[branch-name] Falling back to the prompt after title generation failed: ${formatErrorMessage(error)}`
+        );
       }
     }
+    return tryBranchName(title?.trim() || taskPrompt);
   }
 
   private async notifySessionCompleted(

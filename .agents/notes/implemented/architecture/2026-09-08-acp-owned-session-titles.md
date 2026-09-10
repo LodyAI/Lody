@@ -99,7 +99,27 @@ sites, and Codex needs opposite answers to them:
   and Grok, which both send a bare `session_info_update`. This is now
   `trustsUntaggedAcpSessionTitle()`.
 
-The two sets are deliberately not the same, and Codex is the reason. It emits a
+Capability negotiation was the alternative, and it was deferred rather than
+overlooked. The adapters already declare `_meta.lody` capabilities that Lody
+consumes (`usage`, `rateLimits`, `compaction`, ...), and the Grok proxy even
+synthesizes some the runtime never sends, so a `sessionTitle` capability is the
+shape this rule eventually wants — it would degrade correctly when a
+`BuiltinRuntimeOverrides` path points at an older binary, and would let registry
+and custom providers opt in, neither of which an identity allowlist can do. The
+cost is what deferred it: `acpOwnsSessionTitleGeneration` is consulted at session
+start before `initialize` returns, and again in the settings dialog where no
+client exists, so it needs the capability *persisted* — a new field on
+`AcpCapabilityCacheEntry`, threaded through the capability probe and both
+positional doc signatures, plus an `ACP_CAPABILITY_CACHE_VERSION` bump that
+invalidates every user's cache and a bootstrap path for never-probed configs.
+That is a larger change than this one, and it spans three adapter submodules.
+`BUILTIN_ACP_TITLE_OWNERSHIP` is the interim stand-in; it is exhaustive over
+`BuiltinAgentType` so a new builtin agent cannot silently default.
+
+The table also collapses what began as two hand-synced lists. The trusted set is
+a strict subset of the owning set, and expressing that as one `none | untagged |
+tagged` value per agent makes the relation structural instead of a comment.
+Codex is the reason the two questions differ at all. It emits a
 `fallback` prompt-preview title before its generated `explicit` one, and
 `apps/cli/src/agent/AGENTS.md` already required rejecting that preview. Keeping
 one predicate and extending it to Codex would have silently made the raw first
@@ -156,7 +176,7 @@ are also created for local projects with `useWorktree`.
 What actually landed is simpler: `titleToBranchName` was always a pure transform,
 so the isolated agent only ever compressed the prompt into a shorter title first.
 Branch naming now prefers a title that is already stored or in flight, and
-otherwise converts the prompt directly. `generateBranchNameWithTimeout` no longer
+otherwise converts the prompt directly. `deriveWorktreeBranchName` no longer
 takes a provider, env, launch spec or title config, and the branch path no longer
 reads the agent config at all.
 
@@ -167,6 +187,13 @@ for a Chinese prompt — and it was the outcome before this change too, since th
 generator was asked for a title in the prompt's own language. The isolated session
 those sessions paid for could never have produced a usable branch name. A timeout
 now also falls back to the prompt instead of abandoning the rename.
+
+One residual inconsistency is known and left alone: `acpOwnsSessionTitleGeneration`
+gates the settings dialog, but `lody agent-config` and the onboarding provider
+screen still accept and persist a `titleGeneration` block for these agents. The
+stored value is now provably inert — nothing reads it for them on any path — so
+this is cosmetic, and applying the predicate in the config write path is a
+follow-up.
 
 Verification is type checks, lint, and the shared unit tests covering both
 predicates, the branch-name derivation cases, and the dialog cases covering the

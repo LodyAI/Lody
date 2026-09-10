@@ -139,16 +139,13 @@ export const isValidGitBranchName = (name: string): boolean => {
 };
 
 /**
- * Ensure a branch name is valid, falling back to a safe default if not.
+ * Convert a title or prompt into a valid branch name, or null when it yields none.
+ *
+ * Kebab conversion drops every non-ASCII character, so a prompt written entirely
+ * in another script has no name to give. Callers are expected to leave the
+ * existing branch alone in that case rather than invent a meaningless one.
  */
-export const ensureValidBranchName = (name: string, fallbackPrefix: string = 'task'): string => {
-  const generated = titleToBranchName(name);
-
-  if (generated && isValidGitBranchName(generated)) {
-    return generated;
-  }
-
-  // Fallback: use a timestamp-based name
-  const timestamp = Date.now().toString(36);
-  return `${fallbackPrefix}/${timestamp}`;
+export const tryBranchName = (base: string): string | null => {
+  const candidate = titleToBranchName(base);
+  return candidate && isValidGitBranchName(candidate) ? candidate : null;
 };
