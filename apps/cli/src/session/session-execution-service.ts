@@ -1978,6 +1978,19 @@ export class SessionExecutionService {
             )
           );
       }
+
+      if (runtime?.promptStarted) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to settle context compaction after cancelled ACP prompt stopped',
+          self.tryPromise(async () => {
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
+              settleContextCompactionAsFailed: true,
+            });
+            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
+          })
+        );
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -2195,7 +2208,9 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
+      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
+    });
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2298,7 +2313,8 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown
+    error?: unknown,
+    options?: { providerPromptSettled?: boolean }
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
@@ -2306,7 +2322,8 @@ export class SessionExecutionService {
       sessionId,
       this.currentTurnBySession.get(sessionId),
       {
-        settleContextCompactionAsFailed: acpError !== null || providerDisconnected,
+        settleContextCompactionAsFailed:
+          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
       }
     );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(

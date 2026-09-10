@@ -4838,7 +4838,26 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
   });
 
-  it('records ACP string error data as the visible chat failure message', async () => {
+  it.each([
+    {
+      name: 'ACP string error data',
+      error: Object.assign(new Error('Invalid params'), {
+        code: -32602,
+        data: 'No goal is currently set. Use `/goal <objective>` to create one.',
+      }),
+      expectedFailure: [
+        'acp_invalid_params',
+        'No goal is currently set. Use `/goal <objective>` to create one.',
+      ] as const,
+    },
+    {
+      name: 'remote compact transport error',
+      error: new Error(
+        'Error running remote compact task: Connection failed: error sending request'
+      ),
+      expectedFailure: null,
+    },
+  ])('settles context compaction after a provider prompt rejects ($name)', async (testCase) => {
     const upsertDocMeta = vi.fn(async () => {});
     let history: SessionHistoryInput[] = [
       {
@@ -4868,14 +4887,10 @@ describe('SessionExecutionService', () => {
         }
       ),
     };
-    const acpError = Object.assign(new Error('Invalid params'), {
-      code: -32602,
-      data: 'No goal is currently set. Use `/goal <objective>` to create one.',
-    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       prompt: vi.fn(async () => {
-        throw acpError;
+        throw testCase.error;
       }),
       currentModel: undefined,
     };
@@ -4939,11 +4954,11 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
-    expect(deps.recordChatFailure).toHaveBeenCalledWith(
-      sessionDoc,
-      'acp_invalid_params',
-      'No goal is currently set. Use `/goal <objective>` to create one.'
-    );
+    if (testCase.expectedFailure) {
+      expect(deps.recordChatFailure).toHaveBeenCalledWith(sessionDoc, ...testCase.expectedFailure);
+    } else {
+      expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    }
     expect(history[0]).toMatchObject({
       finished: true,
       items: [expect.objectContaining({ toolCallId: 'compact-1', status: 'failed' })],
@@ -5389,7 +5404,7 @@ describe('SessionExecutionService', () => {
     );
 
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel');
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
@@ -5399,7 +5414,7 @@ describe('SessionExecutionService', () => {
       items: [
         expect.objectContaining({
           toolCallId: 'compact-cancelled-turn',
-          status: 'in_progress',
+          status: 'failed',
         }),
       ],
     });
@@ -5429,6 +5444,21 @@ describe('SessionExecutionService', () => {
           status: 'pending',
           read: false,
           items: [{ type: 'text', text: 'old request' }],
+        },
+        {
+          id: `assistant:${userTurnId}`,
+          role: 'assistant',
+          timestamp: '2026-09-10T00:00:00.000Z',
+          fileDiff: [],
+          items: [
+            {
+              type: 'tool_call',
+              toolCallId: 'compact-cancel-drain',
+              title: 'Context compacting',
+              status: 'in_progress',
+              activityKind: 'context_compaction',
+            },
+          ],
         },
       ];
       let status: unknown;
@@ -5536,6 +5566,15 @@ describe('SessionExecutionService', () => {
         } as unknown as LoroDocumentManager,
         buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
       });
+      vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
+        async (_sessionId, turnId, options) => {
+          history = markAssistantTurnFinished(history as SessionHistoryInput[], {
+            turnId,
+            endedAt: 42,
+            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+          }) as Array<Record<string, unknown>>;
+        }
+      );
       const service = new SessionExecutionService(deps);
       const message: Parameters<SessionExecutionService['continueSession']>[0] = {
         type: 'session/chat',
@@ -5575,6 +5614,16 @@ describe('SessionExecutionService', () => {
           processingUserMsgId: undefined,
         });
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+        expect(history[1]).toMatchObject({
+          id: `assistant:${userTurnId}`,
+          finished: true,
+          items: [
+            expect.objectContaining({
+              toolCallId: 'compact-cancel-drain',
+              status: 'in_progress',
+            }),
+          ],
+        });
         await service.continueSession(nextMessage);
         expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
 
@@ -5601,6 +5650,17 @@ describe('SessionExecutionService', () => {
           expect(terminated).toBe(false);
         }
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+        expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
+        expect(history[1]).toMatchObject({
+          id: `assistant:${userTurnId}`,
+          finished: true,
+          items: [
+            expect.objectContaining({
+              toolCallId: 'compact-cancel-drain',
+              status: 'failed',
+            }),
+          ],
+        });
         if (completion !== 'timeout') {
           await service.continueSession(nextMessage);
           expect(delivered).toEqual([
@@ -5709,7 +5769,12 @@ describe('SessionExecutionService', () => {
     });
 
     expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel-resolved');
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
+    expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
+      'session-prompt-cancel-resolved',
+      'assistant-prompt-cancel-resolved',
+      { settleContextCompactionAsFailed: true }
+    );
     expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel-resolved', {
