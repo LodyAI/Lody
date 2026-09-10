@@ -6,14 +6,21 @@ export { isToolCallRef };
 
 /**
  * A sealed tool_call skeleton: the turn stores only `kind`/`status`/`title`/
- * `locations`/`ref`, and the execution payload (`content`/`rawInput`/
- * `rawOutput`) stays on the origin machine. A full call and a skeleton share the
- * `tool_call` discriminant, so callers narrow with this guard rather than
- * casting around `toolCallId`.
+ * `locations`/`ref`, with no execution payload, because `content`/`rawInput`/
+ * `rawOutput` stay on the origin machine.
+ *
+ * `ref` alone is NOT enough: a full call may also carry a `ref`, and treating it
+ * as a skeleton would make the card render the "stored on <machine>" placeholder
+ * instead of the payload it actually has. A skeleton must therefore actually omit
+ * the payload (an empty `content` array counts as omitted).
  */
 export const isToolCallSkeleton = (
   content: ToolCallMessage
-): content is ToolCallMessage & { ref: ToolCallRef } => isToolCallRef(content.ref);
+): content is ToolCallMessage & { ref: ToolCallRef } =>
+  isToolCallRef(content.ref) &&
+  (content.content?.length ?? 0) === 0 &&
+  content.rawInput === undefined &&
+  content.rawOutput === undefined;
 
 /**
  * Stable identity for rows and React keys. A full call uses its `toolCallId`; a

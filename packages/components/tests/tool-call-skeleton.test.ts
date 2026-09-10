@@ -156,6 +156,8 @@ describe('tool-call skeleton helpers', () => {
     expect(isToolCallRef(null)).toBe(false);
 
     expect(isToolCallSkeleton(skeletonTool('execute'))).toBe(true);
+    // An empty content array from a normalizing reader is still "no payload".
+    expect(isToolCallSkeleton(skeletonTool('execute', { content: [] }))).toBe(true);
     expect(
       isToolCallSkeleton({
         type: 'tool_call',
@@ -163,6 +165,55 @@ describe('tool-call skeleton helpers', () => {
         status: 'completed',
       })
     ).toBe(false);
+  });
+
+  it('does not treat a full call that also carries a ref as a skeleton', () => {
+    // `ref` alone is not the predicate: a full call with payload + ref must keep
+    // rendering its real payload, not the "stored on <machine>" placeholder.
+    expect(
+      isToolCallSkeleton({
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        status: 'completed',
+        ref: ref(),
+        content: [{ type: 'terminal_output', output: 'real output' }],
+      })
+    ).toBe(false);
+    expect(
+      isToolCallSkeleton({
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        status: 'completed',
+        ref: ref(),
+        rawOutput: { ok: true },
+      })
+    ).toBe(false);
+    expect(
+      isToolCallSkeleton({
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        status: 'completed',
+        ref: ref(),
+        rawInput: { command: 'ls' },
+      })
+    ).toBe(false);
+  });
+
+  it('classifies a full call with a ref from its content, not its ref', () => {
+    // With the loose predicate this was counted as `other`; a full call must
+    // consult `content` for terminal detection even when a ref is present.
+    const blocks = buildAssistantTurnRenderBlocks('assistant-1', [
+      {
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        status: 'completed',
+        ref: ref(),
+        content: [{ type: 'terminal_output', output: 'real output' }],
+      },
+    ]);
+    const block = blocks[0];
+    if (block?.kind !== 'activity_group') throw new Error('Expected activity group');
+    expect(block.summary).toMatchObject({ commandCount: 1, otherCount: 0 });
   });
 
   it('falls back to the ref when a skeleton has no toolCallId', () => {

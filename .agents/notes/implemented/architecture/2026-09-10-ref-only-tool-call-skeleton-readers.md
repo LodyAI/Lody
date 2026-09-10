@@ -35,9 +35,12 @@ machine. Three layers disagreed about it.
 
 ## Decision
 
-`toolCallId` is optional and `ref?: ToolCallRef` exists on the `tool_call` variant. The
-identity requirement lives at each runtime boundary instead of in one place:
+The `tool_call` variant carries a `ToolCallIdentity` union, so the TypeScript type itself
+requires at least one of `toolCallId` (full call) or `ref` (sealed skeleton); a full call may
+also carry a `ref`. The runtime boundaries enforce the same rule:
 
+- `history-writer.contract.ts` pins the type half with `@ts-expect-error` compile-failure
+  checks for an identity-less tool_call and an explicit-undefined id.
 - `MessageContentSchema.superRefine` rejects a tool call with neither identity. It lives on
   the union rather than on `ToolCallMessageSchema` because `z.discriminatedUnion` needs that
   object to stay a `ZodObject` (it is used with `.omit` in the writer).
@@ -51,8 +54,12 @@ Reader paths treat a skeleton as a first-class item without inventing payload:
 - `acp/history-apply.ts` skips non-string ids when indexing, resolving and merging, so a
   skeleton is never a merge target and an id-less replay appends like any unknown id.
 - `tool-call-skeleton.ts` owns `isToolCallRef`, `isToolCallSkeleton` and
-  `getToolCallStableId`; activity summaries and React/virtual keys use them, so a skeleton
-  classifies from `kind`/`status`/`locations` and never renders the literal `undefined`.
+  `getToolCallStableId`. `isToolCallSkeleton` requires `ref` AND no
+  `content`/`rawInput`/`rawOutput` (an empty `content` array counts as absent); `ref` alone is
+  not the predicate, because a full call may also carry a `ref` and must keep rendering its
+  payload instead of the "stored on <machine>" placeholder. Activity summaries and
+  React/virtual keys use these guards, so a skeleton classifies from
+  `kind`/`status`/`locations` and never renders the literal `undefined`.
 - `use-tool-call-payload.ts` is an explicit `unavailable` stub; the card adds a
   "stored on <machine>" row. `session-export` writes `toolCallId: null` plus `ref`, and the
   transcript markdown renders the skeleton without an id line.

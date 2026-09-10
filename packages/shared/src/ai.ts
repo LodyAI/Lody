@@ -1534,15 +1534,9 @@ export type MessageContent =
       isLatest: boolean;
     }
   | SessionGoalContent
-  | {
+  | ({
       type: 'tool_call';
       _meta?: { [k: string]: unknown } | null;
-      /**
-       * ACP-assigned id. Present on every live/full tool call. A sealed skeleton
-       * omits it and identifies itself with `ref` instead, so this is optional in
-       * the type to match the runtime contract exactly.
-       */
-      toolCallId?: string;
       title?: string | null;
       status: ToolCallStatus;
       kind?: ToolKind;
@@ -1550,13 +1544,6 @@ export type MessageContent =
       locations?: ToolCallLocation[];
       rawInput?: { [k: string]: unknown };
       rawOutput?: { [k: string]: unknown };
-      /**
-       * Payload pointer of a sealed skeleton. The execution payload
-       * (`content`/`rawInput`/`rawOutput`) stays on the origin machine; readers
-       * must tolerate its absence whenever `ref` is present and never treat a
-       * skeleton as a merge target for a live tool call.
-       */
-      ref?: ToolCallRef;
       /** Small provider-neutral marker for tool-like status rows rendered in the transcript. */
       activityKind?: 'context_compaction' | 'codex_retry';
       /**
@@ -1588,7 +1575,7 @@ export type MessageContent =
         _meta?: Record<string, unknown>;
         outcome?: PermissionOutcome;
       };
-    }
+    } & ToolCallIdentity)
   | ({
       type: 'subagent_task';
     } & SubagentTaskPayload)
@@ -1632,6 +1619,16 @@ export type ToolCallRef = {
   turnId: string;
   index: number;
 };
+
+/**
+ * A `tool_call` carries at least one identity: `toolCallId` for a live/full call or
+ * `ref` for a sealed skeleton. Expressing it as a union makes the TypeScript type
+ * reject an identity-less tool_call exactly like the Zod parser and the Loro
+ * `validate` guard do. A full call may additionally carry a `ref`.
+ */
+export type ToolCallIdentity =
+  | { toolCallId: string; ref?: ToolCallRef }
+  | { toolCallId?: undefined; ref: ToolCallRef };
 
 /**
  * The execution payload a sealed skeleton omits. Fetched on demand from the

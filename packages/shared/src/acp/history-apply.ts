@@ -1,4 +1,4 @@
-import type { MessageContent, ModelInfo } from '../ai';
+import type { MessageContent, ModelInfo, ToolCallIdentity } from '../ai';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
 import { sanitizeLodyInternalInstructions } from '../goal';
 
@@ -909,9 +909,18 @@ const mergeToolCallMessage = (
   const nextStatus =
     statusRank[incoming.status] < statusRank[prev.status] ? prev.status : incoming.status;
 
+  // This merge path is keyed by `toolCallId`, so a live update carries one; a `ref`-only
+  // replay never reaches here because skeletons are not merge targets. Rebuild the
+  // identity explicitly so the TS union stays satisfied, but never clear `ref` with an
+  // `undefined` from an update that predates the pointer.
+  const identity: ToolCallIdentity =
+    typeof incoming.toolCallId === 'string'
+      ? { toolCallId: incoming.toolCallId, ...(incoming.ref ? { ref: incoming.ref } : {}) }
+      : { ref: incoming.ref };
+
   return {
     ...prev,
-    toolCallId: incoming.toolCallId,
+    ...identity,
     // `null` title/kind means "no information" on the wire (zod allows explicit null);
     // it must keep the previously persisted value, not wipe it.
     title: incoming.title ?? prev.title,
