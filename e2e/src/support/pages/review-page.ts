@@ -1,122 +1,10 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
-type RegisteredLocalProject = {
-  machineId: string;
-  workspaceId: string;
-  workspaceSlug: string;
-  localProjectId: string;
-  name: string;
-  rootPath: string;
-};
-
-type LocalProjectAddResponse = {
-  ok?: boolean;
-  type?: string;
-  message?: string;
-  result?: {
-    localProjectId?: string;
-    name?: string;
-    rootPath?: string;
-  };
-};
-
 export class ReviewPage {
   private readonly sidePanel: Locator;
 
   constructor(private readonly page: Page) {
     this.sidePanel = page.locator('[data-lody-session-tab-region="side-panel"]');
-  }
-
-  async registerLocalProject(rootPath: string): Promise<RegisteredLocalProject> {
-    const registered = await this.page.evaluate(async (projectRootPath) => {
-      if (!window.ipc) throw new Error('Electron IPC is unavailable');
-      const [cliStateRaw, platformRaw] = await Promise.all([
-        window.ipc.invoke('cli.getState'),
-        window.ipc.invoke('localPlatform.getSnapshot'),
-      ]);
-      const cliState = cliStateRaw as { runtime?: { machineId?: unknown } } | null;
-      const platform = platformRaw as {
-        workspace?: { workspaceId?: unknown; slug?: unknown };
-      } | null;
-      const machineId = cliState?.runtime?.machineId;
-      const workspaceId = platform?.workspace?.workspaceId;
-      const workspaceSlug = platform?.workspace?.slug;
-      if (typeof machineId !== 'string' || typeof workspaceId !== 'string') {
-        throw new Error('Local runtime identity is not ready');
-      }
-      const response = (await window.ipc.invoke('localProjects.control', {
-        type: 'local-project/add',
-        machineId,
-        rootPath: projectRootPath,
-        workspace: workspaceId,
-      })) as LocalProjectAddResponse;
-      if (
-        response.ok !== true ||
-        response.type !== 'local-project/add' ||
-        typeof response.result?.localProjectId !== 'string' ||
-        typeof response.result.name !== 'string' ||
-        typeof response.result.rootPath !== 'string'
-      ) {
-        throw new Error(response.message ?? 'Failed to register synthetic local project');
-      }
-      return {
-        machineId,
-        workspaceId,
-        workspaceSlug: typeof workspaceSlug === 'string' ? workspaceSlug : 'local',
-        localProjectId: response.result.localProjectId,
-        name: response.result.name,
-        rootPath: response.result.rootPath,
-      };
-    }, rootPath);
-
-    await expect
-      .poll(
-        async () =>
-          await this.page.evaluate(async ({ machineId, workspaceId, localProjectId }) => {
-            const response = (await window.ipc?.invoke('localProjects.control', {
-              type: 'local-project/list',
-              machineId,
-            })) as
-              | {
-                  ok?: boolean;
-                  result?: {
-                    workspaces?: Array<{
-                      workspaceId?: string;
-                      projects?: Array<{ localProjectId?: string }>;
-                    }>;
-                  };
-                }
-              | undefined;
-            return (
-              response?.ok === true &&
-              response.result?.workspaces?.some(
-                (workspace) =>
-                  workspace.workspaceId === workspaceId &&
-                  workspace.projects?.some((project) => project.localProjectId === localProjectId)
-              ) === true
-            );
-          }, registered),
-        { timeout: 30_000, intervals: [100, 250, 500] }
-      )
-      .toBe(true);
-
-    return registered;
-  }
-
-  async openSession(workspaceSlug: string, sessionId: string): Promise<void> {
-    await this.page.evaluate(
-      ({ slug, id }) => {
-        window.location.hash = `/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(id)}`;
-      },
-      { slug: workspaceSlug, id: sessionId }
-    );
-    await expect(this.page).toHaveURL(
-      new RegExp(
-        `#/${escapeRegExp(workspaceSlug)}/sessions/${escapeRegExp(sessionId)}(?:\\?.*)?$`,
-        'u'
-      )
-    );
-    await expect(this.page.locator('#chat-prompt')).toBeVisible({ timeout: 60_000 });
   }
 
   async openChangesPanel(expectedPaths: readonly string[]): Promise<void> {
@@ -228,8 +116,4 @@ export class ReviewPage {
       );
     });
   }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }

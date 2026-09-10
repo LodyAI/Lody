@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 export const PRIMARY_REVIEW_DIFF_PATH = 'src/generated/primary-snapshot.ts';
 export const SECONDARY_REVIEW_DIFF_PATH = 'src/generated/secondary-snapshot.ts';
@@ -10,6 +10,7 @@ const PRIMARY_LINE_COUNT = 2_400;
 const SECONDARY_LINE_COUNT = 1_200;
 
 export type SyntheticReviewRepository = {
+  name: string;
   rootPath: string;
   changedPaths: readonly string[];
   expectedLineChanges: Readonly<Record<string, { additions: number; deletions: number }>>;
@@ -88,6 +89,7 @@ export function createSyntheticReviewRepository(): SyntheticReviewRepository {
 
     retained = true;
     return {
+      name: basename(rootPath),
       rootPath,
       changedPaths: ['README.md', PRIMARY_REVIEW_DIFF_PATH, SECONDARY_REVIEW_DIFF_PATH],
       expectedLineChanges: {

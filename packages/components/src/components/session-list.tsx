@@ -936,6 +936,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   useAnchor
                     ? undefined
                     : (e) => {
+                        // Nested controls (such as the opened-session disclosure) own their
+                        // keyboard activation. Selecting the row here would navigate before
+                        // the control receives its native click.
+                        if (e.currentTarget !== e.target) return;
                         if (!isSelectable) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
