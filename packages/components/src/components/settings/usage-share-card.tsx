@@ -143,13 +143,17 @@ const RHYTHM: Record<
 /**
  * The mark as a cast shadow rather than a logo: `brightness-0` flattens the
  * artwork to a pure silhouette (alpha survives, colour does not), inverted on a
- * dark card so the shadow is light instead of invisible. It is scaled past the
- * card and clipped by it, so only an edge of the bell and a few tentacles show —
- * a texture the eye reads as brand, not a second copy of the icon in the header.
+ * dark card so the shadow is light instead of invisible.
+ *
+ * Its whole job is the void beside the headline number, so it is anchored to the
+ * top-right corner and stops above the rule under the stat row — the bands below
+ * are dense and do not want a shadow behind them. It bleeds off the top and right
+ * edges and is clipped by the card, so it fills that corner without ever reading
+ * as a second copy of the icon already in the brand row.
  */
 const WATERMARK: Record<UsageShareCardAspect, string> = {
-  portrait: 'h-[135%] left-[58%] -top-[12%]',
-  wide: 'h-[230%] left-[70%] -top-[55%]',
+  portrait: 'h-[44%] left-[56%] -top-[12%]',
+  wide: 'h-[62%] left-[80%] -top-[20%]',
 };
 
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */

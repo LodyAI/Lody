@@ -62,10 +62,13 @@ cannot cut a real outline from the raster. Ghosting `lody-icon.png` at low opaci
 fixed the identity but still read as a second copy of the logo sitting in a corner.
 What works is treating it as a cast shadow rather than a mark: `brightness-0`
 flattens the artwork to a pure silhouette (alpha survives, colour does not),
-inverted on a dark card so the shadow is light instead of invisible, then scaled
-well past the card and clipped by its edge so only a fragment of the bell intrudes
-from the right. It is positioned on the card root and every band is positioned
-above it, so it is atmosphere and can never displace a number.
+inverted on a dark card so the shadow is light instead of invisible, oversized and
+clipped by the card's edges. Scope matters as much as treatment: its job is the
+void beside the headline number, so it is anchored to the top-right corner and
+stops above the rule under the stat row — a first pass ran it down the full height
+and put a shadow behind the heatmap and the legend, which are dense and did not
+want one. It sits on the card root with every band positioned above it, so it is
+atmosphere and can never displace a number.
 
 **The card declares its own type and spacing scale.** Built element by element it
 accumulated ten font sizes (10, 10.5, 11, 11.5, 13, 15px …) whose half-pixel steps
