@@ -344,6 +344,8 @@ export function createConversationViewFromDoc(
 
   // ---- background index pass -------------------------------------------------
 
+  let idleCursor = -1;
+
   const runIdleChunk = (deadline: IdleDeadline) => {
     if (disposed) return;
     let processed = 0;
@@ -353,7 +355,8 @@ export function createConversationViewFromDoc(
     // The tail comes first: a turn the eager pass deferred is still part of
     // the always-hydrated window.
     if (ensureTailHydrated(undefined, IDLE_CHUNK_ITEMS)) complete = false;
-    for (let i = cids.length - 1; i >= 0 && complete; i -= 1) {
+    for (let i = idleCursor; i >= 0 && complete; i -= 1) {
+      idleCursor = i - 1;
       const row = rows[i];
       const cid = cids[i];
       if (!row || !cid) continue;
@@ -366,6 +369,7 @@ export function createConversationViewFromDoc(
         items >= IDLE_CHUNK_ITEMS ||
         deadline.timeRemaining() <= 1
       ) {
+        idleCursor = i;
         complete = false;
         break;
       }
@@ -394,11 +398,13 @@ export function createConversationViewFromDoc(
       emit({ kind: 'tail', from: tailStart(), to: cids.length });
     }
     if (complete) resolveReady();
-    else scheduleIdlePass();
+    else scheduleIdlePass(false);
   };
 
-  const scheduleIdlePass = () => {
-    if (disposed || idleCancel) return;
+  const scheduleIdlePass = (restart = true) => {
+    if (disposed) return;
+    if (restart) idleCursor = cids.length - 1;
+    if (idleCancel) return;
     idleCancel = scheduleIdle((deadline) => {
       idleCancel = null;
       runIdleChunk(deadline);

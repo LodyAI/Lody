@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sessionDocSchema, type PermissionOutcome, type SessionHistory } from '@lody/shared';
+import { HistoryEntryWriteSchema, parseHistoryWrite, sessionDocSchema, type PermissionOutcome, type SessionHistory } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/conversation-view';
@@ -45,7 +45,7 @@ const openWriterDoc = (history: readonly SessionHistory[] = []) => {
     maxHydrated: 4,
     scheduleIdle: idle.scheduleIdle,
   });
-  return { doc, view, writer: createHistoryWriter(doc, view) };
+  return { doc, view, writer: createHistoryWriter(doc) };
 };
 
 const mirrorOver = (doc: LoroDoc) =>
@@ -58,7 +58,7 @@ const mirrorOver = (doc: LoroDoc) =>
 
 describe('createHistoryWriter', () => {
   it('appends turns with the exact ops and container shape Mirror.setState produces', () => {
-    const history = buildFixtureHistory(8);
+    const history = buildFixtureHistory(8).map((entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry)) as SessionHistory[];
     // Reference: today's path, one Mirror write per turn on a fresh doc.
     const reference = new LoroDoc();
     reference.setPeerId(PEER);
@@ -85,7 +85,7 @@ describe('createHistoryWriter', () => {
     const { writer } = openWriterDoc();
     expect(() =>
       writer.append({ id: 'bad', role: 'user', items: [{ type: 'text' }] } as unknown as SessionHistory)
-    ).toThrow(/validation failed/i);
+    ).toThrow(/Invalid history write/i);
   });
 
   const replaceCases: Array<[string, (turn: SessionHistory) => SessionHistory]> = [
@@ -95,7 +95,7 @@ describe('createHistoryWriter', () => {
       'tool call meta update',
       (turn) => {
         const items = [...turn.items!];
-        items[1] = { ...(items[1] as object), meta: { taskProposal: { decision: 'accepted' } } } as never;
+        items[1] = { ...(items[1] as object), title: 'accepted tool' } as never;
         return { ...turn, items };
       },
     ],
@@ -113,8 +113,8 @@ describe('createHistoryWriter', () => {
       'fileDiff and modelInfo replaced with fresh objects',
       (turn) => ({
         ...turn,
-        fileDiff: [{ path: 'x.ts', add: 2, del: 0, cc: { v: 1, fileId: 'f' } }],
-        modelInfo: { name: 'opus', _meta: { provider: 'anthropic', effort: 'high' } },
+        fileDiff: [{ filePath: 'x.ts', add: 2, del: 0, cc: { v: 1, fileId: 'f' } }],
+        modelInfo: { modelId: 'test', name: 'opus', _meta: { provider: 'anthropic', effort: 'high' } },
       }),
     ],
   ];

@@ -6,7 +6,7 @@ import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/c
 import {
   getMapFieldSchema,
   writeMapEntry,
-} from '../src/lib/conversation-view/history-materializer';
+} from '../../shared/src/history-materializer';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -69,33 +69,33 @@ describe('optional string storage layouts', () => {
     const legacyTitle = item.setContainer('title', new LoroText());
     legacyTitle.insert(0, 'old title');
     const titleId = legacyTitle.id;
-    item.set('markdown', 'legacy primitive');
+    item.set('toolName', 'legacy primitive');
     doc.commit();
     const itemSchema = sessionHistorySchema.definition.items.itemSchema;
     const definition = itemSchema.definition as Record<string, SchemaType>;
-    const previousMarkdown = definition.markdown;
+    const previousToolName = definition.toolName;
     const oldDefault = itemSchema.catchallType.options.defaultLoroText;
     try {
-      definition.markdown = hinted(schema.LoroText());
+      definition.toolName = hinted(schema.LoroText());
       itemSchema.catchallType.options.defaultLoroText = false;
       const idle = createManualIdle();
       const view = createConversationViewFromDoc(doc, {
         sessionId: FIXTURE_SESSION_ID,
         scheduleIdle: idle.scheduleIdle,
       });
-      const writer = createHistoryWriter(doc, view);
+      const writer = createHistoryWriter(doc);
       const before = writer.read('a-0')!;
       const items = [...before.items!];
-      items[1] = { ...items[1], title: 'changed title', markdown: 'changed primitive' } as never;
+      items[1] = { ...items[1], title: 'changed title', toolName: 'changed primitive' } as never;
       writer.replace('a-0', { ...before, items });
       expect((item.get('title') as LoroText).id).toBe(titleId);
       expect((item.get('title') as LoroText).toString()).toBe('changed title');
-      expect(item.get('markdown')).toBe('changed primitive');
+      expect(item.get('toolName')).toBe('changed primitive');
       view.dispose();
     } finally {
       itemSchema.catchallType.options.defaultLoroText = oldDefault;
-      if (previousMarkdown) definition.markdown = previousMarkdown;
-      else delete definition.markdown;
+      if (previousToolName) definition.toolName = previousToolName;
+      else delete definition.toolName;
     }
   });
 });

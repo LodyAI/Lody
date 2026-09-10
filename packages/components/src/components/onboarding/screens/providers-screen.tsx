@@ -2,10 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Loader2,
+  Plus,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
@@ -51,6 +61,7 @@ import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
 import { REGISTRY_AGENT_ICON_SVGS } from '@/components/icons/registry-agent-icons';
 import {
   AgentConfigDialog,
@@ -72,11 +83,19 @@ import {
   resolveInitialOnboardingProviderStatus,
   type OnboardingProviderStatus,
 } from '../provider-status';
+import { collectErrorBoundaryEnvironment } from '@/lib/error-boundary-report';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { buildProviderWaitReport } from '../provider-wait-report';
 import {
+  agentRuntimeReadinessFromActivity,
   createProviderTestRunRegistry,
   providerTestActivityFromProgress,
+  providerWaitEscalation,
+  type AgentRuntimeReadiness,
   type ProviderTestActivity,
+  type ProviderWaitEscalation,
 } from '../provider-test-state';
+import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
@@ -183,6 +202,12 @@ export interface ProvidersScreenViewProps {
   testActivities?: Record<string, ProviderTestActivity>;
   /** Latest failed probe detail, kept available after its toast disappears. */
   failureReasons?: Record<string, string>;
+  /**
+   * Readiness of the managed built-in runtimes the background prefetch warms.
+   * Passed in rather than read from a runtime atom so this half stays
+   * presentational and story-renderable.
+   */
+  runtimeReadiness?: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
   selectedProviderId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
@@ -215,6 +240,7 @@ export function ProvidersScreenView({
   testStatuses,
   testActivities = {},
   failureReasons = {},
+  runtimeReadiness = {},
   selectedProviderId,
   noLocalMachine,
   localMachineId = null,
@@ -332,8 +358,14 @@ export function ProvidersScreenView({
                 {configs.map((config) => {
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
                   const activity = testActivities[config.id];
-                  const activityPercent = getProviderTestActivityPercent(activity);
                   const selected = config.id === resolvedSelectedProviderId;
+                  // 'needs-auth' stays ready on purpose: that agent arrived, it
+                  // is waiting on the user, and the row's panel says so.
+                  const rowReadiness: AgentRuntimeReadiness =
+                    agentRuntimeReadinessFromActivity(activity) ??
+                    (status === 'failed'
+                      ? { readiness: 'cold', percent: null }
+                      : { readiness: 'ready', percent: null });
                   return (
                     <motion.div
                       key={config.id}
@@ -346,19 +378,22 @@ export function ProvidersScreenView({
                         // Hover lives on the row, not the inner edit button,
                         // so highlighting feels like one unit even though
                         // Test/Delete are separate click targets.
-                        'group flex flex-wrap items-center gap-3 rounded-lg border transition-colors',
+                        'group flex flex-wrap items-center rounded-lg border transition-colors',
+                        // Only selection is allowed to tint the row. A passed
+                        // row used to carry the same primary wash, which left
+                        // the list striped in two nearly identical blues and
+                        // the actual selection indistinguishable from status.
+                        // Status now lives in the badge column alone.
                         selected
-                          ? 'border-primary bg-primary/[0.06] ring-2 ring-primary/15'
-                          : status === 'passed'
-                            ? 'border-primary/40 bg-primary/[0.04] hover:bg-primary/[0.07]'
-                            : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
+                          ? 'border-primary bg-primary/[0.06]'
+                          : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
                       )}
                     >
                       <button
                         type="button"
                         disabled={noLocalMachine}
                         className={cn(
-                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 text-left',
+                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 pr-2 text-left',
                           'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                           'disabled:cursor-not-allowed disabled:opacity-60'
                         )}
@@ -368,15 +403,20 @@ export function ProvidersScreenView({
                         })}
                         onClick={() => (onSelect ? onSelect(config) : onEdit(config))}
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-                          <AgentIcon
-                            cliType={config.cliType}
-                            agentType={config.agentType}
-                            brandId={config.brandId}
-                            env={config.env}
-                            className="h-5 w-5"
-                          />
-                        </div>
+                        {/* The mark carries the work, so the row needs no second
+                            activity element. A published config reads as ready
+                            unless a request is running on it or it failed:
+                            dimming an agent the user already has, because we
+                            have not probed it, is the anxiety this replaces. */}
+                        <AgentReadinessMark
+                          cliType={config.cliType}
+                          agentType={config.agentType}
+                          brandId={config.brandId}
+                          env={config.env}
+                          readiness={rowReadiness.readiness}
+                          percent={rowReadiness.percent}
+                          size="md"
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{config.name}</div>
                           <div className="truncate text-xs text-muted-foreground">
@@ -385,50 +425,71 @@ export function ProvidersScreenView({
                         </div>
                         {/* Sibling of the two-line text column, so the badge
                             centres against the whole row instead of riding the
-                            name's baseline. */}
-                        <ProviderStatusBadge
-                          status={status}
-                          activity={activity}
-                          failureReason={failureReasons[config.id]}
-                        />
+                            name's baseline. The column is fixed and its
+                            contents right-aligned: every badge then shares one
+                            edge and one gutter to the actions, whatever word it
+                            happens to carry. */}
+                        <div className="flex min-w-20 shrink-0 justify-end">
+                          <ProviderStatusBadge
+                            status={status}
+                            activity={activity}
+                            failureReason={failureReasons[config.id]}
+                          />
+                        </div>
                       </button>
-                      <div className="flex shrink-0 items-center gap-1 pr-3">
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
+                      {/* Fixed-width slots, not intrinsic ones. Test/Re-test,
+                          the progress pill and the needs-auth row all differ in
+                          width, and an intrinsic cluster passed that difference
+                          leftward: the badge and the name column landed at a
+                          different x in every row, and jumped again the moment a
+                          test started. */}
+                      <div className="flex shrink-0 items-center gap-1 py-3 pr-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-12 shrink-0 px-0"
+                          onClick={() => onEdit(config)}
+                        >
                           {t('common.edit', 'Edit')}
                         </Button>
-                        {activity ? (
-                          <ProviderProgressButton
-                            percent={activityPercent}
-                            label={
-                              activityPercent !== null
-                                ? `${activityPercent}%`
-                                : t('onboarding.providers.workingAction', 'Working')
-                            }
-                          />
-                        ) : status !== 'needs-auth' ? (
-                          <Button
-                            variant={status === 'passed' ? 'ghost' : 'outline'}
-                            size="sm"
-                            disabled={noLocalMachine}
-                            onClick={() => onTest(config)}
-                          >
-                            {status === 'passed'
-                              ? t('onboarding.providers.retest', 'Re-test')
-                              : t('onboarding.providers.test', 'Test')}
-                          </Button>
-                        ) : null}
+                        <div className="flex w-20 shrink-0 items-center gap-1">
+                          {activity ? (
+                            <ProviderActivityAction activity={activity} config={config} />
+                          ) : status !== 'needs-auth' ? (
+                            // Always outline, passed or not. Ghosting the
+                            // button once a test succeeded emptied the slot of
+                            // everything but a word, so the one row that had
+                            // been verified read as a hole in the column while
+                            // its neighbours kept a bordered control. A fixed
+                            // slot only holds the column if what sits in it
+                            // keeps its shape too.
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full px-0"
+                              disabled={noLocalMachine}
+                              onClick={() => onTest(config)}
+                            >
+                              {status === 'passed'
+                                ? t('onboarding.providers.retest', 'Re-test')
+                                : t('onboarding.providers.test', 'Test')}
+                            </Button>
+                          ) : null}
+                        </div>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                           aria-label={t('common.delete', 'Delete')}
                           onClick={() => onDelete(config)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
+                      {/* Indented to the agent's name, not the card edge: the
+                          panel belongs to the agent named above it. */}
                       {status === 'needs-auth' ? (
-                        <div className="basis-full px-3 pb-3">
+                        <div className="basis-full pb-3 pl-[3.25rem] pr-3">
                           <AcpAuthenticationPanel
                             machineId={localMachineId}
                             configId={config.id}
@@ -476,9 +537,59 @@ export function ProvidersScreenView({
           </p>
         ) : null}
 
-        <AgentShowcase disabled={noLocalMachine} onPick={onAdd} />
+        <AgentShowcase
+          disabled={noLocalMachine}
+          onPick={onAdd}
+          runtimeReadiness={runtimeReadiness}
+        />
       </div>
     </OnboardingShell>
+  );
+}
+
+/**
+ * The glyph inside a showcase chip.
+ *
+ * Only the managed built-in runtimes the background prefetch warms get the
+ * readiness treatment, and they light up from monochrome to full brand colour
+ * as each one lands. The rest keep the wall's resting monochrome look, because
+ * nothing is being prepared for them and a dimmed mark would imply otherwise.
+ */
+function ShowcaseChipMark({
+  agent,
+  runtimeReadiness,
+}: {
+  agent: ShowcaseAgent;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
+}) {
+  const warmed =
+    agent.pick.kind === 'builtin' && isManagedBuiltinAgentType(agent.pick.agentType)
+      ? runtimeReadiness[agent.pick.agentType]
+      : undefined;
+
+  if (warmed) {
+    return (
+      <AgentReadinessMark
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        readiness={warmed.readiness}
+        percent={warmed.percent}
+        size="sm"
+        className="rounded-full bg-muted/50"
+      />
+    );
+  }
+
+  return (
+    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
+      <AgentIcon
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        className="h-3.5 w-3.5"
+      />
+    </span>
   );
 }
 
@@ -491,9 +602,11 @@ export function ProvidersScreenView({
 function AgentShowcase({
   disabled,
   onPick,
+  runtimeReadiness,
 }: {
   disabled: boolean;
   onPick: (pick: ShowcasePick) => void;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -527,14 +640,7 @@ function AgentShowcase({
               'disabled:pointer-events-none disabled:opacity-50'
             )}
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
-              <AgentIcon
-                cliType={agent.icon.cliType}
-                agentType={agent.icon.agentType}
-                brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
-                className="h-3.5 w-3.5"
-              />
-            </span>
+            <ShowcaseChipMark agent={agent} runtimeReadiness={runtimeReadiness} />
             {agent.label}
           </button>
         ))}
@@ -623,6 +729,7 @@ export function ProvidersScreen({
     [allSetups, localMachineId]
   );
   useProviderSetupRuntimeProgress(runtime, workspaceId, localSetups);
+  const runtimeReadiness = useBuiltinRuntimeReadiness(localMachineId);
 
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   const dialogOpen = dialogMode !== null;
@@ -671,9 +778,13 @@ export function ProvidersScreen({
     [clearTestActivity]
   );
 
+  // Detach, never abort: leaving this step stops the screen from committing a
+  // result it can no longer show, but the machine keeps working. The refresh
+  // writes durable capabilities, so a recovery that outlives the step still
+  // finishes the job the user asked for.
   useEffect(
     () => () => {
-      testRunsRef.current.invalidateAll();
+      testRunsRef.current.detachAll();
     },
     []
   );
@@ -832,7 +943,11 @@ export function ProvidersScreen({
       }
       // The machine flock doc only syncs once per session; force a re-sync so
       // the freshly probed capabilities surface without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId);
+      await resyncMachineFlockRows(runtime, args.machineId, {
+        refreshedCapability: response.capability
+          ? { configId: response.configId, value: response.capability }
+          : undefined,
+      });
       return response;
     },
     [localMachineId, runtime, t, workspaceId]
@@ -852,7 +967,7 @@ export function ProvidersScreen({
       });
       setTestActivities((prev) => ({
         ...prev,
-        [config.id]: { phase: 'checking-runtime' },
+        [config.id]: { phase: 'checking-runtime', startedAtMs: Date.now() },
       }));
       void (async () => {
         try {
@@ -864,7 +979,14 @@ export function ProvidersScreen({
               if (!testRunsRef.current.isCurrent(config.id, run)) return;
               setTestActivities((prev) => ({
                 ...prev,
-                [config.id]: providerTestActivityFromProgress(progress),
+                [config.id]: {
+                  ...providerTestActivityFromProgress(progress),
+                  // Elapsed time belongs to the request, not to the stage it
+                  // happens to be in, so it survives every phase change.
+                  ...(prev[config.id]?.startedAtMs !== undefined
+                    ? { startedAtMs: prev[config.id]?.startedAtMs }
+                    : {}),
+                },
               }));
             },
           });
@@ -1107,6 +1229,7 @@ export function ProvidersScreen({
         testStatuses={testStatuses}
         testActivities={testActivities}
         failureReasons={failureReasons}
+        runtimeReadiness={runtimeReadiness}
         selectedProviderId={selectedProviderId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
@@ -1215,11 +1338,144 @@ export function ProvidersScreen({
   );
 }
 
+/** Seconds since `startedAtMs`, ticking only while one is supplied. */
+function useElapsedSeconds(startedAtMs: number | null): number {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (startedAtMs === null) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const tick = (): void =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [startedAtMs]);
+  return elapsedSeconds;
+}
+
+/**
+ * The escalation tier a row's wait has reached, and the seconds behind it.
+ *
+ * The badge and the action both read this, so the tone the row takes and the
+ * number it shows can never disagree about which tier the wait is in. Only a
+ * denominator-free stage escalates: a download already answers "how much
+ * longer" with a percentage, and a runtime that has failed is not waiting.
+ */
+function useProviderWaitEscalation(activity: ProviderTestActivity | undefined): {
+  escalation: ProviderWaitEscalation;
+  elapsedSeconds: number;
+} {
+  const percent = getProviderTestActivityPercent(activity);
+  const measurable =
+    activity !== undefined && percent === null && activity.phase !== 'runtime-failed';
+  const elapsedSeconds = useElapsedSeconds(measurable ? (activity.startedAtMs ?? null) : null);
+  return { escalation: providerWaitEscalation(elapsedSeconds), elapsedSeconds };
+}
+
+/**
+ * The in-flight action for a row.
+ *
+ * A download has a denominator, so the button fills and reads as a percentage.
+ * Every other stage — the ACP handshake above all — has none, and inventing one
+ * would be a lie. Once the wait is `measured` it reports elapsed time instead,
+ * which is what turns an open-ended wait into a wait the user can measure. The
+ * badge beside it names the stage, so the two together read as "Starting · 14s"
+ * — and, once the wait is `exceptional`, as "Taking longer · 74s".
+ */
+function ProviderActivityAction({
+  activity,
+  config,
+}: {
+  activity: ProviderTestActivity;
+  config: AgentConfigMeta;
+}) {
+  const { t } = useTranslation();
+  const percent = getProviderTestActivityPercent(activity);
+  const runtimeFailed = activity.phase === 'runtime-failed';
+  const { escalation, elapsedSeconds } = useProviderWaitEscalation(activity);
+  const label = (() => {
+    if (percent !== null) return `${percent}%`;
+    // Never label an already-failed runtime as ongoing work while the durable
+    // reason is still in flight.
+    if (runtimeFailed) return t('onboarding.providers.failedAction', 'Failed');
+    if (escalation !== 'normal') {
+      return t('onboarding.providers.workingSeconds', '{{seconds}}s', {
+        seconds: elapsedSeconds,
+      });
+    }
+    return t('onboarding.providers.workingAction', 'Working');
+  })();
+
+  const handleCopyReport = useCallback(() => {
+    const report = buildProviderWaitReport({
+      agentName: config.name,
+      cliType: config.cliType,
+      agentType: config.agentType,
+      phase: activity.phase,
+      elapsedSeconds,
+      percent,
+      environment: collectErrorBoundaryEnvironment(),
+    });
+    void writeTextToClipboard(report).then((ok) => {
+      if (ok) {
+        toast.success(t('onboarding.providers.slowWaitCopied', 'Setup details copied'));
+        return;
+      }
+      // Copying can be blocked (insecure context, no gesture). Say so rather
+      // than leaving the user believing they have something to paste.
+      console.error('[onboarding] Could not copy provider setup details to the clipboard');
+      toast.error(t('onboarding.providers.slowWaitCopyFailed', 'Could not copy setup details'), {
+        description: report,
+      });
+    });
+  }, [activity.phase, config, elapsedSeconds, percent, t]);
+
+  // The escalation's real ask is "tell someone". A wait this long ends in the
+  // chat, and the three things we would have to ask for there — which stage,
+  // how long, which build — are the three things the user cannot see. So the
+  // exceptional tier hands them one block to paste. It is also the tier's only
+  // pointer-independent affordance: the tooltip beside it is hover-only.
+  const copyable = !runtimeFailed && escalation === 'exceptional';
+  const copyLabel = t('onboarding.providers.slowWaitCopy', 'Copy setup details');
+
+  // The escalation turns the pill itself into the copy control rather than
+  // adding a button beside it. A second control here would widen this row's
+  // action cluster past every other row's, so the status column and the name
+  // column would slide sideways for exactly the row already asking for
+  // attention. It stays a real focusable button, so the affordance survives
+  // without a pointer.
+  return (
+    <ProviderProgressButton
+      percent={percent}
+      label={label}
+      className="w-full"
+      {...(copyable
+        ? {
+            icon: <Copy className="h-3.5 w-3.5" />,
+            ariaLabel: copyLabel,
+            title: copyLabel,
+            onClick: handleCopyReport,
+          }
+        : {})}
+    />
+  );
+}
+
 function getProviderTestActivityPercent(activity?: ProviderTestActivity): number | null {
   return activity?.phase === 'downloading-runtime' && typeof activity.percent === 'number'
     ? Math.min(100, Math.max(0, Math.round(activity.percent)))
     : null;
 }
+
+/**
+ * One chip geometry for every provider status. The words differ in length and
+ * only some carry a glyph, so without a fixed height and a single padding the
+ * column read as five different controls stacked on top of each other.
+ */
+const PROVIDER_STATUS_CHIP =
+  'h-5 shrink-0 gap-1 whitespace-nowrap rounded-full border px-2 py-0 text-[10px] font-medium';
 
 function ProviderStatusBadge({
   status,
@@ -1231,8 +1487,9 @@ function ProviderStatusBadge({
   failureReason?: string;
 }) {
   const { t } = useTranslation();
+  const { escalation } = useProviderWaitEscalation(activity);
   if (activity) {
-    const label = (() => {
+    const stageLabel = (() => {
       switch (activity.phase) {
         case 'checking-runtime':
           return t('onboarding.providers.activityChecking', 'Checking');
@@ -1246,25 +1503,69 @@ function ProviderStatusBadge({
           return t('onboarding.providers.activityInstalling', 'Installing');
         case 'probing-provider':
           return t('onboarding.providers.activityStarting', 'Starting');
+        case 'runtime-failed':
+          return t('onboarding.providers.activityRuntimeFailed', 'Runtime failed');
       }
 
       const unreachablePhase: never = activity.phase;
       throw new Error(`Unknown provider test activity phase: ${String(unreachablePhase)}`);
     })();
-    return (
+    // A runtime that already reported a failure must not keep wearing the
+    // in-progress tone; the final response still owns the durable reason.
+    const runtimeFailed = activity.phase === 'runtime-failed';
+    // Second escalation. The row stops naming the stage as if this were a
+    // normal run and says what is actually true — the wait left the usual
+    // range — in the amber this screen already uses for "needs your
+    // attention, but nothing has failed". No new progress is invented, and
+    // the elapsed counter beside it keeps the wait measurable.
+    const exceptional = !runtimeFailed && escalation === 'exceptional';
+    // Request-scoped, exactly like the counter beside it. The badge no longer
+    // names a stage here on purpose: the timer measures the whole setup, so a
+    // sentence about the current stage would attach the elapsed number to work
+    // that may have started a second ago. The stage still travels — in the
+    // copyable report, where it is diagnostic data rather than a claim.
+    const slowDetail = t(
+      'onboarding.providers.slowWaitDetail',
+      'Agent setup is still running. A first run may have to download and unpack the agent. You can continue — Lody keeps working on this in the background.'
+    );
+    const badge = (
       <Badge
         variant="outline"
-        className="shrink-0 whitespace-nowrap border-primary/35 bg-primary/8 text-[10px] text-primary"
+        // The badge is not focusable, so the tooltip is a hover-only detail.
+        // The acknowledgement itself must reach assistive tech regardless.
+        aria-label={exceptional ? slowDetail : undefined}
+        className={cn(
+          PROVIDER_STATUS_CHIP,
+          runtimeFailed
+            ? 'border-destructive/40 bg-destructive/8 text-destructive'
+            : exceptional
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              : 'border-primary/35 bg-primary/8 text-primary'
+        )}
       >
-        {label}
+        {exceptional ? t('onboarding.providers.activitySlow', 'Taking longer') : stageLabel}
       </Badge>
+    );
+    if (!exceptional) return badge;
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>{badge}</TooltipTrigger>
+          <TooltipContent side="top" className="max-w-80 px-3 py-2">
+            <div className="font-medium">
+              {t('onboarding.providers.slowWaitTitle', 'This is taking longer than usual')}
+            </div>
+            <div className="mt-1 break-words text-xs text-muted-foreground">{slowDetail}</div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
   if (status === 'passed') {
     return (
       <Badge
         variant="outline"
-        className="shrink-0 gap-1 whitespace-nowrap border-primary/40 bg-primary/10 text-[10px] text-primary"
+        className={cn(PROVIDER_STATUS_CHIP, 'border-primary/40 bg-primary/10 text-primary')}
       >
         <CheckCircle2 className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusPassed', 'Verified')}
@@ -1282,7 +1583,10 @@ function ProviderStatusBadge({
               })
             : undefined
         }
-        className="shrink-0 gap-1 whitespace-nowrap border-destructive/40 text-[10px] text-destructive"
+        className={cn(
+          PROVIDER_STATUS_CHIP,
+          'border-destructive/40 bg-destructive/8 text-destructive'
+        )}
       >
         <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
@@ -1307,7 +1611,10 @@ function ProviderStatusBadge({
     return (
       <Badge
         variant="outline"
-        className="shrink-0 whitespace-nowrap text-[10px] text-amber-600 dark:text-amber-400"
+        className={cn(
+          PROVIDER_STATUS_CHIP,
+          'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+        )}
       >
         {t('onboarding.providers.statusNeedsAuth', 'Sign in')}
       </Badge>
@@ -1316,7 +1623,7 @@ function ProviderStatusBadge({
   return (
     <Badge
       variant="outline"
-      className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground"
+      className={cn(PROVIDER_STATUS_CHIP, 'border-border/70 bg-muted/40 text-muted-foreground')}
     >
       {t('onboarding.providers.statusUntested', 'Untested')}
     </Badge>

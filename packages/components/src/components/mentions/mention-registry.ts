@@ -5,7 +5,6 @@ import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
 import {
   buildPathSuggestions,
   getSuggestions,
-  type FuseInstance,
   type PathSuggestion,
 } from '@/components/mentions/file-at-mention';
 import {
@@ -25,6 +24,7 @@ import {
   selectAgentRoleMentionCandidates,
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
+import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import type { MentionKind } from '@/ui/mention/index';
@@ -94,6 +94,7 @@ export type MentionCandidate = {
   icon: MentionIcon;
   title: string;
   subtitle?: string;
+  disabled?: boolean;
   trailing?: string;
   /** Render the title in the monospace face (paths, tokens). */
   mono?: boolean;
@@ -331,7 +332,6 @@ export function buildMentionFileIndex(
       kind: 'dir',
       path: token.replace(/\/+$/u, ''),
       token,
-      searchable: token.toLowerCase(),
     });
   }
   if (lazyDirs.length === 0) return base;
@@ -361,11 +361,10 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
 export function buildFileCandidates(
   index: FileSuggestionIndex | null,
   term: string,
-  fuse: FuseInstance<PathSuggestion> | null,
   limit?: number
 ): MentionCandidate[] {
   if (!index) return [];
-  return applyLimit(getSuggestions(index, term, fuse), limit).map(toFileCandidate);
+  return applyLimit(getSuggestions(index, term), limit).map(toFileCandidate);
 }
 
 export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
@@ -390,10 +389,9 @@ export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
 export function buildIssuePrCandidates(
   scoped: IssuePrSuggestion[],
   term: string,
-  fuse: FuseInstance<IssuePrSuggestion> | null,
   limit?: number
 ): MentionCandidate[] {
-  return applyLimit(getIssuePrSuggestions(scoped, term, fuse), limit).map(toIssuePrCandidate);
+  return applyLimit(getIssuePrSuggestions(scoped, term), limit).map(toIssuePrCandidate);
 }
 
 /** i18n'd labels for the skill detail panel, supplied by `useMentionCategories`. */
@@ -493,7 +491,10 @@ export function buildSessionCandidates(
  * generic rows had already drifted — they printed the stored ids raw and
  * labelled the permission mode "Reasoning".
  */
-export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandidate {
+export function toAgentRoleCandidate(
+  item: AgentRoleMentionItem,
+  availabilityText?: string
+): MentionCandidate {
   const { role } = item;
   // The emoji REPLACES the category glyph on the row: the category header above
   // already says these are Agent Roles, so a second generic glyph only crowds
@@ -509,10 +510,12 @@ export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandida
     icon: 'agent_role',
     iconEmoji: emoji,
     title: role.name,
+    disabled: item.availability.kind !== 'available',
+    subtitle: availabilityText,
     detail: {
       // No `title` and no badges: the pane heads itself with the Role's own
       // mark and name, and visibility is deliberately absent — every Role the menu
-      // offers is one this user may run, so private-vs-workspace changes
+      // lists is one this user may read, so private-vs-workspace changes
       // nothing about accepting it. It is a Settings concern.
       agentRole: {
         role,
@@ -530,9 +533,12 @@ export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandida
 export function buildAgentRoleCandidates(
   items: readonly AgentRoleMentionItem[],
   term: string,
-  limit?: number
+  limit?: number,
+  availabilityText?: (item: AgentRoleMentionItem) => string | undefined
 ): MentionCandidate[] {
-  return selectAgentRoleMentionCandidates(items, term, limit).map(toAgentRoleCandidate);
+  return selectAgentRoleMentionCandidates(items, term, limit).map((item) =>
+    toAgentRoleCandidate(item, availabilityText?.(item))
+  );
 }
 
 export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
@@ -585,17 +591,10 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
 export type MentionCategorySources = {
   file?: SourceState & {
     index: FileSuggestionIndex | null;
-    fuse: FuseInstance<PathSuggestion> | null;
     notice?: string;
   };
   issuePr?: SourceState & {
     suggestions: readonly IssuePrSuggestion[];
-    /**
-     * Builds a matcher over one category's slice. The caller owns loading the
-     * Fuse constructor so the menu keeps its module-cached, activation-keyed
-     * loading; returning null falls back to substring matching.
-     */
-    createFuse: (list: IssuePrSuggestion[]) => FuseInstance<IssuePrSuggestion> | null;
   };
   skill?: SourceState & {
     items: readonly SkillMentionItem[];
@@ -624,9 +623,8 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
   const { t } = useTranslation();
   const { file, issuePr, skill, command, session, agentRole } = sources;
 
-  // Partitioned once and shared with the Fuse indexes: the cache holds both
-  // types, and re-splitting it inside `getCandidates` walked the whole list
-  // twice on every keystroke.
+  // Partitioned once: the cache holds both types, and re-splitting it inside
+  // `getCandidates` would walk the whole list twice on every keystroke.
   const issueSuggestions = React.useMemo(
     () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'issue') : []),
     [issuePr]
@@ -635,16 +633,6 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'pr') : []),
     [issuePr]
   );
-  const createIssuePrFuse = issuePr?.createFuse;
-  const issueFuse = React.useMemo(
-    () => createIssuePrFuse?.(issueSuggestions) ?? null,
-    [createIssuePrFuse, issueSuggestions]
-  );
-  const prFuse = React.useMemo(
-    () => createIssuePrFuse?.(prSuggestions) ?? null,
-    [createIssuePrFuse, prSuggestions]
-  );
-
   return React.useMemo(() => {
     const categories: MentionCategory[] = [];
 
@@ -656,7 +644,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'file',
         ...sourceCategoryFields('file', file),
         notice: file.notice,
-        getCandidates: (term, limit) => buildFileCandidates(file.index, term, file.fuse, limit),
+        getCandidates: (term, limit) => buildFileCandidates(file.index, term, limit),
       });
     }
 
@@ -667,8 +655,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.issue.label', 'Issues'),
         icon: 'issue',
         ...sourceCategoryFields('issuePr', issuePr),
-        getCandidates: (term, limit) =>
-          buildIssuePrCandidates(issueSuggestions, term, issueFuse, limit),
+        getCandidates: (term, limit) => buildIssuePrCandidates(issueSuggestions, term, limit),
       });
       categories.push({
         id: 'pr',
@@ -676,7 +663,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.pr.label', 'Pull Requests'),
         icon: 'pr',
         ...sourceCategoryFields('issuePr', issuePr),
-        getCandidates: (term, limit) => buildIssuePrCandidates(prSuggestions, term, prFuse, limit),
+        getCandidates: (term, limit) => buildIssuePrCandidates(prSuggestions, term, limit),
       });
     }
 
@@ -737,7 +724,17 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.agentRole.label', 'Agent Roles'),
         icon: 'agent_role',
         ...sourceCategoryFields('agentRole', agentRole),
-        getCandidates: (term, limit) => buildAgentRoleCandidates(agentRole.items, term, limit),
+        getCandidates: (term, limit) =>
+          buildAgentRoleCandidates(agentRole.items, term, limit, (item) => {
+            const { availability } = item;
+            if (availability.kind === 'available') return undefined;
+            if (availability.kind === 'unknown') return t('settings.agentRoles.status.checking');
+            const reason =
+              availability.reason === 'outside_work_context'
+                ? t('mention.agentRole.unavailable.workContext')
+                : t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
+            return t('settings.agentRoles.unavailable.label', { reason });
+          }),
       });
     }
 
@@ -754,17 +751,5 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     }
 
     return categories;
-  }, [
-    agentRole,
-    command,
-    file,
-    issueFuse,
-    issuePr,
-    issueSuggestions,
-    prFuse,
-    prSuggestions,
-    session,
-    skill,
-    t,
-  ]);
+  }, [agentRole, command, file, issuePr, issueSuggestions, prSuggestions, session, skill, t]);
 }

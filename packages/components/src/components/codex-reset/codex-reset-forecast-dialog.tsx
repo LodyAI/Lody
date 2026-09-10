@@ -1,7 +1,8 @@
 import { useCallback, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
 
 import { Badge } from '@/ui/badge';

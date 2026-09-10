@@ -1,3 +1,4 @@
+import { isAuxiliaryWindow } from '@/lib/desktop-window';
 import {
   Archive,
   ArchiveRestore,
@@ -25,6 +26,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
+import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
   buildPendingUserHistoryEntry,
@@ -45,6 +47,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  type ConversationMessage,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
 } from '@lody/shared';
@@ -66,6 +69,7 @@ import {
   RenameSessionDialog,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import {
   DraftSessionChatInterface,
   type DraftSessionChatInterfaceHandle,
@@ -88,8 +92,22 @@ import {
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
-import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  getZenAwarePanelToggleState,
+  navigationSidebarHiddenAtom,
+  showNavigationSidebarAtom,
+  zenLayoutModeAtom,
+} from '@/atoms/layout-state';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
 import {
@@ -146,6 +164,8 @@ import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
 import { FileTreeView } from './components/file-tree-view';
+import { useSessionFileActions } from '@/hooks/use-session-file-actions';
+import { SessionFileActionsMenu } from './session-file-actions-menu';
 import {
   MobileProjectFileBrowser,
   type MobileProjectFileBrowserHandle,
@@ -186,6 +206,7 @@ import {
 import { useSessionDiffSummary } from './use-session-diff-summary';
 import { userAtom } from '@/atoms';
 import {
+  appendTabOrderId,
   createDraftSessionTab,
   filterPendingPromotedChildSessions,
   getDraftTabLabel,
@@ -688,8 +709,11 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
+  const isZenLayoutMode = useAtomValue(zenLayoutModeAtom);
+  const setZenLayoutMode = useSetAtom(zenLayoutModeAtom);
   const hidesBillingUi = isMobile || isNativeAppShell();
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
@@ -712,6 +736,11 @@ const SessionDetail = ({
     oneActiveSurface: isMobile,
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => initialTabState.sidePanel.open);
+  const isSidebarVisible = isSidebarOpen && !isZenLayoutMode;
+  const revealRightSidebar = useCallback(() => {
+    setZenLayoutMode(false);
+    setIsSidebarOpen(true);
+  }, [setZenLayoutMode]);
   /* Bumped whenever `isSidebarOpen` changes because side-panel state was
      RESTORED (session switch, `?pr=` deep link) rather than toggled by the
      user, so the desktop layout snaps the panel to its target width instead of
@@ -799,8 +828,8 @@ const SessionDetail = ({
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
-  const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -855,7 +884,7 @@ const SessionDetail = ({
     [viewerTabs]
   );
   const isFileProviderSidebarActive =
-    isSidebarOpen && (activeSidebarTab === 'files' || activeSidebarTab === 'changes');
+    isSidebarVisible && (activeSidebarTab === 'files' || activeSidebarTab === 'changes');
   const isSessionStateCurrent = localStateSessionId === sessionId;
   const activeSessionFileProviderRequested = Boolean(
     activeSession &&
@@ -1270,9 +1299,7 @@ const SessionDetail = ({
         };
       });
       if (placement === 'tab') {
-        setTabOrderState((current) =>
-          current.includes(targetSessionId) ? current : [...current, targetSessionId]
-        );
+        setTabOrderState((current) => appendTabOrderId(current, sessionGroupIds, targetSessionId));
       }
       if (response.partial && response.warnings.length > 0) {
         toast.warning(
@@ -1280,7 +1307,16 @@ const SessionDetail = ({
         );
       }
     },
-    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, t, user?.id]
+    [
+      canForkSession,
+      currentWorkspaceId,
+      pendingForks,
+      postHog,
+      runtime,
+      sessionGroupIds,
+      t,
+      user?.id,
+    ]
   );
   const pendingForkSourceByTargetSessionId = useMemo(() => {
     const sourceByTarget = new Map<SessionId, string>();
@@ -1898,6 +1934,7 @@ const SessionDetail = ({
       modelId: null,
     });
     setDraftTabs((prev) => [...prev, draft]);
+    setTabOrderState((prev) => appendTabOrderId(prev, sessionGroupIds, draft.id));
     if (isMobile) {
       setActiveViewerTabId(null);
     }
@@ -1906,7 +1943,14 @@ const SessionDetail = ({
       draft_tab_id: draft.id,
       source_session_id: activeSession.id,
     });
-  }, [activeSession, captureSessionDetailEvent, isMobile, navigateToSessionTab, setDraftTabs]);
+  }, [
+    activeSession,
+    captureSessionDetailEvent,
+    isMobile,
+    navigateToSessionTab,
+    sessionGroupIds,
+    setDraftTabs,
+  ]);
 
   const handleDraftChange = useCallback(
     (draftId: DraftSessionTab['id'], patch: Partial<DraftSessionTab>) => {
@@ -2049,7 +2093,13 @@ const SessionDetail = ({
           setSessionChatInputTextDraft(childSessionId, payload.preservedInputText);
         }
         setDraftTabs((prev) => prev.filter((draft) => draft.id !== payload.draftId));
-        setTabOrderState((prev) => replaceTabOrderId(prev, payload.draftId, childSessionId));
+        setTabOrderState((prev) =>
+          replaceTabOrderId(
+            appendTabOrderId(prev, sessionGroupIds, payload.draftId),
+            payload.draftId,
+            childSessionId
+          )
+        );
         if (isMobile) {
           setActiveViewerTabId(null);
         }
@@ -2160,6 +2210,7 @@ const SessionDetail = ({
       navigateToSessionTab,
       openSettings,
       requestSessionDispatch,
+      sessionGroupIds,
       setDraftTabs,
       startSession,
       t,
@@ -2327,6 +2378,14 @@ const SessionDetail = ({
     null
   );
 
+  // Share-as-image preview target: the selected tab's session plus the plain-text
+  // conversation snapshot pulled from its chat surface when the menu item fires.
+  const [shareImageTarget, setShareImageTarget] = useState<{
+    session: SessionMeta;
+    messages: ConversationMessage[];
+    agentName?: string;
+  } | null>(null);
+
   const handleRequestDeleteCurrentSession = useCallback(() => {
     if (!activeSession) return;
     setDeleteConfirmOpen(true);
@@ -2480,6 +2539,34 @@ const SessionDetail = ({
     void activeChatRef.copyConversationHistory();
   }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
 
+  const handleShareAsImage = useCallback(async () => {
+    if (activeDraftTab) {
+      return;
+    }
+    const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
+    const shareData =
+      activeChatRef && 'getShareImageData' in activeChatRef
+        ? await activeChatRef.getShareImageData()
+        : null;
+    if (
+      !activeTabSession ||
+      !shareData ||
+      shareData.messages.length === 0 ||
+      !activeChatRef ||
+      !('startShareImageSelection' in activeChatRef)
+    ) {
+      toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+      return;
+    }
+    activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
+      setShareImageTarget({
+        session: activeTabSession,
+        messages,
+        agentName: shareData.agentName,
+      });
+    });
+  }, [activeDraftTab, activeTabSession, activeTabSessionId, t]);
+
   const handleOpenSearch = useCallback(() => {
     if (activeDraftTab) {
       return;
@@ -2592,6 +2679,12 @@ const SessionDetail = ({
   } else if (restoredPrSidebar !== null) {
     setRestoredPrSidebar(null);
   }
+
+  // The PR restore token is committed with the open panel and restore sequence.
+  // Clear the transient Zen override before paint without writing Jotai during render.
+  useLayoutEffect(() => {
+    if (restoredPrSidebar !== null) setZenLayoutMode(false);
+  }, [restoredPrSidebar, setZenLayoutMode]);
 
   // Once restored, a user switching away from the PR tab (or closing the
   // sidebar) clears `?pr` so the URL stays consistent. The URL write must be
@@ -2706,10 +2799,10 @@ const SessionDetail = ({
         setActiveViewerTabId((prevActiveId) => (prevActiveId === tab.id ? prevActiveId : tab.id));
       } else {
         selectSidePanelTab(tab.id);
-        setIsSidebarOpen(true);
+        revealRightSidebar();
       }
     },
-    [isMobile, selectSidePanelTab]
+    [isMobile, revealRightSidebar, selectSidePanelTab]
   );
 
   const nextFocusRequestSeq = useCallback(() => {
@@ -2962,7 +3055,7 @@ const SessionDetail = ({
         surface: 'mobile_sheet',
       });
     } else {
-      setIsSidebarOpen(true);
+      revealRightSidebar();
       activateSidebarTab('changes');
       captureSessionDetailEvent('session/sidebar_tab_selected', {
         source: 'info_bar_diff_stat',
@@ -2976,6 +3069,7 @@ const SessionDetail = ({
     changeFilePaths,
     isMobile,
     nextFocusRequestSeq,
+    revealRightSidebar,
   ]);
 
   const handleOpenPrTab = useCallback(
@@ -2995,7 +3089,7 @@ const SessionDetail = ({
             minWidthPx: PR_SIDEBAR_MIN_WIDTH_PX,
           }));
         }
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         activateSidebarTab('pr');
       }
       captureSessionDetailEvent('session/pr_tab_opened', {
@@ -3012,6 +3106,7 @@ const SessionDetail = ({
       isMobile,
       isSidebarOpen,
       replaceSessionUrlPr,
+      revealRightSidebar,
     ]
   );
 
@@ -3072,7 +3167,7 @@ const SessionDetail = ({
       if (isMobile) {
         replaceSessionUrlBrowser(true, { push: true });
       } else {
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         activateSidebarTab('browser');
       }
       captureSessionDetailEvent('session/browser_tab_opened', {
@@ -3086,6 +3181,7 @@ const SessionDetail = ({
       captureSessionDetailEvent,
       isMobile,
       navigateToSessionTab,
+      revealRightSidebar,
       replaceSessionUrlBrowser,
     ]
   );
@@ -3314,7 +3410,7 @@ const SessionDetail = ({
       if (!taken) return;
       if (taken.placement === 'side-panel') {
         selectSidePanelTab(getSideSessionPanelTabId(targetSessionId));
-        setIsSidebarOpen(true);
+        revealRightSidebar();
         return;
       }
       if (taken.placement === 'worktree') {
@@ -3328,7 +3424,14 @@ const SessionDetail = ({
       }
       handleSessionTabSelect(targetSessionId);
     },
-    [handleSessionTabSelect, router, selectSidePanelTab, takePendingFork, workspaceSlug]
+    [
+      handleSessionTabSelect,
+      revealRightSidebar,
+      router,
+      selectSidePanelTab,
+      takePendingFork,
+      workspaceSlug,
+    ]
   );
   const handleForkedConversationPrepareError = useCallback(
     (sourceSessionId: string, targetSessionId: SessionId) => {
@@ -3364,14 +3467,14 @@ const SessionDetail = ({
         setActiveViewerTabId(tabId);
       } else {
         selectSidePanelTab(tabId);
-        setIsSidebarOpen(true);
+        revealRightSidebar();
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
         viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
       });
     },
-    [captureSessionDetailEvent, isMobile, selectSidePanelTab]
+    [captureSessionDetailEvent, isMobile, revealRightSidebar, selectSidePanelTab]
   );
 
   const handleSidebarTabSelect = useCallback(
@@ -3595,13 +3698,27 @@ const SessionDetail = ({
   );
 
   const handleToggleSidebar = useCallback(() => {
-    const nextOpen = !isSidebarOpen;
-    captureSessionDetailEvent(nextOpen ? 'session/sidebar_opened' : 'session/sidebar_closed', {
-      default_tab: activeSidebarTab,
-      change_file_count: changeEntries.length,
+    const next = getZenAwarePanelToggleState({
+      zenMode: isZenLayoutMode,
+      panelOpen: isSidebarOpen,
     });
-    setIsSidebarOpen((prev) => !prev);
-  }, [activeSidebarTab, captureSessionDetailEvent, changeEntries.length, isSidebarOpen]);
+    captureSessionDetailEvent(
+      next.panelOpen ? 'session/sidebar_opened' : 'session/sidebar_closed',
+      {
+        default_tab: activeSidebarTab,
+        change_file_count: changeEntries.length,
+      }
+    );
+    setZenLayoutMode(next.zenMode);
+    setIsSidebarOpen(next.panelOpen);
+  }, [
+    activeSidebarTab,
+    captureSessionDetailEvent,
+    changeEntries.length,
+    isSidebarOpen,
+    isZenLayoutMode,
+    setZenLayoutMode,
+  ]);
 
   const handleCloseViewerTab = useCallback(
     (tabId: string) => {
@@ -3682,6 +3799,14 @@ const SessionDetail = ({
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
+  // One resolver for what this client can do with the session's files, shared
+  // by the Files tree's right-click menu and the side panel's ⋯ menu so the two
+  // can never offer different sets. It decides local-host vs remote itself.
+  const activeSessionFileActions = useSessionFileActions({
+    session: activeSession,
+    fileProvider: activeSessionFileProvider,
+  });
+  const activeViewerFilePath = activeViewerTab?.type === 'file' ? activeViewerTab.filePath : null;
   const handleSaveCurrentFile = useCallback(() => {
     if (!effectiveActiveViewerTabId || activeViewerTab?.type !== 'file') {
       return;
@@ -4070,7 +4195,7 @@ const SessionDetail = ({
     () =>
       getSessionTabCloseTarget({
         focusRegion: desktopTabFocusRegionRef.current,
-        sidePanelOpen: isSidebarOpen,
+        sidePanelOpen: isSidebarVisible,
         activeSidePanelTabId,
         activeConversationTabId: activeTabSessionId,
         parentConversationTabId: sessionId,
@@ -4079,7 +4204,7 @@ const SessionDetail = ({
     [
       activeSidePanelTabId,
       activeTabSessionId,
-      isSidebarOpen,
+      isSidebarVisible,
       orderedSessionTabIds.length,
       sessionId,
     ]
@@ -4090,6 +4215,7 @@ const SessionDetail = ({
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
       if (target.kind === 'landing') {
+        if (isAuxiliaryWindow()) return 'unhandled';
         handleBackToList();
         return 'handled';
       }
@@ -5025,6 +5151,9 @@ const SessionDetail = ({
               >
                 <SessionChatInterface
                   ref={(el) => setChatTabRef(tabSession.id, el)}
+                  claimNavigationFocus={
+                    isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+                  }
                   session={tabSession}
                   workspaceSession={activeSession}
                   className="h-full"
@@ -5291,10 +5420,9 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5343,10 +5471,9 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5441,6 +5568,7 @@ const SessionDetail = ({
         fileProviderPending={activeSessionFileProviderPending}
         fileProviderMessage={activeSessionFileProviderMessage}
         autoCodeCollab={false}
+        fileMenuItems={activeSessionFileActions.menuItems}
         changedFilePaths={changeFilePaths}
         // Opening a file selects its viewer tab, which unmounts this tree. Key
         // its expanded folders per session so returning to Files restores them.
@@ -5455,7 +5583,7 @@ const SessionDetail = ({
         className="bg-background"
         // The side panel stays mounted while collapsed, so GitHub polling has
         // to be paused explicitly — same signal SessionBrowserPanel takes.
-        visible={isSidebarOpen}
+        visible={isSidebarVisible}
       />
     ) : activeSidebarTab === 'changes' ? (
       <SessionChangesSidebar
@@ -5483,7 +5611,7 @@ const SessionDetail = ({
         >
           <SessionBrowserPanel
             session={activeBrowserSession}
-            active={activeSidebarTab === 'browser' && isSidebarOpen}
+            active={activeSidebarTab === 'browser' && isSidebarVisible}
             candidateNavigationRequestId={
               browserCandidateNavigationRequest?.sessionId === activeBrowserSession.id
                 ? browserCandidateNavigationRequest.id
@@ -5524,22 +5652,22 @@ const SessionDetail = ({
       size="icon"
       onClick={handleToggleSidebar}
       aria-label={
-        isSidebarOpen
+        isSidebarVisible
           ? t('sessions.sidebar.hide', 'Hide sidebar')
           : t('sessions.sidebar.show', 'Show sidebar')
       }
-      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !isSidebarOpen && 'mr-[9px]')}
+      className={cn('h-7 w-7 shrink-0 text-muted-foreground', !isSidebarVisible && 'mr-[9px]')}
     >
       <PanelRight className="h-4 w-4" />
     </Button>
   );
 
-  const leftSidebarExpandButton = isLeftSidebarCollapsed ? (
+  const leftSidebarExpandButton = isLeftSidebarHidden ? (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      onClick={() => setLeftSidebarCollapsed(false)}
+      onClick={() => showNavigationSidebar()}
       aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
       className="h-7 w-7 shrink-0 text-muted-foreground"
     >
@@ -5560,7 +5688,7 @@ const SessionDetail = ({
       headerEndSlot={
         <>
           <TerminalDockToggleButton />
-          {!isSidebarOpen ? sidebarToggleButton : null}
+          {!isSidebarVisible ? sidebarToggleButton : null}
         </>
       }
       titleSyncing={activeSessionDocIsSyncing}
@@ -5592,6 +5720,16 @@ const SessionDetail = ({
       sharing={activeSessionSharing ?? undefined}
       onShareWithTeam={
         showSessionSharing ? () => handleRequestShareSession(activeSession) : undefined
+      }
+      onShareAsImage={
+        activeDraftTab
+          ? undefined
+          : () => {
+              void handleShareAsImage().catch((error: unknown) => {
+                console.error('Failed to load conversation for image sharing', error);
+                toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+              });
+            }
       }
       onOpenPrTab={handleOpenPrTab}
       onNavigateSession={handleNavigateSession}
@@ -5636,8 +5774,8 @@ const SessionDetail = ({
         // 6px higher for them to land on that same line: 2 + (44 - 32) / 2 = 8.
         // Re-derive this if the row or the pill height changes.
         'mt-0.5 h-11',
-        isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]',
-        !isSidebarOpen && windowsCaptionPadClass
+        isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
+        !isSidebarVisible && windowsCaptionPadClass
       )}
     />
   );
@@ -5654,6 +5792,8 @@ const SessionDetail = ({
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
       ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
+      claimNavigationFocus:
+        isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
       className: 'h-full',
@@ -5755,9 +5895,9 @@ const SessionDetail = ({
       <div
         key={tab.id}
         className={isActive ? 'h-full' : 'hidden h-full'}
-        aria-hidden={!isActive || !isSidebarOpen}
+        aria-hidden={!isActive || !isSidebarVisible}
       >
-        {renderViewerTabContent(tab, 'h-full', isActive && isSidebarOpen)}
+        {renderViewerTabContent(tab, 'h-full', isActive && isSidebarVisible)}
       </div>
     );
   });
@@ -5779,7 +5919,7 @@ const SessionDetail = ({
           aria-hidden={!isActive}
         >
           <SessionChatInterface
-            {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarOpen)}
+            {...getSharedChatSurfaceProps(sideSession, isActive, isActive && isSidebarVisible)}
             isChildTab
           />
         </div>
@@ -5804,6 +5944,12 @@ const SessionDetail = ({
         addPanelLabel={t('sessions.sidebar.addPanel', 'Add panel')}
         closeTabLabel={(tabLabel) =>
           t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
+        }
+        moreSlot={
+          <SessionFileActionsMenu
+            filePath={activeViewerFilePath}
+            items={activeSessionFileActions.menuItems}
+          />
         }
         endSlot={sidebarToggleButton}
         className={cn(
@@ -5858,7 +6004,7 @@ const SessionDetail = ({
         chatSurfaces={desktopChatSurfaces}
         terminalDock={<TerminalDockHost />}
         secondaryPanel={desktopSecondaryPanel}
-        sidebarOpen={isSidebarOpen}
+        sidebarOpen={isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
         sidebarMinWidthRequest={prSidebarWidthRequest}
@@ -5888,6 +6034,15 @@ const SessionDetail = ({
       <RenameSessionDialog
         target={renameDialogTarget}
         onClose={() => setRenameDialogTarget(null)}
+      />
+      <ChatShareImageDialog
+        open={shareImageTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setShareImageTarget(null);
+        }}
+        session={shareImageTarget?.session ?? null}
+        messages={shareImageTarget?.messages ?? []}
+        agentName={shareImageTarget?.agentName}
       />
     </div>
   );

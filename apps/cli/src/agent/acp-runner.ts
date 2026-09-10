@@ -66,10 +66,12 @@ import {
   resolveAcpLauncher,
 } from './acp-analytics';
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
+import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 
 export type CreateAcpClientOptions = {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   stream: Stream;
   workdir: string;
   logger: Logger;
@@ -127,6 +129,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     terminalManager: options.terminalManager,
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
+    resolveWorktreeProject: options.resolveWorktreeProject,
     taskToolsEnabled: options.taskToolsEnabled,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
@@ -354,6 +357,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     agentType: options.agentType,
     customAcp: options.customAcp,
     runtimeOverrides: options.runtimeOverrides,
+    env: options.env,
     extraArgs: options.extraArgs,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress
       ? (event) => {
@@ -594,6 +598,12 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
       label: `acp-startup:${options.agentType}`,
       logger: options.logger,
       abortSignal: options.signal,
+      // This path is a capability refresh or a title run: both sit inside a
+      // client-visible budget, and the queue ahead of them emits no progress
+      // frame. Without a deadline here that wait is silence the client counts
+      // against a machine that has not started working yet. Session restore
+      // deliberately has no such bound — see the gate's options.
+      waitTimeoutMs: ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS,
     },
     async () =>
       await runNpxStartupWithRecovery({

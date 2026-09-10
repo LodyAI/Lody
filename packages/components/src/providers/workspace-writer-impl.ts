@@ -3,9 +3,7 @@ import {
   getServerNow,
   getSessionRoomId,
   type MessageQueueItem,
-  type PermissionOutcome,
   type PreviewVisualCommentDocInput,
-  type SessionHistory,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
@@ -82,7 +80,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
         withSessionStore(sessionId, (store) => {
-          store.historyWriter.append(entry as unknown as SessionHistory);
+          store.historyWriter.append(entry);
         }),
       ]);
       void dispatch;
@@ -123,7 +121,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionTurn(sessionId, entry, dispatch) {
       await withSessionStore(sessionId, (store) => {
-        store.historyWriter.append(entry as unknown as SessionHistory);
+        store.historyWriter.append(entry);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -132,22 +130,38 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionHistory(sessionId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.historyWriter.append(entry as unknown as SessionHistory);
+        store.historyWriter.append(entry);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
       await withSessionStore(sessionId, (store) => {
-        // Unknown id is a no-op, as the Mirror findIndex short-circuit was.
-        store.historyWriter.replace(entryId, entry as unknown as SessionHistory);
+        store.historyWriter.replace(entryId, entry);
+      });
+    },
+
+    async resolveSessionTaskProposal(sessionId, entryId, proposalId, resolution) {
+      await withSessionStore(sessionId, (store) => {
+        store.historyWriter.update((history) => {
+          const entry = history.find((item) => item.id === entryId);
+          const target = entry?.items?.find(
+            (item) =>
+              item?.type === 'system_notice' &&
+              item.name === 'task_proposal' &&
+              item.meta?.proposalId === proposalId
+          );
+          if (target?.type === 'system_notice' && target.name === 'task_proposal' && target.meta) {
+            target.meta.outcome = resolution.outcome;
+            if (resolution.taskId !== undefined) target.meta.taskId = resolution.taskId;
+          }
+          return history;
+        });
       });
     },
 
     async respondSessionPermission(sessionId, requestId, outcome, options) {
       await withSessionStore(sessionId, (store) => {
-        store.historyWriter.respondPermission(requestId, outcome as unknown as PermissionOutcome, {
-          turnId: options?.turnId,
-        });
+        store.historyWriter.respondPermission(requestId, outcome, options);
       });
     },
 

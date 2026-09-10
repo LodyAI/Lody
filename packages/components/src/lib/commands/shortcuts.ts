@@ -6,6 +6,7 @@ export type ShortcutCommandId =
   | 'nav.back'
   | 'nav.forward'
   | 'app.cycleTheme'
+  | 'layout.toggleZenMode'
   | 'workspace.openSettings'
   | 'session.new'
   | 'session.archiveCurrent'
@@ -51,6 +52,7 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'nav.back': [electron('$mod+[')],
   'nav.forward': [electron('$mod+]')],
   'app.cycleTheme': [],
+  'layout.toggleZenMode': ['$mod+.'],
   // Settings: ⌘, follows OS convention, on web + desktop. On desktop the native app menu
   // still SHOWS ⌘, next to "Settings" but does NOT register the accelerator
   // (`registerAccelerator: false` in apps/electron menu.ts), so the key reaches this

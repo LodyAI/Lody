@@ -1,3 +1,6 @@
+import { BrowserWindow } from 'electron'
+import { assertProductWindowSender } from '../assert-sender'
+import { PublicBrowserService } from '../../services/public-browser-service'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   ElectronPublicBrowserBoundsInputSchema,
@@ -13,17 +16,20 @@ import {
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-function assertTrustedSender(): void {
+const services = new WeakMap<BrowserWindow, PublicBrowserService>()
+function getWindowBrowser(): PublicBrowserService {
   const { event } = getIpcContext()
-  const window = getIpcServiceDeps().getMainWindow()
-  if (
-    !window ||
-    window.isDestroyed() ||
-    event.sender !== window.webContents ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
-    throw new Error('Rejected public browser IPC from an untrusted renderer.')
+  assertProductWindowSender(event)
+  const window = BrowserWindow.fromWebContents(event.sender)!
+  let service = services.get(window)
+  if (!service) {
+    service =
+      window === getIpcServiceDeps().getMainWindow()
+        ? getIpcServiceDeps().publicBrowserService
+        : new PublicBrowserService(() => window)
+    services.set(window, service)
   }
+  return service
 }
 
 export class PublicBrowserIpc extends IpcService {
@@ -31,64 +37,55 @@ export class PublicBrowserIpc extends IpcService {
 
   @IpcMethod()
   async create(raw: ElectronPublicBrowserCreateInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserCreateInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.create(input.browserId, input.bounds)
+    return getWindowBrowser().create(input.browserId, input.bounds)
   }
 
   @IpcMethod()
   async navigate(raw: ElectronPublicBrowserNavigateInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserNavigateInputSchema.parse(raw)
-    return await getIpcServiceDeps().publicBrowserService.navigate(input.browserId, input.url)
+    return await getWindowBrowser().navigate(input.browserId, input.url)
   }
 
   @IpcMethod()
   async back(raw: ElectronPublicBrowserIdInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserIdInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.goBack(input.browserId)
+    return getWindowBrowser().goBack(input.browserId)
   }
 
   @IpcMethod()
   async forward(raw: ElectronPublicBrowserIdInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserIdInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.goForward(input.browserId)
+    return getWindowBrowser().goForward(input.browserId)
   }
 
   @IpcMethod()
   async reload(raw: ElectronPublicBrowserIdInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserIdInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.reload(input.browserId)
+    return getWindowBrowser().reload(input.browserId)
   }
 
   @IpcMethod()
   async stop(raw: ElectronPublicBrowserIdInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserIdInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.stop(input.browserId)
+    return getWindowBrowser().stop(input.browserId)
   }
 
   @IpcMethod()
   async setBounds(raw: ElectronPublicBrowserBoundsInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserBoundsInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.setBounds(input.browserId, input.bounds)
+    return getWindowBrowser().setBounds(input.browserId, input.bounds)
   }
 
   @IpcMethod()
   async setVisible(raw: ElectronPublicBrowserVisibilityInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserVisibilityInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.setVisible(input.browserId, input.visible)
+    return getWindowBrowser().setVisible(input.browserId, input.visible)
   }
 
   @IpcMethod()
   async destroy(raw: ElectronPublicBrowserIdInput) {
-    assertTrustedSender()
     const input = ElectronPublicBrowserIdInputSchema.parse(raw)
-    return getIpcServiceDeps().publicBrowserService.destroy(input.browserId)
+    return getWindowBrowser().destroy(input.browserId)
   }
 }

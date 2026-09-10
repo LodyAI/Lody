@@ -19,7 +19,7 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
@@ -184,6 +184,50 @@ const createSessionInner = async (
       ): Promise<ISession>;
     }
   ).createSessionInner(config, undefined, preparedWorktree);
+
+describe('SessionManager ACP project identity', () => {
+  it.each([undefined, 'parent-session' as SessionId])(
+    'resolves the registered root for local worktree sessions, including child %s',
+    async (parentSessionId) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const localProjectId = 'local-project' as LocalProjectId;
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) => {
+        if (id !== localProjectId) throw new Error('wrong project');
+        return '/registered-project';
+      });
+      const config = createSessionConfig({
+        sessionId: 'session-project' as SessionId,
+        parentSessionId,
+        project: { kind: 'local', localProjectId, useWorktree: true },
+        workdir: '/execution-worktree',
+      });
+      const session = new Session(config, createLogger(), '/execution-worktree');
+      const callbacks = (
+        manager as unknown as {
+          buildCreateAgentConfig(
+            session: Session,
+            config: SessionConfig,
+            launch: { command: string; args: string[] }
+          ): import('./session-manager').CreateAgentConfig;
+        }
+      ).buildCreateAgentConfig(session, config, { command: 'agent', args: [] });
+      expect(await callbacks.resolveWorktreeProject?.()).toEqual({
+        version: 1,
+        originProjectPath: '/registered-project',
+      });
+    }
+  );
+});
 
 describe('SessionManager cleanup phases', () => {
   it('stops session producers before closing the workspace document', async () => {
@@ -872,6 +916,65 @@ describe('SessionManager durable create ownership', () => {
 });
 
 describe('SessionManager preparation compatibility', () => {
+  it('keeps an adopted preparation when its Git identity changes', async () => {
+    const logger = createLogger();
+    const workspaceDocument = createWorkspaceDocument(new Map());
+    const manager = new SessionManager(
+      logger,
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const sessionId = 'stale-prepared-git-identity' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const preparedSession = new Session(config, logger, process.cwd(), createNoopSessionSandbox());
+    const updateIdentity = vi.spyOn(preparedSession, 'updateGitIdentity');
+    const dispose = vi.fn(async () => await preparedSession.terminate(true));
+    const prepared = {
+      session: preparedSession,
+      config,
+      compatibility: createPreparedTestCompatibility({}),
+      initialized: Promise.resolve(),
+      sessionReady: Promise.resolve(),
+      workspaceReady: Promise.resolve(null),
+      agentResult: Promise.resolve('prepared-acp-session'),
+      adopt: vi.fn(async () => undefined),
+      dispose,
+    };
+    const sessionDoc = await workspaceDocument.getOrCreateSessionDoc(sessionId);
+    sessionDoc.setACPSessionId = vi.fn(async () => undefined);
+    const internals = manager as unknown as {
+      finishPreparedSession(config: SessionConfig, prepared: typeof prepared): Promise<ISession>;
+      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
+    };
+    const coldCreate = vi
+      .spyOn(internals, 'createSessionInnerWithAgent')
+      .mockRejectedValue(new Error('unexpected cold restart'));
+    const terminated = vi.fn();
+    manager.on('terminated', terminated);
+
+    const incomingConfig = { ...config, userEmail: 'changed@example.com' };
+    await expect(internals.finishPreparedSession(incomingConfig, prepared)).resolves.toBe(
+      preparedSession
+    );
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(manager.getSession(sessionId)).toBe(preparedSession);
+    expect(coldCreate).not.toHaveBeenCalled();
+    expect(updateIdentity).toHaveBeenCalledWith(
+      config.userName,
+      'changed@example.com',
+      config.requesterUserId,
+      { preferMachineIdentity: true }
+    );
+  });
+
   it('rejects a prepared session with different initial config option values', async () => {
     const manager = new SessionManager(
       createLogger(),

@@ -152,6 +152,9 @@ Lody is still moving toward full local-first support.
 - `packages/components` — Shared workspace UI
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
+- `packages/cloud-api` — Optional-cloud protocol names and DTOs
+- `packages/loro-streams-rpc` — RPC over Loro Streams
+- `packages/acp-extension-{core,kimi}` — ACP extension submodule workspaces
 - `site-docs` — Website, documentation, and blog
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started with development.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.

@@ -3,6 +3,7 @@ import { atomWithStorage } from 'jotai/utils';
 import { CONVERSATION_VIEW_STORAGE_KEY } from '@/lib/conversation-view/feature-flag';
 import type { MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
+import { isSymbolFontFamily } from '@/lib/local-fonts';
 import {
   SETTINGS_DEFAULT_TAB,
   type SettingsTabId,
@@ -47,7 +48,9 @@ export const conversationFontSizeAtom = atom(
 export const INTERFACE_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeInterfaceFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 const interfaceFontFamilyStorageAtom = atomWithStorage<unknown>('lody-interface-font-family', '');
@@ -65,7 +68,9 @@ export const TERMINAL_FONT_SIZE_MAX = 24;
 export const TERMINAL_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeTerminalFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 export function normalizeTerminalFontSize(value: unknown): number {

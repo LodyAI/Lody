@@ -1,10 +1,12 @@
+import type { PagedFileSource } from './paged-file-source';
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import type { SessionFileOpenResult } from './session-file-provider';
 import { getSessionFileUnavailableReasonLabel } from './session-file-provider-view-model';
 
 export type SessionFileContentSnapshot =
   | { readonly kind: 'text'; readonly text: string; readonly truncated?: boolean }
-  | { readonly kind: 'binary'; readonly bytes?: Uint8Array }
+  | { readonly kind: 'binary'; readonly bytes?: Uint8Array; readonly url?: string }
+  | { readonly kind: 'paged-text'; readonly source: PagedFileSource }
   | { readonly kind: 'missing' };
 
 export type SessionFileContentLoadResult =
@@ -27,6 +29,8 @@ export function sessionFileOpenResultToContentLoadResult(
   }
 
   switch (result.snapshot.kind) {
+    case 'paged-text':
+      return { status: 'ready', snapshot: result.snapshot };
     case 'text':
       return {
         status: 'ready',
@@ -37,6 +41,7 @@ export function sessionFileOpenResultToContentLoadResult(
         status: 'ready',
         snapshot: {
           kind: 'binary',
+          ...(result.snapshot.url === undefined ? {} : { url: result.snapshot.url }),
           ...(result.snapshot.bytes === undefined ? {} : { bytes: result.snapshot.bytes }),
         },
       };

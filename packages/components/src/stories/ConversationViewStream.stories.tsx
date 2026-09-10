@@ -113,7 +113,7 @@ function openWindowedView(rounds: number): ConversationView {
   const doc = new LoroDoc();
   doc.getMap('session').set('id', sessionId);
   const view = createConversationViewFromDoc(doc, { sessionId });
-  const writer = createHistoryWriter(doc, view);
+  const writer = createHistoryWriter(doc);
   for (const entry of buildHistory(rounds)) writer.append(entry);
   return view;
 }

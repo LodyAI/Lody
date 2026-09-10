@@ -745,7 +745,11 @@ export function MachineAgentSettings({
       // The CLI wrote the fresh capabilities to the machine flock doc, which the
       // web only syncs once per session; force a re-sync so chat landing and the
       // settings dialog reflect the new modes/models without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId);
+      await resyncMachineFlockRows(runtime, args.machineId, {
+        refreshedCapability: response.capability
+          ? { configId: response.configId, value: response.capability }
+          : undefined,
+      });
       return response;
     },
     [runtime, t, workspaceId]

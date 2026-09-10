@@ -1,3 +1,4 @@
+import type { PagedFileSource } from './paged-file-source';
 import type {
   CodeCollabContentUnavailableReason,
   CodeCollabFileKind,
@@ -38,6 +39,7 @@ export type FileWorkspaceBinarySnapshot = {
   readonly kind: 'binary';
   readonly bytes?: Uint8Array;
   readonly mimeType?: string;
+  readonly url?: string;
 };
 
 export type FileWorkspaceUnavailableSnapshot = {
@@ -47,6 +49,7 @@ export type FileWorkspaceUnavailableSnapshot = {
 };
 
 export type FileWorkspaceSnapshot =
+  | { readonly kind: 'paged-text'; readonly source: PagedFileSource }
   | FileWorkspaceTextSnapshot
   | FileWorkspaceBinarySnapshot
   | FileWorkspaceUnavailableSnapshot;
@@ -89,7 +92,9 @@ export interface FileWorkspaceProvider {
   updateLiveText?(pathOrFileId: string, text: string): Promise<void>;
   subscribeText?(pathOrFileId: string, callback: (text: string) => void): () => void;
   getHostLivenessStatus?(): Promise<FileWorkspaceHostLivenessSnapshot>;
-  subscribeHostLiveness?(callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void): () => void;
+  subscribeHostLiveness?(
+    callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void
+  ): () => void;
   resolveSaveConflict?(
     pathOrFileId: string,
     params: {
@@ -232,7 +237,9 @@ class FakeFileWorkspaceProvider implements FileWorkspaceProvider {
     return this.hostLiveness;
   }
 
-  subscribeHostLiveness(callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void): () => void {
+  subscribeHostLiveness(
+    callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void
+  ): () => void {
     callback(this.hostLiveness);
     return () => undefined;
   }

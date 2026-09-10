@@ -62,6 +62,79 @@ describe('AgentClient session preparation gate', () => {
     connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session-1' });
   });
 
+  it.each(['new', 'load', 'resume', 'fork'] as const)(
+    'carries negotiated local project identity on %s while preserving the claimed worktree',
+    async (operation) => {
+      const project = { version: 1 as const, originProjectPath: '/original-project' };
+      connectionMocks.initialize.mockResolvedValue({
+        agentCapabilities: {
+          loadSession: operation === 'load',
+          sessionCapabilities: { resume: {}, fork: {} },
+          _meta: { lody: { worktreeProject: { version: 1 } } },
+        },
+      });
+      connectionMocks.loadSession.mockResolvedValue({});
+      connectionMocks.resumeSession.mockResolvedValue({});
+      connectionMocks.unstable_forkSession.mockResolvedValue({ sessionId: 'forked' });
+      const client = new AgentClient({
+        logger: createLogger(),
+        sessionId: 'session-1' as SessionId,
+        terminalManager: {} as never,
+        resolveWorktreeProject: async () => project,
+        configOptionValues: { model: 'selected-model' },
+        onUpdateMessage: vi.fn(),
+        onRequestPermission: vi.fn(),
+      });
+      await client.startSession(
+        {} as never,
+        '/provisional',
+        operation === 'load' || operation === 'resume' ? ('existing' as never) : undefined,
+        {},
+        undefined,
+        async () => ({
+          workdir: '/worktree',
+          resumeSessionId:
+            operation === 'load' || operation === 'resume' ? ('existing' as never) : undefined,
+        }),
+        operation === 'fork' ? ('source' as never) : undefined
+      );
+      const request =
+        operation === 'new'
+          ? connectionMocks.newSession
+          : operation === 'load'
+            ? connectionMocks.loadSession
+            : operation === 'resume'
+              ? connectionMocks.resumeSession
+              : connectionMocks.unstable_forkSession;
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/worktree',
+          _meta: {
+            lody: {
+              worktreeProject: project,
+              sessionConfig: { version: 1, configOptionValues: { model: 'selected-model' } },
+            },
+          },
+        })
+      );
+    }
+  );
+
+  it('keeps project lookup disabled when the agent does not advertise support', async () => {
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-1' as SessionId,
+      terminalManager: {} as never,
+      resolveWorktreeProject: async () => {
+        throw new Error('unexpected project lookup');
+      },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+    await client.startSession({} as never, '/worktree');
+    expect(connectionMocks.newSession).toHaveBeenCalledWith({ cwd: '/worktree', mcpServers: [] });
+  });
+
   it('initializes before the claim and starts the ACP session only with the claimed workdir', async () => {
     const target = deferred<{ workdir: string }>();
     const stages: string[] = [];
@@ -313,6 +386,79 @@ describe('AgentClient session preparation gate', () => {
       cwd: '/workdir',
       mcpServers: [],
     });
+  });
+
+  it('uses accepted Grok config for permission decisions and notifies pending requests', async () => {
+    const permissions = (currentValue: string) => [
+      {
+        id: 'permission_mode',
+        category: '_permission',
+        type: 'select' as const,
+        name: 'Permissions',
+        currentValue,
+        options: [],
+      },
+    ];
+    connectionMocks.newSession.mockResolvedValueOnce({
+      sessionId: 'acp-session-1',
+      configOptions: permissions('ask'),
+    });
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'grok-config' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'grok' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+    await client.startSession({} as never, '/workdir');
+    const request = {
+      sessionId: 'acp-session-1',
+      toolCall: { toolCallId: 'tool' },
+      options: [{ kind: 'allow_once' as const, optionId: 'once', name: 'Once' }],
+    };
+    const outcomes: unknown[] = [];
+    const unsubscribe = client.subscribeConfigOptions(() => {
+      outcomes.push(client.getAutomaticToolPermissionOutcome(request, true));
+    });
+    const response = deferred<{ configOptions: ReturnType<typeof permissions> }>();
+    connectionMocks.setSessionConfigOption.mockReturnValueOnce(response.promise);
+    const setting = client.setSessionConfigOption(
+      'acp-session-1' as never,
+      'permission_mode',
+      'always-approve'
+    );
+    expect(client.getAutomaticToolPermissionOutcome(request, false)).toBeUndefined();
+    response.resolve({ configOptions: permissions('always-approve') });
+    await setting;
+    expect(outcomes).toEqual([{ outcome: 'selected', optionId: 'once' }]);
+    expect(
+      client.getAutomaticToolPermissionOutcome({ ...request, sessionId: 'other' }, true)
+    ).toBeUndefined();
+
+    // Runtime rejection preserves the accepted state and cannot spuriously drain requests.
+    connectionMocks.setSessionConfigOption.mockRejectedValueOnce(new Error('unsupported value'));
+    await expect(
+      client.setSessionConfigOption('acp-session-1' as never, 'permission_mode', 'ask')
+    ).rejects.toThrow('unsupported value');
+    expect(outcomes).toHaveLength(1);
+
+    connectionMocks.setSessionConfigOption.mockResolvedValueOnce({});
+    await client.setSessionConfigOption('acp-session-1' as never, 'permission_mode', 'ask');
+    expect(outcomes).toEqual([{ outcome: 'selected', optionId: 'once' }, undefined]);
+    await client.sessionUpdate({
+      sessionId: 'acp-session-1',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: permissions('always-approve'),
+      },
+    } as never);
+    expect(outcomes.at(-1)).toEqual({ outcome: 'selected', optionId: 'once' });
+    unsubscribe();
+    connectionMocks.setSessionConfigOption.mockResolvedValueOnce({ configOptions: [] });
+    await client.setSessionConfigOption('acp-session-1' as never, 'permission_mode', 'ask');
+    expect(client.getAutomaticToolPermissionOutcome(request, false)).toBeUndefined();
+    expect(outcomes).toHaveLength(3);
   });
 
   it('carries agent-originated config updates into replacement session startup', async () => {

@@ -30,6 +30,8 @@ only tells global dispatch to yield for events originating in its subtree.
 - A scope that yields an event must not call `preventDefault`: the editor/local keymap
   still needs to receive it. This applies after a shortcut is rebound as well.
 - `$mod` means Command on macOS and Control elsewhere. Formatting is platform-aware.
+- `layout.toggleZenMode` owns `$mod+.` outside editors. Monaco claims that binding
+  locally for Quick Fix, so the app command must yield while focus is in its subtree.
 - Alt+letter matching and recording must use `event.code`; macOS `event.key` may be a
   generated glyph such as `∫`.
 - Shortcut capture pauses dispatch. It finishes after the last modifier is released and

@@ -578,10 +578,16 @@ export function createJsonLineSplitter(options: {
   onOverflow?: () => void;
 }): (chunk: string | Uint8Array) => void {
   const decodeChunk = createUtf8StreamDecoder();
-  let buffer = '';
+  let parts: string[] = [];
+  let bufferedLength = 0;
+  let retryChunk = '';
   let discardingOversizedLine = false;
   return (input: string | Uint8Array) => {
     let chunk = typeof input === 'string' ? input : decodeChunk(input);
+    if (retryChunk) {
+      chunk = retryChunk + chunk;
+      retryChunk = '';
+    }
     if (discardingOversizedLine) {
       const newlineIndex = chunk.indexOf('\n');
       if (newlineIndex < 0) {
@@ -590,22 +596,39 @@ export function createJsonLineSplitter(options: {
       discardingOversizedLine = false;
       chunk = chunk.slice(newlineIndex + 1);
     }
-    buffer += chunk;
-    let newlineIndex = buffer.indexOf('\n');
-    while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line) {
-        if (options.maxBufferBytes !== undefined && line.length > options.maxBufferBytes) {
-          options.onOverflow?.();
-        } else {
-          options.onLine(line);
+    let start = 0;
+    let newlineIndex = chunk.indexOf('\n');
+    try {
+      while (newlineIndex >= 0) {
+        let line = chunk.slice(start, newlineIndex);
+        if (parts.length > 0) {
+          parts.push(line);
+          line = parts.join('');
+          parts = [];
+          bufferedLength = 0;
         }
+        line = line.trim();
+        start = newlineIndex + 1;
+        if (line) {
+          if (options.maxBufferBytes !== undefined && line.length > options.maxBufferBytes) {
+            options.onOverflow?.();
+          } else {
+            options.onLine(line);
+          }
+        }
+        newlineIndex = chunk.indexOf('\n', start);
       }
-      newlineIndex = buffer.indexOf('\n');
+    } catch (error) {
+      retryChunk = chunk.slice(start);
+      throw error;
     }
-    if (options.maxBufferBytes !== undefined && buffer.length > options.maxBufferBytes) {
-      buffer = '';
+    if (start < chunk.length) {
+      parts.push(chunk.slice(start));
+      bufferedLength += chunk.length - start;
+    }
+    if (options.maxBufferBytes !== undefined && bufferedLength > options.maxBufferBytes) {
+      parts = [];
+      bufferedLength = 0;
       discardingOversizedLine = true;
       options.onOverflow?.();
     }

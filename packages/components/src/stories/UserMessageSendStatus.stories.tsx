@@ -198,3 +198,26 @@ export const AllStates: Story = {
     </MessageSendStatusContext.Provider>
   ),
 };
+
+/** Context-copy controls, sender metadata and assistant timestamp spacing. */
+export const ContextCopy: Story = {
+  args: {
+    sessionId,
+    items: buildItems([
+      userMessage('context-user', '请帮我检查这段代码。', { read: true }),
+      {
+        ...assistantMessage('context-assistant', '检查完成，可以从这里复制上下文。'),
+        endedAt: Date.parse(at(10)),
+      },
+    ]),
+    onCopyContext: () => undefined,
+    renderMessageRow: ({ message, sessionId: sid }) => (
+      <MessageRowView message={message} sessionId={sid} user={user} showSenderIdentity />
+    ),
+  },
+  render: (args) => (
+    <div className="mx-auto h-[400px] w-full max-w-2xl">
+      <SessionChatStreamView {...args} />
+    </div>
+  ),
+};

@@ -2,7 +2,7 @@
  * Rollback switch for windowed conversation rendering, kept for one release.
  *
  * Off means the old path: the session Mirror materializes the whole `history`
- * list, writes go through `Mirror.setState`, and the renderer is fed a fully
+ * list; writes still use the shared HistoryWriter, and the renderer is fed a fully
  * hydrated `ConversationView` adapter over that array.
  *
  * Resolution order: the build-time env `LODY_CONVERSATION_VIEW=0` wins, then

@@ -23,14 +23,8 @@ export function usePermissionResponse() {
       }
 
       // Awaiting the writer call is the accept boundary: the local authored
-      // write is durable, so there's no need to block on remote sync. The
-      // turn id lets the writer address the turn instead of scanning history.
-      await runtime.writer.respondSessionPermission(
-        sessionId,
-        requestId,
-        outcome as unknown as Record<string, unknown>,
-        options
-      );
+      // write is durable, so there's no need to block on remote sync.
+      await runtime.writer.respondSessionPermission(sessionId, requestId, outcome, options);
     },
     [runtime]
   );

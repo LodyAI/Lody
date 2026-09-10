@@ -3,9 +3,9 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. Package
 [AGENTS.md](../../../AGENTS.md) applies.
 
-Opening a conversation must cost O(window), not O(turns). loro-mirror's
-`Mirror` walks every container of the `history` list (seconds on a
-2,000-turn doc), so the session store never materializes history:
+The windowed reader materializes only requested turn bodies. Snapshot import
+and the initial shallow directory remain O(total turns), before the first window.
+Do not claim O(window) cold open or a hard whole-process memory bound.
 
 - **Read** through `ConversationView` (`createConversationViewFromDoc`):
   `index(i)` is always available from one shallow read per turn; `turn(i)`
@@ -18,14 +18,13 @@ Opening a conversation must cost O(window), not O(turns). loro-mirror's
   full re-read when a path does not resolve. Every full read also replaces
   all index scalars from that same turn, including absent/deleted fields;
   structural batches may then safely skip the subsumed turn events.
-- **Write** through `HistoryWriter` (`history-writer.ts`). Its container
-  shape is byte-identical to `Mirror.setState`
-  (`history-materializer.ts` restates loro-mirror's inference rules over
-  the shared schema; `tests/history-writer.test.ts` proves op equality). Do
-  not add another write path or write history through `setState`. Optional
-  `Any.options.storageSchema` hints affect matching new map-field layouts only;
-  mismatched values retain Any inference, and existing string edits keep their
-  stored Text identity or primitive representation.
+- **Write** through `@lody/shared` HistoryWriter in both feature-flag modes.
+  Never recreate its parser, materializer, rollback or stored-copy behavior here.
+  `createConversationSession` owns reader composition; windowed writes do not
+  receive a full-history callback. Read caches are never a write baseline.
+- **Cache ownership**: derivations keep weak identity hints, not strong turn
+  references. Facts must contain only the data their consumer needs. Disposal
+  clears facts and releases in-flight pins. LRU limits exclude pinned/tail turns.
 - **Control plane**: the session Mirror uses `sessionControlPlaneSchema`
   (`history: schema.Ignore()`) over `createControlPlaneDoc`, which drops
   `history` events (the incremental event path applies ignored roots) and
@@ -38,9 +37,9 @@ Opening a conversation must cost O(window), not O(turns). loro-mirror's
 - **Rollback**: `isConversationViewEnabled()` (env `LODY_CONVERSATION_VIEW=0`
   or the developer setting) swaps in the old full Mirror behind a fully
   hydrated adapter (`createConversationViewFromHistory`) for one release.
-- loro-mirror's upcoming `LazyList` maps 1:1 onto this interface (`index` ↔
-  `index`, `get` ↔ `turn`, `hydrate` ↔ `ensureRange`, `subscribeRange` ↔
-  `subscribe` + `ensureRange`/`release`); keep the surface this narrow.
+- This reader does not depend on Mirror LazyList. Any future adapter must
+  preserve range ownership, event delivery and unknown-history behavior;
+  similar method names alone do not establish compatibility.
 
 ## No `@/` aliases in this module
 

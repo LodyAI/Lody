@@ -46,7 +46,7 @@ export function buildFixtureHistory(rounds: number): SessionHistory[] {
         status: 'completed',
         title: `Read src/module-${round}.ts`,
         kind: 'read',
-        rawInput: { path: `src/module-${round}.ts`, nested: { deep: 'value' } },
+        rawInput: { filePath: `src/module-${round}.ts`, nested: { deep: 'value' } },
         content: [{ type: 'content', content: { type: 'text', text: `body ${round}` } }],
         locations: [{ path: `src/module-${round}.ts`, line: round }],
         ...(round % 3 === 0
@@ -84,9 +84,9 @@ export function buildFixtureHistory(rounds: number): SessionHistory[] {
       permissionWaitMs: round,
       fileDiff:
         round % 2 === 0
-          ? [{ path: `src/module-${round}.ts`, add: round, del: 1, cc: { v: 1, fileId: `f-${round}` } }]
+          ? [{ filePath: `src/module-${round}.ts`, add: round, del: 1, cc: { v: 1, fileId: `f-${round}` } }]
           : [],
-      modelInfo: { name: 'sonnet', _meta: { provider: 'anthropic' } },
+      modelInfo: { modelId: 'sonnet', name: 'sonnet', _meta: { provider: 'anthropic' } },
       items,
       ...(round % 4 === 0
         ? { plan: [{ status: 'pending', content: `plan ${round}`, priority: 'high' }] }

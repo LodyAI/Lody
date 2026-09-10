@@ -660,3 +660,57 @@ describe('CodeCollabSessionFileProvider v2', () => {
     expect(refreshText).toHaveBeenLastCalledWith('Readme.md', savedDigest);
   });
 });
+
+describe('local resource snapshots', () => {
+  it('makes paged files readonly and removes any previously editable snapshot', async () => {
+    let large = false;
+    const runtime = createRuntime({
+      previewFile: async () =>
+        large
+          ? {
+              status: 'resource',
+              kind: 'text',
+              path: 'src/app.ts',
+              external: false,
+              sizeBytes: 3 * 1024 ** 3,
+              url: 'lody-resource://file/synthetic',
+            }
+          : previewOk('small', DIGEST_1),
+    });
+    const provider = new CodeCollabSessionFileProvider({
+      runtime,
+      role: 'write',
+      fileTree: { 'src/app.ts': true },
+    });
+    expect((await provider.openFile('src/app.ts')).status).toBe('ready');
+    large = true;
+    const opened = await provider.openFile('src/app.ts');
+    expect(opened).toMatchObject({
+      status: 'ready',
+      entry: { readonly: true },
+      snapshot: { kind: 'paged-text' },
+    });
+    expect(await provider.saveText('src/app.ts', 'partial page')).toMatchObject({
+      status: 'unavailable',
+    });
+  });
+
+  it('passes binary resource URLs to viewers without allocating byte snapshots', async () => {
+    const runtime = createRuntime({
+      previewFile: async () => ({
+        status: 'resource',
+        kind: 'binary',
+        path: 'large.png',
+        external: false,
+        sizeBytes: 50 * 1024 ** 2,
+        url: 'lody-resource://file/synthetic',
+      }),
+    });
+    const provider = new CodeCollabSessionFileProvider({ runtime, role: 'write', fileTree: {} });
+    expect(await provider.openFile('large.png')).toMatchObject({
+      status: 'ready',
+      entry: { readonly: true },
+      snapshot: { kind: 'binary', url: 'lody-resource://file/synthetic' },
+    });
+  });
+});

@@ -1,3 +1,7 @@
+import { jotaiStore } from '@/lib/utils';
+import { desktopWindowId } from '@/lib/desktop-window';
+import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
+import { getMachineRoomId, type MachineMeta } from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -35,7 +39,6 @@ import {
   SESSION_DOC_PREFIX,
   type SessionStatus,
   LORO_STREAMS_BUCKET_ID,
-  sessionDocSchema,
   ClientToServerSchema,
   ServerToClientSchema,
   type ClientToServer,
@@ -64,21 +67,14 @@ import {
   type LodyPresenceStateMap,
   type LoroStreamsTokenProviderEvent,
   type SyncReason,
+  ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import {
-  CONTROL_PLANE_IGNORED_ROOT_KEYS,
-  createControlPlaneDoc,
-  createConversationViewFromDoc,
-  createConversationViewFromHistory,
-  createHistoryWriter,
-  createMirrorHistoryWriter,
+  createConversationSession,
   isConversationViewEnabled,
-  sessionControlPlaneSchema,
-  type ConversationView,
-  type HistoryWriter,
 } from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
@@ -404,7 +400,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repo = await LoroRepo.create({
     storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: 'lody-loro-repo-db-' + deps.workspaceId,
+      dbName:
+        'lody-loro-repo-db-' +
+        deps.workspaceId +
+        (desktopWindowId() ? ':' + desktopWindowId() : ''),
     }),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
@@ -478,6 +477,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let machineRpcStreamsClientReady: Promise<LoroStreamsJsonStreamClient> | null = null;
   let transportStreamsBaseUrl: string | null = null;
   let detachMetaRoomStatusListener: (() => void) | null = null;
+  let metaRoomJoinPromise: Promise<void> | null = null;
   // Meta room health tracker, registered in roomSyncRegistry like every other
   // room (durable sessions, presence). Recreated fresh on each
   // ensureMetaRoomSynced cycle so stale first-sync/status state from a
@@ -1692,6 +1692,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
   } = createWorkspaceMachineRpcFacade({
+    getMachineProtocolCapabilities: async (machineId) => {
+      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
+      return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
+    },
     workspaceId,
     targetRouter,
     getMachineRpcClient,
@@ -1841,7 +1845,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
         },
         signal: options.signal,
-        timeoutMs: 120000,
+        // Backstop only: the machine owns this deadline and reports its own
+        // reason, so this must stay above the machine's worst case rather than
+        // expiring a refresh the machine is still working on.
+        timeoutMs: ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
       });
       return (
         response ?? {
@@ -2495,6 +2502,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           if (signal.aborted) return;
           await resyncMachineFlockRows({ repo, workspaceId }, machineId, {
             requireRemoteSync: true,
+            refreshedCapability: response.capability
+              ? { configId: response.configId, value: response.capability }
+              : undefined,
           });
         },
         onError: (error, context) => {
@@ -2960,7 +2970,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsTokenProvider = null;
   };
 
-  const ensureMetaRoomSynced = async (syncPhase: 'initial' | 'recovery' = 'initial') => {
+  const joinAndWatchMetaRoom = async (syncPhase: 'initial' | 'recovery') => {
     if (metaSub) {
       return;
     }
@@ -3166,8 +3176,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     void watchMetaFirstSync(
       'Failed to sync repo meta room',
       'Timed out waiting for repo meta room initial sync',
-      'initial'
+      syncPhase
     );
+  };
+
+  const ensureMetaRoomSynced = async (syncPhase: 'initial' | 'recovery' = 'initial') => {
+    if (metaSub) {
+      return;
+    }
+    if (metaRoomJoinPromise) {
+      await metaRoomJoinPromise;
+      return;
+    }
+
+    const pendingJoin = joinAndWatchMetaRoom(syncPhase);
+    metaRoomJoinPromise = pendingJoin;
+    try {
+      await pendingJoin;
+    } finally {
+      if (metaRoomJoinPromise === pendingJoin) {
+        metaRoomJoinPromise = null;
+      }
+    }
   };
 
   const restartDurableTransportForMetaSyncRecovery = async (reason: string): Promise<void> => {
@@ -3269,13 +3299,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           initialMetaSyncFailed,
         }
       );
-      if (!metaSub) {
-        await ensureMetaRoomSynced();
-      }
       notifyConnectionStateInputsChanged();
       // A fresh token is a hard reconnect signal: connections that died on 401
       // while the old token was stale (e.g. wake after a long sleep) can only
-      // recover now. trigger() resets the retry backoff and reconciles.
+      // recover now. The forced run is immediate but remains part of the same
+      // recovery episode, so repeated rotations cannot erase its backoff.
       localReconnectLoop?.trigger('token-refresh');
       return;
     }
@@ -3415,6 +3443,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ? { transportIds: ['local'], resetBackoff: true }
               : { resetBackoff: true }
           );
+          // A failed repo-level meta attach leaves no subscription for
+          // repo.reconnect() to revive. Rejoin it through the same recovery
+          // episode instead of letting auth refresh start a new initial sync.
+          if (!metaSub && !disposePromise) {
+            await ensureMetaRoomSynced('recovery');
+          }
         }
       }
       if (
@@ -3636,44 +3670,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const persistedDoc = await repo.openPersistedDoc(roomId);
     const sessionDoc = persistedDoc.doc as LoroDoc;
 
-    // Two Mirrors are never built here: either the control-plane Mirror that
-    // ignores `history` (turns come from a windowed `ConversationView` over
-    // the raw doc), or — with the rollback flag off — the old full Mirror
-    // fronted by a fully hydrated view adapter. Either way the store's public
-    // surface is the same.
-    let mirror: Mirror<typeof sessionControlPlaneSchema> | Mirror<typeof sessionDocSchema>;
-    let history: ConversationView;
-    let historyWriter: HistoryWriter;
-    if (isConversationViewEnabled()) {
-      const controlPlaneMirror = new Mirror({
-        doc: createControlPlaneDoc(sessionDoc, { ignoredRootKeys: CONTROL_PLANE_IGNORED_ROOT_KEYS }),
-        schema: sessionControlPlaneSchema,
-        // Tolerate root keys written by peers running a newer schema version.
-        ignoreUnknownProperties: true,
-        initialState: { session: { id: sessionId } },
-        debug: false,
-      });
-      mirror = controlPlaneMirror;
-      history = createConversationViewFromDoc(sessionDoc, { sessionId });
-      historyWriter = createHistoryWriter(sessionDoc, history);
-    } else {
-      const fullMirror = new Mirror({
-        doc: sessionDoc,
-        schema: sessionDocSchema,
-        // Tolerate root keys written by peers running a newer schema version.
-        ignoreUnknownProperties: true,
-        // Plan is now stored per-turn on history entries, not at root level
-        initialState: { session: { id: sessionId }, history: [] },
-        debug: false,
-      });
-      mirror = fullMirror;
-      history = createConversationViewFromHistory({
-        sessionId,
-        getHistory: () => (fullMirror.getState().history ?? []) as never,
-        subscribe: (listener) => fullMirror.subscribe(() => listener()),
-      });
-      historyWriter = createMirrorHistoryWriter(fullMirror as never);
-    }
+    const { mirror, history, historyWriter } = createConversationSession(sessionDoc, {
+      sessionId,
+      windowed: isConversationViewEnabled(),
+    });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
     // Track subscription for cleanup
@@ -4286,10 +4286,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         env: {
           isOnline: () => isBrowserOnline(),
           isAppVisible: () =>
-            typeof document === 'undefined' || document.visibilityState === 'visible',
+            !jotaiStore.get(navigationSidebarHiddenAtom) &&
+            (typeof document === 'undefined' || document.visibilityState === 'visible'),
           subscribe: (onChange) => {
             backgroundSyncEnvListeners.add(onChange);
+            const unsubscribeSidebar = jotaiStore.sub(navigationSidebarHiddenAtom, onChange);
             return () => {
+              unsubscribeSidebar();
               backgroundSyncEnvListeners.delete(onChange);
             };
           },

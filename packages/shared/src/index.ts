@@ -1,4 +1,7 @@
 import { CliType } from './ai';
+export * from './history-writer';
+export * from './history-write-schema';
+export * from './session-mirror';
 import type { AgentConfigId, MachineId, SessionId, TaskId, WorkspaceId } from './ids';
 import { PREVIEW_COMMENT_DOC_PREFIX, getLoroPreviewCommentStreamId } from './preview-comment-types';
 import { TASK_DOC_PREFIX, getLoroTaskStreamId } from './task-types';
@@ -23,6 +26,7 @@ export * from './ai';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';
+export * from './acp-startup-budget';
 export * from './image-file-types';
 export * from './custom-acp-command';
 export * from './session-image';
@@ -56,7 +60,7 @@ export * from './acp/codex-collab-agent-task';
 export * from './acp/schema';
 export * from './acp/tool-call-history';
 export * from './acp/history-apply';
-
+export * from './acp/history-replay-import';
 export * from './acp/ask-user-question';
 export * from './acp/lody-rate-limit-migration';
 export * from './acp/skills';

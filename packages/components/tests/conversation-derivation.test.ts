@@ -91,6 +91,8 @@ describe('createConversationDerivation', () => {
     expect(derivation.facts.get('a-0')).toEqual({ diffs: 2 });
     expect(notifications).toBeGreaterThan(0);
     derivation.dispose();
+    expect(derivation.facts.size).toBe(0);
+    view.dispose();
   });
 
   it('releases its hydration pin when disposed mid-chunk', async () => {

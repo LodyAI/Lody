@@ -14,6 +14,7 @@ export * from './machine-flock';
 export * from './control-connection';
 export * from './local-storage-cache';
 export * from './sidebar-state';
+export * from './layout-state';
 export * from './settings-machine-tab';
 export * from './focus-layer';
 export * from './onboarding';

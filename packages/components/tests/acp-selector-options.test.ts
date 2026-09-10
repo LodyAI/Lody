@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { orderAcpConfigOptionSelectors } from '../src/lib/acp-selector-order';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   type AcpConfigOptionSummary,
@@ -8,7 +9,7 @@ import {
 import {
   buildAcpSelectorOptions,
   buildAllConfigOptionSelectors,
-  normalizeCodexReasoningEffortSelectors,
+  normalizeReasoningEffortSelectors,
   resolvePlanModeSelectorEnabled,
   togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
@@ -44,6 +45,7 @@ const codexModelAndReasoningOptions = (
     type: 'select',
     currentValue: 'gpt-5.6-sol',
     options: [
+      { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
       { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
       { value: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
       { value: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
@@ -60,7 +62,94 @@ const codexModelAndReasoningOptions = (
   },
 ];
 
+/**
+ * A runtime-probed builtin Grok cache entry: the model option and flat
+ * thought-level list measured at probe time, plus the per-model ladder map
+ * the adapter publishes.
+ */
+const grokMachineWithLadderProbe = ({
+  currentModelId,
+  models,
+  currentEffort,
+  effortOptions,
+  modelReasoningEfforts,
+}: {
+  currentModelId: string;
+  models: Array<{ modelId: string; name: string }>;
+  currentEffort: string;
+  effortOptions: Array<{ value: string; name: string }>;
+  modelReasoningEfforts: Record<string, string[]>;
+}) =>
+  machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'builtin',
+      agentType: 'grok',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: currentModelId,
+          options: models.map((model) => ({ value: model.modelId, name: model.name })),
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Reasoning Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: currentEffort,
+          options: effortOptions,
+        },
+      ],
+      modelReasoningEfforts,
+      fetchedAt: 1,
+    },
+  });
+
 describe('buildAcpSelectorOptions', () => {
+  it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gpt-5.6-sol',
+              options: [
+                { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+                { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+              ],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      }),
+    });
+
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.modelOptions.map((option) => option.value)).toEqual([
+      'gpt-6-astra',
+      'gpt-5.6-sol',
+    ]);
+  });
+
   it('synthesizes registry model selectors when a stale cache stores empty config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -169,7 +258,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.defaultModeId).toBe('auto');
   });
 
-  it('uses auto as the static builtin Kimi default mode', () => {
+  it('uses auto as the static builtin Kimi permission default', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -177,7 +266,10 @@ describe('buildAcpSelectorOptions', () => {
       machine: machineWithCapabilities({}),
     });
 
-    expect(options.defaultModeId).toBe('auto');
+    expect(options.defaultModeId).toBeNull();
+    expect(
+      orderAcpConfigOptionSelectors(options.configOptionSelectors).permissionModeSelectors
+    ).toMatchObject([{ configId: 'permission_mode', currentValue: 'auto' }]);
   });
 
   it('does not relabel Codex auto mode', () => {
@@ -236,7 +328,7 @@ describe('buildAcpSelectorOptions', () => {
     ]);
   });
 
-  it('keeps latest Codex fast and plan config options', () => {
+  it('keeps legacy Codex fast and plan config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -437,7 +529,11 @@ describe('buildAcpSelectorOptions', () => {
     });
   });
 
-  it('ignores stale registry capability cache entries', () => {
+  it.each([
+    ['legacy entries without a version', undefined],
+    ['older-version entries', ACP_CAPABILITY_CACHE_VERSION - 1],
+    ['newer-version entries with understood fields', ACP_CAPABILITY_CACHE_VERSION + 1],
+  ])('keeps %s readable while the cache converges', (_label, cacheVersion) => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'registry',
@@ -446,7 +542,8 @@ describe('buildAcpSelectorOptions', () => {
         [agentConfigId]: {
           cliType: 'registry',
           agentType: 'codex',
-          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          cacheVersion,
+          provenance: 'runtime',
           modes: [],
           models: [],
           configOptions: [
@@ -463,7 +560,18 @@ describe('buildAcpSelectorOptions', () => {
       }),
     });
 
-    expect(options.configOptionSelectors).toEqual([]);
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.configOptionSelectors).toEqual([
+      {
+        configId: 'safe_mode',
+        label: 'Safe Mode',
+        description: undefined,
+        category: undefined,
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      },
+    ]);
   });
 
   it('provides no mode options before registry capabilities have loaded', () => {
@@ -509,7 +617,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'collaboration_mode',
+      'plan_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.6-sol');
@@ -577,24 +685,184 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.modeOptions.length).toBeGreaterThan(0);
   });
 
-  it('keeps builtin Grok interaction mode in the run-config selectors', () => {
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'offers independent Plan before the first %s probe',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType,
+        machine: machineWithCapabilities({}),
+      });
+
+      expect(options.capabilityAuthority).toBe('provisional');
+      const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+      expect(ordered.planModeSelectors).toMatchObject([
+        { configId: 'plan_mode', type: 'boolean', currentValue: false },
+      ]);
+      expect(ordered.interactionModeSelectors).toEqual([]);
+      expect(options.modeOptions.some((option) => option.value === 'plan')).toBe(false);
+      expect(
+        ordered.permissionModeSelectors
+          .flatMap((selector) => selector.options)
+          .some((option) => option.value === 'plan')
+      ).toBe(false);
+    }
+  );
+
+  it('rebuilds the Grok thought-level ladder for the selected model, not the probed one', () => {
+    /* The capability probe measured the thought-level list while a model with
+       a `high`/`low`/`max` ladder was current; selecting Grok 4.6 must restore
+       its own ladder instead of the probed one (LodyAI/Lody#149). */
+    const grokMachineWithProbedKimiLadder = grokMachineWithLadderProbe({
+      currentModelId: 'kimi-k3-256k',
+      models: [
+        { modelId: 'grok-4.6', name: 'Grok 4.6' },
+        { modelId: 'grok-4.5', name: 'Grok 4.5' },
+        { modelId: 'kimi-k3-256k', name: 'Kimi K3 256K' },
+      ],
+      currentEffort: 'high',
+      effortOptions: [
+        { value: 'high', name: 'High' },
+        { value: 'low', name: 'Low' },
+        { value: 'max', name: 'Max' },
+      ],
+      modelReasoningEfforts: {
+        'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+        'grok-4.5': ['high', 'medium', 'low'],
+        'kimi-k3-256k': ['high', 'low', 'max'],
+      },
+    });
+
+    const options46 = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.6',
+      machine: grokMachineWithProbedKimiLadder,
+    });
+    const selector46 = options46.configOptionSelectors.find(
+      (candidate) => candidate.configId === 'reasoning_effort'
+    );
+    expect(selector46?.options).toEqual([
+      { value: 'xhigh', label: 'X-High', description: undefined },
+      { value: 'high', label: 'High', description: undefined },
+      { value: 'medium', label: 'Medium', description: undefined },
+      { value: 'low', label: 'Low', description: undefined },
+    ]);
+    expect(selector46?.currentValue).toBe('high');
+
+    const options45 = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.5',
+      machine: grokMachineWithProbedKimiLadder,
+    });
+    expect(
+      options45.configOptionSelectors
+        .find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'medium', 'low']);
+  });
+
+  it('falls back to medium rather than the highest target-model tier', () => {
+    /* The probed model's current effort (`max`) is invalid for Grok 4.6,
+       whose ladder starts at `xhigh`: the fallback must pick the neutral
+       tier instead of silently defaulting the next turn to maximum effort. */
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
       agentType: 'grok',
+      selectedModelId: 'grok-4.6',
+      machine: grokMachineWithLadderProbe({
+        currentModelId: 'kimi-k3-256k',
+        models: [
+          { modelId: 'grok-4.6', name: 'Grok 4.6' },
+          { modelId: 'kimi-k3-256k', name: 'Kimi K3 256K' },
+        ],
+        currentEffort: 'max',
+        effortOptions: [
+          { value: 'high', name: 'High' },
+          { value: 'low', name: 'Low' },
+          { value: 'max', name: 'Max' },
+        ],
+        modelReasoningEfforts: {
+          'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+        },
+      }),
+    });
+
+    const selector = options.configOptionSelectors.find(
+      (candidate) => candidate.configId === 'reasoning_effort'
+    );
+    expect(selector?.currentValue).toBe('medium');
+  });
+
+  it('follows the static Grok per-model ladders before any probe', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'grok',
+      selectedModelId: 'grok-4.5',
       machine: machineWithCapabilities({}),
     });
 
-    expect(options.capabilityAuthority).toBe('provisional');
-    expect(options.modeOptions).toEqual([]);
-    expect(options.defaultModeId).toBeNull();
     expect(
-      options.configOptionSelectors.find((selector) => selector.configId === 'interaction_mode')
-    ).toMatchObject({
-      label: 'Interaction Mode',
-      currentValue: 'agent',
-      options: [{ value: 'agent' }, { value: 'plan' }],
+      options.configOptionSelectors
+        .find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'medium', 'low']);
+  });
+
+  it('keeps the Codex hardcoded tiers richer than a synthesized map rebuild', () => {
+    /* When the Codex cache carries a per-model map richer than the probed
+       thought-level list (the probe ran under a lesser model), the map-driven
+       rebuild would synthesize label-only `max`/`ultra` and the hardcoded
+       normalizer would then skip its described options. Codex stays on its
+       hardcoded path so the described tiers keep winning. */
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-5.6-sol',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: codexModelAndReasoningOptions('medium', [
+            { value: 'low', name: 'low' },
+            { value: 'medium', name: 'medium' },
+          ]),
+          modelReasoningEfforts: {
+            'gpt-5.6-sol': ['low', 'medium', 'max', 'ultra'],
+          },
+          fetchedAt: 1,
+        },
+      }),
     });
+
+    expect(
+      options.configOptionSelectors.find((candidate) => candidate.configId === 'reasoning_effort')
+        ?.options
+    ).toEqual([
+      { value: 'low', label: 'low', description: undefined },
+      { value: 'medium', label: 'medium', description: undefined },
+      {
+        value: 'max',
+        label: 'Max',
+        description: 'Maximum reasoning depth for the hardest problems',
+      },
+      {
+        value: 'ultra',
+        label: 'Ultra',
+        description: 'Maximum reasoning with automatic task delegation',
+      },
+    ]);
   });
 
   it('does not use static or default cached builtin capabilities when a runtime override is set', () => {
@@ -647,36 +915,41 @@ describe('buildAcpSelectorOptions', () => {
     ]);
   });
 
-  it('hides max and ultra for other Codex models and falls back to medium', () => {
-    const configOptions = codexModelAndReasoningOptions('ultra', [
-      { value: 'low', name: 'low' },
-      { value: 'medium', name: 'medium' },
-      { value: 'high', name: 'high' },
-      { value: 'max', name: 'max' },
-      { value: 'ultra', name: 'ultra' },
-    ]);
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      selectedModelId: 'gpt-5.6-other',
-      machine: codexMachineWithConfigOptions(configOptions),
-    });
+  it.each(['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark', 'gpt-5.6-other'])(
+    'hides max and ultra for %s and falls back to medium',
+    (selectedModelId) => {
+      const configOptions = codexModelAndReasoningOptions('ultra', [
+        { value: 'low', name: 'low' },
+        { value: 'medium', name: 'medium' },
+        { value: 'high', name: 'high' },
+        { value: 'max', name: 'max' },
+        { value: 'ultra', name: 'ultra' },
+      ]);
+      const options = buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType: 'codex',
+        selectedModelId,
+        machine: codexMachineWithConfigOptions(configOptions),
+      });
 
-    const selector = options.configOptionSelectors.find(
-      (candidate) => candidate.configId === 'reasoning_effort'
-    );
-    expect(selector).toMatchObject({ currentValue: 'medium' });
-    expect(selector?.options.map((option) => option.value)).toEqual(['low', 'medium', 'high']);
-    const cachedReasoningOption = configOptions.find((option) => option.id === 'reasoning_effort');
-    expect(cachedReasoningOption?.options.map((option) => option.value)).toEqual([
-      'low',
-      'medium',
-      'high',
-      'max',
-      'ultra',
-    ]);
-  });
+      const selector = options.configOptionSelectors.find(
+        (candidate) => candidate.configId === 'reasoning_effort'
+      );
+      expect(selector).toMatchObject({ currentValue: 'medium' });
+      expect(selector?.options.map((option) => option.value)).toEqual(['low', 'medium', 'high']);
+      const cachedReasoningOption = configOptions.find(
+        (option) => option.id === 'reasoning_effort'
+      );
+      expect(cachedReasoningOption?.options.map((option) => option.value)).toEqual([
+        'low',
+        'medium',
+        'high',
+        'max',
+        'ultra',
+      ]);
+    }
+  );
 
   it('falls back to the first visible effort when medium is unavailable', () => {
     const options = buildAcpSelectorOptions({
@@ -700,7 +973,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(selector?.options.map((option) => option.value)).toEqual(['low', 'high']);
   });
 
-  it.each(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
+  it.each(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
     'adds missing max and ultra options for %s',
     (selectedModelId) => {
       const options = buildAcpSelectorOptions({
@@ -736,31 +1009,60 @@ describe('buildAcpSelectorOptions', () => {
     }
   );
 
-  it('preserves advertised extended effort metadata and appends only missing options', () => {
-    const selectors = buildAllConfigOptionSelectors({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      selectedModelId: 'gpt-5.6-sol',
-      machine: codexMachineWithConfigOptions(
-        codexModelAndReasoningOptions('max', [
-          { value: 'low', name: 'low' },
-          { value: 'max', name: 'maximum', description: 'Upstream maximum' },
-        ])
-      ),
-    });
+  it.each(['medium', 'max', 'ultra'])(
+    'offers only max for Luna when the cached effort is %s',
+    (currentValue) => {
+      const target = {
+        configId: agentConfigId,
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        selectedModelId: 'gpt-5.6-luna',
+        machine: codexMachineWithConfigOptions(
+          codexModelAndReasoningOptions(currentValue, [
+            { value: 'medium', name: 'medium' },
+            { value: 'ultra', name: 'ultra' },
+          ])
+        ),
+      };
+      for (const selectors of [
+        buildAcpSelectorOptions(target).configOptionSelectors,
+        buildAllConfigOptionSelectors(target),
+      ]) {
+        const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
+        expect(selector?.options.map((option) => option.value)).toEqual(['medium', 'max']);
+        expect(selector?.currentValue).toBe(currentValue === 'max' ? 'max' : 'medium');
+      }
+    }
+  );
 
-    const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
-    expect(selector?.options).toEqual([
-      { value: 'low', label: 'low', description: undefined },
-      { value: 'max', label: 'maximum', description: 'Upstream maximum' },
-      {
-        value: 'ultra',
-        label: 'Ultra',
-        description: 'Maximum reasoning with automatic task delegation',
-      },
-    ]);
-  });
+  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
+    'preserves advertised extended effort metadata for %s and appends only missing options',
+    (selectedModelId) => {
+      const selectors = buildAllConfigOptionSelectors({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType: 'codex',
+        selectedModelId,
+        machine: codexMachineWithConfigOptions(
+          codexModelAndReasoningOptions('max', [
+            { value: 'low', name: 'low' },
+            { value: 'max', name: 'maximum', description: 'Upstream maximum' },
+          ])
+        ),
+      });
+
+      const selector = selectors.find((candidate) => candidate.configId === 'reasoning_effort');
+      expect(selector?.options).toEqual([
+        { value: 'low', label: 'low', description: undefined },
+        { value: 'max', label: 'maximum', description: 'Upstream maximum' },
+        {
+          value: 'ultra',
+          label: 'Ultra',
+          description: 'Maximum reasoning with automatic task delegation',
+        },
+      ]);
+    }
+  );
 
   it('does not grant extended efforts to near-match model ids', () => {
     const options = buildAcpSelectorOptions({
@@ -797,14 +1099,14 @@ describe('buildAcpSelectorOptions', () => {
     };
 
     expect(
-      normalizeCodexReasoningEffortSelectors([reasoningSelector], {
+      normalizeReasoningEffortSelectors([reasoningSelector], {
         cliType: 'builtin',
         agentType: 'claude',
         selectedModelId: 'gpt-5.6-sol',
       })
     ).toEqual([reasoningSelector]);
     expect(
-      normalizeCodexReasoningEffortSelectors([customSelector], {
+      normalizeReasoningEffortSelectors([customSelector], {
         cliType: 'builtin',
         agentType: 'codex',
         selectedModelId: 'gpt-5.6-sol',
@@ -814,9 +1116,63 @@ describe('buildAcpSelectorOptions', () => {
 });
 
 describe('plan mode selector value semantics', () => {
-  /* Codex is the only agent that carries plan mode as a config option, and it
-     publishes exactly one shape: a `collaboration_mode` select over
-     `default` / `plan` — never the `on` / `off` pair the fast toggle uses. */
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'does not reintroduce static Plan when the %s runtime omits it',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        cliType: 'builtin',
+        agentType,
+        configId: agentConfigId,
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType: 'builtin',
+            agentType,
+            provenance: 'runtime',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            fetchedAt: 1,
+            models: [],
+            modes: [],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [{ value: 'ask', name: 'Ask' }],
+              },
+            ],
+          },
+        }),
+      });
+      expect(options.capabilityAuthority).toBe('authoritative');
+      expect(
+        orderAcpConfigOptionSelectors(options.configOptionSelectors).planModeSelectors
+      ).toEqual([]);
+    }
+  );
+
+  it('projects runtime Core options into the Plan group and toggles boolean values', () => {
+    const options = buildAcpSelectorOptions({
+      cliType: 'builtin',
+      agentType: 'codex',
+      configId: agentConfigId,
+      machine: codexMachineWithConfigOptions([
+        { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
+      ]),
+    });
+    const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+    expect(ordered.booleanSelectors).toEqual([]);
+    expect(ordered.planModeSelectors).toHaveLength(1);
+    const selector = ordered.planModeSelectors[0]!;
+    const enabled = togglePlanModeSelectorValue(selector, undefined);
+    expect(enabled).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(selector, enabled)).toBe(true);
+    expect(togglePlanModeSelectorValue(selector, enabled)).toBe(false);
+    expect(resolvePlanModeSelectorEnabled(selector, false)).toBe(false);
+  });
+
+  // Older adapters and caches still use the default/plan select.
   const collaborationModeSelector: AcpConfigOptionSelector = {
     configId: 'collaboration_mode',
     label: 'Collaboration mode',

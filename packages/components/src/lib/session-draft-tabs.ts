@@ -1,3 +1,4 @@
+import { windowStorage } from './desktop-window';
 import type {
   AcpConfigOptionValue,
   AgentConfigMeta,
@@ -207,7 +208,7 @@ export const readPersistedDraftTabs = (parentSessionId: SessionId): DraftSession
   if (typeof window === 'undefined') {
     return [];
   }
-  return parseStoredDraftTabs(localStorage.getItem(getDraftTabsStorageKey(parentSessionId)));
+  return parseStoredDraftTabs(windowStorage().getItem(getDraftTabsStorageKey(parentSessionId)));
 };
 
 export const writePersistedDraftTabs = (
@@ -220,7 +221,7 @@ export const writePersistedDraftTabs = (
 
   try {
     const persistedDraftTabs = draftTabs.filter((draft) => draft.prompt.length > 0);
-    localStorage.setItem(
+    windowStorage().setItem(
       getDraftTabsStorageKey(parentSessionId),
       JSON.stringify(persistedDraftTabs)
     );
@@ -235,7 +236,7 @@ export const readStoredTabOrder = (parentSessionId: SessionId): string[] => {
   }
 
   try {
-    const raw = localStorage.getItem(getTabOrderStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getTabOrderStorageKey(parentSessionId));
     if (!raw) {
       return [];
     }
@@ -252,7 +253,7 @@ export const writeStoredTabOrder = (parentSessionId: SessionId, tabOrder: string
   }
 
   try {
-    localStorage.setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
+    windowStorage().setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
   } catch {
     // ignore
   }
@@ -266,7 +267,7 @@ export const readStoredLastActiveTabState = (
   }
 
   try {
-    const raw = localStorage.getItem(getLastActiveTabStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getLastActiveTabStorageKey(parentSessionId));
     if (!raw) {
       return null;
     }
@@ -286,7 +287,7 @@ export const writeStoredLastActiveTabState = (
   }
 
   try {
-    localStorage.setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
+    windowStorage().setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
   } catch {
     // ignore
   }
@@ -305,6 +306,28 @@ export const replaceTabOrderId = (
   }
   const nextOrder = tabOrder.map((id) => (id === currentId ? nextId : id));
   return nextOrder.includes(nextId) ? nextOrder : [...nextOrder, nextId];
+};
+
+/** Adds a tab after the currently displayed fallback tabs without disturbing saved order. */
+export const appendTabOrderId = (
+  tabOrder: string[],
+  displayedTabIds: Iterable<string>,
+  nextId: string
+): string[] => {
+  const nextOrder = [...tabOrder];
+  const seen = new Set(nextOrder);
+
+  for (const id of displayedTabIds) {
+    if (!seen.has(id)) {
+      nextOrder.push(id);
+      seen.add(id);
+    }
+  }
+  if (!seen.has(nextId)) {
+    nextOrder.push(nextId);
+  }
+
+  return nextOrder;
 };
 
 export const removeTabOrderId = (tabOrder: string[], targetId: string): string[] =>

@@ -31,6 +31,29 @@ const isNeverCollapsedAssistantItem = (content: MessageContent | undefined): boo
   content?.type === 'proposed_plan' ||
   (content?.type === 'tool_call' && content.kind === 'switch_mode');
 
+/**
+ * The answer is the final contiguous run of text before the never-collapsed
+ * tail, not necessarily the last item. Every adjacent text block in that run
+ * stays visible; a non-text item is the boundary between work and the answer.
+ */
+const getFinalTextRunStart = (items: MessageContent[]): number => {
+  let index = items.length - 1;
+
+  while (index >= 0 && isNeverCollapsedAssistantItem(items[index])) {
+    index -= 1;
+  }
+
+  if (items[index]?.type !== 'text') {
+    return items.length;
+  }
+
+  while (index > 0 && items[index - 1]?.type === 'text') {
+    index -= 1;
+  }
+
+  return index;
+};
+
 export const shouldCollapseAssistantMessageItem = ({
   content,
   index,
@@ -43,33 +66,15 @@ export const shouldCollapseAssistantMessageItem = ({
   isTurnFinished: boolean;
 }): boolean => {
   const itemCount = items.length;
-  const visibleTextIndex = getTextIndexBeforeTrailingNeverCollapsedItems(items);
+  const visibleTextRunStart = getFinalTextRunStart(items);
 
   return (
     isTurnFinished &&
     itemCount > 1 &&
     index < itemCount - 1 &&
-    index !== visibleTextIndex &&
+    !(content.type === 'text' && index >= visibleTextRunStart) &&
     !isNeverCollapsedAssistantItem(content)
   );
-};
-
-/**
- * The answer is the last text BEFORE the never-collapsed tail, not necessarily
- * the last item — it must not be demoted to process output just because a plan
- * or an attachment follows it.
- */
-const getTextIndexBeforeTrailingNeverCollapsedItems = (items: MessageContent[]): number => {
-  let index = items.length - 1;
-  if (!isNeverCollapsedAssistantItem(items[index])) {
-    return -1;
-  }
-
-  while (index >= 0 && isNeverCollapsedAssistantItem(items[index])) {
-    index -= 1;
-  }
-
-  return items[index]?.type === 'text' ? index : -1;
 };
 
 // Copyable text = plain `text` answers plus `proposed_plan` markdown. The plan

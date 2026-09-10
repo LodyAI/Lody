@@ -276,21 +276,14 @@ export function useSessionDoc(
         if (!userId || !timestamp || !inputConfig) {
           throw new Error(`Cannot dispatch invalid user history entry (sessionId=${sessionId})`);
         }
-        await runtime.writer.appendSessionTurn(
-          sessionId,
-          entry as unknown as Record<string, unknown>,
-          {
-            userTurnId: entry.id,
-            userId,
-            timestamp,
-            inputConfig: inputConfig as unknown as Record<string, unknown>,
-          }
-        );
+        await runtime.writer.appendSessionTurn(sessionId, entry, {
+          userTurnId: entry.id,
+          userId,
+          timestamp,
+          inputConfig: inputConfig as unknown as Record<string, unknown>,
+        });
       } else {
-        await runtime.writer.appendSessionHistory(
-          sessionId,
-          entry as unknown as Record<string, unknown>
-        );
+        await runtime.writer.appendSessionHistory(sessionId, entry);
       }
       return { entry };
     },
@@ -396,11 +389,7 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      await runtime.writer.updateSessionHistory(
-        sessionId,
-        historyId,
-        nextEntry as unknown as Record<string, unknown>
-      );
+      await runtime.writer.updateSessionHistory(sessionId, historyId, nextEntry);
     },
     [withStore, runtime, sessionId]
   );

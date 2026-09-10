@@ -4,6 +4,9 @@ Shared mention primitive used by composer autocomplete surfaces.
 
 ## Invariants
 
+- `onMentionAdd` rejects disabled registered items before any text/range mutation;
+  filtering them from keyboard navigation alone is insufficient.
+
 - Inserted text comes from the item, not from the trigger. `MentionItem`'s
   `insertText` (commit) and `navigateText` (drill-down) replace the whole span
   from the trigger character to the caret, so each carries its own leading
@@ -24,6 +27,18 @@ Shared mention primitive used by composer autocomplete surfaces.
   commits a highlighted non-navigation item the same way Enter does.
   Shift+Tab still closes the menu so the composer mode-cycle binding
   is not stolen.
+- A committed mention is an atomic editing range. A collapsed caret placed
+  inside it by pointer/focus/selection changes snaps to the nearest boundary;
+  otherwise the chip mirror hides the native caret and the next edit silently
+  decommits the range. Non-collapsed selections remain native so copy and
+  whole-region edits can span mentions. At a mention boundary, the textarea is
+  raised above the opaque chip and its text fill is made transparent while the
+  background mirror carries the glyphs; this leaves the native caret visible
+  without painting a second caret. Readonly inputs still apply this visual
+  boundary constraint. IME composition is the offset exception: its transient
+  caret must not snap against the still-committed ranges, and both mirrors map
+  those ranges through the transient edit so the chip neither disappears nor
+  exposes a duplicated suffix.
 - The pop-back itself is `context.onNavigateBack()`, owned by the root next to
   `onMentionAdd`: it has to interleave the controlled value commit with caret
   restoration, so a menu's own Back affordance calls it rather than restaging the
@@ -42,7 +57,9 @@ Shared mention primitive used by composer autocomplete surfaces.
   its whitespace resolved against the INPUT's value
   (`resolveMentionInsertPrefix`), not the caller's copy of it, which can trail
   by a keystroke. Stays product-neutral: text, payload, and kind are all
-  arguments.
+  arguments. Pass an array to insert multiple mentions in one transaction; each
+  index and separator is resolved against the preceding result, then text, ranges,
+  selected values, and caret are committed together.
 - `MentionKind` stays product-neutral: `pasted_text` is the only member the
   primitive branches on, and every other kind is an opaque tag the menu chooses.
   Adding a mention category must not edit this package.

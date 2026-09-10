@@ -4,13 +4,13 @@ import {
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   isAcpFastModeConfigId,
   isAcpThoughtLevelConfigOption,
   getAcpCapabilityCacheKey,
   getAcpCapabilityCacheEntryAuthority,
   getBuiltinDefaultModeId,
   getStaticBuiltinAcpCapabilities,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
   type AcpCapabilityAuthority,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -60,10 +60,12 @@ export const CODEX_COLLABORATION_MODE_PLAN_VALUE = ACP_COLLABORATION_MODE_PLAN_V
 export const CONFIG_OPTION_ON_VALUE = ACP_CONFIG_OPTION_ON_VALUE;
 export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 
-const CODEX_EXTENDED_REASONING_MODEL_IDS = new Set([
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
+// Keep model-specific support aligned with the Codex ACP model catalog.
+const CODEX_EXTENDED_REASONING_BY_MODEL = new Map<string, readonly string[]>([
+  ['gpt-6-astra', ['max', 'ultra']],
+  ['gpt-5.6-sol', ['max', 'ultra']],
+  ['gpt-5.6-terra', ['max', 'ultra']],
+  ['gpt-5.6-luna', ['max']],
 ]);
 const CODEX_EXTENDED_REASONING_OPTIONS: AcpSessionSelectOption[] = [
   {
@@ -147,29 +149,25 @@ export const toggleFastModeSelectorValue = (
 ): AcpConfigOptionValue => toggleOnOffConfigOptionValue(selector, value);
 
 /**
- * Plan mode is NOT an on/off toggle. Codex — the only agent that carries plan
- * mode as a config option — publishes `collaboration_mode`, a select over
- * `default` / `plan`. (Claude expresses planning as the `plan` PERMISSION mode,
- * so it reaches the UI through the mode selector, never through these.)
- *
- * Plan surfaces must use these two helpers rather than the on/off pair: reading
- * `collaboration_mode` with `resolveOnOffConfigOptionEnabled` always reports
- * "off", and writing `on` produces a value the selector rejects, so
- * `resolveConfigOptionValue` falls back to `currentValue` and the control
- * silently never changes.
+ * Core plan_mode uses booleans. Legacy collaboration_mode uses default/plan;
+ * preserve the advertised value shape when reading or toggling either option.
  */
 export const resolvePlanModeSelectorEnabled = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
-): boolean => resolveConfigOptionValue(selector, value) === CODEX_COLLABORATION_MODE_PLAN_VALUE;
+): boolean =>
+  resolveConfigOptionValue(selector, value) ===
+  (selector.type === 'boolean' ? true : CODEX_COLLABORATION_MODE_PLAN_VALUE);
 
 export const togglePlanModeSelectorValue = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
 ): AcpConfigOptionValue =>
-  resolvePlanModeSelectorEnabled(selector, value)
-    ? CODEX_COLLABORATION_MODE_DEFAULT_VALUE
-    : CODEX_COLLABORATION_MODE_PLAN_VALUE;
+  selector.type === 'boolean'
+    ? !resolvePlanModeSelectorEnabled(selector, value)
+    : resolvePlanModeSelectorEnabled(selector, value)
+      ? CODEX_COLLABORATION_MODE_DEFAULT_VALUE
+      : CODEX_COLLABORATION_MODE_PLAN_VALUE;
 
 /**
  * Classifies a selector as a "thought level" (reasoning effort) control. Registry agents
@@ -187,6 +185,8 @@ export type AcpSelectorOptions = {
   defaultModelId: string | null;
   /** Dynamic config option selectors for agents with configOptions (e.g. thought_level). */
   configOptionSelectors: AcpConfigOptionSelector[];
+  /** Per-model reasoning-effort ladders when the capability source publishes them. */
+  modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
 export type AcpSelectorTarget = {
@@ -208,20 +208,25 @@ export type AcpSelectorTarget = {
 type ResolvedConfigOptions = {
   authority: AcpCapabilityAuthority;
   configOptions?: AcpConfigOptionSummary[];
+  modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
 const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions => {
   if (!target?.cliType || !target.agentType) {
-    return { authority: 'unavailable' };
+    return { authority: 'unavailable', modelReasoningEfforts: undefined };
   }
 
   if (target.configId) {
     const key = getAcpCapabilityCacheKey(target.configId);
-    const capability = target.machine?.acpCapabilities?.[key];
-    if (isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, target.runtimeOverrides)) {
+    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+      target.machine?.acpCapabilities?.[key],
+      target.runtimeOverrides
+    );
+    if (capability) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
+      const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions };
+        return { authority, configOptions: capability.configOptions, modelReasoningEfforts };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -255,6 +260,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       return {
         authority,
         configOptions: synthesized.length > 0 ? synthesized : undefined,
+        modelReasoningEfforts,
       };
     }
   }
@@ -265,8 +271,12 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     target.runtimeOverrides
   );
   return staticCapabilities
-    ? { authority: 'provisional', configOptions: staticCapabilities.configOptions }
-    : { authority: 'unavailable' };
+    ? {
+        authority: 'provisional',
+        configOptions: staticCapabilities.configOptions,
+        modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
+      }
+    : { authority: 'unavailable', modelReasoningEfforts: undefined };
 };
 
 export const stripRecommended = (text: string): string => text.replace(/\s*\(recommended\)/gi, '');
@@ -353,7 +363,7 @@ const resolveSelectedModelId = (
   return typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
 };
 
-export const normalizeCodexReasoningEffortSelectors = (
+const normalizeCodexReasoningEffortSelectors = (
   selectors: AcpConfigOptionSelector[],
   target?: Pick<AcpSelectorTarget, 'cliType' | 'agentType' | 'selectedModelId'>
 ): AcpConfigOptionSelector[] => {
@@ -364,26 +374,25 @@ export const normalizeCodexReasoningEffortSelectors = (
   ) {
     return selectors;
   }
-  const selectedModelId = target.selectedModelId;
+  const supportedValues = CODEX_EXTENDED_REASONING_BY_MODEL.get(target.selectedModelId) ?? [];
 
   return selectors.map((selector) => {
     if (selector.type !== 'select' || selector.configId !== 'reasoning_effort') {
       return selector;
     }
 
-    let options: AcpSessionSelectOption[];
-    if (CODEX_EXTENDED_REASONING_MODEL_IDS.has(selectedModelId)) {
-      const existingValues = new Set(selector.options.map((option) => option.value));
-      const missingOptions = CODEX_EXTENDED_REASONING_OPTIONS.filter(
-        (option) => !existingValues.has(option.value)
-      );
-      options =
-        missingOptions.length === 0 ? selector.options : [...selector.options, ...missingOptions];
-    } else {
-      options = selector.options.filter(
-        (option) => !CODEX_EXTENDED_REASONING_VALUES.has(option.value)
-      );
-    }
+    const visibleOptions = selector.options.filter(
+      (option) =>
+        !CODEX_EXTENDED_REASONING_VALUES.has(option.value) || supportedValues.includes(option.value)
+    );
+    const existingValues = new Set(visibleOptions.map((option) => option.value));
+    const missingOptions = CODEX_EXTENDED_REASONING_OPTIONS.filter(
+      (option) => supportedValues.includes(option.value) && !existingValues.has(option.value)
+    );
+    const options =
+      visibleOptions.length === selector.options.length && missingOptions.length === 0
+        ? selector.options
+        : [...visibleOptions, ...missingOptions];
 
     const currentValue = options.some((option) => option.value === selector.currentValue)
       ? selector.currentValue
@@ -392,6 +401,72 @@ export const normalizeCodexReasoningEffortSelectors = (
       return selector;
     }
     return { ...selector, options, currentValue };
+  });
+};
+
+const reasoningEffortOptionLabel = (value: string): string =>
+  value === 'xhigh' ? 'X-High' : value.charAt(0).toUpperCase() + value.slice(1);
+
+/**
+ * Rebuilds a thought-level selector's options from the selected model's own
+ * effort ladder. The probed config option list describes only the model that
+ * was current at probe time; agents that publish a per-model map
+ * (`modelReasoningEfforts`) get a picker that follows the model instead of
+ * serving that stale list for every model (LodyAI/Lody#149). A model the
+ * map does not cover keeps the probe-time list — the adapter owns the wire
+ * and rejects unsupported efforts with a visible warning, so the UI does
+ * not duplicate that guard.
+ *
+ * The map is a FALLBACK, never an override: an agent that already adapts the
+ * ladder to the model itself owns that behavior. Codex hands off to its
+ * hand-maintained tiers above (its probed list omits the extended ones), and
+ * Claude's adapter rebuilds its effort option from the model's own
+ * `supportedEffortLevels` on every switch, so it publishes no map and this
+ * path stays inert for it. This is the one entry point; the per-agent split
+ * lives here rather than at every call site.
+ */
+export const normalizeReasoningEffortSelectors = (
+  selectors: AcpConfigOptionSelector[],
+  options: {
+    cliType?: AcpSelectorTarget['cliType'];
+    agentType?: AcpSelectorTarget['agentType'];
+    modelReasoningEfforts?: Record<string, string[]>;
+    selectedModelId?: string | null;
+  }
+): AcpConfigOptionSelector[] => {
+  if (options.cliType === 'builtin' && options.agentType?.toLowerCase() === 'codex') {
+    return normalizeCodexReasoningEffortSelectors(selectors, {
+      cliType: options.cliType,
+      agentType: options.agentType,
+      selectedModelId: options.selectedModelId ?? undefined,
+    });
+  }
+  const map = options.modelReasoningEfforts;
+  const selectedModelId = options.selectedModelId;
+  if (!map || !selectedModelId) {
+    return selectors;
+  }
+  const targetEfforts = map[selectedModelId];
+  if (!targetEfforts || targetEfforts.length === 0) {
+    return selectors;
+  }
+  return selectors.map((selector) => {
+    if (selector.type !== 'select' || !isThoughtLevelSelector(selector)) {
+      return selector;
+    }
+    return {
+      ...selector,
+      options: targetEfforts.map((value) => ({
+        value,
+        label: reasoningEffortOptionLabel(value),
+        description: undefined,
+      })),
+      currentValue: targetEfforts.includes(selector.currentValue)
+        ? selector.currentValue
+        : targetEfforts.includes('medium')
+          ? 'medium'
+          : (targetEfforts[0] ?? ''),
+    };
   });
 };
 
@@ -495,7 +570,11 @@ const resolveDefaultModeId = (
  * For React components, prefer useAcpSelectorOptions hook instead.
  */
 export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelectorOptions => {
-  const { authority: capabilityAuthority, configOptions } = resolveConfigOptions(target);
+  const {
+    authority: capabilityAuthority,
+    configOptions,
+    modelReasoningEfforts,
+  } = resolveConfigOptions(target);
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -515,15 +594,14 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     (option) => option.category === 'model' && option.type === 'select'
   );
 
-  const allSelectors = normalizeCodexReasoningEffortSelectors(
+  const allSelectors = normalizeReasoningEffortSelectors(
     buildConfigOptionSelectors(configOptions, target, capabilityAuthority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
+    {
+      cliType: target?.cliType,
+      agentType: target?.agentType,
+      modelReasoningEfforts,
+      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+    }
   );
   const configOptionSelectors = allSelectors.filter((selector) => {
     const category = selector.category ?? '';
@@ -544,6 +622,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     defaultModelId:
       typeof modelConfigOption?.currentValue === 'string' ? modelConfigOption.currentValue : null,
     configOptionSelectors,
+    modelReasoningEfforts,
   };
 };
 
@@ -554,15 +633,14 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
 export const buildAllConfigOptionSelectors = (
   target?: AcpSelectorTarget
 ): AcpConfigOptionSelector[] => {
-  const { authority, configOptions } = resolveConfigOptions(target);
-  return normalizeCodexReasoningEffortSelectors(
+  const { authority, configOptions, modelReasoningEfforts } = resolveConfigOptions(target);
+  return normalizeReasoningEffortSelectors(
     buildConfigOptionSelectors(configOptions, target, authority),
-    target
-      ? {
-          cliType: target.cliType,
-          agentType: target.agentType,
-          selectedModelId: resolveSelectedModelId(configOptions, target),
-        }
-      : undefined
+    {
+      cliType: target?.cliType,
+      agentType: target?.agentType,
+      modelReasoningEfforts,
+      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+    }
   );
 };

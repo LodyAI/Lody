@@ -62,16 +62,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     environment: release
     env:
-      CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
-      CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
-      CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
-      APPLE_API_KEY_P8: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_P8 || '' }}
-      APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
-      APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
-      SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
-      SPARKLE_ED_PRIVATE_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PRIVATE_KEY || '' }}
-      # Signing identities come from the secrets above only; never from whatever
-      # happens to be in the runner keychain.
+      # Signing identities are injected only into the trusted preparation and
+      # package steps; never discover whatever happens to be in the runner keychain.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
     steps:
@@ -105,9 +97,32 @@ jobs:
           echo "LODY_OSS_RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
           echo "Packaging Lody OSS ${version}"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bundled CLI and renderer
+        run: pnpm --dir apps/electron run build
+
       - name: Prepare macOS signing and notarization credentials
         if: matrix.target == 'mac'
         shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           required_envs=(
@@ -132,23 +147,23 @@ jobs:
           chmod 600 "${api_key_path}"
           echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build bundled CLI and renderer
-        run: pnpm --dir apps/electron run build
-
       - name: Package (${{ matrix.target }})
+        env:
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
         run: pnpm --dir apps/electron run package -- ${{ matrix.package_args }} --publish never
+
+      - name: Remove macOS notarization key
+        if: ${{ always() && matrix.target == 'mac' }}
+        shell: bash
+        run: |
+          if [[ -n "${APPLE_API_KEY:-}" ]]; then
+            rm -f "${APPLE_API_KEY}"
+          fi
 
       - name: Prepare Sparkle archive dir
         if: matrix.target == 'mac'
@@ -174,7 +189,7 @@ jobs:
       # Lody's ubuntu job publishes mac/win/linux together.
       - name: Sign appcast and generate Sparkle deltas
         if: matrix.target == 'mac'
-        uses: Innei/electron-sparkle-updater/action@v1
+        uses: Innei/electron-sparkle-updater/action@002472bdb78a9608eddc8b39202572af3f7986fb # v1
         with:
           tag: v${{ env.LODY_OSS_RELEASE_VERSION }}
           repo: ${{ github.repository }}

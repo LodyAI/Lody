@@ -1,0 +1,53 @@
+# Windowed conversation reads with one shared writer
+
+Status: implemented
+Translation: pending
+
+## Abstract
+
+Long conversations still materialize their entire history through the full Mirror reader.
+PR #376 now composes a windowed reader with the shared HistoryWriter introduced by #460;
+the rollback switch changes only readers. Derived facts use weak turn identity hints and
+clear their caches on disposal, so the identity cache cannot retain evicted turn bodies.
+Cold snapshot import and the initial directory still scale with total history, and real
+desktop/mobile performance acceptance remains outstanding.
+
+## Ownership
+
+```mermaid
+flowchart LR
+  D[LoroDoc] --> C[Control fields Mirror]
+  D --> V[Windowed directory and bodies]
+  V --> U[Visible rows]
+  V --> F[Derived facts with weak identity hints]
+  W[Shared HistoryWriter] --> D
+```
+
+`createConversationSession` composes the readers. In windowed mode the writer receives
+no full-history callback; it reads its target from the document. Rollback uses
+`createSessionMirror`, whose writer is the same shared implementation. The component-local
+writer and materializer are removed. Input validation, opaque history preservation and
+rollback remain shared-package responsibilities, independent of this read optimization.
+
+The old derivation identity Map retained complete turns after range release. Its values
+are now WeakRefs, used only to skip repeated derivation while the object still exists.
+Derived facts remain consumer-owned values and can themselves retain selected payloads;
+this is not a hard total-memory bound. Disposal clears facts and identity hints. The idle
+summary cursor advances across chunks instead of rescanning the completed suffix each time;
+document changes restart the cursor against current positions.
+
+Markdown export and image sharing explicitly acquire full ranges and release them when
+finished. They are deliberately not claimed to have window-sized peak memory. Pinned
+ranges and the tail may exceed the LRU target; a single giant turn is still indivisible.
+No persisted history is migrated or rewritten by reading.
+
+## Verification
+
+The control-plane suite runs both modes with opaque stored history and the shared writer.
+Existing mixed-event and derivation tests cover invalidation and disposal; fixtures now
+use the current authored-input schema. Timing assertions are kept out of unit tests.
+See the PR for the current executed commands and outcomes; browser layout, mobile memory,
+and 3000-user-round end-to-end acceptance are not established by these unit tests.
+
+Related: [shared writer](2026-09-07-single-history-writer.md),
+[PR #376](https://github.com/LodyAI/Lody/pull/376).

@@ -1,3 +1,4 @@
+export { createConversationSession } from './create-conversation-session';
 export * from './types';
 export { isEmptyAssistantIndexRow } from './index-row';
 export {
@@ -10,12 +11,7 @@ export {
   type CreateConversationViewFromHistoryOptions,
 } from './create-conversation-view-from-history';
 export { createProjectedConversationView } from './projected-conversation-view';
-export {
-  createHistoryWriter,
-  createMirrorHistoryWriter,
-  type HistoryMirrorLike,
-  type HistoryWriter,
-} from './history-writer';
+export { createHistoryWriter, type HistoryWriter } from '@lody/shared';
 export { createControlPlaneDoc } from './control-plane-doc';
 export { CONTROL_PLANE_IGNORED_ROOT_KEYS, sessionControlPlaneSchema } from './control-plane-schema';
 export { isConversationViewEnabled } from './feature-flag';

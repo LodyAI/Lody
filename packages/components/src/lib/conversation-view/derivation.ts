@@ -41,7 +41,8 @@ export function createConversationDerivation<F>(
   const chunkSize = options.chunkSize ?? 32;
   const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
   const facts = new Map<string, F>();
-  const derivedFrom = new Map<string, SessionHistory>();
+  // Identity is only a reuse hint, never ownership of a released turn.
+  const derivedFrom = new Map<string, WeakRef<SessionHistory>>();
   const listeners = new Set<() => void>();
   let version = 0;
   let complete = false;
@@ -72,9 +73,9 @@ export function createConversationDerivation<F>(
       if (!row) continue;
       const turn = view.turn(i);
       if (turn) {
-        if (derivedFrom.get(row.id) === turn) continue;
+        if (derivedFrom.get(row.id)?.deref() === turn) continue;
         facts.set(row.id, derive(turn, row, i));
-        derivedFrom.set(row.id, turn);
+        derivedFrom.set(row.id, new WeakRef(turn));
         changed = true;
       } else if (dropStale && facts.delete(row.id)) {
         derivedFrom.delete(row.id);
@@ -194,6 +195,8 @@ export function createConversationDerivation<F>(
       disposed = true;
       unsubscribe();
       listeners.clear();
+      facts.clear();
+      derivedFrom.clear();
     },
   };
 }

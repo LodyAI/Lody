@@ -57,7 +57,8 @@ export { MarkdownRenderer, type MarkdownRendererSize } from './markdown-renderer
 export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
-  /** The session's turns; null while the store is loading. */
+  /** Shows sender names and desktop profile cards in multi-member workspaces. */
+  showSenderIdentity?: boolean;
   view: ConversationView | null;
   sessionCreatedAt?: string;
   dividerLabel?: string;
@@ -76,6 +77,7 @@ export interface SessionChatStreamProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -101,6 +103,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message,
   sessionId,
   workspaceId,
+  showSenderIdentity,
   onNavigateSession,
   onEditLastUser,
   onResendUndelivered,
@@ -110,6 +113,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
+  showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
@@ -128,6 +132,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       message={message}
       sessionId={sessionId}
       user={userInfo}
+      showSenderIdentity={showSenderIdentity}
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
       onResendUndelivered={onResendUndelivered}
@@ -142,6 +147,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     {
       sessionId,
       workspaceId,
+      showSenderIdentity = false,
       view,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
@@ -159,6 +165,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       assistantActions,
       assistantActionsMessageId,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability,
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
@@ -195,6 +202,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const stableOnNavigateSession = useStableCallback((target: SessionNavigationTarget) => {
       onNavigateSession?.(target);
     });
+    const stableOnCopyContext = useStableCallback((messageId: string) =>
+      onCopyContext?.(messageId)
+    );
     const stableOnForkLastAssistant = useStableCallback(
       (turnId: string, destination?: SessionForkDestination) => {
         onForkLastAssistant?.(turnId, destination);
@@ -224,6 +234,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             message={message}
             sessionId={messageSessionId}
             workspaceId={workspaceId}
+            showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
             onResendUndelivered={onResendUndelivered}
@@ -240,6 +251,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onResendUndelivered,
         capacityRetry,
         stableOnNavigateSession,
+        showSenderIdentity,
         workspaceId,
       ]
     );
@@ -263,6 +275,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
         assistantActions={assistantActions}
         assistantActionsMessageId={assistantActionsMessageId}
+        onCopyContext={onCopyContext ? stableOnCopyContext : undefined}
         onForkLastAssistant={hasForkLastAssistant ? stableOnForkLastAssistant : undefined}
         forkWorktreeAvailability={forkWorktreeAvailability}
         onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}

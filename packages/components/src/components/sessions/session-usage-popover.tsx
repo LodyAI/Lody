@@ -1,7 +1,8 @@
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
 import { Loader2 } from 'lucide-react';
 
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
   getContextWindowUsageData,
@@ -185,7 +187,11 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
                     key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                    label={formatWindowLabel(window.windowDurationSeconds)}
+                    label={formatAgentRateLimitWindowLabel(
+                      window,
+                      formatWindowLabel(window.windowDurationSeconds),
+                      t
+                    )}
                     value={window.usedPercent}
                     detail={formatReset(window.resetsAtEpochSeconds)}
                   />

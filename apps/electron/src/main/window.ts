@@ -7,7 +7,8 @@ import {
   getMainWindow,
   isAppQuitting,
   isWindowsTrayAvailable,
-  setMainWindow
+  setMainWindow,
+  productWindows
 } from './window-state'
 import {
   getMainWindowConstructorOptions,
@@ -37,9 +38,12 @@ import {
   type RecoveryContext
 } from './renderer-recovery'
 
+let productWindowIcon = ''
+
 type CreateMainWindowOptions = {
-  icon: string
-  initialPath?: '/' | '/onboarding'
+  icon?: string
+  initialPath?: string
+  auxiliary?: boolean
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
 }
@@ -130,7 +134,7 @@ function formatLoadFailure(details: LoadFailureDetails): string {
   ].join('\n')
 }
 
-function resolveMainRendererTarget(initialPath: '/' | '/onboarding' = '/'): ReloadTarget {
+function resolveMainRendererTarget(initialPath = '/'): ReloadTarget {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     return {
       type: 'url',
@@ -328,15 +332,20 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
 }
 
 export function createMainWindow(options: CreateMainWindowOptions): BrowserWindow {
-  const shouldMaximizeOnLaunch = shouldMaximizeMainWindowOnLaunch()
-  nativeTheme.themeSource = getInitialMainWindowThemeSource(options.initialPath)
+  const shouldMaximizeOnLaunch = !options.auxiliary && shouldMaximizeMainWindowOnLaunch()
+  if (options.icon) productWindowIcon = options.icon
+  if (!options.auxiliary)
+    nativeTheme.themeSource = getInitialMainWindowThemeSource(
+      options.initialPath === '/onboarding' ? '/onboarding' : '/'
+    )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
     ...getMainWindowConstructorOptions(),
+    ...(options.auxiliary ? { width: 1000, height: 760 } : {}),
     show: false,
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon: options.icon } : {}),
+    ...(process.platform === 'linux' ? { icon: productWindowIcon } : {}),
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 16 } }
       : {}),
@@ -365,12 +374,30 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   if (options.hideWindowOnAutoLaunch && shouldMaximizeOnLaunch) {
     pendingInitialMaximize.add(window)
   }
-  trackMainWindowState(window)
+  productWindows.add(window)
+  window.once('closed', () => {
+    productWindows.delete(window)
+    if (getMainWindow() === window) {
+      setMainWindow([...productWindows].find((candidate) => !candidate.isDestroyed()) ?? null)
+    }
+  })
+  if (!options.auxiliary) trackMainWindowState(window)
   const mainTarget = resolveMainRendererTarget(options.initialPath)
   const recoveryTarget = resolveRecoveryTarget()
   installNavigationGuard(window, [mainTarget, recoveryTarget])
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
+
+  // Push fullscreen state to the renderer so it can collapse the macOS
+  // traffic-light insets (sidebar header, top-bar padding, drag strip) while
+  // the lights are auto-hidden in native fullscreen.
+  const sendFullscreenState = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app.fullscreen', window.isFullScreen())
+    }
+  }
+  window.on('enter-full-screen', sendFullscreenState)
+  window.on('leave-full-screen', sendFullscreenState)
 
   window.on('ready-to-show', () => {
     if (options.hideWindowOnAutoLaunch) {
@@ -475,17 +502,6 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
 
   setMainWindow(window)
 
-  // Push fullscreen state to the renderer so it can collapse the macOS
-  // traffic-light insets (sidebar header, top-bar padding, drag strip) while
-  // the lights are auto-hidden in native fullscreen.
-  const sendFullscreenState = () => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('app.fullscreen', window.isFullScreen())
-    }
-  }
-  window.on('enter-full-screen', sendFullscreenState)
-  window.on('leave-full-screen', sendFullscreenState)
-
   window.on('close', (event) => {
     if (isAppQuitting()) {
       return
@@ -514,12 +530,6 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
     }
 
     window.hide()
-  })
-
-  window.on('closed', () => {
-    if (getMainWindow() === window) {
-      setMainWindow(null)
-    }
   })
 
   return window

@@ -2,40 +2,53 @@ import { describe, expect, it } from 'vitest';
 import {
   BrowserAddressError,
   classifyBrowserHostname,
-  classifyResolvedBrowserAddress,
   formatPreviewTargetUrl,
   parseBrowserAddress,
 } from '../src/browser-url';
 
 describe('parseBrowserAddress', () => {
   it.each([
-    ['localhost:5173/path?q=1#hash', 'loopback', 'http://localhost:5173/path?q=1#hash'],
-    ['127.1:3000', 'loopback', 'http://127.0.0.1:3000/'],
-    ['10.12.0.9:8080', 'private-lan', 'http://10.12.0.9:8080/'],
-    ['172.31.0.1', 'private-lan', 'http://172.31.0.1/'],
-    ['192.168.1.10', 'private-lan', 'http://192.168.1.10/'],
-    ['https://[fc00::1]:8443/a', 'private-lan', 'https://[fc00::1]:8443/a'],
-  ])('routes %s through managed preview', (input, targetClass, logicalUrl) => {
+    ['localhost:5173/path?q=1#hash', 'http://localhost:5173/path?q=1#hash'],
+    ['127.1:3000', 'http://127.0.0.1:3000/'],
+    ['http://[::1]:4000/', 'http://[::1]:4000/'],
+  ])('routes loopback %s through managed preview', (input, logicalUrl) => {
     const result = parseBrowserAddress(input);
     expect(result).toMatchObject({
       engine: 'managed-preview',
-      targetClass,
+      targetClass: 'loopback',
       logicalUrl,
     });
     expect(result.target).toBeDefined();
   });
 
   it.each([
-    ['example.com', 'https://example.com/'],
-    ['http://example.com:8080/docs', 'http://example.com:8080/docs'],
-    ['https://8.8.8.8/search', 'https://8.8.8.8/search'],
-  ])('routes %s through public web', (input, logicalUrl) => {
-    expect(parseBrowserAddress(input)).toEqual({
-      engine: 'public-web',
-      targetClass: 'public',
-      logicalUrl,
-    });
+    ['example.com', 'public', 'https://example.com/'],
+    ['http://example.com:8080/docs', 'public', 'http://example.com:8080/docs'],
+    ['https://8.8.8.8/search', 'public', 'https://8.8.8.8/search'],
+  ])('routes %s through public web', (input, targetClass, logicalUrl) => {
+    expect(parseBrowserAddress(input)).toEqual({ engine: 'public-web', targetClass, logicalUrl });
   });
+
+  // A LAN address is the user's own local browser reaching the user's own network.
+  // Sending it through the agent machine would make that machine a pivot into its
+  // LAN, so it must never route to managed preview — only loopback does.
+  it.each([
+    ['10.12.0.9:8080', 'http://10.12.0.9:8080/'],
+    ['172.31.0.1', 'http://172.31.0.1/'],
+    ['192.168.1.10', 'http://192.168.1.10/'],
+    ['https://[fc00::1]:8443/a', 'https://[fc00::1]:8443/a'],
+    ['printer.local', 'http://printer.local/'],
+    ['host.docker.internal:9000', 'http://host.docker.internal:9000/'],
+  ])(
+    'keeps private LAN %s in the local public browser, never managed preview',
+    (input, logicalUrl) => {
+      expect(parseBrowserAddress(input)).toEqual({
+        engine: 'public-web',
+        targetClass: 'private-lan',
+        logicalUrl,
+      });
+    }
+  );
 
   it.each([
     'file:///tmp/a',
@@ -76,28 +89,6 @@ describe('classifyBrowserHostname', () => {
     expect(classifyBrowserHostname('198.18.3.75')).toBe('prohibited');
     expect(classifyBrowserHostname('198.19.255.1')).toBe('prohibited');
     expect(() => parseBrowserAddress('http://198.18.3.75/')).toThrow(BrowserAddressError);
-  });
-});
-
-describe('classifyResolvedBrowserAddress', () => {
-  it.each(['198.18.0.1', '198.18.3.75', '198.19.255.254', '[::ffff:c612:34b]'])(
-    'accepts %s as a fake-IP proxy answer for a public hostname',
-    (address) => {
-      expect(classifyResolvedBrowserAddress(address)).toBe('public');
-    }
-  );
-
-  it.each([
-    ['127.0.0.1', 'loopback'],
-    ['10.0.0.8', 'private-lan'],
-    ['[::ffff:c0a8:101]', 'private-lan'],
-    ['169.254.169.254', 'prohibited'],
-    ['198.17.255.255', 'public'],
-    ['198.20.0.0', 'public'],
-    ['198.51.100.7', 'prohibited'],
-    ['[fe80::1]', 'prohibited'],
-  ])('still classifies resolved %s as %s', (address, targetClass) => {
-    expect(classifyResolvedBrowserAddress(address)).toBe(targetClass);
   });
 });
 

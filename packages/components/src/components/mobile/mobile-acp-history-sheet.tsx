@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertCircle, Check, Download, Loader2, RefreshCw, X } from 'lucide-react';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';

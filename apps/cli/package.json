@@ -49,7 +49,6 @@
     "@lody/cli-supervisor": "workspace:*",
     "@lody/code-review-helper": "workspace:*",
     "@lody/cloud-api": "workspace:*",
-    "@lody/history-import": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",
@@ -121,7 +120,7 @@
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.14",
     "better-sqlite3": "catalog:",
-    "loro-crdt": "1.16.0",
+    "loro-crdt": "1.15.1",
     "shell-env": "^4.0.3",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"

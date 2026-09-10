@@ -52,4 +52,66 @@ describe('local data-plane UTF-8 chunk decoding', () => {
     splitLines('2}\n');
     expect(lines).toEqual(['{"a":1}', '{"b":2}']);
   });
+
+  it('reassembles a large frame from small byte chunks without emitting a partial line', () => {
+    const frame = JSON.stringify({ data: 'x'.repeat(1_100_000) });
+    const bytes = new TextEncoder().encode(frame);
+    const lines: string[] = [];
+    const splitLines = createJsonLineSplitter({ onLine: (line) => lines.push(line) });
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      splitLines(bytes.subarray(offset, offset + 64));
+    }
+    expect(lines).toEqual([]);
+    splitLines('\n{"next":true}\n');
+    expect(lines).toEqual([frame, '{"next":true}']);
+  });
+
+  it('trims complete lines before checking the cap but caps untrimmed partial lines', () => {
+    const events: string[] = [];
+    const splitLines = createJsonLineSplitter({
+      maxBufferBytes: 4,
+      onLine: (line) => events.push(line),
+      onOverflow: () => events.push('overflow'),
+    });
+    splitLines(' 12');
+    splitLines('34 \r\n\t \n');
+    splitLines('1234');
+    splitLines('');
+    splitLines('\n');
+    splitLines('     ');
+    splitLines('discarded');
+    splitLines('\n12345\n12\n3');
+    splitLines('4\n');
+    expect(events).toEqual(['1234', '1234', 'overflow', 'overflow', '12', '34']);
+  });
+
+  it('counts decoded characters across multibyte chunk boundaries for the cap', () => {
+    const events: string[] = [];
+    const splitLines = createJsonLineSplitter({
+      maxBufferBytes: 4,
+      onLine: (line) => events.push(line),
+      onOverflow: () => events.push('overflow'),
+    });
+    const bytes = new TextEncoder().encode('软😀件\n软😀件多\n好\n');
+    for (const byte of bytes) {
+      splitLines(Uint8Array.of(byte));
+    }
+    expect(events).toEqual(['软😀件', 'overflow', '好']);
+  });
+
+  it('retains unprocessed lines and a partial tail when a callback throws', () => {
+    const lines: string[] = [];
+    const splitLines = createJsonLineSplitter({
+      onLine: (line) => {
+        lines.push(line);
+        if (line === 'first') {
+          throw new Error('callback failed');
+        }
+      },
+    });
+    splitLines('fir');
+    expect(() => splitLines('st\nsecond\nthi')).toThrow('callback failed');
+    splitLines('rd\n');
+    expect(lines).toEqual(['first', 'second', 'third']);
+  });
 });

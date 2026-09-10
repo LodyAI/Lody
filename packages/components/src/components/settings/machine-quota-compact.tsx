@@ -7,7 +7,8 @@ import {
   parseRateLimitEntryKey,
 } from '@lody/shared';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
 import { Badge } from '@/ui/badge';
@@ -15,6 +16,7 @@ import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
@@ -121,8 +123,8 @@ export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaC
               return (
                 <UsageQuotaWindow
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  shortLabel={shortLabel}
-                  fullLabel={fullLabel}
+                  shortLabel={formatAgentRateLimitWindowLabel(window, shortLabel, t)}
+                  fullLabel={formatAgentRateLimitWindowLabel(window, fullLabel, t)}
                   percent={window.usedPercent}
                   resetText={formatResetDistance(window.resetsAtEpochSeconds)}
                   disabled={false}

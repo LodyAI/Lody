@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import spawn from 'cross-spawn';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';

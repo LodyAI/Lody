@@ -42,7 +42,7 @@ import { Bench } from 'tinybench';
 // Benchmarks import the view implementation by path: this package stays a
 // pure domain package with no dependency on `@lody/components`.
 import { createConversationViewFromDoc } from '../../components/src/lib/conversation-view/create-conversation-view-from-doc';
-import { createHistoryWriter } from '../../components/src/lib/conversation-view/history-writer';
+import { createHistoryWriter } from '@lody/shared';
 import { measuredLatency } from './latency-stats';
 import type { ConversationView } from '../../components/src/lib/conversation-view/types';
 import { materializeReplay } from '../src/materialize';
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
     const mirrorStreamText = tailText(mirrorStreamDoc);
     const appendDoc = importedDoc(snapshot);
     const appendView = openView(appendDoc);
-    const appendWriter = createHistoryWriter(appendDoc, appendView);
+    const appendWriter = createHistoryWriter(appendDoc);
     let appended = 0;
     let delta = 0;
 

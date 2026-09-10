@@ -1,3 +1,4 @@
+import { LocalFileResolutionSchema } from './local-file-preview';
 import { z } from 'zod';
 import {
   CodeCollabV2ErrorSchema,
@@ -50,7 +51,38 @@ const BaseLocalMachineRpcRequestSchema = z
   })
   .strict();
 
+export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('active', [
+  z
+    .object({
+      type: z.literal('session/active-invocation-context'),
+      sessionId: SessionIdSchema,
+      active: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('session/active-invocation-context'),
+      sessionId: SessionIdSchema,
+      active: z.literal(true),
+      requesterUserId: z.string().trim().min(1),
+      sourceTurnId: z.string().trim().min(1),
+      inputConfig: z.record(z.string(), z.unknown()),
+    })
+    .strict(),
+]);
+export type SessionActiveInvocationContextResult = z.infer<
+  typeof SessionActiveInvocationContextResultSchema
+>;
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/get-active-invocation-context'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+      })
+      .strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('code-collab/get-file-index'),
     params: CodeCollabV2FileIndexRequestSchema,
@@ -115,7 +147,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   // Loro Streams counterpart: the desktop user may inspect any local file,
   // while remote requests retain File Preview v3's restricted-root policy.
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('file/preview-local'),
+    method: z.literal('file/resolve-local'),
     params: FilePreviewV3RequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -204,6 +236,7 @@ export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,
   CodeCollabV2RefreshTextResponseSchema,
@@ -215,6 +248,7 @@ export const LocalMachineRpcResultSchema = z.union([
   CodeCollabV2LspUnsupportedSchema,
   CodeCollabV2ErrorSchema,
   FilePreviewV3ResponseSchema,
+  LocalFileResolutionSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -272,3 +306,5 @@ export function safeParseLocalMachineRpcRequest(
     };
   }
 }
+
+export { FilePreviewV3ErrorSchema } from './file-preview';
