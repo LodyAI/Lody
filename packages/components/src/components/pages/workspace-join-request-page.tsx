@@ -1,7 +1,7 @@
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
 
 export type WorkspaceJoinPageState =

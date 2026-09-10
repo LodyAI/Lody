@@ -3,7 +3,7 @@ import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { File as FileViewer, type FileProps } from '@pierre/diffs/react';
 import {

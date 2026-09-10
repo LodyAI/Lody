@@ -5,7 +5,7 @@ import { ArrowRight, Mail, Plus, Send, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { cn } from '@/lib/utils';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthClient } from '../../../providers/convex-provider';

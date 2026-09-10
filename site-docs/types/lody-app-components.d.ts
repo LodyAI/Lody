@@ -847,14 +847,6 @@ declare module '@/ui/badge' {
   export function Badge(props: BadgeProps): ReactElement;
 }
 
-declare module '@/ui/textarea' {
-  import type { ForwardRefExoticComponent, RefAttributes, TextareaHTMLAttributes } from 'react';
-
-  export const Textarea: ForwardRefExoticComponent<
-    TextareaHTMLAttributes<HTMLTextAreaElement> & RefAttributes<HTMLTextAreaElement>
-  >;
-}
-
 declare module '@/atoms' {
   import type { PrimitiveAtom } from 'jotai';
   import type { WorkspaceId } from '@lody/shared';

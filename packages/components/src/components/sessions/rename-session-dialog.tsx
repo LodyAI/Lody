@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';

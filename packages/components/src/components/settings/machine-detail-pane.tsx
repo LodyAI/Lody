@@ -27,7 +27,7 @@ import {
 import { Spinner } from '@/ui/spinner';
 import { Badge } from '@/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Switch } from '@/ui/switch';
 import {
   DropdownMenu,

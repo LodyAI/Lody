@@ -10,6 +10,9 @@
     "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
     "./theme": "./src/theme/theme.tsx",
     "./button": "./src/button/button.tsx",
+    "./field": "./src/field/field.tsx",
+    "./input": "./src/field/input.tsx",
+    "./textarea": "./src/field/textarea.tsx",
     "./gallery": "./src/gallery/gallery.tsx"
   },
   "scripts": {

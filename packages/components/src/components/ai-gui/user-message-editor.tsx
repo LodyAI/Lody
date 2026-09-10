@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';

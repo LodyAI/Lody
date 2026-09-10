@@ -20,6 +20,22 @@ mini, small, medium, and large sizes; icon-only controls; destructive tone; and
 default or pill shapes. These choices define the redesigned interface. Migrated
 callers must not reproduce the appearance of the deleted Button implementation.
 
+A field is a composition rather than a single control. A field root owns the
+control's name, whether it is disabled, and whether it is valid; the label, the
+control, the help text, and the error message read that state from the root
+instead of receiving their own copies of it. A caller therefore states a field is
+invalid in one place, and cannot leave a control and its message disagreeing.
+The composition provides a text input in small, medium, and large sizes and a
+multi-line control, and associates the label with the control without the caller
+naming an identifier.
+
+Every control in this family shares one set of state appearances: a sunken
+resting surface with no border, a placeholder in the hint colour, an accent ring
+on focus, a destructive ring while invalid that persists when the control is
+focused, and reduced opacity on the whole control when disabled. The states are
+defined once for the family, so a control added later inherits them rather than
+choosing its own.
+
 Product surfaces own workflows, placement, responsive layout, and accessibility
 requirements. They may add layout or interaction classes when a local constraint
 cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
@@ -51,7 +67,9 @@ that no sample presents is a gap the package reports.
 Primitives move from `@lody/components` one at a time. A legacy primitive is
 removed once all in-repository callers use the new package and type checks show no
 remaining dependency. The migration does not expose an adapter for old Button
-variants or sizes.
+variants or sizes. A primitive arrives with the state appearances its family
+already defines; it does not introduce a second colour or state vocabulary for a
+state the family has decided.
 
 ## Evidence
 
@@ -66,3 +84,6 @@ Executed validation is recorded in the linked PR and its
 
 The gallery and the subtree palette behavior are recorded in the
 [UI token gallery note](../.agents/notes/implemented/feature/2026-09-09-ui-token-gallery.md).
+The field composition, the state mapping it settles, and the outstanding focus
+ring suppression in the desktop shell are recorded in the
+[UI field primitives note](../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
