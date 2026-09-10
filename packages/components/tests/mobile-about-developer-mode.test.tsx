@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import React from 'react';
+import { act, createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -17,6 +17,15 @@ import { initI18n } from '../src/i18n';
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+class TestPointerEvent extends MouseEvent {
+  readonly pointerType: string;
+
+  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? '';
+  }
+}
 
 let container: HTMLDivElement;
 let root: Root;
@@ -49,6 +58,10 @@ function switchLabelled(label: string): HTMLButtonElement | null {
 }
 
 beforeEach(async () => {
+  Object.defineProperty(globalThis, 'PointerEvent', {
+    configurable: true,
+    value: TestPointerEvent,
+  });
   localStorage.clear();
   await initI18n();
   container = document.createElement('div');
