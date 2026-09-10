@@ -44,7 +44,8 @@ Ownership and explanations: [README.md](README.md).
   Opener Session", `SessionHeaderMenu.openedByRelations`, and conversation cards for
   successful create Operations / the precise opener. Mobile lists use the same two
   fields and per-bucket tree without disclosure, per [mobile/AGENTS.md](mobile/AGENTS.md).
-- Root archive, restore, and archived-root permanent delete include only direct child
+- Follow the [Session relation contract](../../../../specs/session-relations.md): root
+  archive, restore, and archived-root permanent delete include only direct child
   Tabs whose `parentSessionId` equals the root id. Independently opened Sessions keep
   their own state and resources. `deleteArchivedSession` requires a complete metadata
   cache before selecting that destructive set; `deleteSessions(ids)` deletes exactly

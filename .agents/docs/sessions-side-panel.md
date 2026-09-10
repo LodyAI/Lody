@@ -36,8 +36,10 @@ this page is the full text of the rules summarised there.
   one is presentation-only provenance: the opened Session stays INDEPENDENT — own workspace,
   machine, project, lifecycle, sidebar row — and is only INDENTED under its opener by
   `lib/session-opened-by-tree.ts`. It must never be turned into a `parentSessionId`, never roll
-  its activity into the opener's row, and never be filtered out of the session list. While both
-  endpoints exist, both directions of that link are navigable: the sidebar tree plus its "Go to Opener Session" row menu,
+  its activity into the opener's row, and never be filtered out of the session list. The durable
+  operation rules live in the [Session relation contract](../../specs/session-relations.md).
+  While both endpoints exist, both directions of that link are navigable: the sidebar tree plus
+  its "Go to Opener Session" row menu,
   `SessionHeaderMenu`'s `openedByRelations` ("Opened by …" / "Opened sessions"), and
   in-conversation relationship cards. A successful `session_create` Operation completion links to
   each exact `target.sessionId`; the opened Session's first scroll row links back to its exact

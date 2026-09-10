@@ -3,6 +3,8 @@
 Status: implemented
 Translation: pending
 
+Contract: [Session relations and operation targets](../../../../specs/session-relations.md)
+
 ## Abstract
 
 Desktop and mobile operations treated opened-by provenance as lifecycle ownership,
