@@ -202,7 +202,19 @@ describe('chat message selection', () => {
       await act(async () => {
         window.dispatchEvent(new MouseEvent('pointerup'));
       });
-      expect(frames.size).toBe(0);
+      // Releasing stops the loop, which shows as scrolling that no longer
+      // advances however many frames are drained. An outstanding-frame count
+      // cannot show it: Base UI's scheduler deliberately leaves its last frame
+      // queued and turns it into a no-op, so any checkbox in the tree keeps one.
+      const settled = container.scrollTop;
+      for (const time of [32, 48]) {
+        await act(async () => {
+          const pending = [...frames.values()];
+          frames.clear();
+          pending.forEach((callback) => callback(time));
+        });
+      }
+      expect(container.scrollTop).toBe(settled);
       expect(overlay.hidden).toBe(true);
     } finally {
       if (original) Object.defineProperty(document, 'elementFromPoint', original);

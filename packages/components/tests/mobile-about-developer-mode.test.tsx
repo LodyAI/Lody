@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
