@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ACPSessionId, AcpSessionNotification } from '@lody/shared';
 
 import {
+  applyResolvedTitleConfigOptions,
   applyTitleConfigOptions,
   extractTitleChunkFromNotification,
+  resolveTitleConfigOptionValues,
   sanitizeGeneratedTitle,
 } from './title-generator';
 
@@ -108,5 +110,124 @@ describe('applyTitleConfigOptions', () => {
 
     expect(unstableSetSessionModel).toHaveBeenCalledWith('title-session', 'grok-code-fast-1');
     expect(setSessionConfigOption).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyResolvedTitleConfigOptions', () => {
+  it('uses automatic reasoning when an explicit value is stale after a model switch', async () => {
+    const initialConfigOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: 'model-a',
+        options: [
+          { value: 'model-a', name: 'Model A' },
+          { value: 'model-b', name: 'Model B' },
+        ],
+      },
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning effort',
+        category: 'thought_level',
+        type: 'select' as const,
+        currentValue: 'medium',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'ultra', name: 'Ultra' },
+        ],
+      },
+    ];
+    const modelBConfigOptions = [
+      { ...initialConfigOptions[0], currentValue: 'model-b' },
+      {
+        ...initialConfigOptions[1],
+        options: [
+          { value: 'none', name: 'None' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+        ],
+      },
+    ];
+    const setSessionConfigOption = vi.fn(async () => modelBConfigOptions);
+
+    await applyResolvedTitleConfigOptions({
+      client: {
+        setSessionConfigOption,
+        unstable_setSessionModel: vi.fn(async () => {}),
+      } as never,
+      acpSessionId: 'title-session' as ACPSessionId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      sessionResponse: { configOptions: initialConfigOptions },
+      configuredValues: { model: 'model-b', reasoning_effort: 'ultra' },
+      logger: { debug: vi.fn() } as never,
+    });
+
+    expect(setSessionConfigOption.mock.calls).toEqual([
+      ['title-session', 'model', 'model-b'],
+      ['title-session', 'reasoning_effort', 'none'],
+    ]);
+  });
+});
+
+describe('resolveTitleConfigOptionValues', () => {
+  const configOptions = [
+    {
+      id: 'amp-mode',
+      name: 'Amp mode',
+      category: 'model',
+      type: 'select' as const,
+      currentValue: 'medium',
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+        { value: 'ultra', name: 'Ultra' },
+      ],
+    },
+    {
+      id: 'permission',
+      name: 'Permission',
+      category: 'mode',
+      type: 'select' as const,
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'read-only', name: 'Read Only' },
+      ],
+    },
+  ];
+
+  it('keeps the provider model and applies only recognized automatic overrides', () => {
+    expect(resolveTitleConfigOptionValues('registry', 'amp-acp', configOptions)).toEqual({
+      permission: 'read-only',
+    });
+  });
+
+  it('merges sparse explicit values over automatic overrides', () => {
+    expect(
+      resolveTitleConfigOptionValues('registry', 'amp-acp', configOptions, {
+        'amp-mode': 'ultra',
+        permission: 'default',
+      })
+    ).toEqual({
+      'amp-mode': 'ultra',
+      permission: 'default',
+    });
+  });
+
+  it('keeps an automatic safe value when its explicit override is unavailable', () => {
+    expect(
+      resolveTitleConfigOptionValues('registry', 'amp-acp', configOptions, {
+        permission: 'legacy-read-only',
+        removed_option: 'legacy-value',
+      })
+    ).toEqual({
+      permission: 'read-only',
+      removed_option: 'legacy-value',
+    });
   });
 });

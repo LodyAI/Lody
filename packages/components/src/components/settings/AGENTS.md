@@ -23,6 +23,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   add a parallel manual catalog field. Additional env cannot override either connection
   key, and changing endpoint or credential invalidates the dialog's prior live
   verification.
+- Title-generation config is a sparse set of explicit overrides. Automatic values are
+  display-only: saving or persisting before a machine launch must not write them or rewrite
+  an unavailable legacy selection. Selecting Automatic removes that key.
 - Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
   and SSR consumers do not evaluate its renderer graph.
 - Interface and terminal font choices exclude the known symbol families in

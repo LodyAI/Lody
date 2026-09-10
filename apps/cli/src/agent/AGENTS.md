@@ -99,16 +99,16 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## Capabilities and titles
 
-- `getStaticBuiltinAcpCapabilities()` applies only to `cliType: 'builtin'` without runtime
-  overrides. `machine/acp-capabilities-refresh` is always a real runtime probe, cached per
-  `agentConfigId` and the launched runtime version; an aborted probe must NOT update
-  the cache, and requests/responses carry that id to keep configs of one provider isolated.
-  `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
-  writes ignore `fetchedAt` when comparing entries.
-- Builtin Claude owns session titles through ACP `session_info_update`; store them only after
-  `sanitizeLodyInternalInstructions`, and never start `title-generator.ts`'s isolated session
-  for Claude. For Codex accept only `explicit` `_meta.lody.titleSource` names, ignore its
-  first-prompt `fallback`, and require `_meta.lody.messagePhase === 'final_answer'`; untyped
-  chunks, error/warning payloads, and internal-instruction tails are never candidates.
-  Each isolated run owns and removes a unique temp directory; concurrent session-title and
-  branch-name work reuses one in-flight result.
+- `getStaticBuiltinAcpCapabilities()`: builtin only, no runtime overrides.
+  `machine/acp-capabilities-refresh` always probes; requests/responses carry `agentConfigId`,
+  caching by it and launched version. Aborted probes never update caches.
+  `ManagedRuntimeUpdateCoordinator` never hot-swaps ACP; Machine Flock comparisons ignore `fetchedAt`.
+- Claude titles use ACP `session_info_update` plus `sanitizeLodyInternalInstructions`, never
+  an isolated generator. Codex accepts only `explicit` `_meta.lody.titleSource`, not `fallback`;
+  chunks require `_meta.lody.messagePhase === 'final_answer'`, excluding untyped chunks,
+  errors/warnings and internal-instruction tails. Isolated runs own/remove unique temp dirs;
+  concurrent title/branch generation shares one in-flight result.
+- Title config is sparse explicit overrides. Absent models keep provider defaults: option
+  order implies no cost/preference. Lower only recognized permission/reasoning values;
+  unknown vocabularies stay provider-owned. Retain unavailable overrides for UI compatibility
+  without suppressing recognized safe runtime defaults.
