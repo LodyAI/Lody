@@ -3365,18 +3365,23 @@ export const SessionChatInterface = memo(
 
         try {
           const history = conversationCopyRange(sessionDoc.history, throughMessageId);
+          const last = history.at(-1);
           const { markdown, stats } = buildConversationMarkdown({
             history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
             title: session.title ?? undefined,
             source: conversationCopySource,
             participants: conversationCopyParticipants,
+            // Header, not a trailing line: whoever reads this next has to know the
+            // last turn is cut short before reading it. See the builder's option.
+            incompleteFinalResponse:
+              last?.role === 'assistant' && !last.finished
+                ? t(
+                    'sessions.copyContextIncomplete',
+                    'The last response was still generating when copied.'
+                  )
+                : undefined,
           });
-          const last = history.at(-1);
-          const suffix =
-            last?.role === 'assistant' && !last.finished
-              ? `\n_${t('sessions.copyContextIncomplete', 'The last response was still generating when copied.')}_\n`
-              : '';
-          await navigator.clipboard.writeText(markdown + suffix);
+          await navigator.clipboard.writeText(markdown);
           captureSessionEvent('session/history_copy_succeeded', {
             history_count: sessionDoc.history.length,
             prompt_length: stats.chars,

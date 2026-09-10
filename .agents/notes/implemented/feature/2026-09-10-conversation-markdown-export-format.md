@@ -53,6 +53,12 @@ Four changes in `packages/shared/src/conversation-markdown.ts`:
   noise, and the caller supplies the `userId → name` map because `@lody/shared`
   cannot resolve it.
 
+The same reasoning later absorbed the "last response was still generating"
+warning that #558 appended after the document: it is a caller-localized string
+passed as `incompleteFinalResponse` and rendered in the header block. Two notices
+about the transcript's completeness sitting in different places, one of them
+after the content it qualifies, is the defect this change set exists to remove.
+
 `describeTrim` states that collapsing drops results and terminal output rather
 than incrementing the per-block tallies. A collapsed call never reaches the
 block renderer, so those counters stay at zero; faking them to make the notice

@@ -402,6 +402,30 @@ describe('buildConversationMarkdown', () => {
     expect(result.markdown).toContain('deliberating 11 deliberating');
   });
 
+  it('puts an unfinished final turn in the header, not after the transcript', () => {
+    const result = buildConversationMarkdown({
+      history: [entry('user', [textItem('ask')]), entry('assistant', [textItem('partial')])],
+      incompleteFinalResponse: 'The last response was still generating when copied.',
+    });
+
+    const notice = result.markdown.indexOf('still generating when copied');
+    const firstTurn = result.markdown.indexOf('## 1 · User');
+    expect(notice).toBeGreaterThan(-1);
+    // A trailing line is read after the transcript it qualifies, which is too late
+    // for the agent this export is pasted into.
+    expect(notice).toBeLessThan(firstTurn);
+    expect(result.markdown).toContain('> **The last response was still generating');
+    expect(result.markdown.trimEnd().endsWith('partial')).toBe(true);
+  });
+
+  it('omits the unfinished-turn notice when the caller does not pass one', () => {
+    const result = buildConversationMarkdown({
+      history: [entry('user', [textItem('ask')])],
+    });
+
+    expect(result.markdown).not.toContain('still generating');
+  });
+
   it('puts the trim notice in the header, before anything it describes', () => {
     const result = buildConversationMarkdown({ history: heavyHistory(30, 8_000) });
 

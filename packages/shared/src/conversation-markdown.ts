@@ -215,6 +215,14 @@ export interface BuildConversationMarkdownOptions {
    * repeating one name on every turn of a solo session is pure noise.
    */
   participants?: Record<string, string>;
+  /**
+   * Caller-localized line stating that the final assistant turn had not finished
+   * when the copy was taken. It belongs in the header next to the trim notice
+   * for the same reason that one does: the reader — often another agent — has to
+   * know the transcript is incomplete BEFORE reading it, not after. Callers must
+   * not append their own trailing note instead.
+   */
+  incompleteFinalResponse?: string;
   maxChars?: number;
   maxTokens?: number;
   recentEntryCount?: number;
@@ -779,6 +787,7 @@ function renderConversation(
     title?: string;
     source?: string;
     participants?: Record<string, string>;
+    incompleteFinalResponse?: string;
     oldLevel: number;
     recentLevel: number;
     recentEntryCount: number;
@@ -932,6 +941,9 @@ function renderConversation(
   if (models.size > 0) {
     headerLines.push(`Models: ${[...models].join(', ')}`);
   }
+  if (options.incompleteFinalResponse?.trim()) {
+    headerLines.push(`**${options.incompleteFinalResponse.trim()}**`);
+  }
   if (options.includeTrimNotice) {
     const notes = describeTrim(tally);
     if (notes.length > 0) {
@@ -965,6 +977,7 @@ export function buildConversationMarkdown(
     title,
     source,
     participants,
+    incompleteFinalResponse,
     maxChars = CONVERSATION_MARKDOWN_MAX_CHARS,
     maxTokens = CONVERSATION_MARKDOWN_MAX_TOKENS,
     recentEntryCount = CONVERSATION_MARKDOWN_RECENT_ENTRIES,
@@ -979,6 +992,7 @@ export function buildConversationMarkdown(
       title,
       source,
       participants,
+      incompleteFinalResponse,
       oldLevel: pass.oldLevel,
       recentLevel: pass.recentLevel,
       recentEntryCount,
