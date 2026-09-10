@@ -3,10 +3,30 @@ import { createPlanModeConfigOption } from 'acp-extension-core';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  getStaticBuiltinAcpCapabilities,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
+
+describe('builtin independent Plan preflight', () => {
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'dispatches boolean Plan for %s without selecting a permission mode',
+    (agentType) => {
+      const capability = getStaticBuiltinAcpCapabilities('builtin', agentType);
+      expect(capability?.configOptions.find((option) => option.id === 'plan_mode')).toEqual({
+        ...createPlanModeConfigOption(false),
+        options: [],
+      });
+      expect(summarizeAgentRunConfigCapabilities(capability).planMode).toBe(true);
+      for (const planMode of [true, false]) {
+        expect(resolveAgentRunConfigSelection({ planMode }, capability)).toEqual({
+          configOptionValues: { plan_mode: planMode },
+        });
+      }
+    }
+  );
+});
 
 /** Legacy Codex agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
 const codexCapability = (): AcpCapabilityCacheEntry => ({

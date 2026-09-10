@@ -6,8 +6,13 @@ authorities.
 
 Independent Plan uses ACP Core's boolean `plan_mode`. Shared capability discovery
 and selector ordering recognize it as Plan; UI changes and semantic run-config
-dispatch send booleans without changing permissions. Static Codex capabilities
-use Core's option factory. Older agents advertising `collaboration_mode` retain
+dispatch send booleans without changing permissions. Static Codex, Grok, Kimi,
+and DeepSeek Harness capabilities use Core's option factory; Claude retains its
+permission-based Plan mode. Kimi and Grok static permission selectors match their
+adapters' independent permission options rather than offering Plan as permission
+or a second interaction selector. DeepSeek's builtin profile mounts the Plan
+service; a runtime snapshot that omits Plan still removes the provisional control.
+Older agents advertising `collaboration_mode` retain
 their `default`/`plan` select values; do not rewrite those cached contracts into
 new wire ids. A live `configOptions` snapshot determines the current controls.
 

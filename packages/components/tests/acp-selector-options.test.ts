@@ -258,7 +258,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.defaultModeId).toBe('auto');
   });
 
-  it('uses auto as the static builtin Kimi default mode', () => {
+  it('uses auto as the static builtin Kimi permission default', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -266,7 +266,10 @@ describe('buildAcpSelectorOptions', () => {
       machine: machineWithCapabilities({}),
     });
 
-    expect(options.defaultModeId).toBe('auto');
+    expect(options.defaultModeId).toBeNull();
+    expect(
+      orderAcpConfigOptionSelectors(options.configOptionSelectors).permissionModeSelectors
+    ).toMatchObject([{ configId: 'permission_mode', currentValue: 'auto' }]);
   });
 
   it('does not relabel Codex auto mode', () => {
@@ -682,25 +685,30 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.modeOptions.length).toBeGreaterThan(0);
   });
 
-  it('keeps builtin Grok interaction mode in the run-config selectors', () => {
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'grok',
-      machine: machineWithCapabilities({}),
-    });
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'offers independent Plan before the first %s probe',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType,
+        machine: machineWithCapabilities({}),
+      });
 
-    expect(options.capabilityAuthority).toBe('provisional');
-    expect(options.modeOptions).toEqual([]);
-    expect(options.defaultModeId).toBeNull();
-    expect(
-      options.configOptionSelectors.find((selector) => selector.configId === 'interaction_mode')
-    ).toMatchObject({
-      label: 'Interaction Mode',
-      currentValue: 'agent',
-      options: [{ value: 'agent' }, { value: 'plan' }],
-    });
-  });
+      expect(options.capabilityAuthority).toBe('provisional');
+      const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+      expect(ordered.planModeSelectors).toMatchObject([
+        { configId: 'plan_mode', type: 'boolean', currentValue: false },
+      ]);
+      expect(ordered.interactionModeSelectors).toEqual([]);
+      expect(options.modeOptions.some((option) => option.value === 'plan')).toBe(false);
+      expect(
+        ordered.permissionModeSelectors
+          .flatMap((selector) => selector.options)
+          .some((option) => option.value === 'plan')
+      ).toBe(false);
+    }
+  );
 
   it('rebuilds the Grok thought-level ladder for the selected model, not the probed one', () => {
     /* The capability probe measured the thought-level list while a model with
@@ -1108,6 +1116,42 @@ describe('buildAcpSelectorOptions', () => {
 });
 
 describe('plan mode selector value semantics', () => {
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'does not reintroduce static Plan when the %s runtime omits it',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        cliType: 'builtin',
+        agentType,
+        configId: agentConfigId,
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType: 'builtin',
+            agentType,
+            provenance: 'runtime',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            fetchedAt: 1,
+            models: [],
+            modes: [],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [{ value: 'ask', name: 'Ask' }],
+              },
+            ],
+          },
+        }),
+      });
+      expect(options.capabilityAuthority).toBe('authoritative');
+      expect(
+        orderAcpConfigOptionSelectors(options.configOptionSelectors).planModeSelectors
+      ).toEqual([]);
+    }
+  );
+
   it('projects runtime Core options into the Plan group and toggles boolean values', () => {
     const options = buildAcpSelectorOptions({
       cliType: 'builtin',
