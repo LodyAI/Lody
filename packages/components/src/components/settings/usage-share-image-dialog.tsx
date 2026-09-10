@@ -18,6 +18,7 @@ import {
   type UsageShareCardSubject,
 } from './usage-share-card';
 import {
+  computeUsageShareGraphic,
   computeUsageShareMemberSlices,
   computeUsageShareModelSlices,
   computeUsageShareStats,
@@ -126,6 +127,7 @@ export function UsageShareImageDialog({
     () => computeUsageShareStats(model, timeline, range),
     [model, timeline, range]
   );
+  const graphic = useMemo(() => computeUsageShareGraphic(timeline, range), [timeline, range]);
   const modelSlices = useMemo(
     () =>
       computeUsageShareModelSlices(timeline, stripRecommended, t('workspace.usage.skyline.other')),
@@ -331,6 +333,7 @@ export function UsageShareImageDialog({
                 <UsageShareCard
                   calendar={model}
                   stats={stats}
+                  graphic={graphic}
                   modelSlices={modelSlices}
                   memberSlices={memberSlices}
                   rangeLabel={t(`workspace.usage.window.${range}.long`)}

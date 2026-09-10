@@ -193,3 +193,55 @@ function foldSlices(rows: UsageShareSlice[], otherLabel: string): UsageShareSlic
   const slices = restTokens > 0 ? [...head, { id: '__other', label: otherLabel, tokens: restTokens, share: 0 }] : head;
   return slices.map((row) => ({ ...row, share: row.tokens / total }));
 }
+
+/**
+ * Which graphic the card draws for a range. The Usage screen already speaks three
+ * visual languages — an hour skyline for 24h, a day-by-hour dot matrix for 7d, the
+ * 53-week calendar for the longer windows — and the card following the same split
+ * is what makes a 24h card worth looking at. Drawing the year for every range left
+ * the 24h card with a single lit cell.
+ */
+export type UsageShareGraphic =
+  | { kind: 'calendar' }
+  /** One value per hour of the shared day. */
+  | { kind: 'hours'; values: number[] }
+  /** One row per day, each row one value per hour. */
+  | { kind: 'weekHours'; rows: Array<{ dayStartMs: number; values: number[] }> };
+
+const HOUR_MS = 60 * 60 * 1000;
+const HOURS_PER_DAY = 24;
+
+/**
+ * Picks the graphic for the range. Hourly ranges need hour-granular buckets to say
+ * anything; when the timeline is missing or coarser than an hour the calendar is
+ * the honest fallback, because it is the one series always present.
+ */
+export function computeUsageShareGraphic(
+  timeline: SettingsUsageTimelineData | undefined,
+  range: SettingsUsageRange
+): UsageShareGraphic {
+  const hourly =
+    timeline && timeline.bucketSizeMs <= HOUR_MS && timeline.buckets.length > 0
+      ? timeline.buckets
+      : null;
+  if (!hourly || (range !== 'day' && range !== 'week')) return { kind: 'calendar' };
+
+  if (range === 'day') return { kind: 'hours', values: hourly.map((bucket) => bucket.tokens) };
+
+  // 7d: group the hour buckets into whole days so every row is a real day, and a
+  // day the range only partly covers still lines its hours up with the others.
+  const rows = new Map<number, number[]>();
+  for (const bucket of hourly) {
+    const date = new Date(bucket.bucketStartMs);
+    const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    const values = rows.get(dayStartMs) ?? new Array<number>(HOURS_PER_DAY).fill(0);
+    values[date.getUTCHours()] += bucket.tokens;
+    rows.set(dayStartMs, values);
+  }
+  return {
+    kind: 'weekHours',
+    rows: [...rows.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([dayStartMs, values]) => ({ dayStartMs, values })),
+  };
+}

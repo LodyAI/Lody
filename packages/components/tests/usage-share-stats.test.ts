@@ -5,6 +5,7 @@ import {
   type UsageCalendarData,
 } from '../src/components/settings/usage-calendar-model';
 import {
+  computeUsageShareGraphic,
   computeUsageShareMemberSlices,
   computeUsageShareModelSlices,
   computeUsageShareStats,
@@ -211,6 +212,46 @@ describe('usage share stats', () => {
       { id: 'u2', label: 'Unknown member', tokens: 10, share: 0.1, image: null },
     ]);
     expect(JSON.stringify(slices)).not.toContain('@example.com');
+  });
+
+  it('draws hours for 24h, a day-by-hour grid for 7d, and the calendar otherwise', () => {
+    const hourly = (count: number, range: SettingsUsageTimelineData['range']) =>
+      createTimeline({
+        range,
+        bucketSizeMs: HOUR_MS,
+        buckets: Array.from({ length: count }, (_, index) =>
+          bucket(START_MS + index * HOUR_MS, index)
+        ),
+      });
+
+    expect(computeUsageShareGraphic(hourly(24, 'day'), 'day')).toEqual({
+      kind: 'hours',
+      values: Array.from({ length: 24 }, (_, index) => index),
+    });
+
+    const week = computeUsageShareGraphic(hourly(26, 'week'), 'week');
+    expect(week.kind).toBe('weekHours');
+    if (week.kind !== 'weekHours') throw new Error('expected weekHours');
+    // 26 hourly buckets from a midnight start fall into two calendar days, oldest
+    // first, and each hour lands on its own index rather than being appended.
+    expect(week.rows).toHaveLength(2);
+    expect(week.rows[0]?.dayStartMs).toBe(START_MS);
+    expect(week.rows[0]?.values).toHaveLength(24);
+    expect(week.rows[0]?.values[5]).toBe(5);
+    expect(week.rows[1]?.values.slice(0, 3)).toEqual([24, 25, 0]);
+
+    expect(computeUsageShareGraphic(hourly(24, 'month'), 'month')).toEqual({ kind: 'calendar' });
+  });
+
+  it('falls back to the calendar when a range has no hour-granular series', () => {
+    const daily = createTimeline({
+      range: 'day',
+      bucketSizeMs: DAY_MS,
+      buckets: [bucket(START_MS, 10)],
+    });
+
+    expect(computeUsageShareGraphic(daily, 'day')).toEqual({ kind: 'calendar' });
+    expect(computeUsageShareGraphic(undefined, 'day')).toEqual({ kind: 'calendar' });
   });
 
   it('returns no slices when the range recorded no usage', () => {

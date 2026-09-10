@@ -27,10 +27,19 @@ consistently, how much on a typical unit, how much at the best one. Hourly range
 count active intervals; day-denominated ranges count active days, and their
 average is taken over elapsed days including quiet ones.
 
-The heatmap is always the past 53 weeks and is labelled as such, with month ticks
-so a burst can be placed in time rather than only seen. The shared range's window
-is lit inside it and the surrounding year recedes. The all-time range lights the
-whole calendar, because no part of it is out of scope.
+The card's graphic follows the range, in the same three visual languages the Usage
+screen speaks: an hour skyline for the last 24 hours, a day-by-hour dot grid for
+the last 7 days, and the 53-week calendar for the longer windows. A range that has
+no hour-granular series falls back to the calendar, which is the one series always
+present. Every graphic occupies the same fixed box, so the card's height never
+depends on which range it describes.
+
+The calendar carries month ticks so a burst can be placed in time rather than only
+seen, lights the shared range's window and lets the surrounding year recede. The
+all-time range lights the whole calendar, because no part of it is out of scope.
+The hourly graphics carry an hour axis, and the week's rows are labelled with both
+weekday and day number, because seven days of hours touch eight calendar days
+whenever the window does not begin at midnight.
 
 The card is always token-denominated; the screen's tokens/cost toggle is a
 reading aid and does not travel into the image. USD spend appears only when the

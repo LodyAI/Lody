@@ -3280,6 +3280,8 @@
   "workspace.usage.shareImage.exportPng": "导出 PNG",
   "workspace.usage.shareImage.exportFailed": "图片操作未能完成，请重试。",
   "workspace.usage.shareImage.calendarCaption": "过去 53 周",
+  "workspace.usage.shareImage.hoursCaption": "按小时",
+  "workspace.usage.shareImage.weekCaption": "按天 × 小时",
   "workspace.usage.shareImage.windowLit": "高亮：{{range}}",
   "workspace.usage.shareImage.unknownMember": "未知成员",
   "workspace.usage.skyline.activeDays": "活跃天数",

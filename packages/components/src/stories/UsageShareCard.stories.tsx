@@ -6,6 +6,7 @@ import {
 } from '@/components/settings/usage-calendar-model';
 import { UsageShareCard } from '@/components/settings/usage-share-card';
 import {
+  computeUsageShareGraphic,
   computeUsageShareMemberSlices,
   computeUsageShareModelSlices,
   computeUsageShareStats,
@@ -105,11 +106,13 @@ function buildTimeline(
 
 const MONTH = buildTimeline('month', buildBuckets(30, DAY_MS, 41_000_000), DAY_MS);
 const DAY = buildTimeline('day', buildBuckets(24, HOUR_MS, 3_100_000), HOUR_MS);
+const WEEK = buildTimeline('week', buildBuckets(7 * 24, HOUR_MS, 1_900_000), HOUR_MS);
 
 function cardProps(timeline: SettingsUsageTimelineData, rangeLabel: string) {
   return {
     calendar: MODEL,
     stats: computeUsageShareStats(MODEL, timeline, timeline.range),
+    graphic: computeUsageShareGraphic(timeline, timeline.range),
     modelSlices: computeUsageShareModelSlices(timeline, (id) => id, 'Other'),
     memberSlices: computeUsageShareMemberSlices(timeline, () => 'Unknown member', 'Other'),
     rangeLabel,
@@ -155,6 +158,20 @@ export const TeamPortrait: Story = {
 /** Hourly range: the trio counts intervals and only a sliver of the year lights. */
 export const HourlyRange: Story = {
   args: { ...cardProps(DAY, 'Last 24 hours'), aspect: 'portrait', theme: 'light' },
+};
+
+/** 7d draws the day-by-hour dot matrix, the Usage screen's own idiom for a week. */
+export const WeekRange: Story = {
+  args: { ...cardProps(WEEK, 'Last 7 days'), aspect: 'portrait', theme: 'dark' },
+};
+
+/** The hourly graphics have to survive 16:9's tighter height too. */
+export const HourlyWide: Story = {
+  args: { ...cardProps(DAY, 'Last 24 hours'), aspect: 'wide', theme: 'dark' },
+};
+
+export const WeekWide: Story = {
+  args: { ...cardProps(WEEK, 'Last 7 days'), aspect: 'wide', theme: 'light' },
 };
 
 /** Cost is opt-in; this is what turning it on looks like. */

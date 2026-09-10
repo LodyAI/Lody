@@ -32,13 +32,21 @@ and day-denominated ranges count days across the same four headline cells — th
 same split the on-screen summary already makes, now computed once in
 `usage-share-stats.ts` so the page and the image cannot drift apart.
 
-**The heatmap is always the past 53 weeks, with the range lit inside it.**
-Swapping the block per range was considered and rejected: it doubled the layout
-surface and destroyed the comparability that is the card's whole purpose. Lighting
-the shared window inside a dimmed year is an idiom the calendar view already uses
-for its 30-day window, is honest at every range, and gives short ranges a genuine
-story ("this burst, in my year"). The all-time range lights everything, because
-nothing in the calendar is out of scope for it.
+**The graphic follows the range — a reversal.** The first decision here was that
+the heatmap is always the past 53 weeks with the range lit inside it, on the
+grounds that swapping the block per range doubles the layout surface and destroys
+comparability. That reasoning still holds for the day-denominated ranges, and they
+keep the lit-window calendar. It did not survive contact with the short ranges: a
+24h card drew a year with **one cell lit**, which is not a comparable record, it is
+a wasted band.
+
+The Usage screen already speaks three visual languages — an hour skyline for 24h, a
+day-by-hour dot grid for 7d, the calendar for the longer windows — so the card now
+makes the same split rather than inventing a fourth. Comparability is preserved
+where it means something: two 30-day cards still line up, and two 24h cards still
+line up, because a card is only ever compared against the same range. The layout
+surface is contained by giving the graphic one fixed box (`GRAPHIC_H`) that every
+kind fits, so the card's height does not depend on its range.
 
 **Privacy defaults follow the data, not the gesture.** Sharing activity does not
 imply sharing spend, so USD is an explicit opt-in switch rather than a field of

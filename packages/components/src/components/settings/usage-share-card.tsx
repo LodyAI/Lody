@@ -9,7 +9,7 @@ import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import lodyLogo from '@/assets/lody-icon.png';
 import { createUsageHeatScale, type UsageCalendarModel } from './usage-calendar-model';
-import type { UsageShareSlice, UsageShareStats } from './usage-share-stats';
+import type { UsageShareGraphic, UsageShareSlice, UsageShareStats } from './usage-share-stats';
 
 /**
  * Feed formats, not free-form sizes. Portrait claims the largest area a social
@@ -53,9 +53,11 @@ export const USAGE_SHARE_BACKDROP_STYLES: Record<
 };
 
 export interface UsageShareCardProps {
-  /** 53-week calendar behind the heatmap. Always the full year, at every range. */
+  /** 53-week calendar, used when the range's graphic is the year. */
   calendar: UsageCalendarModel;
   stats: UsageShareStats;
+  /** Which graphic this range draws; see `computeUsageShareGraphic`. */
+  graphic: UsageShareGraphic;
   /** Model split for the range; empty hides the split block. */
   modelSlices: UsageShareSlice[];
   /** Member split for the range; only read when `subject` is `team`. */
@@ -139,6 +141,14 @@ const RHYTHM: Record<
     axis: 'mb-1',
   },
 };
+
+/**
+ * Every range's graphic occupies the same box, so the card's height never depends
+ * on which range it describes — the whole point of a fixed format. It matches what
+ * the 53-week grid renders at (its aspect ratio against the content width), and the
+ * hourly graphics fit themselves to it rather than the other way round.
+ */
+const GRAPHIC_H = 'h-[58px]';
 
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */
 const HEAT_CELL = 10;
@@ -230,6 +240,116 @@ function UsageShareHeatmap({
           );
         })}
       </svg>
+    </div>
+  );
+}
+
+/** Hour ticks under an hourly graphic, the axis counterpart of the month ticks. */
+function HourAxis({ gap }: { gap: string }) {
+  return (
+    <div className={cn('relative h-[12px]', gap)}>
+      {[0, 6, 12, 18].map((hour) => (
+        <span
+          key={hour}
+          className={cn('absolute top-0 leading-none text-muted-foreground/70', TEXT.micro)}
+          style={{ left: `${(hour / 24) * 100}%` }}
+        >
+          {String(hour).padStart(2, '0')}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 24h: one flat bar per hour standing on a baseline — the Usage screen's own hour
+ * skyline. Height carries magnitude; the fill lightens with share of the peak, so
+ * a quiet hour still reads as present rather than as a gap.
+ */
+function UsageShareHours({ values, axisGap }: { values: number[]; axisGap: string }) {
+  const max = Math.max(...values, 0);
+  return (
+    <div>
+      <HourAxis gap={axisGap} />
+      <div className={cn('flex items-end gap-px', GRAPHIC_H)}>
+        {values.map((value, index) => {
+          const share = max > 0 ? value / max : 0;
+          return (
+            <div
+              key={index}
+              className="min-w-0 flex-1 rounded-t-[1px]"
+              style={{
+                height: value > 0 ? `${Math.max(7, share * 100)}%` : '2px',
+                backgroundColor:
+                  value > 0
+                    ? `hsl(var(--chart-1) / ${(0.35 + share * 0.55).toFixed(3)})`
+                    : 'hsl(var(--muted-foreground) / 0.16)',
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 7d: the same 24 hour tracks stacked seven deep, as dots rather than tiles. A
+ * circle that grows and brightens with its hour keeps a quiet week readable as
+ * texture, where a full-bleed grid turns into a wall.
+ */
+function UsageShareWeekHours({
+  rows,
+  locale,
+  axisGap,
+}: {
+  rows: Array<{ dayStartMs: number; values: number[] }>;
+  locale: string;
+  axisGap: string;
+}) {
+  const max = Math.max(0, ...rows.flatMap((row) => row.values));
+  // Seven days of hour buckets touch eight calendar days whenever the window does
+  // not start at midnight, so the weekday alone repeats. The day number settles it,
+  // the same way the Usage screen labels its own week matrix.
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: 'narrow', timeZone: 'UTC' });
+  const dayOfMonth = new Intl.DateTimeFormat(locale, { day: 'numeric', timeZone: 'UTC' });
+  return (
+    <div>
+      <div className="pl-8">
+        <HourAxis gap={axisGap} />
+      </div>
+      {/* Rows divide the shared box, so seven days fit the same height as a year. */}
+      <div className={cn('flex flex-col justify-between', GRAPHIC_H)}>
+        {rows.map((row) => (
+          <div key={row.dayStartMs} className="flex flex-1 items-center gap-1">
+            <span className="flex w-7 shrink-0 items-baseline justify-end gap-[2px] text-[8px] leading-none text-muted-foreground/70">
+              <span>{weekday.format(new Date(row.dayStartMs))}</span>
+              <span className="tabular-nums">{dayOfMonth.format(new Date(row.dayStartMs))}</span>
+            </span>
+            <div className="flex flex-1 items-center gap-px">
+              {row.values.map((value, hour) => {
+                const share = max > 0 ? value / max : 0;
+                const size = value > 0 ? 2.5 + share * 4 : 2;
+                return (
+                  <div key={hour} className="flex min-w-0 flex-1 justify-center">
+                    <div
+                      className="rounded-full"
+                      style={{
+                        width: `${size}px`,
+                        height: `${size}px`,
+                        backgroundColor:
+                          value > 0
+                            ? `hsl(var(--chart-1) / ${(0.35 + share * 0.55).toFixed(3)})`
+                            : 'hsl(var(--muted-foreground) / 0.16)',
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -342,6 +462,7 @@ function StatCell({ label, value }: { label: string; value: string }) {
 export function UsageShareCard({
   calendar,
   stats,
+  graphic,
   modelSlices,
   memberSlices,
   rangeLabel,
@@ -489,22 +610,31 @@ export function UsageShareCard({
     </div>
   );
 
+  // One slot, three visual languages — the same split the Usage screen makes, so a
+  // 24h card is an hour skyline rather than a year with one cell lit.
   const heatmap = (
     <div className={cn('shrink-0', rhythm.stack)}>
-      <UsageShareHeatmap
-        calendar={calendar}
-        lit={stats.litDayStartMs}
-        locale={locale}
-        axisGap={rhythm.axis}
-      />
-      <div
-        className={cn(
-          'flex items-center justify-between text-muted-foreground/80',
-          TEXT.micro
-        )}
-      >
-        <span>{t('workspace.usage.shareImage.calendarCaption')}</span>
-        {stats.litDayStartMs ? (
+      {graphic.kind === 'hours' ? (
+        <UsageShareHours values={graphic.values} axisGap={rhythm.axis} />
+      ) : graphic.kind === 'weekHours' ? (
+        <UsageShareWeekHours rows={graphic.rows} locale={locale} axisGap={rhythm.axis} />
+      ) : (
+        <UsageShareHeatmap
+          calendar={calendar}
+          lit={stats.litDayStartMs}
+          locale={locale}
+          axisGap={rhythm.axis}
+        />
+      )}
+      <div className={cn('flex items-center justify-between text-muted-foreground/80', TEXT.micro)}>
+        <span>
+          {graphic.kind === 'hours'
+            ? t('workspace.usage.shareImage.hoursCaption')
+            : graphic.kind === 'weekHours'
+              ? t('workspace.usage.shareImage.weekCaption')
+              : t('workspace.usage.shareImage.calendarCaption')}
+        </span>
+        {graphic.kind === 'calendar' && stats.litDayStartMs ? (
           <span>{t('workspace.usage.shareImage.windowLit', { range: rangeLabel })}</span>
         ) : null}
       </div>

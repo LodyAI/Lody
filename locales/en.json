@@ -3280,6 +3280,8 @@
   "workspace.usage.shareImage.exportPng": "Export PNG",
   "workspace.usage.shareImage.exportFailed": "Could not complete the image action. Please try again.",
   "workspace.usage.shareImage.calendarCaption": "Past 53 weeks",
+  "workspace.usage.shareImage.hoursCaption": "Hour of day",
+  "workspace.usage.shareImage.weekCaption": "Day by hour",
   "workspace.usage.shareImage.windowLit": "{{range}} highlighted",
   "workspace.usage.shareImage.unknownMember": "Unknown member",
   "workspace.usage.skyline.activeDays": "Active days",
