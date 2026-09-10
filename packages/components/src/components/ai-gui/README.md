@@ -19,9 +19,11 @@ the reasoning behind those rules.
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
-- `markdown-renderer.tsx` wraps Streamdown; `mermaid-diagram-viewer.tsx` is the
-  full-screen diagram surface and `markdown-diff-block.tsx` the inline diff.
-  Diagram invariants live in
+- `markdown-renderer.tsx` wraps Streamdown; `markdown-diff-block.tsx` is the
+  inline diff. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
+  owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the
+  pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
+  surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `chat-failed-error-report.ts` / `chat-failed-detail-dialog.tsx` own raw error
@@ -64,10 +66,11 @@ the reasoning behind those rules.
   cost is unbounded on a long turn.
 - **The gutter rule.** Virtua rows are absolutely positioned and ignore scroller
   padding, so the rail has to come from `ConversationColumn`.
-- **The Mermaid viewer replacement, and the still preview in a message.**
+- **The Mermaid viewer replacement, and click-to-activate in a message.**
   Streamdown's own overlay could not be left on touch, and the pan/zoom canvas it
-  wraps every diagram in swallowed page scrolls that merely passed under one.
-  Both, and the gestures that replaced them, are in
+  wraps every diagram in swallowed page scrolls that merely passed under one. A
+  diagram now becomes a canvas only when the reader asks for one, and an
+  unmodified wheel is never taken either way:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 
 ## Creation progress

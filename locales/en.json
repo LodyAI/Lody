@@ -1170,6 +1170,7 @@
   "sharing.privateHelpTitle": "Private resources are only visible to you",
   "sharing.privateOnlyYou": "Private · Only you",
   "sessions.addImage": "Add image",
+  "sessions.diagram.canvas": "Zoom and pan diagram",
   "sessions.diagramViewer.close": "Close diagram",
   "sessions.diagramViewer.open": "Open diagram",
   "sessions.diagramViewer.resetZoom": "Reset zoom",

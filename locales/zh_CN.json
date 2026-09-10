@@ -1170,6 +1170,7 @@
   "sharing.privateHelpTitle": "私密资源仅你可见",
   "sharing.privateOnlyYou": "私密 · 仅你可见",
   "sessions.addImage": "添加图片",
+  "sessions.diagram.canvas": "缩放和平移图表",
   "sessions.diagramViewer.close": "关闭图表",
   "sessions.diagramViewer.open": "打开图表",
   "sessions.diagramViewer.resetZoom": "重置缩放",

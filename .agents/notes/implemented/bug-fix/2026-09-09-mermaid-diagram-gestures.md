@@ -104,6 +104,11 @@ latent teardown race in an unrelated suite, recorded in
 [a React commit outside act](../testing/2026-09-09-react-commit-teardown-leak.md)
 and fixed in the same pull request.
 
+A later decision partly supersedes this one: a diagram in a message can now be
+activated into a canvas by clicking it, and full-screen moved to the block's
+action bar. The wheel rule below is unchanged — see
+[click to turn a Mermaid diagram into a canvas](../feature/2026-09-10-mermaid-click-to-activate.md).
+
 Limits: touch was not exercised; the `touch-action` fix is a computed-style
 observation, not a finger on a phone, and two-finger pinch is absent by design.
 The full `pnpm check` was not run — this worktree needs its submodules initialized
