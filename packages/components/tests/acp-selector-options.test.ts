@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { orderAcpConfigOptionSelectors } from '../src/lib/acp-selector-order';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   type AcpConfigOptionSummary,
@@ -324,7 +325,7 @@ describe('buildAcpSelectorOptions', () => {
     ]);
   });
 
-  it('keeps latest Codex fast and plan config options', () => {
+  it('keeps legacy Codex fast and plan config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -613,7 +614,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'collaboration_mode',
+      'plan_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.6-sol');
@@ -1107,9 +1108,27 @@ describe('buildAcpSelectorOptions', () => {
 });
 
 describe('plan mode selector value semantics', () => {
-  /* Codex is the only agent that carries plan mode as a config option, and it
-     publishes exactly one shape: a `collaboration_mode` select over
-     `default` / `plan` — never the `on` / `off` pair the fast toggle uses. */
+  it('projects runtime Core options into the Plan group and toggles boolean values', () => {
+    const options = buildAcpSelectorOptions({
+      cliType: 'builtin',
+      agentType: 'codex',
+      configId: agentConfigId,
+      machine: codexMachineWithConfigOptions([
+        { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
+      ]),
+    });
+    const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+    expect(ordered.booleanSelectors).toEqual([]);
+    expect(ordered.planModeSelectors).toHaveLength(1);
+    const selector = ordered.planModeSelectors[0]!;
+    const enabled = togglePlanModeSelectorValue(selector, undefined);
+    expect(enabled).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(selector, enabled)).toBe(true);
+    expect(togglePlanModeSelectorValue(selector, enabled)).toBe(false);
+    expect(resolvePlanModeSelectorEnabled(selector, false)).toBe(false);
+  });
+
+  // Older adapters and caches still use the default/plan select.
   const collaborationModeSelector: AcpConfigOptionSelector = {
     configId: 'collaboration_mode',
     label: 'Collaboration mode',

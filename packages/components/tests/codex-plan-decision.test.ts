@@ -29,6 +29,15 @@ const makeHistory = (items: unknown[], id = 'assistant-turn'): SessionDoc['histo
   ] as unknown as SessionDoc['history'];
 
 describe('codex plan decision helpers', () => {
+  it('disables Core planning without changing permission, model, or reasoning', () => {
+    const config = { plan_mode: true, mode: 'agent', reasoning_effort: 'high' };
+    expect(isCodexPlanModeEnabled(config)).toBe(true);
+    const disabled = disableCodexPlanMode(config);
+    expect(disabled).toEqual({ ...config, plan_mode: false });
+    expect(isCodexPlanModeEnabled(disabled)).toBe(false);
+    expect(isCodexPlanModeEnabled({ plan_mode: false, collaboration_mode: 'plan' })).toBe(false);
+  });
+
   it('finds the latest completed Codex proposed plan', () => {
     const history = makeHistory([
       {

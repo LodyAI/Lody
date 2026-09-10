@@ -7,6 +7,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
+import { createPlanModeConfigOption } from 'acp-extension-core';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
@@ -600,20 +601,8 @@ const CODEX_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     options: [],
   },
   {
-    id: 'collaboration_mode',
-    name: 'Collaboration mode',
-    description: 'How Codex collaborates for subsequent turns',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', name: 'Default' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan before making changes',
-      },
-    ],
+    ...createPlanModeConfigOption(false),
+    options: [],
   },
 ];
 
