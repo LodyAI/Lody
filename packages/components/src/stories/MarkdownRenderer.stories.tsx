@@ -1,3 +1,4 @@
+import { fn } from 'storybook/test';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -118,6 +119,50 @@ export const CodeBlocks: Story = {
       'echo "hello"',
       '```',
     ].join('\n'),
+  },
+  render: (args) => wrap(<MarkdownRenderer {...args} />),
+};
+
+export const DiffCodeBlocks: Story = {
+  name: 'Diff Code Blocks',
+  args: {
+    size: 'default',
+    text: [
+      'Headerless explanatory diffs are the common chat form:',
+      '',
+      '```diff',
+      ' resolveSessionMentionProjectSource(session)',
+      '-  if codeCollabProvider or providerPending',
+      '-    return provider                    # won even on this machine',
+      '+  if no localFileSource',
+      '+    and (codeCollabProvider or providerPending)',
+      '+    return provider                    # remote machine only',
+      '   if localFileSource is session-worktree  -> local + worktree',
+      '   if localFileSource is local-project     -> local',
+      '   if repoFullName                         -> github',
+      '```',
+      '',
+      'Full unified patches keep their metadata and hunk rows distinct:',
+      '',
+      '```diff',
+      'diff --git a/list-files.ts b/list-files.ts',
+      'index 4f5f1c2..8a629bb 100644',
+      '--- a/list-files.ts',
+      '+++ b/list-files.ts',
+      '@@ -1,2 +1,1 @@',
+      '-git ls-files -z',
+      '-git ls-files --others --exclude-standard -z',
+      '+git ls-files -z --cached --others --exclude-standard',
+      '```',
+    ].join('\n'),
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Diff fences use a lightweight row renderer that supports explanatory snippets, full unified patches, and incomplete streaming fences without requiring patch parsing.',
+      },
+    },
   },
   render: (args) => wrap(<MarkdownRenderer {...args} />),
 };
@@ -615,9 +660,10 @@ export const InlineCodeDensity: Story = {
 
 export const AgentFileLinks: Story = {
   args: {
+    onAgentFileLinkClick: fn(),
     size: 'default',
     text: [
-      'Agent filesystem links should not navigate inside the web app:',
+      'Updated files and build artifacts:',
       '',
       'A labeled worktree file: [markdown-renderer.tsx](/home/agent/.lody/repos/github---example---project/worktrees/5110aa94-b18b-43cf-afa7-369905c2515a/packages/components/src/components/ai-gui/markdown-renderer.tsx)',
       '',
@@ -627,8 +673,99 @@ export const AgentFileLinks: Story = {
       '',
       'A raw path label: [/tmp/lody-output.log](/tmp/lody-output.log)',
       '',
+      'Build artifacts: [Lody.zip](/tmp/lody-build/Lody.zip) and [Lody.dmg](/tmp/lody-build/Lody.dmg)',
+      '',
       'A protocol-relative web URL stays a normal link: [CDN script](//cdn.example.com/app.js)',
     ].join('\n'),
   },
   render: (args) => wrap(<MarkdownRenderer {...args} />),
 };
+
+const mermaidPhoneText = [
+  'The run below is the shape a keeper agent reports back:',
+  '',
+  '```mermaid',
+  'sequenceDiagram',
+  '  participant U as User',
+  '  participant K as Keeper runtime',
+  '  participant G as Game',
+  '  participant V as Vision runtime',
+  '  participant L as Upper LLM',
+  '  participant T as Task verifier',
+  '  U->>K: Start whole-run task with intent and context',
+  '  K->>G: Launch game',
+  '  K->>V: Start capture, recording, and tracking',
+  '  V-->>K: Ready at observed frame',
+  '  K->>L: Start Upper with whole-run context',
+  '  L->>V: Query current world state',
+  '  V-->>L: Structured snapshot (observed frame)',
+  '  L->>T: Verify current task (task instance)',
+  '  T-->>L: Status, evidence, task instance, observed frame',
+  '  L-->>K: Keep current task',
+  '  K-->>U: Report final status',
+  '```',
+].join('\n');
+
+/**
+ * Phone-shaped fixture for the Mermaid full-screen viewer. Open it through
+ * `iframe.html` sized to a phone viewport: the viewer portals to
+ * `document.body`, so a story frame nested inside a desktop-sized page cannot
+ * show where its controls actually land.
+ *
+ * The `--safe-area-*` variables are set on the document element (the same names
+ * `tailwind/index.css` maps to `env(safe-area-inset-*)`) because a headless
+ * browser reports zero insets — without them nothing here can show that a
+ * control has been parked under the status bar.
+ */
+export const MermaidPhoneViewer: Story = {
+  args: {
+    size: 'default',
+    text: mermaidPhoneText,
+  },
+  globals: { theme: 'dark' },
+  parameters: {
+    layout: 'fullscreen',
+    docs: {
+      description: {
+        story:
+          'Mermaid on a phone-sized viewport with simulated safe-area insets, for reviewing the full-screen diagram viewer.',
+      },
+    },
+  },
+  render: (args) => <MermaidPhoneFrame>{<MarkdownRenderer {...args} />}</MermaidPhoneFrame>,
+};
+
+const PHONE_SAFE_AREA = {
+  '--safe-area-top': '59px',
+  '--safe-area-right': '0px',
+  '--safe-area-bottom': '34px',
+  '--safe-area-left': '0px',
+} as const;
+
+function MermaidPhoneFrame({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [name, value] of Object.entries(PHONE_SAFE_AREA)) {
+      root.style.setProperty(name, value);
+    }
+    return () => {
+      for (const name of Object.keys(PHONE_SAFE_AREA)) {
+        root.style.removeProperty(name);
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      data-testid="mermaid-phone-story"
+      className="flex h-screen w-full flex-col bg-background text-foreground"
+    >
+      {/* Stand-in for the system status bar the insets above reserve. */}
+      <div className="flex shrink-0 items-end justify-between bg-black px-6 pb-1 text-xs text-white [block-size:var(--safe-area-top)]">
+        <span>21:00</span>
+        <span>76%</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-sm">{children}</div>
+    </div>
+  );
+}

@@ -84,3 +84,28 @@ it('serializes durable writes and exposes the clear synchronously before a promo
   await Promise.all([first, clear]);
   expect(writes).toEqual([fixture(), null]);
 });
+
+it('retires only the captured checkpoint version, including identical-text replacements', async () => {
+  let durable: ShortcutDraftRecord | null = null;
+  const repo = new ShortcutDraftRepository({
+    read: async () => durable,
+    write: async (_identity, record) => {
+      durable = record;
+    },
+  });
+  const submitted = fixture();
+  await repo.write(identity, submitted);
+  const version = repo.captureVersion(identity, fixture())!;
+  expect(version).toBe(submitted);
+  const replacement = fixture();
+  await repo.write(identity, replacement);
+  expect(repo.clearIfUnchanged(identity, version)).toBeNull();
+  expect(await repo.read(identity)).toBe(replacement);
+  expect(durable).toBe(replacement);
+  const currentVersion = repo.captureVersion(identity, replacement)!;
+  const clearing = repo.clearIfUnchanged(identity, currentVersion);
+  expect(clearing).not.toBeNull();
+  expect(await repo.read(identity)).toBeNull();
+  await clearing;
+  expect(durable).toBeNull();
+});

@@ -1,141 +1,105 @@
 # components/chat
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+Index and rationale: [README.md](README.md).
 
-## Responsibility Split
+## Composer and selectors
 
-- `chat-composer.tsx` owns the reusable composer shell: prompt textarea,
-  attachment chips, status text, top/footer/bottom selector slots, image add,
-  and primary/secondary action placement.
-- `attachment-add-menu.tsx` is the composer's single "+" menu and owns the
-  per-turn MCP selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), NOT the
-  footer selector row — the footer stays run config → permission → usage. MCP is
-  always a second level because the catalog is multi-select and unbounded:
-  desktop opens a hover submenu, touch has no hover so mobile pushes the panel
-  onto the same surface with a back row. Toggling never closes the menu. The
-  entry hides itself when the workspace catalog is empty.
-- `chat-landing.tsx` owns new-chat orchestration, selector state, mobile sheet
-  wiring, submit behavior, and the nodes passed into `ChatComposer`.
-- `chat-landing-selectors.tsx` and `unified-project-selector.tsx` wrap shared
-  selector primitives for project/branch controls. The desktop project picker
-  mixes local + GitHub projects by recent activity and exposes pinned no-project,
-  add-local, and connect-GitHub actions on the standard DropdownMenu surface
-  as composer run config. It mounts at most 20 option rows: the 20 most recent
-  while the query is empty, or the first 20 matches from the complete option set
-  while searching. Desktop landing's top scope row is ordered machine →
-  project → worktree/branch. Direct local-project sessions never render or pass
-  a branch; the local branch picker appears only in explicit worktree mode.
-  GitHub sessions keep their branch picker. The selected machine filters both
-  local projects and agent configs; changing away from a selected local project's
-  machine clears that project instead of silently choosing another one. GitHub
-  projects remain machine-independent. Keep the mobile type-specific pickers
-  independent until their sheet is redesigned. A single-member workspace never
-  passes project-sharing state. In multi-member workspaces, local project options
-  and the selected desktop trigger show only an effective `Private` status; Team
-  and unresolved states stay hidden. Effective access still combines
-  `machine.sharedWithTeam && project.sharedWithTeam`, rather than using the raw
-  project bit. The selected Private segment opens `ProjectShareDialog`; confirming
-  uses the project share mutation, which also shares its machine atomically. Route
-  project share failures through `useConvexErrorMessage` so expired auth requests
-  recovery and raw Convex details never reach the toast. GitHub options do not use
-  this local-project access badge. The desktop machine selector marks an option as
-  local only when its value exactly matches `visibleLocalMachineId`; ownership and
-  Private access are independent and must never stand in for the local probe.
-- The sharing-review landing notice has two distinct durable actions: dismissing
-  it keeps the current source revision quiet, while “Don't remind me again”
+- `attachment-add-menu.tsx` owns the single composer "+" menu and per-turn MCP
+  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), never the footer row.
+  MCP uses a desktop hover submenu or a touch panel on the same surface with a
+  back row. Toggling keeps it open; an empty catalog hides the entry.
+- Desktop project pickers use DropdownMenu with local/GitHub projects by recency.
+  Pin no-project/add-local/connect-GitHub actions; mount at most 20 rows (most
+  recent if empty, first matches from all options if searching). Scope order:
+  machine → project → worktree/branch. Direct local sessions neither render nor
+  pass a branch; local worktrees and GitHub sessions keep theirs. GitHub projects
+  are machine-independent. Machine changes filter local projects/configs and clear
+  incompatible local projects without replacement. Keep mobile pickers independent.
+- Single-member workspaces pass no project-sharing state. Otherwise local project
+  options and the selected desktop trigger show only effective `Private`; hide Team
+  and unresolved states. Effective access is `machine.sharedWithTeam &&
+  project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
+  its project share mutation also shares the machine atomically. Use
+  `useConvexErrorMessage` for failures (auth recovery, no raw Convex toast).
+  GitHub options have no access badge. A desktop machine option is local only when
+  its value equals `visibleLocalMachineId`, never by ownership or Private access.
+- The sharing-review landing notice has two distinct durable actions: dismissal
+  keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
-- The landing composer footer is ordered run config → permission → usage on
-  desktop. Provider interaction mode is a row inside run config; the standalone
-  button is reserved for explicit permission mode, with legacy ACP modes as its
-  fallback. Mobile new-chat uses the same consolidated `MobileSessionRunConfig`
-  face + sheet as the in-session composer (agent/model/interaction/reasoning/
-  permission/Plan/Fast), with usage beside it; do not reintroduce separate model/thinking
-  chips or a below-composer agent/permission row. Usage reads subscription rate
-  limits from the selected agent's Machine Flock metadata and remains hidden for
-  custom or environment-overridden providers.
-- The desktop run config menu's "Recently used" group (`lib/recent-run-configs.ts`)
-  is device-local localStorage history keyed per workspace, recorded only when a
-  chat is actually STARTED — never when a knob moves. A row offers a whole
-  combination (agent + model + every config option) and is filtered to agents on
-  the selected machine; the current combination never appears. Applying one sets
-  the agent first and must wait until `appliedTargetKey` (see
-  `use-acp-session-config-selection.ts`) names that agent before writing
-  model/options, or the seeded per-agent defaults overwrite them.
-- `chat-landing-view.tsx` is the render-only landing layout around
-  `ChatComposer`; keep stateful data loading in `chat-landing.tsx`. Its one
-  piece of local state is the session-mention drop target: a session dragged
-  from the sidebar onto the landing writes a mention into the composer this
-  layout renders, and nothing above it participates, so plumbing the handle up
-  to `chat-landing.tsx` would buy nothing. `ConversationDropOverlay` paints the
-  page-level mask as soon as the sidebar drag starts, not only after `dragenter`.
-  Desktop only — touch has no HTML5 drag, so the mobile branch passes the handle
-  but installs no drop target.
-- `comment-reference-*` and `visual-annotation-reference-*` own attachment chip
-  state and rendering for references attached to outgoing messages.
-- Landing attachment uploads use two sibling hooks in `hooks/`:
-  `use-chat-landing-image-draft.ts` (images) and `use-chat-landing-file-draft.ts`
-  (non-image files; cloud upload + Electron local-transport fast path, mirroring
-  `sessions/session-chat-input-area.tsx`). Every landing branch exposes ONE
-  unfiltered hidden file input and one `onAttachmentAddClick`; selected files
-  are split by MIME into those two state machines, just like paste and drop.
+- Desktop footer order: run config → permission → usage. Provider interaction mode
+  belongs inside run config; the standalone button is explicit permission mode,
+  falling back to legacy ACP modes. Mobile new-chat and in-session composers share
+  `MobileSessionRunConfig` face + sheet, with adjacent usage; see
+  [mobile rules](../mobile/AGENTS.md). Never restore separate model/thinking chips
+  or below-composer agent/permission rows. Usage reads the selected agent's Machine
+  Flock subscription limits; hide it for custom or environment-overridden providers.
+- Desktop "Recently used" (`lib/recent-run-configs.ts`) is device-local localStorage
+  history per workspace, recorded only on chat START, never on setting changes.
+  Rows offer the entire agent/model/config combination, filter by selected machine,
+  and exclude the current combination. Apply the agent first; wait for
+  `appliedTargetKey` in `use-acp-session-config-selection.ts` to name it before
+  applying model/options.
+- Every landing branch exposes ONE unfiltered hidden file input and one
+  `onAttachmentAddClick`; selected files are split by MIME into the image and file
+  draft hooks, exactly like paste and drop.
 
 ## Invariants
 
-- The chat-route URL declares the composer's selection; it never carries one-shot
-  event nonces. Once the URL names a selection, the landing mirrors composer
-  steering back into it via the desktop route's `onSelectionUrlSync` (replace,
-  incomplete selections map to an empty search), so a sidebar project-row click
-  is either an identical-URL no-op or an ordinary search change. A plain `/chat`
-  URL stays plain: restored defaults and auto-selection never rewrite it. Mobile
-  keeps its base-context model and passes no sync callback.
-- `use-chat-landing-draft-session.ts` owns the landing's reserved session id.
-  Images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)` MUST consume
-  that same identity. Attachment hooks never reset it independently; reset only
-  after full draft clear. Submit blocks while either `hasBlockingImages` or
+- The chat-route URL declares selection, never one-shot event nonces. Once it names
+  a selection, mirror composer steering through desktop `onSelectionUrlSync` using
+  replace (incomplete selection → empty search). Plain `/chat` stays plain; restored
+  defaults/auto-selection never rewrite it. Mobile keeps base context with no callback.
+- `use-chat-landing-draft-session.ts` owns the landing's reserved session id, and
+  images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)`
+  MUST consume that same identity. Attachment hooks never reset it independently;
+  reset only after a full draft clear. Submit blocks while `hasBlockingImages` or
   `hasBlockingFiles`.
-- Submit immediately hides and disables the visible landing draft, but preserves
+- Store reserved session id and attachments in module-level atoms
+  (`atoms/chat-landing-draft.ts`, `buildChatLandingDraftKey`) keyed by workspace SLUG,
+  not initially unresolved id. Route unmount neither revokes previews nor aborts
+  uploads; uploads settle into the atom. Revoke/abort only on removal/full draft
+  clear. No localStorage persistence; app restart may lose attachments.
+- Submit immediately hides and disables the visible landing draft but preserves
   its controlled text, attachment resources, and reserved session id until
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance
   may clear resources or reset the reserved id. The accepted history entry is
-  direct-authored into the renderer's own session store, so the new conversation
-  renders it immediately without waiting for room sync.
+  direct-authored into the renderer's own session store.
 - `use-landing-submission-owner.ts` fences post-accept draft cleanup and navigation
   by mount and draft identity. A late accepted session must not clear a replacement
-  landing's Shortcut checkpoint; only its current owner clears before navigation.
-- Draft ACP preparation also uses that exact reserved session id. It carries no prompt,
-  env, or secret-shaped ACP option values; it may include the current sanitized
-  mode/model/options. It is debounced/best-effort, replaced when routing or run config
-  changes, cancelled on idle, and never awaited by submit. After the initial user turn
-  is locally accepted, submit MUST hand the lease to the durable session before clearing
-  the draft or navigating; successful handoff must not send
-  `session/prepare-cancel`. See
-  The detailed contract remains in the private architecture context.
-
-- Composer dropdown/toggle chrome must disable browser text selection with
-  `select-none`: top selector, footer selector, bottom bar, ACP boolean toggles,
-  Workdir/agent/model/branch picker triggers, mobile inline picker triggers, and
-  picker option rows.
-- After a desktop composer/landing menu selection (mode, model/agent run-config,
-  project, branch, machine, …), focus must return to the prompt
-  (`[data-keyboard-nav="composer"]`), never the menu trigger. Shared policy lives
-  in `lib/menu-focus.ts` and is wired through `ui/dropdown-menu` +
-  `OptionSelector`. Keep-open run-config picks (`event.preventDefault` on select)
-  still count as a selection so Esc/outside-dismiss does not leave focus on the
-  model/agent trigger (which would make Enter re-open that menu).
+  landing's Shortcut checkpoint. Retired acceptance may only compare-and-clear its
+  captured checkpoint version; it must not clear current UI state or navigate.
+- Draft ACP preparation uses that same reserved id. It carries no prompt, env, or
+  secret-shaped ACP option values; it may include the current sanitized
+  mode/model/options. It is debounced/best-effort, replaced when routing or run
+  config changes, cancelled on idle, and never awaited by submit. Once the initial
+  user turn is locally accepted, submit MUST hand the lease to the durable session
+  before clearing the draft or navigating; a successful handoff must not send
+  `session/prepare-cancel`.
+- `chat-landing-view.tsx` renders `ChatComposer`; stateful loading stays in
+  `chat-landing.tsx`, session-mention drop handling in the view. Paint the page-level
+  `ConversationDropOverlay` when sidebar drag starts, before `dragenter`. Desktop
+  only: mobile passes the handle but installs no HTML5 drop target. A dropped folder
+  takes the same handle and becomes a `@<absolute path>` mention, never an upload.
+- Apply `select-none` to composer dropdown/toggle chrome: top/footer selectors,
+  bottom bar, ACP booleans, Workdir/agent/model/branch triggers, mobile inline
+  triggers, and option rows. Keep prompt, pasted-text editor, and picker search
+  selectable/editable; they must not inherit broad `select-none`.
+- Desktop composer/landing menu selections return focus to the prompt
+  (`[data-keyboard-nav="composer"]`), never the trigger. Use `lib/menu-focus.ts`
+  through `ui/dropdown-menu` and `OptionSelector`, including keep-open run-config
+  selections (`event.preventDefault`).
 - Desktop landing's machine/project/branch menus always open upward with collision
   flipping disabled. Their top-row labels and glyphs, including disabled branch
   state, share the same neutral foreground level.
 - The ACP provider cycle command uses the same single-machine scope as the visible
   provider menu. Never cycle all workspace configs while retaining the old machine id.
-- Keep text-entry surfaces selectable/editable: the main prompt textarea, pasted
-  text editor, and picker search inputs must not inherit broad `select-none`.
 - Mobile composer pickers rely on `MobileInlinePicker` plus
-  `MobileInlinePickerRowSlot` so dropdown panels project to a full-row slot
-  instead of resizing a narrow footer chip.
-- Do not render raw local Git, Machine RPC, or Streams failures as landing composer
-  status text. Keep those failures in state for submit blocking, telemetry, logging,
-  and the scoped retry control; composer status is for actionable validation and
-  selected-machine project guidance.
-- Chat Landing must not initiate ACP capability probes. Startup refresh lives in
-  the workspace runtime, and explicit probes live in settings/onboarding; do not
-  render their spinner, download progress, or ready state inside the landing composer.
+  `MobileInlinePickerRowSlot` so dropdown panels project to a full-row slot,
+  never resizing a narrow footer chip.
+- Keep raw local Git, Machine RPC, and Streams failures out of landing status copy;
+  retain them for submit blocking, telemetry, logging, and scoped retry. Status copy
+  is for actionable validation and selected-machine project guidance.
+- Chat Landing must not initiate ACP capability probes: startup refresh lives in
+  the workspace runtime and explicit probes in settings/onboarding. Do not render
+  their spinner, download progress, or ready state in the landing composer.

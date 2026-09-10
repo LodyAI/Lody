@@ -20,6 +20,11 @@ import {
   useState,
 } from 'react';
 import {
+  MessageSelectionContext,
+  MessageSelectionOverlay,
+  MessageSelectionRow,
+} from './message-selection';
+import {
   ZoomableImageViewer,
   type ImagePreviewPortalAnchorRef,
 } from '@/components/shared/zoomable-image-viewer';
@@ -164,7 +169,7 @@ import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-dur
 import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { SessionRelationCard } from '@/components/shared/session-relation-card';
+import { CreatedSessionOperationCard } from './created-session-operation-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
@@ -434,6 +439,7 @@ export interface SessionChatStreamViewProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -455,6 +461,7 @@ export interface SessionChatStreamViewProps {
 const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
@@ -825,6 +832,7 @@ type AssistantTurnRowsCacheEntry = {
   scopedAssistantActions: AssistantMessageAction[] | undefined;
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
+  copyContextAvailable: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
@@ -837,6 +845,7 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId,
   activeSearchBlockId,
   expansionVersion,
+  copyContextAvailable = false,
 }: {
   items: ChatStreamItem[];
   lastAssistantMessageId: string | null;
@@ -845,6 +854,7 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId?: string | null;
   activeSearchBlockId?: string | null;
   expansionVersion: number;
+  copyContextAvailable?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -880,6 +890,7 @@ export const buildChatVirtualRows = ({
       cachedRows.fileDiffs === fileDiffs &&
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
+      cachedRows.copyContextAvailable === copyContextAvailable &&
       cachedRows.expansionVersion === expansionVersion
     ) {
       rows.push(...cachedRows.rows);
@@ -1115,6 +1126,7 @@ export const buildChatVirtualRows = ({
 
     const showDurationInFooter = !anySegmentUsesWorkedGroup;
     if (
+      copyContextAvailable ||
       shouldRenderAssistantFooter({
         message,
         renderEntries: entries,
@@ -1143,6 +1155,7 @@ export const buildChatVirtualRows = ({
       scopedAssistantActions,
       activeSearchBlockId,
       expansionVersion,
+      copyContextAvailable,
     });
     rows.push(...assistantRows);
   }
@@ -1184,6 +1197,7 @@ export const SessionChatStreamView = forwardRef<
       assistantActions,
       assistantActionsMessageId = null,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability = 'hidden',
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
@@ -1197,6 +1211,7 @@ export const SessionChatStreamView = forwardRef<
     ref
   ) => {
     const vlistRef = useRef<VirtualizerHandle>(null);
+    const messageSelection = useContext(MessageSelectionContext);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
     const search = useSessionSearch();
@@ -1224,12 +1239,13 @@ export const SessionChatStreamView = forwardRef<
         get current() {
           return (
             groupExpansionAutoScrollSuppressedRef.current ||
+            messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
       }),
-      [suppressStickyAutoScrollRef]
+      [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
       (messageId: string, groupKey: string, expanded: boolean) => {
@@ -1274,6 +1290,7 @@ export const SessionChatStreamView = forwardRef<
       });
     }, []);
 
+    const copyContextAvailable = onCopyContext !== undefined;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1286,12 +1303,14 @@ export const SessionChatStreamView = forwardRef<
         assistantActionsMessageId,
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
+        copyContextAvailable,
       });
     }, [
       activeSearchBlockId,
       assistantActions,
       assistantActionsMessageId,
       assistantExpansionVersion,
+      copyContextAvailable,
       items,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
@@ -1624,10 +1643,11 @@ export const SessionChatStreamView = forwardRef<
     );
     const chatActionContextValue = useMemo(
       () => ({
+        copyContext: onCopyContext,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
       }),
-      [onOpenHtmlFile, sendMessage]
+      [onCopyContext, onOpenHtmlFile, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -1659,10 +1679,11 @@ export const SessionChatStreamView = forwardRef<
           >
             <div
               ref={scrollContainerRef}
+              data-message-selection-scroll=""
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.
-              className="chat-scrollbar h-full overflow-x-hidden py-5 sm:py-6"
+              className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
               // Mobile session page floats a frosted header over the list;
               // `--conversation-top-inset` (set by session-detail's mobile
               // branch) pads the scroll content so the first message clears the
@@ -1693,20 +1714,25 @@ export const SessionChatStreamView = forwardRef<
                 {leadingContent == null ? null : (
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
-                {virtualRows.map((row) => {
+                {virtualRows.map((row, rowIndex) => {
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
                     // so they carry no per-turn file diffs or last-assistant
                     // quick actions.
                     return (
-                      <ChatItem
+                      <MessageSelectionRow
                         key={row.key}
-                        item={row.item}
-                        renderMessageRow={renderMessageRow}
-                        noMessagesLabel={noMessagesLabel}
-                        emptyState={emptyState}
-                      />
+                        id={row.item.type === 'message' ? row.item.message.id : undefined}
+                        first
+                      >
+                        <ChatItem
+                          item={row.item}
+                          renderMessageRow={renderMessageRow}
+                          noMessagesLabel={noMessagesLabel}
+                          emptyState={emptyState}
+                        />
+                      </MessageSelectionRow>
                     );
                   }
 
@@ -1720,33 +1746,39 @@ export const SessionChatStreamView = forwardRef<
                       : (messageFileDiffEntriesByTurn[row.item.message.id] ??
                         EMPTY_EDITED_FILE_ENTRIES);
                   return (
-                    <AssistantChatItem
+                    <MessageSelectionRow
                       key={row.key}
-                      row={row}
-                      fileDiffOverride={fileDiffOverride}
-                      assistantActions={resolveAssistantMessageActions(
-                        row.item.message.id,
-                        assistantActionsMessageId,
-                        assistantActions
-                      )}
-                      onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                      forkWorktreeAvailability={forkWorktreeAvailability}
-                      onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                      isForking={forkingAssistantMessageId === row.item.message.id}
-                      onFileDiffClick={onFileDiffClick}
-                      onFilePathClick={onFilePathClick}
-                      onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                      onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                      isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                      onTurnHoverChange={handleAssistantTurnHoverChange}
-                      conversationFontSize={conversationFontSize}
-                    />
+                      id={row.item.message.id}
+                      first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+                    >
+                      <AssistantChatItem
+                        row={row}
+                        fileDiffOverride={fileDiffOverride}
+                        assistantActions={resolveAssistantMessageActions(
+                          row.item.message.id,
+                          assistantActionsMessageId,
+                          assistantActions
+                        )}
+                        onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+                        forkWorktreeAvailability={forkWorktreeAvailability}
+                        onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                        isForking={forkingAssistantMessageId === row.item.message.id}
+                        onFileDiffClick={onFileDiffClick}
+                        onFilePathClick={onFilePathClick}
+                        onGroupExpandedChange={handleAssistantGroupExpandedChange}
+                        onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+                        isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+                        onTurnHoverChange={handleAssistantTurnHoverChange}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </MessageSelectionRow>
                   );
                 })}
                 {shouldShowAgentActivity && agentActivityLabel && (
                   <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                 )}
               </Virtualizer>
+              <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
@@ -1810,6 +1842,7 @@ export const MessageRowView = memo(function MessageRowView({
   message,
   sessionId,
   user,
+  showSenderIdentity = false,
   onNavigateSession,
   onEdit,
   onResendUndelivered,
@@ -1823,6 +1856,7 @@ export const MessageRowView = memo(function MessageRowView({
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
 }) {
   const { i18n } = useTranslation();
@@ -1853,6 +1887,7 @@ export const MessageRowView = memo(function MessageRowView({
         message={message}
         sessionId={sessionId}
         user={user}
+        showSenderIdentity={showSenderIdentity}
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
@@ -1915,6 +1950,22 @@ const SystemMessageRowView = ({
             key={`worktree-script-${item.phase}-${itemIndex}`}
             script={item}
           />
+        ) : item.type === 'operation_progress' ? (
+          <div
+            key={item.operationId}
+            className="flex flex-col gap-2"
+            data-session-create-progress=""
+          >
+            {item.items.map((target) => (
+              <CreatedSessionOperationCard
+                key={target.target.sessionId}
+                sessionId={target.target.sessionId}
+                fallbackTitle={target.label}
+                status={target.status}
+                onNavigateSession={onNavigateSession}
+              />
+            ))}
+          </div>
         ) : (
           <OperationCompletionView
             key={`${item.deliveryId}-${itemIndex}`}
@@ -1924,37 +1975,6 @@ const SystemMessageRowView = ({
         )
       )}
     </div>
-  );
-};
-
-const selectSessionTitle = (session: SessionMeta | null | undefined): string | null =>
-  session?.title?.trim() || null;
-
-const CreatedSessionOperationCard = ({
-  sessionId,
-  fallbackTitle,
-  onNavigateSession,
-}: {
-  sessionId: SessionId;
-  fallbackTitle?: string;
-  onNavigateSession?: (target: SessionNavigationTarget) => void;
-}) => {
-  const { t } = useTranslation();
-  const titleAtom = useMemo(
-    () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), selectSessionTitle),
-    [sessionId]
-  );
-  const liveTitle = useAtomValue(titleAtom);
-  const title = liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
-
-  return (
-    <SessionRelationCard
-      relation="opened"
-      label={t('sessions.openedBy.createdSession', 'Session created')}
-      sessionTitle={title}
-      actionLabel={t('sessions.openedBy.viewSession', 'View session')}
-      onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
-    />
   );
 };
 
@@ -1979,8 +1999,9 @@ const OperationCompletionView = ({
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createdSessions =
-    completion.operationKind === 'session_create' ||
-    completion.operationKind === 'session_create_many'
+    !completion.progressMessageId &&
+    (completion.operationKind === 'session_create' ||
+      completion.operationKind === 'session_create_many')
       ? resultItems.flatMap((item) =>
           item.status === 'succeeded'
             ? [
@@ -2001,6 +2022,7 @@ const OperationCompletionView = ({
             key={created.sessionId}
             sessionId={created.sessionId}
             fallbackTitle={created.fallbackTitle}
+            status="succeeded"
             onNavigateSession={onNavigateSession}
           />
         ))}
@@ -2018,9 +2040,13 @@ const OperationCompletionView = ({
                   })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="px-1 text-xs text-muted-foreground">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
@@ -2057,9 +2083,13 @@ const OperationCompletionView = ({
             })}
           </div>
         ) : null}
-        {completion.continuation?.status === 'not_started' ? (
+        {completion.continuation ? (
           <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.continuationNotStarted')}
+            {t(
+              completion.continuation.status === 'uncertain'
+                ? 'orchestration.continuationUncertain'
+                : 'orchestration.continuationNotStarted'
+            )}
           </div>
         ) : null}
       </div>
@@ -2674,6 +2704,7 @@ const UserMessageRowView = ({
   message,
   sessionId,
   user,
+  showSenderIdentity,
   timestampLabel,
   hasWideContent,
   conversationFontSize,
@@ -2683,6 +2714,7 @@ const UserMessageRowView = ({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   user?: SessionChatUser;
+  showSenderIdentity: boolean;
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
@@ -2690,6 +2722,7 @@ const UserMessageRowView = ({
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -2787,7 +2820,7 @@ const UserMessageRowView = ({
   return (
     <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
       <div className="mt-0.5 shrink-0 text-muted-foreground">
-        <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
       </div>
       <div
         className={cn(
@@ -2795,7 +2828,15 @@ const UserMessageRowView = ({
           isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
         )}
       >
-        <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div
+          className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground"
+          data-testid="user-message-metadata"
+        >
+          {showSenderIdentity && user?.name ? (
+            <span className="max-w-40 truncate font-medium" title={user.name}>
+              {user.name}
+            </span>
+          ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
           {isUndelivered ? (
             onResendUndelivered ? (
@@ -2887,8 +2928,19 @@ const UserMessageRowView = ({
         </div>
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
-        {hasTextContent && !isEditing ? (
+        {(hasTextContent || copyContext) && !isEditing ? (
           <div className="flex gap-0.5">
+            {copyContext && (
+              <AssistantForkButton
+                turnId={message.id}
+                worktreeAvailability="hidden"
+                className={cn(
+                  'transition-opacity',
+                  !isMobile &&
+                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                )}
+              />
+            )}
             {onEdit ? (
               <TooltipProvider>
                 <Tooltip delayDuration={500}>
@@ -2989,6 +3041,67 @@ const UserMessageRowView = ({
     </div>
   );
 };
+
+function UserMessageAuthorAvatar({
+  user,
+  isMobile,
+  showProfile,
+}: {
+  user?: SessionChatUser;
+  isMobile: boolean;
+  showProfile: boolean;
+}) {
+  const { t } = useTranslation();
+  const displayName = user?.name?.trim() || user?.email?.trim();
+  const avatar = (
+    <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+  );
+
+  if (isMobile || !showProfile || !displayName) {
+    return avatar;
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
+            name: displayName,
+          })}
+        >
+          {avatar}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="left"
+        align="start"
+        sideOffset={10}
+        className="w-72 overflow-hidden p-0"
+        aria-label={t('sessions.senderProfile', 'Sender profile')}
+      >
+        <div className="flex items-center gap-3.5 p-4">
+          <UserAvatar
+            user={user}
+            className="h-16 w-16 shrink-0 text-xl"
+            fallbackClassName="bg-primary/10 text-primary"
+          />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">
+              {user?.name?.trim() || displayName}
+            </div>
+            {user?.email ? (
+              <div className="mt-1 truncate text-xs text-muted-foreground" title={user.email}>
+                {user.email}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Confirmation dialog behind the "Not delivered" label: resends the
@@ -3464,28 +3577,31 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 const AssistantForkButton = ({
   turnId,
+  className,
   isForking,
   worktreeAvailability,
   onFork,
   onWorktreeMenuOpen,
 }: {
   turnId: string;
+  className?: string;
   isForking?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
-  onFork: (turnId: string, destination?: SessionForkDestination) => void;
+  onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   onWorktreeMenuOpen?: () => void;
 }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const offerWorktree = worktreeAvailability !== 'hidden';
+  const { copyContext } = useContext(SessionChatActionContext);
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-      onClick={offerWorktree ? undefined : () => onFork(turnId, 'shared')}
-      disabled={isForking}
+      className={cn(
+        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
+        className
+      )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
       {isForking ? (
@@ -3496,17 +3612,6 @@ const AssistantForkButton = ({
     </Button>
   );
 
-  if (!offerWorktree) {
-    return (
-      <TooltipProvider>
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{t('sessions.forkSession', 'Fork session')}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-
   return (
     <SessionForkDestinationPopover
       open={menuOpen}
@@ -3515,8 +3620,9 @@ const AssistantForkButton = ({
         if (open) onWorktreeMenuOpen?.();
       }}
       worktreeAvailability={worktreeAvailability}
-      disabled={isForking}
-      onSelect={(destination) => onFork(turnId, destination)}
+      nativeForkAvailable={!!onFork && !isForking}
+      onCopyContext={copyContext ? () => copyContext(turnId) : undefined}
+      onSelect={(destination) => onFork?.(turnId, destination)}
     >
       {button}
     </SessionForkDestinationPopover>
@@ -3549,6 +3655,7 @@ const AssistantTurnFooter = ({
   isForking?: boolean;
 }) => {
   const { t, i18n } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   const [didCopy, setDidCopy] = useState(false);
   const textContent = useMemo(() => {
@@ -3592,7 +3699,7 @@ const AssistantTurnFooter = ({
     completionTimestampLabel.length > 0 ||
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
-  const showActionBar = hasActionBarContent || onFork !== undefined;
+  const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
@@ -3624,7 +3731,7 @@ const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {showFinishedMetadata && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -3648,7 +3755,7 @@ const AssistantTurnFooter = ({
               className="shrink-0 tabular-nums"
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
-              {mobileDurationLabel}
+              {showFinishedMetadata ? mobileDurationLabel : ''}
             </span>
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
@@ -3659,7 +3766,7 @@ const AssistantTurnFooter = ({
              render, the timestamp must stay on the plain gutter. Mobile pulls
              only the trailing edge — its leading glyph aligns to the duration
              label, not to the answer text. */}
-          {hasCopyableText || hasTurnConfigInfo || onFork ? (
+          {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
               {hasCopyableText ? (
                 <TooltipProvider>
@@ -3691,28 +3798,29 @@ const AssistantTurnFooter = ({
                 </TooltipProvider>
               ) : null}
               {/* The turn config lives below the output on every layout. */}
-              {hasTurnConfigInfo ? (
+              {showFinishedMetadata && hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
                   className="h-7 w-7"
                 />
               ) : null}
-              {onFork ? (
+              {(showFinishedMetadata && onFork) || copyContext ? (
                 <AssistantForkButton
                   turnId={message.id}
+                  className="mr-2"
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
-                  onFork={onFork}
+                  onFork={showFinishedMetadata ? onFork : undefined}
                   onWorktreeMenuOpen={onForkWorktreeMenuOpen}
                 />
               ) : null}
             </div>
           ) : null}
-          {completionTimestampLabel ? (
+          {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
           ) : null}
-          {!isMobile && showDuration && durationLabel ? (
+          {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
               <span className="font-mono tabular-nums">{durationLabel}</span>

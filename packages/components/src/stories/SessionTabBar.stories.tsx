@@ -161,6 +161,88 @@ const screenshotChildSessions: SessionMeta[] = [
   },
 ];
 
+/**
+ * Live presence per session id. Presence — never `SessionMeta.status` — is what
+ * the tab bar reads for working / waiting-permission, so a story that wants a
+ * spinner or an amber marker has to seed it here.
+ */
+type StoryPresence = Record<string, 'running' | 'requestPermission'>;
+
+const DEFAULT_STORY_PRESENCE: StoryPresence = {
+  [childSessions[0]!.id]: 'running',
+  [childSessions[1]!.id]: 'requestPermission',
+};
+
+function buildPresenceStates(presence: StoryPresence) {
+  return Object.fromEntries(
+    Object.entries(presence).map(([sessionId, type]) => {
+      const instanceId = `storybook-${sessionId}` as LodyPresenceInstanceId;
+      return [
+        getLodySessionPresenceKey(sessionId as SessionId, instanceId),
+        {
+          kind: 'session' as const,
+          sessionId: sessionId as SessionId,
+          machineId,
+          instanceId,
+          status: { type },
+          updatedAt: getServerNow(),
+        },
+      ];
+    })
+  );
+}
+
+/* ── Unread sub-session tabs ────────────────────────────────────────────
+   A child tab is the ONLY place its own new output is announced: sub-sessions
+   get no sidebar row of their own. These four cover the whole status ladder in
+   one row — waiting > working > unread > resting. */
+const UNREAD_NOW = Date.parse('2026-04-02T01:00:00.000Z');
+
+const unreadChildSessions: SessionMeta[] = [
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-1' as SessionId,
+    title: 'Review changes',
+    // Answered after the user last looked at it — the unread case.
+    lastMessageAt: UNREAD_NOW,
+    lastReadAt: UNREAD_NOW - 120_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-2' as SessionId,
+    title: 'Trace message dispatch',
+    // Never opened, and it has produced output.
+    lastMessageAt: UNREAD_NOW - 30_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-3' as SessionId,
+    title: 'Run the integration tests',
+    // Still working: the spinner outranks unread.
+    lastMessageAt: UNREAD_NOW - 5_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-4' as SessionId,
+    title: 'Write the migration notes',
+    // Blocked on a permission request: outranks everything.
+    lastMessageAt: UNREAD_NOW - 9_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-5' as SessionId,
+    title: 'Update the changelog',
+    // Caught up — plain agent icon.
+    lastMessageAt: UNREAD_NOW - 600_000,
+    lastReadAt: UNREAD_NOW - 60_000,
+  },
+];
+
+const unreadPresence: StoryPresence = {
+  'session-unread-3': 'running',
+  'session-unread-4': 'requestPermission',
+};
+
 const manyChildSessions: SessionMeta[] = [
   'Review the protocol design',
   'Trace message dispatch',
@@ -179,35 +261,18 @@ const manyChildSessions: SessionMeta[] = [
 type StoryShellProps = React.ComponentProps<typeof SessionTabBar> & {
   frameWidth?: number;
   reservedRightWidth?: number;
+  presence?: StoryPresence;
 };
 
-function StoryShell({ frameWidth, reservedRightWidth = 0, ...props }: StoryShellProps) {
+function StoryShell({
+  frameWidth,
+  reservedRightWidth = 0,
+  presence = DEFAULT_STORY_PRESENCE,
+  ...props
+}: StoryShellProps) {
   const [store] = useState(() => {
     const nextStore = createStore();
-    nextStore.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(
-        childSessions[0]!.id,
-        'storybook-running' as LodyPresenceInstanceId
-      )]: {
-        kind: 'session',
-        sessionId: childSessions[0]!.id,
-        machineId,
-        instanceId: 'storybook-running' as LodyPresenceInstanceId,
-        status: { type: 'running' },
-        updatedAt: getServerNow(),
-      },
-      [getLodySessionPresenceKey(
-        childSessions[1]!.id,
-        'storybook-permission' as LodyPresenceInstanceId
-      )]: {
-        kind: 'session',
-        sessionId: childSessions[1]!.id,
-        machineId,
-        instanceId: 'storybook-permission' as LodyPresenceInstanceId,
-        status: { type: 'requestPermission' },
-        updatedAt: getServerNow(),
-      },
-    });
+    nextStore.set(lodyPresenceStatesAtom, buildPresenceStates(presence));
     return nextStore;
   });
   const [activeTabSessionId, setActiveTabSessionId] = useState(props.activeTabSessionId);
@@ -478,5 +543,30 @@ export const ViewerGroupOnly: Story = {
     archivedChildSessions: [],
     tabOrder: [viewerTabs[1]!.id, viewerTabs[0]!.id],
     activeViewerTabId: viewerTabs[1]!.id,
+  },
+};
+
+export const UnreadChildTabs: Story = {
+  name: 'Unread sub-session tabs',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: unreadChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: unreadChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotParentSession.id,
+    presence: unreadPresence,
+    frameWidth: 1200,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'The tab bar status slot across its whole ladder, left to right: the ACTIVE parent ' +
+          '(never marked — it is the surface clearing unread), an unread child, a never-read ' +
+          'child, a working child (spinner outranks unread), a child blocked on a permission ' +
+          'request (outranks everything), and a caught-up child (plain agent icon).',
+      },
+    },
   },
 };

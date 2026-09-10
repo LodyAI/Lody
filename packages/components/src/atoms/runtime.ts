@@ -1,3 +1,4 @@
+import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import { atom } from 'jotai';
 import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
@@ -85,6 +86,7 @@ export type SessionDocUpdater =
   | ((state: Readonly<SessionDocInput>) => SessionDocInput);
 
 export type SessionDocStore = {
+  readonly historyWriter: import('@lody/shared').HistoryWriter;
   readonly sessionId: SessionId;
   readonly roomId: string;
   readonly doc: LoroDoc;
@@ -367,7 +369,7 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
     options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
-  ) => Promise<FilePreviewV3Response>;
+  ) => Promise<FilePreviewV3Response | LocalFilePreviewResource>;
   /**
    * Electron-only initial Code Collab tree/current-All-Changes snapshot. This
    * never falls back to the cloud Machine RPC transport.

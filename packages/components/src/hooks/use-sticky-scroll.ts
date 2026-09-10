@@ -56,9 +56,9 @@ export interface UseStickyScrollResult {
 
 /**
  * `use-stick-to-bottom` observes content growth. Observe the viewport too so a
- * flex sibling or window inset shrinking the available height cannot leave a
+ * docked panel or window inset shrinking the available height cannot leave a
  * followed conversation floating above the real bottom. ResizeObserver is the
- * completion signal for every committed viewport size; no transition-duration
+ * completion signal for every committed viewport height; no transition-duration
  * clock or custom resize-event pump is needed.
  */
 function useStickyViewportResizeObserver(options: {
@@ -81,18 +81,15 @@ function useStickyViewportResizeObserver(options: {
   useEffect(() => {
     if (!scrollElement || typeof ResizeObserver === 'undefined') return undefined;
 
-    let previousWidth = scrollElement.getBoundingClientRect().width;
     let previousHeight = scrollElement.getBoundingClientRect().height;
     let rafId: number | null = null;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width === previousWidth && height === previousHeight) continue;
-        const heightChanged = height !== previousHeight;
-        previousWidth = width;
+        const { height } = entry.contentRect;
+        if (height === previousHeight) continue;
         previousHeight = height;
-        if (heightChanged && skipNextViewportResizeAutoScrollRef?.current) {
+        if (skipNextViewportResizeAutoScrollRef?.current) {
           skipNextViewportResizeAutoScrollRef.current = false;
           if (rafId !== null) {
             cancelAnimationFrame(rafId);

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildCommandCandidates,
+  buildFileCandidates,
   buildIssuePrCandidates,
+  buildMentionFileIndex,
   getCategoryNavigateText,
   selectMentionMenuView,
   selectMentionMenuViewForTrigger,
@@ -51,7 +53,6 @@ function makeIssuePrSuggestion(number: number, type: 'issue' | 'pr', title: stri
     token: `#${number}`,
     label: String(number),
     searchableNumber: String(number),
-    searchableTitle: title.toLowerCase(),
   };
 }
 
@@ -170,7 +171,6 @@ describe('candidate insertion semantics', () => {
       kind: 'dir',
       path: 'src/components',
       token: 'src/components/',
-      searchable: 'src/components/',
     });
 
     expect(candidate.navigateText).toBe('@src/components/');
@@ -183,7 +183,6 @@ describe('candidate insertion semantics', () => {
       kind: 'file',
       path: 'src/a.ts',
       token: 'src/a.ts',
-      searchable: 'src/a.ts',
     });
 
     expect(candidate.navigateText).toBeUndefined();
@@ -220,11 +219,35 @@ describe('buildIssuePrCandidates', () => {
     ];
 
     const scopedTo = (type: 'issue' | 'pr') => suggestions.filter((item) => item.type === type);
-    const prs = buildIssuePrCandidates(scopedTo('pr'), '', null);
-    const issues = buildIssuePrCandidates(scopedTo('issue'), '', null);
+    const prs = buildIssuePrCandidates(scopedTo('pr'), '');
+    const issues = buildIssuePrCandidates(scopedTo('issue'), '');
 
     expect(prs.map((entry) => entry.value)).toEqual(['#900', '#901']);
     expect(issues.every((entry) => entry.kind === 'issue')).toBe(true);
     expect(issues.length).toBeGreaterThan(0);
+  });
+
+  it('matches issue titles as ordered subsequences across words and punctuation', () => {
+    const suggestions = [
+      makeIssuePrSuggestion(42, 'issue', 'File generated-name is missing'),
+      makeIssuePrSuggestion(43, 'issue', 'Unrelated bug'),
+    ];
+
+    expect(buildIssuePrCandidates(suggestions, 'filename').map((entry) => entry.value)).toEqual([
+      '#42',
+    ]);
+  });
+});
+
+describe('buildFileCandidates', () => {
+  it('matches paths as ordered subsequences across words and punctuation', () => {
+    const index = buildMentionFileIndex(
+      { paths: ['src/file generated-name.ts', 'src/unrelated.ts'] },
+      () => null
+    );
+
+    expect(buildFileCandidates(index, 'filename').map((entry) => entry.value)).toContain(
+      'src/file generated-name.ts'
+    );
   });
 });

@@ -42,19 +42,16 @@ const FILES: MentionCandidate[] = [
     kind: 'dir',
     path: 'src/components/mentions',
     token: 'src/components/mentions/',
-    searchable: 'src/components/mentions/',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/ui/mention/mention-root.tsx',
     token: 'src/ui/mention/mention-root.tsx',
-    searchable: 'src/ui/mention/mention-root.tsx',
   }),
   toFileCandidate({
     kind: 'file',
     path: 'src/components/mentions/mention-registry.ts',
     token: 'src/components/mentions/mention-registry.ts',
-    searchable: 'src/components/mentions/mention-registry.ts',
   }),
 ];
 
@@ -66,7 +63,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3312',
     label: '3312',
     searchableNumber: '3312',
-    searchableTitle: 'mention menu cannot be scrolled on mobile',
   }),
   toIssuePrCandidate({
     number: 3298,
@@ -75,7 +71,6 @@ const ISSUES: MentionCandidate[] = [
     token: '#3298',
     label: '3298',
     searchableNumber: '3298',
-    searchableTitle: 'switching sessions janks the composer',
   }),
 ];
 
@@ -143,6 +138,7 @@ const agentRole = (overrides: Partial<AgentRole>): AgentRole => ({
 
 const AGENT_ROLES: MentionCandidate[] = [
   toAgentRoleCandidate({
+    availability: { kind: 'available' },
     slug: 'Code-Reviewer',
     role: agentRole({
       // Long on purpose: the instruction scrolls inside its own block so the
@@ -158,6 +154,7 @@ const AGENT_ROLES: MentionCandidate[] = [
     agentConfig: ROLE_AGENT_CONFIG,
   }),
   toAgentRoleCandidate({
+    availability: { kind: 'available' },
     slug: 'Release-Notes',
     role: agentRole({
       id: 'role-2' as AgentRoleId,
@@ -169,6 +166,34 @@ const AGENT_ROLES: MentionCandidate[] = [
     machine: ROLE_MACHINE,
     agentConfig: ROLE_AGENT_CONFIG,
   }),
+];
+
+const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
+  ...AGENT_ROLES,
+  toAgentRoleCandidate(
+    {
+      slug: 'Offline-Reviewer',
+      role: agentRole({ id: 'offline-role' as AgentRoleId, name: 'Offline Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'machine_offline' },
+    },
+    'Unavailable: its machine is offline'
+  ),
+  toAgentRoleCandidate(
+    {
+      slug: 'Loading-Reviewer',
+      role: agentRole({ id: 'loading-role' as AgentRoleId, name: 'Loading Reviewer' }),
+      availability: { kind: 'unknown' },
+    },
+    'Checking availability…'
+  ),
+  toAgentRoleCandidate(
+    {
+      slug: 'Remote-Reviewer',
+      role: agentRole({ id: 'remote-role' as AgentRoleId, name: 'Remote Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'outside_work_context' },
+    },
+    'Unavailable: this workspace requires a role on the same machine'
+  ),
 ];
 
 const COMMANDS: MentionCandidate[] = [
@@ -456,4 +481,18 @@ export const FileCategoryTruncated: Story = {
 /** Nothing matched anywhere. */
 export const NoResults: Story = {
   args: { search: 'zzzz' },
+};
+
+export const AgentRoleAvailability: Story = {
+  args: {
+    search: 'role:',
+    withDetail: false,
+    categories: [
+      category('agent_role', 'role', 'Agent Roles', 'agent_role', UNAVAILABLE_AGENT_ROLES),
+    ],
+  },
+};
+
+export const AgentRoleAvailabilityNarrow: Story = {
+  args: { ...AgentRoleAvailability.args, narrow: true },
 };

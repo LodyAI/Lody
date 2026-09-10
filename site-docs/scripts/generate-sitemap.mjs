@@ -1,13 +1,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { absoluteSiteUrl, collectSitePaths } from './site-paths.mjs';
+import { absoluteSiteUrl, collectSitePaths, isSitemapPath } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sitemapPath = path.join(packageRoot, 'public', 'sitemap.xml');
 
 const entries = collectSitePaths(packageRoot)
-  .filter((sitePath) => sitePath !== '/home' && sitePath !== '/zh/home')
+  .filter(isSitemapPath)
   .map((sitePath) => `  <url><loc>${absoluteSiteUrl(sitePath)}</loc></url>`)
   .join('\n');
 

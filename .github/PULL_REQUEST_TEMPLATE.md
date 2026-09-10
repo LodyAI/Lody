@@ -1,8 +1,9 @@
 <!--
 Fork-based contributions must reference a Lody issue below. Keep the change focused:
-all policy findings share one seven-day correction period. A change over 200
-lines (additions + deletions) without its prior Issue adds a size-specific finding.
-Same-repository branches do not create an Issue solely for contribution intake.
+all policy findings share one seven-day correction period. Community PRs over 1000
+lines (additions + deletions) need a maintainer assignment on the linked Issue;
+over 200 without its prior Issue adds a size-specific finding. Same-repository
+branches do not create an Issue solely for contribution intake.
 
 The Issue is for tracking context; maintainers review the contribution through
 the normal PR process. Context handoff is public and cannot use N/A or redacted
@@ -27,6 +28,22 @@ normalized to `Closes #123` by the PR policy workflow.
 ## Summary
 
 <!-- What changed in response to that pressure. Keep this about the change set, not the motivation. -->
+
+## Visual explanation
+
+<!--
+Required. Agents: invoke `$show-me` and place its smallest useful view here.
+
+Complex changes must include a structural view: Mermaid, pseudocode/call tree,
+component/file tree, structural diff, image, or a linked reviewable HTML artifact.
+A change is complex when it crosses component/runtime/authority boundaries, changes
+multi-step control or data flow, or exceeds 200 changed lines. The automated policy
+enforces the 200-line floor; reviewers enforce the semantic cases.
+
+For a simple change, write `Simple change: <why a visual would not help review>`.
+Examples and selection rules: .agents/docs/visual-explanations.md
+Any supporting artifact must be reachable by reviewers; a local HTML file is not.
+-->
 
 ## Before / after
 

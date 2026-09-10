@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { hasRelatedIssueLink, normalizeRelatedIssueLink } from './pr-issue-link.mjs';
+import {
+  hasRelatedIssueLink,
+  normalizeRelatedIssueLink,
+  relatedIssueNumbers,
+} from './pr-issue-link.mjs';
 
 const body = (reference) => `## Related issue
 
@@ -32,6 +36,8 @@ void describe('pull request issue links', () => {
     );
     assert.equal(hasRelatedIssueLink(body('LodyAI/Lody#121')), true);
     assert.equal(hasRelatedIssueLink(body('Issue 121')), false);
+    assert.deepEqual(relatedIssueNumbers(body('Closes #121')), [121]);
+    assert.deepEqual(relatedIssueNumbers(body('Issue 121')), []);
   });
 
   void it('is idempotent after adding the native closing keyword', () => {

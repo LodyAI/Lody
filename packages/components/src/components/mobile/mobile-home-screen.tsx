@@ -1617,8 +1617,13 @@ export function MobileHomeScreen({
 
             <div
               ref={listScrollRef}
+              data-mobile-session-list-scroll-region=""
               className={cn(
-                'mobile-home-list-region scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
+                /* `z-0` makes the scroller a stacking context. WebKit can
+                   otherwise promote the positioned / animated conversation
+                   rows beside its overflow-controls layer, letting row
+                   backgrounds paint over the vertical scrollbar. */
+                'mobile-home-list-region scrollbar-pro relative z-0 min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
                 'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
               )}
             >
@@ -2289,6 +2294,11 @@ function ChatsFlatView({
         chats={visible}
         groupBy={groupBy}
         groupLabels={labels.chatGroupLabels}
+        /* Home aggregates every project and worktree into one scroll, so each
+           bucket previews its latest rows and offers the rest. Without it a
+           single busy project owns the screen — the whole reason the cap
+           exists. The in-project list deliberately does not pass this. */
+        capGroupPreviews
         /* Active list is flat — no "全部对话" section label. Only the
            archived surface keeps a heading so the mode is obvious. */
         flatHeading={archived ? (labels.archivedChatsHeading ?? '归档对话') : undefined}

@@ -1,3 +1,6 @@
+import { isElectronRenderer } from '@/lib/electron';
+import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
   memo,
   useCallback,
@@ -15,6 +18,7 @@ import {
   Link2,
   Loader2,
   LockKeyhole,
+  Mail,
   Pencil,
   Pin,
   PinOff,
@@ -161,6 +165,7 @@ export type SidebarUpdatedContextMenuLabels = {
   pin: string;
   unpin: string;
   archive: string;
+  markUnread: string;
   copyUrl: string;
   shareWithTeam: string;
   onlyOwnerCanShare: string;
@@ -310,6 +315,8 @@ export type SidebarUpdatedSessionListProps = {
    * mobile rows expose the same action via left-swipe + tap-to-confirm.
    */
   onArchiveItem?: (id: string) => void;
+  /** Mark a read desktop item unread. */
+  onMarkItemUnread?: (id: string) => void;
   /** Rename an item through the shared Rename Chat dialog. */
   onRenameItem?: (id: string, nextTitle: string) => void | Promise<void>;
   /**
@@ -370,6 +377,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   labels,
   onSelectItem,
   onArchiveItem,
+  onMarkItemUnread,
   onRenameItem,
   onTogglePinItem,
   onCopyItemUrl,
@@ -412,6 +420,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
       onlyOwnerCanShare: t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share'),
@@ -561,6 +570,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           href={getItemHref?.(node.item.id)}
                           onSelect={onSelectItem}
                           onArchive={onArchiveItem}
+                          onMarkUnread={onMarkItemUnread}
                           onRename={onRenameItem}
                           onTogglePin={onTogglePinItem}
                           onCopyUrl={onCopyItemUrl}
@@ -622,6 +632,7 @@ type UpdatedItemRowProps = {
   href?: string;
   onSelect?: (id: string, tabSessionId?: string) => void;
   onArchive?: (id: string) => void;
+  onMarkUnread?: (id: string) => void;
   onRename?: (id: string, nextTitle: string) => void | Promise<void>;
   onTogglePin?: (id: string, nextPinned: boolean) => void;
   onCopyUrl?: (id: string) => void;
@@ -644,6 +655,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   href,
   onSelect,
   onArchive,
+  onMarkUnread,
   onRename,
   onTogglePin,
   onCopyUrl,
@@ -694,6 +706,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       : null;
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
+        if (openSessionOnModifiedClick(event, item.id)) return;
         if (
           event.metaKey ||
           event.ctrlKey ||
@@ -709,6 +722,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     : undefined;
 
   const canArchive = typeof onArchive === 'function';
+  const canMarkUnread = typeof onMarkUnread === 'function' && !item.hasUnreadMessages;
   const showInlineArchive = canArchive && !isMobile;
   const canRename = typeof onRename === 'function';
   const canTogglePin = typeof onTogglePin === 'function';
@@ -743,6 +757,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     (canRename ||
       canTogglePin ||
       canArchive ||
+      canMarkUnread ||
       canCopyUrl ||
       Boolean(shareMenuState) ||
       Boolean(branchName) ||
@@ -817,8 +832,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       onClick={
         useAnchor
           ? undefined
-          : () => {
+          : (event) => {
               if (!onSelect) return;
+              if (openSessionOnModifiedClick(event, item.id)) return;
               onSelect(item.id);
             }
       }
@@ -847,9 +863,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
       <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
         <SessionRowLeadingSlot
-          isWaitingPermission={item.isWaitingPermission}
-          isWorking={item.isWorking}
-          hasUnreadMessages={item.hasUnreadMessages}
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
           openedByTree={openedByTree}
@@ -880,6 +893,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         </div>
         {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
         <SidebarRowEndSlot
+          isWaitingPermission={item.isWaitingPermission}
+          isWorking={item.isWorking}
+          hasUnreadMessages={item.hasUnreadMessages}
           fadeClassName="group-hover/row:opacity-0"
           restIcon={
             showPr ||
@@ -959,25 +975,27 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       <ContextMenuContent className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
-          goToOpener={
-            canGoToOpener && openerSessionId
-              ? () => onSelect?.(openerRootSessionId ?? openerSessionId, openerSessionId)
-              : undefined
-          }
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
-        {handlePrOpen ? (
+        {canTogglePin ? (
           <ContextMenuItem
             onSelect={() => {
-              handlePrOpen();
+              onTogglePin?.(item.id, !item.isPinned);
             }}
           >
-            <GitPullRequest />
-            {contextMenuLabels.openPr}
+            {item.isPinned ? <PinOff /> : <Pin />}
+            {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenuItem>
         ) : null}
-        {handlePrOpen && (canRename || canTogglePin || canArchive || canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
+        {canMarkUnread ? (
+          <ContextMenuItem
+            onSelect={() => {
+              onMarkUnread?.(item.id);
+            }}
+          >
+            <Mail />
+            {contextMenuLabels.markUnread}
+          </ContextMenuItem>
         ) : null}
         {canRename ? (
           <ContextMenuItem
@@ -989,27 +1007,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.rename}
           </ContextMenuItem>
         ) : null}
-        {canTogglePin ? (
-          <ContextMenuItem
-            onSelect={() => {
-              onTogglePin?.(item.id, !item.isPinned);
-            }}
-          >
-            {item.isPinned ? <PinOff /> : <Pin />}
-            {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
-        ) : null}
-        {canArchive ? (
-          <ContextMenuItem
-            onSelect={() => {
-              onArchive?.(item.id);
-            }}
-          >
-            <Archive />
-            {contextMenuLabels.archive}
-          </ContextMenuItem>
-        ) : null}
-        {(canRename || canTogglePin || canArchive) && (canCopyUrl || branchName) ? (
+        {(openedByOpener || canTogglePin || canMarkUnread || canRename) &&
+        (canCopyUrl || branchName || shareMenuState) ? (
           <ContextMenuSeparator />
         ) : null}
         {canCopyUrl ? (
@@ -1020,6 +1019,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             <Link2 />
             {contextMenuLabels.copyUrl}
+          </ContextMenuItem>
+        ) : null}
+        {branchName ? (
+          <ContextMenuItem
+            onSelect={() => {
+              void navigator.clipboard.writeText(branchName).catch(() => {});
+            }}
+          >
+            <GitBranch />
+            {contextMenuLabels.copyBranch}
           </ContextMenuItem>
         ) : null}
         {shareMenuState ? (
@@ -1045,14 +1054,56 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
-        {branchName ? (
+        {(openedByOpener ||
+          canTogglePin ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          branchName ||
+          shareMenuState) &&
+        (handlePrOpen || (canGoToOpener && openerSessionId) || isElectronRenderer()) ? (
+          <ContextMenuSeparator />
+        ) : null}
+        {handlePrOpen ? (
           <ContextMenuItem
             onSelect={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              handlePrOpen();
             }}
           >
-            <GitBranch />
-            {contextMenuLabels.copyBranch}
+            <GitPullRequest />
+            {contextMenuLabels.openPr}
+          </ContextMenuItem>
+        ) : null}
+        <SessionRowOpenedByMenuItems
+          goToOpener={
+            canGoToOpener && openerSessionId
+              ? () => onSelect?.(openerRootSessionId ?? openerSessionId, openerSessionId)
+              : undefined
+          }
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
+        <SessionWindowMenuItem sessionId={item.id} />
+        {(openedByOpener ||
+          canTogglePin ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          branchName ||
+          shareMenuState ||
+          handlePrOpen ||
+          (canGoToOpener && openerSessionId) ||
+          isElectronRenderer()) &&
+        canArchive ? (
+          <ContextMenuSeparator />
+        ) : null}
+        {canArchive ? (
+          <ContextMenuItem
+            onSelect={() => {
+              onArchive?.(item.id);
+            }}
+          >
+            <Archive />
+            {contextMenuLabels.archive}
           </ContextMenuItem>
         ) : null}
       </ContextMenuContent>

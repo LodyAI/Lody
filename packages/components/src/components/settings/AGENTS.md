@@ -1,11 +1,76 @@
-# Settings components
+# Settings surfaces
+
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+Parent `AGENTS.md` files also apply.
+
+Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
+Roles). The catalog's durability rule — a local Flock write is durable, and the
+upload that follows it is not something a settings surface waits on, reports, or
+rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
+
+## Layout and components
+
+- A settings row (`compact-layout.tsx`) is one grid: the label column takes the
+  remaining space and the control column hugs its content. Never size either column
+  from a viewport breakpoint — settings render in a panel far narrower than the window,
+  and the panel clips its overflow, so a `md:`-width label column silently hides the
+  control.
+- Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
+  DeepSeek Harness official vs custom endpoint is dialog form state only: persist
+  `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
+  `https://api.deepseek.com`) and never a new AgentConfigMeta field. Model ids come from
+  the endpoint's OpenAI-compatible discovery response during live verification; do not
+  add a parallel manual catalog field. Additional env cannot override either connection
+  key, and changing endpoint or credential invalidates the dialog's prior live
+  verification.
+- Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
+  and SSR consumers do not evaluate its renderer graph.
+- Interface and terminal font choices exclude the known symbol families in
+  `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
+  use the default interface font so they remain readable.
+- The Codex reset forecast chip in the provider row must not fetch on mount and must
+  pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
+
+## Agent Roles
+
+Roles are read and written from Settings, mentioned from the composer, and
+resolved by CLI MCP creation, so these are cross-surface rules rather than
+component details.
+
+- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
+  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
+  A Role stores no secret — no API key, MCP selection, or memory — and
+  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
+  because a workspace row reaches every member's client. It DOES pin the permission
+  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
+  option: permission is a run-config value the agent publishes, not a secret, and a
+  Role that left it out would not be the whole configuration it claims to be. So the
+  composer drops its separate permission button while such a Role is selected. A Role
+  may therefore pin a warning-tone mode (full access / skip permissions), which every
+  surface that hides the permission control must keep visibly marked; what stays out
+  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
+  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
+  the workspace catalog without requiring a mention-scoped authorization record.
+- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
+  when the machine, config, or a stored model/mode is unavailable the Role stays listed
+  with the precise reason and stops being mentionable. MCP creation resolves the current
+  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
+  target, Role revision, and dispatch config are frozen into the accepted Operation so a
+  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
+  `agentRoleRevision` record where a Session came from and are display-only.
+
+## Workspace ownership
+
+- Ownership transfer is an owner-only danger-zone slot shared by desktop and mobile.
+  `workspace-ownership-transfer.tsx` collects an existing member and exact workspace
+  name, then calls the cloud mutation through `account-setting.tsx`. Refresh session
+  and active organization after success; cache refresh failure must not claim transfer
+  failed. Card changes use the billing Portal separately; transfer keeps the current card.
 
 ## The shared editor grammar
 
-`emoji-field.tsx` is the one emoji control (button + lazy `emoji-picker-panel`
-
-- reset), shared by the Agent Role and Prompt Shortcut editors so a catalog
-  entry's glyph is the same affordance everywhere.
+`emoji-field.tsx` is the one emoji control (button, lazy `emoji-picker-panel`,
+and reset), shared by the Agent Role and Prompt Shortcut editors.
 
 `form-primitives.tsx` owns `Section`, `Field`, `FormMessage` and
 `AutoGrowTextarea` (a one-row field that tracks its content's height; it must
@@ -20,56 +85,6 @@ to read as one drift apart a padding value at a time.
 
 ## Prompt Shortcuts
 
-- `promptShortcutsFeatureEnabledAtom` requires Developer mode plus the default-off
-  opt-in in About → Beta features. It gates shared settings navigation, direct
-  panel access, mention discovery and runtime initialization; disabling never
-  deletes saved Shortcuts.
-
-- `prompt-shortcuts-setting.tsx` owns the list and editor container. Key its local
-  dialog state by account/workspace so old drafts and late reads cannot appear
-  under a new identity. Storage and publication belong to the workspace provider
-  and `shared/src/prompt-shortcuts`, never a panel effect.
-- Scope options are resolved once for the whole panel and passed to both the list
-  and the editor: a row that printed a raw machine id beside a selector that
-  prints its name is two answers to one question.
-- `prompt-shortcut-form.tsx` is presentational. Scope starts empty; never infer it
-  from the active composer or a selected mention. Sharing starts private, and the
-  slug follows the name only for a new Shortcut whose slug the author never typed.
-- A Shortcut carries an optional `emoji`, stored normalized (stripped and capped
-  in `shared/prompt-shortcuts/model.ts`) and projected into the index, so the
-  list can show it without loading a body. Unset renders
-  `DEFAULT_PROMPT_SHORTCUT_EMOJI` rather than an empty tile.
-- A Shortcut is a Prompt and a scope, nothing more: no variables, no defaults,
-  no call-time parameters. Do not reintroduce `!{name}` parsing anywhere.
-- `prompt-shortcut-scope.tsx` owns the axis order (Project → Machine → Agent),
-  their icons, the `None` sentinel a Radix `Select` needs, and the read-only
-  pills. All axes unset prints one muted `Workspace` pill — that is scope, never
-  visibility, so it must not read as "shared".
-- The container remounts the source-owning `CombinedMentionTextarea` on explicit
-  scope changes. Restore the current draft's semantic ranges, not the saved
-  revision's ranges; otherwise new mentions are lost or old-project candidates
-  can be rebound to the new scope. Template mode disables token-scanning
-  hydrators, sessions and ACP commands. Skills load only on menu activation.
-  `ShortcutPromptField` is exported so Storybook renders that real field.
-- A row's warning line is derived from the index alone (saved dependencies vs
-  saved scope). It is not live availability — there is no dependency resolver
-  yet — so it says what to repair and never claims a Shortcut is `Available`.
-  It is the ONLY status a row carries: publication state is deliberately absent,
-  because a local save is already durable and the runtime retries on its own. A
-  row must never report a background upload, and never lose an action over one.
-- A pending publication is durable but not yet advertised. Do not call it synced.
-  Save/Delete remain available: the runtime separates the local working head from
-  immutable in-flight publication jobs. Only local I/O (`saving`/`busy`) disables
-  duplicate actions, never cloud health or pendingIds. Retry through the runtime.
-  Full conflict repair and invocation UI are tracked in the
-  private composition's `docs/prompt-shortcuts.md`.
-- Another member's shared Shortcut opens read-only in the same dialog shell.
-  There is no copy-to-mine action yet; do not add an editing affordance that the
-  authorization layer would reject.
-- Visual fixtures: `src/stories/PromptShortcutForm.stories.tsx` and
-  `src/stories/PromptShortcutsList.stories.tsx`. Scope and range behavior:
-  `tests/prompt-shortcut-form.test.tsx`; identity fencing, read-only sharing and
-  pending publication: `tests/prompt-shortcuts-setting.test.tsx`.
-- `components/prototypes/prompt-shortcuts/` is a synthetic-data design prototype,
-  not the product. Its Variables section still shows label/required/multiline
-  controls the shipped model deliberately dropped; do not copy them back.
+Before changing Prompt Shortcuts, read [Prompt Shortcut contracts](prompt-shortcuts.md).
+Keep the developer gate, account/workspace isolation, read-only sharing and
+non-recursive template restrictions intact; templates have no variables.

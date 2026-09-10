@@ -145,6 +145,19 @@ export class ShortcutDraftRepository {
   private memory = new Map<string, ShortcutDraftRecord | null>();
   private writes = new Map<string, Promise<void>>();
   constructor(private storage: ShortcutDraftStorage) {}
+  /** Capture only the checkpoint that describes the actual submitted draft. */
+  captureVersion(identity: ShortcutDraftIdentity, submitted: ShortcutDraftRecord) {
+    const current = this.memory.get(shortcutDraftKey(identity));
+    return current && JSON.stringify(current) === JSON.stringify(submitted) ? current : null;
+  }
+  /** Compare and publish synchronously; even a same-text replacement has a new version. */
+  clearIfUnchanged(
+    identity: ShortcutDraftIdentity,
+    version: ShortcutDraftRecord
+  ): Promise<void> | null {
+    if (this.memory.get(shortcutDraftKey(identity)) !== version) return null;
+    return this.write(identity, null);
+  }
   async read(identity: ShortcutDraftIdentity): Promise<ShortcutDraftRecord | null> {
     const key = shortcutDraftKey(identity);
     if (this.memory.has(key)) return this.memory.get(key)!;

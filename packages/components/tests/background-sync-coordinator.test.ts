@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
 import {
   createBackgroundSyncCoordinator,
-  resolveEagerSyncPolicy,
   type BackgroundSyncCoordinatorDeps,
   type EagerSyncHighWaterStore,
   type EagerSyncPolicy,
   type PrefetchOutcome,
   type SessionActivitySnapshot,
 } from '../src/providers/background-sync-coordinator';
+import { resolveEagerSyncPolicy } from '../src/providers/eager-sync-policy';
 
 const sid = (id: string) => id as SessionId;
 const room = (id: string) => getSessionRoomId(sid(id));
@@ -231,7 +231,7 @@ function setup(
 }
 
 describe('createBackgroundSyncCoordinator', () => {
-  it('uses a bounded web policy and full desktop/mobile policy', () => {
+  it('uses a bounded web policy, full desktop policy, and paced mobile policy', () => {
     expect(resolveEagerSyncPolicy('web')).toMatchObject({
       concurrency: 2,
       batchSize: 4,
@@ -246,7 +246,13 @@ describe('createBackgroundSyncCoordinator', () => {
       candidateWindow: Number.POSITIVE_INFINITY,
       maxWarmDocs: 96,
     });
-    expect(resolveEagerSyncPolicy('mobile')).toBe(resolveEagerSyncPolicy('desktop'));
+    expect(resolveEagerSyncPolicy('mobile')).toMatchObject({
+      concurrency: 1,
+      batchSize: 3,
+      batchCooldownMs: 3_000,
+      candidateWindow: Number.POSITIVE_INFINITY,
+      maxWarmDocs: 12,
+    });
   });
 
   it('prefetches a recently-active session on start', async () => {

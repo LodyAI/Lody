@@ -159,45 +159,55 @@ it.each([false, true])(
     expect(durable.get(JSON.stringify(identity))).toEqual(accepted ? null : record);
   }
 );
-it('does not clear or navigate a replacement landing when an unmounted submission accepts late', async () => {
-  await act(async () => root.render(null));
-  const identity = { userId: 'user', workspaceId: 'ws', composerId: 'landing' };
-  const durable = new Map<string, ShortcutDraftRecord | null>();
-  const repo = new ShortcutDraftRepository({
-    read: async (key) => durable.get(JSON.stringify(key)) ?? null,
-    write: async (key, value) => {
-      durable.set(JSON.stringify(key), value);
-    },
-  });
-  await repo.write(identity, record);
-  storage.read.mockImplementation((key) => repo.read(key));
-  storage.write.mockImplementation((key, value) => repo.write(key, value));
-  await act(async () => root.render(<Harness draftKey="landing" />));
-  const ownsSubmittedDraft = captureOwner();
-  let accept!: () => void;
-  const acceptance = new Promise<void>((resolve) => {
-    accept = resolve;
-  });
-  const navigate = vi.fn();
-  const submission = acceptance.then(async () => {
-    if (!ownsSubmittedDraft()) return;
-    await repo.write(identity, null);
-    navigate();
-  });
-  await act(async () => setPending(true));
-  await act(async () => root.render(null));
-  const replacement = { ...record, text: `${record.text} new draft` };
-  await repo.write(identity, replacement);
-  await act(async () => root.render(<Harness draftKey="landing" />));
-  await act(async () => {
-    accept();
-    await submission;
-  });
-  expect(container.querySelector('textarea')?.value).toBe(replacement.text);
-  expect(await repo.read(identity)).toEqual(replacement);
-  expect(durable.get(JSON.stringify(identity))).toEqual(replacement);
-  expect(navigate).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'retires only the unchanged departed landing checkpoint (replacement=%s)',
+  async (replace) => {
+    await act(async () => root.render(null));
+    const identity = { userId: 'user', workspaceId: 'ws', composerId: 'landing' };
+    const durable = new Map<string, ShortcutDraftRecord | null>();
+    const repo = new ShortcutDraftRepository({
+      read: async (key) => durable.get(JSON.stringify(key)) ?? null,
+      write: async (key, value) => {
+        durable.set(JSON.stringify(key), value);
+      },
+    });
+    await repo.write(identity, record);
+    storage.read.mockImplementation((key) => repo.read(key));
+    storage.write.mockImplementation((key, value) => repo.write(key, value));
+    await act(async () => root.render(<Harness draftKey="landing" />));
+    const ownsSubmittedDraft = captureOwner();
+    const version = repo.captureVersion(identity, record)!;
+    let accept!: () => void;
+    const acceptance = new Promise<void>((resolve) => {
+      accept = resolve;
+    });
+    const navigate = vi.fn();
+    const submission = acceptance.then(async () => {
+      if (!ownsSubmittedDraft()) {
+        await repo.clearIfUnchanged(identity, version);
+        return;
+      }
+      await repo.write(identity, null);
+      navigate();
+    });
+    await act(async () => setPending(true));
+    await act(async () => root.render(null));
+    const replacement = { ...record };
+    if (replace) {
+      await repo.write(identity, replacement);
+      await act(async () => root.render(<Harness draftKey="landing" />));
+    }
+    await act(async () => {
+      accept();
+      await submission;
+    });
+    expect(await repo.read(identity)).toEqual(replace ? replacement : null);
+    expect(durable.get(JSON.stringify(identity))).toEqual(replace ? replacement : null);
+    await act(async () => root.render(<Harness draftKey="landing" />));
+    expect(container.querySelector('textarea')?.value).toBe(replace ? replacement.text : '');
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();

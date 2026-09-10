@@ -54,6 +54,12 @@ const formatErrorWithCausesInternal = (error: unknown, seen: ReadonlySet<unknown
     if (typeof code === 'string' && code.length > 0) {
       parts.push(`code=${code}`);
     }
+    if (error instanceof AggregateError && error.errors.length > 0) {
+      const nested = error.errors
+        .slice(0, 3)
+        .map((entry) => formatErrorWithCausesInternal(entry, nextSeen));
+      parts.push(`errors=[${nested.join('; ')}]`);
+    }
     const cause = (error as { cause?: unknown }).cause;
     if (cause !== undefined) {
       parts.push(`cause=${formatErrorWithCausesInternal(cause, nextSeen)}`);

@@ -10,6 +10,11 @@ build does not declare; without the flag loro-mirror rejects the entire state
 with `Unknown property: <key>`, so the older client can never write to that doc
 again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
+Session docs use `createSessionMirror`; only its HistoryWriter writes history.
+Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
+Task-proposal decisions locate the current item by proposal id after store acquisition
+and update only decision fields through HistoryWriter; never replace a rendered entry.
+
 ## Streams connection cardinality
 
 - Capability discovery and refresh must reuse the workspace runtime's existing Machine
@@ -54,3 +59,37 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
   Learned revocations hide cached shared content; offline revocation is not instantaneous.
   The cloud port stages/activates immutable snapshots and atomically settles superseded
   jobs. It never uploads the mutable working body or gates subsequent local saves.
+
+## Workspace runtime
+
+- `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
+  target ownership and transport selection; do not restore a second writer or a
+  proxy-authoring/write-intent mirror.
+- Transport state is selected per room, never merged. Runtime stores use
+  `getReadinessTransportForRoom`; hooks without the router use the structural binding in
+  `src/lib/room-readiness.ts`. Keep those selection rules aligned.
+- The local renderer identity comes atomically from the Electron local-platform snapshot
+  and uses the CLI catalog's persistent `local:*` id. Do not substitute a constant or
+  temporary user.
+- Controls for a machine resolved as local use Electron local session control,
+  independent of cloud-token or sync state. A failed local bridge is an error; never
+  fall back to a remote RPC path.
+- Cloud Electron waits for the first **Run local agent** setting snapshot before creating
+  its workspace runtime. Enabled uses dual sync; disabled uses cloud-only sync and must
+  not attach the local data plane or surface its reconnect state.
+- Meta-room attachment is single-flight per runtime. Token, network, and visibility edges may
+  force one immediate recovery attempt, but they must preserve the current outage's retry history;
+  only a sustained healthy dwell resets backoff. Every attempt after the first is a `recovery`
+  phase, including one prompted by a rotated token.
+- Workspace-level rooms without a machine owner use the platform fallback. Task rooms and
+  the Task Index depend on this behavior; returning no transport silently disables task
+  synchronization.
+- Resource monitoring follows target ownership: local machines use the local monitor
+  transport, remote machines use the optional remote transport, and unknown ownership
+  remains pending.
+- Presence is merged by origin. For an origin represented by the local plane, the local
+  snapshot is authoritative, including absence; do not resurrect cleared presence from a
+  lagging replica.
+- Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
+  live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
+  already applied live.

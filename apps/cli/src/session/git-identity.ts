@@ -15,6 +15,13 @@ type PartialGitIdentity = {
   email?: string | null;
 };
 
+export type GitIdentityResolutionOptions = {
+  /** Only machine-owner turns may read and prefer the machine's Git identity. */
+  preferMachineIdentity: boolean;
+  machineIdentity?: PartialGitIdentity;
+  cwd?: string;
+};
+
 const trimNonEmpty = (value?: string | null): string | undefined => {
   const trimmed = value?.trim();
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
@@ -80,26 +87,26 @@ export const readHostDefaultGitIdentity = (cwd?: string): PartialGitIdentity => 
 
 export const resolveSessionGitIdentity = (
   requested: PartialGitIdentity,
-  defaultIdentity?: PartialGitIdentity,
-  cwd?: string
+  options: GitIdentityResolutionOptions
 ): GitIdentity => {
-  const resolvedDefaultIdentity = defaultIdentity ?? readHostDefaultGitIdentity(cwd);
-  // Missing-email addresses are auth placeholders, not commit identities.
-  // Rejected: exporting them as GIT_AUTHOR_EMAIL masks the user's repo/global
-  // git config because Git gives environment variables higher priority.
+  if (options.preferMachineIdentity) {
+    const machineIdentity = options.machineIdentity ?? readHostDefaultGitIdentity(options.cwd);
+    const machineEmail = trimNonEmpty(machineIdentity.email);
+    if (isUsableEmail(machineEmail)) {
+      return {
+        name: normalizeName(trimNonEmpty(machineIdentity.name), machineEmail),
+        email: machineEmail,
+      };
+    }
+  }
+
+  // Missing-email addresses are auth placeholders, not commit identities. A
+  // non-owner must never fall back to the machine owner's Git configuration.
   const requestedEmail = trimNonEmpty(requested.email);
   if (isUsableEmail(requestedEmail)) {
     return {
       name: normalizeName(trimNonEmpty(requested.name), requestedEmail),
       email: requestedEmail,
-    };
-  }
-
-  const defaultEmail = trimNonEmpty(resolvedDefaultIdentity.email);
-  if (isUsableEmail(defaultEmail)) {
-    return {
-      name: normalizeName(trimNonEmpty(resolvedDefaultIdentity.name), defaultEmail),
-      email: defaultEmail,
     };
   }
 

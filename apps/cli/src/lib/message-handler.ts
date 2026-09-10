@@ -15,6 +15,7 @@ import {
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  HistoryWriteError,
   MachineId,
   WorkspaceId,
   SessionInputBlockSchema,
@@ -262,6 +263,7 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
@@ -876,6 +878,7 @@ export class MessageHandler {
   private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
+  private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
   private static readonly MACHINE_ACCESS_REGISTRATION_CACHE_TTL_MS = 20 * 60_000;
   private machineAccessRegistrationInFlight: Promise<void> | null = null;
   private machineAccessRegistrationExpiresAtMs = 0;
@@ -2836,6 +2839,9 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2860,8 +2866,12 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(delegatedRequester
+          ? { delegatedRequester }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
@@ -2910,12 +2920,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      delegatedRequester
     );
   }
 
@@ -3033,7 +3044,13 @@ export class MessageHandler {
       },
     });
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
-      this.handleAgentPermissionRequest(sessionId, requestId, request, agentClient?.currentModel)
+      this.handleAgentPermissionRequest(
+        sessionId,
+        requestId,
+        request,
+        agentClient?.currentModel,
+        agentClient
+      )
     );
     this.autoPromptRunner = new AutoPromptRunner({
       workspaceId: this.workspaceId,
@@ -3255,7 +3272,7 @@ export class MessageHandler {
             requestId,
             targetVersion,
           }),
-        onMachineLifecycleResponseAppended: ({ response }) => {
+        onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
@@ -5066,8 +5083,8 @@ export class MessageHandler {
     turnId: string;
     targetSource: ACPUpdateTarget['source'];
     modelInfo?: ModelInfo;
-    // Counts notifications (in `args.updates` order) whose history writes
-    // committed. Text batches and rich-content uploads interleave inside one
+    // Counts consumed notifications (committed or explicitly rejected) in
+    // `args.updates` order. Text batches and rich-content uploads interleave inside one
     // call, so a mid-group failure leaves a persisted prefix; the caller must
     // only re-queue past this watermark or short text chunks (intentionally not
     // deduplicated) would duplicate on retry.
@@ -5077,25 +5094,40 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
-      await appendACPNotificationsToAssistantEntry(
-        args.sessionDoc,
-        notifications,
-        args.assistantEntryId,
-        {
-          logger: this.logger,
-          editCallback: async (edits) => {
-            // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
-            // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
-            // them into the diff store (old text chained from the prior recorded state),
-            // keeping the turn-diff badge and its clickable content from the same source.
-            this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+      try {
+        await appendACPNotificationsToAssistantEntry(
+          args.sessionDoc,
+          notifications,
+          args.assistantEntryId,
+          {
+            logger: this.logger,
+            editCallback: async (edits) => {
+              // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
+              // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
+              // them into the diff store (old text chained from the prior recorded state),
+              // keeping the turn-diff badge and its clickable content from the same source.
+              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+            },
+            standardDiffCallback: async (diffs) => {
+              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            },
           },
-          standardDiffCallback: async (diffs) => {
-            await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
-          },
-        },
-        args.modelInfo
-      );
+          args.modelInfo
+        );
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        // The writer rejects before committing history. Isolate deterministic
+        // poison inputs instead of retaining them ahead of every later chunk.
+        if (notifications.length > 1) {
+          for (const notification of notifications) await persistNotifications([notification]);
+          return;
+        }
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        return;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += notifications.length;
       }
@@ -5166,7 +5198,16 @@ export class MessageHandler {
             await this.uploadValidatedSessionFile(uploadArgs),
         }));
       update.materializedContents = contents;
-      await appendContents(contents);
+      try {
+        await appendContents(contents);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP rich-content history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        continue;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += 1;
       }
@@ -5807,20 +5848,9 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
-            }
-            break;
-          }
-        }
-        return history;
-      });
+      await sessionDoc.updateHistory((history) =>
+        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+      );
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
@@ -6586,11 +6616,25 @@ export class MessageHandler {
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
-      case 'file/preview-local':
+      case 'file/resolve-local':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.filePreviewService.previewFile(request.params, {
-          allowArbitraryPaths: true,
-        });
+        return await this.filePreviewService.resolveLocalFile(request.params);
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        return invocation
+          ? {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: true as const,
+              ...invocation,
+            }
+          : {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: false as const,
+            };
+      }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',
@@ -8428,7 +8472,8 @@ export class MessageHandler {
     sessionId: SessionId,
     requestId: string,
     request: RequestPermissionRequest,
-    model?: ModelInfo
+    model?: ModelInfo,
+    agentClient?: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
   ): Promise<RequestPermissionResponse> {
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
@@ -8535,6 +8580,26 @@ export class MessageHandler {
       return { outcome: { outcome: 'cancelled' } };
     }
 
+    const automaticOutcome = isAskUserQuestionRequest
+      ? undefined
+      : agentClient?.getAutomaticToolPermissionOutcome(request, false);
+    if (automaticOutcome) {
+      try {
+        await updatePermissionOutcomeInHistory(doc, requestId, automaticOutcome, this.logger);
+      } catch (error) {
+        this.logger.error(
+          `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+        );
+        return { outcome: { outcome: 'cancelled' } };
+      }
+      capturePermissionResolved('allow', { resolutionSource: 'run_config_auto_approve' });
+      return { outcome: automaticOutcome };
+    }
+
+    const pendingRequests = this.pendingPermissionRequests.get(sessionId) ?? new Set<string>();
+    pendingRequests.add(requestId);
+    this.pendingPermissionRequests.set(sessionId, pendingRequests);
+
     try {
       // The durable marker rides the same meta write as the status. Status is
       // repaired to idle by the heartbeat TTL; this is not, because an offline
@@ -8551,6 +8616,7 @@ export class MessageHandler {
       );
     }
 
+    let resolved = false;
     const permissionUserId = historyUserId ?? metaUserId ?? this.userId;
 
     const notificationService = this.notificationService;
@@ -8582,6 +8648,7 @@ export class MessageHandler {
       if (requestKind === 'permission') {
         void (async () => {
           const historySynced = await doc.waitUntilSynced();
+          if (resolved) return;
           if (!historySynced) {
             this.logger.debug(
               `[${sessionId}] Permission request history was not confirmed before Live Activity sync; sending notification fallback`
@@ -8593,6 +8660,7 @@ export class MessageHandler {
           const liveActivityResult = await this.syncLiveActivitySummary(permissionUserId, {
             permissionAlert: true,
           });
+          if (resolved) return;
           if (liveActivityResult.sent && !liveActivityResult.ended) {
             return;
           }
@@ -8616,12 +8684,14 @@ export class MessageHandler {
 
     // Subscribe to LoroDoc and wait for outcome
     return new Promise<RequestPermissionResponse>((resolve) => {
-      let resolved = false;
       let timedOutResolution = false;
       let unsubscribe: (() => void) | null = null;
+      let unsubscribeConfig: (() => void) | undefined;
       let timeoutId: NodeJS.Timeout | null = null;
 
       const cleanup = () => {
+        unsubscribeConfig?.();
+        unsubscribeConfig = undefined;
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;
@@ -8634,11 +8704,23 @@ export class MessageHandler {
 
       const resolveWithOutcome = async (
         outcome: RequestPermissionResponse['outcome'],
-        resolutionSource: string = 'client'
+        resolutionSource: string = 'client',
+        persistOutcome = false
       ) => {
         if (resolved) return;
         resolved = true;
         cleanup();
+
+        if (persistOutcome) {
+          try {
+            await updatePermissionOutcomeInHistory(doc, requestId, outcome, this.logger);
+          } catch (error) {
+            this.logger.error(
+              `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+            );
+            outcome = { outcome: 'cancelled' };
+          }
+        }
 
         // Accumulate permission wait time for this session
         const requestStartTime = this.permissionRequestStartTimes.get(requestId);
@@ -8652,14 +8734,17 @@ export class MessageHandler {
           );
         }
 
-        // Single funnel for client answers, cancels, and timeouts, so clearing
-        // here cannot leave a stale "waiting on you" behind.
-        try {
-          await doc.clearAwaitingUser();
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
-          );
+        // A drained tool must not clear a still-pending question's waiting state.
+        pendingRequests.delete(requestId);
+        if (pendingRequests.size === 0) {
+          this.pendingPermissionRequests.delete(sessionId);
+          try {
+            await doc.clearAwaitingUser();
+          } catch (error) {
+            this.logger.debug(
+              `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
+            );
+          }
         }
 
         this.logger.info(`Permission resolved for session ${sessionId}: ${outcome.outcome}`);
@@ -8699,6 +8784,7 @@ export class MessageHandler {
           // the visible active scope ended; only restore `running` while active
           // presence is still owned locally.
           if (
+            !this.pendingPermissionRequests.has(sessionId) &&
             shouldRestoreRunningAfterPermission({
               hasActivePresence: this.hasSessionActivePresence(sessionId),
               status: currentStatus,
@@ -8736,8 +8822,30 @@ export class MessageHandler {
         });
       }
 
+      const checkAutomaticOutcome = (pending: boolean) => {
+        // A client decision already written to history wins over a later mode toggle.
+        checkForOutcome();
+        if (resolved || isAskUserQuestionRequest) return;
+        const outcome = agentClient?.getAutomaticToolPermissionOutcome(request, pending);
+        if (outcome) void resolveWithOutcome(outcome, 'run_config_auto_approve', true);
+      };
+      if (agentClient && !isAskUserQuestionRequest) {
+        let wasAutomatic =
+          agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+        unsubscribeConfig = agentClient.subscribeConfigOptions(() => {
+          const isAutomatic =
+            agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+          const enabled = isAutomatic && !wasAutomatic;
+          wasAutomatic = isAutomatic;
+          // Unrelated config updates must not drain a request queued while YOLO was already on.
+          if (enabled) checkAutomaticOutcome(true);
+        });
+      }
+
       // Check immediately in case outcome was already written
-      checkForOutcome();
+      // or the config changed while history/status/notifications were being prepared.
+      checkAutomaticOutcome(false);
+      if (resolved) return;
 
       // Setup timeout
       timeoutId = setTimeout(() => {
@@ -9535,6 +9643,7 @@ export class MessageHandler {
 
   cancelPendingPermissionRequests(): void {
     this.permissionRequestStartTimes.clear();
+    this.pendingPermissionRequests.clear();
   }
 
   /**

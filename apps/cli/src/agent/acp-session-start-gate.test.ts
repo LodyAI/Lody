@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
 
 import {
   ACP_SESSION_START_GATE_ENV,
   AcpSessionStartGate,
+  AcpSessionStartQueueTimeoutError,
   DEFAULT_MAX_CONCURRENT_ACP_SESSION_STARTS,
   __test__,
   getAcpSessionStartGate,
@@ -99,6 +102,111 @@ describe('AcpSessionStartGate', () => {
     });
     expect(ran).toBe(true);
     expect(gate.inUse).toBe(0);
+  });
+
+  it('waits without a deadline unless a caller sets one', async () => {
+    // A session restore wave is the contention this gate exists to serialize.
+    // Failing its tail on a queue deadline would undo the reason for the queue,
+    // so the bound belongs to callers whose wait sits inside an RPC budget.
+    expect(new AcpSessionStartGate({ maxConcurrent: 1 }).waitTimeoutMs).toBeUndefined();
+    expect(ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS).toBeGreaterThan(0);
+
+    vi.useFakeTimers();
+    try {
+      const gate = new AcpSessionStartGate({ maxConcurrent: 1 });
+      const holder = deferred();
+      const held = gate.run({ label: 'holder' }, async () => {
+        await holder.promise;
+      });
+      let ran = false;
+      const queued = gate.run({ label: 'queued' }, async () => {
+        ran = true;
+      });
+
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(gate.queued).toBe(1);
+
+      holder.resolve();
+      await Promise.all([held, queued]);
+      expect(ran).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up on a start that never reaches the front of the queue', async () => {
+    // A queued start emits no progress frame, so an unbounded wait is silence
+    // the client eventually expires — reporting its own timeout instead of the
+    // machine's reason. The machine has to own this deadline like every other.
+    vi.useFakeTimers();
+    try {
+      const gate = new AcpSessionStartGate({ maxConcurrent: 1, waitTimeoutMs: 1_000 });
+      const holder = deferred();
+      const held = gate.run({ label: 'holder' }, async () => {
+        await holder.promise;
+      });
+
+      const queued = gate.run({ label: 'queued' }, async () => {
+        throw new Error('queued start should not run');
+      });
+      const queuedFailure = queued.then(
+        () => {
+          throw new Error('queued start should reject');
+        },
+        (error: unknown) => error
+      );
+
+      await Promise.resolve();
+      expect(gate.queued).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      const error = await queuedFailure;
+      expect(error).toBeInstanceOf(AcpSessionStartQueueTimeoutError);
+      expect((error as Error).message).toContain('busy starting other agents');
+      // The wait failing must not eat the slot it never got.
+      expect(gate.queued).toBe(0);
+      expect(gate.inUse).toBe(1);
+
+      holder.resolve();
+      await held;
+      expect(gate.inUse).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a granted start alive past its queue deadline', async () => {
+    // The deadline bounds the WAIT, not the work. A start that got its slot
+    // must not be cancelled while the agent is initializing.
+    vi.useFakeTimers();
+    try {
+      const gate = new AcpSessionStartGate({ maxConcurrent: 1, waitTimeoutMs: 1_000 });
+      const holder = deferred();
+      const held = gate.run({ label: 'holder' }, async () => {
+        await holder.promise;
+      });
+
+      const work = deferred();
+      let started = false;
+      const queued = gate.run({ label: 'queued' }, async () => {
+        started = true;
+        await work.promise;
+      });
+
+      await Promise.resolve();
+      holder.resolve();
+      await held;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(started).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      work.resolve();
+      await expect(queued).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not consume a slot when a queued start is aborted', async () => {

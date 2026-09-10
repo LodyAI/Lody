@@ -397,6 +397,7 @@ let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   const mode = readPendingLocalClearMode();
   if (!mode) return null;
+  await getIpcServices()?.app.prepareCacheClear();
 
   try {
     if (mode === 'hard') {

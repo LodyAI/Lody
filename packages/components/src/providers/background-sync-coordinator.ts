@@ -1,4 +1,5 @@
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
+import type { EagerSyncPolicy } from './eager-sync-policy';
 
 /**
  * Background progressive eager-sync of session docs.
@@ -88,52 +89,16 @@ export interface BackgroundSyncCoordinatorDeps {
   logger?: { debug(...args: unknown[]): void };
 }
 
-export interface EagerSyncPolicy {
-  /** Max concurrent prefetches. */
-  concurrency: number;
-  /** Max prefetches to start before yielding to a cooldown. */
-  batchSize: number;
-  /** Delay before starting the next prefetch batch. */
-  batchCooldownMs: number;
-  /** Burst-coalesce window: skip re-syncing a room synced within this window. */
-  freshnessTtlMs: number;
-  /** Max coordinator-warmed docs kept before LRU eviction. */
-  maxWarmDocs: number;
-  /** Only eager-sync the top-N candidates; Infinity means all candidates. */
-  candidateWindow: number;
-  /** Abort a prefetch that has not settled within this window. */
-  prefetchTimeoutMs: number;
-}
-
-export type EagerSyncSurface = 'web' | 'desktop' | 'mobile';
-
-export const WEB_EAGER_SYNC_CANDIDATE_WINDOW = 20;
-export const FULL_EAGER_SYNC_CANDIDATE_WINDOW = Number.POSITIVE_INFINITY;
-
-export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 2,
-  batchSize: 4,
-  batchCooldownMs: 1_500,
-  freshnessTtlMs: 15_000,
-  maxWarmDocs: 20,
-  candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
-  prefetchTimeoutMs: 20_000,
-};
-
-export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 3,
-  batchSize: 8,
-  batchCooldownMs: 750,
-  freshnessTtlMs: 15_000,
-  maxWarmDocs: 96,
-  candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
-  prefetchTimeoutMs: 20_000,
-};
-
-export const DEFAULT_EAGER_SYNC_POLICY = WEB_EAGER_SYNC_POLICY;
-
-export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy =>
-  surface === 'web' ? WEB_EAGER_SYNC_POLICY : FULL_EAGER_SYNC_POLICY;
+export type { EagerSyncPolicy, EagerSyncSurface } from './eager-sync-policy';
+export {
+  DEFAULT_EAGER_SYNC_POLICY,
+  FULL_EAGER_SYNC_CANDIDATE_WINDOW,
+  FULL_EAGER_SYNC_POLICY,
+  MOBILE_EAGER_SYNC_POLICY,
+  WEB_EAGER_SYNC_CANDIDATE_WINDOW,
+  WEB_EAGER_SYNC_POLICY,
+  resolveEagerSyncPolicy,
+} from './eager-sync-policy';
 
 export interface BackgroundSyncCoordinator {
   start(): void;

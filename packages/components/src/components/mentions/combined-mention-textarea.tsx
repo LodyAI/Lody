@@ -13,17 +13,11 @@ import {
 } from '@/components/mentions/mention-analytics';
 import {
   buildItemSuggestions,
-  getIssuePrFuseOptions,
   IssuePrMentionHydrator,
   IssuePrMentionTitleHint,
   useKnownIssuePrItems,
-  type ItemSuggestion as IssuePrSuggestion,
 } from '@/components/mentions/issue-pr-hash-mention';
-import {
-  getFuseOptions,
-  hydrateFileMentionsFromText,
-  type PathSuggestion,
-} from '@/components/mentions/file-at-mention';
+import { hydrateFileMentionsFromText } from '@/components/mentions/file-at-mention';
 import {
   buildSessionMentionInsertion,
   filterSessionMentionItemsByProject,
@@ -42,7 +36,7 @@ import {
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { applyAgentRoleEmojiChip } from '@/components/mentions/mention-chips';
-import { useMentionFuseCtor } from '@/components/mentions/mention-fuse';
+import { toPathMentionInsertion, type PathMentionInsertion } from '@/lib/dropped-local-path';
 import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import {
   sanitizeMentionRanges,
@@ -51,6 +45,7 @@ import {
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
   buildMentionFileIndex,
+  MENTION_TRIGGER,
   useMentionCategories,
   type MentionCategorySources,
 } from '@/components/mentions/mention-registry';
@@ -92,8 +87,7 @@ function isLazySourceLoading(status: string, hasData: boolean) {
 
 /**
  * Builds the mention registry from the composer's already-fetched data and
- * renders the single `@` menu. Lives inside `<Mention>` so Fuse loading stays
- * keyed to the menu actually being open.
+ * renders the single `@` menu.
  */
 function TwoLevelMentionMenu({
   fileData,
@@ -181,36 +175,11 @@ function TwoLevelMentionMenu({
       enableFileMentions ? buildMentionFileIndex(fileData.entry, buildLazyDirectoryToken) : null,
     [enableFileMentions, fileData.entry]
   );
-  const fileFuseCtor = useMentionFuseCtor<PathSuggestion>(active && fileIndex !== null);
-  const fileFuse = React.useMemo(() => {
-    if (!fileFuseCtor || !fileIndex) return null;
-    try {
-      return new fileFuseCtor(fileIndex.allSuggestions, getFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [fileFuseCtor, fileIndex]);
-
   const issuePrSuggestions = React.useMemo(
     () =>
       enableIssueMentions && issuePrData.entry ? buildItemSuggestions(issuePrData.entry.items) : [],
     [enableIssueMentions, issuePrData.entry]
   );
-  const issuePrFuseCtor = useMentionFuseCtor<IssuePrSuggestion>(
-    active && issuePrSuggestions.length > 0
-  );
-  const createIssuePrFuse = React.useCallback(
-    (list: IssuePrSuggestion[]) => {
-      if (!issuePrFuseCtor || list.length === 0) return null;
-      try {
-        return new issuePrFuseCtor(list, getIssuePrFuseOptions());
-      } catch {
-        return null;
-      }
-    },
-    [issuePrFuseCtor]
-  );
-
   const fileSource = React.useMemo<NonNullable<MentionCategorySources['file']>>(
     () => ({
       enabled: enableFileMentions,
@@ -236,9 +205,8 @@ function TwoLevelMentionMenu({
             )
         : undefined,
       index: fileIndex,
-      fuse: fileFuse,
     }),
-    [enableFileMentions, fileData, fileFuse, fileIndex, fileSourceKind, t]
+    [enableFileMentions, fileData, fileIndex, fileSourceKind, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -265,17 +233,8 @@ function TwoLevelMentionMenu({
           : undefined,
       onActivate: activateIssuePr,
       suggestions: issuePrSuggestions,
-      createFuse: createIssuePrFuse,
     }),
-    [
-      activateIssuePr,
-      createIssuePrFuse,
-      enableIssueMentions,
-      issuePrData,
-      issuePrSuggestions,
-      repoFullName,
-      t,
-    ]
+    [activateIssuePr, enableIssueMentions, issuePrData, issuePrSuggestions, repoFullName, t]
   );
 
   const skillSource = React.useMemo<NonNullable<MentionCategorySources['skill']>>(
@@ -601,6 +560,13 @@ export type CombinedMentionTextareaHandle = {
    * unknown/archived/own session, or one the draft already mentions.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /**
+   * Append `@path` mentions in one transaction for paths outside the menu —
+   * folders dropped from the OS. Each writes text plus a committed range,
+   * so chips and the before-send rewrite see the same artefact as a menu commit.
+   * Returns false when every path is empty.
+   */
+  insertPathMentions: (insertions: PathMentionInsertion[]) => boolean;
 };
 
 /**
@@ -629,6 +595,24 @@ function MentionActionsBridge({
         const insertion = buildSessionMentionInsertion(mentions, item);
         if (!insertion) return false;
         onMentionInsert(insertion);
+        return true;
+      },
+      insertPathMentions: (insertions) => {
+        const requests = insertions.flatMap(({ path, kind }) => {
+          const token = toPathMentionInsertion(path, kind).path;
+          if (!token) return [];
+          return [
+            {
+              text: `${MENTION_TRIGGER}${token}`,
+              value: kind === 'dir' && !token.endsWith('/') ? `${token}/` : token,
+              kind,
+              separate: true,
+              suffix: ' ',
+            },
+          ];
+        });
+        if (requests.length === 0) return false;
+        onMentionInsert(requests);
         return true;
       },
     }),
@@ -839,12 +823,9 @@ export const CombinedMentionTextarea = React.forwardRef<
     const agentRoleContext = React.useMemo(
       () =>
         templateScope
-          ? { kind: 'github' as const }
-          : buildAgentRoleMentionContext({
-              mentionSource,
-              currentMachineId: skillAgent?.machineId,
-            }),
-      [mentionSource, skillAgent?.machineId, templateScope]
+          ? { kind: 'authorized_machines' as const }
+          : buildAgentRoleMentionContext({ mentionSource }),
+      [mentionSource, templateScope]
     );
     const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
     // A committed range carries only the Role id, so the caller's chip resolver
@@ -950,22 +931,9 @@ export const CombinedMentionTextarea = React.forwardRef<
       },
       [onExternalMentionsChange, onMentionRangesChange, internalMentions, markDraftEdited]
     );
-    const [instanceKey, setInstanceKey] = React.useState(0);
     const prevValueRef = React.useRef(value);
-    const shouldRefocusRef = React.useRef(false);
-    // The cleared-input reset remounts the tree, which replaces the textarea
-    // node and drops focus. Restoring it cannot depend on the caller passing a
-    // ref — the settings template editor does not — so keep our own and hand
-    // the node to the forwarded ref as well.
-    const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
-    const composedInputRef = React.useCallback(
-      (node: HTMLTextAreaElement | null) => {
-        inputRef.current = node;
-        if (typeof ref === 'function') ref(node);
-        else if (ref) (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
-      },
-      [ref]
-    );
+    const [hydrationKey, setHydrationKey] = React.useState(0);
+    const [menuOpen, setMenuOpen] = React.useState(false);
 
     // A draft swap, applied during render so the outgoing draft's ranges are
     // never painted over the incoming text — not even for one frame. Remounting
@@ -976,47 +944,37 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (renderedDraftKey !== effectiveDraftKey) {
       setRenderedDraftKey(effectiveDraftKey);
       setInternalMentions([]);
-      setInstanceKey((k) => k + 1);
+      setMenuOpen(false);
       // The swap is not an edit, so it must not read as one: an incoming empty
       // draft would otherwise trip the cleared-input reset below and report the
       // *new* draft's ranges as emptied.
       prevValueRef.current = value;
     }
 
+    // Clearing content resets data and re-arms hydration, not the input DOM.
+    // Replacing the textarea here loses browser focus and breaks submission's
+    // disabled → enabled handoff. Only a different draft replaces the tree.
     React.useEffect(() => {
       if (suspendShortcutDraft) return;
       const prevValue = prevValueRef.current;
       prevValueRef.current = value;
       if (!resetOnEmpty) return;
       if (prevValue !== '' && value === '') {
-        // Track whether the textarea had focus before the reset so we can restore it
-        if (inputRef.current && document.activeElement === inputRef.current) {
-          shouldRefocusRef.current = true;
-        }
         setInternalMentions([]);
         handleMentionValuesChange([]);
         onExternalMentionsChange?.([]);
         onMentionRangesChange?.([]);
-        if (!shortcutHistory) setInstanceKey((k) => k + 1);
+        setMenuOpen(false);
+        setHydrationKey((k) => k + 1);
       }
     }, [
       handleMentionValuesChange,
       onExternalMentionsChange,
       onMentionRangesChange,
-      onShortcutAvailabilityChange,
-      ref,
       resetOnEmpty,
       suspendShortcutDraft,
-      shortcutHistory,
       value,
     ]);
-
-    // Re-focus the textarea after the Mention tree remounts due to instanceKey change
-    React.useEffect(() => {
-      if (!shouldRefocusRef.current) return;
-      shouldRefocusRef.current = false;
-      inputRef.current?.focus();
-    }, [instanceKey]);
 
     const enableCommandMentions =
       !templateScope && Boolean(availableCommands && availableCommands.length > 0);
@@ -1066,7 +1024,7 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (!enableMentions) {
       const textarea = (
         <Textarea
-          ref={composedInputRef}
+          ref={ref}
           // Marks the message composer so the ⇧Tab "cycle mode" command can scope
           // itself to the composer and not hijack reverse-Tab elsewhere.
           data-lody-composer-input=""
@@ -1086,10 +1044,12 @@ export const CombinedMentionTextarea = React.forwardRef<
 
     return (
       <Mention
-        key={instanceKey}
+        key={effectiveDraftKey}
         editHistory={shortcutHistory}
         disabled={props.disabled}
         readonly={props.readOnly}
+        open={value !== '' && menuOpen}
+        onOpenChange={setMenuOpen}
         triggers={triggers}
         trigger={triggers[0] ?? '@'}
         inputValue={value}
@@ -1108,53 +1068,55 @@ export const CombinedMentionTextarea = React.forwardRef<
         loop
         className="w-full"
       >
-        <FileMentionHydrator
-          text={value}
-          getKnownPaths={getKnownFileTokens}
-          enabled={enableFileMentions && !templateScope}
-        />
-        {persistedMentions && persistedMentions.length > 0 ? (
-          <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
-        ) : null}
-        <SessionMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={sessionItems}
-          enabled={enableSessionMentions}
-        />
-        <AgentRoleMentionHydrator
-          getKnownFileTokens={getKnownFileTokens}
-          text={value}
-          items={agentRoleItems}
-          enabled={enableAgentRoleMentions && !templateScope}
-        />
-        {mentionActionsRef ? (
-          <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
-        ) : null}
-        {enableSkillMentions ? (
-          <SkillMentionHydrator
+        <React.Fragment key={hydrationKey}>
+          <FileMentionHydrator
             text={value}
-            knownTokens={knownSkillTokens}
-            enabled={skillsActive && !templateScope}
+            getKnownPaths={getKnownFileTokens}
+            enabled={enableFileMentions && !templateScope}
           />
-        ) : null}
-        {enableIssueMentions ? (
-          <>
-            <IssuePrMentionHydrator
+          {persistedMentions && persistedMentions.length > 0 ? (
+            <PersistedMentionHydrator text={value} ranges={persistedMentions} enabled />
+          ) : null}
+          <SessionMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={sessionItems}
+            enabled={enableSessionMentions}
+          />
+          <AgentRoleMentionHydrator
+            getKnownFileTokens={getKnownFileTokens}
+            text={value}
+            items={agentRoleItems}
+            enabled={enableAgentRoleMentions && !templateScope}
+          />
+          {mentionActionsRef ? (
+            <MentionActionsBridge actionsRef={mentionActionsRef} items={sessionItems} />
+          ) : null}
+          {enableSkillMentions ? (
+            <SkillMentionHydrator
               text={value}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions && !templateScope}
+              knownTokens={knownSkillTokens}
+              enabled={skillsActive && !templateScope}
             />
-            <IssuePrMentionTitleHint
-              repoFullName={githubRepoFullName}
-              knownItems={knownIssuePrItems}
-              enabled={enableIssueMentions}
-            />
-          </>
-        ) : null}
+          ) : null}
+          {enableIssueMentions ? (
+            <>
+              <IssuePrMentionHydrator
+                text={value}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions && !templateScope}
+              />
+              <IssuePrMentionTitleHint
+                repoFullName={githubRepoFullName}
+                knownItems={knownIssuePrItems}
+                enabled={enableIssueMentions && !templateScope}
+              />
+            </>
+          ) : null}
+        </React.Fragment>
         <MentionLabel className="sr-only">{label}</MentionLabel>
         <MentionInput
-          ref={composedInputRef}
+          ref={ref}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}

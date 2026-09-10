@@ -1,107 +1,133 @@
 # src/components/mentions
 
-Product-level mention sources built on `src/ui/mention`.
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Read [mention-behavior.md](mention-behavior.md) before changing source activation,
-hydration, persisted ranges, session/Role addressing, or transcript semantics.
+Mention sources on `src/ui/mention`. Files: [README.md](README.md).
+Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md).
 
-## Invariants
+## Triggers, menu, and candidates
 
-- Disabled categories remain discoverable with localized reasons; they neither
-  activate sources nor accept selection. Disabled differs from absent and loading.
-- `/` groups independent Shortcut and ACP sources. ACP alone owns the whole
-  prompt; Shortcuts can appear inline. Never put Shortcut data into agent caches.
-- Restore ranges as data; text hydration only fills unclaimed ranges. Draft swaps
-  reset ranges synchronously by `draftKey`; all hydrators preserve existing ranges.
-- Stable range IDs own session/Role/Shortcut meaning. Never infer an invocation
-  from its visible token. `useMentionPromptExpansion` owns both send paths.
-- Lazy source activation is menu-scoped and freshness-aware, never a body prefetch.
-- Locale files use flat dotted keys. Template editors exclude Shortcut/ACP nesting.
+- `@` opens the two-level menu; `$` keeps Skills; `/` groups ACP and Shortcuts.
+  `#` opens no menu but retains hydration/expansion.
+- `enableAtMentions` is the ONE list of what `@` reaches, gating both trigger
+  registration and mounting `<Mention>`; every source with its own `enabled`
+  rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
+  only under the conditions that enable Skill mentions.
+- Desktop `MentionContent` stays capped at `var(--mention-input-width)`.
+- `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
+  `/cmd`): reaching a type through `@` must not change what the agent receives.
+  Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
+  `insertText` (`@dir`, commit).
+- `MentionCategory.getCandidates` stays lazy: a query scoped to one category
+  never ranks files for other categories; bare `@` calls none. Aggregate results
+  are capped by `selectMentionMenuView`; the Role category lists all readable Roles.
+- Issues and PRs rank over their own slice of the shared cache, partitioned once
+  by `useMentionCategories`.
+- File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
+  `scoreFuzzy` with non-contiguous matching, wrapped by any source-specific
+  ordering. Skills and commands keep their own ranking.
+- `MentionCandidateDetail` fields render verbatim: supply i18n text, not enums.
+  `detail.agentRole` uses the shared desktop-only Role pane with fixed height
+  and stable scrollbar gutter.
+- `MentionCategory.activation` starts synchronously via `onMentionNavigate`;
+  `selectMentionViewActivations` covers typed/direct/aggregate entry. Both share
+  one activation latch per menu-open and `sourceKey`, without source-specific menu logic.
+- Activation ensures loading, not revalidation. Issues/PRs use `ISSUE_PR_FRESH_FOR_MS`
+  and persist fetch time; only explicit refresh passes `force: true`. Unasked
+  sources report `loading`, never ready/empty.
 
-## Files
+## Hydration and drafts
 
-- `mention-prompt-shortcut-source.tsx` filters the protected catalog INDEX only.
-  It has no body loader: default results require `available`; exact unavailable
-  matches are disabled diagnostics. Unverified dependencies remain `unknown`.
-  Shortcut ids and ACP ids are distinct; template editors exclude both kinds.
+- Hydrators only add ranges for known tokens/items, preserve existing external
+  `pasted_text` ranges, and must record a `kind`. Hydration latches the first
+  NON-EMPTY text, not the first render's.
+- A composer stores its ranges with its draft and restores them through
+  `PersistedMentionHydrator`; rebuilding from text is the fallback. Store the
+  narrow `PersistedMentionRange`, never the live range. `mergeHydratedMentions`
+  drops a hydrated range that OVERLAPS one already present, not merely a
+  duplicate.
+- A composer that swaps drafts in place (the session one does) must pass
+  `draftKey`; the reset runs during render.
+- Locale files are flat dotted-key maps: i18next runs `keySeparator: false`.
+- `vscode-fuzzy-score.ts` is vendored: keep Microsoft's copyright header, the
+  adjacent MIT license, and the generated third-party attribution when updating
+  it.
 
-- `combined-mention-textarea.tsx` combines sources, hydrators, triggers, and
-  `MentionInput` for chat composer usage.
-- `file-at-mention.tsx` and `mention-project-file-source.ts` provide file path
-  indexing and `@` candidates.
-- `mention-registry.ts` holds the two-level menu contract: category definitions,
-  candidate building, and `selectMentionMenuView`.
-- `mention-two-level-menu.tsx` renders that contract as the single `@` menu and
-  owns the activation latch and the `menu_open` -> `category_enter` -> `select`
-  funnel, both through `hooks/use-fire-once` rather than private refs.
-  `category_enter` is reported from the resolved view, not a row callback: a
-  navigation item never fires `onMentionSelect`, and the keyboard route counts.
-- `mention-session-source.ts` owns session slugs, candidates, the slug -> id
-  cache, hydration, the drop-time insertion, and the before-send expansion.
-- `mention-agent-role-source.ts` owns the Agent Roles work-context rule,
-  candidates, hydration, and the before-send rewrite. `useAgentRoleMentionItems`
-  is the single owner of the mentionable list, like `useSessionMentionItems`:
-  the menu and expansion both read it. It reads the visible-machine index, so a
-  test that renders a composer stubs it the same way it already stubs the
-  session source.
-- `mention-expansion.ts` composes every before-send transform into one hook.
-  Which kinds it rewrites is the short list (`REWRITTEN_SPAN_KINDS`); the
-  verbatim ones are derived from `MESSAGE_TEXT_SPAN_KINDS` minus it, so a new
-  span kind is a type error here rather than a mention that silently stops
-  getting a transcript chip.
-- `mention-hydration.ts` owns the hydrate-the-initial-text-once effect, the
-  range merge every source shares, and `forEachAtTokenSpan` — the single
-  definition of where an `@` token ends. Both the file and session hydrators
-  scan with it; they have to agree, because the session one decides what it may
-  claim by asking the file source which tokens it already knows.
-- An invocation chip is atomic and stays a chip: there is no "expand and edit"
-  that lowers one back into editable text. So the draft carries no generated
-  variable markers and no literal ranges, and nothing but a chip's own values can
-  block send. To change the template itself, edit the Shortcut in Settings.
-- `shortcut-prompt-compilation.ts` compiles snapshot segments with stable-target
-  lowering, then sends those and ordinary original-coordinate rewrites through
-  one `applyTextRewrites` emitter. Variable output is never scanned for tokens.
-  Both send paths catch validation failures before hiding or clearing the draft.
-- `use-shortcut-composer-draft.ts` adds account/workspace/composer-scoped local
-  recovery only for Shortcut drafts. The checkpoint pairs text/ordinary ranges
-  with snapshots because session text caches do not survive refresh. Restore
-  through existing owner callbacks, never a DOM/component-ref handoff; edits
-  fence pending reads by generation. `lib/shortcut-composer-draft.ts` serializes
-  durable writes and exposes clears synchronously for accepted child promotion.
-  Every identity transition creates a new restore ticket, including returning to
-  a previously ready key. `draftSuspended` pauses checkpoint writes and the
-  empty-input reset while a pending send only hides the prompt: rejected sends
-  must keep the original invocation data. Accepted sends clear before promotion.
-  Landing/session owners mask Shortcut-bearing cached
-  text from foreign account/workspace domains without replacing normal caches.
-- An invocation chip is atomic and carries only `/slug`. A Shortcut has no
-  variables, so there is nothing to fill in and no parameter surface at all;
-  `!{name}` inside a template is ordinary text, stored and sent as written.
-- `shortcut-invocation-status.tsx` says why an inserted chip cannot be sent. The
-  snapshot is frozen, so what changes under it is the live context — machine
-  offline, project changed, reference no longer readable — and it reports that
-  upward so the send button and the notice cannot disagree.
-- `shortcut-composer-state.ts` derives scope from composer project/provider identity.
-  Invocation snapshots live on each `prompt_shortcut` range, keyed by invocation
-  id; never reconstruct them from the visible slug or the live catalog.
-- `mention-chips.tsx` owns the kind -> glyph and kind -> colour tables for BOTH
-  chip surfaces. The composer's resolver decides only slot geometry and the
-  transcript's chip only its layout, so `@src/a.ts` cannot look like two
-  different objects before and after it is sent.
-- `message-text-chips.tsx` paints the transcript's chip as INLINE text, never an
-  `inline-flex` box: an atomic inline cannot break, so a long path was pinned to
-  one line and lost its file name to `truncate`. The glyph is bound to the first
-  few label characters with `white-space: nowrap` — every engine offers a break
-  beside an atomic inline and a WORD JOINER does not stop it, so without that
-  group the glyph strands at the end of the previous line. Only the pasted-text
-  chip stays boxed; it is a `<button>` with a short, fixed label.
-- `mention-fuse.ts` owns the shared, module-cached `fuse.js` import. Keep it
-  module-cached and keyed by menu activation, and reuse provider file entries
-  when paths/lazy dirs are unchanged — the menu must not rebuild either from
-  per-render derived objects. The keying is latched, so closing the menu must
-  not drop the constructor and re-index everything on the next `@`.
-- `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
-  hydration, and post-insert title hints.
-- `mention-skill-source.tsx` provides `$` skill discovery, provider directory
-  filtering, hydration, and the before-send prompt expansion.
-- `mention-analytics.ts` centralizes mention analytics event helpers.
+## Before-send expansion and transcript
+
+- `useMentionPromptExpansion` is the single before-send text transform where
+  per-type hooks compose. `mention-expansion.ts` lists the rewritten kinds
+  (`REWRITTEN_SPAN_KINDS`) and derives the verbatim ones from
+  `MESSAGE_TEXT_SPAN_KINDS` minus it.
+- The transcript chip comes from `MessageTextSpan.mark`, FROZEN at send time,
+  never resolved from the catalog at render. A span field must be declared in
+  BOTH `sanitizeMessageTextSpans` and the strict `MessageTextSpanSchema`.
+- `agent_role` is the one span kind the message COPY button collapses back to
+  its label (`getCopyTextFromMessageItems`); edit-and-resend still reads the
+  expanded text through `getTextContentFromMessageItems`. Both chip surfaces
+  read one kind → glyph and colour table (`mention-chips.tsx`).
+
+## Skills
+
+- `$` tokens end at whitespace. Known tokens expand to `use /token [Skill Path](path)`;
+  project paths are relative, home (`global`/`system`) paths CLI-provided absolute.
+  Order project → global → system with `compareProjectSkillScope`.
+- Candidates come from `useProjectSkills`, never Codex's registry. One CLI home
+  scan supplies global/system scopes filtered by `getRegisteredGlobalSkillDirs` /
+  `getRegisteredSystemSkillDirs`. `~/.agents/skills` is provider-specific; support
+  flat and catalog layouts but exclude unregistered roots. Registered empty
+  whitelists stay empty; unknown agent types use `null`, not an empty `Set`.
+
+## Sessions
+
+- `useSessionMentionItems` owns child-inclusive `allActiveSessions`, excluding
+  archived/own sessions. Project filtering is menu-only: never filter hydration,
+  expansion, drops, slug lookup, or child addressing by menu scope.
+- Commit plain `@<title-slug>` with `sessionId` on its range. Expand THE RANGE
+  into the id-bearing MCP instruction; unclaimed tokens stay verbatim. Session
+  hydration skips tokens known by the file source.
+- Resolve slugs live first, then the synchronous localStorage slug→id map;
+  register its key in `clear-local-cache.ts` and skip unchanged writes.
+- Sidebar/tab drops use `mentionActionsRef.insertSessionMention(sessionId)` to
+  create a real range; unknown/own/duplicate sessions return false. Draft and
+  file/diff tabs are not sources. Paint ONE `ConversationDropOverlay` through
+  `SessionMentionDropLayer` per conversation column, never per keep-alive tab.
+
+## Agent Roles
+
+- Commit plain `@<token>` with the Role id on its range; expansion requests Session
+  creation with that id only (shared contracts own acceptance/freezing). Unavailable
+  Roles stay plain text at send. Derive names/uniqueness via `getAgentRoleMentionSlug`.
+- `MentionCandidate.iconEmoji` replaces the category glyph via `getAgentRoleEmoji`;
+  omit detail title. `applyAgentRoleEmojiChip` clips the committed glyph to its slot;
+  `AgentRoleMentionItem` carries config and machine for the pane.
+- Check visibility, executability, then work context. Local Project/localWorktree
+  pins a machine; plain/GitHub contexts may use authorized machines. List readable
+  unavailable Roles after available matches with reasons. Only available Roles
+  select, hydrate or expand; never fall back.
+
+## Prompt Shortcuts
+
+- Disabled categories stay discoverable with localized reasons but cannot activate
+  or commit. Template editors exclude Sessions, recursive Shortcuts and ACP commands;
+  explicit scope owns discovery and text-scanning hydrators remain disabled there.
+- Shortcut discovery reads only the index. Default results require `available`;
+  exact unavailable matches are disabled diagnostics and unverified dependencies
+  remain `unknown`. Body loading belongs to cancellable selection, never menu open.
+- Shortcut and ACP ids are distinct. ACP owns a whole slash-only prompt; Shortcut
+  chips can appear inline. Never put Shortcut data into machine capability caches.
+- Invocation snapshots live on `prompt_shortcut` ranges keyed by invocation id,
+  never reconstructed from visible slugs. Chips are atomic, have no parameters or
+  expand-and-edit action, and `!{name}` is literal text. Scope/dependency status,
+  not variable values, can block sending.
+- `shortcut-prompt-compilation.ts` lowers snapshot segments and ordinary original-
+  coordinate rewrites through one emitter. Both send paths catch failures before
+  clearing the draft; history stores the fully expanded Prompt.
+- `use-shortcut-composer-draft.ts` supplements ordinary draft owners only for
+  Shortcut drafts. Checkpoints pair text/ranges/snapshots under account, workspace
+  and composer identity. Generation fences late restores, including return to an
+  earlier identity; restores use owner callbacks, never component-ref handoffs.
+- Pending sends suspend checkpoint writes and empty-input resets; rejection keeps
+  invocation data and acceptance clears before child-tab promotion. Identity swaps
+  remount the mention root; clearing text only resets data and hydrators, preserving
+  the textarea DOM and focus as well as semantic undo history.

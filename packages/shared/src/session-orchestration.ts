@@ -10,7 +10,7 @@ export const LODY_OPERATION_MIN_DEADLINE_SECONDS = 60;
 export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
-export const LODY_MAX_CHAIN_DEPTH = 5;
+export const LODY_MAX_CHAIN_DEPTH = 32;
 
 export const LodyOperationIdSchema = z
   .string()
@@ -28,11 +28,103 @@ export const LodyErrorSchema = z
 
 export type LodyError = z.infer<typeof LodyErrorSchema>;
 
+const OperationTargetSchema = z.object({ sessionId: z.string(), userTurnId: z.string() }).strict();
+const OperationOutputPreviewSchema = z
+  .object({
+    text: z.string(),
+    truncated: z.literal(true).optional(),
+    omittedBytes: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const LodyOperationItemSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('active'),
+      label: z.string().optional(),
+      target: OperationTargetSchema,
+      inputDurable: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('succeeded'),
+      label: z.string().optional(),
+      target: OperationTargetSchema,
+      assistantTurnId: z.string(),
+      output: OperationOutputPreviewSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('failed'),
+      label: z.string().optional(),
+      target: OperationTargetSchema.optional(),
+      error: LodyErrorSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('cancelled'),
+      label: z.string().optional(),
+      target: OperationTargetSchema.optional(),
+    })
+    .strict(),
+]);
+
+const OperationResultSchema = z.object({ items: z.array(LodyOperationItemSchema) }).strict();
+const CompletionTruncationSchema = z
+  .object({ truncated: z.literal(true), omittedBytes: z.number().int().nonnegative() })
+  .strict();
+export const LodyOperationCompletionSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('result'),
+      value: OperationResultSchema,
+      truncation: CompletionTruncationSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('error'),
+      error: LodyErrorSchema,
+      truncation: CompletionTruncationSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('cancelled'),
+      partial: OperationResultSchema.optional(),
+      truncation: CompletionTruncationSchema.optional(),
+    })
+    .strict(),
+]);
+
 export type LodyOperationKind =
   | 'session_create'
   | 'session_create_many'
   | 'session_chat'
   | 'session_chat_many';
+
+export type OperationProgressKind = Extract<
+  LodyOperationKind,
+  'session_create' | 'session_create_many'
+>;
+
+export type OperationProgressStatus = 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export type OperationProgressItem = {
+  target: LodyOperationItemTarget;
+  label?: string;
+  status: OperationProgressStatus;
+};
+
+export type OperationProgressContent = {
+  type: 'operation_progress';
+  operationId: string;
+  operationKind: OperationProgressKind;
+  items: OperationProgressItem[];
+};
 
 /**
  * Durable batch Operations intentionally bypass the cooperative session quotas;
@@ -120,6 +212,8 @@ export type LodyOperationSnapshot =
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;
   inputConfig: SessionTurnInputConfig;
+  /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
+  sourceTurnId?: string;
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.
@@ -164,6 +258,10 @@ export type StoredLodyDelivery = {
   deliveryId: string;
   systemTurnId: string;
   state: 'pending' | 'consumed';
+  executionPhase: 'ready' | 'claimed' | 'prepared' | 'started' | 'uncertain';
+  attemptCount: number;
+  activeClaimId?: string;
+  activeClaimWorkerBootId?: string;
   initiatorChainDepth: number;
   completion: LodyOperationCompletion;
   consumedAt?: string;
@@ -174,11 +272,16 @@ export type OperationCompletionContent = {
   deliveryId: string;
   operationId: string;
   operationKind: LodyOperationKind;
+  /** Stable system history entry id for the matching operation_progress card, when one exists. */
+  progressMessageId?: string;
   completion: LodyOperationCompletion;
   continuation?: {
-    status: 'not_started';
+    status: 'not_started' | 'uncertain';
     reason: {
-      code: 'CONFIGURATION_UNAVAILABLE';
+      code:
+        | 'CONFIGURATION_UNAVAILABLE'
+        | 'DELIVERY_ATTEMPTS_EXHAUSTED'
+        | 'DELIVERY_EXECUTION_UNCERTAIN';
       message: string;
     };
   };

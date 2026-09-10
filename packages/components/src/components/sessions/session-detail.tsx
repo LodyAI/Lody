@@ -1,4 +1,5 @@
 import { shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
+import { isAuxiliaryWindow } from '@/lib/desktop-window';
 import {
   Archive,
   ArchiveRestore,
@@ -26,6 +27,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
+import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
   buildPendingUserHistoryEntry,
@@ -46,6 +48,7 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
+  type ConversationMessage,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
 } from '@lody/shared';
@@ -67,6 +70,7 @@ import {
   RenameSessionDialog,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import {
   DraftSessionChatInterface,
   type DraftSessionChatInterfaceHandle,
@@ -161,6 +165,8 @@ import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
 import { FileTreeView } from './components/file-tree-view';
+import { useSessionFileActions } from '@/hooks/use-session-file-actions';
+import { SessionFileActionsMenu } from './session-file-actions-menu';
 import {
   MobileProjectFileBrowser,
   type MobileProjectFileBrowserHandle,
@@ -700,6 +706,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
   const isZenLayoutMode = useAtomValue(zenLayoutModeAtom);
@@ -1289,9 +1296,7 @@ const SessionDetail = ({
         };
       });
       if (placement === 'tab') {
-        setTabOrderState((current) =>
-          appendTabOrderId(current, sessionGroupIds, targetSessionId)
-        );
+        setTabOrderState((current) => appendTabOrderId(current, sessionGroupIds, targetSessionId));
       }
       if (response.partial && response.warnings.length > 0) {
         toast.warning(
@@ -1299,7 +1304,16 @@ const SessionDetail = ({
         );
       }
     },
-    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, sessionGroupIds, t, user?.id]
+    [
+      canForkSession,
+      currentWorkspaceId,
+      pendingForks,
+      postHog,
+      runtime,
+      sessionGroupIds,
+      t,
+      user?.id,
+    ]
   );
   const pendingForkSourceByTargetSessionId = useMemo(() => {
     const sourceByTarget = new Map<SessionId, string>();
@@ -2372,6 +2386,14 @@ const SessionDetail = ({
     null
   );
 
+  // Share-as-image preview target: the selected tab's session plus the plain-text
+  // conversation snapshot pulled from its chat surface when the menu item fires.
+  const [shareImageTarget, setShareImageTarget] = useState<{
+    session: SessionMeta;
+    messages: ConversationMessage[];
+    agentName?: string;
+  } | null>(null);
+
   const handleRequestDeleteCurrentSession = useCallback(() => {
     if (!activeSession) return;
     setDeleteConfirmOpen(true);
@@ -2524,6 +2546,34 @@ const SessionDetail = ({
     }
     void activeChatRef.copyConversationHistory();
   }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
+
+  const handleShareAsImage = useCallback(() => {
+    if (activeDraftTab) {
+      return;
+    }
+    const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
+    const shareData =
+      activeChatRef && 'getShareImageData' in activeChatRef
+        ? activeChatRef.getShareImageData()
+        : null;
+    if (
+      !activeTabSession ||
+      !shareData ||
+      shareData.messages.length === 0 ||
+      !activeChatRef ||
+      !('startShareImageSelection' in activeChatRef)
+    ) {
+      toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+      return;
+    }
+    activeChatRef.startShareImageSelection(shareData.messages, (messages) => {
+      setShareImageTarget({
+        session: activeTabSession,
+        messages,
+        agentName: shareData.agentName,
+      });
+    });
+  }, [activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
   const handleOpenSearch = useCallback(() => {
     if (activeDraftTab) {
@@ -3757,6 +3807,14 @@ const SessionDetail = ({
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
+  // One resolver for what this client can do with the session's files, shared
+  // by the Files tree's right-click menu and the side panel's ⋯ menu so the two
+  // can never offer different sets. It decides local-host vs remote itself.
+  const activeSessionFileActions = useSessionFileActions({
+    session: activeSession,
+    fileProvider: activeSessionFileProvider,
+  });
+  const activeViewerFilePath = activeViewerTab?.type === 'file' ? activeViewerTab.filePath : null;
   const handleSaveCurrentFile = useCallback(() => {
     if (!effectiveActiveViewerTabId || activeViewerTab?.type !== 'file') {
       return;
@@ -4165,6 +4223,7 @@ const SessionDetail = ({
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
       if (target.kind === 'landing') {
+        if (isAuxiliaryWindow()) return 'unhandled';
         handleBackToList();
         return 'handled';
       }
@@ -5100,6 +5159,9 @@ const SessionDetail = ({
               >
                 <SessionChatInterface
                   ref={(el) => setChatTabRef(tabSession.id, el)}
+                  claimNavigationFocus={
+                    isActive && tabSession.id === sessionId ? claimNavigationFocus : undefined
+                  }
                   session={tabSession}
                   workspaceSession={activeSession}
                   className="h-full"
@@ -5366,10 +5428,9 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5418,10 +5479,9 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* repositionInputs is platform-scoped: off on mobile web (vaul captures
-           the shrunk viewport and never restores it, #2761), on natively where the
-           keyboard overlays the content and vaul is what lifts/restores inputs.
-           See mobile-workspace-stack.tsx + context/mobile-keyboard.md. */}
+        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
+           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+           uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
           repositionInputs={isNativeAppShell()}
@@ -5516,6 +5576,7 @@ const SessionDetail = ({
         fileProviderPending={activeSessionFileProviderPending}
         fileProviderMessage={activeSessionFileProviderMessage}
         autoCodeCollab={false}
+        fileMenuItems={activeSessionFileActions.menuItems}
         changedFilePaths={changeFilePaths}
         // Opening a file selects its viewer tab, which unmounts this tree. Key
         // its expanded folders per session so returning to Files restores them.
@@ -5668,6 +5729,7 @@ const SessionDetail = ({
       onShareWithTeam={
         showSessionSharing ? () => handleRequestShareSession(activeSession) : undefined
       }
+      onShareAsImage={activeDraftTab ? undefined : handleShareAsImage}
       onOpenPrTab={handleOpenPrTab}
       onNavigateSession={handleNavigateSession}
       browserActionSession={activeBrowserSession}
@@ -5729,6 +5791,8 @@ const SessionDetail = ({
     const pendingForkSourceId = pendingForkSourceByTargetSessionId.get(chatSession.id);
     return {
       ref: (element: SessionChatInterfaceHandle | null) => setChatTabRef(chatSession.id, element),
+      claimNavigationFocus:
+        isActive && chatSession.id === sessionId ? claimNavigationFocus : undefined,
       session: chatSession,
       workspaceSession: activeSession,
       className: 'h-full',
@@ -5880,6 +5944,12 @@ const SessionDetail = ({
         closeTabLabel={(tabLabel) =>
           t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
         }
+        moreSlot={
+          <SessionFileActionsMenu
+            filePath={activeViewerFilePath}
+            items={activeSessionFileActions.menuItems}
+          />
+        }
         endSlot={sidebarToggleButton}
         className={cn(
           'border-b border-border/50 bg-background',
@@ -5963,6 +6033,15 @@ const SessionDetail = ({
       <RenameSessionDialog
         target={renameDialogTarget}
         onClose={() => setRenameDialogTarget(null)}
+      />
+      <ChatShareImageDialog
+        open={shareImageTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setShareImageTarget(null);
+        }}
+        session={shareImageTarget?.session ?? null}
+        messages={shareImageTarget?.messages ?? []}
+        agentName={shareImageTarget?.agentName}
       />
     </div>
   );

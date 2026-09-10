@@ -115,4 +115,113 @@ describe('Session relation cards', () => {
     });
     expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
   });
+
+  it('shows a navigable card before completion and updates the same card through target states', async () => {
+    const store = createStore();
+    const onNavigateSession = vi.fn();
+    let card: Element | null = null;
+    for (const status of ['created', 'running', 'succeeded', 'failed', 'cancelled'] as const) {
+      const message: SessionHistoryParsed = {
+        id: 'create-progress',
+        role: 'system',
+        read: true,
+        timestamp: '2026-08-14T12:00:00.000Z',
+        items: [
+          {
+            type: 'operation_progress',
+            operationId: 'create-child',
+            operationKind: 'session_create',
+            items: [
+              {
+                status,
+                label: 'Created child Tab',
+                target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+              },
+            ],
+          },
+        ],
+      };
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <MessageRowView
+              message={message}
+              sessionId={openerSessionId}
+              onNavigateSession={onNavigateSession}
+            />
+          </Provider>
+        );
+      });
+      const current = container.querySelector('[data-session-relation-card="opened"]');
+      expect(current).not.toBeNull();
+      if (card) expect(current).toBe(card);
+      card = current;
+      expect(
+        container.querySelector('[role="status"]')?.getAttribute('data-session-creation-status')
+      ).toBe(status);
+      expect(container.textContent).toContain('Created child Tab');
+      const button = container.querySelector<HTMLButtonElement>('button');
+      expect(button?.disabled).toBe(false);
+      await act(async () => button?.click());
+      expect(onNavigateSession).toHaveBeenLastCalledWith({ sessionId: createdSessionId });
+    }
+  });
+
+  it('renders independent batch target states without waiting for the whole batch', async () => {
+    await act(async () =>
+      root.render(
+        <Provider store={createStore()}>
+          <MessageRowView
+            sessionId={openerSessionId}
+            message={{
+              id: 'batch-progress',
+              role: 'system',
+              read: true,
+              timestamp: '2026-08-14T12:00:00.000Z',
+              items: [
+                {
+                  type: 'operation_progress',
+                  operationId: 'batch',
+                  operationKind: 'session_create_many',
+                  items: [
+                    {
+                      status: 'running',
+                      label: 'Still working',
+                      target: { sessionId: createdSessionId, userTurnId: 'turn-1' },
+                    },
+                    {
+                      status: 'succeeded',
+                      label: 'Already finished',
+                      target: { sessionId: 'second-child' as SessionId, userTurnId: 'turn-2' },
+                    },
+                  ],
+                },
+              ],
+            }}
+          />
+        </Provider>
+      )
+    );
+    expect(container.querySelectorAll('[data-session-relation-card="opened"]')).toHaveLength(2);
+    expect(container.querySelector('[data-session-creation-status="running"]')).not.toBeNull();
+    expect(container.querySelector('[data-session-creation-status="succeeded"]')).not.toBeNull();
+  });
+
+  it('does not duplicate target cards on completion when progress was published', async () => {
+    const completion = completionMessage.items[0];
+    if (completion.type !== 'operation_completion') throw new Error('Expected completion fixture');
+    await act(async () =>
+      root.render(
+        <MessageRowView
+          message={{
+            ...completionMessage,
+            items: [{ ...completion, progressMessageId: 'create-progress' }],
+          }}
+          sessionId={openerSessionId}
+        />
+      )
+    );
+    expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
+    expect(container.textContent).not.toBe('');
+  });
 });

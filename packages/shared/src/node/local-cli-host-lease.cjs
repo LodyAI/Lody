@@ -5,6 +5,9 @@ const { getInstallationProfile } = require('./installation-profile.cjs');
 
 const HOST_TCP_ADDRESS = '127.0.0.1';
 const HOST_REQUEST_TIMEOUT_MS = 800;
+const E2E_HOST_PORT_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PORT';
+const E2E_HOST_PIPE_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PIPE';
+const E2E_HOST_PIPE_PATTERN = /^\\\\\.\\pipe\\lody-e2e-[A-Za-z0-9-]{1,80}$/u;
 
 function getUserPipeSuffix() {
   if (typeof process.getuid === 'function') return String(process.getuid());
@@ -16,15 +19,44 @@ function getUserPipeSuffix() {
     .slice(0, 16);
 }
 
+function getE2eHostPort() {
+  if (process.env.LODY_E2E !== '1') return null;
+  const rawPort = process.env[E2E_HOST_PORT_ENV]?.trim();
+  if (!rawPort) return null;
+  if (!/^\d+$/u.test(rawPort)) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  const port = Number(rawPort);
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  return port;
+}
+
+function getE2eHostPipe(nodePlatform = process.platform) {
+  if (nodePlatform !== 'win32' || process.env.LODY_E2E !== '1') return null;
+  const pipe = process.env[E2E_HOST_PIPE_ENV]?.trim();
+  if (!pipe) return null;
+  if (!E2E_HOST_PIPE_PATTERN.test(pipe)) {
+    throw new Error(`${E2E_HOST_PIPE_ENV} must use the \\\\.\\pipe\\lody-e2e-<id> namespace`);
+  }
+  return pipe;
+}
+
 function getLocalCliHostEndpoint(platform) {
   const profile = getInstallationProfile(platform);
   if (process.platform === 'win32') {
     return {
       kind: 'pipe',
-      path: `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
+      path:
+        getE2eHostPipe() ?? `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
     };
   }
-  return { kind: 'tcp', host: HOST_TCP_ADDRESS, port: profile.localCliHostPort };
+  return {
+    kind: 'tcp',
+    host: HOST_TCP_ADDRESS,
+    port: getE2eHostPort() ?? profile.localCliHostPort,
+  };
 }
 
 function throwIfAborted(signal) {
@@ -278,6 +310,7 @@ async function requestLocalCliHostShutdown(options) {
 
 module.exports = {
   acquireLocalCliHostLease,
+  getE2eHostPipe,
   getLocalCliHostEndpoint,
   inspectLocalCliHost,
   requestLocalCliHostShutdown,

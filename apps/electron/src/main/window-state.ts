@@ -6,6 +6,9 @@ let pendingDeepLink: string | null = extractDeepLinkFromArgv(process.argv)
 let appQuitting = false
 let windowsTrayAvailable = false
 
+// Only product windows enter this set; embedded browsers and recovery probes do not.
+export const productWindows = new Set<BrowserWindow>()
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }

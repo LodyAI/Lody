@@ -236,6 +236,43 @@ describe('MentionTwoLevelMenuBody', () => {
     );
   }
 
+  it.each(['click', 'Enter', 'Tab', 'direct'] as const)(
+    'shows disabled role reasons and blocks %s selection',
+    (action) => {
+      const candidate: MentionCandidate = {
+        value: 'offline-role',
+        label: 'Offline',
+        insertText: '@Offline',
+        kind: 'agent_role',
+        icon: 'agent_role',
+        title: 'Offline Reviewer',
+        disabled: true,
+        subtitle: 'Unavailable: its machine is offline',
+      };
+      const categories: MentionCategory[] = [
+        {
+          id: 'agent_role',
+          namespace: 'role',
+          label: 'Agent Roles',
+          icon: 'agent_role',
+          status: 'ready',
+          getCandidates: () => [candidate],
+        },
+      ];
+      const input = render('@Offline', categories);
+      const row = container?.querySelector<HTMLElement>('[data-disabled]');
+      expect(row?.textContent).toContain('Unavailable: its machine is offline');
+      expect(row?.getAttribute('aria-disabled')).toBe('true');
+      act(() => {
+        if (action === 'click') row?.click();
+        else if (action === 'direct') latest.onMentionAdd?.('offline-role', 0);
+        else input.dispatchEvent(new KeyboardEvent('keydown', { key: action, bubbles: true }));
+      });
+      expect(latest.mentions).toEqual([]);
+      expect(latest.inputValue).toBe('@Offline');
+    }
+  );
+
   it('lists one row per category at the first level', () => {
     render('@');
 

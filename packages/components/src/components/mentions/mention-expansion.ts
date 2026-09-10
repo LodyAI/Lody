@@ -131,12 +131,8 @@ export function useMentionPromptExpansion({
     [shortcutRuntime, source, skillAgent]
   );
   const agentRoleContext = React.useMemo(
-    () =>
-      buildAgentRoleMentionContext({
-        mentionSource: source,
-        currentMachineId: skillAgent?.machineId,
-      }),
-    [skillAgent?.machineId, source]
+    () => buildAgentRoleMentionContext({ mentionSource: source }),
+    [source]
   );
   // Same owner as the composer menu, by module: both read the shared catalog
   // room, so the list the user picked from is the list this authorizes against.

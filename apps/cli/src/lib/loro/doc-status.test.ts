@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getSessionRoomId, SessionStatusFactory, type SessionId } from '@lody/shared';
+import {
+  createSessionMirror,
+  getSessionRoomId,
+  SessionStatusFactory,
+  type SessionId,
+} from '@lody/shared';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 
@@ -127,6 +132,10 @@ describe('SessionDocument status metadata', () => {
     entry.set('role', 'assistant');
     entry.set('fileDiff', [{ path: 'a.ts', add: 1, del: 0 }]);
     doc.handle = { doc: loroDoc } as SessionDocument['handle'];
+    doc.mirror = createSessionMirror({
+      doc: loroDoc,
+      initialState: { session: { id: doc.sessionId }, history: [] },
+    });
 
     expect(doc.setHistoryEntryField('entry-1', 'fileDiff', undefined)).toBe(true);
 
@@ -136,6 +145,7 @@ describe('SessionDocument status metadata', () => {
 
     expect(doc.setLatestAssistantHistoryFileDiff(undefined, 'entry-1')).toBe(true);
     expect((loroDoc.getList('history').get(0) as LoroMap).keys()).not.toContain('fileDiff');
+    doc.mirror.dispose();
   });
 
   it('derives stable turn storage metadata from the associated user entry', () => {

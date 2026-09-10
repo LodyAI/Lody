@@ -137,3 +137,73 @@ export const AtConversationStart: Story = {
     </div>
   ),
 };
+
+const progressMessage = (
+  status: 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+): SessionHistoryParsed => ({
+  id: 'storybook-create-progress',
+  role: 'system',
+  timestamp: '2026-08-14T12:00:00.000Z',
+  read: true,
+  items: [
+    {
+      type: 'operation_progress',
+      operationId: 'create-sidebar-audit',
+      operationKind: 'session_create',
+      items: [
+        {
+          status,
+          label: 'Audit the sidebar navigation state',
+          target: { sessionId: operationSessionId, userTurnId: 'storybook-user-turn' },
+        },
+      ],
+    },
+  ],
+});
+
+function ProgressPreview({
+  status,
+}: {
+  status: 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+}) {
+  return (
+    <div className="w-[720px] max-w-[calc(100vw-2rem)] bg-background p-5">
+      <MessageRowView
+        message={progressMessage(status)}
+        sessionId={'storybook-opener' as SessionId}
+        onNavigateSession={() => {}}
+      />
+    </div>
+  );
+}
+
+export const Created: Story = {
+  args: CreatedConversation.args,
+  render: () => <ProgressPreview status="created" />,
+};
+export const Running: Story = {
+  args: CreatedConversation.args,
+  render: () => <ProgressPreview status="running" />,
+};
+export const Succeeded: Story = {
+  args: CreatedConversation.args,
+  render: () => <ProgressPreview status="succeeded" />,
+};
+export const Failed: Story = {
+  args: CreatedConversation.args,
+  render: () => <ProgressPreview status="failed" />,
+};
+export const Cancelled: Story = {
+  args: CreatedConversation.args,
+  render: () => <ProgressPreview status="cancelled" />,
+};
+export const AllCreationStates: Story = {
+  args: CreatedConversation.args,
+  render: () => (
+    <div className="flex flex-col bg-background">
+      {(['created', 'running', 'succeeded', 'failed', 'cancelled'] as const).map((status) => (
+        <ProgressPreview key={status} status={status} />
+      ))}
+    </div>
+  ),
+};

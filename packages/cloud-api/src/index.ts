@@ -344,6 +344,7 @@ export type CloudApi = {
     >;
   };
   auth: {
+    transferWorkspaceOwnership: Mutation<{ workspaceId: string; targetMemberId: string }, null>;
     getMyWorkspaceMembershipFingerprint: Query<Record<string, never>, string | null>;
     getUserById: Query<
       { workspaceId?: string; userId: string },
@@ -363,6 +364,10 @@ export type CloudApi = {
     >;
   };
   billing: {
+    createBillingPortalSession: Action<
+      { workspaceId: string; returnUrl?: string; returnTarget?: 'web' | 'desktop' },
+      { url: string }
+    >;
     createCheckoutSession: Action<
       CheckoutUrls & { workspaceId: string; interval: BillingInterval },
       { url: string; checkoutKind?: 'subscription' | 'gift_setup' }

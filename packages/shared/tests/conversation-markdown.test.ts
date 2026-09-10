@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildConversationMarkdown,
+  collectConversationMessages,
   estimateTokenCount,
   CONVERSATION_MARKDOWN_MAX_CHARS,
   CONVERSATION_MARKDOWN_MAX_TOKENS,
@@ -68,6 +69,84 @@ describe('estimateTokenCount', () => {
 
   it('counts CJK at roughly one token per character', () => {
     expect(estimateTokenCount('中文测试'.repeat(100))).toBe(400);
+  });
+});
+
+describe('share message token estimates', () => {
+  it('preserves the recorded model instead of substituting another turn configuration', () => {
+    const recorded = entry('assistant', [textItem('Answer')]);
+    recorded.modelInfo = { modelId: 'recorded-model', name: 'Recorded Model' };
+    recorded.inputConfig = { modelId: 'requested-model' };
+    const legacy = entry('assistant', [textItem('Legacy answer')]);
+    legacy.inputConfig = { modelId: 'legacy-model' };
+    const unknown = entry('assistant', [textItem('Unknown model')]);
+    expect(
+      collectConversationMessages([recorded, legacy, unknown]).map((message) => message.modelName)
+    ).toEqual(['Recorded Model', 'legacy-model', undefined]);
+  });
+
+  it('keeps the card prose-only while counting folded thinking, plans and tool output', () => {
+    const history = [
+      entry('assistant', [
+        { type: 'thought', text: 't'.repeat(400) },
+        {
+          type: 'plan',
+          entries: [{ content: 'p'.repeat(40), status: 'completed', priority: 'medium' }],
+        },
+        {
+          type: 'proposed_plan',
+          turnId: 'turn',
+          markdown: 'm'.repeat(40),
+          status: 'completed',
+          isLatest: true,
+        },
+        toolCall('Read', 'o'.repeat(4000)),
+        textItem('Done'),
+      ]),
+    ];
+    const [message] = collectConversationMessages(history);
+    expect(message?.text).toBe('Done');
+    expect(message?.estimatedTokens).toBe(1122);
+    expect(JSON.stringify(message)).not.toContain('o'.repeat(40));
+  });
+
+  it('counts terminal and diff content without counting a duplicate raw output', () => {
+    const item: MessageContent = {
+      type: 'tool_call',
+      toolCallId: 'tool-count',
+      title: 'Edit',
+      status: 'completed',
+      rawInput: { command: 'test' },
+      rawOutput: { duplicate: 'x'.repeat(10000) },
+      content: [
+        { type: 'terminal_command', command: 'test' },
+        { type: 'terminal_output', output: 'o'.repeat(400) },
+        { type: 'diff', path: 'file', oldText: 'a'.repeat(40), newText: 'b'.repeat(80) },
+      ],
+    };
+    const [message] = collectConversationMessages([entry('assistant', [item, textItem('Done')])]);
+    expect(message?.estimatedTokens).toBe(
+      133 + estimateTokenCount(JSON.stringify({ command: 'test' }))
+    );
+  });
+
+  it('keeps estimates on their own messages and counts raw output without display blocks', () => {
+    const first = entry('assistant', [{ type: 'thought', text: '中文测试' }, textItem('Done')]);
+    const second = entry('assistant', [
+      {
+        type: 'tool_call',
+        toolCallId: 'raw',
+        title: 'Tool',
+        status: 'completed',
+        rawOutput: { result: 'x'.repeat(400) },
+      },
+      textItem('Next'),
+    ]);
+    const result = collectConversationMessages([first, second]);
+    expect(result[0]?.estimatedTokens).toBe(5);
+    expect(result[1]?.estimatedTokens).toBe(
+      2 + estimateTokenCount(JSON.stringify({ result: 'x'.repeat(400) }))
+    );
   });
 });
 
@@ -214,4 +293,120 @@ describe('buildConversationMarkdown', () => {
     expect(result.markdown).toContain('`src/a.ts`');
     expect(result.stats.pathsCount).toBe(1);
   });
+});
+
+it('records file references without claiming their bytes were copied', () => {
+  const file = { type: 'file', fileName: 'context.txt', sizeBytes: 5001 } as MessageContent;
+  const result = buildConversationMarkdown({ history: [entry('user', [file])] });
+  expect(result.markdown).toContain('context.txt');
+  expect(result.markdown).toContain('File contents not included.');
+});
+
+it('retains standalone user images without exporting their blob identifiers', () => {
+  const image: MessageContent = {
+    type: 'image',
+    imageId: 'private-blob-id',
+    mimeType: 'image/png',
+    fileName: 'screenshot.png',
+    sizeBytes: 512,
+  };
+  const { markdown } = buildConversationMarkdown({ history: [entry('user', [image])] });
+  expect(markdown).toContain('screenshot.png');
+  expect(markdown).toContain('Image contents not included.');
+  expect(markdown).not.toContain('private-blob-id');
+});
+
+it('retains a reference-only code review prompt and its replies even over budget', () => {
+  const ref: MessageContent = {
+    type: 'comment_reference',
+    source: 'github',
+    path: 'src/app.ts',
+    lineNumber: 42,
+    side: 'deletions',
+    authorName: 'Reviewer',
+    commentBody: 'Keep **this check**.\n```ts\nvalidate(input);\n```',
+    replies: [{ authorName: 'Author', body: 'The replacement must reject invalid input.' }],
+  };
+  const { markdown, stats } = buildConversationMarkdown({
+    history: [entry('user', [ref])],
+    maxChars: 20,
+    maxTokens: 5,
+  });
+  expect(markdown).toContain('path="src/app.ts" line="42" side="deletions"');
+  expect(markdown).toContain(ref.commentBody);
+  expect(markdown).toContain('@Author:');
+  expect(markdown).toContain('The replacement must reject invalid input.');
+  expect(markdown).toContain('````xml');
+  expect(stats.overBudget).toBe(true);
+});
+
+const visualAnnotationReference: Extract<MessageContent, { type: 'visual_annotation_reference' }> =
+  {
+    type: 'visual_annotation_reference',
+    source: 'visual_annotation',
+    commentId: 'visual-comment-1',
+    turnId: 'turn-1',
+    body: 'Move this heading closer to the eyebrow.',
+    authorName: 'Ada',
+    status: 'submitted',
+    anchor: {
+      version: 1,
+      page: {
+        url: '/preview',
+        pathname: '/preview',
+        viewport: {
+          width: 960,
+          height: 620,
+          scrollX: 0,
+          scrollY: 0,
+          devicePixelRatio: 2,
+        },
+      },
+      click: {
+        clientX: 120,
+        clientY: 140,
+        pageX: 120,
+        pageY: 140,
+        viewportXRatio: 0.125,
+        viewportYRatio: 0.2258064516,
+      },
+      target: {
+        tag: 'h1',
+        attributes: { 'data-testid': 'hero-title' },
+        text: 'Design reviews should point at pixels.',
+        rect: {
+          x: 100,
+          y: 120,
+          width: 480,
+          height: 96,
+        },
+        rectRatio: {
+          x: 0.1041666667,
+          y: 0.1935483871,
+          width: 0.5,
+          height: 0.1548387097,
+        },
+        selector: 'h1[data-testid="hero-title"]',
+        xpath: '/html/body/main/h1',
+      },
+      context: {
+        ancestors: [{ tag: 'main', selector: 'main' }],
+        nearbyText: ['Preview fixture', 'Design reviews should point at pixels.'],
+      },
+    },
+  };
+
+it('retains a reference-only visual annotation and its target', () => {
+  const { markdown, stats } = buildConversationMarkdown({
+    history: [entry('user', [visualAnnotationReference])],
+    maxChars: 20,
+    maxTokens: 5,
+  });
+  expect(markdown).toContain(visualAnnotationReference.body);
+  expect(markdown).toContain('url="/preview" pathname="/preview"');
+  expect(markdown).toContain('selector="h1[data-testid=&quot;hero-title&quot;]"');
+  expect(markdown).toContain('viewport-x-ratio="0.125"');
+  expect(markdown).toContain('Target text: Design reviews should point at pixels.');
+  expect(markdown).toContain('Preview fixture');
+  expect(stats.overBudget).toBe(true);
 });

@@ -84,6 +84,16 @@ describe('session usage', () => {
     ]);
   });
 
+  it('preserves scoped windows even when their values match the shared quota', () => {
+    const weekly = { usedPercent: 0, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null };
+    expect(
+      getAgentRateLimitWindows(usage({ windows: [weekly, { ...weekly, label: ' Fable ' }] }))
+    ).toEqual([
+      { ...weekly, remainingPercent: 100 },
+      { ...weekly, remainingPercent: 100, label: 'Fable' },
+    ]);
+  });
+
   it('keeps sub-one-percent Grok usage on the percentage scale', () => {
     expect(
       getAgentRateLimitWindows(

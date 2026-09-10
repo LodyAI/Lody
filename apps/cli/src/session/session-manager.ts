@@ -321,7 +321,12 @@ export interface ISession {
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
    */
-  updateGitIdentity(userName: string, userEmail: string, userId?: string): void;
+  updateGitIdentity(
+    userName: string,
+    userEmail: string,
+    userId: string | undefined,
+    options: { preferMachineIdentity: boolean }
+  ): void;
   /**
    * Return the already-resolved effective git identity only when it belongs to
    * the requested user. Forks use this as an optimistic local fast path.
@@ -354,6 +359,7 @@ export type SessionMonitorRuntimeInfo = {
 };
 
 export interface CreateAgentConfig {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   cliType: AgentConfigCliType;
   agentType: string;
   command: string;
@@ -944,6 +950,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
     });
     signal.throwIfAborted();
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
@@ -1199,7 +1206,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         sessionId
       );
       session.ghTokenInjected = prepared.session.ghTokenInjected;
-      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+        preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+      });
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1227,12 +1236,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
     const dispatchEvent = options?.dispatchEvent ?? ((event: () => void) => event());
+    const localProjectId =
+      config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
       cliType: config.agentCliType,
       agentType: config.agentType,
       command: launch.command,
       args: launch.args,
       env: launch.env,
+      resolveWorktreeProject: localProjectId
+        ? async () => {
+            const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
+            if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
+            return { version: 1, originProjectPath };
+          }
+        : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,
@@ -1337,7 +1355,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     session.ghTokenInjected = ghTokenInjected;
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
-    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+      preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+    });
     let acpSessionId: string | undefined;
 
     const launchResolutionStartedAt = performance.now();
@@ -1347,6 +1367,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
         if (event.phase === 'complete' && !managedRuntimeReadyLogged) {

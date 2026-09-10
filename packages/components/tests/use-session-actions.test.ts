@@ -428,6 +428,57 @@ describe('useSessionActions', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
+  it('marks a session unread by moving only its read receipt behind the latest message', async () => {
+    const sessionId = 'session-mark-unread' as SessionId;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const sessionMeta = {
+      ...createSessionPayload(sessionId),
+      id: sessionId,
+      createdAt: '2026-09-04T00:00:00.000Z',
+      lastMessageAt: 500,
+      lastReadAt: 500,
+    } as SessionMeta;
+    const runtime = createRuntime({
+      repo: {
+        // The sidebar's rendered cache can lead the async repo read during
+        // hydration; the visible row's action must still work in that window.
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
+    });
+
+    await actions.markSessionUnread(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
+      lastReadAt: 499,
+    });
+  });
+
+  it('does not invent activity when marking an empty session unread', async () => {
+    const sessionId = 'empty-session-mark-unread' as SessionId;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            ...createSessionPayload(sessionId),
+            id: sessionId,
+            createdAt: '2026-09-04T00:00:00.000Z',
+          } as SessionMeta,
+        })),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime);
+
+    await actions.markSessionUnread(sessionId);
+
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
   it('starts dispatch RPC without waiting for the metadata pointer write', async () => {
     const sessionId = 'session-dispatch-parallel' as SessionId;
     const userTurnId = 'user-turn-dispatch-parallel';
@@ -484,10 +535,9 @@ describe('useSessionActions', () => {
     });
     await vi.waitFor(() => expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1));
 
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
+    expect(upsertDocMeta).toHaveBeenCalledWith(getSessionRoomId(sessionId), {
+      latestUserMsgId: userTurnId,
+    });
     expect(setState).not.toHaveBeenCalled();
     expect(waitUntilSynced).toHaveBeenCalledTimes(1);
 

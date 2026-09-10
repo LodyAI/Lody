@@ -16,6 +16,7 @@ import {
   safeParseServerReceiveMessage,
   safeParseServerToMachine,
   MachineAcpCapabilitiesRefreshRequestSchema,
+  MachineAcpCapabilitiesRefreshResponseSchema,
   ServerToClientSchema,
   SessionCancelRequestSchema,
   SessionChatRequestSchema,
@@ -26,7 +27,7 @@ import {
   SessionIdSchema,
   SessionImagePayloadSchema,
 } from '../src/message-schemas';
-import type { SessionImagePayload } from '../src/ai';
+import { ACP_CAPABILITY_CACHE_VERSION, type SessionImagePayload } from '../src/ai';
 import { ACP_AUTHENTICATION_FORM_MAX_BYTES } from '../src/acp-authentication-limits';
 import type { SessionId } from '../src/ids';
 
@@ -267,6 +268,51 @@ describe('message-schemas machine ACP capabilities refresh', () => {
         runtimeOverrides: { kimiPath: '/tmp/untrusted-kimi' },
       }).success
     ).toBe(false);
+  });
+
+  it('preserves the complete capability used to converge the renderer after refresh', () => {
+    const response = {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: 'machine-1',
+      configId: 'config-1',
+      cliType: 'registry',
+      agentType: 'deepseek',
+      success: true,
+      capability: {
+        cliType: 'registry',
+        agentType: 'deepseek',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        sourceVersion: 'registry:deepseek:test',
+        modes: [],
+        models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'kimi-k3',
+            options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+          },
+          {
+            id: 'reasoning_effort',
+            name: 'Thinking',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'max',
+            options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
+          },
+        ],
+        modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+        sessionFork: false,
+        fetchedAt: 1,
+      },
+    };
+
+    expect(MachineAcpCapabilitiesRefreshResponseSchema.parse(response).capability).toEqual(
+      response.capability
+    );
   });
 });
 

@@ -92,6 +92,20 @@ describe('buildSessionMentionItems', () => {
       'a',
     ]);
   });
+
+  it('matches titles as ordered subsequences across words and punctuation', () => {
+    const items = buildSessionMentionItems(
+      [
+        session({ id: 'match', title: 'File generated-name investigation', lastMessageAt: 10 }),
+        session({ id: 'miss', title: 'Unrelated conversation', lastMessageAt: 20 }),
+      ],
+      null
+    );
+
+    expect(selectSessionMentionCandidates(items, 'filename').map((item) => item.sessionId)).toEqual(
+      ['match']
+    );
+  });
 });
 
 describe('session mention project scope', () => {
