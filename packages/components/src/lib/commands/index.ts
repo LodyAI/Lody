@@ -18,9 +18,14 @@ export {
   GLOBAL_SHORTCUTS,
   UNINTERCEPTABLE_WEB_KEYS,
   getCommandKeybindings,
+  getWorkspaceShortcutCommandId,
   keybindingAppliesToEnvironment,
 } from './shortcuts';
-export type { GlobalShortcut, ShortcutCommandId } from './shortcuts';
+export type {
+  GlobalShortcut,
+  ShortcutCommandId,
+  WorkspaceShortcutCommandId,
+} from './shortcuts';
 export {
   commandPaletteOpenAtom,
   useCommandPaletteState,

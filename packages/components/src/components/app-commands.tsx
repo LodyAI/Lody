@@ -1,14 +1,32 @@
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { currentWorkspaceSlugAtom, settingsDialogOpenAtom, toggleZenLayoutModeAtom } from '@/atoms';
+import {
+  currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
+  settingsDialogOpenAtom,
+  toggleZenLayoutModeAtom,
+  userAtom,
+} from '@/atoms';
 import { taskQuickAddOpenAtom } from '@/atoms/tasks';
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import {
+  getCommandKeybindings,
+  getRuntime,
+  getWorkspaceShortcutCommandId,
+  useCommand,
+} from '@/lib/commands';
+import {
+  WORKSPACE_SHORTCUT_SLOT_NUMBERS,
+  type WorkspaceShortcutSlotNumber,
+} from '@/lib/workspace-shortcut-slots';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isSettingsPath, resolveSettingsCloseTo } from '@/lib/settings-navigation';
+import { isNavigableWorkspaceSlug } from '@/lib/workspace';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { useWorkspaceShortcutSlots } from '@/hooks/use-workspace-shortcut-slots';
+import { useWorkspaceSwitcher } from '@/hooks/use-workspace-switcher';
 import { nextCycledTheme, useTheme } from '../theme-provider';
 
 /**
@@ -145,5 +163,77 @@ export function AppCommands() {
     },
   });
 
+  return <WorkspaceShortcutCommands />;
+}
+
+export function WorkspaceShortcutCommands() {
+  const { t } = useTranslation();
+  const userId = useAtomValue(userAtom)?.id ?? null;
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const { organizations, switchWorkspace } = useWorkspaceSwitcher();
+  const availableWorkspaceIds = organizations
+    ?.filter(
+      (organization) => organization.slug && isNavigableWorkspaceSlug(organization.slug)
+    )
+    .map((organization) => organization.id);
+  const { slots } = useWorkspaceShortcutSlots(userId, availableWorkspaceIds);
+
+  return (
+    <>
+      {WORKSPACE_SHORTCUT_SLOT_NUMBERS.map((slot) => {
+        const workspaceId = slots[slot - 1] ?? null;
+        const workspace = organizations?.find((organization) => organization.id === workspaceId);
+        return (
+          <WorkspaceShortcutCommand
+            key={slot}
+            slot={slot}
+            title={
+              workspace
+                ? t('commands.workspace.switchSlotWithName', {
+                    slot,
+                    workspace: workspace.name,
+                  })
+                : t('commands.workspace.switchSlot', { slot })
+            }
+            workspaceId={workspace?.id ?? null}
+            currentWorkspaceId={currentWorkspaceId}
+            enabled={getRuntime() === 'electron' && Boolean(workspace)}
+            onSwitch={switchWorkspace}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function WorkspaceShortcutCommand({
+  slot,
+  title,
+  workspaceId,
+  currentWorkspaceId,
+  enabled,
+  onSwitch,
+}: {
+  slot: WorkspaceShortcutSlotNumber;
+  title: string;
+  workspaceId: string | null;
+  currentWorkspaceId: string | null;
+  enabled: boolean;
+  onSwitch: (workspaceId: string) => boolean;
+}) {
+  const commandId = getWorkspaceShortcutCommandId(slot);
+  useCommand(
+    {
+      id: commandId,
+      title,
+      category: 'Workspace',
+      keybindings: getCommandKeybindings(commandId),
+      when: () => workspaceId !== null && workspaceId !== currentWorkspaceId,
+      run: () => {
+        if (workspaceId) onSwitch(workspaceId);
+      },
+    },
+    enabled
+  );
   return null;
 }

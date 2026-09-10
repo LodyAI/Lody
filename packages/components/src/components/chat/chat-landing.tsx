@@ -146,7 +146,7 @@ import {
   useWorkspaceAgentRoles,
 } from '@/hooks/use-workspace-agent-roles';
 import { useAvailableCommands } from '@/hooks/use-available-commands';
-import { useOrganization } from '@/hooks/useOrganization';
+import { useWorkspaceSwitcher } from '@/hooks/use-workspace-switcher';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
@@ -577,7 +577,7 @@ function WorkspaceChatLanding({
   const currentUser = useAtomValue(userAtom);
   const userId = currentUser?.id;
   const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
-  const { activeOrganization, organizations, switchOrganization } = useOrganization({
+  const { activeOrganization, organizations, switchWorkspace } = useWorkspaceSwitcher({
     targetSlug: workspaceSlug,
   });
   const isMobile = useIsMobile();
@@ -5294,19 +5294,9 @@ function WorkspaceChatLanding({
   const selectedProjectsSubTab: MobileProjectsSubTab = persistedProjectsSubTab;
   const handleMobileHomeWorkspaceSelect = useCallback(
     (nextWorkspaceId: string) => {
-      const targetOrganization = organizations?.find(
-        (organization) => organization.id === nextWorkspaceId
-      );
-      if (!targetOrganization) return;
-      void switchOrganization(targetOrganization.id);
-      if (targetOrganization.slug) {
-        void navigate({
-          to: '/$workspaceName/chat',
-          params: { workspaceName: targetOrganization.slug },
-        });
-      }
+      switchWorkspace(nextWorkspaceId);
     },
-    [navigate, organizations, switchOrganization]
+    [switchWorkspace]
   );
   const handleMobileHomeTabSelect = useCallback(
     (nextTab: MobileHomeTab) => {

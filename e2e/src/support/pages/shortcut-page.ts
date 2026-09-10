@@ -42,6 +42,13 @@ export class ShortcutPage {
     await page.keyboard.press(`${PRIMARY_MODIFIER}+,`);
     const settings = this.settingsDialog(page);
     await expect(settings).toBeVisible();
+    await settings.locator('[data-settings-tab-id="keyboard-shortcuts"]').click();
+    const workspaceSlotLabel = settings.getByText(
+      /^(Switch to workspace 1:|切换到工作区 1：)/u
+    );
+    const workspaceSlotRow = workspaceSlotLabel.locator('..').locator('..');
+    await expect(workspaceSlotLabel).toBeVisible();
+    await expect(workspaceSlotRow.locator('[data-slot="kbd"]', { hasText: '1' })).toBeVisible();
     await this.closeSettings(page, settings);
   }
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Check, ChevronsUpDown, Plus, Building2, LogOut } from 'lucide-react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
-import { useOrganization } from '../hooks/useOrganization';
+import { useWorkspaceSwitcher } from '../hooks/use-workspace-switcher';
 import { useWorkspaceSlugField } from '../hooks/useWorkspaceSlugField';
 import { useTranslation } from 'react-i18next';
 import {
@@ -76,8 +76,8 @@ function LocalWorkspaceNameplate() {
 function CloudOrganizationSwitcher() {
   const { t } = useTranslation();
   const signOut = useAuthSignOut();
-  const { activeOrganization, organizations, loading, switchOrganization, createOrganization } =
-    useOrganization();
+  const { activeOrganization, organizations, loading, switchWorkspace, createOrganization } =
+    useWorkspaceSwitcher();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   // Paid workspaces only (free ones are omitted by the query); keyed by the
@@ -194,14 +194,8 @@ function CloudOrganizationSwitcher() {
               <DropdownMenuItem
                 key={org.id}
                 onClick={() => {
-                  void switchOrganization(org.id);
+                  switchWorkspace(org.id);
                   setOpen(false);
-                  if (org.slug) {
-                    void navigate({
-                      to: '/$workspaceName/chat',
-                      params: { workspaceName: org.slug },
-                    });
-                  }
                 }}
               >
                 <div className="flex items-center justify-between w-full">

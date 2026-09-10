@@ -20,11 +20,9 @@ type BuiltInCommandDefinition = {
 // keeps them non-executable; a mounted real command replaces the placeholder by id. Titles
 // carry a `titleKey` (not a pre-translated string) because this module registers outside
 // React and can't call `t()` — display surfaces translate via the key instead.
-// The Tasks commands (`tasks.quickAdd` / `tasks.open`) are deliberately absent: a
-// placeholder here would list them in the palette and keyboard settings even for
-// users who never enabled the Tasks beta. `app-commands.tsx` registers the real
-// ones behind `tasksFeatureEnabledAtom`, and it is mounted workspace-wide, so
-// nothing is lost once the beta is on.
+// The Tasks commands (`tasks.quickAdd` / `tasks.open`) and workspace-slot commands are
+// deliberately absent: placeholders would list unavailable features. `app-commands.tsx`
+// registers their real definitions when the relevant catalog/feature is available.
 const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'nav.back',

@@ -28,6 +28,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
+- Keyboard Shortcut workspace selectors assign stable workspace ids to numbered slots;
+  shortcut recording and collision policy remain owned by `lib/commands`.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`: its two

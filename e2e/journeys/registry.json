@@ -111,15 +111,20 @@
       "owner": "desktop-shortcuts",
       "feature": "src/features/shortcuts.feature",
       "fixture": "fresh-local-workspace",
-      "fingerprint": "ca40a75b29ba41bb0e96b2e86fbbff3d18b42f40878b35d631857d2addb3844f",
+      "fingerprint": "b3f36c25d4099d068177be72520777f9ce192d60a76aac31dfb1dff6fd67c753",
       "ownerPaths": [
         "packages/components/src/lib/commands/",
+        "packages/components/src/lib/workspace-shortcut-slots.ts",
+        "packages/components/src/hooks/use-workspace-shortcut-slots.ts",
+        "packages/components/src/hooks/use-workspace-switcher.ts",
+        "packages/components/src/components/app-commands.tsx",
         "packages/components/src/components/settings/keyboard-shortcuts-setting.tsx",
         "packages/components/src/hooks/use-keyboard-navigation.ts"
       ],
       "actions": [
         { "id": "shortcut.openPaletteWithDefaultBinding" },
         { "id": "shortcut.openSettingsWithPhysicalPunctuation" },
+        { "id": "shortcut.verifyWorkspaceSlotDefault" },
         { "id": "window.openSecondaryWorkspace" },
         { "id": "shortcut.verifySecondaryDefaults" },
         { "id": "shortcut.rebindSidebarWithShiftedDigit" },
@@ -128,13 +133,13 @@
         { "id": "shortcut.verifyUserBindingRestoredInSecondary" }
       ],
       "checkpoints": [
-        "default command palette and settings bindings execute in both Electron windows",
+        "default command palette, settings bindings, and the workspace slot command are available in both Electron windows",
         "the old sidebar binding stops while the shifted-digit physical key works immediately in both windows",
         "the user binding is restored in the secondary window after its renderer reload"
       ],
       "cleanup": ["isolated desktop profile and shortcut overrides are deleted"],
       "coverage": {
-        "renderer": "Two command hosts, settings recorder, sidebars, and secondary renderer reload",
+        "renderer": "Two command hosts, workspace slot registration, settings recorder, sidebars, and secondary renderer reload",
         "electronIpc": "Real primary and auxiliary Electron windows through app.openWindow IPC",
         "bundledCli": "Real owned runtime for local workspace entry",
         "durableState": "User shortcut override in isolated localStorage",

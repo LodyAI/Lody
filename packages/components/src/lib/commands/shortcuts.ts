@@ -1,5 +1,8 @@
 import { GLOBAL_SHORTCUT_DEFAULTS, type GlobalShortcutId } from '@lody/shared';
+import type { WorkspaceShortcutSlotNumber } from '../workspace-shortcut-slots';
 import type { KeyBinding, Platform, Runtime } from './types';
+
+export type WorkspaceShortcutCommandId = `workspace.switchSlot.${WorkspaceShortcutSlotNumber}`;
 
 export type ShortcutCommandId =
   | 'palette.toggle'
@@ -8,6 +11,7 @@ export type ShortcutCommandId =
   | 'app.cycleTheme'
   | 'layout.toggleZenMode'
   | 'workspace.openSettings'
+  | WorkspaceShortcutCommandId
   | 'session.new'
   | 'session.archiveCurrent'
   | 'sidebar.toggle'
@@ -59,6 +63,15 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // registry binding — a single source that also shows + is rebindable on the
   // keyboard-shortcuts settings page (instead of an invisible native-menu accelerator).
   'workspace.openSettings': ['Mod+,'],
+  'workspace.switchSlot.1': [electron('Mod+1')],
+  'workspace.switchSlot.2': [electron('Mod+2')],
+  'workspace.switchSlot.3': [electron('Mod+3')],
+  'workspace.switchSlot.4': [electron('Mod+4')],
+  'workspace.switchSlot.5': [electron('Mod+5')],
+  'workspace.switchSlot.6': [electron('Mod+6')],
+  'workspace.switchSlot.7': [electron('Mod+7')],
+  'workspace.switchSlot.8': [electron('Mod+8')],
+  'workspace.switchSlot.9': [electron('Mod+9')],
   'session.new': [electron('Mod+n'), web('Mod+Alt+n')],
   'session.archiveCurrent': ['Mod+Alt+a'],
   'sidebar.toggle': ['Mod+b'],
@@ -98,6 +111,12 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
 
 export function getCommandKeybindings(id: ShortcutCommandId): CommandKeybindings {
   return COMMAND_SHORTCUTS[id].map(cloneKeybinding);
+}
+
+export function getWorkspaceShortcutCommandId(
+  slot: WorkspaceShortcutSlotNumber
+): WorkspaceShortcutCommandId {
+  return `workspace.switchSlot.${slot}`;
 }
 
 /**

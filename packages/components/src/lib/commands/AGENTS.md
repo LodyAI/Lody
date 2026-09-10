@@ -42,6 +42,9 @@ only tells global dispatch to yield for events originating in its subtree.
   `CommandShortcutHost` owns the renderer lifecycle, TanStack Hotkeys owns parsing/matching, and
   `user-bindings.ts` owns the storage subscription so changes take effect in all open
   windows. `[]` explicitly unbinds all defaults and `null` restores defaults.
+- Desktop workspace slots are per-user, per-device workspace-id assignments. Catalog reorder
+  never renumbers them; removal clears only the missing id. Slot commands use `useCommand`
+  with Electron-only `Mod+1..9` defaults and the ordinary conflict index.
 
 ## File responsibilities
 

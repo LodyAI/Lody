@@ -1,13 +1,18 @@
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import {
   globalShortcutBindingHasModifier,
   type GlobalShortcutId,
   type GlobalShortcutSetError,
 } from '@lody/shared';
 import { Button } from '@/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { userAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
+import { isNavigableWorkspaceSlug } from '@/lib/workspace';
+import { WORKSPACE_SHORTCUT_SLOT_NUMBERS } from '@/lib/workspace-shortcut-slots';
 import {
   canonicalizeBinding,
   commands,
@@ -21,6 +26,8 @@ import {
 } from '@/lib/commands';
 import type { GlobalShortcutBinding } from '@lody/shared';
 import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
+import { useOrganization } from '@/hooks/useOrganization';
+import { useWorkspaceShortcutSlots } from '@/hooks/use-workspace-shortcut-slots';
 import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
@@ -40,6 +47,7 @@ const CATEGORY_ORDER: CommandCategory[] = [
 // nothing to delete so the column doesn't shift when neighbors do.
 const SHORTCUT_SLOT_CLASS = 'flex w-36 justify-end';
 const TRASH_SLOT_CLASS = 'flex w-9 justify-center';
+const UNASSIGNED_WORKSPACE_VALUE = '__unassigned__';
 
 export function KeyboardShortcutsSetting() {
   const { t } = useTranslation();
@@ -110,6 +118,8 @@ export function KeyboardShortcutsSetting() {
         </div>
       )}
 
+      <WorkspaceShortcutSlotAssignments />
+
       {grouped.map(([category, items]) => (
         <CompactSection
           key={category}
@@ -143,6 +153,66 @@ export function KeyboardShortcutsSetting() {
         </CompactSection>
       )}
     </div>
+  );
+}
+
+function WorkspaceShortcutSlotAssignments() {
+  const { t } = useTranslation();
+  const userId = useAtomValue(userAtom)?.id ?? null;
+  const { organizations } = useOrganization();
+  const assignableWorkspaces = useMemo(
+    () =>
+      organizations?.filter(
+        (organization) =>
+          organization.slug && isNavigableWorkspaceSlug(organization.slug)
+      ),
+    [organizations]
+  );
+  const availableWorkspaceIds = useMemo(
+    () => assignableWorkspaces?.map((workspace) => workspace.id),
+    [assignableWorkspaces]
+  );
+  const { slots, setSlot } = useWorkspaceShortcutSlots(userId, availableWorkspaceIds);
+
+  if (
+    getRuntime() !== 'electron' ||
+    !assignableWorkspaces ||
+    assignableWorkspaces.length <= 1
+  ) {
+    return null;
+  }
+
+  return (
+    <CompactSection title={t('settings.keyboardShortcuts.workspaceSlots')}>
+      {WORKSPACE_SHORTCUT_SLOT_NUMBERS.map((slot) => (
+        <CompactRow key={slot} label={t('settings.keyboardShortcuts.workspaceSlot', { slot })}>
+          <Select
+            value={slots[slot - 1] ?? UNASSIGNED_WORKSPACE_VALUE}
+            onValueChange={(value) =>
+              setSlot(slot, value === UNASSIGNED_WORKSPACE_VALUE ? null : value)
+            }
+          >
+            <SelectTrigger
+              className="w-52"
+              aria-label={t('settings.keyboardShortcuts.workspaceSlot', { slot })}
+              data-workspace-shortcut-slot={slot}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNASSIGNED_WORKSPACE_VALUE}>
+                {t('settings.keyboardShortcuts.workspaceSlotUnassigned')}
+              </SelectItem>
+              {assignableWorkspaces.map((workspace) => (
+                <SelectItem key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CompactRow>
+      ))}
+    </CompactSection>
   );
 }
 

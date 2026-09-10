@@ -17,7 +17,6 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionStatus,
-  type WorkspaceId,
 } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -50,7 +49,6 @@ import {
   joinCommunityDialogOpenAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
-  setWorkspaceContextAtom,
 } from '@/atoms';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
@@ -91,7 +89,7 @@ import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
-import { useOrganization } from '@/hooks/useOrganization';
+import { useWorkspaceSwitcher } from '@/hooks/use-workspace-switcher';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
 import {
@@ -166,7 +164,6 @@ import {
 import { toast } from 'sonner';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
-import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
@@ -1410,7 +1407,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const routeTargetSlug = useWorkspaceRouteTargetSlug();
   const workspaceSlug = routeTargetSlug ?? atomWorkspaceSlug;
-  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const connectionUiState = useAtomValue(lodyConnectionUiStateAtom);
   const setMobileDrawerOpen = useSetAtom(setMobileDrawerOpenAtom);
   const language = useAtomValue(languageAtom);
@@ -1448,7 +1444,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [updaterState, resolvedLanguage]
   );
 
-  const { organizations, activeOrganization, switchOrganization } = useOrganization();
+  const { organizations, activeOrganization, switchWorkspace } = useWorkspaceSwitcher();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const organizationsReady = Array.isArray(organizations);
@@ -2753,21 +2749,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const handleWorkspaceSelected = useCallback(
     (nextWorkspaceId: string) => {
-      const target = (organizations ?? []).find((org) => org.id === nextWorkspaceId);
-      const slug = target?.slug;
-      if (!slug) {
-        return;
-      }
-      writePreferredWorkspaceSlug(slug);
-      setWorkspaceContext({
-        slug,
-        workspaceId: target.id as WorkspaceId,
-      });
-      void switchOrganization(target.id);
+      if (!switchWorkspace(nextWorkspaceId)) return;
       closeMobileDrawer();
-      void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
     },
-    [closeMobileDrawer, organizations, router, setWorkspaceContext, switchOrganization]
+    [closeMobileDrawer, switchWorkspace]
   );
 
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {

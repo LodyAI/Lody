@@ -12,6 +12,20 @@ ownership transfer, before organization permissions refresh. The membership hook
 therefore calls it directly and separately notifies `$activeOrgSignal`. Its tests
 use the plugin's actual action so a Promise-returning mock cannot hide this error.
 
+## Workspace switching
+
+`use-workspace-switcher.ts` is the ordinary user-navigation boundary shared by sidebar,
+mobile, selector, shortcut, and gesture entry points. It publishes the preferred slug and
+the slug/id pair before requesting organization activation and routing the receiving window
+to workspace home. Keeping those writes together prevents an entry point from navigating
+with the previous workspace runtime still visible; onboarding recovery and workspace
+creation retain their separate transactional flows.
+
+Numbered shortcuts resolve through `use-workspace-shortcut-slots.ts`. The underlying store
+is keyed by user because a device may host multiple accounts, while storage events refresh
+every renderer for the same account. Slot identity follows workspace id rather than catalog
+order so later reordering cannot silently change what `Mod+1..9` opens.
+
 ## Conversation scrolling (`use-sticky-scroll.ts`)
 
 `virtua` owns mounted rows, measurement, and index navigation. `use-stick-to-bottom`

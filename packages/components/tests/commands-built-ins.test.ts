@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { commands, registerBuiltInCommands, unregisterBuiltInCommands } from '../src/lib/commands';
+import {
+  commands,
+  getCommandKeybindings,
+  getWorkspaceShortcutCommandId,
+  registerBuiltInCommands,
+  unregisterBuiltInCommands,
+} from '../src/lib/commands';
+import { WORKSPACE_SHORTCUT_SLOT_NUMBERS } from '../src/lib/workspace-shortcut-slots';
 import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
 
 beforeEach(() => {
@@ -68,5 +75,14 @@ describe('built-in commands', () => {
     // ⌘, but registerAccelerator:false leaves the key to the registry), so it shows here too.
     expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['Mod+,']);
     expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['Mod+.']);
+    expect(
+      WORKSPACE_SHORTCUT_SLOT_NUMBERS.map((slot) =>
+        getCommandKeybindings(getWorkspaceShortcutCommandId(slot))
+      )
+    ).toEqual(
+      WORKSPACE_SHORTCUT_SLOT_NUMBERS.map((slot) => [
+        { key: `Mod+${slot}`, runtimes: ['electron'] },
+      ])
+    );
   });
 });
