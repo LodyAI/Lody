@@ -37,10 +37,11 @@ narrowest reliable terminal signal.
 
 ## Scope and verification
 
-This fixes [issue #570](https://github.com/LodyAI/Lody/issues/570). It is distinct
-from [issue #267](https://github.com/LodyAI/Lody/issues/267), where an interrupted
-manual `/compact` may leave an actually active backend turn; this change does not
-alter ACP lifecycle or cancellation behavior.
+This fixes [issue #570](https://github.com/LodyAI/Lody/issues/570) in
+[PR #573](https://github.com/LodyAI/Lody/pull/573). It is distinct from
+[issue #267](https://github.com/LodyAI/Lody/issues/267), where an interrupted manual
+`/compact` may leave an actually active backend turn; this change does not alter
+ACP lifecycle or cancellation behavior.
 
 Unit coverage verifies unfinished active states, finished unresolved states, and
 explicit terminal states. Component type checking covers propagation of the turn

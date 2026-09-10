@@ -30,7 +30,8 @@ assistant turn 尚未结束时保持活跃；turn 结束后，它会显示为失
 
 ## 范围与验证
 
-本修复对应 [issue #570](https://github.com/LodyAI/Lody/issues/570)。它不同于
+本修复通过 [PR #573](https://github.com/LodyAI/Lody/pull/573) 处理
+[issue #570](https://github.com/LodyAI/Lody/issues/570)。它不同于
 [issue #267](https://github.com/LodyAI/Lody/issues/267)：后者是手动 `/compact` 被中断后，
 后端 turn 可能确实仍处于活跃状态；本次改动不调整 ACP 生命周期或取消行为。
 
