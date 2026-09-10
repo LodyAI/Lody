@@ -37,24 +37,29 @@ export function formatUsdAmount(
   }).format(safeValue);
 }
 
-/** Below this a dollar figure is both short and worth stating exactly. */
-const USD_COMPACT_FROM = 1000;
+/** Below this the cents are the point, not noise. */
+const USD_CENTS_BELOW = 1000;
+/** Above this the digits stop being a boast and start being a wall. */
+const USD_COMPACT_FROM = 1_000_000_000;
 
 /**
- * A dollar figure short enough to sit beside other numbers in a fixed layout.
- * The usage share card speaks in compact units everywhere else (`1.3B`, `42M`),
- * and a full `$1,234,567.89` beside them grows without bound — in the 16:9 card
- * it closed the gap to the headline cells to nothing and eventually overlapped
- * them. Small amounts keep their exact value, where the cents are the point and
- * the string is short anyway.
+ * A dollar figure sized for a fixed layout, shortened in two stages rather than
+ * one. Someone denominating a share card in money usually wants the digits — that
+ * is the point of choosing cost — so the whole figure survives up to a billion and
+ * only the cents go, because on a four-figure sum they are noise. Below a thousand
+ * the cents come back: there they carry the meaning and the string is short anyway.
+ * A figure past a billion compacts, since by then the digits are a wall and the
+ * headline shares its row with the stat cells.
  */
 export function formatUsdCompact(value: number, locale: string | null | undefined): string {
   const safeValue = Number.isFinite(value) ? value : 0;
-  if (Math.abs(safeValue) < USD_COMPACT_FROM) return formatUsdAmount(safeValue, locale);
+  const abs = Math.abs(safeValue);
+  if (abs < USD_CENTS_BELOW) return formatUsdAmount(safeValue, locale);
   return new Intl.NumberFormat(locale ?? 'en', {
     style: 'currency',
     currency: 'USD',
-    notation: 'compact',
-    maximumFractionDigits: 1,
+    ...(abs < USD_COMPACT_FROM
+      ? { maximumFractionDigits: 0 }
+      : { notation: 'compact' as const, maximumFractionDigits: 1 }),
   }).format(safeValue);
 }

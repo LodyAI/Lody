@@ -71,9 +71,13 @@ everywhere (`1.3B`, `42M`) while money was written out in full, and a string tha
 grows with its value does not belong in a fixed layout: measured in the 16:9 card,
 the gap between the headline and the stat cells fell from 208px at `1.3B` to 119px
 at `$5,297.05`, 10px at `$123,456,789.01`, and **−18px** — an overlap — at ten
-figures. `formatUsdCompact` compacts from a thousand up and keeps smaller amounts
-exact, where the cents are the point and the string is short regardless; the gap is
-now flat at ~180px whatever the magnitude. Member identification is a second opt-in, is offered only when the range
+figures. The first fix compacted from a thousand up, which
+bounded the width but threw away the thing a cost card is usually chosen to show:
+`$5.3K` hides the digits that are the point. `formatUsdCompact` now shortens in two
+stages — cents go above a thousand, the figure itself only past a billion — so
+`$5,297` and `$1,234,568` survive whole. Measured again on the 16:9 card, the worst
+surviving case (`$999,999,999`) leaves a 59px gap where the old formatting
+overlapped by 18px. Member identification is a second opt-in, is offered only when the range
 has more than one contributor, and carries display name and avatar only — the
 timeline also holds emails, and `computeUsageShareMemberSlices` never reads them.
 A test asserts no email reaches the slices.
