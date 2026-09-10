@@ -3,8 +3,9 @@
 ## The shared editor grammar
 
 `emoji-field.tsx` is the one emoji control (button + lazy `emoji-picker-panel`
-+ reset), shared by the Agent Role and Prompt Shortcut editors so a catalog
-entry's glyph is the same affordance everywhere.
+
+- reset), shared by the Agent Role and Prompt Shortcut editors so a catalog
+  entry's glyph is the same affordance everywhere.
 
 `form-primitives.tsx` owns `Section`, `Field`, `FormMessage` and
 `AutoGrowTextarea` (a one-row field that tracks its content's height; it must

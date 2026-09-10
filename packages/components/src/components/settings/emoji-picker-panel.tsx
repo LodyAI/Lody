@@ -16,11 +16,7 @@ import {
  * the Agent Role editor. The popover unmounts its content when closed, so the
  * lazy boundary is exactly the mount.
  */
-export default function AgentRoleEmojiPicker({
-  onSelect,
-}: {
-  onSelect: (emoji: string) => void;
-}) {
+export default function AgentRoleEmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
   const { i18n } = useTranslation();
   return (
     <EmojiPicker

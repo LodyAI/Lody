@@ -99,6 +99,9 @@
   may clear resources or reset the reserved id. The accepted history entry is
   direct-authored into the renderer's own session store, so the new conversation
   renders it immediately without waiting for room sync.
+- `use-landing-submission-owner.ts` fences post-accept draft cleanup and navigation
+  by mount and draft identity. A late accepted session must not clear a replacement
+  landing's Shortcut checkpoint; only its current owner clears before navigation.
 - Draft ACP preparation also uses that exact reserved session id. It carries no prompt,
   env, or secret-shaped ACP option values; it may include the current sanitized
   mode/model/options. It is debounced/best-effort, replaced when routing or run config

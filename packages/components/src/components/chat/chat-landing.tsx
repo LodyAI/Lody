@@ -1,4 +1,6 @@
 import { isShortcutDraftRange } from '@/components/mentions/shortcut-composer-state';
+import { shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
+import { useLandingSubmissionOwner } from './use-landing-submission-owner';
 import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
 import {
   useCallback,
@@ -961,6 +963,9 @@ function WorkspaceChatLanding({
     !!sessionState.shortcutWorkspaceId && sessionState.shortcutWorkspaceId !== workspaceId;
   const prompt = foreignShortcutDraft ? '' : sessionState.prompt;
   const [draftActivityRevision, setDraftActivityRevision] = useState(0);
+  const captureSubmissionOwner = useLandingSubmissionOwner(
+    JSON.stringify([userId, workspaceId, resetDraftKey, draftActivityRevision])
+  );
   const pastedTextDrafts = useMemo(
     () => sanitizePastedTextDrafts(foreignShortcutDraft ? [] : sessionState.pastedTextDrafts),
     [foreignShortcutDraft, sessionState.pastedTextDrafts]
@@ -2915,6 +2920,7 @@ function WorkspaceChatLanding({
   // ── Submit ──
   const handleSubmit = async () => {
     if (submitting) return;
+    const ownsSubmittedDraft = captureSubmissionOwner();
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
       captureSessionInputBlocked('image_upload_in_progress');
@@ -3269,6 +3275,12 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
+      if (!ownsSubmittedDraft()) return;
+      // The suspended composer cannot clear its checkpoint before navigation
+      // unmounts it. Publish the accepted clear before another landing can restore.
+      void shortcutDraftRepository
+        .write({ userId, workspaceId, composerId: 'landing' }, null)
+        .catch((error: unknown) => console.error('Failed to clear accepted Shortcut draft', error));
       setPrompt('');
       clearPastedTextDrafts();
       clearPendingImages();
@@ -3304,6 +3316,7 @@ function WorkspaceChatLanding({
         error_message: error instanceof Error ? error.message : String(error),
       });
       console.error('Failed to start session', error);
+      if (!ownsSubmittedDraft()) return;
       if (error instanceof SessionCreateBillingError) {
         if (error.code === 'workspace_payment_required') {
           toast.error(
