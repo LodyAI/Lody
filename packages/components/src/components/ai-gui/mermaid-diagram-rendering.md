@@ -32,14 +32,27 @@ why they read the way they do. Coverage:
   never writes to. Its own canvas stays pinned at `transform: none` with
   `touch-action: auto`, so its remaining handlers cannot move anything and a
   finger resting on a diagram still scrolls the conversation.
-- The activated ring is written inline with `important` rather than through a
-  stylesheet: the diagram is Streamdown's element, and an ordinary rule of ours
-  does not reliably outrank what already applies to it.
+- The activated ring is written inline with `important` because it cannot come
+  from a stylesheet: activating focuses the diagram, and `tailwind/index.css`
+  carries a global `*:focus, *:focus-visible { outline: none !important }`.
+  Specificity does not beat `important`, so only an inline `important` of our own
+  wins. The grab cursor, which is not focus-gated, does live in that stylesheet
+  beside the resting `zoom-in`.
+- Every key the canvas answers — Escape included — is read only while focus is
+  inside the activated diagram. An activated diagram sitting further up the
+  scrollback must not swallow the Escape that dismisses a dialog, nor pull the
+  caret out of the composer. Leaving by keyboard releases the canvas, so
+  "activated" and "focused" never drift apart.
 - Streamdown owns the markup, so the click target, its `role`/`tabindex`, and the
   full-screen button's host are all found by a `MutationObserver` — a diagram
   appears only after the lazily imported runtime resolves, long after the
   component commits. The block's own copy/download controls stay reachable
   without hover, and the full-screen button joins them there.
+- The observer marks a diagram ONCE. It re-runs on every mutation a streaming
+  turn makes, and removing `tabindex` from a focused element blurs it in
+  Chromium — which would drop an activated canvas out of the keyboard mid-turn —
+  while rewriting `aria-label` re-announces it. Only a diagram that has
+  disappeared is restored.
 
 ## The viewer is the only full-screen surface
 
@@ -62,8 +75,12 @@ why they read the way they do. Coverage:
   that fits, and that offset is not proportional to the zoom.
 - Plain wheel and touch panning stay with the surface's own scrolling. A pan
   driven from pointer deltas cannot reproduce touch momentum or rubber-banding, so
-  only a held mouse or pen button pans by hand, and a release that moved the
-  diagram does not read as the click off the diagram that closes the viewer.
+  only a held mouse or pen button pans by hand.
+- Whether a click closes the viewer is decided by where the press STARTED, never
+  by the click's target. Panning takes pointer capture on the surface, and pointer
+  capture retargets the following `click` to the capturing element — so a plain
+  click on the diagram arrives with the surface as its target and would otherwise
+  dismiss the viewer the reader just opened.
 - Two-finger pinch on a touch screen is deliberately absent, here and inline:
   implementing it means taking `touch-action` from the browser and reimplementing
   inertial panning. Touch zooms with the control bar's buttons instead.

@@ -35,21 +35,23 @@ export const MERMAID_DIAGRAM_SELECTOR = '[data-streamdown="mermaid"]';
 const MERMAID_BLOCK_SELECTOR = '[data-streamdown="mermaid-block"]';
 const MERMAID_BLOCK_ACTIONS_SELECTOR = '[data-streamdown="mermaid-block-actions"]';
 
-/** Marks the activated diagram for tests and for anything styling it. */
+/** Marks the activated diagram; the grab cursor hangs off it in `index.css`. */
 const CANVAS_STATE_ATTRIBUTE = 'data-lody-canvas';
 
 /**
- * The ring is the only sign that a click did anything, so it is written inline
- * with `important` rather than through a stylesheet: the diagram is Streamdown's
- * element, sitting under utilities in a cascade layer, and an ordinary rule of
- * ours does not reliably outrank what is already on it. The element carries no
- * React-managed `style`, so nothing overwrites these.
+ * The ring is the only sign that a click did anything, and it cannot come from
+ * a stylesheet: activating focuses the diagram, and `tailwind/index.css` carries
+ * a global `*:focus, *:focus-visible { outline: none !important }`. No rule of
+ * ours can outrank that — specificity does not beat `important` — so the ring is
+ * written inline with `important` of its own. The element carries no
+ * React-managed `style`, so nothing overwrites it.
  */
 const CANVAS_ACTIVE_STYLE = [
   ['outline', '2px solid hsl(var(--ring))'],
   ['outline-offset', '2px'],
   ['border-radius', 'var(--radius-md)'],
 ] as const;
+
 const BLOCK_ID_ATTRIBUTE = 'data-lody-diagram-id';
 
 /** A drag this short is a click that wobbled, not a pan. */
@@ -210,46 +212,64 @@ export function useMermaidDiagramCanvas({
       HTMLElement,
       { role: string | null; tabIndex: string | null; ariaLabel: string | null }
     >();
-    const restoreMarked = () => {
-      for (const [diagram, attributes] of marked) {
-        for (const [name, value] of [
-          ['role', attributes.role],
-          ['tabindex', attributes.tabIndex],
-          ['aria-label', attributes.ariaLabel],
-        ] as const) {
-          if (value == null) {
-            diagram.removeAttribute(name);
-          } else {
-            diagram.setAttribute(name, value);
-          }
+    const restoreOne = (diagram: HTMLElement) => {
+      const attributes = marked.get(diagram);
+      if (!attributes) {
+        return;
+      }
+      for (const [name, value] of [
+        ['role', attributes.role],
+        ['tabindex', attributes.tabIndex],
+        ['aria-label', attributes.ariaLabel],
+      ] as const) {
+        if (value == null) {
+          diagram.removeAttribute(name);
+        } else {
+          diagram.setAttribute(name, value);
         }
       }
-      marked.clear();
+      marked.delete(diagram);
+    };
+    const restoreMarked = () => {
+      for (const diagram of [...marked.keys()]) {
+        restoreOne(diagram);
+      }
     };
 
     if (!enabled) {
+      // The markdown no longer fences a diagram, so any canvas it was holding
+      // is gone with it — including the document listeners keyed to it.
+      deactivate();
       restoreMarked();
       setBlocks((current) => (current.length === 0 ? current : []));
       return undefined;
     }
 
     const scan = () => {
-      restoreMarked();
       const found: MermaidDiagramBlock[] = [];
+      const present = new Set<HTMLElement>();
       root.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR).forEach((block) => {
         const diagram = block.querySelector<HTMLElement>(MERMAID_DIAGRAM_SELECTOR);
         const actions = block.querySelector<HTMLElement>(MERMAID_BLOCK_ACTIONS_SELECTOR);
         if (!diagram) {
           return;
         }
-        marked.set(diagram, {
-          role: diagram.getAttribute('role'),
-          tabIndex: diagram.getAttribute('tabindex'),
-          ariaLabel: diagram.getAttribute('aria-label'),
-        });
-        diagram.setAttribute('role', 'button');
-        diagram.setAttribute('tabindex', '0');
-        diagram.setAttribute('aria-label', canvasLabel);
+        present.add(diagram);
+        // Only a diagram seen for the first time is written to. Re-marking one
+        // that is already correct runs on every streamed mutation, and removing
+        // `tabindex` from a focused element blurs it — which would drop an
+        // activated canvas out of the keyboard mid-stream — while rewriting
+        // `aria-label` re-announces it.
+        if (!marked.has(diagram)) {
+          marked.set(diagram, {
+            role: diagram.getAttribute('role'),
+            tabIndex: diagram.getAttribute('tabindex'),
+            ariaLabel: diagram.getAttribute('aria-label'),
+          });
+          diagram.setAttribute('role', 'button');
+          diagram.setAttribute('tabindex', '0');
+          diagram.setAttribute('aria-label', canvasLabel);
+        }
         if (!actions) {
           return;
         }
@@ -261,6 +281,11 @@ export function useMermaidDiagramCanvas({
         }
         found.push({ id, diagram, actions });
       });
+      for (const diagram of [...marked.keys()]) {
+        if (!present.has(diagram)) {
+          restoreOne(diagram);
+        }
+      }
       // The portalled button below is itself a child-list mutation, so an
       // unconditional update would re-enter this observer forever.
       setBlocks((current) => (sameBlocks(current, found) ? current : found));
@@ -430,7 +455,27 @@ export function useMermaidDiagramCanvas({
       deactivate();
     };
 
+    // Tabbing away is the other way to leave without pressing anything.
+    const handleFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && activeDiagram.contains(next)) {
+        return;
+      }
+      deactivate();
+    };
+
+    // Every key below belongs to the activated diagram, so none of them is read
+    // unless focus is actually inside it. An activated diagram sitting in the
+    // scrollback must not answer the Escape that dismisses a dialog, nor pull
+    // the caret out of the composer.
     const handleKeyDown = (event: KeyboardEvent) => {
+      const focused = document.activeElement;
+      if (
+        focused !== activeDiagram &&
+        !(focused instanceof Node && activeDiagram.contains(focused))
+      ) {
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         deactivate();
@@ -440,9 +485,6 @@ export function useMermaidDiagramCanvas({
       // Pinch and drag have no keyboard equivalent, so the activated canvas
       // carries its own. Only while it is activated, so ordinary scrolling and
       // typing keep every key.
-      if (document.activeElement !== activeDiagram) {
-        return;
-      }
       const frame = activeDiagram.getBoundingClientRect();
       switch (event.key) {
         case 'ArrowLeft':
@@ -477,9 +519,11 @@ export function useMermaidDiagramCanvas({
 
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleKeyDown);
+    activeDiagram.addEventListener('focusout', handleFocusOut);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('keydown', handleKeyDown);
+      activeDiagram.removeEventListener('focusout', handleFocusOut);
     };
   }, [activeDiagram, deactivate, panBy, zoomAt]);
 

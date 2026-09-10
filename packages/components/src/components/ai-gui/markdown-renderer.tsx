@@ -179,18 +179,15 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
   // through inline styles: `touch-action: none` stops a finger resting on a
-  // diagram from scrolling the conversation, and a `grab` cursor advertises a
-  // drag that only shifts the preview inside its own frame. A diagram in a
-  // message is a still preview that opens `MermaidDiagramViewer`; panning and
-  // zooming belong to that viewer, so the canvas transform is pinned and the
-  // gesture handed back to the page. The canvas also takes the wheel from a
-  // listener, which CSS cannot reach — see `releaseDiagramWheelToPage` below.
+  // diagram from scrolling the conversation, and its transform moves the preview
+  // inside its own frame. Panning and zooming belong to the canvas
+  // `use-mermaid-diagram-canvas.tsx` activates on the `<svg>`, so Streamdown's
+  // own transform is pinned and touch is handed back to the page. The wheel it
+  // takes from a listener is out of CSS's reach and is intercepted there too.
   '[&_[data-streamdown="mermaid"]_[role="application"]]:!touch-auto ' +
   '[&_[data-streamdown="mermaid"]_[role="application"]]:!transform-none ' +
-  // The cursor and the activated ring live in `tailwind/index.css` under
-  // `.markdown-renderer`: they key off `data-lody-canvas`, and an arbitrary
-  // variant carrying both an attribute selector and `:not()` is not reliably
-  // compiled by the pinned Tailwind.
+  // The cursor and the activated ring are in `tailwind/index.css` under
+  // `.markdown-renderer`, beside the rest of the diagram's frame.
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +

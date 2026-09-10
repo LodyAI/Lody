@@ -231,6 +231,10 @@ function OpenMermaidDiagramViewer({
   // A pan that ends off the diagram would otherwise read as a click on the
   // backdrop, which closes the viewer.
   const pannedRef = useRef(false);
+  // Pointer capture retargets the following `click` to the capturing element,
+  // so a press on the diagram arrives at the surface with the surface as its
+  // target. Where the press STARTED is the only reliable question to ask.
+  const pressedOnDiagramRef = useRef(false);
 
   // The diagram is a live node, not markup: hand it to the DOM directly rather
   // than re-serializing it through `dangerouslySetInnerHTML`.
@@ -330,13 +334,18 @@ function OpenMermaidDiagramViewer({
   const handleSurfaceClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const panned = pannedRef.current;
+      const pressedOnDiagram = pressedOnDiagramRef.current;
       pannedRef.current = false;
+      pressedOnDiagramRef.current = false;
+      // A press that began on the diagram is never a click on the backdrop,
+      // however the click was retargeted and however far it travelled.
+      if (pressedOnDiagram) {
+        return;
+      }
       const target = event.target;
       if (target instanceof Node && hostRef.current?.contains(target)) {
         return;
       }
-      // Letting go after dragging the diagram out from under the pointer is not
-      // a click on the backdrop.
       if (panned) {
         return;
       }
@@ -389,13 +398,10 @@ function OpenMermaidDiagramViewer({
     pannedRef.current = false;
     const surface = scrollRef.current;
     const target = event.target;
-    if (
-      !surface ||
-      event.pointerType === 'touch' ||
-      event.button !== 0 ||
-      !(target instanceof Node) ||
-      !hostRef.current?.contains(target)
-    ) {
+    const onDiagram = target instanceof Node && Boolean(hostRef.current?.contains(target));
+    // Recorded for every pointer type, including the touch that never pans.
+    pressedOnDiagramRef.current = onDiagram;
+    if (!surface || event.pointerType === 'touch' || event.button !== 0 || !onDiagram) {
       return;
     }
     // Otherwise the drag paints a text selection across the diagram's labels.

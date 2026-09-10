@@ -544,7 +544,27 @@ describe('mermaid full-screen viewer', () => {
     expect(readTranslate(svg).x).toBe(zoomed.x - 30);
     expect(readTranslate(svg).y).toBe(zoomed.y - 20);
 
+    // Escape belongs to the canvas only while the canvas has focus. An
+    // activated diagram sitting in the scrollback must not answer the Escape
+    // that dismisses a dialog, nor prevent its default.
+    const elsewhere = document.createElement('input');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    const ignored = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
     await act(async () => {
+      document.dispatchEvent(ignored);
+    });
+    expect(ignored.defaultPrevented).toBe(false);
+    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+
+    await act(async () => {
+      diagram.focus();
       document.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
       );
@@ -554,6 +574,88 @@ describe('mermaid full-screen viewer', () => {
     expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
     expect(svg.style.transform).toBe('');
     expect(diagram.style.outline).toBe('');
+  });
+
+  it('keeps the viewer open when a press that began on the diagram is retargeted', async () => {
+    await renderMarkdown();
+    await openViewer();
+    const surface = viewerSurface() as HTMLElement;
+    const svg = surface.querySelector('svg[data-diagram="sequence"]') as Element;
+
+    // Pointer capture retargets the `click` that follows a press on the diagram
+    // to the capturing element, which is the surface itself. Without the press
+    // being remembered, that click reads as one on the backdrop and closes the
+    // viewer the user just opened.
+    await act(async () => {
+      svg.dispatchEvent(
+        Object.assign(
+          new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }),
+          { pointerType: 'mouse', pointerId: 4, isPrimary: true }
+        )
+      );
+    });
+    await clickOn(surface);
+    expect(viewer()).toBeTruthy();
+
+    // A press that really did start on the backdrop still closes it.
+    await act(async () => {
+      surface.dispatchEvent(
+        Object.assign(
+          new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }),
+          { pointerType: 'mouse', pointerId: 5, isPrimary: true }
+        )
+      );
+    });
+    await clickOn(surface);
+    expect(viewer()).toBeNull();
+  });
+
+  it('releases an activated diagram when the markdown stops containing one', async () => {
+    const diagram = await renderMarkdown();
+    stubCanvasRects(diagram, diagram.querySelector('svg') as SVGSVGElement);
+    await pressWith(diagram, 'mouse');
+    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
+
+    await renderMarkdown(PLAIN_MARKDOWN);
+
+    // The element is detached by now, so its own state is what proves the
+    // canvas was released rather than left holding document listeners.
+    expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
+    expect(diagram.style.outline).toBe('');
+  });
+
+  it('does not rewrite a diagram it has already marked while the turn streams', async () => {
+    const diagram = await renderMarkdown();
+    stubCanvasRects(diagram, diagram.querySelector('svg') as SVGSVGElement);
+    await pressWith(diagram, 'mouse');
+    await act(async () => {
+      diagram.focus();
+    });
+
+    // Every streamed mutation re-runs the observer. Re-marking a diagram that is
+    // already marked removes `tabindex` from a focused element, which blurs it
+    // in a browser and drops the canvas out of the keyboard mid-turn, and
+    // rewriting `aria-label` re-announces it. Watching the attributes is the
+    // part of that jsdom can prove; the blur itself was checked in Chromium.
+    const rewrites: string[] = [];
+    const watcher = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.attributeName) rewrites.push(record.attributeName);
+      }
+    });
+    watcher.observe(diagram, { attributes: true });
+
+    await renderMarkdown(`${MERMAID_MARKDOWN}\n\nAnd then it finished.`);
+    watcher.takeRecords().forEach((record) => {
+      if (record.attributeName) rewrites.push(record.attributeName);
+    });
+    watcher.disconnect();
+
+    expect(container?.querySelector('[data-streamdown="mermaid"]')).toBe(diagram);
+    expect(rewrites).toEqual([]);
+    expect(document.activeElement).toBe(diagram);
+    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
+    expect(diagram.getAttribute('tabindex')).toBe('0');
   });
 
   it('opens the viewer instead of activating when the tap came from touch', async () => {
