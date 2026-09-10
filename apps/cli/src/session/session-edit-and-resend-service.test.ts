@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LoroDoc, LoroMap } from 'loro-crdt';
+import { SessionDocument } from '../lib/loro/doc';
+import { attachAutoMarkLatestUserHistoryAsRead } from '../lib/loro/history-auto-read';
 import {
+  createSessionMirror,
   SessionStatusFactory,
   type AgentConfigId,
   type MachineId,
@@ -8,9 +12,14 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
+import { SessionExecutionService } from './session-execution-service';
 
 const sessionId = 'session-1' as SessionId;
 const machineId = 'machine-1' as MachineId;
+const cleanups: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+});
 
 const historyFixture = (): SessionHistoryInput[] => [
   {
@@ -68,11 +77,36 @@ function createHarness(
     active?: boolean;
     prepareError?: Error;
     persistError?: Error;
+    beforeCommitFailure?: (doc: LoroDoc) => void;
     history?: SessionHistoryInput[];
   } = {}
 ) {
   const events: string[] = [];
   let history = options.history ?? historyFixture();
+  const loro = new LoroDoc();
+  for (const entry of history) {
+    const map = loro
+      .getList('history')
+      .insertContainer(loro.getList('history').length, new LoroMap());
+    for (const [key, value] of Object.entries(entry)) if (value !== undefined) map.set(key, value);
+  }
+  loro.commit();
+  const realDoc = new SessionDocument({} as never, sessionId, async () => {}, {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as never);
+  realDoc.mirror = createSessionMirror({
+    doc: loro,
+    initialState: { session: { id: sessionId }, history: [] },
+  });
+  const mirror = realDoc.mirror;
+  const autoRead = attachAutoMarkLatestUserHistoryAsRead(mirror);
+  cleanups.push(() => {
+    autoRead.dispose();
+    mirror.dispose();
+  });
   const meta = {
     id: sessionId,
     machineId,
@@ -87,11 +121,16 @@ function createHarness(
   } as SessionMeta;
   const sessionDoc = {
     getMetaState: vi.fn(async () => meta),
-    getHistory: vi.fn(async () => history),
-    updateHistory: vi.fn(
+    getHistory: vi.fn(realDoc.getHistory.bind(realDoc)),
+    updateHistoryWithRollback: vi.fn(
       async (update: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         events.push('history');
-        history = update(history);
+        const rollback = await realDoc.updateHistoryWithRollback(update);
+        history = await realDoc.getHistory();
+        return () => {
+          rollback();
+          history = loro.getList('history').toJSON() as SessionHistoryInput[];
+        };
       }
     ),
   };
@@ -147,6 +186,7 @@ function createHarness(
       persistPendingChanges: vi.fn(async (reason: string) => {
         events.push(reason.endsWith('rollback') ? 'persist-rollback' : 'persist');
         if (options.persistError && reason.endsWith('commit')) {
+          options.beforeCommitFailure?.(loro);
           throw options.persistError;
         }
       }),
@@ -162,7 +202,15 @@ function createHarness(
     enqueueDispatch: () => events.push('dispatch'),
   });
 
-  return { agentClient, events, executionService, getHistory: () => history, repo, service };
+  return {
+    agentClient,
+    events,
+    executionService,
+    getHistory: () => history,
+    realDoc,
+    repo,
+    service,
+  };
 }
 
 const spec = {
@@ -174,7 +222,7 @@ const spec = {
   inputConfig: {
     prompt: 'new prompt',
     inputBlocks: [
-      { type: 'image', key: 'image-1', mimeType: 'image/png' },
+      { type: 'image', imageId: 'image-1', mimeType: 'image/png', sizeBytes: 1 },
       { type: 'text', text: 'new prompt' },
     ],
     cliType: 'builtin' as const,
@@ -186,7 +234,8 @@ describe('SessionEditAndResendService', () => {
   it('forks before cancelling, then atomically replaces the history tail', async () => {
     const harness = createHarness({ active: true });
 
-    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({ success: true });
+    const result = await harness.service.editAndResend(spec);
+    expect(result, JSON.stringify(result)).toMatchObject({ success: true });
 
     expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
     expect(harness.events).toEqual([
@@ -208,7 +257,8 @@ describe('SessionEditAndResendService', () => {
     ]);
     expect(harness.getHistory().at(-1)).toMatchObject({
       userId: 'original-author',
-      status: 'pending',
+      status: 'seen',
+      read: true,
       inputConfig: {
         modelId: 'model-1',
         configOptionValues: {
@@ -279,6 +329,35 @@ describe('SessionEditAndResendService', () => {
     expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
   });
 
+  it('retains newly accepted steer provenance through the writer and actual reader before editing', async () => {
+    const harness = createHarness();
+    const execution = new SessionExecutionService({
+      logger: { debug: vi.fn() },
+      workspaceDocument: { repo: harness.repo },
+    } as never);
+    await execution['transitionDispatchOwnership']({
+      sessionId,
+      sessionDoc: harness.realDoc,
+      nextUserTurnId: 'user-2',
+    });
+    // Once settled, pending_apply no longer protects the steer from editing.
+    await execution['setUserTurnStatus'](harness.realDoc, 'user-2', 'handled');
+    const stored = harness.realDoc.mirror
+      ?.getState()
+      .history.find((entry) => entry.id === 'user-2');
+    expect(stored?.inputConfig?._lodyDeliveryKind).toBe('steer');
+    const read = await harness.realDoc.getHistory();
+    expect(read.find((entry) => entry.id === 'user-2')?.inputConfig?._lodyDeliveryKind).toBe(
+      'steer'
+    );
+    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({
+      success: false,
+      error: { code: 'USER_TURN_NOT_EDITABLE' },
+    });
+    expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+  });
+
   it('requires a new logical user turn id', async () => {
     const harness = createHarness();
 
@@ -294,20 +373,50 @@ describe('SessionEditAndResendService', () => {
     expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
   });
 
-  it('restores the old history tail when the durable commit fails', async () => {
-    const harness = createHarness({ persistError: new Error('disk unavailable') });
+  it.each([false, true])(
+    'restores the old tail on commit failure with peer prefix edit=%s',
+    async (peerEdit) => {
+      const history = historyFixture();
+      const opaqueItems = [
+        { type: 'future_item', value: 42 },
+        { type: 'text', text: 42, futureField: 'keep' },
+      ];
+      history[3] = { ...history[3]!, items: opaqueItems } as unknown as SessionHistoryInput;
+      const harness = createHarness({
+        persistError: new Error('disk unavailable'),
+        history,
+        beforeCommitFailure: peerEdit
+          ? (doc) => {
+              const peer = new LoroDoc();
+              peer.import(doc.export({ mode: 'snapshot' }));
+              (peer.getList('history').get(0) as LoroMap).set('items', [
+                { type: 'text', text: 'peer prefix edit' },
+              ]);
+              doc.import(peer.export({ mode: 'update', from: doc.version() }));
+            }
+          : undefined,
+      });
 
-    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({
-      success: false,
-      error: { code: 'HISTORY_WRITE_FAILED' },
-    });
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
-      'user-1',
-      'assistant-1',
-      'user-2',
-      'assistant-2',
-    ]);
-    expect(harness.events).toContain('persist-rollback');
-    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
-  });
+      await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({
+        success: false,
+        error: { code: 'HISTORY_WRITE_FAILED' },
+      });
+      expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+        'user-1',
+        'assistant-1',
+        'user-2',
+        'assistant-2',
+      ]);
+      expect(harness.events).toContain('persist-rollback');
+      expect(harness.getHistory()).toEqual(
+        peerEdit
+          ? [
+              { ...history[0], items: [{ type: 'text', text: 'peer prefix edit' }] },
+              ...history.slice(1),
+            ]
+          : history
+      );
+      expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    }
+  );
 });

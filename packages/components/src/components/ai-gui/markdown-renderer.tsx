@@ -1,17 +1,15 @@
 import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useState,
   useCallback,
-  useEffect,
   useMemo,
   useLayoutEffect,
   useRef,
   memo,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { createMathPlugin } from '@streamdown/math';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
@@ -35,7 +33,7 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { parseTaskImageMarkdownUrl } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { FileIcon } from '@/components/icons/file-icons';
+import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import {
   isMarkdownAgentFileHref,
   parseMarkdownAgentFileHref,
@@ -59,7 +57,8 @@ import type { ConversationFontSize } from '@/atoms/settings';
 import { useTaskImageUrl } from '@/hooks/use-task-image';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
-import { MermaidDiagramViewer, type MermaidDiagramSelection } from './mermaid-diagram-viewer';
+import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
+import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -178,6 +177,18 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-muted-foreground/40 [&_a:hover]:decoration-muted-foreground ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
+  // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
+  // through inline styles: `touch-action: none` stops a finger resting on a
+  // diagram from scrolling the conversation, and its transform moves the preview
+  // inside its own frame. Panning and zooming belong to the canvas
+  // `use-mermaid-diagram-canvas.tsx` activates on the `<svg>`, so Streamdown's
+  // own transform is pinned and touch is handed back to the page. The wheel it
+  // takes from a listener is out of CSS's reach and is intercepted there too.
+  '[&_[data-streamdown="mermaid"]_[role="application"]]:!touch-auto ' +
+  '[&_[data-streamdown="mermaid"]_[role="application"]]:!transform-none ' +
+  // The cursor and the activated ring are in `tailwind/index.css` under
+  // `.markdown-renderer`, beside the rest of the diagram's frame.
+  '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
   '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/45 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 ' +
@@ -881,9 +892,6 @@ const STREAMDOWN_CONTROLS = {
   table: false,
 } satisfies ControlsConfig;
 
-/** Streamdown's wrapper around one rendered diagram, inside a `mermaid-block`. */
-const MERMAID_DIAGRAM_SELECTOR = '[data-streamdown="mermaid"]';
-
 /** Matches a fenced ```mermaid block, so blocks without one skip the observer. */
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
@@ -963,17 +971,17 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-px align-[-0.15em] font-mono text-[0.92em] leading-tight text-foreground no-underline shadow-none transition-colors',
-        'hover:border-border hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.15em] text-sky-700 dark:text-sky-400 no-underline shadow-none transition-colors',
+        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
-      <FileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
+      <MonochromeFileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" />
+          <Check className="h-3 w-3 shrink-0" />
         ) : (
-          <Copy className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <Copy className="h-3 w-3 shrink-0" />
         )
       ) : null}
     </button>
@@ -1113,127 +1121,23 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const copyCodeLabel = t('common.copyCode', 'Copy code');
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
+  const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
   const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
-  const [diagramSelection, setDiagramSelection] = useState<MermaidDiagramSelection | null>(null);
   const hasMermaidBlock = useMemo(() => MERMAID_FENCE_PATTERN.test(text), [text]);
   const normalizedText = useMemo(() => normalizeTexMathDelimiters(text), [text]);
+  const {
+    blocks: mermaidBlocks,
+    selection: diagramSelection,
+    closeDiagram,
+    openDiagram,
+    handleContainerClick,
+    handleContainerKeyDown,
+  } = useMermaidDiagramCanvas({
+    containerRef,
+    enabled: hasMermaidBlock,
+    canvasLabel,
+  });
 
-  const closeDiagram = useCallback(() => setDiagramSelection(null), []);
-
-  const openDiagram = useCallback((diagram: Element) => {
-    const svg = diagram.querySelector('svg');
-    if (!svg) {
-      return;
-    }
-    // The rendered size of the copy in the message is the diagram's natural
-    // size, and the viewer's opening zoom is expressed against it.
-    const rect = svg.getBoundingClientRect();
-    setDiagramSelection({
-      svg: svg.cloneNode(true) as SVGSVGElement,
-      naturalWidth: rect.width,
-      naturalHeight: rect.height,
-    });
-  }, []);
-
-  const handleMarkdownClick = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!(event.target instanceof Element)) {
-        return;
-      }
-      const diagram = event.target.closest(MERMAID_DIAGRAM_SELECTOR);
-      if (!diagram) {
-        return;
-      }
-      // Releasing a text selection over a diagram label is not a request to
-      // open it.
-      if (window.getSelection()?.toString()) {
-        return;
-      }
-      openDiagram(diagram);
-    },
-    [openDiagram]
-  );
-
-  const handleMarkdownKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== 'Enter' && event.key !== ' ') {
-        return;
-      }
-      if (!(event.target instanceof Element)) {
-        return;
-      }
-      const diagram = event.target.closest(MERMAID_DIAGRAM_SELECTOR);
-      if (!diagram) {
-        return;
-      }
-      event.preventDefault();
-      openDiagram(diagram);
-    },
-    [openDiagram]
-  );
-
-  // Streamdown owns the diagram markup, so the affordance that replaces its
-  // removed full-screen button is applied to that markup here. A diagram
-  // appears only after the lazily imported Mermaid runtime resolves — long
-  // after this component commits — so a one-shot pass would miss it; the
-  // observer is installed only for text that actually fences a diagram.
-  useEffect(() => {
-    const root = containerRef.current;
-    if (!root) {
-      return undefined;
-    }
-
-    const markedDiagrams = new Map<
-      HTMLElement,
-      { role: string | null; tabIndex: string | null; ariaLabel: string | null }
-    >();
-    const clearMarkedDiagrams = () => {
-      for (const [diagram, attributes] of markedDiagrams) {
-        if (attributes.role == null) {
-          diagram.removeAttribute('role');
-        } else {
-          diagram.setAttribute('role', attributes.role);
-        }
-        if (attributes.tabIndex == null) {
-          diagram.removeAttribute('tabindex');
-        } else {
-          diagram.setAttribute('tabindex', attributes.tabIndex);
-        }
-        if (attributes.ariaLabel == null) {
-          diagram.removeAttribute('aria-label');
-        } else {
-          diagram.setAttribute('aria-label', attributes.ariaLabel);
-        }
-      }
-      markedDiagrams.clear();
-    };
-    if (!hasMermaidBlock) {
-      clearMarkedDiagrams();
-      return undefined;
-    }
-
-    const markDiagramsOpenable = () => {
-      clearMarkedDiagrams();
-      root.querySelectorAll<HTMLElement>(MERMAID_DIAGRAM_SELECTOR).forEach((diagram) => {
-        markedDiagrams.set(diagram, {
-          role: diagram.getAttribute('role'),
-          tabIndex: diagram.getAttribute('tabindex'),
-          ariaLabel: diagram.getAttribute('aria-label'),
-        });
-        diagram.setAttribute('role', 'button');
-        diagram.setAttribute('tabindex', '0');
-        diagram.setAttribute('aria-label', openDiagramLabel);
-      });
-    };
-
-    markDiagramsOpenable();
-    const observer = new MutationObserver(markDiagramsOpenable);
-    observer.observe(root, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      clearMarkedDiagrams();
-    };
-  }, [hasMermaidBlock, openDiagramLabel]);
   const components = useMemo(
     () =>
       createMarkdownComponents({
@@ -1401,8 +1305,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         data-search-block-id={searchBlockId}
         className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
         style={markdownFontSizeStyle(normalizedSize)}
-        onClick={handleMarkdownClick}
-        onKeyDown={handleMarkdownKeyDown}
+        onClick={handleContainerClick}
+        onKeyDown={handleContainerKeyDown}
       >
         <Streamdown
           // Streamdown's memo comparator does not include every rendering prop;
@@ -1424,6 +1328,20 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         >
           {normalizedText}
         </Streamdown>
+        {/* Streamdown's own action bar, filled by portal: its full-screen
+            control is off (its overlay is unusable on touch), and this one
+            opens `MermaidDiagramViewer` from the same always-visible row as
+            copy and download. */}
+        {mermaidBlocks.map((block) =>
+          createPortal(
+            <MermaidFullscreenButton
+              label={openDiagramLabel}
+              onOpen={() => openDiagram(block.diagram)}
+            />,
+            block.actions,
+            block.id
+          )
+        )}
       </div>
       {/* A sibling of the markdown, not a child: a portal's events bubble
           through the React tree, and inside the container the viewer's own

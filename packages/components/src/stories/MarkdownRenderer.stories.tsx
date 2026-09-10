@@ -1,3 +1,4 @@
+import { fn } from 'storybook/test';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -659,9 +660,10 @@ export const InlineCodeDensity: Story = {
 
 export const AgentFileLinks: Story = {
   args: {
+    onAgentFileLinkClick: fn(),
     size: 'default',
     text: [
-      'Agent filesystem links should not navigate inside the web app:',
+      'Updated files and build artifacts:',
       '',
       'A labeled worktree file: [markdown-renderer.tsx](/home/agent/.lody/repos/github---example---project/worktrees/5110aa94-b18b-43cf-afa7-369905c2515a/packages/components/src/components/ai-gui/markdown-renderer.tsx)',
       '',
@@ -670,6 +672,8 @@ export const AgentFileLinks: Story = {
       'A repo-relative line reference: [README.md:100](README.md:100)',
       '',
       'A raw path label: [/tmp/lody-output.log](/tmp/lody-output.log)',
+      '',
+      'Build artifacts: [Lody.zip](/tmp/lody-build/Lody.zip) and [Lody.dmg](/tmp/lody-build/Lody.dmg)',
       '',
       'A protocol-relative web URL stays a normal link: [CDN script](//cdn.example.com/app.js)',
     ].join('\n'),

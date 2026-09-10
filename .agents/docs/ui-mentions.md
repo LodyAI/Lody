@@ -12,7 +12,8 @@ lives in its `README.md`.
    gates both trigger registration and whether `<Mention>` mounts at all — a
    source missing from that list silently degrades the composer to a plain
    textarea and drops its type.
-2. **Candidates.** Each category builds and caps its own rows. A row is a
+2. **Candidates.** Each category builds its own rows; aggregate results are capped.
+   The Role category lists the full readable catalog. A row is a
    registered collection item that arrow-key movement walks, so an uncapped source
    degrades navigation, not just render time. Ranking the file index is the
    expensive one, which is why `getCandidates` must stay lazy and a bare `@` calls
@@ -99,6 +100,13 @@ tab page, where hidden panes and draft tabs would make it vanish or stack on the
 wrong surface.
 
 ## Agent Roles
+
+Role visibility and selection follow [the Role mention Spec](../../specs/agent-role-mentions.md).
+Plain chats can reach all authorized machines. The menu keeps readable Roles
+that are loading, unavailable, or outside a filesystem-bound work context, with
+an explanation below the name. They follow available matches and cannot be
+selected. Hydration and before-send expansion independently reject those rows,
+so showing a stale Role never creates a new dispatch instruction.
 
 A Role mention borrows the session mention's shape with a different payload. The
 emoji replaces the category glyph because the category header already says these

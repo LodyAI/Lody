@@ -47,7 +47,6 @@ const APP_STORE_HREF_EN =
   'https://apps.apple.com/us/app/lody-run-code-agent-anywhere/id6761373528';
 const APP_STORE_HREF_ZH =
   'https://apps.apple.com/cn/app/lody-%E9%9A%8F%E6%97%B6%E9%9A%8F%E5%9C%B0%E8%BF%90%E8%A1%8C-code-agent/id6761373528';
-const TESTFLIGHT_HREF = 'https://testflight.apple.com/join/cUcDcVFa';
 const GOOGLE_PLAY_HREF = 'https://play.google.com/store/apps/details?id=ai.lody.android';
 
 const copy = {
@@ -65,7 +64,7 @@ const copy = {
       mac: 'Universal desktop app for macOS with Apple Silicon and Intel builds.',
       win: 'Signed Windows installer for x64 machines.',
       linux: 'Linux builds for AppImage and Debian/Ubuntu environments.',
-      ios: 'Get Lody on the App Store, or join TestFlight for previews.',
+      ios: 'Get Lody on the App Store.',
       android: 'Install from Google Play, or download the signed APK.',
       browser: 'Open the hosted web app in your browser.',
     },
@@ -83,7 +82,7 @@ const copy = {
       mac: '适用于 macOS 的桌面应用，提供 Apple Silicon 和 Intel 构建。',
       win: '适用于 x64 Windows 机器的签名安装包。',
       linux: '适用于 AppImage 与 Debian/Ubuntu 环境的 Linux 构建。',
-      ios: '在 App Store 安装 Lody，或通过 TestFlight 试用预览版。',
+      ios: '在 App Store 安装 Lody。',
       android: '从 Google Play 安装，或下载签名 APK。',
       browser: '在浏览器中打开托管版 Web 应用。',
     },
@@ -236,12 +235,6 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
           {
             label: 'App Store',
             href: isZh ? APP_STORE_HREF_ZH : APP_STORE_HREF_EN,
-            action: 'open',
-            target: '_blank',
-          },
-          {
-            label: 'TestFlight',
-            href: TESTFLIGHT_HREF,
             action: 'open',
             target: '_blank',
           },

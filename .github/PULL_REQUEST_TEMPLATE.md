@@ -90,4 +90,26 @@ characters. Include only the highest-value files, decisions, risks, and gaps.
 - **Deliberately not done or tested:** <!-- Intentional omissions and why they are acceptable. -->
 - **Unknowns / confidence:** <!-- Residual risk and confidence in the change. -->
 
+### Original user prompt
+
+<!--
+Required only for fork-based/external pull requests. Same-repository maintainer
+branches do not need to provide an original user prompt.
+
+For external PRs, preserve the triggering user's prompt as source evidence for
+review. Paste it verbatim: do not summarize, rewrite, clean up, or translate it.
+If the prompt contains secrets or private material that cannot be published,
+redact only those spans and leave an explicit marker in their place. Do not append
+unrelated transcript turns, tool logs, or attachment bytes.
+-->
+
+<details>
+<summary>Show original prompt</summary>
+
+````text
+<!-- Paste the triggering user's original prompt here, verbatim. -->
+````
+
+</details>
+
 <!-- context-handoff:end -->

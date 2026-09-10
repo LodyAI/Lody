@@ -3,7 +3,7 @@ import { formatKeyParts } from '@/lib/commands';
 import { Kbd as KbdPrimitive, KbdGroup } from '@/ui/kbd';
 
 type KbdProps = {
-  /** Binding string in registry syntax, e.g. `$mod+b`, `Shift+Enter`. */
+  /** Binding string in registry syntax, e.g. `Mod+b`, `Shift+Enter`. */
   binding: string;
   className?: string;
 };

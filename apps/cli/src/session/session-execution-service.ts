@@ -67,7 +67,7 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
-import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
+import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
   checkoutLocalProjectBranchAtRootPath,
@@ -112,6 +112,7 @@ import {
 import {
   getACPErrorUserMessage,
   isAgentDisconnectedError,
+  isAuthenticationRequiredACPError,
   mapACPErrorToFailureReason,
   parseACPError,
   shouldRecoverStaleACPConnectionPrompt,
@@ -147,6 +148,25 @@ const ACP_AUTHENTICATION_WORKFLOW_DEADLINE_MS = 295_000;
 const ACP_POST_AUTH_REFRESH_MAX_MS = 60_000;
 
 /**
+ * How long a fallback restore waits for the history CRDT to carry the prior
+ * conversation before it gives up on replaying it. Long enough to cover a room
+ * re-join after a daemon restart, short enough that a genuinely broken uplink
+ * fails the turn instead of holding the user's message.
+ */
+const REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS = 15_000;
+
+/**
+ * Shown when the agent's own session could not be resumed AND this machine has
+ * no conversation history to rebuild the context from. Starting a fresh agent
+ * anyway would silently answer as if the conversation never happened, so the
+ * turn is failed instead and the user keeps their message.
+ */
+const CONTEXT_FREE_RESTORE_MESSAGE =
+  'The agent session could not be resumed, and this machine has not synced the earlier ' +
+  'conversation yet, so there was nothing to restore the context from. The turn was not ' +
+  'started — retry once the session finishes syncing so the agent keeps its history.';
+
+/**
  * Shown in chat when a turn ends with no agent output at all. It names the most
  * common upstream cause without asserting it, because the adapter discarded the
  * real error before we could classify it.
@@ -158,7 +178,11 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
+  finalizeACPState: (
+    sessionId: SessionId,
+    turnId?: string,
+    options?: { settleContextCompactionAsFailed?: boolean }
+  ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -1927,6 +1951,46 @@ export class SessionExecutionService {
         'Failed to clear cancel request',
         self.tryPromise(() => self.clearCancelRequest(options.sessionId))
       );
+
+      const sessionToDrain = options.session;
+      const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
+      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+        // Keep the execution owner until ACP has actually finished. Otherwise
+        // the next queued turn can reach the still-busy adapter after local abort.
+        yield* self
+          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
+          .pipe(
+            Effect.catchAll(() =>
+              self.tryPromise(async () => {
+                self.deps.logger.warn(
+                  `[${options.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+                );
+                try {
+                  await sessionToDrain.terminate(true);
+                } catch (error) {
+                  self.deps.logger.warn(
+                    `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+                  );
+                  // Failed termination is not permission to reuse a busy agent.
+                  await pendingPrompt;
+                }
+              })
+            )
+          );
+      }
+
+      if (runtime?.promptStarted) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to settle context compaction after cancelled ACP prompt stopped',
+          self.tryPromise(async () => {
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
+              settleContextCompactionAsFailed: true,
+            });
+            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
+          })
+        );
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -2144,7 +2208,9 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
+      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
+    });
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2247,9 +2313,19 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown
+    error?: unknown,
+    options?: { providerPromptSettled?: boolean }
   ): Promise<void> {
-    await this.deps.turnFinalization.finalizeACPState(sessionId);
+    const acpError = error ? parseACPError(error) : null;
+    const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
+    await this.deps.turnFinalization.finalizeACPState(
+      sessionId,
+      this.currentTurnBySession.get(sessionId),
+      {
+        settleContextCompactionAsFailed:
+          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
+      }
+    );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
       this.currentTurnBySession.get(sessionId)
@@ -2257,8 +2333,6 @@ export class SessionExecutionService {
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
-      const acpError = parseACPError(error);
-
       if (acpError) {
         const failureReason = mapACPErrorToFailureReason(acpError);
         const userMessage = getACPErrorUserMessage(acpError);
@@ -2280,18 +2354,26 @@ export class SessionExecutionService {
         await this.deps.recordChatFailure(sessionDoc, failureReason, recordedMessage);
 
         if (shouldTerminateOnACPError(acpError, failureReason)) {
+          // Expired credentials leave a healthy agent process behind, so close
+          // its ACP session before killing it: adapters that flush their
+          // transcript on `session/close` would otherwise lose the artifact
+          // `loadSession` needs, and the next turn — after the user signs back
+          // in — would have nothing left to resume into. Every other
+          // terminating error means a wedged or disposed connection, where a
+          // graceful close only stalls the teardown, so those stay forced.
+          const force = failureReason !== 'acp_auth_required';
           this.deps.logger.debug(
-            `[${sessionId}] Terminating session due to ACP error (code=${acpError.code})`
+            `[${sessionId}] Terminating session due to ACP error (code=${acpError.code} force=${force})`
           );
           try {
-            await this.deps.sessionManager.terminateSession(sessionId, true);
+            await this.deps.sessionManager.terminateSession(sessionId, force);
           } catch (terminateError) {
             this.deps.logger.debug(
               `[${sessionId}] Failed to terminate session after ACP error: ${formatErrorMessage(terminateError)}`
             );
           }
         }
-      } else if (isAgentDisconnectedError(error)) {
+      } else if (providerDisconnected) {
         this.deps.logger.warn(
           `[${sessionId}] Agent disconnected during chat, terminating session for clean restart`
         );
@@ -3239,6 +3321,115 @@ export class SessionExecutionService {
     return await getHistory.call(sessionDoc);
   }
 
+  /**
+   * Read session history for a replay prompt, waiting briefly while it is empty.
+   *
+   * `SessionDocument.getHistory` is a local mirror read and never blocks on
+   * sync, so right after a daemon restart it can hold only the turn that was
+   * just delivered over RPC. A caller about to trade a resumable ACP session
+   * for a fresh one needs to tell "this session genuinely has nothing to
+   * replay" apart from "history has not arrived on this machine yet", and the
+   * dispatch watcher's own wait only covers the pending user turn, not the
+   * conversation before it.
+   *
+   * Bounded and best-effort: with no mirror to subscribe to there is nothing to
+   * wait on, so the first read is returned as-is.
+   */
+  private async waitForReplayableHistory(args: {
+    sessionId: SessionId;
+    sessionDoc: SessionDocument;
+    excludeTurnId?: string;
+    timeoutMs?: number;
+  }): Promise<SessionHistoryInput[]> {
+    // Mirrors what `buildReplayPromptFromHistory` counts: system notices are
+    // skipped there, so waiting must not treat a synced failure notice as
+    // proof that the conversation arrived.
+    const hasReplayableEntry = (history: SessionHistoryInput[]): boolean =>
+      history.some(
+        (entry) =>
+          entry.id !== args.excludeTurnId && (entry.role === 'user' || entry.role === 'assistant')
+      );
+
+    let latest = await this.getSessionHistory(args.sessionDoc);
+    if (hasReplayableEntry(latest)) {
+      return latest;
+    }
+
+    const mirror = args.sessionDoc.mirror;
+    if (typeof mirror?.subscribe !== 'function') {
+      return latest;
+    }
+    const subscribe = mirror.subscribe.bind(mirror);
+
+    const timeoutMs = args.timeoutMs ?? REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS;
+    const startedAtMs = Date.now();
+    return await new Promise<SessionHistoryInput[]>((resolve) => {
+      let settled = false;
+      let checking = false;
+      let recheckRequested = false;
+      let unsubscribe: (() => void) | undefined;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const finish = (history: SessionHistoryInput[]): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        unsubscribe?.();
+        resolve(history);
+      };
+
+      const check = (): void => {
+        if (settled) {
+          return;
+        }
+        if (checking) {
+          recheckRequested = true;
+          return;
+        }
+        checking = true;
+        void (async () => {
+          try {
+            do {
+              recheckRequested = false;
+              const next = await this.getSessionHistory(args.sessionDoc);
+              if (settled) {
+                return;
+              }
+              latest = next;
+              if (hasReplayableEntry(next)) {
+                this.deps.logger.debug(
+                  `[${args.sessionId}] Replayable history synced after ${Date.now() - startedAtMs}ms (entries=${next.length})`
+                );
+                finish(next);
+                return;
+              }
+            } while (recheckRequested);
+          } catch (error) {
+            this.deps.logger.debug(
+              `[${args.sessionId}] Replay history check failed: ${formatErrorMessage(error)}`
+            );
+          } finally {
+            checking = false;
+          }
+        })();
+      };
+
+      unsubscribe = subscribe(check);
+      timer = setTimeout(() => {
+        this.deps.logger.warn(
+          `[${args.sessionId}] Session history did not sync within ${timeoutMs}ms; nothing to replay into a fresh ACP session`
+        );
+        finish(latest);
+      }, timeoutMs);
+      timer.unref?.();
+      check();
+    });
+  }
+
   private async isUserTurnCancelled(
     sessionDoc: SessionDocument,
     userTurnId: string | undefined
@@ -3695,12 +3886,60 @@ export class SessionExecutionService {
               const isAcpResumeError =
                 lowerMessage.includes('acp_resume_unsupported') ||
                 lowerMessage.includes('acp_resume_failed');
+              // An expired credential is recoverable and session-scoped: the
+              // agent's transcript is still on disk and `loadSession` works
+              // again once the user signs back in. The fallback below would
+              // instead create a fresh ACP session and overwrite
+              // `meta.acpSessionId`, permanently detaching this session from
+              // that transcript over a failure that fixes itself. Ask for
+              // sign-in and keep the resume pointer intact.
+              const needsAuthentication =
+                error instanceof AcpAuthenticationRequiredError ||
+                isAuthenticationRequiredACPError(error);
 
-              if (isAcpResumeError && resumeSessionId) {
+              if (isAcpResumeError && resumeSessionId && !needsAuthentication) {
                 self.deps.logger.debug(
                   `[${sessionId}] ACP resume failed, attempting fallback with chat history replay`
                 );
                 yield* acpReplaySuppression.release;
+
+                // Built BEFORE the replacement session exists. Creating it
+                // first persists a new `acpSessionId`, so discovering only
+                // afterwards that there is nothing to replay would already have
+                // destroyed the last pointer back to the agent's transcript.
+                const replayHistory = yield* self.tryPromise(() =>
+                  self.waitForReplayableHistory({
+                    sessionId,
+                    sessionDoc,
+                    excludeTurnId: message.userTurnId,
+                  })
+                );
+                const fallbackReplay =
+                  replayHistory.length > 0
+                    ? buildReplayPromptFromHistory({
+                        history: replayHistory,
+                        excludeTurnId: message.userTurnId,
+                      })
+                    : null;
+
+                if (!fallbackReplay || fallbackReplay.stats.messagesIncluded === 0) {
+                  // A session that had a resumable ACP session necessarily had
+                  // prior turns, so an empty local history means this machine's
+                  // history CRDT has not caught up rather than that the
+                  // conversation is empty. Replacing the agent silently here is
+                  // what turns "resume failed" into "the agent forgot
+                  // everything", so fail the turn and keep the pointer.
+                  self.deps.logger.error(
+                    `[${sessionId}] Refusing context-free fallback restore (resumeSessionId=${resumeSessionId} historyEntries=${replayHistory.length})`
+                  );
+                  return yield* self.recordKnownChatFailureAndHaltEffect({
+                    sessionId,
+                    sessionDoc,
+                    userTurnId: executionUserTurnId,
+                    reason: 'session_restore_failed',
+                    message: CONTEXT_FREE_RESTORE_MESSAGE,
+                  });
+                }
 
                 const fallbackConfig: SessionConfig = {
                   ...restoreConfig,
@@ -3718,18 +3957,11 @@ export class SessionExecutionService {
                   ctx.bindSession(fallbackSession);
                   yield* ctx.abortIfCancelled({ terminateSession: true });
                   usedHistoryReplay = true;
+                  replayPromptResult = fallbackReplay;
 
-                  const history = yield* self.tryPromise(() => sessionDoc.getHistory());
-                  if (history.length > 0) {
-                    replayPromptResult = buildReplayPromptFromHistory({
-                      history,
-                      excludeTurnId: message.userTurnId,
-                    });
-
-                    self.deps.logger.debug(
-                      `[${sessionId}] Built replay prompt (chars=${replayPromptResult.stats.usedChars} messages=${replayPromptResult.stats.messagesIncluded} paths=${replayPromptResult.stats.pathsCount} truncated=${replayPromptResult.stats.truncated} terminalOmitted=${replayPromptResult.stats.terminalOmitted} thinkingOmitted=${replayPromptResult.stats.thinkingOmitted})`
-                    );
-                  }
+                  self.deps.logger.debug(
+                    `[${sessionId}] Built replay prompt (chars=${fallbackReplay.stats.usedChars} messages=${fallbackReplay.stats.messagesIncluded} paths=${fallbackReplay.stats.pathsCount} truncated=${fallbackReplay.stats.truncated} terminalOmitted=${fallbackReplay.stats.terminalOmitted} thinkingOmitted=${fallbackReplay.stats.thinkingOmitted})`
+                  );
                   return fallbackSession;
                 });
 
@@ -3764,10 +3996,10 @@ export class SessionExecutionService {
                 sessionId,
                 sessionDoc,
                 userTurnId: executionUserTurnId,
-                reason:
-                  error instanceof AcpAuthenticationRequiredError
-                    ? 'acp_auth_required'
-                    : 'session_restore_failed',
+                // `needsAuthentication` also covers a provider auth failure that
+                // arrives wrapped as `[ACP_RESUME_FAILED] …`; without it the UI
+                // reports a generic restore failure and offers no way to sign in.
+                reason: needsAuthentication ? 'acp_auth_required' : 'session_restore_failed',
                 message: errMessage,
               });
             })
@@ -3790,7 +4022,9 @@ export class SessionExecutionService {
           activeSession = nextSession;
           session = nextSession;
           ctx.bindSession(nextSession);
-          nextSession.updateGitIdentity(userName, userEmail, message.userId);
+          nextSession.updateGitIdentity(userName, userEmail, message.userId, {
+            preferMachineIdentity: message.userId === self.deps.userId,
+          });
         };
 
         const sessionInputBlocks = normalizeSessionInputBlocks(

@@ -14,6 +14,7 @@ import {
 } from '@lody/shared';
 import {
   EphemeralRoomTransport,
+  type EphemeralRoomStartArgs,
   type EphemeralRoomBaseOptions,
   type EphemeralRoomStoreLike,
 } from './ephemeral-room-transport';
@@ -35,6 +36,21 @@ export class WorkspaceMachineMonitorTransport extends EphemeralRoomTransport<
   private readonly listeners = new Map<MachineId, Set<SnapshotListener>>();
   private readonly renewalTimers = new Map<MachineId, ReturnType<typeof setInterval>>();
   private readonly forceSampleAtByMachine = new Map<MachineId, number>();
+  private startArgs: EphemeralRoomStartArgs | null = null;
+
+  /**
+   * Retain connection credentials while the workspace is attached, but do not
+   * join the ephemeral room until a consumer needs a machine snapshot.
+   */
+  override start(args: EphemeralRoomStartArgs): void {
+    this.startArgs = args;
+    if (this.listeners.size > 0) super.start(args);
+  }
+
+  override async stop(): Promise<void> {
+    this.startArgs = null;
+    await super.stop();
+  }
 
   shouldRestartOnExternalWake(nowMs: number = getServerNow()): boolean {
     const syncState = this.getSyncState();
@@ -53,10 +69,11 @@ export class WorkspaceMachineMonitorTransport extends EphemeralRoomTransport<
     if (!machineListeners) {
       machineListeners = new Set();
       this.listeners.set(machineId, machineListeners);
-      this.startRenewal(machineId);
     }
     machineListeners.add(listener);
     listener(this.getSnapshot(machineId));
+    this.startRenewal(machineId);
+    this.startIfObserved();
     this.publishObserver(machineId, null);
     return () => {
       const current = this.listeners.get(machineId);
@@ -68,6 +85,7 @@ export class WorkspaceMachineMonitorTransport extends EphemeralRoomTransport<
       this.renewalTimers.delete(machineId);
       this.forceSampleAtByMachine.delete(machineId);
       this.store?.delete(getMachineMonitorObserverKey(machineId, this.observerId));
+      if (this.listeners.size === 0) void super.stop();
     };
   }
 
@@ -109,11 +127,17 @@ export class WorkspaceMachineMonitorTransport extends EphemeralRoomTransport<
   }
 
   private startRenewal(machineId: MachineId): void {
+    if (this.renewalTimers.has(machineId)) return;
     const timer = setInterval(
       () => this.publishObserver(machineId, null),
       LODY_MACHINE_MONITOR_OBSERVER_RENEW_MS
     );
     this.renewalTimers.set(machineId, timer);
+  }
+
+  private startIfObserved(): void {
+    if (this.getSyncState() !== 'idle' || !this.startArgs) return;
+    super.start(this.startArgs);
   }
 
   private publishObserver(machineId: MachineId, forceSampleAtMs: number | null): void {

@@ -235,6 +235,30 @@ describe('withGitHubOperationTokenRetry', () => {
     expect(mockAction).toHaveBeenCalledTimes(1);
   });
 
+  it('retries token minting once when Convex reconnects before returning the action result', async () => {
+    mockAction
+      .mockRejectedValueOnce(new Error('Connection lost while action was in flight'))
+      .mockResolvedValueOnce({
+        success: true,
+        token: 'ghu_reconnected',
+        tokenSource: 'personal',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+
+    await expect(getGitHubOperationToken('ws-1', 'owner/repo', 'write')).resolves.toMatchObject({
+      token: 'ghu_reconnected',
+    });
+    expect(mockAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after one reconnect retry when the token action keeps disconnecting', async () => {
+    const error = new Error('Connection lost while action was in flight');
+    mockAction.mockRejectedValue(error);
+
+    await expect(getGitHubOperationToken('ws-1', 'owner/repo', 'write')).rejects.toBe(error);
+    expect(mockAction).toHaveBeenCalledTimes(2);
+  });
+
   it('invalidates all cached tokens for a workspace after personal identity changes', async () => {
     mockAction
       .mockResolvedValueOnce({

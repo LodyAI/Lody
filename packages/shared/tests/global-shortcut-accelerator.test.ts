@@ -4,6 +4,7 @@ import {
   bindingToElectronAccelerator,
   GLOBAL_SHORTCUT_DEFAULTS,
   globalShortcutBindingHasModifier,
+  migrateLegacyShortcutBinding,
 } from '../src/electron-ipc';
 
 describe('bindingToElectronAccelerator', () => {
@@ -18,6 +19,7 @@ describe('bindingToElectronAccelerator', () => {
   });
 
   it('maps modifiers and uppercases letter keys', () => {
+    expect(bindingToElectronAccelerator('Mod+k')).toBe('CommandOrControl+K');
     expect(bindingToElectronAccelerator('$mod+k')).toBe('CommandOrControl+K');
     expect(bindingToElectronAccelerator('Alt+Shift+b')).toBe('Alt+Shift+B');
     expect(bindingToElectronAccelerator('Ctrl+Alt+t')).toBe('Control+Alt+T');
@@ -25,9 +27,9 @@ describe('bindingToElectronAccelerator', () => {
   });
 
   it('maps named keys', () => {
-    expect(bindingToElectronAccelerator('$mod+ArrowRight')).toBe('CommandOrControl+Right');
-    expect(bindingToElectronAccelerator('$mod+Space')).toBe('CommandOrControl+Space');
-    expect(bindingToElectronAccelerator('$mod+Shift+F5')).toBe('CommandOrControl+Shift+F5');
+    expect(bindingToElectronAccelerator('Mod+ArrowRight')).toBe('CommandOrControl+Right');
+    expect(bindingToElectronAccelerator('Mod+Space')).toBe('CommandOrControl+Space');
+    expect(bindingToElectronAccelerator('Mod+Shift+F5')).toBe('CommandOrControl+Shift+F5');
   });
 
   it('refuses modifier-less bindings (would swallow a bare key OS-wide)', () => {
@@ -45,17 +47,25 @@ describe('bindingToElectronAccelerator', () => {
   it('refuses unknown / empty tokens', () => {
     expect(bindingToElectronAccelerator('')).toBeNull();
     expect(bindingToElectronAccelerator('Hyper+x')).toBeNull();
-    expect(bindingToElectronAccelerator('$mod+Nonsense')).toBeNull();
+    expect(bindingToElectronAccelerator('Mod+Nonsense')).toBeNull();
   });
 
   it('dedupes repeated modifiers', () => {
-    expect(bindingToElectronAccelerator('$mod+mod+k')).toBe('CommandOrControl+K');
+    expect(bindingToElectronAccelerator('Mod+mod+k')).toBe('CommandOrControl+K');
+  });
+});
+
+describe('migrateLegacyShortcutBinding', () => {
+  it('rewrites only the legacy primary-modifier token', () => {
+    expect(migrateLegacyShortcutBinding('$mod+Shift+b')).toBe('Mod+Shift+b');
+    expect(migrateLegacyShortcutBinding('Shift+$MOD+k')).toBe('Shift+Mod+k');
+    expect(migrateLegacyShortcutBinding('Mod+Shift+b')).toBe('Mod+Shift+b');
   });
 });
 
 describe('globalShortcutBindingHasModifier', () => {
   it('detects a primary modifier', () => {
-    expect(globalShortcutBindingHasModifier('$mod+Shift+n')).toBe(true);
+    expect(globalShortcutBindingHasModifier('Mod+Shift+n')).toBe(true);
     expect(globalShortcutBindingHasModifier('Alt+b')).toBe(true);
   });
 

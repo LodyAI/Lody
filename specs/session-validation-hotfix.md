@@ -17,5 +17,5 @@ restore protection through changed-input validation without reintroducing an old
 history gate. Unpatched clients retain the old behavior.
 
 Evidence: `packages/shared/tests/session-validation-hotfix.test.ts` and
-`mirror-construction-sites.test.ts`. No deployed-client acceptance is claimed.
+`session-doc-forward-compat.test.ts`. No deployed-client acceptance is claimed.
 Draft for human review; tests do not grant approval.

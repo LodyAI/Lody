@@ -1,3 +1,4 @@
+import type { LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -574,6 +575,8 @@ function extractImageGenerationContentFields(content: unknown): {
  * Synchronous: everything that needs I/O already happened in the load phase.
  */
 export interface AgentClientOptions {
+  /** Resolve logical project identity only after worktreeProject capability negotiation. */
+  resolveWorktreeProject?: () => Promise<LodyWorktreeProject>;
   sessionId: SessionId;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
@@ -638,12 +641,14 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
   private acknowledgedSteerCapability: AcknowledgedSteerCapability | null = null;
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
+  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -1582,6 +1587,7 @@ export class AgentClient implements acp.Client {
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
+      ...(this.worktreeProject ? { worktreeProject: this.worktreeProject } : {}),
       ...(forkSessionTurnId !== undefined
         ? { forkAtTurn: { version: 1 as const, turnId: forkSessionTurnId } }
         : {}),
@@ -1683,7 +1689,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
-    const sessionStartMeta = this.getSessionStartMeta();
+    this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
         resumeSessionId ?? 'none'
@@ -1828,6 +1834,14 @@ export class AgentClient implements acp.Client {
       workdir = target.workdir;
       resumeSessionId = target.resumeSessionId;
     }
+
+    if (
+      this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&
+      this.options.resolveWorktreeProject
+    ) {
+      this.worktreeProject = await withAbort(this.options.resolveWorktreeProject(), startupAbort);
+    }
+    const sessionStartMeta = this.getSessionStartMeta();
 
     this.logger.debug(`[${this.options.sessionId}] About to establish ACP session`);
     const newSessionStart = performance.now();
@@ -2373,6 +2387,13 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  /** Includes raw ACP requests whose local caller has already been cancelled. */
+  get pendingPromptCompletion(): Promise<void> | null {
+    return this.pendingPrompts.size > 0
+      ? Promise.allSettled([...this.pendingPrompts]).then(() => undefined)
+      : null;
+  }
+
   async prompt(
     sessionId: ACPSessionId,
     prompt: acp.ContentBlock[],
@@ -2407,6 +2428,14 @@ export class AgentClient implements acp.Client {
         span.end({ outcome: 'undefined-promise' });
         return undefined;
       }
+
+      // A local abort does not finish the remote request. Track every raw
+      // request, including overlapping prompts used by acknowledged handoff.
+      this.pendingPrompts.add(promptPromise);
+      const releasePrompt = () => {
+        this.pendingPrompts.delete(promptPromise);
+      };
+      void promptPromise.then(releasePrompt, releasePrompt);
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;

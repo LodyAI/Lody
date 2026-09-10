@@ -177,6 +177,24 @@ export const DesktopFinishedTurn: Story = {
   ),
 };
 
+export const DesktopForkingTurn: Story = {
+  args: { sessionId, items: finishedItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={finishedItems}
+        sessionId={sessionId}
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={finishedTurn.id}
+        lastCompletedAssistantMessageId={finishedTurn.id}
+        onForkLastAssistant={() => undefined}
+        forkingAssistantMessageId={finishedTurn.id}
+      />
+    </div>
+  ),
+};
+
 /**
  * PLAN-MODE TURN — the widest set of top-level row shells in one column.
  *

@@ -1,4 +1,6 @@
 import { getProjectActivityLabel, ProjectActivityIndicator } from './project-activity-indicator';
+import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { SessionWindowMenuItem } from './session-window-menu-item';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
@@ -689,7 +691,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           ? 'text-sidebar-selection-foreground'
           : 'text-sidebar-foreground dark:text-sidebar-foreground/75'
       )}
-      onClick={() => {
+      onClick={(event) => {
+        if (openSessionOnModifiedClick(event, session.id)) return;
         onNavigate(session.id);
       }}
       onKeyDown={(event) => {
@@ -763,18 +766,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       <ContextMenuContent className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
-          goToOpener={
-            openerSessionId
-              ? () => onNavigate(openerRootSessionId ?? openerSessionId, openerSessionId)
-              : undefined
-          }
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
-        {canRename ? (
-          <ContextMenuItem icon={<Pencil />} onSelect={beginRename}>
-            {contextMenuLabels.rename}
-          </ContextMenuItem>
-        ) : null}
         {canTogglePinned ? (
           <ContextMenuItem
             icon={isPinned ? <PinOff /> : <Pin />}
@@ -795,15 +788,15 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             {contextMenuLabels.markUnread}
           </ContextMenuItem>
         ) : null}
-        <ContextMenuItem
-          icon={<Archive />}
-          onSelect={() => {
-            onArchive(session.id);
-          }}
-        >
-          {contextMenuLabels.archive}
-        </ContextMenuItem>
-        {canCopyUrl || shareMenuState ? <ContextMenuSeparator /> : null}
+        {canRename ? (
+          <ContextMenuItem icon={<Pencil />} onSelect={beginRename}>
+            {contextMenuLabels.rename}
+          </ContextMenuItem>
+        ) : null}
+        {(openedByOpener || canTogglePinned || canMarkUnread || canRename) &&
+        (canCopyUrl || shareMenuState) ? (
+          <ContextMenuSeparator />
+        ) : null}
         {canCopyUrl ? (
           <ContextMenuItem
             icon={<Link2 />}
@@ -814,6 +807,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             {contextMenuLabels.copyUrl}
           </ContextMenuItem>
         ) : null}
+
         {shareMenuState ? (
           <ContextMenuItem
             disabled={shareMenuState !== 'share'}
@@ -839,6 +833,44 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
+        {(openedByOpener ||
+          canTogglePinned ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          shareMenuState) &&
+        (openerSessionId || isElectronRenderer()) ? (
+          <ContextMenuSeparator />
+        ) : null}
+
+        <SessionRowOpenedByMenuItems
+          goToOpener={
+            openerSessionId
+              ? () => onNavigate(openerRootSessionId ?? openerSessionId, openerSessionId)
+              : undefined
+          }
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
+        <SessionWindowMenuItem sessionId={session.id} />
+        {(openedByOpener ||
+          canTogglePinned ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          shareMenuState ||
+          openerSessionId ||
+          isElectronRenderer()) &&
+        true ? (
+          <ContextMenuSeparator />
+        ) : null}
+        <ContextMenuItem
+          icon={<Archive />}
+          onSelect={() => {
+            onArchive(session.id);
+          }}
+        >
+          {contextMenuLabels.archive}
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   ) : (
@@ -2585,6 +2617,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       .filter((org) => Boolean(org))
       .map((org) => ({
         id: org.id,
+        slug: org.slug,
         name: org.name,
         logo: resolveWorkspaceIdentityLogo(org.logo, multiWorkspaceAvailable),
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
