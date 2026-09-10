@@ -1415,10 +1415,16 @@ export class LoroDocumentManager {
         machineFlockKeys.providerSetupCancellation(agentConfigId),
       ],
     });
-    if (getMachineFlockProviderSetupCancellations(rows)[agentConfigId]) {
+    const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
+    const cancellation = getMachineFlockProviderSetupCancellations(rows)[agentConfigId];
+    if (
+      cancellation &&
+      (!cancellation.setupRevision ||
+        !setup?.setupRevision ||
+        cancellation.setupRevision === setup.setupRevision)
+    ) {
       return null;
     }
-    const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
     return setup?.machineId === machineId &&
       isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
       ? await hydrateCodexProviderCredential(this.workspaceId, setup.config)
@@ -1429,9 +1435,11 @@ export class LoroDocumentManager {
     agentConfigId: AgentConfigId,
     machineId: MachineId,
     setupRevision: string,
-    options: { timeoutMs?: number } = {}
+    options: { timeoutMs?: number; signal?: AbortSignal } = {}
   ): Promise<AgentConfigMeta | null> {
+    options.signal?.throwIfAborted();
     const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
+    options.signal?.throwIfAborted();
     const read = (): AgentConfigMeta | null | undefined => {
       const rows = readMachineFlockRowsFromFlock(handle.flock, {
         prefixes: [
@@ -1455,17 +1463,32 @@ export class LoroDocumentManager {
     };
     const initial = read();
     if (initial !== undefined) return initial;
-    return await new Promise<AgentConfigMeta | null>((resolve) => {
+    return await new Promise<AgentConfigMeta | null>((resolve, reject) => {
       let settled = false;
       let unsubscribe = (): void => {};
       let timeout: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = (): void => {
+        if (timeout) clearTimeout(timeout);
+        unsubscribe();
+        options.signal?.removeEventListener('abort', onAbort);
+      };
       const finish = (value: AgentConfigMeta | null): void => {
         if (settled) return;
         settled = true;
-        if (timeout) clearTimeout(timeout);
-        unsubscribe();
+        cleanup();
         resolve(value);
       };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new DOMException('Provider setup wait was cancelled', 'AbortError'));
+      };
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      if (options.signal?.aborted) {
+        onAbort();
+        return;
+      }
       unsubscribe = handle.flock.subscribe(() => {
         const value = read();
         if (value !== undefined) finish(value);

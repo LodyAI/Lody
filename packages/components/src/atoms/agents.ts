@@ -115,26 +115,16 @@ async function writeProviderSetupToMachineFlock(
 
 async function cancelProviderSetupInMachineFlock(
   runtime: WorkspaceRuntime,
-  setup: ProviderSetupTask,
+  cancellation: ProviderSetupCancellation,
   optimisticRows: MachineFlockRowMap
 ): Promise<MachineFlockRowMap> {
-  const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
-  const cancelledAt = getServerNow();
-  const preservePublishedConfig = setup.replacesPublishedConfig === true;
-  const cancellation: ProviderSetupCancellation = {
-    v: 1,
-    id: setup.id,
-    machineId: setup.machineId,
-    cancelledAt,
-    ...(preservePublishedConfig ? { preservePublishedConfig: true } : {}),
-    ...(setup.setupRevision ? { setupRevision: setup.setupRevision } : {}),
-  };
-  const cancellationKey = machineFlockKeys.providerSetupCancellation(setup.id);
-  const setupKey = machineFlockKeys.providerSetup(setup.id);
+  const flockDocId = getMachineFlockDocId(runtime.workspaceId, cancellation.machineId);
+  const cancellationKey = machineFlockKeys.providerSetupCancellation(cancellation.id);
+  const setupKey = machineFlockKeys.providerSetup(cancellation.id);
+  const configKey = machineFlockKeys.agentConfig(cancellation.id);
 
-  // The durable marker is the cancellation accept boundary. The target CLI can
-  // reconcile both rows from it even if either best-effort cleanup is interrupted.
-  // Nothing is read from the mirror before it, so the boundary is never delayed.
+  // The durable marker is the cancellation accept boundary. The target CLI applies
+  // the revision CAS and removes the affected rows; local projection only hides them.
   await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
 
   const handle = await runtime.repo.openFlockDoc(flockDocId);
@@ -146,15 +136,15 @@ async function cancelProviderSetupInMachineFlock(
       value: cancellation,
     },
   };
-  const cleanup = [runtime.writer.flockRowDelete(flockDocId, setupKey)];
-  if (!preservePublishedConfig) {
-    cleanup.push(runtime.writer.flockRowDelete(flockDocId, machineFlockKeys.agentConfig(setup.id)));
+  const currentSetup = getMachineFlockProviderSetups(rows)[cancellation.id];
+  if (
+    currentSetup &&
+    (!cancellation.setupRevision || currentSetup.setupRevision === cancellation.setupRevision)
+  ) {
+    delete rows[serializeMachineFlockKey(setupKey)];
   }
-  await Promise.allSettled(cleanup);
-
-  delete rows[serializeMachineFlockKey(setupKey)];
-  if (!preservePublishedConfig) {
-    delete rows[serializeMachineFlockKey(machineFlockKeys.agentConfig(setup.id))];
+  if (!cancellation.preservePublishedConfig) {
+    delete rows[serializeMachineFlockKey(configKey)];
   }
   return rows;
 }
@@ -468,18 +458,42 @@ export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: Ag
   });
 });
 
-export const deleteProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
+export type CancelProviderSetupInput = {
+  id: AgentConfigId;
+  machineId: MachineId;
+  expectedSetupRevision?: string;
+  preservePublishedConfig?: boolean;
+};
+
+export const deleteProviderSetupAtom = atom(null, async (get, set, input: CancelProviderSetupInput) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
-  const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === setupId);
-  if (!setup) return;
+  const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === input.id);
+  if (
+    input.expectedSetupRevision &&
+    (!setup || setup.setupRevision !== input.expectedSetupRevision)
+  ) {
+    return;
+  }
   const optimisticRows =
-    get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[String(setup.machineId)] ??
+    get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[String(input.machineId)] ??
     {};
-  const rows = await cancelProviderSetupInMachineFlock(runtime, setup, optimisticRows);
+  const cancellation: ProviderSetupCancellation = {
+    v: 1,
+    id: input.id,
+    machineId: input.machineId,
+    cancelledAt: getServerNow(),
+    ...((input.preservePublishedConfig ?? setup?.replacesPublishedConfig)
+      ? { preservePublishedConfig: true }
+      : {}),
+    ...(input.expectedSetupRevision
+      ? { setupRevision: input.expectedSetupRevision }
+      : {}),
+  };
+  const rows = await cancelProviderSetupInMachineFlock(runtime, cancellation, optimisticRows);
   set(setMachineFlockRowsForMachineAtom, {
     workspaceId: runtime.workspaceId,
-    machineId: setup.machineId,
+    machineId: input.machineId,
     rows,
   });
 });

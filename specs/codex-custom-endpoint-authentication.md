@@ -19,8 +19,11 @@ and IP loopback. The shared builder enforces the same rule as the form.
 The API key is one-shot renderer state. It must never enter `AgentConfig.env`, a
 `ProviderSetupTask`, logs, or another workspace-readable document. The renderer submits it
 through the encrypted Machine ACP authentication-input path. During verification the target CLI
-keeps the candidate key in memory. After a successful live probe, it replaces the single
-machine-local active credential and publishes the desired config before acknowledging success.
+keeps the candidate key in memory. After a successful live probe, it opens a short machine-local
+commit window that retains at most the currently published and desired credential bindings,
+publishes the desired config, and then prunes the old binding before acknowledging success.
+Either binding can still launch after a daemon crash on either side of publication; an
+authoritative rescan retains only the binding referenced by the surviving config or setup.
 The credential is injected under the generated provider's `env_key` only when the current launch
 configuration matches the record's complete launch binding. A changed endpoint, proxy, runtime,
 agent type, custom launch command, or launch-relevant environment value fails closed. POSIX
@@ -30,19 +33,25 @@ per-user data directory.
 Creation, key rotation, and launch-binding changes use a non-secret durable setup draft with an
 exact setup revision. The credential RPC waits for that revision to become visible on the target
 daemon, always requests a replacement key, and probes the staged config with the in-memory
-candidate. Probe failure writes no credential. Probe success stores the active machine-local
-credential, publishes the final non-secret `AgentConfig`, and removes the setup before the RPC
-acknowledges success. A superseded RPC returns a conflict instead of publishing or reporting
-success. During an edit, the previous published config remains live until publication. Display
-metadata, prompt, title-generation, and other non-binding edits update the published config
-directly and do not request the API key or run a probe. Machines that do not advertise the
-credential protocol cannot submit credential-changing edits.
+candidate. One authentication lifecycle and its abort signal cover setup synchronization, secret
+input, probe, credential commit, and config publication; cancellation before the commit boundary
+writes neither credential nor config. Probe failure writes no credential. RPC success means the final non-secret
+`AgentConfig` was published and the setup was removed. A superseded RPC returns a conflict instead
+of publishing or reporting success. Each submit attempt has a fresh setup revision, and automatic
+failure compensation may cancel only that exact revision. During an edit, the previous published
+launch config remains live until publication. Display metadata, prompt, title-generation, and other
+non-binding edits update the published config directly and do not request the API key or run a
+probe. A replacement publication merges the latest published metadata instead of overwriting it
+with the setup snapshot. Machines that do not advertise the credential protocol cannot submit
+credential-changing edits.
 
 The dedicated form owns only the provider entry and ownership marker it generates. Returning to
 ChatGPT restores the prior `model_provider` selector and removes the generated provider and
 marker. Switching modes and deleting a provider also writes a durable credential-cleanup intent
-before changing or deleting the config. The target daemon replays that intent whenever it is
-online and removes the local credential only after no published config or setup still uses it;
+and a revision-independent setup cancellation before changing or deleting the config. That
+cancellation is a barrier against any in-flight replacement; an explicitly new setup retracts it.
+The target daemon replays the cleanup intent whenever it is online and removes the local credential
+only after no published config or setup still uses it;
 cleanup does not depend on observing an intermediate config revision. The tombstone remains
 necessary until initial Machine Flock synchronization exposes an authoritative-complete boundary
 that local garbage collection can prove. Existing

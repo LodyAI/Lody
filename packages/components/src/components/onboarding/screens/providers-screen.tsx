@@ -1074,7 +1074,13 @@ export function ProvidersScreen({
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              if (payload.backgroundSetup) await deleteSetup(config.id);
+              if (payload.backgroundSetup) {
+                await deleteSetup({
+                  id: config.id,
+                  machineId: config.machineId,
+                  expectedSetupRevision: payload.setupRevision,
+                });
+              }
               else await deleteConfig(config.id);
               throw error;
             }
@@ -1101,6 +1107,14 @@ export function ProvidersScreen({
           };
           if (payload.codexApiKey) {
             if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            await updateConfig({
+              ...dialogMode.config,
+              name: nextConfig.name,
+              description: nextConfig.description,
+              prompt: nextConfig.prompt,
+              titleGeneration: nextConfig.titleGeneration,
+              brandId: nextConfig.brandId,
+            });
             await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
             try {
               await provisionCodexCredential({
@@ -1110,11 +1124,21 @@ export function ProvidersScreen({
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              await deleteSetup(nextConfig.id);
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                expectedSetupRevision: payload.setupRevision,
+                preservePublishedConfig: true,
+              });
               throw error;
             }
           } else {
             if (removingCodexCredential) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                preservePublishedConfig: true,
+              });
               await requestCredentialCleanup({
                 id: nextConfig.id,
                 machineId: nextConfig.machineId,
@@ -1209,7 +1233,12 @@ export function ProvidersScreen({
         operation: 'agent_setup_cancel',
       });
       try {
-        await deleteSetup(setup.id);
+        await deleteSetup({
+          id: setup.id,
+          machineId: setup.machineId,
+          expectedSetupRevision: setup.setupRevision,
+          preservePublishedConfig: setup.replacesPublishedConfig === true,
+        });
         analytics.capture('onboarding/operation_succeeded', {
           step: 'providers',
           operation: 'agent_setup_cancel',
@@ -1245,6 +1274,11 @@ export function ProvidersScreen({
       invalidateTestRun(pendingDelete.id);
       const provider = getLodyCodexCustomProvider(pendingDelete.env);
       if (provider) {
+        await deleteSetup({
+          id: pendingDelete.id,
+          machineId: pendingDelete.machineId,
+          preservePublishedConfig: false,
+        });
         await requestCredentialCleanup({
           id: pendingDelete.id,
           machineId: pendingDelete.machineId,

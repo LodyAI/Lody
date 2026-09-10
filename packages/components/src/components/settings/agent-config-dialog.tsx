@@ -1227,8 +1227,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     ((isCodexBuiltin && codexCredentialProvisioningRequired) ||
       (requiresBuiltinCreationVerification && usesDefaultManagedRuntime));
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
-  const codexSetupRevisionRef = useRef(crypto.randomUUID());
-  const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
+  const buildSubmitPayload = useCallback((setupRevision?: string): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
       env = buildPresetEnv(activePreset, activeCredentialMode, formData);
@@ -1259,7 +1258,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
         ? {
             codexApiKey: formData.codexApiKey?.trim(),
-            setupRevision: codexSetupRevisionRef.current,
+            setupRevision,
           }
         : {}),
     };
@@ -1278,12 +1277,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     resolvedBrandId,
   ]);
   const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
-    const payload = buildSubmitPayload();
+    const payload = buildSubmitPayload(
+      codexCredentialProvisioningRequired ? crypto.randomUUID() : undefined
+    );
     const payloadKey = JSON.stringify(payload);
     if (lastPersistedPayloadKeyRef.current === payloadKey) return;
     await onSubmit(payload);
     lastPersistedPayloadKeyRef.current = payloadKey;
-  }, [buildSubmitPayload, onSubmit]);
+  }, [buildSubmitPayload, codexCredentialProvisioningRequired, onSubmit]);
 
   useEffect(() => {
     if (

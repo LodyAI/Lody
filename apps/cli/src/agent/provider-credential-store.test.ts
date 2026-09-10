@@ -10,6 +10,8 @@ import {
 } from '@lody/shared';
 import {
   hydrateCodexProviderCredential,
+  reconcileCodexProviderCredential,
+  stageCodexProviderCredential,
   storeCodexProviderCredential,
 } from './provider-credential-store';
 
@@ -70,13 +72,61 @@ describe('provider credential store', () => {
     ).toBeUndefined();
   });
 
-  it('restores the prior record when verification rolls back', async () => {
+  it('keeps both published and desired bindings usable through the commit window', async () => {
     const original = config();
     await storeCodexProviderCredential(workspaceId, original, 'old-key');
     const changed = config('https://new.example.com/v1');
-    const rollback = await storeCodexProviderCredential(workspaceId, changed, 'new-key');
-    await rollback();
+    const staged = await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
 
+    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
+    });
+    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'new-key',
+    });
+
+    await staged.finalize();
+
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'new-key',
+    });
+  });
+
+  it('restores the prior record when a staged commit loses its setup CAS', async () => {
+    const original = config();
+    await storeCodexProviderCredential(workspaceId, original, 'old-key');
+    const changed = config('https://new.example.com/v1');
+    const staged = await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+    await staged.rollback();
+
+    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
+    });
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+  });
+
+  it('recovers either side of a crash cut from authoritative Flock references', async () => {
+    const original = config();
+    const changed = config('https://new.example.com/v1');
+    await storeCodexProviderCredential(workspaceId, original, 'old-key');
+    await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+
+    await reconcileCodexProviderCredential(workspaceId, original.id, [changed]);
+    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'new-key',
+    });
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+
+    await storeCodexProviderCredential(workspaceId, original, 'old-key');
+    await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+    await reconcileCodexProviderCredential(workspaceId, original.id, [original]);
     expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });

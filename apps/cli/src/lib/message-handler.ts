@@ -8387,8 +8387,13 @@ export class MessageHandler {
       ...options,
       ...(message.action === 'start' && message.purpose === 'provision-provider-credential'
         ? {
-            commitCodexProviderCredential: ({ configId, setupRevision, apiKey }) =>
-              this.providerSetupManager.commitCredentialSetup(configId, setupRevision, apiKey),
+            commitCodexProviderCredential: ({ configId, setupRevision, apiKey, signal }) =>
+              this.providerSetupManager.commitCredentialSetup(
+                configId,
+                setupRevision,
+                apiKey,
+                signal
+              ),
           }
         : {}),
     });

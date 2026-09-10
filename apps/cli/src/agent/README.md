@@ -155,7 +155,9 @@ Grok and Codex authentication requirements come from ACP session creation becaus
 `codex login status` cannot account for custom model providers with
 `requires_openai_auth = false`. Because protocol authentication spans launch preparation,
 JSON-RPC requests, and process cleanup, the running slot also carries an `AbortController`
-that termination raises before any child exists.
+that termination raises before any child exists. Custom Codex provisioning keeps that same slot
+through setup synchronization, live probe, credential commit, and final publication, so Cancel
+cannot acknowledge while those steps continue in the background.
 
 The real-process authentication test keeps method selection, versioned secret metadata, form
 submission, URL parsing, protocol stdout integrity, and process cleanup on one spawned ACP

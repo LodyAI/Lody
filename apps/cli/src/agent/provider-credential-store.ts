@@ -12,11 +12,18 @@ import {
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
+const CredentialEntrySchema = z
+  .object({
+    binding: z.string().min(1),
+    apiKey: z.string().min(1),
+  })
+  .strict();
+
 const CredentialRecordSchema = z
   .object({
     v: z.literal(1),
-    binding: z.string().min(1),
-    apiKey: z.string().min(1),
+    current: CredentialEntrySchema,
+    previous: CredentialEntrySchema.optional(),
   })
   .strict();
 
@@ -55,7 +62,7 @@ export async function storeCodexProviderCredential(
   workspaceId: WorkspaceId,
   config: AgentConfigMeta,
   apiKey: string
-): Promise<() => Promise<void>> {
+): Promise<void> {
   const provider = getLodyCodexCustomProvider(config.env);
   const binding = getLodyCodexCredentialBinding(config);
   const normalizedKey = apiKey.trim();
@@ -63,12 +70,105 @@ export async function storeCodexProviderCredential(
     throw new Error('Invalid Codex custom endpoint credential');
   }
   const filePath = recordPath(workspaceId, config.id);
-  const previous = await readRecord(filePath);
-  await writeRecord(filePath, { v: 1, binding, apiKey: normalizedKey });
-  return async () => {
-    if (previous) await writeRecord(filePath, previous);
-    else await rm(filePath, { force: true });
+  await writeRecord(filePath, {
+    v: 1,
+    current: { binding, apiKey: normalizedKey },
+  });
+}
+
+export type StagedCodexProviderCredential = {
+  finalize: () => Promise<void>;
+  rollback: () => Promise<void>;
+};
+
+/**
+ * Opens the short cross-store commit window after a successful live probe.
+ * The desired binding and the currently published binding remain readable
+ * until AgentConfig publication chooses which one survives.
+ */
+export async function stageCodexProviderCredential(
+  workspaceId: WorkspaceId,
+  desiredConfig: AgentConfigMeta,
+  apiKey: string,
+  publishedConfig?: AgentConfigMeta
+): Promise<StagedCodexProviderCredential> {
+  const provider = getLodyCodexCustomProvider(desiredConfig.env);
+  const desiredBinding = getLodyCodexCredentialBinding(desiredConfig);
+  const normalizedKey = apiKey.trim();
+  if (
+    !provider ||
+    !desiredBinding ||
+    !isAllowedCredentialEndpoint(provider.baseUrl) ||
+    !normalizedKey
+  ) {
+    throw new Error('Invalid Codex custom endpoint credential');
+  }
+
+  const filePath = recordPath(workspaceId, desiredConfig.id);
+  const previousRecord = await readRecord(filePath);
+  const publishedBinding = publishedConfig ? getLodyCodexCredentialBinding(publishedConfig) : null;
+  const previousEntry = publishedBinding
+    ? [previousRecord?.current, previousRecord?.previous].find(
+        (entry) => entry?.binding === publishedBinding
+      )
+    : undefined;
+  const stagedRecord: CredentialRecord = {
+    v: 1,
+    current: { binding: desiredBinding, apiKey: normalizedKey },
+    ...(previousEntry && previousEntry.binding !== desiredBinding
+      ? { previous: previousEntry }
+      : {}),
   };
+  await writeRecord(filePath, stagedRecord);
+
+  const recordStillMatches = async (): Promise<boolean> => {
+    const current = await readRecord(filePath);
+    return (
+      current?.current.binding === stagedRecord.current.binding &&
+      current.current.apiKey === stagedRecord.current.apiKey
+    );
+  };
+  return {
+    finalize: async () => {
+      if (!(await recordStillMatches())) return;
+      await writeRecord(filePath, { v: 1, current: stagedRecord.current });
+    },
+    rollback: async () => {
+      if (!(await recordStillMatches())) return;
+      if (previousRecord) await writeRecord(filePath, previousRecord);
+      else await rm(filePath, { force: true });
+    },
+  };
+}
+
+/** Keep only credentials referenced by an authoritative config/setup decision. */
+export async function reconcileCodexProviderCredential(
+  workspaceId: WorkspaceId,
+  configId: string,
+  referencedConfigs: AgentConfigMeta[]
+): Promise<void> {
+  const filePath = recordPath(workspaceId, configId);
+  const record = await readRecord(filePath);
+  if (!record) return;
+  const referencedBindings = referencedConfigs
+    .map(getLodyCodexCredentialBinding)
+    .filter((binding): binding is string => Boolean(binding));
+  const retained = referencedBindings
+    .map((binding) => [record.current, record.previous].find((entry) => entry?.binding === binding))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const [current, previous] = retained.filter(
+    (entry, index, entries) =>
+      entries.findIndex((other) => other.binding === entry.binding) === index
+  );
+  if (!current) {
+    await rm(filePath, { force: true });
+    return;
+  }
+  await writeRecord(filePath, {
+    v: 1,
+    current,
+    ...(previous ? { previous } : {}),
+  });
 }
 
 export async function hydrateCodexProviderCredential<T extends CredentialBoundConfig>(
@@ -78,10 +178,13 @@ export async function hydrateCodexProviderCredential<T extends CredentialBoundCo
   const binding = getLodyCodexCredentialBinding(config);
   if (!getLodyCodexCustomProvider(config.env) || !binding) return config;
   const record = await readRecord(recordPath(workspaceId, config.id));
-  if (!record || record.binding !== binding) return config;
+  const credential = [record?.current, record?.previous].find(
+    (entry) => entry?.binding === binding
+  );
+  if (!credential) return config;
   return {
     ...config,
-    env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: record.apiKey },
+    env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: credential.apiKey },
   } as T;
 }
 

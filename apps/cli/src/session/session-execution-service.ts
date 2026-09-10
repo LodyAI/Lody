@@ -644,6 +644,7 @@ type AcpAuthenticationOptions = {
     configId: AgentConfigId;
     setupRevision: string;
     apiKey: string;
+    signal: AbortSignal;
   }) => Promise<void>;
 };
 
@@ -5135,18 +5136,13 @@ export class SessionExecutionService {
         error: 'Credential provisioning requires an exact setup revision',
       };
     }
-    const config = provisioning
-      ? await this.deps.workspaceDocument.waitForProviderSetupConfig(
-          message.configId,
-          this.deps.machineId,
-          message.setupRevision ?? '',
-          { timeoutMs: 60_000 }
-        )
+    let config = provisioning
+      ? null
       : await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
           message.configId,
           this.deps.machineId
         );
-    if (!config || (config.cliType === 'custom' && !config.customAcp)) {
+    if (!provisioning && (!config || (config.cliType === 'custom' && !config.customAcp))) {
       return {
         ...base,
         success: false,
@@ -5154,7 +5150,9 @@ export class SessionExecutionService {
         error: `Provider config not found or invalid on this machine: ${message.configId}`,
       };
     }
-    const resolvedBase = { ...base, agentType: config.agentType };
+    const authenticationCliType = provisioning ? 'builtin' : (config?.cliType ?? 'builtin');
+    const authenticationAgentType = provisioning ? 'codex' : (config?.agentType ?? 'unknown');
+    const resolvedBase = { ...base, agentType: authenticationAgentType };
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
       if (event.status === 'auth-methods') {
@@ -5162,7 +5160,7 @@ export class SessionExecutionService {
           type: 'machine/acp-authentication-progress',
           machineId: this.deps.machineId,
           requestId: message.requestId,
-          agentType: config.agentType,
+          agentType: authenticationAgentType,
           status: event.status,
           interactionId: event.interactionId,
           authMethods: event.authMethods.map(summarizeAcpAuthMethod),
@@ -5173,36 +5171,18 @@ export class SessionExecutionService {
         type: 'machine/acp-authentication-progress',
         machineId: this.deps.machineId,
         requestId: message.requestId,
-        agentType: config.agentType,
+        agentType: authenticationAgentType,
         ...event,
       });
     };
-    let candidateApiKey: string | undefined;
-    const result = await this.acpAuthenticationManager.authenticate({
-      requestId: message.requestId,
-      cliType: config.cliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-      forceCodexApiKeyInput: provisioning,
-      storeCodexApiKey: async (apiKey) => {
-        candidateApiKey = apiKey.trim();
-      },
-      onProgress,
-    });
-    if (result.success && result.disposition === 'authenticated') {
-      const verifiedConfig =
-        provisioning && candidateApiKey
-          ? {
-              ...config,
-              env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: candidateApiKey },
-            }
-          : ((await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-              message.configId,
-              this.deps.machineId
-            )) ?? config);
+    const verifyConfig = async (
+      verifiedConfig: AgentConfigMeta,
+      signal?: AbortSignal
+    ): Promise<MachineAcpCapabilitiesRefreshResponse> => {
+      signal?.throwIfAborted();
       const refreshController = new AbortController();
+      const abortRefresh = (): void => refreshController.abort();
+      signal?.addEventListener('abort', abortRefresh, { once: true });
       const refreshTimeoutMs = Math.max(
         1,
         Math.min(
@@ -5212,9 +5192,8 @@ export class SessionExecutionService {
       );
       const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
       refreshTimeout.unref?.();
-      let refresh: MachineAcpCapabilitiesRefreshResponse;
       try {
-        refresh = await this.refreshMachineAcpCapabilitiesForConfig(
+        const refresh = await this.refreshMachineAcpCapabilitiesForConfig(
           {
             type: 'machine/acp-capabilities-refresh',
             machineId: message.machineId,
@@ -5228,13 +5207,16 @@ export class SessionExecutionService {
           },
           { signal: refreshController.signal }
         );
+        signal?.throwIfAborted();
+        return refresh;
       } catch (error) {
-        refresh = {
+        signal?.throwIfAborted();
+        return {
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
           configId: message.configId,
-          cliType: config.cliType,
-          agentType: config.agentType,
+          cliType: verifiedConfig.cliType,
+          agentType: verifiedConfig.agentType,
           success: false,
           error: refreshController.signal.aborted
             ? 'Authentication succeeded, but capability verification timed out'
@@ -5242,7 +5224,92 @@ export class SessionExecutionService {
         };
       } finally {
         clearTimeout(refreshTimeout);
+        signal?.removeEventListener('abort', abortRefresh);
       }
+    };
+    let provisioningRefresh: MachineAcpCapabilitiesRefreshResponse | undefined;
+    const result = await this.acpAuthenticationManager.authenticate({
+      requestId: message.requestId,
+      cliType: authenticationCliType,
+      agentType: authenticationAgentType,
+      customAcp: config?.customAcp,
+      runtimeOverrides: config?.runtimeOverrides,
+      env: config?.env,
+      prepare: provisioning
+        ? async (signal) => {
+            const stagedConfig = await this.deps.workspaceDocument.waitForProviderSetupConfig(
+              message.configId,
+              this.deps.machineId,
+              message.setupRevision ?? '',
+              { timeoutMs: 60_000, signal }
+            );
+            if (
+              !stagedConfig ||
+              stagedConfig.cliType !== 'builtin' ||
+              stagedConfig.agentType !== 'codex'
+            ) {
+              throw new Error(
+                `Provider config not found or invalid on this machine: ${message.configId}`
+              );
+            }
+            config = stagedConfig;
+            return {
+              cliType: stagedConfig.cliType,
+              agentType: stagedConfig.agentType,
+              customAcp: stagedConfig.customAcp,
+              runtimeOverrides: stagedConfig.runtimeOverrides,
+              env: stagedConfig.env,
+            };
+          }
+        : undefined,
+      forceCodexApiKeyInput: provisioning,
+      storeCodexApiKey: provisioning
+        ? async (apiKey, signal) => {
+            if (!config) throw new Error('Codex provider setup is no longer available');
+            const candidateApiKey = apiKey.trim();
+            const verifiedConfig = {
+              ...config,
+              env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: candidateApiKey },
+            };
+            provisioningRefresh = await verifyConfig(verifiedConfig, signal);
+            if (!provisioningRefresh.success) {
+              throw new Error(
+                provisioningRefresh.error ??
+                  'Authentication succeeded, but capability refresh failed'
+              );
+            }
+            signal.throwIfAborted();
+            if (!message.setupRevision || !options.commitCodexProviderCredential) {
+              throw new Error('Codex credential setup could not be committed');
+            }
+            await options.commitCodexProviderCredential({
+              configId: message.configId,
+              setupRevision: message.setupRevision,
+              apiKey: candidateApiKey,
+              signal,
+            });
+          }
+        : undefined,
+      onProgress,
+    });
+    if (result.success && result.disposition === 'authenticated') {
+      if (provisioning) {
+        return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
+      }
+      if (!config) {
+        return {
+          ...resolvedBase,
+          success: false,
+          disposition: 'error',
+          error: `Provider config not found or invalid on this machine: ${message.configId}`,
+        };
+      }
+      const verifiedConfig =
+        (await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          message.configId,
+          this.deps.machineId
+        )) ?? config;
+      const refresh = await verifyConfig(verifiedConfig);
       if (!refresh.success) {
         return {
           ...resolvedBase,
@@ -5253,34 +5320,20 @@ export class SessionExecutionService {
           error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
         };
       }
-      if (provisioning) {
-        if (!candidateApiKey || !message.setupRevision || !options.commitCodexProviderCredential) {
-          return {
-            ...resolvedBase,
-            success: false,
-            disposition: 'error',
-            error: 'Codex credential setup could not be committed',
-          };
-        }
-        try {
-          await options.commitCodexProviderCredential({
-            configId: message.configId,
-            setupRevision: message.setupRevision,
-            apiKey: candidateApiKey,
-          });
-        } catch (error) {
-          return {
-            ...resolvedBase,
-            success: false,
-            disposition: 'error',
-            error: formatErrorMessage(error),
-          };
-        }
-      }
       return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
     }
 
-    return { ...resolvedBase, ...result };
+    return {
+      ...resolvedBase,
+      ...result,
+      ...(provisioningRefresh
+        ? {
+            capabilitiesRefreshed: false,
+            authRequired: provisioningRefresh.authRequired,
+            authMethods: provisioningRefresh.authMethods,
+          }
+        : {}),
+    };
   }
 
   async refreshMachineAcpCapabilities(

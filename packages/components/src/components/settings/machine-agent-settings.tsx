@@ -927,7 +927,13 @@ export function MachineAgentSettings({
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              if (payload.backgroundSetup) await deleteSetup(config.id);
+              if (payload.backgroundSetup) {
+                await deleteSetup({
+                  id: config.id,
+                  machineId: config.machineId,
+                  expectedSetupRevision: payload.setupRevision,
+                });
+              }
               else await deleteConfig(config.id);
               throw error;
             }
@@ -952,6 +958,14 @@ export function MachineAgentSettings({
           };
           if (payload.codexApiKey) {
             if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            await updateConfig({
+              ...dialogMode.config,
+              name: nextConfig.name,
+              description: nextConfig.description,
+              prompt: nextConfig.prompt,
+              titleGeneration: nextConfig.titleGeneration,
+              brandId: nextConfig.brandId,
+            });
             await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
             try {
               await provisionCodexCredential({
@@ -961,11 +975,21 @@ export function MachineAgentSettings({
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              await deleteSetup(nextConfig.id);
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                expectedSetupRevision: payload.setupRevision,
+                preservePublishedConfig: true,
+              });
               throw error;
             }
           } else {
             if (removingCodexCredential) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                preservePublishedConfig: true,
+              });
               await requestCredentialCleanup({
                 id: nextConfig.id,
                 machineId: nextConfig.machineId,
@@ -1013,7 +1037,12 @@ export function MachineAgentSettings({
   const handleDeleteSetup = useCallback(
     async (setup: ProviderSetupTask) => {
       try {
-        await deleteSetup(setup.id);
+        await deleteSetup({
+          id: setup.id,
+          machineId: setup.machineId,
+          expectedSetupRevision: setup.setupRevision,
+          preservePublishedConfig: setup.replacesPublishedConfig === true,
+        });
       } catch (error) {
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'));
         throw error;
@@ -1026,6 +1055,11 @@ export function MachineAgentSettings({
     async (config: AgentConfigMeta) => {
       try {
         if (getLodyCodexCustomProvider(config.env)) {
+          await deleteSetup({
+            id: config.id,
+            machineId: config.machineId,
+            preservePublishedConfig: false,
+          });
           await requestCredentialCleanup({ id: config.id, machineId: config.machineId });
         }
         await deleteConfig(config.id);
@@ -1035,7 +1069,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [deleteConfig, requestCredentialCleanup, t]
+    [deleteConfig, deleteSetup, requestCredentialCleanup, t]
   );
 
   const showBanner = mode === 'agents' && migration.status === 'running';

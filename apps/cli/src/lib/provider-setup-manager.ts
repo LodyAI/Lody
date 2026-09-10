@@ -27,7 +27,8 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import {
   clearCodexProviderCredential,
-  storeCodexProviderCredential,
+  reconcileCodexProviderCredential,
+  stageCodexProviderCredential,
 } from '@/agent/provider-credential-store';
 
 type ProviderSetupExecution = Pick<
@@ -47,7 +48,8 @@ export type ProviderSetupManagerOptions = {
   sync: ProviderSetupSyncScheduler;
   logger: Logger;
   clearCredential?: typeof clearCodexProviderCredential;
-  storeCredential?: typeof storeCodexProviderCredential;
+  reconcileCredential?: typeof reconcileCodexProviderCredential;
+  stageCredential?: typeof stageCodexProviderCredential;
 };
 
 const RESUMABLE_STATUSES = new Set<ProviderSetupStatus>([
@@ -70,8 +72,9 @@ export class ProviderSetupManager {
   private readonly sync: ProviderSetupSyncScheduler;
   private readonly logger: Logger;
   private readonly clearCredential: typeof clearCodexProviderCredential;
-  private readonly storeCredential: typeof storeCodexProviderCredential;
-  private credentialCommitChain: Promise<void> = Promise.resolve();
+  private readonly reconcileCredential: typeof reconcileCodexProviderCredential;
+  private readonly stageCredential: typeof stageCodexProviderCredential;
+  private readonly credentialMutationChains = new Map<AgentConfigId, Promise<void>>();
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
@@ -84,7 +87,8 @@ export class ProviderSetupManager {
     this.sync = options.sync;
     this.logger = options.logger;
     this.clearCredential = options.clearCredential ?? clearCodexProviderCredential;
-    this.storeCredential = options.storeCredential ?? storeCodexProviderCredential;
+    this.reconcileCredential = options.reconcileCredential ?? reconcileCodexProviderCredential;
+    this.stageCredential = options.stageCredential ?? stageCodexProviderCredential;
   }
 
   kick(): Promise<void> {
@@ -127,23 +131,63 @@ export class ProviderSetupManager {
   async commitCredentialSetup(
     setupId: AgentConfigId,
     setupRevision: string,
-    apiKey: string
+    apiKey: string,
+    signal?: AbortSignal
   ): Promise<void> {
-    const commit = this.credentialCommitChain.then(async () => {
+    await this.runCredentialMutation(setupId, async () => {
       if (this.stopped) throw new Error('Provider setup manager is stopped');
+      signal?.throwIfAborted();
       const setup = await this.readSetup(setupId);
       if (!setup || setup.status !== 'awaiting-auth' || setup.setupRevision !== setupRevision) {
         throw new Error('Provider setup was cancelled or replaced');
       }
-      const rollback = await this.storeCredential(this.workspaceId, setup.config, apiKey);
-      const published = await this.publishVerifiedConfig(setup.id, setup.attempt, setupRevision);
+      const publishedConfig = await this.readAgentConfig(setup.id);
+      const staged = await this.stageCredential(
+        this.workspaceId,
+        setup.config,
+        apiKey,
+        publishedConfig
+      );
+      if (signal?.aborted) {
+        await staged.rollback();
+        signal.throwIfAborted();
+      }
+      const published = await this.publishVerifiedConfig(
+        setup.id,
+        setup.attempt,
+        setupRevision,
+        signal
+      );
       if (!published) {
-        await rollback();
+        await staged.rollback();
         throw new Error('Provider setup was cancelled or replaced');
       }
+      await staged.finalize().catch((error) => {
+        this.logger.debug(
+          `[provider-setup] Published ${setup.id}, but old credential binding cleanup will retry: ${formatErrorMessage(error)}`
+        );
+      });
     });
-    this.credentialCommitChain = commit.catch(() => undefined);
-    await commit;
+  }
+
+  private async runCredentialMutation<T>(
+    configId: AgentConfigId,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const prior = this.credentialMutationChains.get(configId) ?? Promise.resolve();
+    const result = prior.then(operation);
+    const settled = result.then(
+      () => undefined,
+      () => undefined
+    );
+    this.credentialMutationChains.set(configId, settled);
+    try {
+      return await result;
+    } finally {
+      if (this.credentialMutationChains.get(configId) === settled) {
+        this.credentialMutationChains.delete(configId);
+      }
+    }
   }
 
   private async waitUntilIdle(): Promise<void> {
@@ -156,6 +200,7 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
+      await this.reconcileCredentialBindings();
       await this.reconcileCredentialCleanups();
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
@@ -264,7 +309,10 @@ export class ProviderSetupManager {
     let changed = false;
     for (const cancellation of cancellations) {
       const setupRevision = setups[cancellation.id]?.setupRevision;
-      if (setupRevision && setupRevision !== cancellation.setupRevision) {
+      if (
+        cancellation.setupRevision &&
+        (!setupRevision || setupRevision !== cancellation.setupRevision)
+      ) {
         continue;
       }
       changed =
@@ -279,6 +327,34 @@ export class ProviderSetupManager {
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
   }
 
+  private async reconcileCredentialBindings(): Promise<void> {
+    const handle = await this.repo.openFlockDoc(
+      getMachineFlockDocId(this.workspaceId, this.machineId)
+    );
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      families: ['providerSetupCancellation', 'providerSetup', 'agentConfig'],
+    });
+    const configs = getMachineFlockAgentConfigs(rows);
+    const setups = getMachineFlockProviderSetups(rows);
+    const cancellations = getMachineFlockProviderSetupCancellations(rows);
+    const ids = new Set<AgentConfigId>([
+      ...(Object.keys(configs) as AgentConfigId[]),
+      ...(Object.keys(setups) as AgentConfigId[]),
+      ...(Object.keys(cancellations) as AgentConfigId[]),
+    ]);
+    for (const id of ids) {
+      const config = configs[id];
+      const setup = setups[id];
+      const referencedConfigs = [setup?.config, config].filter(
+        (entry): entry is NonNullable<typeof entry> =>
+          Boolean(entry && getLodyCodexCustomProvider(entry.env))
+      );
+      await this.runCredentialMutation(id, () =>
+        this.reconcileCredential(this.workspaceId, id, referencedConfigs)
+      );
+    }
+  }
+
   private async reconcileCredentialCleanups(): Promise<void> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
@@ -286,28 +362,37 @@ export class ProviderSetupManager {
     const rows = readMachineFlockRowsFromFlock(handle.flock, {
       families: ['providerCredentialCleanup', 'providerSetup', 'agentConfig'],
     });
-    const configs = getMachineFlockAgentConfigs(rows);
-    const setups = getMachineFlockProviderSetups(rows);
-    let changed = false;
     for (const cleanup of getMachineFlockProviderCredentialCleanups(rows)) {
       if (cleanup.machineId !== this.machineId) continue;
-      if (
-        getLodyCodexCustomProvider(configs[cleanup.id]?.env) ||
-        getLodyCodexCustomProvider(setups[cleanup.id]?.config.env)
-      ) {
-        continue;
-      }
-      await this.clearCredential(this.workspaceId, cleanup.id);
-      changed =
-        deleteMachineFlockRowFromFlock(
+      await this.runCredentialMutation(cleanup.id, async () => {
+        const currentRows = readMachineFlockRowsFromFlock(handle.flock, {
+          prefixes: [
+            machineFlockKeys.providerCredentialCleanup(cleanup.id),
+            machineFlockKeys.providerSetup(cleanup.id),
+            machineFlockKeys.agentConfig(cleanup.id),
+          ],
+        });
+        if (
+          getLodyCodexCustomProvider(getMachineFlockAgentConfigs(currentRows)[cleanup.id]?.env) ||
+          getLodyCodexCustomProvider(
+            getMachineFlockProviderSetups(currentRows)[cleanup.id]?.config.env
+          )
+        ) {
+          return;
+        }
+        await this.clearCredential(this.workspaceId, cleanup.id);
+        const changed = deleteMachineFlockRowFromFlock(
           handle.flock,
           machineFlockKeys.providerCredentialCleanup(cleanup.id),
           getServerNow()
-        ) || changed;
+        );
+        if (!changed) return;
+        await this.repo.flush();
+        this.sync.markMachineFlockDocDirty(this.machineId, {
+          reason: 'provider-credential-cleanup',
+        });
+      });
     }
-    if (!changed) return;
-    await this.repo.flush();
-    this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-credential-cleanup' });
   }
 
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {
@@ -410,7 +495,8 @@ export class ProviderSetupManager {
   private async publishVerifiedConfig(
     setupId: AgentConfigId,
     attempt: number,
-    expectedSetupRevision?: string
+    expectedSetupRevision?: string,
+    signal?: AbortSignal
   ): Promise<boolean> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
@@ -452,22 +538,36 @@ export class ProviderSetupManager {
     ) {
       return false;
     }
-    if (getMachineFlockAgentConfigs(rows)[setupId] && !setup.setupRevision) {
+    const currentConfig = getMachineFlockAgentConfigs(rows)[setupId];
+    if (currentConfig && !setup.replacesPublishedConfig) {
       await this.deleteSetup(setupId);
       return false;
     }
+    if (signal?.aborted) return false;
 
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
-    flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
+    const publishedConfig =
+      setup.replacesPublishedConfig && currentConfig
+        ? {
+            ...setup.config,
+            name: currentConfig.name,
+            description: currentConfig.description,
+            prompt: currentConfig.prompt,
+            titleGeneration: currentConfig.titleGeneration,
+            brandId: currentConfig.brandId,
+          }
+        : setup.config;
+    flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
     // Publishing is the user adding the provider explicitly, so the earlier same-type
     // removal intent has to be retracted too, or the list holds it while startup still
     // treats it as removed.
-    const optOutKey = findBuiltinAgentOptOutToRetract(rows, setup.config);
+    const optOutKey = findBuiltinAgentOptOutToRetract(rows, publishedConfig);
     if (optOutKey) {
       flock.delete(optOutKey, now);
     }
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
+    flock.delete(machineFlockKeys.providerSetupCancellation(setupId), now);
     flock.commit();
     await this.repo.flush();
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-publish' });

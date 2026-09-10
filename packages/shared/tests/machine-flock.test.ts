@@ -10,6 +10,7 @@ import {
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockProviderSetups,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDeleteLocalProjectIds,
@@ -805,6 +806,55 @@ describe('machine Flock helpers', () => {
         })
       ).not.toEqual({});
     });
+
+    it.each([
+      { preservePublishedConfig: true, expectedConfigCount: 1 },
+      { preservePublishedConfig: false, expectedConfigCount: 0 },
+    ])(
+      'uses a revision-less cancellation as a barrier for any in-flight replacement',
+      ({ preservePublishedConfig, expectedConfigCount }) => {
+        const flock = new FakeMachineFlock();
+        const id = 'setup-1' as AgentConfigId;
+        const publishedConfig = kimi(id);
+        writeAgentConfigToFlock(flock, publishedConfig);
+        writeMachineFlockRowToFlock(flock, {
+          key: machineFlockKeys.providerSetup(id),
+          value: {
+            v: 1,
+            id,
+            machineId,
+            config: {
+              ...publishedConfig,
+              agentType: 'codex',
+              env: buildLodyCodexCustomProviderEnv(
+                {},
+                { baseUrl: 'https://relay.example.test/v1' }
+              ),
+            },
+            status: 'awaiting-auth',
+            setupRevision: 'revision-new',
+            replacesPublishedConfig: true,
+            attempt: 1,
+            createdAt: 10,
+            updatedAt: 10,
+          },
+        });
+
+        expect(
+          applyProviderSetupCancellationToFlock(flock, {
+            v: 1,
+            id,
+            machineId,
+            preservePublishedConfig,
+            cancelledAt: 20,
+          })
+        ).toBe(true);
+
+        const rows = readMachineFlockRowsFromFlock(flock);
+        expect(getMachineFlockProviderSetups(rows)).toEqual({});
+        expect(Object.keys(getMachineFlockAgentConfigs(rows))).toHaveLength(expectedConfigCount);
+      }
+    );
 
     it('rejects an agentType that has no managed runtime', () => {
       // deepseek is a builtin provider but stays outside startup auto-registration, so it must

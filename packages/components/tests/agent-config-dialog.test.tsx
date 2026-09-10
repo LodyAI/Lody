@@ -654,6 +654,53 @@ describe('AgentConfigDialog', () => {
     expect(document.body.textContent).not.toContain('Sign in with ChatGPT');
   });
 
+  it('uses a new setup revision for each provisioning submit attempt', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const onSubmit = vi
+      .fn<(payload: AgentConfigSubmitPayload) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('first attempt failed'))
+      .mockResolvedValueOnce(undefined);
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: { name: 'Codex Relay', cliType: 'builtin', agentType: 'codex' },
+      },
+      createMachine('Relay workstation', {
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+        codexCustomEndpointCredentials: CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+      }),
+      onSubmit
+    );
+    await selectTab('Base URL + API Key');
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-base-url')!,
+        'https://relay.example.com/v1'
+      );
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-api-key')!,
+        'sk-relay-test'
+      );
+    });
+
+    const createButton = getPrimaryAction('Create');
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(createButton.disabled).toBe(false));
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+
+    const firstRevision = onSubmit.mock.calls[0]![0].setupRevision;
+    const secondRevision = onSubmit.mock.calls[1]![0].setupRevision;
+    expect(firstRevision).toEqual(expect.any(String));
+    expect(secondRevision).toEqual(expect.any(String));
+    expect(secondRevision).not.toBe(firstRevision);
+  });
+
   it('hydrates a Codex custom endpoint and does not offer ChatGPT reauthentication', async () => {
     const env = buildLodyCodexCustomProviderEnv(
       { EXTRA_FLAG: '1' },

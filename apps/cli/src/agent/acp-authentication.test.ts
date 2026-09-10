@@ -82,7 +82,7 @@ describe('AcpAuthenticationManager', () => {
     });
 
     await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
-    expect(storeCodexApiKey).toHaveBeenCalledWith('sk-encrypted-input');
+    expect(storeCodexApiKey).toHaveBeenCalledWith('sk-encrypted-input', expect.any(AbortSignal));
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
@@ -110,7 +110,7 @@ describe('AcpAuthenticationManager', () => {
     });
 
     await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
-    expect(storeCodexApiKey).toHaveBeenCalledWith('new-key');
+    expect(storeCodexApiKey).toHaveBeenCalledWith('new-key', expect.any(AbortSignal));
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {

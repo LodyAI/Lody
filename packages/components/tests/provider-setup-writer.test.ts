@@ -68,11 +68,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
         await markerAccepted.promise;
       }
     });
-    const flockRowDelete = vi.fn(async (_flockDocId: string, key: readonly string[]) => {
-      if (key[0] === 'providerSetup') {
-        throw new Error('injected-delete-interruption');
-      }
-    });
+    const flockRowDelete = vi.fn(async () => undefined);
 
     store.set(runtimeAtom, {
       workspaceId,
@@ -162,7 +158,19 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     });
     expect(store.get(getAllAgentConfigAtom)).toEqual([config]);
 
-    const cancelPromise = store.set(deleteProviderSetupAtom, setupId);
+    const writesBeforeStaleCancel = flockRowPut.mock.calls.length;
+    await store.set(deleteProviderSetupAtom, {
+      id: setupId,
+      machineId,
+      expectedSetupRevision: 'revision-stale',
+    });
+    expect(flockRowPut).toHaveBeenCalledTimes(writesBeforeStaleCancel);
+
+    const cancelPromise = store.set(deleteProviderSetupAtom, {
+      id: setupId,
+      machineId,
+      expectedSetupRevision: 'revision-1',
+    });
     const cancellationKey = machineFlockKeys.providerSetupCancellation(setupId);
 
     expect(flockRowPut).toHaveBeenCalledTimes(3);
@@ -179,8 +187,6 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     expect(flockRowDelete.mock.calls).toEqual([
       [flockDocId, cancellationKey],
       [flockDocId, cancellationKey],
-      [flockDocId, setupKey],
-      [flockDocId, configKey],
     ]);
     const finalRows = store.get(machineFlockRowsByWorkspaceAtom)[String(workspaceId)]?.[
       String(machineId)

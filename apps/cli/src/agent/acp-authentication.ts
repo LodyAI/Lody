@@ -534,7 +534,14 @@ export class AcpAuthenticationManager {
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
     env?: Record<string, string>;
-    storeCodexApiKey?: (apiKey: string) => Promise<void>;
+    prepare?: (signal: AbortSignal) => Promise<{
+      cliType: AgentConfigCliType;
+      agentType: string;
+      customAcp?: CustomAcpLaunchSpec;
+      runtimeOverrides?: BuiltinRuntimeOverrides;
+      env?: Record<string, string>;
+    }>;
+    storeCodexApiKey?: (apiKey: string, signal: AbortSignal) => Promise<void>;
     forceCodexApiKeyInput?: boolean;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
@@ -593,6 +600,13 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      if (options.prepare) {
+        const prepared = await options.prepare(running.abortController.signal);
+        if (prepared.cliType !== options.cliType || prepared.agentType !== options.agentType) {
+          throw new Error('Authentication preparation changed the reserved provider identity');
+        }
+        options = { ...options, ...prepared, prepare: undefined };
+      }
       if (!isBuiltinAuthentication) {
         return await this.authenticateProtocolDrivenAcp(options, running);
       }
@@ -621,7 +635,7 @@ export class AcpAuthenticationManager {
         }
         const apiKey = typeof input.content?.apiKey === 'string' ? input.content.apiKey.trim() : '';
         if (!apiKey) throw new Error('Codex API key is required');
-        await options.storeCodexApiKey(apiKey);
+        await options.storeCodexApiKey(apiKey, running.abortController.signal);
         options.onProgress?.({ status: 'authenticated' });
         return { success: true, disposition: 'authenticated' };
       }

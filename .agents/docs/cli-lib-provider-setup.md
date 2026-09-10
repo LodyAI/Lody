@@ -13,10 +13,20 @@ runtime, auth, and live-probe work is incomplete, and only the target CLI may pu
 it — by writing `agentConfig` and deleting `providerSetup` in one commit. Setup rows
 with executable runtime overrides are invalid.
 
-Cancellation is a separate row, `['providerSetupCancellation', configId]`. After a
-merge the owning CLI causally deletes any concurrently published setup or config, so a
-cancellation that raced a publish still wins. Restart resumes only non-interactive
-states.
+Cancellation is a separate row, `['providerSetupCancellation', configId]`. A
+revision-bearing cancellation applies only to that setup attempt, so late failure
+compensation cannot cancel a newer revision. A cancellation without a revision is an
+explicit provider-removal barrier: it cancels any in-flight replacement, and a later
+explicit setup retracts it. After a merge the owning CLI causally applies the marker,
+so a cancellation that raced publication still wins. Restart resumes only
+non-interactive states.
+
+Credential-changing Codex replacements keep the old launch config published during
+the probe. The post-probe cross-store commit may retain the old and desired
+machine-local credential bindings until publication chooses one. Publishing merges
+the current display metadata into the verified launch config, writes `agentConfig`,
+and deletes `providerSetup` in one Flock commit. RPC success is not returned before
+that publication completes.
 
 ## When the queue may start
 

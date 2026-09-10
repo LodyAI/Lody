@@ -5984,7 +5984,10 @@ describe('SessionExecutionService', () => {
     const visibleSetup = createDeferred<AgentConfigMeta | null>();
     const authenticate = vi
       .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
-      .mockResolvedValue({ success: true, disposition: 'cancelled' });
+      .mockImplementation(async (options) => {
+        await options.prepare?.(new AbortController().signal);
+        return { success: true, disposition: 'cancelled' };
+      });
     const config = createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {} });
     const waitForProviderSetupConfig = vi.fn(() => visibleSetup.promise);
     const service = new SessionExecutionService(
@@ -6007,7 +6010,8 @@ describe('SessionExecutionService', () => {
         setupRevision: 'revision-new',
       });
       await Promise.resolve();
-      expect(authenticate).not.toHaveBeenCalled();
+      expect(authenticate).toHaveBeenCalledOnce();
+      expect(waitForProviderSetupConfig).toHaveBeenCalledOnce();
 
       visibleSetup.resolve(config);
       await expect(result).resolves.toEqual(
@@ -6017,14 +6021,68 @@ describe('SessionExecutionService', () => {
         capabilityConfigId,
         'machine-1',
         'revision-new',
-        { timeoutMs: 60_000 }
+        { timeoutMs: 60_000, signal: expect.any(AbortSignal) }
       );
       expect(authenticate).toHaveBeenCalledWith(
-        expect.objectContaining({ forceCodexApiKeyInput: true })
+        expect.objectContaining({ forceCodexApiKeyInput: true, prepare: expect.any(Function) })
       );
     } finally {
       authenticate.mockRestore();
     }
+  });
+
+  it('cancels provisioning while the exact setup revision is still syncing', async () => {
+    const setupWaitStarted = createDeferred();
+    const waitForProviderSetupConfig = vi.fn(
+      (
+        _configId: AgentConfigId,
+        _machineId: MachineId,
+        _setupRevision: string,
+        options: { signal?: AbortSignal }
+      ) => {
+        setupWaitStarted.resolve();
+        return new Promise<AgentConfigMeta | null>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('cancelled', 'AbortError')),
+            { once: true }
+          );
+        });
+      }
+    );
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          waitForProviderSetupConfig,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const authenticationRequestId = 'provision-cancel-during-setup-sync';
+    const result = service.authenticateMachineAcp({
+      type: 'machine/acp-authenticate',
+      machineId: 'machine-1' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      requestId: authenticationRequestId,
+      action: 'start',
+      configId: capabilityConfigId,
+      purpose: 'provision-provider-credential',
+      setupRevision: 'revision-new',
+    });
+
+    await setupWaitStarted.promise;
+    await expect(
+      service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'cancel-setup-sync',
+        action: 'cancel',
+        authenticationRequestId,
+      })
+    ).resolves.toEqual(expect.objectContaining({ success: true, disposition: 'cancelled' }));
+    await expect(result).resolves.toEqual(
+      expect.objectContaining({ success: true, disposition: 'cancelled' })
+    );
   });
 
   it('keeps the one-shot key in memory and reports publish failure instead of success', async () => {
@@ -6037,8 +6095,18 @@ describe('SessionExecutionService', () => {
     const authenticate = vi
       .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
       .mockImplementation(async (options) => {
-        await options.storeCodexApiKey?.('new-key');
-        return { success: true, disposition: 'authenticated' };
+        try {
+          const signal = new AbortController().signal;
+          await options.prepare?.(signal);
+          await options.storeCodexApiKey?.('new-key', signal);
+          return { success: true, disposition: 'authenticated' };
+        } catch (error) {
+          return {
+            success: false,
+            disposition: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
       });
     const commitCodexProviderCredential = vi.fn(async () => {
       throw new Error('publish flush failed');
@@ -6080,6 +6148,7 @@ describe('SessionExecutionService', () => {
         configId: capabilityConfigId,
         setupRevision: 'revision-new',
         apiKey: 'new-key',
+        signal: expect.any(AbortSignal),
       });
       expect(fetchAcpCapabilities.mock.calls[0]?.[2]).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'new-key',
@@ -6090,6 +6159,83 @@ describe('SessionExecutionService', () => {
     } finally {
       authenticate.mockRestore();
     }
+  });
+
+  it('cancels provisioning after secret input without storing or publishing the credential', async () => {
+    const config = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      runtimeOverrides: { codexPath: '/bin/echo' },
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+    });
+    const probeStarted = createDeferred();
+    const releaseProbe = createDeferred();
+    const fetchAcpCapabilities = vi.fn(async () => {
+      probeStarted.resolve();
+      await releaseProbe.promise;
+      return { modes: [], models: [] };
+    });
+    const commitCodexProviderCredential = vi.fn(async () => undefined);
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities,
+        workspaceDocument: {
+          waitForProviderSetupConfig: vi.fn(async () => config),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const authenticationRequestId = 'provision-cancel-after-input';
+
+    const result = service.authenticateMachineAcp(
+      {
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: authenticationRequestId,
+        action: 'start',
+        configId: capabilityConfigId,
+        purpose: 'provision-provider-credential',
+        setupRevision: 'revision-new',
+      },
+      {
+        commitCodexProviderCredential,
+        onProgress: (progress) => {
+          if (progress.status !== 'input-required') return;
+          void service.authenticateMachineAcp({
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'submit-provision-key',
+            action: 'submit-input',
+            authenticationRequestId,
+            interactionId: progress.interactionId,
+            authenticationInput: JSON.stringify({
+              action: 'accept',
+              content: { apiKey: 'new-key' },
+            }),
+          });
+        },
+      }
+    );
+
+    await probeStarted.promise;
+    await expect(
+      service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'cancel-provision',
+        action: 'cancel',
+        authenticationRequestId,
+      })
+    ).resolves.toEqual(expect.objectContaining({ success: true, disposition: 'cancelled' }));
+    releaseProbe.resolve();
+
+    await expect(result).resolves.toEqual(
+      expect.objectContaining({ success: true, disposition: 'cancelled' })
+    );
+    expect(commitCodexProviderCredential).not.toHaveBeenCalled();
   });
 
   it('bounds the post-authentication capability proof inside the renderer deadline', async () => {

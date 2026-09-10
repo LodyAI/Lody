@@ -20,9 +20,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   generated `CODEX_CONFIG` metadata with `requires_openai_auth=false`; send the key
   through encrypted Machine ACP authentication input for machine-local storage and
   launch-time injection. Credential-changing edits stage a revision in provider setup;
-  never update the published config before the target daemon verifies that revision.
-  Delete and ChatGPT transitions write durable cleanup intent and never wait for the
-  machine. Additional env cannot override managed keys, and arbitrary user-authored
+  never update published launch/binding fields before the target daemon verifies that
+  revision, and merge current display metadata when publishing. Delete and ChatGPT
+  transitions write a revision-independent setup cancellation plus durable cleanup
+  intent and never wait for the machine. Additional env cannot override managed keys, and arbitrary user-authored
   `CODEX_CONFIG` remains untouched.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes

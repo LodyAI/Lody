@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import {
@@ -8,6 +11,7 @@ import {
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderCredentialCleanups,
   buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   writeMachineFlockRowToFlock,
@@ -22,6 +26,11 @@ import {
 import type { LoroRepo } from 'loro-repo';
 
 import type { Logger } from '@/utils/logger';
+import {
+  hydrateCodexProviderCredential,
+  stageCodexProviderCredential,
+  storeCodexProviderCredential,
+} from '@/agent/provider-credential-store';
 import { ProviderSetupManager, type ProviderSetupManagerOptions } from './provider-setup-manager';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
@@ -86,7 +95,10 @@ function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask 
 
 function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
   flock: TFlock,
-  overrides: Partial<ProviderSetupManagerOptions['execution']> = {}
+  overrides: Partial<ProviderSetupManagerOptions['execution']> = {},
+  managerOverrides: Partial<
+    Pick<ProviderSetupManagerOptions, 'stageCredential' | 'reconcileCredential'>
+  > = {}
 ) {
   const flush = vi.fn(async () => undefined);
   const repo = {
@@ -121,8 +133,13 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
   } as ProviderSetupManagerOptions['execution'];
   const markMachineFlockDocDirty = vi.fn();
   const clearCredential = vi.fn(async () => undefined);
+  const finalizeCredential = vi.fn(async () => undefined);
   const rollbackCredential = vi.fn(async () => undefined);
-  const storeCredential = vi.fn(async () => rollbackCredential);
+  const stageCredential = vi.fn(async () => ({
+    finalize: finalizeCredential,
+    rollback: rollbackCredential,
+  }));
+  const reconcileCredential = vi.fn(async () => undefined);
   const manager = new ProviderSetupManager({
     repo,
     workspaceId,
@@ -131,7 +148,9 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     sync: { markMachineFlockDocDirty },
     logger: createSilentLogger(),
     clearCredential,
-    storeCredential,
+    stageCredential,
+    reconcileCredential,
+    ...managerOverrides,
   });
   return {
     flock,
@@ -139,7 +158,9 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     execution,
     markMachineFlockDocDirty,
     clearCredential,
-    storeCredential,
+    stageCredential,
+    reconcileCredential,
+    finalizeCredential,
     rollbackCredential,
     manager,
   };
@@ -405,6 +426,7 @@ describe('ProviderSetupManager', () => {
     const replacement: ProviderSetupTask = {
       ...createSetup('awaiting-auth'),
       setupRevision: 'revision-new',
+      replacesPublishedConfig: true,
       config: {
         ...oldConfig,
         env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
@@ -417,11 +439,14 @@ describe('ProviderSetupManager', () => {
     expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
     expect(readState(harness.flock).setup).toBeUndefined();
     expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
-    expect(harness.storeCredential).toHaveBeenCalledWith(
+    expect(harness.stageCredential).toHaveBeenCalledWith(
       workspaceId,
       replacement.config,
-      'new-key'
+      'new-key',
+      oldConfig
     );
+    expect(harness.finalizeCredential).toHaveBeenCalledTimes(1);
+    expect(harness.rollbackCredential).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -435,6 +460,7 @@ describe('ProviderSetupManager', () => {
     const replacement: ProviderSetupTask = {
       ...createSetup('awaiting-auth'),
       setupRevision: 'revision-new',
+      replacesPublishedConfig: true,
       config: {
         ...oldConfig,
         env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
@@ -448,7 +474,132 @@ describe('ProviderSetupManager', () => {
 
     expect(readState(harness.flock).config).toEqual(oldConfig);
     expect(readState(harness.flock).setup).toEqual(replacement);
-    expect(harness.storeCredential).not.toHaveBeenCalled();
+    expect(harness.stageCredential).not.toHaveBeenCalled();
+    harness.manager.stop();
+  });
+
+  it('keeps both credential bindings when publication durability is uncertain', async () => {
+    const harness = createHarness();
+    const oldConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://old.example.com/v1' }),
+    };
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: oldConfig,
+    });
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-new',
+      replacesPublishedConfig: true,
+      config: {
+        ...oldConfig,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://new.example.com/v1' }),
+      },
+    };
+    seedSetup(harness.flock, replacement);
+    harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
+
+    await expect(
+      harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
+    ).rejects.toThrow('publish flush failed');
+
+    expect(harness.stageCredential).toHaveBeenCalledWith(
+      workspaceId,
+      replacement.config,
+      'new-key',
+      oldConfig
+    );
+    expect(harness.finalizeCredential).not.toHaveBeenCalled();
+    expect(harness.rollbackCredential).not.toHaveBeenCalled();
+    harness.manager.stop();
+  });
+
+  it('keeps both real credential bindings launchable when publish flush throws', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-commit-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const flock = new FakeMachineFlock();
+    const harness = createHarnessForFlock(
+      flock,
+      {},
+      { stageCredential: stageCodexProviderCredential }
+    );
+    const oldConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://old.example.com/v1' }),
+    };
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-new',
+      replacesPublishedConfig: true,
+      config: {
+        ...oldConfig,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://new.example.com/v1' }),
+      },
+    };
+
+    try {
+      await storeCodexProviderCredential(workspaceId, oldConfig, 'old-key');
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: oldConfig,
+      });
+      seedSetup(flock, replacement);
+      harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
+
+      await expect(
+        harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
+      ).rejects.toThrow('publish flush failed');
+
+      expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'old-key',
+      });
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, replacement.config)).env
+      ).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'new-key',
+      });
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves metadata published while a credential replacement is being verified', async () => {
+    const harness = createHarness();
+    const currentConfig = {
+      ...createSetup().config,
+      name: 'New Name',
+      prompt: 'new prompt',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://old.example.com/v1' }),
+    };
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: currentConfig,
+    });
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-new',
+      replacesPublishedConfig: true,
+      config: {
+        ...currentConfig,
+        name: 'Old Name',
+        prompt: 'old prompt',
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://new.example.com/v1' }),
+      },
+    };
+    seedSetup(harness.flock, replacement);
+
+    await harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key');
+
+    expect(readState(harness.flock).config).toEqual({
+      ...replacement.config,
+      name: 'New Name',
+      prompt: 'new prompt',
+    });
     harness.manager.stop();
   });
 

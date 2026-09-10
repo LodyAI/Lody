@@ -226,6 +226,7 @@ export type ProviderSetupCancellation = {
   cancelledAt: number;
   /** Preserve a config that was already published before this setup began. */
   preservePublishedConfig?: boolean;
+  /** Omitted to cancel any in-flight revision for an explicit provider removal. */
   setupRevision?: string;
 };
 
@@ -849,7 +850,10 @@ export function applyProviderSetupCancellationToFlock(
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
-  if (setup?.setupRevision && setup.setupRevision !== cancellation.setupRevision) {
+  if (
+    cancellation.setupRevision &&
+    (!setup?.setupRevision || setup.setupRevision !== cancellation.setupRevision)
+  ) {
     return false;
   }
   if (existingCancellation && !setup && (!config || cancellation.preservePublishedConfig)) {
