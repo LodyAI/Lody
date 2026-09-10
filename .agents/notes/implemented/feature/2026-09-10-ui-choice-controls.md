@@ -163,6 +163,36 @@ Spending the contract on real call sites found three classes of caller state:
 `message-selection`'s tests read `[data-state="checked"]`, which is Radix's
 attribute; Base UI writes `data-checked`. The four assertions moved with it.
 
+## Correction: a squircle at `radius.full` is not a pill
+
+The first version of this change gave the switch track and the radio
+`radius.full` and left them under the squircle every control in `well.box`
+carries, on the reading that the corner rule's "`corner.shape` on every radius"
+covers the whole scale. It does not, and the result shipped visibly wrong: the
+28×16 track rendered as a rounded rectangle rather than a stadium.
+
+`corner-shape: squircle` does not degrade to a circle as the radius grows. It
+draws a superellipse of that radius, so at `radius.full` a wide box becomes a
+rounded rectangle and a square one becomes a squircle instead of a circle.
+Measured in Chromium against `corner-shape: round` at the same radius, the two
+are plainly different shapes at 28×16, at 16×16 and at 120×56.
+
+`radius.full` therefore takes `corner.round`, a second constant beside
+`corner.shape`, and the rule in `RULES.md` gains the exception. The switch track
+and the radio box set it; the switch thumb and the radio dot never needed it,
+because `corner-shape` does not inherit and their default is already round.
+`Button`'s `pill` shape had the same defect since it was written and is fixed
+with them: at `radius.full` a squircle is not the stadium the shape name
+promises. The gallery's `radius.full` chip carried the squircle too, so the board
+was showing a rounded rectangle under the label "pills"; it now renders the round
+shape beside the four squircles.
+
+Three tests pin it. They re-declare both corner shapes through `stylex.create`
+and rely on StyleX hashing a class per property and value, so the expected class
+is derived from the compiler rather than written down: the switch and the radio
+must carry the round class and not the squircle one, the checkbox must carry the
+squircle at its 5px radius, and the two classes must differ at all.
+
 ## Verification
 
 `pnpm --filter @lody/ui test` (46 tests, 16 of them new) and
@@ -178,8 +208,9 @@ text control while a checked one gets a different one composed with its ink edge
 at the control, and a caller class landing last.
 
 The board was read in Chromium through Storybook at 1440px, values taken off the
-rendered nodes in both palettes. The box is 16×16 at radius 5, the track 28×16
-at a full round with a 12×12 thumb inset 2px that travels to 14px from the left.
+rendered nodes in both palettes. The box is 16×16 at radius 5 with `corner-shape: squircle`,
+the track 28×16 at `radius.full` with `corner-shape: round` and a 12×12 thumb
+inset 2px that travels to 14px from the left.
 Off is `rgb(232, 234, 237)` in Lody Light and `rgb(28, 28, 28)` in Vesper with
 the matching inset; on is `rgb(26, 27, 30)` and `rgb(255, 255, 255)` with the ink
 highlight; disabled reports opacity `0.45`. Focusing a control by keyboard

@@ -2,7 +2,7 @@ import { Switch as BaseSwitch } from '@base-ui/react/switch';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { duration, ease, radius } from '../tokens/scales.stylex';
+import { corner, duration, ease, radius } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -24,6 +24,8 @@ const styles = stylex.create({
     width: field.switchWidth,
     height: field.switchHeight,
     borderRadius: radius.full,
+    // The well's squircle would make this a rounded rectangle; a track is a pill.
+    cornerShape: corner.round,
     justifyContent: 'flex-start',
     padding: field.switchInset,
   },

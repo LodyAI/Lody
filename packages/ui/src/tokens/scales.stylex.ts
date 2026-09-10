@@ -20,6 +20,10 @@ export const radius = stylex.defineVars({
 
 export const corner = stylex.defineConsts({
   shape: 'squircle',
+  // `radius.full` means a pill or a circle, and a squircle at that radius is a
+  // superellipse instead: a 28x16 track reads as a rounded rectangle and a 16px
+  // box as a squircle rather than a circle. Anything on `radius.full` takes this.
+  round: 'round',
 });
 
 export const control = stylex.defineVars({

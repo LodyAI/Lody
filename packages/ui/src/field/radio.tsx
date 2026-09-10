@@ -2,7 +2,7 @@ import { Radio as BaseRadio } from '@base-ui/react/radio';
 import { RadioGroup as BaseRadioGroup } from '@base-ui/react/radio-group';
 import * as stylex from '@stylexjs/stylex';
 import { appendClassName } from '../internal/class-name';
-import { radius, space } from '../tokens/scales.stylex';
+import { corner, radius, space } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -31,6 +31,9 @@ const styles = stylex.create({
     width: field.boxSize,
     height: field.boxSize,
     borderRadius: radius.full,
+    // The well's squircle would make this a squircle rather than a circle, which
+    // is the one shape that tells a radio apart from a checkbox.
+    cornerShape: corner.round,
   },
   dot: {
     display: 'block',

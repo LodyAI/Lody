@@ -46,7 +46,9 @@ into one component at a time. Source-consumed; consumers compile it through
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a
   literal. `test/gallery.test.tsx` fails when a token has no entry.
-- `corner.shape` is applied wherever a radius is applied. Round corners outside
+- `corner.shape` is applied wherever a radius is applied, except on
+  `radius.full`: a pill or a circle takes `corner.round`, because a squircle at
+  that radius is a superellipse rather than a stadium. Round corners outside
   Chromium are the accepted fallback.
 - A Radix file in `packages/components/src/ui` is deleted when its in-repo
   callers reach zero; private consumers sync on typecheck.

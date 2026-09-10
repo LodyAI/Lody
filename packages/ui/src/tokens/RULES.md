@@ -89,7 +89,11 @@ ARIA value except `false` is invalid, `grammar` and `spelling` included.
 
 ## Corners
 
-- `corner.shape` (squircle) on every radius. Round fallback outside Chromium.
+- `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
+  outside Chromium.
+- `radius.full` is a pill or a circle, and takes `corner.round`. A squircle at
+  that radius is a superellipse, not a stadium: it turns a switch track into a
+  rounded rectangle and a radio into a squircle.
 - Radius by size: `mini` 5 for 16px things, `small` 8 for 28px controls and
   tooltips, `medium` 10 for 32 and 36px controls, `large` 14 for surfaces.
 - Nested radius is outer minus inset. A 14px popup with 4px inset holds 10px

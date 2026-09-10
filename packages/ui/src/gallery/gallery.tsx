@@ -345,11 +345,28 @@ const SHADOWS = [
 ];
 
 const RADII = [
-  { name: 'radius.mini', value: radius.mini, note: '16px things' },
-  { name: 'radius.small', value: radius.small, note: '28px controls, tooltips' },
-  { name: 'radius.medium', value: radius.medium, note: '32 and 36px controls' },
-  { name: 'radius.large', value: radius.large, note: 'surfaces' },
-  { name: 'radius.full', value: radius.full, note: 'pills' },
+  { name: 'radius.mini', value: radius.mini, shape: corner.shape, note: '16px things' },
+  {
+    name: 'radius.small',
+    value: radius.small,
+    shape: corner.shape,
+    note: '28px controls, tooltips',
+  },
+  {
+    name: 'radius.medium',
+    value: radius.medium,
+    shape: corner.shape,
+    note: '32 and 36px controls',
+  },
+  { name: 'radius.large', value: radius.large, shape: corner.shape, note: 'surfaces' },
+  // A squircle at this radius is a rounded rectangle, so a pill takes the round
+  // shape and the board shows the two side by side rather than claiming one.
+  {
+    name: 'radius.full',
+    value: radius.full,
+    shape: corner.round,
+    note: 'pills; the one round shape',
+  },
 ];
 
 const CONTROL_SIZES = [
@@ -468,11 +485,21 @@ function ShadowChip({
   );
 }
 
-function RadiusChip({ name, value, note }: { name: string; value: string; note: string }) {
+function RadiusChip({
+  name,
+  value,
+  shape,
+  note,
+}: {
+  name: string;
+  value: string;
+  shape: string;
+  note: string;
+}) {
   const { ref, value: measured } = useMeasured<HTMLDivElement>('border-radius');
   return (
     <Sample name={name} note={note} measured={measured}>
-      <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value))} />
+      <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value, shape))} />
     </Sample>
   );
 }
@@ -786,7 +813,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Corners"
-        rule="corner.shape (squircle) rides along with every radius; round corners outside Chromium are the accepted fallback. Nested radius is outer minus inset."
+        rule="corner.shape (squircle) rides along with every radius except radius.full, which is a pill or a circle and takes corner.round: a squircle at that radius is a superellipse, not a stadium, so it would turn a switch track into a rounded rectangle and a radio into a squircle. Round corners outside Chromium are the accepted fallback. Nested radius is outer minus inset."
       >
         <PaletteSplit palettes={palettes}>
           <Grid>

@@ -85,7 +85,9 @@ const styles = stylex.create({
   iconSmall: { width: button.heightSmall, paddingInline: 0 },
   iconMedium: { width: button.heightMedium, paddingInline: 0 },
   iconLarge: { width: button.heightLarge, paddingInline: 0 },
-  pill: { borderRadius: radius.full },
+  // A pill drops the base squircle: at `radius.full` a squircle is a rounded
+  // rectangle, not the stadium shape the shape name promises.
+  pill: { borderRadius: radius.full, cornerShape: corner.round },
   primary: {
     backgroundColor: {
       default: button.primaryBackground,

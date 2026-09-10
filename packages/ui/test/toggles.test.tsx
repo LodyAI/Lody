@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { Checkbox } from '../src/field/checkbox';
@@ -5,6 +6,7 @@ import { Field } from '../src/field/field';
 import { Input } from '../src/field/input';
 import { Radio, RadioGroup } from '../src/field/radio';
 import { Switch } from '../src/field/switch';
+import { corner } from '../src/tokens/scales.stylex';
 
 function classesOf(html: string, tag: string, occurrence = 0): string[] {
   const open = html.match(new RegExp(`<${tag}\\b[^>]*>`, 'g'))?.[occurrence] ?? '';
@@ -104,6 +106,50 @@ describe('RadioGroup', () => {
     const html = renderToStaticMarkup(group);
     expect(html.match(/name="mode"/g)).toHaveLength(2);
     expect(html.match(/value="ask"|value="auto"/g)).toHaveLength(2);
+  });
+});
+
+/**
+ * StyleX hashes a class per property, value and condition, so re-declaring the
+ * two corner shapes here yields the same classes the primitives carry. Derived
+ * rather than written down, so this cannot drift from the compiler.
+ */
+const CORNERS = stylex.create({
+  squircle: { cornerShape: corner.shape },
+  round: { cornerShape: corner.round },
+});
+const SQUIRCLE = stylex.props(CORNERS.squircle).className ?? '';
+const ROUND = stylex.props(CORNERS.round).className ?? '';
+
+describe('pills are round, not squircles', () => {
+  test('the two corner shapes really are different classes', () => {
+    expect(SQUIRCLE).not.toBe('');
+    expect(ROUND).not.toBe('');
+    expect(SQUIRCLE).not.toBe(ROUND);
+  });
+
+  test('a switch track and a radio drop the well squircle', () => {
+    // A squircle at radius.full is a superellipse: it would make the track a
+    // rounded rectangle and the radio a squircle rather than a circle.
+    for (const [control, name] of [
+      [<Switch key="s" />, 'switch'],
+      [
+        <RadioGroup key="g" name="mode">
+          <Radio value="ask" />
+        </RadioGroup>,
+        'radio',
+      ],
+    ] as const) {
+      const cls = classesOf(renderToStaticMarkup(control), 'button');
+      expect(cls, `${name} is round`).toContain(ROUND);
+      expect(cls, `${name} is not a squircle`).not.toContain(SQUIRCLE);
+    }
+  });
+
+  test('a checkbox keeps the squircle, which is what its radius is for', () => {
+    const cls = classesOf(renderToStaticMarkup(<Checkbox />), 'button');
+    expect(cls).toContain(SQUIRCLE);
+    expect(cls).not.toContain(ROUND);
   });
 });
 
