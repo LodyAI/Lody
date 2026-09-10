@@ -46,11 +46,11 @@ range. Each row carries both its absolute tokens and its share: a percentage
 alone hides scale, and half of a quiet week is not half of a heavy month. A range
 without recorded usage simply has no split block.
 
-The brand mark fills the headline band's spare width, ghosted. It is the same mark
-the card's brand row and footer carry, so one card never shows two versions of the
-logo. It is decoration with a fixed place, not a layout participant: it is sized
-from the band it sits in, so it can neither displace a number nor spill onto the
-rule below.
+The brand mark appears once more as a cast shadow: the same mark the brand row and
+footer carry, flattened to a monochrome silhouette, scaled far past the card and
+clipped by its edge so only a fragment intrudes. It is atmosphere rather than a
+second logo, and it is decoration with a fixed place — never a layout participant,
+so it can neither displace a number nor change where anything sits.
 
 A chosen backdrop is part of the image, not a border added around it, so a framed
 card has less room for its content than an unframed one. The layout is sized for

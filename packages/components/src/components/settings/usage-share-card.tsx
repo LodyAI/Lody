@@ -140,6 +140,18 @@ const RHYTHM: Record<
   },
 };
 
+/**
+ * The mark as a cast shadow rather than a logo: `brightness-0` flattens the
+ * artwork to a pure silhouette (alpha survives, colour does not), inverted on a
+ * dark card so the shadow is light instead of invisible. It is scaled past the
+ * card and clipped by it, so only an edge of the bell and a few tentacles show —
+ * a texture the eye reads as brand, not a second copy of the icon in the header.
+ */
+const WATERMARK: Record<UsageShareCardAspect, string> = {
+  portrait: 'h-[135%] left-[58%] -top-[12%]',
+  wide: 'h-[230%] left-[70%] -top-[55%]',
+};
+
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */
 const HEAT_CELL = 10;
 const HEAT_GAP = 2.6;
@@ -514,7 +526,7 @@ export function UsageShareCard({
   const footer = (
     <div
       className={cn(
-        'mt-auto flex items-center gap-2 border-t py-3',
+        'relative mt-auto flex items-center gap-2 border-t py-3',
         PAD_X,
         framed
           ? 'border-border bg-white dark:bg-white/[0.04]'
@@ -541,18 +553,33 @@ export function UsageShareCard({
   const card = (
     <div
       className={cn(
-        'flex h-full w-full flex-col overflow-hidden text-card-foreground',
+        'relative flex h-full w-full flex-col overflow-hidden text-card-foreground',
         framed
           ? 'rounded-2xl border border-black/[0.06] bg-card shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] dark:border-white/10'
           : 'border border-black/[0.08] bg-card dark:border-white/[0.09]'
       )}
     >
+      <img
+        src={lodyLogo}
+        alt=""
+        className={cn(
+          'pointer-events-none absolute w-auto brightness-0 opacity-[0.045] dark:opacity-[0.07] dark:invert',
+          WATERMARK[aspect]
+        )}
+      />
       {wide ? (
         // Two columns: the number and its trio read as one headline on the
         // left, the year and the split as one graphic on the right. Stacking
         // all five blocks vertically does not fit 16:9 without shrinking the
         // heatmap past the point where a single day is still a square.
-        <div className={cn('flex min-h-0 flex-1 flex-col justify-between', rhythm.band, rhythm.padY, PAD_X)}>
+        <div
+          className={cn(
+            'relative flex min-h-0 flex-1 flex-col justify-between',
+            rhythm.band,
+            rhythm.padY,
+            PAD_X
+          )}
+        >
           {header}
           <div className="flex items-baseline gap-4">
             {hero}
@@ -584,24 +611,9 @@ export function UsageShareCard({
           />
         </div>
       ) : (
-        <div className={cn('flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}>
+        <div className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}>
           {header}
-          {/* The headline band is the only place 4:5 has room to spare, so the
-              brand outline claims it instead of leaving a hole beside the
-              number. It is drawn, not layout: nothing below it shifts, and it
-              is sized from the band so it can never spill onto the rule below. */}
-          <div className="relative flex-1">
-            {/* The same file the brand row and the footer use, ghosted. There is
-                no vector of this mark, so CSS cannot stroke a real outline from
-                it; keeping its own colours at a low opacity reads as a brand
-                watermark, where desaturating and inverting made it a flat sticker. */}
-            <img
-              src={lodyLogo}
-              alt=""
-              className="pointer-events-none absolute inset-y-0 right-0 h-full w-auto opacity-[0.13] dark:opacity-[0.20]"
-            />
-            <div className="relative">{hero}</div>
-          </div>
+          <div className="flex-1">{hero}</div>
           <div className="grid shrink-0 grid-cols-4 gap-4 border-y border-border/60 py-3">
             {trioCells.map((cell) => (
               <StatCell key={cell.label} {...cell} />

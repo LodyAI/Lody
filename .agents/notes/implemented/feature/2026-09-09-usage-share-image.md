@@ -53,14 +53,19 @@ distributed its five blocks evenly over the portrait's height and left large voi
 before the canvas. The fix added information rather than padding: month ticks on
 the heatmap (a year of texture with no time scale cannot answer "when"), a fourth
 headline cell, absolute dates beside the range's name, and absolute token counts
-beside each split percentage. The brand mark occupies the one remaining void
-beside the headline; it is drawn over the band rather than laid out in it, and is
-sized from the band, so it can neither displace a number nor spill onto the rule
-below. It is the same `lody-icon.png` the card's brand row and footer use, ghosted
-by opacity alone. A first attempt stroked `lody.svg` into an outline, which put two
-different jellyfish on one card; there is no vector of the product icon, so CSS
-cannot cut a real outline from it, and desaturating plus inverting the raster made
-a flat gray sticker rather than a watermark.
+beside each split percentage.
+
+The brand mark went through three revisions before it stopped being a problem.
+Stroking `lody.svg` into an outline put two different jellyfish on one card, since
+that vector is not the product icon; there is no vector of the product icon, so CSS
+cannot cut a real outline from the raster. Ghosting `lody-icon.png` at low opacity
+fixed the identity but still read as a second copy of the logo sitting in a corner.
+What works is treating it as a cast shadow rather than a mark: `brightness-0`
+flattens the artwork to a pure silhouette (alpha survives, colour does not),
+inverted on a dark card so the shadow is light instead of invisible, then scaled
+well past the card and clipped by its edge so only a fragment of the bell intrudes
+from the right. It is positioned on the card root and every band is positioned
+above it, so it is atmosphere and can never displace a number.
 
 **The card declares its own type and spacing scale.** Built element by element it
 accumulated ten font sizes (10, 10.5, 11, 11.5, 13, 15px …) whose half-pixel steps
