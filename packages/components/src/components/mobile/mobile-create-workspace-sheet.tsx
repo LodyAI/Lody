@@ -6,8 +6,8 @@ import { useCloudQuery } from '@lody/platform/react';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
@@ -155,12 +155,12 @@ export function MobileCreateWorkspaceSheet({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
               <div className="flex flex-col gap-4">
                 <div className="space-y-1.5">
-                  <Label
+                  <UiField.Label
                     htmlFor="mobile-create-workspace-name"
                     className="text-[0.78rem] font-medium"
                   >
                     {t('organization.workspaceName', 'Workspace name')}
-                  </Label>
+                  </UiField.Label>
                   <Input
                     id="mobile-create-workspace-name"
                     value={name}
@@ -174,12 +174,12 @@ export function MobileCreateWorkspaceSheet({
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <Label
+                    <UiField.Label
                       htmlFor="mobile-create-workspace-slug"
                       className="text-[0.78rem] font-medium"
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
-                    </Label>
+                    </UiField.Label>
                     {canReset ? (
                       <button
                         type="button"

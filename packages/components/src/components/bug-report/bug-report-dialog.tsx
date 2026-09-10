@@ -11,8 +11,8 @@ import {
   DialogTitle,
 } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Label } from '@/ui/label';
-import { Textarea } from '@/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
+import { Textarea } from '@lody/ui/textarea';
 import { CopyButton } from '@/ui/copy-button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 
@@ -121,9 +121,9 @@ export function BugReportDialog({
             </DialogHeader>
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="bug-report-description">
+                <UiField.Label htmlFor="bug-report-description">
                   {t('bugReport.descriptionLabel', 'What happened?')}
-                </Label>
+                </UiField.Label>
                 <Textarea
                   id="bug-report-description"
                   value={description}
@@ -137,7 +137,9 @@ export function BugReportDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="bug-report-machine">{t('bugReport.machineLabel', 'Machine')}</Label>
+                <UiField.Label htmlFor="bug-report-machine">
+                  {t('bugReport.machineLabel', 'Machine')}
+                </UiField.Label>
                 {machines.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {t(

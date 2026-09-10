@@ -26,7 +26,7 @@ import type {
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { VisualAnnotationReferenceCard } from '@/components/ai-gui/visual-annotation-reference-card';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 
 const storySessionId = 'session-storybook-visual-annotation' as SessionId;
 const storyTurnId = 'turn-storybook-visual-annotation';

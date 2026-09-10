@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { BaseHeader } from '@/components/page-headers/base-header';
 import { Button } from '@lody/ui/button';
 import { Plus, Filter, Search } from 'lucide-react';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 
 /**
  * BaseHeader 组件是所有页面 header 的基础组件

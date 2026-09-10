@@ -191,7 +191,7 @@ import {
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/ui/sheet';
 import { Badge } from '@/ui/badge';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Separator } from '@/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';

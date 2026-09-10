@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 
 export interface DeviceAuthPageProps {
   userLabel: string;

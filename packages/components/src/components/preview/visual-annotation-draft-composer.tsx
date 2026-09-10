@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 
 export type VisualAnnotationDraftComposerProps = {
   targetLabel: string;

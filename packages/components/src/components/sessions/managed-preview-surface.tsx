@@ -45,7 +45,7 @@ import {
 
 import { userAtom } from '@/atoms';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { toast } from 'sonner';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { getVisiblePreviewVisualComments } from '@/components/preview/preview-visual-comments';

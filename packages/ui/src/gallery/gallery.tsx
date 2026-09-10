@@ -1,18 +1,23 @@
 import * as stylex from '@stylexjs/stylex';
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { Button } from '../button/button';
+import { button } from '../button/button.tokens.stylex';
+import { Field } from '../field/field';
+import { field } from '../field/field.tokens.stylex';
+import { Input } from '../field/input';
+import { Textarea } from '../field/textarea';
 import { colors, shadow } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
   Board,
   BoardHeader,
   Cluster,
-  Field,
   Grid,
   LegendKey,
   PaletteSplit,
   Row,
   Rows,
+  Sample,
   Section,
   Swatch,
   dyn,
@@ -187,6 +192,55 @@ const styles = stylex.create({
     gridTemplateColumns: 'auto 1fr',
     alignItems: 'center',
   },
+  fieldSlot: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '200px',
+    maxWidth: '340px',
+  },
+  readout: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.tertiaryLabel,
+    overflowWrap: 'anywhere',
+  },
+  // A board cannot hold focus while it is read, so each focus ring is drawn once
+  // on a non-interactive stand-in built from the same tokens the control uses.
+  buttonFocusReplica: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    height: control.medium,
+    paddingInline: '12px',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: button.secondaryBackground,
+    boxShadow: `${button.secondaryShadow}, 0 0 0 ${button.ringWidth} ${button.ring}`,
+    color: colors.label,
+    fontSize: text.subheadlineSize,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+  },
+  focusReplica: {
+    display: 'flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    height: field.heightMedium,
+    paddingInline: field.paddingXMedium,
+    backgroundColor: field.background,
+    boxShadow: `${field.well}, 0 0 0 ${field.ringWidth} ${field.ring}`,
+    borderRadius: field.radiusMedium,
+    cornerShape: corner.shape,
+    color: field.value,
+    fontSize: field.text,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+  },
 });
 
 const SURFACES = [
@@ -340,6 +394,23 @@ const CONSTS = [
   { name: 'z.toast', value: z.toast },
 ];
 
+const FIELD_COLORS = [
+  { name: 'field.background', value: field.background, note: 'the control is a well' },
+  { name: 'field.value', value: field.value, note: 'what the person typed' },
+  { name: 'field.label', value: field.label, note: 'the field label' },
+  { name: 'field.placeholder', value: field.placeholder, note: 'the empty prompt' },
+  { name: 'field.hint', value: field.hint, note: 'help under the control' },
+  { name: 'field.error', value: field.error, note: 'the error message' },
+  { name: 'field.ring', value: field.ring, note: 'focus' },
+  { name: 'field.invalidRing', value: field.invalidRing, note: 'invalid' },
+];
+
+const FIELD_SIZES = [
+  { name: 'small · 28', size: 'small' as const },
+  { name: 'medium · 32', size: 'medium' as const },
+  { name: 'large · 36', size: 'large' as const },
+];
+
 const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['mini', 'small', 'medium', 'large'] as const;
 
@@ -375,7 +446,7 @@ function ShadowChip({
 }) {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
-    <Field name={name} note={note} measured={value}>
+    <Sample name={name} note={note} measured={value}>
       <div
         ref={ref}
         {...stylex.props(
@@ -384,16 +455,16 @@ function ShadowChip({
           ink && dyn.ink(fill, colors.background)
         )}
       />
-    </Field>
+    </Sample>
   );
 }
 
 function RadiusChip({ name, value, note }: { name: string; value: string; note: string }) {
   const { ref, value: measured } = useMeasured<HTMLDivElement>('border-radius');
   return (
-    <Field name={name} note={note} measured={measured}>
+    <Sample name={name} note={note} measured={measured}>
       <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value))} />
-    </Field>
+    </Sample>
   );
 }
 
@@ -455,6 +526,77 @@ function SpaceRow({ name, value }: { name: string; value: string }) {
       <div ref={ref} {...stylex.props(styles.spaceBar, dyn.width(value))} />
       <span {...stylex.props(styles.rungUse)}>{measured}</span>
     </Row>
+  );
+}
+
+function FieldRow({
+  legend,
+  readout,
+  children,
+}: {
+  legend: string;
+  readout?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Row>
+      <LegendKey>{legend}</LegendKey>
+      <div {...stylex.props(styles.fieldSlot)}>
+        {children}
+        {readout ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+      </div>
+    </Row>
+  );
+}
+
+function FieldSizeRow({ name, size }: { name: string; size: 'small' | 'medium' | 'large' }) {
+  const { ref, value } = useMeasured<HTMLInputElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Session title</Field.Label>
+        <Input ref={ref} size={size} placeholder="Describe the task" />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+function InvalidFieldRow() {
+  const { ref, value } = useMeasured<HTMLInputElement>('box-shadow');
+  return (
+    <FieldRow legend="invalid" readout={value}>
+      <Field.Root invalid>
+        <Field.Label>Session title</Field.Label>
+        <Input ref={ref} placeholder="Describe the task" />
+        <Field.Error match>Enter a title before starting the session.</Field.Error>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+function ButtonFocusRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <Row>
+      <LegendKey>focus</LegendKey>
+      <Cluster>
+        <div ref={ref} {...stylex.props(styles.buttonFocusReplica)}>
+          Keyboard focus
+        </div>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+function FocusRingRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <FieldRow legend="focus" readout={value}>
+      <div ref={ref} {...stylex.props(styles.focusReplica)}>
+        Describe the task
+      </div>
+    </FieldRow>
   );
 }
 
@@ -688,7 +830,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Button · states, tone, shape, icons"
-        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints a quiet variant; the destructive variant fills."
+        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints a quiet variant; the destructive variant fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -754,6 +896,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
               </Cluster>
             </Row>
+            <ButtonFocusRow />
             <Row>
               <LegendKey>render</LegendKey>
               <Cluster>
@@ -762,6 +905,87 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
               </Cluster>
             </Row>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · label, control, help, error"
+        rule="One token group serves the whole family, so a state has one colour in one place. Field.Root owns name, disabled and validity; the label, control, help and error read that state instead of taking their own copies. Field.Root renders its validity as aria-invalid, and the ring follows that attribute, so a surface holding its own validation reaches the same state on a bare control."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <FieldRow legend="anatomy">
+              <Field.Root name="title">
+                <Field.Label>Session title</Field.Label>
+                <Input placeholder="Describe the task" />
+                <Field.Description>Shown in the sidebar and on the session card.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="filled">
+              <Field.Root name="title">
+                <Field.Label>Session title</Field.Label>
+                <Input defaultValue="Rebuild the composer" />
+              </Field.Root>
+            </FieldRow>
+            <InvalidFieldRow />
+            <FieldRow legend={'invalid \u00b7 aria-invalid'}>
+              <Field.Label htmlFor="gallery-aria-invalid">Session title</Field.Label>
+              <Input id="gallery-aria-invalid" aria-invalid placeholder="Describe the task" />
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root name="title" disabled>
+                <Field.Label>Session title</Field.Label>
+                <Input defaultValue="Rebuild the composer" />
+                <Field.Description>Locked while the session runs.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FocusRingRow />
+          </Rows>
+          <Grid>
+            {FIELD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="field.well"
+              box={field.well}
+              fill={field.background}
+              ink={false}
+              note="the control is sunken, not outlined"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · sizes and Textarea"
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {FIELD_SIZES.map((entry) => (
+              <FieldSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend="textarea">
+              <Field.Root name="summary">
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea placeholder="Describe the task" rows={3} />
+                <Field.Description>Enter sends; Shift+Enter adds a line.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · invalid">
+              <Field.Root name="summary" invalid>
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea defaultValue="" placeholder="Describe the task" rows={3} />
+                <Field.Error match>Describe the task before starting.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · disabled">
+              <Field.Root name="summary" disabled>
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea defaultValue="Rebuild the composer" resize="none" rows={3} />
+              </Field.Root>
+            </FieldRow>
           </Rows>
         </PaletteSplit>
       </Section>

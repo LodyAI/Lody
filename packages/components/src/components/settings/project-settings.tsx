@@ -56,7 +56,7 @@ import {
 import { Switch } from '@/ui/switch';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { MachinePills, type MachinePillItem } from './machine-pills';
 import {
@@ -1876,9 +1876,7 @@ export function ProjectHistoryImportPanel({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmConflictReplace} variant="destructive"
-            >
+            <AlertDialogAction onClick={confirmConflictReplace} variant="destructive">
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
             </AlertDialogAction>
           </AlertDialogFooter>

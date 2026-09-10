@@ -5,7 +5,7 @@ import { CheckCircle2, KeyRound, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Label } from '@/ui/label';
+import { Field as UiField } from '@lody/ui/field';
 import { PasswordInput } from '@/ui/password-input';
 
 export interface ResetPasswordPageProps {
@@ -89,9 +89,9 @@ export function ResetPasswordPage({
             ) : null}
 
             <div className="grid gap-2">
-              <Label htmlFor="reset-password-new">
+              <UiField.Label htmlFor="reset-password-new">
                 {t('resetPassword.passwordLabel', 'New password')}
-              </Label>
+              </UiField.Label>
               <PasswordInput
                 id="reset-password-new"
                 autoComplete="new-password"
@@ -109,9 +109,9 @@ export function ResetPasswordPage({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="reset-password-confirm">
+              <UiField.Label htmlFor="reset-password-confirm">
                 {t('resetPassword.confirmPasswordLabel', 'Confirm password')}
-              </Label>
+              </UiField.Label>
               <PasswordInput
                 id="reset-password-confirm"
                 autoComplete="new-password"

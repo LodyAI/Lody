@@ -17,7 +17,7 @@
 import { type ReactNode } from 'react';
 import { Check, Send, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { SessionBrowserToolbar } from '@/components/sessions/session-browser-toolbar';
 import { cn } from '@/lib/utils';
 

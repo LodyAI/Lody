@@ -41,9 +41,9 @@ import {
 } from '@/components/sessions/desktop-run-config-menu';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Switch } from '@/ui/switch';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CompactRow, CompactSection } from './compact-layout';
 

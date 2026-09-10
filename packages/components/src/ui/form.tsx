@@ -1,5 +1,4 @@
 import * as React from 'react';
-import * as LabelPrimitive from '@radix-ui/react-label';
 import { Slot } from '@radix-ui/react-slot';
 import {
   Controller,
@@ -12,7 +11,7 @@ import {
 } from 'react-hook-form';
 
 import { cn } from '@/lib/utils';
-import { Label } from '@/ui/label';
+import { Field as UiField } from '@lody/ui/field';
 
 const Form = FormProvider;
 
@@ -77,11 +76,11 @@ function FormItem({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function FormLabel({ className, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
+function FormLabel({ className, ...props }: React.ComponentProps<typeof UiField.Label>) {
   const { error, formItemId } = useFormField();
 
   return (
-    <Label
+    <UiField.Label
       data-slot="form-label"
       data-error={!!error}
       className={cn('data-[error=true]:text-destructive', className)}

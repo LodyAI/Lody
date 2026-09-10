@@ -25,7 +25,7 @@ import type {
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Skeleton } from '@/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';

@@ -2,8 +2,8 @@ import { useId, useRef, useState } from 'react';
 import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import {
   Dialog,
   DialogContent,
@@ -104,7 +104,9 @@ export function WorkspaceOwnershipTransfer({
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor={`${id}-member`}>{t('workspace.transfer.newOwner')}</Label>
+              <UiField.Label htmlFor={`${id}-member`}>
+                {t('workspace.transfer.newOwner')}
+              </UiField.Label>
               <Select
                 value={targetId}
                 onValueChange={(value) => {
@@ -127,9 +129,9 @@ export function WorkspaceOwnershipTransfer({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`${id}-confirm`}>
+              <UiField.Label htmlFor={`${id}-confirm`}>
                 {t('workspace.transfer.confirmLabel', { workspace: workspaceName })}
-              </Label>
+              </UiField.Label>
               <Input
                 id={`${id}-confirm`}
                 value={confirmation}

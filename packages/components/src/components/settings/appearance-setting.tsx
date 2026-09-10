@@ -21,7 +21,7 @@ import { OptionSelector, type OptionSelectorOption } from '@/components/shared/o
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';

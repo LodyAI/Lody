@@ -59,6 +59,31 @@ describe('UiGallery', () => {
     expect(board).toContain('disabled=""');
   });
 
+  test('shows the field family: both controls, every size, and each state', () => {
+    expect(board).toContain('<textarea');
+    expect(board).toContain('placeholder="Describe the task"');
+    for (const legend of ['small · 28', 'medium · 32', 'large · 36']) {
+      expect(board, `field size ${legend} is missing from the board`).toContain(legend);
+    }
+    // Base UI marks these on the rendered parts, so their presence is the state
+    // reaching the control rather than the board describing it.
+    expect(board).toContain('aria-invalid="true"');
+    expect(board).toContain('data-disabled=""');
+    for (const name of [
+      'field.background',
+      'field.value',
+      'field.label',
+      'field.placeholder',
+      'field.hint',
+      'field.error',
+      'field.ring',
+      'field.invalidRing',
+      'field.well',
+    ]) {
+      expect(board, `${name} is missing from the board`).toContain(name);
+    }
+  });
+
   test('renders one palette when asked for one', () => {
     const light = renderToStaticMarkup(<UiGallery palettes="light" />);
     expect(light).toContain('Lody Light');

@@ -55,7 +55,7 @@ import {
   DialogTitle,
 } from '@/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   getChatComposerPromptPlaceholderKey,

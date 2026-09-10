@@ -19,12 +19,12 @@ import {
 } from '@/lib/agent-role-form';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Switch } from '@/ui/switch';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { Field, Section } from './form-primitives';
 
 const AgentRoleEmojiPicker = lazy(() => import('./agent-role-emoji-picker'));
@@ -295,9 +295,9 @@ export function AgentRoleForm({
 
         <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
           <div className="min-w-0">
-            <Label htmlFor={`${fieldId}-share`} className="text-sm">
+            <UiField.Label htmlFor={`${fieldId}-share`} className="text-sm">
               {t('settings.agentRoles.form.share')}
-            </Label>
+            </UiField.Label>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {t('settings.agentRoles.form.shareHint')}
             </p>
@@ -488,9 +488,9 @@ function ConfigOptionField({
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <Label htmlFor={fieldId} className="text-xs font-medium">
+          <UiField.Label htmlFor={fieldId} className="text-xs font-medium">
             {selector.label}
-          </Label>
+          </UiField.Label>
           {selector.description ? (
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {selector.description}

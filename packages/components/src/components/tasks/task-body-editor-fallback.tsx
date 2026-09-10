@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Eye, Pencil, Quote } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import type { TaskBodyEditorProps } from './task-body-editor';
 

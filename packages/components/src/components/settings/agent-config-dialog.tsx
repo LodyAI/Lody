@@ -68,9 +68,9 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Textarea } from '@/ui/textarea';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Textarea } from '@lody/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
@@ -3107,9 +3107,9 @@ function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        <Label htmlFor={htmlFor} className="text-xs font-medium">
+        <UiField.Label htmlFor={htmlFor} className="text-xs font-medium">
           {label}
-        </Label>
+        </UiField.Label>
       </div>
       {children}
       {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
@@ -3211,7 +3211,7 @@ function TitleGenerationFields({
               key={sel.configId}
               className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
             >
-              <Label className="text-xs text-muted-foreground">{sel.label}</Label>
+              <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
               <Button
                 type="button"
                 variant="secondary"
@@ -3232,7 +3232,7 @@ function TitleGenerationFields({
             key={sel.configId}
             className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
           >
-            <Label className="text-xs text-muted-foreground">{sel.label}</Label>
+            <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
             <Select
               value={(stored as string | undefined) ?? sel.currentValue}
               onValueChange={(value) => onChange(sel.configId, value)}

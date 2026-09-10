@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Textarea } from '@/ui/textarea';
-import { Label } from '@/ui/label';
+import { Textarea } from '@lody/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
 import { cn } from '@/lib/utils';
 
 /**
@@ -201,7 +201,7 @@ export function EnvVarsTextarea({
 
   return (
     <div className={cn('space-y-2', className)}>
-      {showLabel && <Label>{displayLabel}</Label>}
+      {showLabel && <UiField.Label>{displayLabel}</UiField.Label>}
       <Textarea
         value={text}
         onChange={handleChange}

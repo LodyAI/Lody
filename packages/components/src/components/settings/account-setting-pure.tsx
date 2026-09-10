@@ -18,8 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { Badge } from '@/ui/badge';
 import {
   DropdownMenu,
@@ -706,7 +706,9 @@ export function AccountSettingsPure({
               </div>
             ) : (
               <div className="space-y-2 py-4">
-                <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
+                <UiField.Label htmlFor="cli-api-key-note">
+                  {t('settings.account.cliAuth.noteLabel')}
+                </UiField.Label>
                 <Input
                   id="cli-api-key-note"
                   value={cliApiKeyNote}
@@ -1248,11 +1250,11 @@ export function AccountSettingsPure({
               </p>
             ) : null}
             <div className="space-y-2">
-              <Label htmlFor="confirmText">
+              <UiField.Label htmlFor="confirmText">
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: organization.name,
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="confirmText"
                 value={deleteConfirmText}
@@ -1328,11 +1330,11 @@ export function AccountSettingsPure({
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="deleteAccountConfirmText">
+              <UiField.Label htmlFor="deleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="deleteAccountConfirmText"
                 value={deleteAccountConfirmText}

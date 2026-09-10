@@ -4,8 +4,8 @@ import type { TFunction } from 'i18next';
 import { usePostHog } from '@posthog/react';
 import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import {
   Dialog,
   DialogContent,
@@ -341,7 +341,9 @@ function LauncherFormDialog({
       </FormHeader>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="path-launcher-name">{t('settings.pathLaunchers.nameLabel', 'Name')}</Label>
+        <UiField.Label htmlFor="path-launcher-name">
+          {t('settings.pathLaunchers.nameLabel', 'Name')}
+        </UiField.Label>
         <Input
           id="path-launcher-name"
           value={draft.label}
@@ -352,9 +354,9 @@ function LauncherFormDialog({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="path-launcher-command">
+        <UiField.Label htmlFor="path-launcher-command">
           {t('settings.pathLaunchers.commandLabel', 'Command')}
-        </Label>
+        </UiField.Label>
         <Input
           id="path-launcher-command"
           className="font-mono text-sm"

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import { UserAvatar } from '@/components/user-avatar';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { CommentAnchor, CommentUser } from './session-comment-types';
 

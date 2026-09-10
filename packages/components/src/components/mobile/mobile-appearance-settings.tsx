@@ -20,7 +20,7 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { withOneSignal } from '@/lib/onesignal';

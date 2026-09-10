@@ -23,8 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
 import { useNavigate } from '@tanstack/react-router';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -260,7 +260,7 @@ function CloudOrganizationSwitcher() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="name">{t('organization.workspaceName')}</Label>
+              <UiField.Label htmlFor="name">{t('organization.workspaceName')}</UiField.Label>
               <Input
                 id="name"
                 value={newOrgName}
@@ -275,7 +275,7 @@ function CloudOrganizationSwitcher() {
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="slug">{t('organization.workspaceSlug')}</Label>
+                <UiField.Label htmlFor="slug">{t('organization.workspaceSlug')}</UiField.Label>
                 {canResetNewOrgSlug && (
                   <button
                     type="button"

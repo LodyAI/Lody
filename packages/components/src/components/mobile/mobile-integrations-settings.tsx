@@ -9,7 +9,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
 import { Switch } from '@/ui/switch';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {

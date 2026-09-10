@@ -10,6 +10,7 @@ behavior.
 | `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens |
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
 | `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
+| `src/field`         | Base UI Field composition: label, Input, Textarea, help, and error  |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -18,9 +19,28 @@ StyleX options. Visual choices use component props. `className` is available for
 layout and interaction constraints in product surfaces; it must not duplicate a
 primitive's visual rules.
 
+A field is a composition rather than one component: `Field.Root` owns the name,
+the disabled flag and validity, and `Field.Label`, `Input`, `Textarea`,
+`Field.Description` and `Field.Error` read that state from it.
+
+```tsx
+<Field.Root name="title" invalid={!title}>
+  <Field.Label>Session title</Field.Label>
+  <Input placeholder="Describe the task" />
+  <Field.Description>Shown in the sidebar.</Field.Description>
+  <Field.Error match>Enter a title.</Field.Error>
+</Field.Root>
+```
+
+The state mapping every control in this family shares — rest, placeholder,
+focus, invalid, disabled, selected — is in
+[token rules](src/tokens/RULES.md#fields).
+
 The intended behavior is specified in [Shared UI primitives](../../specs/ui-primitives.md).
 The integration decision is recorded in the
-[UI Button migration takeover note](../../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md).
+[UI Button migration takeover note](../../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md);
+the field family and the Tailwind field concepts it replaces are recorded in the
+[UI field primitives note](../../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

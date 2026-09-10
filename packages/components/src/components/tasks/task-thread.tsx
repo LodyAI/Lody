@@ -19,7 +19,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import {
   TASK_SESSION_ACTIVITY_PRESENTATION,

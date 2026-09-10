@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Loader2, Mail, Plus, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { cn } from '@/lib/utils';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthClient } from '../../../providers/convex-provider';

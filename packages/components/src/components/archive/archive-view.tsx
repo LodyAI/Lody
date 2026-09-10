@@ -42,7 +42,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';

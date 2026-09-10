@@ -115,15 +115,15 @@ const styles = stylex.create({
   rows: { display: 'flex', flexDirection: 'column', gap: space[3] },
   row: { display: 'flex', alignItems: 'center', gap: space[3], flexWrap: 'wrap' },
   cluster: { display: 'flex', alignItems: 'center', gap: space[2], flexWrap: 'wrap' },
-  field: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
-  fieldName: {
+  sample: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
+  sampleName: {
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
     fontWeight: 500,
     letterSpacing: text.controlTracking,
     overflowWrap: 'anywhere',
   },
-  fieldNote: {
+  sampleNote: {
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
@@ -240,7 +240,7 @@ export function LegendKey({ children }: { children: ReactNode }) {
   return <span {...stylex.props(styles.legendKey)}>{children}</span>;
 }
 
-export function Field({
+export function Sample({
   name,
   note,
   measured,
@@ -252,11 +252,11 @@ export function Field({
   children?: ReactNode;
 }) {
   return (
-    <div {...stylex.props(styles.field)}>
+    <div {...stylex.props(styles.sample)}>
       {children}
-      <span {...stylex.props(styles.fieldName)}>{name}</span>
+      <span {...stylex.props(styles.sampleName)}>{name}</span>
       {measured ? <span {...stylex.props(styles.measured)}>{measured}</span> : null}
-      {note ? <span {...stylex.props(styles.fieldNote)}>{note}</span> : null}
+      {note ? <span {...stylex.props(styles.sampleNote)}>{note}</span> : null}
     </div>
   );
 }
@@ -283,8 +283,8 @@ export const dyn = stylex.create({
 export function Swatch({ name, value, note }: { name: string; value: string; note: string }) {
   const { ref, value: measured } = useMeasured<HTMLDivElement>('background-color');
   return (
-    <Field name={name} note={note} measured={measured}>
+    <Sample name={name} note={note} measured={measured}>
       <div ref={ref} {...stylex.props(styles.swatchChip, dyn.fill(value))} />
-    </Field>
+    </Sample>
   );
 }

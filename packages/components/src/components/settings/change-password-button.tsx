@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { validateNewPassword } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { Label } from '@/ui/label';
+import { Field as UiField } from '@lody/ui/field';
 import { PasswordInput } from '@/ui/password-input';
 import {
   Dialog,
@@ -185,9 +185,9 @@ export function ChangePasswordButton({
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
                       className="space-y-1.5"
                     >
-                      <Label htmlFor="current-password">
+                      <UiField.Label htmlFor="current-password">
                         {t('settings.profile.password.currentLabel')}
-                      </Label>
+                      </UiField.Label>
                       <PasswordInput
                         id="current-password"
                         autoComplete="current-password"
@@ -219,9 +219,9 @@ export function ChangePasswordButton({
                       className="space-y-3"
                     >
                       <div className="space-y-1.5">
-                        <Label htmlFor="new-password">
+                        <UiField.Label htmlFor="new-password">
                           {t('settings.profile.password.newLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="new-password"
                           autoComplete="new-password"
@@ -231,9 +231,9 @@ export function ChangePasswordButton({
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="confirm-password">
+                        <UiField.Label htmlFor="confirm-password">
                           {t('settings.profile.password.confirmLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="confirm-password"
                           autoComplete="new-password"

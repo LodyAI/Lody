@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { Button } from '@lody/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { getFirstTaskPrimaryAction } from '../first-task-primary-action';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';

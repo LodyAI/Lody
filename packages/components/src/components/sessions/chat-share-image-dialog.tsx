@@ -6,8 +6,8 @@ import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Label } from '@/ui/label';
-import { Input } from '@/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Input } from '@lody/ui/input';
 import { Button } from '@lody/ui/button';
 import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@/ui/switch';
@@ -239,7 +239,9 @@ export function ChatShareImageDialog({
             className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="chat-share-theme">{t('sessions.shareImage.theme', 'Theme')}</Label>
+              <UiField.Label htmlFor="chat-share-theme">
+                {t('sessions.shareImage.theme', 'Theme')}
+              </UiField.Label>
               <Select
                 value={theme}
                 onValueChange={(value) => setTheme(value as 'app' | 'light' | 'dark')}
@@ -260,9 +262,9 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="mb-2 block">
+              <UiField.Label className="mb-2 block">
                 {t('sessions.shareImage.backdrop', 'Background')}
-              </Label>
+              </UiField.Label>
               <div className="grid grid-cols-5 gap-1.5" role="group">
                 <button
                   type="button"
@@ -312,9 +314,9 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="chat-share-padding">
+              <UiField.Label htmlFor="chat-share-padding">
                 {t('sessions.shareImage.framePadding', 'Backdrop padding')}
-              </Label>
+              </UiField.Label>
               <Select
                 value={framePadding}
                 onValueChange={(value) =>
@@ -340,7 +342,9 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="chat-share-footer">{t('sessions.shareImage.footer', 'Footer')}</Label>
+              <UiField.Label htmlFor="chat-share-footer">
+                {t('sessions.shareImage.footer', 'Footer')}
+              </UiField.Label>
               <Select
                 value={footerVariant}
                 onValueChange={(value) => setFooterVariant(value as ChatShareCardFooterVariant)}
@@ -359,14 +363,16 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="mb-2 block">{t('sessions.shareImage.content', 'Content')}</Label>
+              <UiField.Label className="mb-2 block">
+                {t('sessions.shareImage.content', 'Content')}
+              </UiField.Label>
               <div className="flex items-center justify-between gap-3">
-                <Label
+                <UiField.Label
                   htmlFor="chat-share-show-title"
                   className="font-normal text-muted-foreground"
                 >
                   {t('sessions.shareImage.showTitle', 'Session title')}
-                </Label>
+                </UiField.Label>
                 <Switch
                   id="chat-share-show-title"
                   checked={showTitle}
@@ -374,9 +380,12 @@ export function ChatShareImageDialog({
                 />
               </div>
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="chat-share-show-date" className="font-normal text-muted-foreground">
+                <UiField.Label
+                  htmlFor="chat-share-show-date"
+                  className="font-normal text-muted-foreground"
+                >
                   {t('sessions.shareImage.showDate', 'Date (EXIF footer)')}
-                </Label>
+                </UiField.Label>
                 <Switch
                   id="chat-share-show-date"
                   checked={showDate}
@@ -385,9 +394,12 @@ export function ChatShareImageDialog({
                 />
               </div>
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="chat-share-show-qr" className="font-normal text-muted-foreground">
+                <UiField.Label
+                  htmlFor="chat-share-show-qr"
+                  className="font-normal text-muted-foreground"
+                >
                   {t('sessions.shareImage.showQr', 'QR code')}
-                </Label>
+                </UiField.Label>
                 <Switch
                   id="chat-share-show-qr"
                   checked={showQr}
@@ -398,17 +410,25 @@ export function ChatShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="mb-2 block">{t('sessions.shareImage.code', 'Code')}</Label>
+              <UiField.Label className="mb-2 block">
+                {t('sessions.shareImage.code', 'Code')}
+              </UiField.Label>
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="chat-share-wrap" className="font-normal text-muted-foreground">
+                <UiField.Label
+                  htmlFor="chat-share-wrap"
+                  className="font-normal text-muted-foreground"
+                >
                   {t('sessions.shareImage.wrapLines', 'Wrap long lines')}
-                </Label>
+                </UiField.Label>
                 <Switch id="chat-share-wrap" checked={wrapCode} onCheckedChange={setWrapCode} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="chat-share-collapse" className="font-normal text-muted-foreground">
+                <UiField.Label
+                  htmlFor="chat-share-collapse"
+                  className="font-normal text-muted-foreground"
+                >
                   {t('sessions.shareImage.collapseAfter', 'Collapse code blocks after (lines)')}
-                </Label>
+                </UiField.Label>
                 <Input
                   id="chat-share-collapse"
                   type="number"

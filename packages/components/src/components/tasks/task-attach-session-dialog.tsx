@@ -4,7 +4,7 @@ import { MessagesSquare, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { ScrollArea } from '@/ui/scroll-area';
 import { TASKS_SURFACE_CLASS } from './tasks-surface';
 

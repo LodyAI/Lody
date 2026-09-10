@@ -20,7 +20,7 @@ import { MobileHomeScreen } from '@/components/mobile/mobile-home-screen';
 import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Toaster } from '@/ui/sonner';
 
 const now = Date.now();

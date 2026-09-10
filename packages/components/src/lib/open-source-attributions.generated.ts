@@ -2423,17 +2423,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-label-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-label",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "2.1.8"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-menu-mit",
       "kind": "package",
       "scope": "production-dependency",

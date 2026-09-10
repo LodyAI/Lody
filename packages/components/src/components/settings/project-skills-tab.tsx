@@ -22,7 +22,7 @@ import {
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { cn } from '@/lib/utils';
 
 /**

@@ -24,8 +24,9 @@ One rung per component. The rung fixes background and shadow together.
 - raised: you can press this. `raisedBackground` + `shadow.raised`. Primary and
   destructive buttons are raised with `shadow.inkEdge` as their top highlight.
 - shadow: above the page. Strength by rung.
-- ring: attention here. 2px, tight to the control, no offset, no glow.
-  `accent` on focus, `destructive` on invalid.
+- ring: attention here. A 2px `box-shadow` composed with the control's own
+  shadow, tight to it, no offset, no glow. `accent` on focus, `destructive` on
+  invalid. Not an `outline`: the product shell resets outlines with `!important`.
 
 ## Color
 
@@ -38,6 +39,38 @@ One rung per component. The rung fixes background and shadow together.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
   scrollbar, tracks, kbd, skeleton.
+
+## Fields
+
+A control is the well rung: `wellBackground` plus `shadow.inset`, never a
+border. One component token group, `field`, serves the whole family — input,
+textarea, and the selects, checkboxes and switches that follow — so a state has
+one colour in one place instead of one per component.
+
+| state       | what it is                                                        |
+| ----------- | ----------------------------------------------------------------- |
+| rest        | `field.background` and `field.well`; the value in `field.value`   |
+| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label |
+| focus       | 2px `field.ring` (accent), tight to the control, no offset        |
+| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused  |
+| disabled    | 45% opacity on the control; the label and help dim with it        |
+| selected    | `selectedFill` on the row that is current, not on the control     |
+
+The control's own text follows the control rule at every size on the ladder: 13
+at weight 500 with `text.controlTracking`. Label at 12 weight 500 in
+`field.label`, help at 12 weight 400 in `field.hint`, error at 12 weight 400 in
+`field.error`, stacked at `field.gap`. Disabled reads `field.disabledOpacity`
+rather than a literal, so the control and its label cannot drift apart.
+
+`Field.Root` owns the name, the disabled flag and validity. A control reads that
+state and picks its own classes from it; it does not take a second `invalid` or
+`disabled` prop for the caller to keep in sync.
+
+The invalid ring follows `aria-invalid`, which `Field.Root` renders onto its
+control, so the attribute is the state rather than a copy of it. What a screen
+reader announces and what a sighted person sees cannot disagree, and a surface
+that owns its own validation marks one control without a field around it. Every
+ARIA value except `false` is invalid, `grammar` and `spelling` included.
 
 ## Corners
 

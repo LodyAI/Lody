@@ -24,8 +24,8 @@ import {
 } from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -754,9 +754,9 @@ export function AcpAuthenticationAuthorizationView({
 
       {authorization.acceptsAuthorizationCode ? (
         <div className="mt-3 space-y-1.5">
-          <Label htmlFor={authorizationCodeInputId} className="text-xs">
+          <UiField.Label htmlFor={authorizationCodeInputId} className="text-xs">
             {t('agents.authentication.authorizationCode', 'Authorization code')}
-          </Label>
+          </UiField.Label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               id={authorizationCodeInputId}
@@ -879,10 +879,10 @@ export function AcpAuthenticationInteractionView({
       </div>
       {interaction.form.fields.map((field) => (
         <div key={field.id} className="space-y-1.5">
-          <Label className="text-xs">
+          <UiField.Label className="text-xs">
             {field.label}
             {!field.required ? ` ${t('common.optional', '(optional)')}` : ''}
-          </Label>
+          </UiField.Label>
           {field.type === 'select' ? (
             <select
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"

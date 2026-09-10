@@ -4,8 +4,8 @@ import { Loader2 } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
@@ -102,7 +102,9 @@ export function CreateWorkspacePage({
           <CardContent>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="workspace-name">{t('organization.workspaceName')}</Label>
+                <UiField.Label htmlFor="workspace-name">
+                  {t('organization.workspaceName')}
+                </UiField.Label>
                 <Input
                   id="workspace-name"
                   type="text"
@@ -128,7 +130,9 @@ export function CreateWorkspacePage({
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="workspace-slug">{t('organization.workspaceSlug')}</Label>
+                  <UiField.Label htmlFor="workspace-slug">
+                    {t('organization.workspaceSlug')}
+                  </UiField.Label>
                   <div className="flex items-center gap-2">
                     {canResetSlug ? (
                       <button

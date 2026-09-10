@@ -9,8 +9,8 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from 'sonner';
 import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '@/components/error-boundary';
 import {
@@ -252,16 +252,16 @@ export function WorkspaceScreenView({
           >
             {repairingWorkspace ? (
               <div className="space-y-2">
-                <Label>{t('organization.workspaceName', 'Workspace name')}</Label>
+                <UiField.Label>{t('organization.workspaceName', 'Workspace name')}</UiField.Label>
                 <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium">
                   {repairingWorkspaceName}
                 </div>
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="onboarding-workspace-name">
+                <UiField.Label htmlFor="onboarding-workspace-name">
                   {t('organization.workspaceName', 'Workspace name')}
-                </Label>
+                </UiField.Label>
                 <Input
                   id="onboarding-workspace-name"
                   value={newName}
@@ -277,9 +277,9 @@ export function WorkspaceScreenView({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-4">
-                <Label htmlFor="onboarding-workspace-slug" className="whitespace-nowrap">
+                <UiField.Label htmlFor="onboarding-workspace-slug" className="whitespace-nowrap">
                   {t('organization.workspaceSlug', 'Handle')}
-                </Label>
+                </UiField.Label>
                 {canResetSlug ? (
                   <button
                     type="button"
