@@ -1275,19 +1275,16 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('permanently deletes only direct child tabs from an active Session', async () => {
+  it('deletes exactly the requested Session before metadata hydration completes', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
-      createContainmentSessions('active-delete', false);
+      createContainmentSessions('exact-delete', false);
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
     const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, {
-      docMetaCacheReady: true,
-      sessionMetaCache,
-    });
+    const actions = await renderActions(runtime, { sessionMetaCache });
 
-    await actions.deleteSessions([rootSession.id]);
+    await actions.deleteSessions([tabSession.id]);
 
-    expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
     expect(metaRepo.getSession(openedSession.id)).toMatchObject({
       isArchived: false,
@@ -1305,6 +1302,26 @@ describe('useSessionActions', () => {
         machineFlockKeys.sessionLaunchConfig(session.id)
       );
     }
+  });
+
+  it('cleans up a partially created child absent from the metadata cache', async () => {
+    const rootSessionId = 'partial-create-root' as SessionId;
+    const childSession = {
+      id: 'partial-create-child' as SessionId,
+      parentSessionId: rootSessionId,
+      createdAt: '2026-09-10T00:00:00.000Z',
+    } as SessionMeta;
+    const metaRepo = createSessionMetaRepo([childSession]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+
+    expect(metaRepo.getSession(childSession.id)).toMatchObject({
+      parentSessionId: rootSessionId,
+    });
+
+    await actions.deleteSessions([childSession.id]);
+
+    expect(metaRepo.getSession(childSession.id)).toBeUndefined();
   });
 
   it('keeps active opened Sessions and their machine queues after archive then delete', async () => {
@@ -1379,7 +1396,7 @@ describe('useSessionActions', () => {
     });
   });
 
-  it('rejects permanent deletion until the Session metadata cache is complete', async () => {
+  it('rejects archived-root deletion until the Session metadata cache is complete', async () => {
     const sessionId = 'session-delete-loading' as SessionId;
     const deleteDoc = vi.fn(async () => undefined);
     const getDocMeta = vi.fn(async () => ({ meta: { id: sessionId } }));
@@ -1396,9 +1413,6 @@ describe('useSessionActions', () => {
     });
 
     await expect(actions.deleteArchivedSession(sessionId)).rejects.toThrow(
-      'Session metadata is still loading'
-    );
-    await expect(actions.deleteSessions([sessionId])).rejects.toThrow(
       'Session metadata is still loading'
     );
     expect(getDocMeta).not.toHaveBeenCalled();

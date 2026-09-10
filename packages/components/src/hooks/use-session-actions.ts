@@ -394,6 +394,7 @@ export type SessionActions = {
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
+  /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -1188,28 +1189,9 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      if (!store.get(docMetaCacheReadyAtom)) {
-        throw new Error('Session metadata is still loading');
-      }
-      const sessions = Object.values(store.get(sessionMetaCacheAtom));
-      const rootIds = new Set(sessionIds);
-      const allIds = new Set([
-        ...sessionIds,
-        ...sessions
-          .filter(
-            (session) =>
-              session.parentSessionId !== undefined && rootIds.has(session.parentSessionId)
-          )
-          .map((session) => session.id),
-      ]);
-      const uniqueIds = Array.from(allIds);
-      await Promise.all(
-        uniqueIds.map(async (id) => {
-          await deleteSessionDocuments(id);
-        })
-      );
+      await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
-    [runtime, store, deleteSessionDocuments]
+    [runtime, deleteSessionDocuments]
   );
 
   const archiveSession = useCallback(
