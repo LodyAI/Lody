@@ -28,7 +28,6 @@ import {
   type MachineFlockRowMap,
   type MachineId,
   type ProviderSetupCancellation,
-  type ProviderCredentialCleanup,
   type ProviderSetupTask,
   type TitleGenerationConfig,
   getAgentConfigRoomId,
@@ -416,24 +415,6 @@ export const cmdCreateProviderSetupAtom = atom(
       mode: 'merge',
     });
     return setup.id;
-  }
-);
-
-export const cmdRequestProviderCredentialCleanupAtom = atom(
-  null,
-  async (_get, _set, cleanup: Omit<ProviderCredentialCleanup, 'v' | 'requestedAt'>) => {
-    const runtime = _get(activeWorkspaceRuntimeAtom);
-    if (!runtime) throw new Error('Runtime not ready');
-    const value: ProviderCredentialCleanup = {
-      v: 1,
-      ...cleanup,
-      requestedAt: getServerNow(),
-    };
-    await runtime.writer.flockRowPut(
-      getMachineFlockDocId(runtime.workspaceId, cleanup.machineId),
-      machineFlockKeys.providerCredentialCleanup(cleanup.id),
-      value
-    );
   }
 );
 

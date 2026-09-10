@@ -6,7 +6,7 @@ import {
   getMachineFlockProviderSetups,
   findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
-  getMachineFlockProviderCredentialCleanups,
+  getLodyCodexCredentialBinding,
   getLodyCodexCustomProvider,
   getServerNow,
   machineFlockKeys,
@@ -26,7 +26,6 @@ import type { SessionExecutionService } from '@/session/session-execution-servic
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import {
-  clearCodexProviderCredential,
   reconcileCodexProviderCredential,
   stageCodexProviderCredential,
 } from '@/agent/provider-credential-store';
@@ -47,10 +46,15 @@ export type ProviderSetupManagerOptions = {
   execution: ProviderSetupExecution;
   sync: ProviderSetupSyncScheduler;
   logger: Logger;
-  clearCredential?: typeof clearCodexProviderCredential;
   reconcileCredential?: typeof reconcileCodexProviderCredential;
   stageCredential?: typeof stageCodexProviderCredential;
 };
+
+export type ProviderSetupPublicationDurability = 'durable' | 'uncertain';
+
+type PublishVerifiedConfigResult =
+  | { published: false }
+  | { published: true; durability: ProviderSetupPublicationDurability };
 
 const RESUMABLE_STATUSES = new Set<ProviderSetupStatus>([
   'queued',
@@ -71,12 +75,13 @@ export class ProviderSetupManager {
   private readonly execution: ProviderSetupExecution;
   private readonly sync: ProviderSetupSyncScheduler;
   private readonly logger: Logger;
-  private readonly clearCredential: typeof clearCodexProviderCredential;
   private readonly reconcileCredential: typeof reconcileCodexProviderCredential;
   private readonly stageCredential: typeof stageCodexProviderCredential;
   private readonly credentialMutationChains = new Map<AgentConfigId, Promise<void>>();
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
+  private credentialRecoveryRequested = false;
+  private credentialRecoveryCompleted = false;
   private stopped = false;
 
   constructor(options: ProviderSetupManagerOptions) {
@@ -86,13 +91,15 @@ export class ProviderSetupManager {
     this.execution = options.execution;
     this.sync = options.sync;
     this.logger = options.logger;
-    this.clearCredential = options.clearCredential ?? clearCodexProviderCredential;
     this.reconcileCredential = options.reconcileCredential ?? reconcileCodexProviderCredential;
     this.stageCredential = options.stageCredential ?? stageCodexProviderCredential;
   }
 
-  kick(): Promise<void> {
+  kick(options: { recoverCredentials?: boolean } = {}): Promise<void> {
     if (this.stopped) return Promise.resolve();
+    if (options.recoverCredentials && !this.credentialRecoveryCompleted) {
+      this.credentialRecoveryRequested = true;
+    }
     this.drainRequested = true;
     if (!this.drainPromise) {
       this.drainPromise = this.drain()
@@ -132,9 +139,10 @@ export class ProviderSetupManager {
     setupId: AgentConfigId,
     setupRevision: string,
     apiKey: string,
-    signal?: AbortSignal
-  ): Promise<void> {
-    await this.runCredentialMutation(setupId, async () => {
+    signal?: AbortSignal,
+    markCommitted?: () => void
+  ): Promise<ProviderSetupPublicationDurability> {
+    return await this.runCredentialMutation(setupId, async () => {
       if (this.stopped) throw new Error('Provider setup manager is stopped');
       signal?.throwIfAborted();
       const setup = await this.readSetup(setupId);
@@ -152,21 +160,32 @@ export class ProviderSetupManager {
         await staged.rollback();
         signal.throwIfAborted();
       }
+      let publicationCommitted = false;
       const published = await this.publishVerifiedConfig(
         setup.id,
         setup.attempt,
         setupRevision,
-        signal
-      );
-      if (!published) {
+        signal,
+        () => {
+          markCommitted?.();
+          publicationCommitted = true;
+        }
+      ).catch(async (error: unknown) => {
+        if (!publicationCommitted) await staged.rollback();
+        throw error;
+      });
+      if (!published.published) {
         await staged.rollback();
         throw new Error('Provider setup was cancelled or replaced');
       }
-      await staged.finalize().catch((error) => {
-        this.logger.debug(
-          `[provider-setup] Published ${setup.id}, but old credential binding cleanup will retry: ${formatErrorMessage(error)}`
-        );
-      });
+      if (published.durability === 'durable') {
+        await staged.finalize().catch((error) => {
+          this.logger.debug(
+            `[provider-setup] Published ${setup.id}, but old credential binding cleanup is deferred to startup recovery: ${formatErrorMessage(error)}`
+          );
+        });
+      }
+      return published.durability;
     });
   }
 
@@ -200,8 +219,16 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
-      await this.reconcileCredentialBindings();
-      await this.reconcileCredentialCleanups();
+      if (this.credentialRecoveryRequested) {
+        this.credentialRecoveryRequested = false;
+        try {
+          await this.reconcileCredentialBindings();
+          this.credentialRecoveryCompleted = true;
+        } catch (error) {
+          this.credentialRecoveryRequested = true;
+          throw error;
+        }
+      }
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);
@@ -306,6 +333,7 @@ export class ProviderSetupManager {
     const cancellations = Object.values(getMachineFlockProviderSetupCancellations(rows)).filter(
       (cancellation) => cancellation.machineId === this.machineId
     );
+    const reconcileIds = new Set<AgentConfigId>();
     let changed = false;
     for (const cancellation of cancellations) {
       const setupRevision = setups[cancellation.id]?.setupRevision;
@@ -315,6 +343,7 @@ export class ProviderSetupManager {
       ) {
         continue;
       }
+      reconcileIds.add(cancellation.id);
       changed =
         applyProviderSetupCancellationToFlock(
           handle.flock,
@@ -322,9 +351,13 @@ export class ProviderSetupManager {
           Math.max(getServerNow(), cancellation.cancelledAt)
         ) || changed;
     }
-    if (!changed) return;
-    await this.repo.flush();
-    this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
+    if (changed) {
+      await this.repo.flush();
+      this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
+    }
+    for (const configId of reconcileIds) {
+      await this.reconcileCredentialBinding(configId);
+    }
   }
 
   private async reconcileCredentialBindings(): Promise<void> {
@@ -355,44 +388,22 @@ export class ProviderSetupManager {
     }
   }
 
-  private async reconcileCredentialCleanups(): Promise<void> {
+  private async reconcileCredentialBinding(configId: AgentConfigId): Promise<void> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
     );
     const rows = readMachineFlockRowsFromFlock(handle.flock, {
-      families: ['providerCredentialCleanup', 'providerSetup', 'agentConfig'],
+      prefixes: [machineFlockKeys.providerSetup(configId), machineFlockKeys.agentConfig(configId)],
     });
-    for (const cleanup of getMachineFlockProviderCredentialCleanups(rows)) {
-      if (cleanup.machineId !== this.machineId) continue;
-      await this.runCredentialMutation(cleanup.id, async () => {
-        const currentRows = readMachineFlockRowsFromFlock(handle.flock, {
-          prefixes: [
-            machineFlockKeys.providerCredentialCleanup(cleanup.id),
-            machineFlockKeys.providerSetup(cleanup.id),
-            machineFlockKeys.agentConfig(cleanup.id),
-          ],
-        });
-        if (
-          getLodyCodexCustomProvider(getMachineFlockAgentConfigs(currentRows)[cleanup.id]?.env) ||
-          getLodyCodexCustomProvider(
-            getMachineFlockProviderSetups(currentRows)[cleanup.id]?.config.env
-          )
-        ) {
-          return;
-        }
-        await this.clearCredential(this.workspaceId, cleanup.id);
-        const changed = deleteMachineFlockRowFromFlock(
-          handle.flock,
-          machineFlockKeys.providerCredentialCleanup(cleanup.id),
-          getServerNow()
-        );
-        if (!changed) return;
-        await this.repo.flush();
-        this.sync.markMachineFlockDocDirty(this.machineId, {
-          reason: 'provider-credential-cleanup',
-        });
-      });
-    }
+    const config = getMachineFlockAgentConfigs(rows)[configId];
+    const setup = getMachineFlockProviderSetups(rows)[configId];
+    const referencedConfigs = [setup?.config, config].filter(
+      (entry): entry is NonNullable<typeof entry> =>
+        Boolean(entry && getLodyCodexCustomProvider(entry.env))
+    );
+    await this.runCredentialMutation(configId, () =>
+      this.reconcileCredential(this.workspaceId, configId, referencedConfigs)
+    );
   }
 
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {
@@ -496,8 +507,9 @@ export class ProviderSetupManager {
     setupId: AgentConfigId,
     attempt: number,
     expectedSetupRevision?: string,
-    signal?: AbortSignal
-  ): Promise<boolean> {
+    signal?: AbortSignal,
+    markCommitted?: () => void
+  ): Promise<PublishVerifiedConfigResult> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
     );
@@ -525,7 +537,7 @@ export class ProviderSetupManager {
         await this.repo.flush();
         this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
       }
-      return false;
+      return { published: false };
     }
     const setup = getMachineFlockProviderSetups(rows)[setupId];
     if (
@@ -536,14 +548,14 @@ export class ProviderSetupManager {
         : setup.status !== 'verifying') ||
       this.stopped
     ) {
-      return false;
+      return { published: false };
     }
     const currentConfig = getMachineFlockAgentConfigs(rows)[setupId];
     if (currentConfig && !setup.replacesPublishedConfig) {
       await this.deleteSetup(setupId);
-      return false;
+      return { published: false };
     }
-    if (signal?.aborted) return false;
+    if (signal?.aborted) return { published: false };
 
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
@@ -558,7 +570,14 @@ export class ProviderSetupManager {
             brandId: currentConfig.brandId,
           }
         : setup.config;
-    flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
+    const currentBinding = currentConfig ? getLodyCodexCredentialBinding(currentConfig) : null;
+    const desiredBinding = getLodyCodexCredentialBinding(publishedConfig);
+    const rotatesSameBinding = Boolean(
+      expectedSetupRevision && currentBinding && desiredBinding && currentBinding === desiredBinding
+    );
+    if (!rotatesSameBinding) {
+      flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
+    }
     // Publishing is the user adding the provider explicitly, so the earlier same-type
     // removal intent has to be retracted too, or the list holds it while startup still
     // treats it as removed.
@@ -568,9 +587,19 @@ export class ProviderSetupManager {
     }
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
     flock.delete(machineFlockKeys.providerSetupCancellation(setupId), now);
-    flock.commit();
-    await this.repo.flush();
+    signal?.throwIfAborted();
+    markCommitted?.();
+    try {
+      flock.commit();
+      await this.repo.flush();
+    } catch (error) {
+      this.logger.debug(
+        `[provider-setup] Publication durability is uncertain for configId=${setupId} setupRevision=${expectedSetupRevision ?? 'none'}: ${formatErrorMessage(error)}`
+      );
+      this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-publish' });
+      return { published: true, durability: 'uncertain' };
+    }
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-publish' });
-    return true;
+    return { published: true, durability: 'durable' };
   }
 }

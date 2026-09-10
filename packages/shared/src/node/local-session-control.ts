@@ -824,6 +824,9 @@ export function isLocalSessionControlResponse(
         value.disposition === 'error') &&
       (typeof value.capabilitiesRefreshed === 'undefined' ||
         typeof value.capabilitiesRefreshed === 'boolean') &&
+      (typeof value.publicationDurability === 'undefined' ||
+        value.publicationDurability === 'durable' ||
+        value.publicationDurability === 'uncertain') &&
       (typeof value.authRequired === 'undefined' || typeof value.authRequired === 'boolean') &&
       (typeof value.authMethods === 'undefined' ||
         (Array.isArray(value.authMethods) && value.authMethods.every(isAcpAuthMethodSummary))) &&

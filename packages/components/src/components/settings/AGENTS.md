@@ -22,7 +22,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   launch-time injection. Credential-changing edits stage a revision in provider setup;
   never update published launch/binding fields before the target daemon verifies that
   revision, and merge current display metadata when publishing. Delete and ChatGPT
-  transitions write a revision-independent setup cancellation plus durable cleanup
+  transitions write a revision-independent setup cancellation as the durable cleanup
   intent and never wait for the machine. Additional env cannot override managed keys, and arbitrary user-authored
   `CODEX_CONFIG` remains untouched.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist

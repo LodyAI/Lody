@@ -15,7 +15,6 @@ import {
 
 import {
   cmdCreateProviderSetupAtom,
-  cmdRequestProviderCredentialCleanupAtom,
   cmdRetryProviderSetupAtom,
   deleteProviderSetupAtom,
   getAllAgentConfigAtom,
@@ -209,18 +208,5 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     expect(rendererCommit).not.toHaveBeenCalled();
     expect(flush).not.toHaveBeenCalled();
     expect(syncOnce).not.toHaveBeenCalled();
-
-    await store.set(cmdRequestProviderCredentialCleanupAtom, {
-      id: setupId,
-      machineId,
-    });
-    expect(flockRowPut).toHaveBeenLastCalledWith(
-      flockDocId,
-      machineFlockKeys.providerCredentialCleanup(setupId),
-      expect.objectContaining({
-        id: setupId,
-        machineId,
-      })
-    );
   });
 });

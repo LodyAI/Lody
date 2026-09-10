@@ -82,6 +82,7 @@ export type AcpAuthenticationResult =
   | {
       success: true;
       disposition: 'authenticated' | 'cancelled' | 'not-running' | 'input-accepted';
+      publicationDurability?: 'durable' | 'uncertain';
     }
   | {
       success: false;
@@ -138,6 +139,7 @@ type RunningAuthentication = {
   cancelled: boolean;
   timedOut: boolean;
   terminating: boolean;
+  publicationPhase: 'cancelable' | 'committed';
   acceptsAuthorizationCode: boolean;
   authorizationCodeSubmitted: boolean;
   abortController: AbortController;
@@ -541,7 +543,11 @@ export class AcpAuthenticationManager {
       runtimeOverrides?: BuiltinRuntimeOverrides;
       env?: Record<string, string>;
     }>;
-    storeCodexApiKey?: (apiKey: string, signal: AbortSignal) => Promise<void>;
+    storeCodexApiKey?: (
+      apiKey: string,
+      signal: AbortSignal,
+      markCommitted: () => void
+    ) => Promise<{ publicationDurability: 'durable' | 'uncertain' }>;
     forceCodexApiKeyInput?: boolean;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
@@ -564,6 +570,7 @@ export class AcpAuthenticationManager {
       cancelled: false,
       timedOut: false,
       terminating: false,
+      publicationPhase: 'cancelable',
       acceptsAuthorizationCode: false,
       authorizationCodeSubmitted: false,
       abortController: new AbortController(),
@@ -587,7 +594,7 @@ export class AcpAuthenticationManager {
     };
 
     timeoutHandle = setTimeout(() => {
-      if (running.cancelled) return;
+      if (running.cancelled || running.publicationPhase === 'committed') return;
       running.timedOut = true;
       running.abortController.abort();
       running.pendingInteraction?.resolve({ action: 'cancel' });
@@ -635,9 +642,16 @@ export class AcpAuthenticationManager {
         }
         const apiKey = typeof input.content?.apiKey === 'string' ? input.content.apiKey.trim() : '';
         if (!apiKey) throw new Error('Codex API key is required');
-        await options.storeCodexApiKey(apiKey, running.abortController.signal);
+        const publication = await options.storeCodexApiKey(
+          apiKey,
+          running.abortController.signal,
+          () => {
+            running.abortController.signal.throwIfAborted();
+            running.publicationPhase = 'committed';
+          }
+        );
         options.onProgress?.({ status: 'authenticated' });
-        return { success: true, disposition: 'authenticated' };
+        return { success: true, disposition: 'authenticated', ...publication };
       }
       const launch = await resolveBuiltinAuthenticationProcessLaunch({
         cliType: options.cliType,
@@ -743,9 +757,15 @@ export class AcpAuthenticationManager {
   cancel(requestId: string): AcpAuthenticationResult {
     const active = this.findRunningAuthentication(requestId);
     if (!active) {
+      this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=not-running`);
       return { success: true, disposition: 'not-running' };
     }
     const { agentType, running } = active;
+
+    if (running.publicationPhase === 'committed') {
+      this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=committed`);
+      return { success: true, disposition: 'not-running' };
+    }
 
     running.cancelled = true;
     running.abortController.abort();
@@ -755,6 +775,7 @@ export class AcpAuthenticationManager {
       this.runningByAgentType.delete(agentType);
     }
     this.terminateAuthentication(agentType, running, 'cancelled');
+    this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=cancelled`);
     return { success: true, disposition: 'cancelled' };
   }
 

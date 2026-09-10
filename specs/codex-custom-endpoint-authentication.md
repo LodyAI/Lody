@@ -23,38 +23,43 @@ keeps the candidate key in memory. After a successful live probe, it opens a sho
 commit window that retains at most the currently published and desired credential bindings,
 publishes the desired config, and then prunes the old binding before acknowledging success.
 Either binding can still launch after a daemon crash on either side of publication; an
-authoritative rescan retains only the binding referenced by the surviving config or setup.
+authoritative startup recovery retains only the binding referenced by the surviving config or
+setup. Ordinary queue drains never reconcile from live Flock state because a post-commit flush
+failure leaves that state ahead of the last proven durable snapshot.
 The credential is injected under the generated provider's `env_key` only when the current launch
-configuration matches the record's complete launch binding. A changed endpoint, proxy, runtime,
-agent type, custom launch command, or launch-relevant environment value fails closed. POSIX
-storage uses `0700` directories and `0600` files; Windows relies on the inherited ACL of Lody's
-per-user data directory.
+configuration hashes to the record's SHA-256 digest of the canonical launch binding. The raw
+binding is not persisted. A changed endpoint, proxy, runtime, agent type, custom launch command,
+or launch-relevant environment value fails closed. POSIX storage uses `0700` directories and
+`0600` files; Windows relies on the inherited ACL of Lody's per-user data directory.
 
 Creation, key rotation, and launch-binding changes use a non-secret durable setup draft with an
 exact setup revision. The credential RPC waits for that revision to become visible on the target
 daemon, always requests a replacement key, and probes the staged config with the in-memory
 candidate. One authentication lifecycle and its abort signal cover setup synchronization, secret
-input, probe, credential commit, and config publication; cancellation before the commit boundary
-writes neither credential nor config. Probe failure writes no credential. RPC success means the final non-secret
-`AgentConfig` was published and the setup was removed. A superseded RPC returns a conflict instead
-of publishing or reporting success. Each submit attempt has a fresh setup revision, and automatic
-failure compensation may cancel only that exact revision. During an edit, the previous published
-launch config remains live until publication. Display metadata, prompt, title-generation, and other
-non-binding edits update the published config directly and do not request the API key or run a
-probe. A replacement publication merges the latest published metadata instead of overwriting it
-with the setup snapshot. Machines that do not advertise the credential protocol cannot submit
-credential-changing edits.
+input, probe, credential staging, and config publication. The final abort check and transition to
+`committed` occur synchronously immediately before the Flock commit. Cancellation before that
+boundary wins and publishes nothing; cancellation or timeout after it is too late and cannot return
+`cancelled`. Probe failure writes no credential. A durable RPC success means the final non-secret
+`AgentConfig` was published and the setup was removed. A post-commit flush failure instead reports
+uncertain publication durability, retains both credential bindings, and forces the renderer to
+resync authoritative config before presenting the result; it is not handled as an ordinary failed
+save or automatic retry. A superseded RPC returns a conflict instead of publishing or reporting
+success. Each submit attempt has a fresh setup revision, and automatic failure compensation may
+cancel only that exact revision. During an edit, the previous published launch config remains live
+until publication. Display metadata, prompt, title-generation, and other non-binding edits update
+the published config directly and do not request the API key or run a probe. A replacement
+publication merges the latest published metadata instead of overwriting it with the setup snapshot.
+Same-binding key rotation consumes the setup without rewriting the unchanged `AgentConfig`.
+Machines that do not advertise the credential protocol cannot submit credential-changing edits.
 
 The dedicated form owns only the provider entry and ownership marker it generates. Returning to
 ChatGPT restores the prior `model_provider` selector and removes the generated provider and
-marker. Switching modes and deleting a provider also writes a durable credential-cleanup intent
-and a revision-independent setup cancellation before changing or deleting the config. That
-cancellation is a barrier against any in-flight replacement; an explicitly new setup retracts it.
-The target daemon replays the cleanup intent whenever it is online and removes the local credential
-only after no published config or setup still uses it;
-cleanup does not depend on observing an intermediate config revision. The tombstone remains
-necessary until initial Machine Flock synchronization exposes an authoritative-complete boundary
-that local garbage collection can prove. Existing
+marker. Switching modes and deleting a provider writes a revision-independent setup cancellation
+before changing or deleting the config. That durable wildcard is both the barrier against any
+in-flight replacement and the cleanup intent; an explicitly new setup retracts it. Once the target
+daemon has durably applied the cancellation, it reconciles that config ID and removes the local
+credential only when no published custom config or custom setup still references it. Cleanup does
+not depend on observing an intermediate config revision or a second row family. Existing
 `CODEX_API_KEY`, unrelated providers, and other environment values remain unchanged. A malformed
 `CODEX_CONFIG`, reserved provider-id collision, or marker collision is rejected instead of
 overwritten. Arbitrary hand-written Codex configuration remains an advanced environment override.

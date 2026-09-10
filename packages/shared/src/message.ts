@@ -435,6 +435,8 @@ export interface MachineAcpAuthenticateResponse {
     | 'error';
   /** Present when a post-login capability refresh was requested. */
   capabilitiesRefreshed?: boolean;
+  /** Durability of an irreversible provider publication on the target machine. */
+  publicationDurability?: 'durable' | 'uncertain';
   /** A successful login command can still leave the runtime requiring auth. */
   authRequired?: boolean;
   authMethods?: MachineAcpAuthMethodSummary[];

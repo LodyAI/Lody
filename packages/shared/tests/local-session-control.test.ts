@@ -95,6 +95,7 @@ describe('local session control node validators', () => {
       success: true,
       disposition: 'authenticated',
       capabilitiesRefreshed: false,
+      publicationDurability: 'uncertain',
       authRequired: true,
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',

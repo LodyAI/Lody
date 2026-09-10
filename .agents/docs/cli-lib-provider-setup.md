@@ -18,15 +18,26 @@ revision-bearing cancellation applies only to that setup attempt, so late failur
 compensation cannot cancel a newer revision. A cancellation without a revision is an
 explicit provider-removal barrier: it cancels any in-flight replacement, and a later
 explicit setup retracts it. After a merge the owning CLI causally applies the marker,
-so a cancellation that raced publication still wins. Restart resumes only
-non-interactive states.
+so a cancellation that raced publication still wins. The same wildcard cancellation
+is the durable machine-local credential cleanup intent; after applying it durably, the
+CLI reconciles that config ID and removes the credential only when no custom config or
+setup remains. Restart resumes only non-interactive states.
 
 Credential-changing Codex replacements keep the old launch config published during
 the probe. The post-probe cross-store commit may retain the old and desired
 machine-local credential bindings until publication chooses one. Publishing merges
 the current display metadata into the verified launch config, writes `agentConfig`,
-and deletes `providerSetup` in one Flock commit. RPC success is not returned before
-that publication completes.
+and deletes `providerSetup` in one Flock commit. Same-binding key rotation omits the
+unchanged `agentConfig` write. The authentication slot becomes committed immediately
+before that Flock commit; Cancel or timeout wins before this boundary and is too late
+after it.
+
+A successful flush finalizes the credential to the published binding. A post-commit
+flush failure reports uncertain durability and retains both bindings; the renderer
+resyncs Machine Flock and does not treat it as an ordinary failed save. Queue event
+drains never use their live snapshot to prune bindings. Credential reconciliation runs
+once from the authoritative startup state, and later only for a durably applied
+cancellation.
 
 ## When the queue may start
 

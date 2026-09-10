@@ -144,7 +144,8 @@ Grok runs the official `login --device-auth`; Claude Code runs the official
 receives a custom `model_providers` entry through `CODEX_CONFIG` and sets
 `requires_openai_auth = false`. Its key arrives through encrypted authentication input, stays
 in the target machine's owner-only provider credential store, and is injected only while the
-stored launch binding matches.
+SHA-256 digest of its canonical launch binding matches. The raw binding and its environment are
+not copied into the credential file.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts
@@ -156,8 +157,9 @@ Grok and Codex authentication requirements come from ACP session creation becaus
 `requires_openai_auth = false`. Because protocol authentication spans launch preparation,
 JSON-RPC requests, and process cleanup, the running slot also carries an `AbortController`
 that termination raises before any child exists. Custom Codex provisioning keeps that same slot
-through setup synchronization, live probe, credential commit, and final publication, so Cancel
-cannot acknowledge while those steps continue in the background.
+through setup synchronization, live probe, credential staging, and final publication. Cancel wins
+until the synchronous Flock commit boundary; after it the publication wins, and a flush failure is
+reported as uncertain durability rather than a cancelled or ordinary failed save.
 
 The real-process authentication test keeps method selection, versioned secret metadata, form
 submission, URL parsing, protocol stdout integrity, and process cleanup on one spawned ACP

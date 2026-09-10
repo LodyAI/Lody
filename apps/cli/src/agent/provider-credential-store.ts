@@ -52,28 +52,19 @@ async function writeRecord(filePath: string, record: CredentialRecord): Promise<
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== 'win32') await chmod(directory, 0o700);
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-  if (process.platform !== 'win32') await chmod(temporaryPath, 0o600);
-  await rename(temporaryPath, filePath);
-  if (process.platform !== 'win32') await chmod(filePath, 0o600);
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    if (process.platform !== 'win32') await chmod(temporaryPath, 0o600);
+    await rename(temporaryPath, filePath);
+    if (process.platform !== 'win32') await chmod(filePath, 0o600);
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
 }
 
-export async function storeCodexProviderCredential(
-  workspaceId: WorkspaceId,
-  config: AgentConfigMeta,
-  apiKey: string
-): Promise<void> {
-  const provider = getLodyCodexCustomProvider(config.env);
+function getCredentialBindingDigest(config: CredentialBoundConfig): string | null {
   const binding = getLodyCodexCredentialBinding(config);
-  const normalizedKey = apiKey.trim();
-  if (!provider || !binding || !isAllowedCredentialEndpoint(provider.baseUrl) || !normalizedKey) {
-    throw new Error('Invalid Codex custom endpoint credential');
-  }
-  const filePath = recordPath(workspaceId, config.id);
-  await writeRecord(filePath, {
-    v: 1,
-    current: { binding, apiKey: normalizedKey },
-  });
+  return binding ? createHash('sha256').update(binding).digest('hex') : null;
 }
 
 export type StagedCodexProviderCredential = {
@@ -93,7 +84,7 @@ export async function stageCodexProviderCredential(
   publishedConfig?: AgentConfigMeta
 ): Promise<StagedCodexProviderCredential> {
   const provider = getLodyCodexCustomProvider(desiredConfig.env);
-  const desiredBinding = getLodyCodexCredentialBinding(desiredConfig);
+  const desiredBinding = getCredentialBindingDigest(desiredConfig);
   const normalizedKey = apiKey.trim();
   if (
     !provider ||
@@ -106,7 +97,7 @@ export async function stageCodexProviderCredential(
 
   const filePath = recordPath(workspaceId, desiredConfig.id);
   const previousRecord = await readRecord(filePath);
-  const publishedBinding = publishedConfig ? getLodyCodexCredentialBinding(publishedConfig) : null;
+  const publishedBinding = publishedConfig ? getCredentialBindingDigest(publishedConfig) : null;
   const previousEntry = publishedBinding
     ? [previousRecord?.current, previousRecord?.previous].find(
         (entry) => entry?.binding === publishedBinding
@@ -151,7 +142,7 @@ export async function reconcileCodexProviderCredential(
   const record = await readRecord(filePath);
   if (!record) return;
   const referencedBindings = referencedConfigs
-    .map(getLodyCodexCredentialBinding)
+    .map(getCredentialBindingDigest)
     .filter((binding): binding is string => Boolean(binding));
   const retained = referencedBindings
     .map((binding) => [record.current, record.previous].find((entry) => entry?.binding === binding))
@@ -175,7 +166,7 @@ export async function hydrateCodexProviderCredential<T extends CredentialBoundCo
   workspaceId: WorkspaceId,
   config: T
 ): Promise<T> {
-  const binding = getLodyCodexCredentialBinding(config);
+  const binding = getCredentialBindingDigest(config);
   if (!getLodyCodexCustomProvider(config.env) || !binding) return config;
   const record = await readRecord(recordPath(workspaceId, config.id));
   const credential = [record?.current, record?.previous].find(
@@ -186,11 +177,4 @@ export async function hydrateCodexProviderCredential<T extends CredentialBoundCo
     ...config,
     env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: credential.apiKey },
   } as T;
-}
-
-export async function clearCodexProviderCredential(
-  workspaceId: WorkspaceId,
-  configId: string
-): Promise<void> {
-  await rm(recordPath(workspaceId, configId), { force: true });
 }

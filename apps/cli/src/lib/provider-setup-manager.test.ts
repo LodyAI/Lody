@@ -9,7 +9,6 @@ import {
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
   getMachineFlockProviderSetupCancellations,
-  getMachineFlockProviderCredentialCleanups,
   buildLodyCodexCustomProviderEnv,
   LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
@@ -28,8 +27,8 @@ import type { LoroRepo } from 'loro-repo';
 import type { Logger } from '@/utils/logger';
 import {
   hydrateCodexProviderCredential,
+  reconcileCodexProviderCredential,
   stageCodexProviderCredential,
-  storeCodexProviderCredential,
 } from '@/agent/provider-credential-store';
 import { ProviderSetupManager, type ProviderSetupManagerOptions } from './provider-setup-manager';
 
@@ -132,7 +131,6 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     ...overrides,
   } as ProviderSetupManagerOptions['execution'];
   const markMachineFlockDocDirty = vi.fn();
-  const clearCredential = vi.fn(async () => undefined);
   const finalizeCredential = vi.fn(async () => undefined);
   const rollbackCredential = vi.fn(async () => undefined);
   const stageCredential = vi.fn(async () => ({
@@ -147,7 +145,6 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     execution,
     sync: { markMachineFlockDocDirty },
     logger: createSilentLogger(),
-    clearCredential,
     stageCredential,
     reconcileCredential,
     ...managerOverrides,
@@ -157,7 +154,6 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     flush,
     execution,
     markMachineFlockDocDirty,
-    clearCredential,
     stageCredential,
     reconcileCredential,
     finalizeCredential,
@@ -183,7 +179,6 @@ function readState(flock: MachineFlockWritableFlock) {
     setup: getMachineFlockProviderSetups(rows)[setupId],
     config: getMachineFlockAgentConfigs(rows)[setupId],
     cancellation: getMachineFlockProviderSetupCancellations(rows)[setupId],
-    cleanups: getMachineFlockProviderCredentialCleanups(rows),
   };
 }
 
@@ -193,6 +188,11 @@ function createDeferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function seedCredential(config: ProviderSetupTask['config'], apiKey: string): Promise<void> {
+  const staged = await stageCodexProviderCredential(workspaceId, config, apiKey);
+  await staged.finalize();
 }
 
 describe('ProviderSetupManager', () => {
@@ -342,7 +342,6 @@ describe('ProviderSetupManager', () => {
       setup: undefined,
       config: undefined,
       cancellation: undefined,
-      cleanups: [],
     });
     expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
     harness.manager.stop();
@@ -409,10 +408,8 @@ describe('ProviderSetupManager', () => {
         setup: undefined,
         config: undefined,
         cancellation: expect.objectContaining({ id: setupId, machineId }),
-        cleanups: [],
       });
     }
-    expect(harness.clearCredential).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -502,7 +499,7 @@ describe('ProviderSetupManager', () => {
 
     await expect(
       harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
-    ).rejects.toThrow('publish flush failed');
+    ).resolves.toBe('uncertain');
 
     expect(harness.stageCredential).toHaveBeenCalledWith(
       workspaceId,
@@ -515,7 +512,7 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
-  it('keeps both real credential bindings launchable when publish flush throws', async () => {
+  it('does not prune either real credential binding on a later event drain after flush throws', async () => {
     const previousDataDir = process.env.LODY_DATA_DIR;
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-commit-'));
     process.env.LODY_DATA_DIR = dataDir;
@@ -540,7 +537,8 @@ describe('ProviderSetupManager', () => {
     };
 
     try {
-      await storeCodexProviderCredential(workspaceId, oldConfig, 'old-key');
+      await harness.manager.kick({ recoverCredentials: true });
+      await seedCredential(oldConfig, 'old-key');
       writeMachineFlockRowToFlock(flock, {
         key: machineFlockKeys.agentConfig(setupId),
         value: oldConfig,
@@ -550,7 +548,20 @@ describe('ProviderSetupManager', () => {
 
       await expect(
         harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
-      ).rejects.toThrow('publish flush failed');
+      ).resolves.toBe('uncertain');
+
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.providerSetupCancellation(setupId),
+        value: {
+          v: 1,
+          id: setupId,
+          machineId,
+          cancelledAt: 20,
+          preservePublishedConfig: true,
+          setupRevision: 'revision-new',
+        },
+      });
+      await harness.manager.kick({ recoverCredentials: true });
 
       expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'old-key',
@@ -560,6 +571,74 @@ describe('ProviderSetupManager', () => {
       ).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'new-key',
       });
+
+      const recoveredFlock = new FakeMachineFlock();
+      writeMachineFlockRowToFlock(recoveredFlock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: oldConfig,
+      });
+      const recoveredHarness = createHarnessForFlock(
+        recoveredFlock,
+        {},
+        {
+          reconcileCredential: reconcileCodexProviderCredential,
+        }
+      );
+      try {
+        await recoveredHarness.manager.kick({ recoverCredentials: true });
+        expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
+          [LODY_CODEX_API_KEY_ENV]: 'old-key',
+        });
+      } finally {
+        recoveredHarness.manager.stop();
+      }
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports uncertain durability after a same-binding key rotation commits before flush fails', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-rotation-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const flock = new FakeMachineFlock();
+    const harness = createHarnessForFlock(
+      flock,
+      {},
+      { stageCredential: stageCodexProviderCredential }
+    );
+    const publishedConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+    };
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-rotation',
+      replacesPublishedConfig: true,
+      config: publishedConfig,
+    };
+
+    try {
+      await seedCredential(publishedConfig, 'old-key');
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: publishedConfig,
+      });
+      seedSetup(flock, replacement);
+      harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
+
+      await expect(
+        harness.manager.commitCredentialSetup(setupId, 'revision-rotation', 'new-key')
+      ).resolves.toBe('uncertain');
+
+      expect(readState(flock).config).toEqual(publishedConfig);
+      expect(readState(flock).setup).toBeUndefined();
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env
+      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
@@ -603,34 +682,128 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
-  it('replays credential cleanup after the referenced config disappears', async () => {
-    const harness = createHarness();
-    const config = {
+  it('clears an offline-deleted provider credential from its wildcard cancellation', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-delete-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const customConfig = {
       ...createSetup().config,
       env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
     };
-    writeMachineFlockRowToFlock(harness.flock, {
-      key: machineFlockKeys.agentConfig(setupId),
-      value: config,
-    });
-    writeMachineFlockRowToFlock(harness.flock, {
-      key: machineFlockKeys.providerCredentialCleanup(setupId),
-      value: {
-        v: 1,
-        id: setupId,
-        machineId,
-        requestedAt: 20,
+    const harness = createHarnessForFlock(
+      new FakeMachineFlock(),
+      {},
+      {
+        reconcileCredential: reconcileCodexProviderCredential,
+      }
+    );
+
+    try {
+      await seedCredential(customConfig, 'old-key');
+      writeMachineFlockRowToFlock(harness.flock, {
+        key: machineFlockKeys.providerSetupCancellation(setupId),
+        value: { v: 1, id: setupId, machineId, cancelledAt: 20 },
+      });
+
+      await harness.manager.kick();
+
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, customConfig)).env[
+          LODY_CODEX_API_KEY_ENV
+        ]
+      ).toBeUndefined();
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('clears a custom credential after an offline switch back to ChatGPT', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-chatgpt-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const customConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+    };
+    const harness = createHarnessForFlock(
+      new FakeMachineFlock(),
+      {},
+      {
+        reconcileCredential: reconcileCodexProviderCredential,
+      }
+    );
+
+    try {
+      await seedCredential(customConfig, 'old-key');
+      writeMachineFlockRowToFlock(harness.flock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: { ...customConfig, env: {} },
+      });
+      writeMachineFlockRowToFlock(harness.flock, {
+        key: machineFlockKeys.providerSetupCancellation(setupId),
+        value: { v: 1, id: setupId, machineId, cancelledAt: 20 },
+      });
+
+      await harness.manager.kick();
+
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, customConfig)).env[
+          LODY_CODEX_API_KEY_ENV
+        ]
+      ).toBeUndefined();
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a new credential after a re-added setup retracts wildcard cancellation', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-readd-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const nextSetup = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-readded',
+      config: {
+        ...createSetup().config,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://new.example.com/v1' }),
       },
-    });
+    };
+    const harness = createHarnessForFlock(
+      new FakeMachineFlock(),
+      {},
+      {
+        reconcileCredential: reconcileCodexProviderCredential,
+      }
+    );
 
-    await harness.manager.kick();
-    expect(harness.clearCredential).not.toHaveBeenCalled();
-    expect(readState(harness.flock).cleanups).toHaveLength(1);
+    try {
+      writeMachineFlockRowToFlock(harness.flock, {
+        key: machineFlockKeys.providerSetupCancellation(setupId),
+        value: { v: 1, id: setupId, machineId, cancelledAt: 20 },
+      });
+      deleteMachineFlockRowFromFlock(
+        harness.flock,
+        machineFlockKeys.providerSetupCancellation(setupId)
+      );
+      seedSetup(harness.flock, nextSetup);
+      await seedCredential(nextSetup.config, 'new-key');
 
-    deleteMachineFlockRowFromFlock(harness.flock, machineFlockKeys.agentConfig(setupId));
-    await harness.manager.kick();
-    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId);
-    expect(readState(harness.flock).cleanups).toEqual([]);
-    harness.manager.stop();
+      await harness.manager.kick({ recoverCredentials: true });
+
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, nextSetup.config)).env
+      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 });

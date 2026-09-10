@@ -50,6 +50,7 @@
   "agents.createConfigDescription": "创建新的代理配置",
   "agents.createConfigError": "创建配置失败",
   "agents.createConfigSuccess": "配置创建成功",
+  "agents.credentialPublicationUncertain": "Provider 已更新，但无法确认是否已持久化。重试前请先检查当前配置。",
   "agents.customPrompt": "自定义提示词",
   "agents.customPromptPlaceholder": "可选：为该代理添加额外指令",
   "agents.deleteConfigConfirm": "删除配置",

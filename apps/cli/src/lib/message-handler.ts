@@ -524,7 +524,6 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (
       parsed?.kind === 'providerSetup' ||
       parsed?.kind === 'providerSetupCancellation' ||
-      parsed?.kind === 'providerCredentialCleanup' ||
       parsed?.kind === 'agentConfig'
     ) {
       providerSetup = true;
@@ -3211,7 +3210,10 @@ export class MessageHandler {
       logger: this.logger,
       onEvents: (events, { authoritative }) =>
         this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
-      onReady: () => this.rescanMachineCommands(),
+      onReady: () => {
+        this.rescanMachineCommands();
+        void this.providerSetupManager.kick({ recoverCredentials: true });
+      },
     });
     this.previewService = new PreviewService({
       logger: this.logger,
@@ -8387,13 +8389,26 @@ export class MessageHandler {
       ...options,
       ...(message.action === 'start' && message.purpose === 'provision-provider-credential'
         ? {
-            commitCodexProviderCredential: ({ configId, setupRevision, apiKey, signal }) =>
-              this.providerSetupManager.commitCredentialSetup(
+            commitCodexProviderCredential: async ({
+              configId,
+              setupRevision,
+              apiKey,
+              signal,
+              markCommitted,
+            }) => ({
+              publicationDurability: await this.providerSetupManager.commitCredentialSetup(
                 configId,
                 setupRevision,
                 apiKey,
-                signal
+                signal,
+                () => {
+                  markCommitted();
+                  this.logger.debug(
+                    `[provider-setup] Commit boundary requestId=${message.requestId} configId=${configId} setupRevision=${setupRevision}`
+                  );
+                }
               ),
+            }),
           }
         : {}),
     });

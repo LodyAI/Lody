@@ -79,8 +79,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 ## `acp-authentication.ts`
 
 - The per-agent slot covers setup wait, launch prep, credential probe/commit, and the child;
-  timeout/cancel abort it and release it for Retry. Cancellation during cleanup still wins; stop
-  the process before success.
+  timeout/cancel wins until credential publication commits, then is too late. Stop children before
+  success.
 - Authorization data never enters logs, chat, Flock, or config. Custom-endpoint provisioning uses
   [machine-local auth](README.md#authentication), waits for the exact setup revision, and injects
   only on its binding.

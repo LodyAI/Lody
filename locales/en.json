@@ -50,6 +50,7 @@
   "agents.createConfigDescription": "Create a new agent configuration",
   "agents.createConfigError": "Failed to create configuration",
   "agents.createConfigSuccess": "Configuration created successfully",
+  "agents.credentialPublicationUncertain": "Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.",
   "agents.customPrompt": "Custom Prompt",
   "agents.customPromptPlaceholder": "Optional instructions to include before task details",
   "agents.deleteConfigConfirm": "Delete Configuration",

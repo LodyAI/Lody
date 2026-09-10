@@ -230,14 +230,6 @@ export type ProviderSetupCancellation = {
   setupRevision?: string;
 };
 
-/** Replayable request for the target machine to remove its local credential. */
-export type ProviderCredentialCleanup = {
-  v: 1;
-  id: AgentConfigId;
-  machineId: MachineId;
-  requestedAt: number;
-};
-
 /**
  * Record that the user removed a managed builtin provider on this machine.
  *
@@ -267,7 +259,6 @@ export type MachineFlockLocalProjectKey = ['localProject', LocalProjectId];
 export type MachineFlockAgentConfigKey = ['agentConfig', AgentConfigId];
 export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
-export type MachineFlockProviderCredentialCleanupKey = ['providerCredentialCleanup', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
@@ -284,7 +275,6 @@ export type MachineFlockKey =
   | MachineFlockAgentConfigKey
   | MachineFlockProviderSetupKey
   | MachineFlockProviderSetupCancellationKey
-  | MachineFlockProviderCredentialCleanupKey
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
   | MachineFlockRateLimitKey
@@ -319,11 +309,6 @@ export type ParsedMachineFlockKey =
       kind: 'providerSetupCancellation';
       key: MachineFlockProviderSetupCancellationKey;
       providerSetupId: AgentConfigId;
-    }
-  | {
-      kind: 'providerCredentialCleanup';
-      key: MachineFlockProviderCredentialCleanupKey;
-      agentConfigId: AgentConfigId;
     }
   | {
       kind: 'agentConfigIndex';
@@ -382,9 +367,6 @@ export const machineFlockKeys = {
   providerSetupCancellation: (
     providerSetupId: AgentConfigId
   ): MachineFlockProviderSetupCancellationKey => ['providerSetupCancellation', providerSetupId],
-  providerCredentialCleanup: (
-    agentConfigId: AgentConfigId
-  ): MachineFlockProviderCredentialCleanupKey => ['providerCredentialCleanup', agentConfigId],
   agentConfigIndex: (agentConfigId: AgentConfigId): MachineFlockAgentConfigIndexKey => [
     'agentConfigIndex',
     agentConfigId,
@@ -494,18 +476,6 @@ export const parseMachineFlockKey = (
     };
   }
 
-  if (
-    key.length === 2 &&
-    key[0] === 'providerCredentialCleanup' &&
-    isNonEmptyString(key[1])
-  ) {
-    return {
-      kind: 'providerCredentialCleanup',
-      key: machineFlockKeys.providerCredentialCleanup(key[1] as AgentConfigId),
-      agentConfigId: key[1] as AgentConfigId,
-    };
-  }
-
   if (key.length === 2 && key[0] === 'agentConfigIndex' && isNonEmptyString(key[1])) {
     const agentConfigId = key[1] as AgentConfigId;
     return {
@@ -573,7 +543,6 @@ export type MachineFlockRow =
       key: MachineFlockProviderSetupCancellationKey;
       value: ProviderSetupCancellation;
     }
-  | { key: MachineFlockProviderCredentialCleanupKey; value: ProviderCredentialCleanup }
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
@@ -616,7 +585,6 @@ export type MachineFlockRowFamily =
   | 'agentConfig'
   | 'providerSetup'
   | 'providerSetupCancellation'
-  | 'providerCredentialCleanup'
   | 'agentConfigIndex'
   | 'acpCapability'
   | 'rateLimit'
@@ -632,7 +600,6 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   agentConfig: ['agentConfig'],
   providerSetup: ['providerSetup'],
   providerSetupCancellation: ['providerSetupCancellation'],
-  providerCredentialCleanup: ['providerCredentialCleanup'],
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
   rateLimit: ['rateLimit'],
@@ -718,11 +685,6 @@ const isMachineFlockProviderSetupCancellationRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockProviderSetupCancellationKey }> =>
   row.key[0] === 'providerSetupCancellation';
-
-const isMachineFlockProviderCredentialCleanupRow = (
-  row: MachineFlockRow
-): row is Extract<MachineFlockRow, { key: MachineFlockProviderCredentialCleanupKey }> =>
-  row.key[0] === 'providerCredentialCleanup';
 
 const isMachineFlockRateLimitRow = (
   row: MachineFlockRow
@@ -825,14 +787,6 @@ export function getMachineFlockProviderSetupCancellations(
     cancellations[row.key[1]] = row.value;
   }
   return cancellations;
-}
-
-export function getMachineFlockProviderCredentialCleanups(
-  rows: MachineFlockRowMap
-): ProviderCredentialCleanup[] {
-  return Object.values(rows)
-    .filter(isMachineFlockProviderCredentialCleanupRow)
-    .map((row) => row.value);
 }
 
 export function applyProviderSetupCancellationToFlock(
@@ -1205,12 +1159,6 @@ export function parseMachineFlockRow(
       const cancellation = normalizeProviderSetupCancellation(value);
       return cancellation && cancellation.id === parsedKey.providerSetupId
         ? { key: parsedKey.key, value: cancellation }
-        : undefined;
-    }
-    case 'providerCredentialCleanup': {
-      const cleanup = normalizeProviderCredentialCleanup(value);
-      return cleanup && cleanup.id === parsedKey.agentConfigId
-        ? { key: parsedKey.key, value: cleanup }
         : undefined;
     }
     case 'agentConfigIndex': {
@@ -1671,27 +1619,6 @@ const normalizeProviderSetupCancellation = (
     ...(isNonEmptyString(value.setupRevision)
       ? { setupRevision: value.setupRevision }
       : {}),
-  };
-};
-
-const normalizeProviderCredentialCleanup = (
-  value: unknown
-): ProviderCredentialCleanup | undefined => {
-  if (
-    !isRecord(value) ||
-    value.v !== 1 ||
-    !isNonEmptyString(value.id) ||
-    !isNonEmptyString(value.machineId) ||
-    typeof value.requestedAt !== 'number' ||
-    !Number.isFinite(value.requestedAt)
-  ) {
-    return undefined;
-  }
-  return {
-    v: 1,
-    id: value.id as AgentConfigId,
-    machineId: value.machineId as MachineId,
-    requestedAt: value.requestedAt,
   };
 };
 

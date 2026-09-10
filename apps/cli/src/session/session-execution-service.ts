@@ -645,7 +645,8 @@ type AcpAuthenticationOptions = {
     setupRevision: string;
     apiKey: string;
     signal: AbortSignal;
-  }) => Promise<void>;
+    markCommitted: () => void;
+  }) => Promise<{ publicationDurability: 'durable' | 'uncertain' }>;
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
@@ -5264,7 +5265,7 @@ export class SessionExecutionService {
         : undefined,
       forceCodexApiKeyInput: provisioning,
       storeCodexApiKey: provisioning
-        ? async (apiKey, signal) => {
+        ? async (apiKey, signal, markCommitted) => {
             if (!config) throw new Error('Codex provider setup is no longer available');
             const candidateApiKey = apiKey.trim();
             const verifiedConfig = {
@@ -5282,11 +5283,12 @@ export class SessionExecutionService {
             if (!message.setupRevision || !options.commitCodexProviderCredential) {
               throw new Error('Codex credential setup could not be committed');
             }
-            await options.commitCodexProviderCredential({
+            return await options.commitCodexProviderCredential({
               configId: message.configId,
               setupRevision: message.setupRevision,
               apiKey: candidateApiKey,
               signal,
+              markCommitted,
             });
           }
         : undefined,

@@ -26,7 +26,6 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import {
   cmdCreateAgentConfigAtom,
   cmdCreateProviderSetupAtom,
-  cmdRequestProviderCredentialCleanupAtom,
   cmdRetryProviderSetupAtom,
   cmdUpdateAgentConfigAtom,
   deleteAgentConfigAtom,
@@ -217,7 +216,6 @@ export function MachineAgentSettings({
   useProviderSetupRuntimeProgress(runtime, workspaceId, allSetups);
   const createConfig = useSetAtom(cmdCreateAgentConfigAtom);
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
-  const requestCredentialCleanup = useSetAtom(cmdRequestProviderCredentialCleanupAtom);
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
   const updateConfig = useSetAtom(cmdUpdateAgentConfigAtom);
   const deleteConfig = useSetAtom(deleteAgentConfigAtom);
@@ -920,12 +918,20 @@ export function MachineAgentSettings({
           if (payload.codexApiKey) {
             if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
             try {
-              await provisionCodexCredential({
+              const provision = await provisionCodexCredential({
                 machineId: config.machineId,
                 configId: config.id,
                 setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
             } catch (error) {
               if (payload.backgroundSetup) {
                 await deleteSetup({
@@ -968,12 +974,20 @@ export function MachineAgentSettings({
             });
             await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
             try {
-              await provisionCodexCredential({
+              const provision = await provisionCodexCredential({
                 machineId: nextConfig.machineId,
                 configId: nextConfig.id,
                 setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
             } catch (error) {
               await deleteSetup({
                 id: nextConfig.id,
@@ -989,10 +1003,6 @@ export function MachineAgentSettings({
                 id: nextConfig.id,
                 machineId: nextConfig.machineId,
                 preservePublishedConfig: true,
-              });
-              await requestCredentialCleanup({
-                id: nextConfig.id,
-                machineId: nextConfig.machineId,
               });
             }
             await updateConfig(nextConfig);
@@ -1016,7 +1026,6 @@ export function MachineAgentSettings({
       deleteConfig,
       deleteSetup,
       provisionCodexCredential,
-      requestCredentialCleanup,
       updateConfig,
       t,
     ]
@@ -1060,7 +1069,6 @@ export function MachineAgentSettings({
             machineId: config.machineId,
             preservePublishedConfig: false,
           });
-          await requestCredentialCleanup({ id: config.id, machineId: config.machineId });
         }
         await deleteConfig(config.id);
       } catch (error) {
@@ -1069,7 +1077,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [deleteConfig, deleteSetup, requestCredentialCleanup, t]
+    [deleteConfig, deleteSetup, t]
   );
 
   const showBanner = mode === 'agents' && migration.status === 'running';

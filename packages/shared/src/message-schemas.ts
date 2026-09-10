@@ -1423,6 +1423,7 @@ export const MachineAcpAuthenticateResponseSchema = z
       'error',
     ]),
     capabilitiesRefreshed: z.boolean().optional(),
+    publicationDurability: z.enum(['durable', 'uncertain']).optional(),
     authRequired: z.boolean().optional(),
     authMethods: z
       .array(MachineAcpAuthMethodSummarySchema)

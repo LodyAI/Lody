@@ -55,7 +55,7 @@ describe('AcpAuthenticationManager', () => {
   });
 
   it('accepts a managed Codex API key only through the secret interaction', async () => {
-    const storeCodexApiKey = vi.fn(async () => {});
+    const storeCodexApiKey = vi.fn(async () => ({ publicationDurability: 'durable' as const }));
     const spawnProcess = vi.fn();
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
       spawnProcess: spawnProcess as never,
@@ -81,13 +81,21 @@ describe('AcpAuthenticationManager', () => {
       },
     });
 
-    await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
-    expect(storeCodexApiKey).toHaveBeenCalledWith('sk-encrypted-input', expect.any(AbortSignal));
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
+    expect(storeCodexApiKey).toHaveBeenCalledWith(
+      'sk-encrypted-input',
+      expect.any(AbortSignal),
+      expect.any(Function)
+    );
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
   it('requests a replacement key during explicit provisioning even when an old key is hydrated', async () => {
-    const storeCodexApiKey = vi.fn(async () => {});
+    const storeCodexApiKey = vi.fn(async () => ({ publicationDurability: 'durable' as const }));
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
       spawnProcess: vi.fn() as never,
     });
@@ -109,8 +117,58 @@ describe('AcpAuthenticationManager', () => {
       },
     });
 
-    await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
-    expect(storeCodexApiKey).toHaveBeenCalledWith('new-key', expect.any(AbortSignal));
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
+    expect(storeCodexApiKey).toHaveBeenCalledWith(
+      'new-key',
+      expect.any(AbortSignal),
+      expect.any(Function)
+    );
+  });
+
+  it('rejects cancellation after provider publication crosses its commit boundary', async () => {
+    const committed = createDeferred<void>();
+    const finishFlush = createDeferred<void>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn() as never,
+    });
+    const result = manager.authenticate({
+      requestId: 'codex-commit-boundary',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+      forceCodexApiKeyInput: true,
+      storeCodexApiKey: async (_apiKey, _signal, markCommitted) => {
+        markCommitted();
+        committed.resolve();
+        await finishFlush.promise;
+        return { publicationDurability: 'durable' };
+      },
+      onProgress: (progress) => {
+        if (progress.status !== 'input-required') return;
+        manager.submitAuthenticationInput(
+          'codex-commit-boundary',
+          progress.interactionId,
+          JSON.stringify({ action: 'accept', content: { apiKey: 'new-key' } })
+        );
+      },
+    });
+
+    await committed.promise;
+    expect(manager.cancel('codex-commit-boundary')).toEqual({
+      success: true,
+      disposition: 'not-running',
+    });
+    finishFlush.resolve();
+
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {

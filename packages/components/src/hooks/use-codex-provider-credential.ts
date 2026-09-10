@@ -1,7 +1,12 @@
 import { useCallback } from 'react';
 import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
+import { resyncMachineFlockRows } from './use-machine-flock-rows';
 import { useMachineAcpAuthentication } from './use-machine-acp-authentication';
+
+export type CodexProviderCredentialProvisionResult = {
+  publicationDurability: 'durable' | 'uncertain';
+};
 
 export function useCodexProviderCredential(
   runtime: WorkspaceRuntime | null,
@@ -16,7 +21,7 @@ export function useCodexProviderCredential(
       configId: AgentConfigId;
       setupRevision: string;
       apiKey: string;
-    }): Promise<void> => {
+    }): Promise<CodexProviderCredentialProvisionResult> => {
       let inputSubmitted = false;
       let rejectInput: (error: unknown) => void = () => {};
       const inputFailure = new Promise<never>((_resolve, reject) => {
@@ -55,7 +60,12 @@ export function useCodexProviderCredential(
       if (response.disposition !== 'authenticated' || response.capabilitiesRefreshed !== true) {
         throw new Error(response.error ?? 'Codex credential verification failed');
       }
+      const publicationDurability = response.publicationDurability ?? 'durable';
+      if (publicationDurability === 'uncertain') {
+        await resyncMachineFlockRows(runtime, args.machineId);
+      }
+      return { publicationDurability };
     },
-    [cancelAuthentication, startAuthentication, submitAuthenticationInput]
+    [cancelAuthentication, runtime, startAuthentication, submitAuthenticationInput]
   );
 }
