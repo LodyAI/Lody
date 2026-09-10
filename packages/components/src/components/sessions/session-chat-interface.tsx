@@ -52,8 +52,7 @@ import {
 import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { isMac } from '@/lib/commands/platform';
-import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
+import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
 import { isSessionContextCompacting } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
@@ -439,7 +438,7 @@ const DISPATCHING_TIMEOUT_MS = 15_000;
 const TITLE_SYNCING_INDICATOR_DELAY_MS = 400;
 
 /** Exact ⌘F / Ctrl+F — no Alt/Shift/secondary primary mod. See find keydown handler. */
-const FIND_IN_CHAT_BINDING = parseBinding('$mod+f');
+const FIND_IN_CHAT_BINDING = 'Mod+F';
 
 const summarizeInputBlocksForAnalytics = (inputBlocks: readonly SessionInputBlock[]) => {
   let textBlockCount = 0;
@@ -3260,8 +3259,8 @@ export const SessionChatInterface = memo(
         // Exact chord only: ⌘F (macOS) / Ctrl+F (Windows/Linux). Refuse any extra
         // modifier (Shift/Alt/the other primary mod) so chords like ⌘⌥F, ⌘⇧F, or
         // ⌘⌃F keep their other meanings and are not stolen via preventDefault.
-        // Matches the command registry's `$mod+f` matcher (primary-mod exclusive).
-        if (!matchesKeyboardEvent(FIND_IN_CHAT_BINDING, event, isMac())) {
+        // Matches the command registry's Mod+F matcher (primary-mod exclusive).
+        if (!matchesKeyboardEvent(event, FIND_IN_CHAT_BINDING)) {
           return;
         }
         event.preventDefault();

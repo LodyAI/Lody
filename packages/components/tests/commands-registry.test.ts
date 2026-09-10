@@ -21,7 +21,7 @@ function ev(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
 }
 
 beforeEach(() => {
-  // Force non-mac default to keep $mod = Ctrl in tests.
+  // Force non-mac default to keep Mod = Ctrl in tests.
   vi.stubGlobal('navigator', { platform: 'Linux x86_64', userAgent: '' });
 });
 
@@ -108,9 +108,9 @@ describe('CommandRegistry.execute', () => {
 describe('CommandRegistry keydown dispatch', () => {
   it('fires command on matching key event and prevents default by default', () => {
     const run = vi.fn();
-    commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
     const event = ev({ key: 'b', ctrlKey: true });
-    commands.dispatchKeybinding('$mod+b', event);
+    commands.dispatchKeybinding('Mod+b', event);
     expect(run).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
   });
@@ -119,14 +119,14 @@ describe('CommandRegistry keydown dispatch', () => {
     const run = vi.fn();
     const analytics = vi.fn();
     commands.setShortcutAnalyticsHandler(analytics);
-    commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
 
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
 
     expect(run).toHaveBeenCalledOnce();
     expect(analytics).toHaveBeenCalledWith({
       commandId: 'k',
-      binding: '$mod+b',
+      binding: 'Mod+b',
       source: 'keyboard',
       runtime: 'web',
       platform: 'unknown',
@@ -139,11 +139,11 @@ describe('CommandRegistry keydown dispatch', () => {
     commands.register({
       id: 'k',
       title: 'K',
-      keybindings: [{ key: '$mod+b', preventDefault: false }],
+      keybindings: [{ key: 'Mod+b', preventDefault: false }],
       run,
     });
     const event = ev({ key: 'b', ctrlKey: true });
-    commands.dispatchKeybinding('$mod+b', event);
+    commands.dispatchKeybinding('Mod+b', event);
     expect(run).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(false);
   });
@@ -154,15 +154,15 @@ describe('CommandRegistry keydown dispatch', () => {
     commands.register({
       id: 'k',
       title: 'K',
-      keybindings: [{ key: '$mod+b', when: () => bindingEnabled }],
+      keybindings: [{ key: 'Mod+b', when: () => bindingEnabled }],
       run,
     });
 
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
 
     bindingEnabled = true;
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -171,31 +171,31 @@ describe('CommandRegistry keydown dispatch', () => {
     commands.register({
       id: 'k',
       title: 'K',
-      keybindings: ['$mod+b'],
+      keybindings: ['Mod+b'],
       when: () => false,
       run,
     });
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
   });
 
   it('most-recently-registered binding wins on collision', () => {
     const earlier = vi.fn();
     const later = vi.fn();
-    commands.register({ id: 'a', title: 'A', keybindings: ['$mod+b'], run: earlier });
-    commands.register({ id: 'b', title: 'B', keybindings: ['$mod+b'], run: later });
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.register({ id: 'a', title: 'A', keybindings: ['Mod+b'], run: earlier });
+    commands.register({ id: 'b', title: 'B', keybindings: ['Mod+b'], run: later });
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(later).toHaveBeenCalledOnce();
     expect(earlier).not.toHaveBeenCalled();
   });
 
-  it('treats $mod and explicit Control as the same collision on non-macOS', () => {
+  it('treats Mod and explicit Control as the same collision on non-macOS', () => {
     const earlier = vi.fn();
     const later = vi.fn();
-    commands.register({ id: 'a', title: 'A', keybindings: ['$mod+b'], run: earlier });
+    commands.register({ id: 'a', title: 'A', keybindings: ['Mod+b'], run: earlier });
     commands.register({ id: 'b', title: 'B', keybindings: ['Control+b'], run: later });
 
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
 
     expect(later).toHaveBeenCalledOnce();
     expect(earlier).not.toHaveBeenCalled();
@@ -206,34 +206,34 @@ describe('CommandRegistry keydown dispatch', () => {
     commands.register({
       id: 'electron-only',
       title: 'X',
-      keybindings: [{ key: '$mod+b', runtimes: ['electron'] }],
+      keybindings: [{ key: 'Mod+b', runtimes: ['electron'] }],
       run,
     });
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     // Default runtime in tests is 'web' (no __LODY_ELECTRON__).
     expect(run).not.toHaveBeenCalled();
   });
 
   it('skips when defaultPrevented already', () => {
     const run = vi.fn();
-    commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
     const event = ev({ key: 'b', ctrlKey: true });
     event.preventDefault();
-    commands.dispatchKeybinding('$mod+b', event);
+    commands.dispatchKeybinding('Mod+b', event);
     expect(run).not.toHaveBeenCalled();
   });
 
   it('skips dispatch entirely while paused (used by the rebinding capture flow)', () => {
     const run = vi.fn();
-    commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
 
     commands.setPaused(true);
     expect(commands.isPaused()).toBe(true);
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
 
     commands.setPaused(false);
-    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -241,20 +241,20 @@ describe('CommandRegistry keydown dispatch', () => {
     vi.useFakeTimers();
     try {
       const run = vi.fn();
-      commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+      commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
 
       commands.pauseFor(1000);
       expect(commands.isPaused()).toBe(true);
-      commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
       expect(run).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(999);
-      commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
       expect(run).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(2);
       expect(commands.isPaused()).toBe(false);
-      commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
       expect(run).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -265,7 +265,7 @@ describe('CommandRegistry keydown dispatch', () => {
     vi.useFakeTimers();
     try {
       const run = vi.fn();
-      commands.register({ id: 'k', title: 'K', keybindings: ['$mod+b'], run });
+      commands.register({ id: 'k', title: 'K', keybindings: ['Mod+b'], run });
 
       commands.pauseFor(1000);
       commands.setPaused(false);
@@ -275,7 +275,7 @@ describe('CommandRegistry keydown dispatch', () => {
       vi.advanceTimersByTime(2000);
       expect(commands.isPaused()).toBe(false);
 
-      commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
       expect(run).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -300,11 +300,11 @@ function evIn(node: Node, init: Partial<KeyboardEventInit> & { key: string }): K
 describe('CommandRegistry key scopes', () => {
   it('gives a focused text scope the key instead of the app command', () => {
     const run = vi.fn();
-    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['Mod+b'], run });
     const editor = fakeNode();
     commands.registerKeyScope({ id: 'editor', element: () => editor });
 
-    commands.dispatchKeybinding('$mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
 
     expect(run).not.toHaveBeenCalled();
   });
@@ -315,14 +315,14 @@ describe('CommandRegistry key scopes', () => {
     commands.register({
       id: 'sidebar.toggle',
       title: 'Toggle',
-      keybindings: ['$mod+b'],
+      keybindings: ['Mod+b'],
       run: () => {},
     });
     const editor = fakeNode();
     commands.registerKeyScope({ id: 'editor', element: () => editor });
 
     const event = evIn(editor, { key: 'b', ctrlKey: true });
-    commands.dispatchKeybinding('$mod+b', event);
+    commands.dispatchKeybinding('Mod+b', event);
 
     expect(event.defaultPrevented).toBe(false);
   });
@@ -332,25 +332,25 @@ describe('CommandRegistry key scopes', () => {
     commands.register({
       id: 'palette.toggle',
       title: 'Palette',
-      keybindings: ['$mod+k'],
+      keybindings: ['Mod+k'],
       allowInTextInput: true,
       run,
     });
     const editor = fakeNode();
     commands.registerKeyScope({ id: 'editor', element: () => editor });
 
-    commands.dispatchKeybinding('$mod+k', evIn(editor, { key: 'k', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+k', evIn(editor, { key: 'k', ctrlKey: true }));
 
     expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('does not suppress when the event happened outside the scope', () => {
     const run = vi.fn();
-    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['Mod+b'], run });
     const editor = fakeNode();
     commands.registerKeyScope({ id: 'editor', element: () => editor });
 
-    commands.dispatchKeybinding('$mod+b', evIn(fakeNode(), { key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', evIn(fakeNode(), { key: 'b', ctrlKey: true }));
 
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -361,15 +361,15 @@ describe('CommandRegistry key scopes', () => {
     commands.register({
       id: 'sidebar.toggle',
       title: 'Toggle',
-      keybindings: ['$mod+b'],
+      keybindings: ['Mod+b'],
       run: bold,
     });
-    commands.register({ id: 'other', title: 'Other', keybindings: ['$mod+j'], run: other });
+    commands.register({ id: 'other', title: 'Other', keybindings: ['Mod+j'], run: other });
     const editor = fakeNode();
-    commands.registerKeyScope({ id: 'editor', element: () => editor, claims: ['$mod+b'] });
+    commands.registerKeyScope({ id: 'editor', element: () => editor, claims: ['Mod+b'] });
 
-    commands.dispatchKeybinding('$mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
-    commands.dispatchKeybinding('$mod+j', evIn(editor, { key: 'j', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+j', evIn(editor, { key: 'j', ctrlKey: true }));
 
     expect(bold).not.toHaveBeenCalled();
     expect(other).toHaveBeenCalledTimes(1);
@@ -379,23 +379,23 @@ describe('CommandRegistry key scopes', () => {
     // Scope activity is decided by where the event happened, so a user who
     // rebinds the sidebar onto another editor key is still covered.
     const run = vi.fn();
-    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['$mod+i'], run });
+    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['Mod+i'], run });
     const editor = fakeNode();
     commands.registerKeyScope({ id: 'editor', element: () => editor });
 
-    commands.dispatchKeybinding('$mod+i', evIn(editor, { key: 'i', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+i', evIn(editor, { key: 'i', ctrlKey: true }));
 
     expect(run).not.toHaveBeenCalled();
   });
 
   it('stops suppressing once the scope is disposed', () => {
     const run = vi.fn();
-    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['Mod+b'], run });
     const editor = fakeNode();
     const dispose = commands.registerKeyScope({ id: 'editor', element: () => editor });
 
     dispose();
-    commands.dispatchKeybinding('$mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', evIn(editor, { key: 'b', ctrlKey: true }));
 
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -407,10 +407,10 @@ describe('CommandRegistry key scopes', () => {
 
   it('ignores a scope whose element is gone', () => {
     const run = vi.fn();
-    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['$mod+b'], run });
+    commands.register({ id: 'sidebar.toggle', title: 'Toggle', keybindings: ['Mod+b'], run });
     commands.registerKeyScope({ id: 'editor', element: () => null });
 
-    commands.dispatchKeybinding('$mod+b', evIn(fakeNode(), { key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('Mod+b', evIn(fakeNode(), { key: 'b', ctrlKey: true }));
 
     expect(run).toHaveBeenCalledTimes(1);
   });

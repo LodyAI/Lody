@@ -1,5 +1,5 @@
-import { parseBinding } from './key-matcher';
-import { getPlatform, getRuntime, isMac } from './platform';
+import { canonicalizeBinding } from './key-matcher';
+import { getPlatform, getRuntime } from './platform';
 import {
   createShortcutUsagePayload,
   type ShortcutUsageAnalyticsHandler,
@@ -31,8 +31,9 @@ type ScopeRegistration = {
  * Central command + key-binding registry.
  *
  * Design tradeoffs:
- *   - DOM listener ownership stays in `CommandShortcutHost`, which uses tinykeys for one
- *     capture-phase listener. The registry only decides which matching command may run.
+ *   - DOM listener ownership stays in `CommandShortcutHost`, which uses TanStack Hotkeys for
+ *     parsing and matching behind one capture-phase listener. The registry only decides which
+ *     matching command may run.
  *   - Stack duplicate ids so stable built-in definitions stay visible/customizable while
  *     route-scoped components temporarily provide the live handler. Rejected replace-only:
  *     unmounting a session page would remove its shortcut from Settings entirely.
@@ -136,7 +137,7 @@ class CommandRegistry {
     const registration: ScopeRegistration = {
       scope,
       canonicalClaims: scope.claims
-        ? new Set(scope.claims.map((claim) => canonicalKey(parseBinding(claim))))
+        ? new Set(scope.claims.map(canonicalizeBinding).filter((claim) => claim !== null))
         : undefined,
     };
     this.scopes.push(registration);
@@ -209,17 +210,12 @@ class CommandRegistry {
   }
 
   /**
-   * Dispatch a keybinding already matched by the renderer shortcut host. tinykeys owns
-   * DOM matching; this method owns command precedence, scopes, guards, and analytics.
+   * Dispatch a keybinding already matched by the renderer shortcut host. The hotkey engine
+   * owns DOM matching; this method owns command precedence, scopes, guards, and analytics.
    */
   dispatchKeybinding(binding: string, event: KeyboardEvent): void {
-    let parsed: ReturnType<typeof parseBinding>;
-    try {
-      parsed = parseBinding(binding);
-    } catch {
-      return;
-    }
-    this.handleKeyDown(canonicalKey(parsed), event);
+    const canonical = canonicalizeBinding(binding);
+    if (canonical) this.handleKeyDown(canonical, event);
   }
 
   /** Refresh persisted overrides after this renderer mounts or another window changes them. */
@@ -280,13 +276,9 @@ class CommandRegistry {
 
   /** Find the command id currently bound to a given binding string, if any. */
   findCommandBoundTo(binding: string, excludeId?: string): string | null {
-    let parsed: ReturnType<typeof parseBinding>;
-    try {
-      parsed = parseBinding(binding);
-    } catch {
-      return null;
-    }
-    const hit = this.commandByCanonical.get(canonicalKey(parsed));
+    const canonical = canonicalizeBinding(binding);
+    if (!canonical) return null;
+    const hit = this.commandByCanonical.get(canonical);
     if (!hit || hit === excludeId) return null;
     return hit;
   }
@@ -345,15 +337,11 @@ class CommandRegistry {
           );
         }
 
-        let parsed: ReturnType<typeof parseBinding>;
-        try {
-          parsed = parseBinding(binding.key);
-        } catch (error) {
-          console.error(`[commands] invalid binding for "${cmd.id}":`, error);
+        const canonical = canonicalizeBinding(binding.key);
+        if (!canonical) {
+          console.error(`[commands] invalid binding for "${cmd.id}": "${binding.key}"`);
           continue;
         }
-
-        const canonical = canonicalKey(parsed);
         const prior = byCanonical.get(canonical);
         if (prior && prior !== cmd.id && import.meta.env?.DEV) {
           console.warn(
@@ -442,18 +430,6 @@ class CommandRegistry {
       .map((registration) => registration.command);
     for (const listener of this.listeners) listener();
   }
-}
-
-function canonicalKey(parsed: ReturnType<typeof parseBinding>): string {
-  const modUsesMeta = parsed.mod && isMac();
-  const modUsesControl = parsed.mod && !modUsesMeta;
-  return [
-    parsed.ctrl || modUsesControl ? 'ctrl' : '',
-    parsed.meta || modUsesMeta ? 'meta' : '',
-    parsed.alt ? 'alt' : '',
-    parsed.shift ? 'shift' : '',
-    parsed.key,
-  ].join(':');
 }
 
 export const commands = new CommandRegistry();

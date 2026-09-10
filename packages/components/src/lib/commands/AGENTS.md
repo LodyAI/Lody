@@ -29,8 +29,9 @@ only tells global dispatch to yield for events originating in its subtree.
   yielded bindings.
 - A scope that yields an event must not call `preventDefault`: the editor/local keymap
   still needs to receive it. This applies after a shortcut is rebound as well.
-- `$mod` means Command on macOS and Control elsewhere. Formatting is platform-aware.
-- `layout.toggleZenMode` owns `$mod+.` outside editors. Monaco claims that binding
+- `Mod` means Command on macOS and Control elsewhere. Parsing, matching, event normalization,
+  and formatting use `@tanstack/hotkeys`; do not introduce another binding grammar.
+- `layout.toggleZenMode` owns `Mod+.` outside editors. Monaco claims that binding
   locally for Quick Fix, so the app command must yield while focus is in its subtree.
 - Alt+letter matching and recording must use `event.code`; macOS `event.key` may be a
   generated glyph such as `∫`.
@@ -38,7 +39,7 @@ only tells global dispatch to yield for events originating in its subtree.
   keeps a one-second settle window because macOS may suppress letter keyup while
   Command remains held.
 - User bindings are per-device localStorage state shared by every renderer window.
-  `CommandShortcutHost` owns the renderer lifecycle, tinykeys owns DOM matching, and
+  `CommandShortcutHost` owns the renderer lifecycle, TanStack Hotkeys owns parsing/matching, and
   `user-bindings.ts` owns the storage subscription so changes take effect in all open
   windows. `[]` explicitly unbinds all defaults and `null` restores defaults.
 
@@ -46,14 +47,13 @@ only tells global dispatch to yield for events originating in its subtree.
 
 - `registry.ts`: registration stack, execution policy, scopes, user overrides, and conflict
   lookup. It does not own browser event listeners.
-- `shortcut-host.tsx`: the single renderer-level tinykeys listener and storage-subscription
+- `shortcut-host.tsx`: the single renderer-level hotkey listener and storage-subscription
   lifecycle. Mount it once through `AppInitializer`.
 - `shortcuts.ts`: `COMMAND_SHORTCUTS` defaults plus the renderer display mirror for OS
   global shortcuts. `@lody/shared`'s `GLOBAL_SHORTCUT_DEFAULTS` owns global ids and
   bindings.
-- `key-matcher.ts`: public binding parsing, tinykeys translation, and physical-key mapping
-  for capture and remaining component-local chords.
-- `key-capture.ts`: interactive recording and registry pausing.
+- `key-matcher.ts`: the narrow platform adapter around TanStack normalization and matching.
+- `key-capture.ts`: interactive recording, DOM physical-key normalization, and registry pausing.
 - `built-ins.ts`: palette toggle and placeholder registrations.
 - `user-bindings.ts`: validated localStorage persistence and cross-window subscription.
 - `format.ts`: platform-aware binding/part presentation.
@@ -69,7 +69,7 @@ only tells global dispatch to yield for events originating in its subtree.
 - Electron menu bridge: `components/electron-menu-handler.tsx` converts
   `lody:menu-action` IPC into `commands.execute()`, except window chords.
 - Cmd/Ctrl+W is a native menu accelerator, not a registry command. Do not restore a
-  `role: 'close'` accelerator and do not bind `$mod+w` in the renderer. Main
+  `role: 'close'` accelerator and do not bind `Mod+w` in the renderer. Main
   `closeFocusedTabOrWindow` closes DevTools, then broadcasts
   `close-current-tab-or-window` to the main window. The shell
   (`desktop-tab-or-window-close.ts`) asks the top tab closer; session-detail

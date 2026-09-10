@@ -1,6 +1,7 @@
+import { createMultiHotkeyHandler, type Hotkey, type HotkeyCallback } from '@tanstack/hotkeys';
 import { useEffect, useMemo } from 'react';
-import { tinykeys, type KeybindingsMap } from 'tinykeys';
-import { bindingToTinykeys } from './key-matcher';
+import { canonicalizeBinding } from './key-matcher';
+import { getHotkeyPlatform } from './platform';
 import { commands } from './registry';
 import { useCommands } from './use-commands';
 import { subscribeUserBindings } from './user-bindings';
@@ -8,15 +9,15 @@ import { subscribeUserBindings } from './user-bindings';
 /** Owns the single application-shortcut listener for one renderer window. */
 export function CommandShortcutHost() {
   const commandSnapshot = useCommands();
-  const keybindings = useMemo<KeybindingsMap>(() => {
-    const next = Object.create(null) as KeybindingsMap;
+  const keybindings = useMemo(() => {
+    const next: Partial<Record<Hotkey, HotkeyCallback>> = Object.create(null);
 
     for (const command of commandSnapshot) {
       for (const binding of commands.getKeybindingsFor(command.id)) {
-        const tinykeysBinding = bindingToTinykeys(binding);
-        if (!tinykeysBinding) continue;
+        const normalized = canonicalizeBinding(binding);
+        if (!normalized) continue;
         // Registry dispatch resolves command collisions and mounted implementation priority.
-        next[tinykeysBinding] = (event) => commands.dispatchKeybinding(binding, event);
+        next[normalized as Hotkey] = (event) => commands.dispatchKeybinding(normalized, event);
       }
     }
 
@@ -25,12 +26,13 @@ export function CommandShortcutHost() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || Object.keys(keybindings).length === 0) return undefined;
-    return tinykeys(window, keybindings, {
-      capture: true,
-      // Scopes and allowInTextInput own focus semantics. The engine must see these events
-      // so registry dispatch can explicitly yield or run the command.
-      ignore: () => false,
+    const handler = createMultiHotkeyHandler(keybindings, {
+      platform: getHotkeyPlatform(),
+      preventDefault: false,
+      stopPropagation: false,
     });
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [keybindings]);
 
   useEffect(() => {

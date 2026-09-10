@@ -1,3 +1,4 @@
+import { migrateLegacyShortcutBinding } from '@lody/shared';
 import { z } from 'zod';
 
 /**
@@ -23,7 +24,11 @@ export function loadUserBindings(): UserBindingsMap {
     const raw = localStorage.getItem(USER_BINDINGS_STORAGE_KEY);
     if (!raw) return {};
     const parsed = userBindingsSchema.safeParse(JSON.parse(raw));
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      const migrated = migrateLegacyPrimaryModifier(parsed.data);
+      if (migrated !== parsed.data) saveUserBindings(migrated);
+      return migrated;
+    }
     console.warn('[commands] discarding malformed user bindings', parsed.error);
     localStorage.removeItem(USER_BINDINGS_STORAGE_KEY);
     return {};
@@ -36,6 +41,21 @@ export function loadUserBindings(): UserBindingsMap {
     }
     return {};
   }
+}
+
+function migrateLegacyPrimaryModifier(map: UserBindingsMap): UserBindingsMap {
+  let changed = false;
+  const migrated = Object.fromEntries(
+    Object.entries(map).map(([commandId, bindings]) => [
+      commandId,
+      bindings.map((binding) => {
+        const next = migrateLegacyShortcutBinding(binding);
+        if (next !== binding) changed = true;
+        return next;
+      }),
+    ])
+  );
+  return changed ? migrated : map;
 }
 
 export function saveUserBindings(map: UserBindingsMap): void {

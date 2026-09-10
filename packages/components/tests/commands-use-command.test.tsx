@@ -46,7 +46,7 @@ describe('useCommand', () => {
       useCommand({
         id: 'session.closeFocusedTab',
         title: 'Close Focused Tab',
-        keybindings: ['$mod+w'],
+        keybindings: ['Mod+w'],
         allowInTextInput: true,
         run,
       });
@@ -89,7 +89,7 @@ describe('useCommand', () => {
       useCommand({
         id: 'session.closeFocusedTab',
         title: 'Close Focused Tab',
-        keybindings: ['$mod+Shift+['],
+        keybindings: ['Mod+Shift+['],
         run,
       });
       return null;
@@ -118,7 +118,7 @@ describe('useCommand', () => {
     });
     expect(run).toHaveBeenCalledTimes(1);
 
-    act(() => commands.setUserKeybindings('session.closeFocusedTab', ['$mod+j']));
+    act(() => commands.setUserKeybindings('session.closeFocusedTab', ['Mod+j']));
     act(() => {
       window.dispatchEvent(
         new KeyboardEvent('keydown', {
@@ -152,7 +152,7 @@ describe('useCommand', () => {
     const later = vi.fn();
 
     function Harness() {
-      useCommand({ id: 'test.mod', title: 'Mod', keybindings: ['$mod+b'], run: earlier });
+      useCommand({ id: 'test.mod', title: 'Mod', keybindings: ['Mod+b'], run: earlier });
       useCommand({ id: 'test.control', title: 'Control', keybindings: ['Control+b'], run: later });
       return null;
     }
