@@ -3,6 +3,7 @@ import {
   createUsageCalendarModel,
   USAGE_CALENDAR_CELLS,
   type UsageCalendarData,
+  type UsageCalendarMetric,
 } from '@/components/settings/usage-calendar-model';
 import { UsageShareCard } from '@/components/settings/usage-share-card';
 import {
@@ -45,7 +46,6 @@ function buildCalendar(): UsageCalendarData {
 }
 
 const CALENDAR = buildCalendar();
-const MODEL = createUsageCalendarModel(CALENDAR, 'tokens');
 
 const MODEL_MIX = [
   { modelId: 'claude-opus-5', weight: 0.52 },
@@ -72,15 +72,18 @@ function buildBuckets(count: number, stepMs: number, perBucket: number) {
       bucketLabel: String(index),
       tokens,
       costUSD: tokens * 0.0000042,
+      // Per-model and per-member cost has to be real here: the card can be
+      // denominated in USD, and a fixture that leaves it at zero would silently
+      // drop the split block instead of exercising it.
       byModel: MODEL_MIX.map((entry) => ({
         modelId: entry.modelId,
         tokens: Math.round(tokens * entry.weight),
-        costUSD: 0,
+        costUSD: tokens * entry.weight * 0.0000042,
       })),
       byUser: MEMBER_MIX.map((entry) => ({
         userId: entry.userId,
         tokens: Math.round(tokens * entry.weight),
-        costUSD: 0,
+        costUSD: tokens * entry.weight * 0.0000042,
       })),
     };
   });
@@ -108,17 +111,25 @@ const MONTH = buildTimeline('month', buildBuckets(30, DAY_MS, 41_000_000), DAY_M
 const DAY = buildTimeline('day', buildBuckets(24, HOUR_MS, 3_100_000), HOUR_MS);
 const WEEK = buildTimeline('week', buildBuckets(7 * 24, HOUR_MS, 1_900_000), HOUR_MS);
 
-function cardProps(timeline: SettingsUsageTimelineData, rangeLabel: string) {
+function cardPropsFor(
+  timeline: SettingsUsageTimelineData,
+  rangeLabel: string,
+  metric: UsageCalendarMetric
+) {
+  const calendar = createUsageCalendarModel(CALENDAR, metric);
   return {
-    calendar: MODEL,
-    stats: computeUsageShareStats(MODEL, timeline, timeline.range),
-    graphic: computeUsageShareGraphic(timeline, timeline.range),
-    modelSlices: computeUsageShareModelSlices(timeline, (id) => id, 'Other'),
-    memberSlices: computeUsageShareMemberSlices(timeline, () => 'Unknown member', 'Other'),
+    calendar,
+    stats: computeUsageShareStats(calendar, timeline, timeline.range, metric),
+    graphic: computeUsageShareGraphic(timeline, timeline.range, metric),
+    modelSlices: computeUsageShareModelSlices(timeline, (id) => id, 'Other', metric),
+    memberSlices: computeUsageShareMemberSlices(timeline, () => 'Unknown member', 'Other', metric),
     rangeLabel,
     workspaceName: 'Loro',
   };
 }
+
+const cardProps = (timeline: SettingsUsageTimelineData, rangeLabel: string) =>
+  cardPropsFor(timeline, rangeLabel, 'tokens');
 
 const meta = {
   title: 'Settings/UsageShareCard',
@@ -184,12 +195,12 @@ export const CanvasFooter: Story = {
   },
 };
 
-/** Cost is opt-in; this is what turning it on looks like. */
-export const WithCost: Story = {
+/** The whole card denominated in dollars: headline, cells, graphic and split. */
+export const CostMetric: Story = {
   args: {
-    ...cardProps(MONTH, 'Last 30 days'),
-    aspect: 'wide',
-    showCost: true,
+    ...cardPropsFor(MONTH, 'Last 30 days', 'costUSD'),
+    aspect: 'portrait',
+    metric: 'costUSD',
     backdrop: 'sunset',
     theme: 'light',
   },

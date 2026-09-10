@@ -1,4 +1,8 @@
-import type { UsageCalendarCell, UsageCalendarModel } from './usage-calendar-model';
+import type {
+  UsageCalendarCell,
+  UsageCalendarMetric,
+  UsageCalendarModel,
+} from './usage-calendar-model';
 import type { SettingsUsageRange, SettingsUsageTimelineData } from './settings-data-cache';
 
 /**
@@ -12,7 +16,8 @@ export type UsageShareTrio = 'daily' | 'interval';
 export type UsageShareSlice = {
   id: string;
   label: string;
-  tokens: number;
+  /** In the card's chosen metric — tokens or USD, never both. */
+  value: number;
   /** Fraction of the range total, in [0, 1]. */
   share: number;
   /** Member avatar URL; only ever set for member slices. */
@@ -21,8 +26,12 @@ export type UsageShareSlice = {
 
 export type UsageShareStats = {
   trio: UsageShareTrio;
-  totalTokens: number;
-  totalCostUSD: number;
+  /**
+   * The range's total in the chosen metric. The card is denominated end to end —
+   * headline, cells, graphic and split all read the same unit — so carrying both
+   * would invite a card that mixes them.
+   */
+  total: number;
   /** Days (or hourly intervals) inside the range that recorded usage. */
   activeCount: number;
   /** Longest run of consecutive active days/intervals inside the range. */
@@ -68,18 +77,22 @@ function streaks(values: number[]): { active: number; longest: number } {
 export function computeUsageShareStats(
   calendar: UsageCalendarModel,
   timeline: SettingsUsageTimelineData | undefined,
-  range: SettingsUsageRange
+  range: SettingsUsageRange,
+  metric: UsageCalendarMetric = 'tokens'
 ): UsageShareStats {
+  const pick = (row: { tokens: number; costUSD: number }) =>
+    metric === 'tokens' ? row.tokens : row.costUSD;
+
   if (timeline && (range === 'day' || range === 'week')) {
-    const values = timeline.buckets.map((bucket) => bucket.tokens);
+    const values = timeline.buckets.map(pick);
     const { active, longest } = streaks(values);
+    const total = pick(timeline.totals);
     return {
       trio: 'interval',
-      totalTokens: timeline.totals.tokens,
-      totalCostUSD: timeline.totals.costUSD,
+      total,
       activeCount: active,
       longestStreak: longest,
-      average: values.length > 0 ? timeline.totals.tokens / values.length : 0,
+      average: values.length > 0 ? total / values.length : 0,
       peak: values.length > 0 ? Math.max(...values) : 0,
       litDayStartMs: { fromMs: timeline.startMs, toMs: timeline.endMs },
       periodMs: { fromMs: timeline.startMs, toMs: timeline.endMs },
@@ -95,21 +108,18 @@ export function computeUsageShareStats(
       )
     : elapsed;
   const window = inRange.length > 0 ? inRange : elapsed;
-  const values = window.map((cell) => cell.tokens);
+  const values = window.map(pick);
   const { active, longest } = streaks(values);
-  const totalTokens = timeline
-    ? timeline.totals.tokens
+  const total = timeline
+    ? pick(timeline.totals)
     : values.reduce((sum, value) => sum + value, 0);
 
   return {
     trio: 'daily',
-    totalTokens,
-    totalCostUSD: timeline
-      ? timeline.totals.costUSD
-      : window.reduce((sum, cell) => sum + cell.costUSD, 0),
+    total,
     activeCount: active,
     longestStreak: longest,
-    average: window.length > 0 ? totalTokens / window.length : 0,
+    average: window.length > 0 ? total / window.length : 0,
     peak: values.length > 0 ? Math.max(...values) : 0,
     litDayStartMs:
       // `total` covers the whole calendar; lighting a window would imply the
@@ -134,20 +144,22 @@ export function computeUsageShareStats(
 export function computeUsageShareModelSlices(
   timeline: SettingsUsageTimelineData | undefined,
   labelModel: (modelId: string) => string,
-  otherLabel: string
+  otherLabel: string,
+  metric: UsageCalendarMetric = 'tokens'
 ): UsageShareSlice[] {
   if (!timeline) return [];
   const totals = new Map<string, number>();
   for (const bucket of timeline.buckets) {
     for (const item of bucket.byModel) {
-      totals.set(item.modelId, (totals.get(item.modelId) ?? 0) + item.tokens);
+      const value = metric === 'tokens' ? item.tokens : item.costUSD;
+      totals.set(item.modelId, (totals.get(item.modelId) ?? 0) + value);
     }
   }
   return foldSlices(
-    [...totals].map(([modelId, tokens]) => ({
+    [...totals].map(([modelId, value]) => ({
       id: modelId,
       label: labelModel(modelId),
-      tokens,
+      value,
       share: 0,
     })),
     otherLabel
@@ -162,20 +174,22 @@ export function computeUsageShareModelSlices(
 export function computeUsageShareMemberSlices(
   timeline: SettingsUsageTimelineData | undefined,
   fallbackLabel: (userId: string) => string,
-  otherLabel: string
+  otherLabel: string,
+  metric: UsageCalendarMetric = 'tokens'
 ): UsageShareSlice[] {
   if (!timeline) return [];
   const totals = new Map<string, number>();
   for (const bucket of timeline.buckets) {
     for (const item of bucket.byUser) {
-      totals.set(item.userId, (totals.get(item.userId) ?? 0) + item.tokens);
+      const value = metric === 'tokens' ? item.tokens : item.costUSD;
+      totals.set(item.userId, (totals.get(item.userId) ?? 0) + value);
     }
   }
   return foldSlices(
-    [...totals].map(([userId, tokens]) => ({
+    [...totals].map(([userId, value]) => ({
       id: userId,
       label: timeline.users?.[userId]?.name?.trim() || fallbackLabel(userId),
-      tokens,
+      value,
       share: 0,
       image: timeline.users?.[userId]?.image ?? null,
     })),
@@ -184,14 +198,15 @@ export function computeUsageShareMemberSlices(
 }
 
 function foldSlices(rows: UsageShareSlice[], otherLabel: string): UsageShareSlice[] {
-  const sorted = rows.filter((row) => row.tokens > 0).sort((a, b) => b.tokens - a.tokens);
-  const total = sorted.reduce((sum, row) => sum + row.tokens, 0);
+  const sorted = rows.filter((row) => row.value > 0).sort((a, b) => b.value - a.value);
+  const total = sorted.reduce((sum, row) => sum + row.value, 0);
   if (total <= 0) return [];
 
   const head = sorted.slice(0, MAX_SLICES);
-  const restTokens = sorted.slice(MAX_SLICES).reduce((sum, row) => sum + row.tokens, 0);
-  const slices = restTokens > 0 ? [...head, { id: '__other', label: otherLabel, tokens: restTokens, share: 0 }] : head;
-  return slices.map((row) => ({ ...row, share: row.tokens / total }));
+  const rest = sorted.slice(MAX_SLICES).reduce((sum, row) => sum + row.value, 0);
+  const slices =
+    rest > 0 ? [...head, { id: '__other', label: otherLabel, value: rest, share: 0 }] : head;
+  return slices.map((row) => ({ ...row, share: row.value / total }));
 }
 
 /**
@@ -218,7 +233,8 @@ const HOURS_PER_DAY = 24;
  */
 export function computeUsageShareGraphic(
   timeline: SettingsUsageTimelineData | undefined,
-  range: SettingsUsageRange
+  range: SettingsUsageRange,
+  metric: UsageCalendarMetric = 'tokens'
 ): UsageShareGraphic {
   const hourly =
     timeline && timeline.bucketSizeMs <= HOUR_MS && timeline.buckets.length > 0
@@ -226,7 +242,9 @@ export function computeUsageShareGraphic(
       : null;
   if (!hourly || (range !== 'day' && range !== 'week')) return { kind: 'calendar' };
 
-  if (range === 'day') return { kind: 'hours', values: hourly.map((bucket) => bucket.tokens) };
+  const pick = (row: { tokens: number; costUSD: number }) =>
+    metric === 'tokens' ? row.tokens : row.costUSD;
+  if (range === 'day') return { kind: 'hours', values: hourly.map(pick) };
 
   // 7d: group the hour buckets into whole days so every row is a real day, and a
   // day the range only partly covers still lines its hours up with the others.
@@ -235,7 +253,7 @@ export function computeUsageShareGraphic(
     const date = new Date(bucket.bucketStartMs);
     const dayStartMs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
     const values = rows.get(dayStartMs) ?? new Array<number>(HOURS_PER_DAY).fill(0);
-    values[date.getUTCHours()] += bucket.tokens;
+    values[date.getUTCHours()] += pick(bucket);
     rows.set(dayStartMs, values);
   }
   return {

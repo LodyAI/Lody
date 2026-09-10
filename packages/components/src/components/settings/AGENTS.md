@@ -33,9 +33,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`: its two
   aspects are exact pixel sizes, its period is the page's selected range, and its
   headline is that range's timeline total, so page and image cannot disagree. Derive
-  every number through `usage-share-stats.ts`. Cost and member identification are each
-  off by default, and member slices carry display name and avatar only — never an
-  email. Both share cards use the one capture pipeline in `lib/share-image-export.ts`
+  every number through `usage-share-stats.ts`, threading the metric so the headline,
+  cells, graphic shading and both splits always read one unit. Tokens and member
+  anonymity are the defaults; cost substitutes for tokens rather than joining them,
+  and member slices carry display name and avatar only — never an email. Both share cards use the one capture pipeline in `lib/share-image-export.ts`
   and the one theme pinning in `components/share-theme-scope.ts`; do not fork either.
   `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
   dialog, because the public landing reuses that view. Typography and spacing come

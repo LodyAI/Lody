@@ -42,10 +42,14 @@ carry no per-day label: seven days of hours touch eight calendar days whenever t
 window does not begin at midnight, and eight rows inside the shared box leave no
 room for a legible one. The headline already names the span.
 
-The card is always token-denominated; the screen's tokens/cost toggle is a
-reading aid and does not travel into the image. USD spend appears only when the
-user turns it on, because a workspace's spend is not implied by a request to
-share activity. The card names the workspace and, by default, no one else. The
+The card is denominated end to end in one measure, tokens or USD: the headline,
+the four cells, the graphic's shading and the split all read the same unit, so no
+band can disagree with another and a reader never has to work out which number is
+the subject. Tokens are the default, because a workspace's spend is not implied by
+a request to share activity; naming cost as the measure is a deliberate act, and it
+substitutes for tokens rather than joining them. A deployment that reports no
+per-model cost simply has no split block on a cost card, the same as any range
+without recorded usage. The card names the workspace and, by default, no one else. The
 member mode is an explicit choice, is offered only when the range has more than
 one contributor, and identifies members by display name and avatar; an email is
 never drawn onto the image.

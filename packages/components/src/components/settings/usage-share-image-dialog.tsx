@@ -9,7 +9,7 @@ import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
-import { createUsageCalendarModel } from './usage-calendar-model';
+import { createUsageCalendarModel, type UsageCalendarMetric } from './usage-calendar-model';
 import {
   UsageShareCard,
   USAGE_SHARE_BACKDROP_STYLES,
@@ -112,7 +112,7 @@ export function UsageShareImageDialog({
   const [backdrop, setBackdrop] = useState<UsageShareCardBackdrop>('lody');
   const [theme, setTheme] = useState<'app' | 'light' | 'dark'>('dark');
   const [footer, setFooter] = useState<UsageShareCardFooter>('card');
-  const [showCost, setShowCost] = useState(false);
+  const [metric, setMetric] = useState<UsageCalendarMetric>('tokens');
   const [showQr, setShowQr] = useState(true);
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
@@ -122,27 +122,36 @@ export function UsageShareImageDialog({
   const [exportError, setExportError] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // The card is always token-denominated; the page's cost/tokens toggle is an
-  // on-screen reading aid, not a property of the shared image.
-  const model = useMemo(() => createUsageCalendarModel(calendar, 'tokens'), [calendar]);
+  // The heatmap's own intensity scale is built from the same metric the card is
+  // denominated in, so a cost card is shaded by cost rather than by tokens.
+  const model = useMemo(() => createUsageCalendarModel(calendar, metric), [calendar, metric]);
   const stats = useMemo(
-    () => computeUsageShareStats(model, timeline, range),
-    [model, timeline, range]
+    () => computeUsageShareStats(model, timeline, range, metric),
+    [model, timeline, range, metric]
   );
-  const graphic = useMemo(() => computeUsageShareGraphic(timeline, range), [timeline, range]);
+  const graphic = useMemo(
+    () => computeUsageShareGraphic(timeline, range, metric),
+    [timeline, range, metric]
+  );
   const modelSlices = useMemo(
     () =>
-      computeUsageShareModelSlices(timeline, stripRecommended, t('workspace.usage.skyline.other')),
-    [timeline, t]
+      computeUsageShareModelSlices(
+        timeline,
+        stripRecommended,
+        t('workspace.usage.skyline.other'),
+        metric
+      ),
+    [timeline, t, metric]
   );
   const memberSlices = useMemo(
     () =>
       computeUsageShareMemberSlices(
         timeline,
         () => t('workspace.usage.shareImage.unknownMember'),
-        t('workspace.usage.skyline.other')
+        t('workspace.usage.skyline.other'),
+        metric
       ),
-    [timeline, t]
+    [timeline, t, metric]
   );
 
   // A "team" card that lists one person is just the personal card with a worse
@@ -201,6 +210,27 @@ export function UsageShareImageDialog({
             disabled={exporting}
             className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
           >
+            <div className="space-y-2">
+              <Label htmlFor="usage-share-metric">{t('workspace.usage.shareImage.metric')}</Label>
+              <Select
+                value={metric}
+                onValueChange={(value) => setMetric(value as UsageCalendarMetric)}
+              >
+                <SelectTrigger id="usage-share-metric" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tokens">{t('workspace.usage.tokens')}</SelectItem>
+                  <SelectItem value="costUSD">{t('workspace.usage.cost')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {metric === 'costUSD' ? (
+                <p className="text-xs leading-snug text-muted-foreground">
+                  {t('workspace.usage.shareImage.metricCostHint')}
+                </p>
+              ) : null}
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="usage-share-aspect">{t('workspace.usage.shareImage.aspect')}</Label>
               <Select
@@ -331,22 +361,11 @@ export function UsageShareImageDialog({
             <div className="space-y-2">
               <Label>{t('workspace.usage.shareImage.content')}</Label>
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="usage-share-cost" className="font-normal text-muted-foreground">
-                  {t('workspace.usage.shareImage.showCost')}
-                </Label>
-                <Switch id="usage-share-cost" checked={showCost} onCheckedChange={setShowCost} />
-              </div>
-              <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="usage-share-qr" className="font-normal text-muted-foreground">
                   {t('workspace.usage.shareImage.showQr')}
                 </Label>
                 <Switch id="usage-share-qr" checked={showQr} onCheckedChange={setShowQr} />
               </div>
-              {showCost ? (
-                <p className="text-xs leading-snug text-muted-foreground">
-                  {t('workspace.usage.shareImage.showCostHint')}
-                </p>
-              ) : null}
             </div>
           </fieldset>
 
@@ -365,7 +384,7 @@ export function UsageShareImageDialog({
                   subject={subject}
                   backdrop={backdrop}
                   footer={footer}
-                  showCost={showCost}
+                  metric={metric}
                   showQr={showQr}
                   theme={theme === 'app' ? undefined : theme}
                   onAssetsReadyChange={setAssetsReady}

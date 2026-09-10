@@ -8,7 +8,11 @@ import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import lodyLogo from '@/assets/lody-icon.png';
-import { createUsageHeatScale, type UsageCalendarModel } from './usage-calendar-model';
+import {
+  createUsageHeatScale,
+  type UsageCalendarMetric,
+  type UsageCalendarModel,
+} from './usage-calendar-model';
 import type { UsageShareGraphic, UsageShareSlice, UsageShareStats } from './usage-share-stats';
 
 /**
@@ -78,10 +82,10 @@ export interface UsageShareCardProps {
   subject?: UsageShareCardSubject;
   backdrop?: UsageShareCardBackdrop;
   /**
-   * Adds the range's USD spend beside the hero number. Off unless the user asks
-   * for it: a workspace's spend is nobody else's business by default.
+   * What the whole card counts. Tokens by default: a workspace's spend is nobody
+   * else's business unless the person sharing chooses to make it the subject.
    */
-  showCost?: boolean;
+  metric?: UsageCalendarMetric;
   shareUrl?: string;
   showQr?: boolean;
   /** Sign-off placement; `canvas` needs a backdrop and falls back to `card` without one. */
@@ -362,7 +366,7 @@ function UsageShareSplit({
   subject,
   compact,
   locale,
-  formatTokens,
+  formatValue,
   split,
   rows: rowGap,
 }: {
@@ -370,7 +374,7 @@ function UsageShareSplit({
   subject: UsageShareCardSubject;
   compact: boolean;
   locale: string;
-  formatTokens: (value: number) => string;
+  formatValue: (value: number) => string;
   /** Bar-to-legend gap and row-to-row gap, from the format's rhythm. */
   split: string;
   rows: string;
@@ -417,7 +421,7 @@ function UsageShareSplit({
               <span
                 className={cn('ml-auto shrink-0 tabular-nums text-muted-foreground/80', TEXT.meta)}
               >
-                {formatTokens(slice.tokens)}
+                {formatValue(slice.value)}
               </span>
             )}
             <span
@@ -472,7 +476,7 @@ export function UsageShareCard({
   aspect = 'portrait',
   subject = 'personal',
   backdrop = 'lody',
-  showCost = false,
+  metric = 'tokens',
   shareUrl = DEFAULT_SHARE_URL,
   showQr = true,
   footer: footerPlacement = 'card',
@@ -523,7 +527,12 @@ export function UsageShareCard({
   // Without a backdrop there is nothing to print the sign-off on.
   const onCanvas = footerPlacement === 'canvas' && framed;
   const slices = subject === 'team' ? memberSlices : modelSlices;
-  const compact = (value: number) => formatCompactNumber(value, locale);
+  // Every number on the card goes through this, so a cost card can never print a
+  // token count beside a dollar figure.
+  const formatValue = (value: number) =>
+    metric === 'tokens'
+      ? formatCompactNumber(value, locale)
+      : formatUsdAmount(value, locale);
 
   // Same four facts at every range, only the unit changes: how often, how
   // consistently, how much on a typical unit, how much at the best one.
@@ -534,15 +543,15 @@ export function UsageShareCard({
           { label: t('workspace.usage.skyline.longestStreak'), value: String(stats.longestStreak) },
           {
             label: t('workspace.usage.skyline.averagePerInterval'),
-            value: compact(stats.average),
+            value: formatValue(stats.average),
           },
-          { label: t('workspace.usage.skyline.peakInterval'), value: compact(stats.peak) },
+          { label: t('workspace.usage.skyline.peakInterval'), value: formatValue(stats.peak) },
         ]
       : [
           { label: t('workspace.usage.skyline.activeDays'), value: String(stats.activeCount) },
           { label: t('workspace.usage.skyline.longestStreak'), value: String(stats.longestStreak) },
-          { label: t('workspace.usage.skyline.dailyAverage'), value: compact(stats.average) },
-          { label: t('workspace.usage.skyline.peakDay'), value: compact(stats.peak) },
+          { label: t('workspace.usage.skyline.dailyAverage'), value: formatValue(stats.average) },
+          { label: t('workspace.usage.skyline.peakDay'), value: formatValue(stats.peak) },
         ];
   // 16:9 puts the cells on the hero's baseline, where a fourth would not fit.
   const trioCells = wide ? allCells.slice(0, 3) : allCells;
@@ -554,7 +563,7 @@ export function UsageShareCard({
         wide ? TEXT.heroWide : TEXT.hero
       )}
     >
-      {compact(stats.totalTokens)}
+      {formatValue(stats.total)}
     </span>
   );
   const dayFormat = new Intl.DateTimeFormat(locale, {
@@ -567,20 +576,13 @@ export function UsageShareCard({
     new Date(stats.periodMs.toMs)
   )}`;
 
+  // The unit is named once, by the caption. A card denominated in dollars must not
+  // also print a token count somewhere, or the reader has to guess which is the
+  // subject.
   const heroUnits = (
-    <>
-      <span className={cn('font-medium text-muted-foreground', TEXT.body)}>
-        {t('workspace.usage.tokens')}
-      </span>
-      {showCost ? (
-        <span className={cn('font-semibold tabular-nums text-foreground/80', TEXT.body)}>
-          {formatUsdAmount(stats.totalCostUSD, locale, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </span>
-      ) : null}
-    </>
+    <span className={cn('font-medium text-muted-foreground', TEXT.body)}>
+      {metric === 'tokens' ? t('workspace.usage.tokens') : t('workspace.usage.cost')}
+    </span>
   );
 
   // Portrait stacks the unit under the number; wide sets it on the same
@@ -748,7 +750,7 @@ export function UsageShareCard({
             subject={subject}
             compact
             locale={locale}
-            formatTokens={compact}
+            formatValue={formatValue}
             split={rhythm.split}
             rows={rhythm.rows}
           />
@@ -770,7 +772,7 @@ export function UsageShareCard({
             subject={subject}
             compact={false}
             locale={locale}
-            formatTokens={compact}
+            formatValue={formatValue}
             split={rhythm.split}
             rows={rhythm.rows}
           />

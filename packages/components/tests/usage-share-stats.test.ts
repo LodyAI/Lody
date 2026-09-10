@@ -103,7 +103,7 @@ describe('usage share stats', () => {
     expect(stats.peak).toBe(50);
     // The hero number is the timeline's own total, so the card and the KPI tile
     // the user was looking at can never disagree.
-    expect(stats.totalTokens).toBe(150);
+    expect(stats.total).toBe(150);
     // Ten elapsed days in the window, quiet days included.
     expect(stats.average).toBe(15);
     expect(stats.litDayStartMs).toEqual({ fromMs: START_MS, toMs: START_MS + 9 * DAY_MS });
@@ -148,7 +148,7 @@ describe('usage share stats', () => {
 
     const stats = computeUsageShareStats(calendar, undefined, 'month');
 
-    expect(stats.totalTokens).toBe(20);
+    expect(stats.total).toBe(20);
     expect(stats.activeCount).toBe(2);
     expect(stats.litDayStartMs).toBeNull();
     // No timeline: the span falls back to the calendar's elapsed days.
@@ -179,9 +179,9 @@ describe('usage share stats', () => {
     const slices = computeUsageShareModelSlices(timeline, (id) => id.toUpperCase(), 'Other');
 
     expect(slices.map((slice) => slice.id)).toEqual(['a', 'b', 'c', 'd', '__other']);
-    expect(slices[0]).toMatchObject({ label: 'A', tokens: 60 });
+    expect(slices[0]).toMatchObject({ label: 'A', value: 60 });
     // e (3) + f (2) fold together rather than adding legend rows.
-    expect(slices.at(-1)).toMatchObject({ label: 'Other', tokens: 5 });
+    expect(slices.at(-1)).toMatchObject({ label: 'Other', value: 5 });
     expect(slices.reduce((sum, slice) => sum + slice.share, 0)).toBeCloseTo(1, 10);
   });
 
@@ -208,8 +208,8 @@ describe('usage share stats', () => {
     const slices = computeUsageShareMemberSlices(timeline, () => 'Unknown member', 'Other');
 
     expect(slices).toEqual([
-      { id: 'u1', label: 'Ada', tokens: 90, share: 0.9, image: 'https://img/1' },
-      { id: 'u2', label: 'Unknown member', tokens: 10, share: 0.1, image: null },
+      { id: 'u1', label: 'Ada', value: 90, share: 0.9, image: 'https://img/1' },
+      { id: 'u2', label: 'Unknown member', value: 10, share: 0.1, image: null },
     ]);
     expect(JSON.stringify(slices)).not.toContain('@example.com');
   });
@@ -252,6 +252,47 @@ describe('usage share stats', () => {
 
     expect(computeUsageShareGraphic(daily, 'day')).toEqual({ kind: 'calendar' });
     expect(computeUsageShareGraphic(undefined, 'day')).toEqual({ kind: 'calendar' });
+  });
+
+  it('denominates the whole card in the chosen metric', () => {
+    const calendar = createUsageCalendarModel(createCalendar({ 0: 100 }), 'costUSD');
+    const timeline = createTimeline({
+      range: 'day',
+      bucketSizeMs: HOUR_MS,
+      totals: { tokens: 9000, costUSD: 9 },
+      // The helper derives a bucket's cost from its tokens, so these are the
+      // token counts that make the costs come out at 6 and 3.
+      buckets: [
+        bucket(START_MS, 6000, [{ modelId: 'a', tokens: 6000, costUSD: 6 }], [
+          { userId: 'u1', tokens: 6000, costUSD: 6 },
+        ]),
+        bucket(START_MS + HOUR_MS, 3000, [{ modelId: 'b', tokens: 3000, costUSD: 3 }], [
+          { userId: 'u2', tokens: 3000, costUSD: 3 },
+        ]),
+      ],
+    });
+
+    const stats = computeUsageShareStats(calendar, timeline, 'day', 'costUSD');
+    expect(stats.total).toBe(9);
+    expect(stats.average).toBe(4.5);
+    expect(stats.peak).toBe(6);
+
+    // The graphic and both splits read the same unit, so no band can disagree.
+    expect(computeUsageShareGraphic(timeline, 'day', 'costUSD')).toEqual({
+      kind: 'hours',
+      values: [6, 3],
+    });
+    expect(
+      computeUsageShareModelSlices(timeline, (id) => id, 'Other', 'costUSD').map((s) => s.value)
+    ).toEqual([6, 3]);
+    expect(
+      computeUsageShareMemberSlices(timeline, () => 'Unknown', 'Other', 'costUSD').map(
+        (s) => s.value
+      )
+    ).toEqual([6, 3]);
+
+    // The same fixtures in tokens produce the token figures, not the dollar ones.
+    expect(computeUsageShareStats(calendar, timeline, 'day', 'tokens').total).toBe(9000);
   });
 
   it('returns no slices when the range recorded no usage', () => {

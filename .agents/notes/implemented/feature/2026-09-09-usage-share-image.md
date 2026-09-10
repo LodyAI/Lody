@@ -58,8 +58,13 @@ newest, the grid shares the same left edge as every other band, and the headline
 already names the span.
 
 **Privacy defaults follow the data, not the gesture.** Sharing activity does not
-imply sharing spend, so USD is an explicit opt-in switch rather than a field of
-the card. Member identification is a second opt-in, is offered only when the range
+imply sharing spend, so tokens are the default and naming cost as the measure is a
+deliberate act. Cost began as a switch that appended a USD figure beside the token
+headline; making it the card's *measure* instead is both better product and a
+tighter default, because the two units now substitute rather than accumulate — a
+cost card cannot leak a token count alongside the spend. Everything follows the
+choice: headline, cells, the heatmap's own intensity scale, and both splits, all
+derived once with the metric threaded through `usage-share-stats.ts`. Member identification is a second opt-in, is offered only when the range
 has more than one contributor, and carries display name and avatar only — the
 timeline also holds emails, and `computeUsageShareMemberSlices` never reads them.
 A test asserts no email reaches the slices.
