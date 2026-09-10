@@ -195,12 +195,26 @@ soon as the session opens a PR, and asking an agent to "rotate sk_live_… befor
 Friday" is ordinary. This was reachable before this branch too — the old
 `generateTitleIsolated` returned `sanitizeGeneratedTitle(taskPrompt)` on every
 failure path — but it went from a rare fallback to the common path for the three
-ACP-owned agents, so the exposure changed in kind. `tryBranchName` now strips
-credential-shaped tokens before deriving a name: known prefixes (`sk_`, `ghp_`,
-`AKIA`, `xox…`, PEM blocks) plus unprefixed runs of 20+ alphanumerics containing
-both letters and digits, which catches hex and base62 tokens while leaving English
-prose untouched. Stripping beats refusing: "Fix API key sk_live_…" still yields
-`fix/api-key`. Over-matching costs only a shorter branch name.
+ACP-owned agents, so the exposure changed in kind.
+
+The first attempt stripped credential-shaped tokens and kept naming the branch from
+what was left. Review rejected it, correctly: a secret has no reliable shape —
+`hunter2` is a password and an ordinary word — so a shape-based denylist removes
+what looks secret and leaves everything that does not. `Fix DB_PASSWORD=hunter2`
+and `Fix https://alice:hunter2@example.com` both survived it verbatim.
+
+`tryBranchName` now fails closed instead. It matches the *syntax* that carries
+secrets rather than the secrets themselves — a value assigned to a sensitive name,
+URL userinfo, known key prefixes, PEM blocks, and 20+ alphanumeric runs mixing
+letters and digits — and returns null on any hit, leaving the session on its
+`session/<id>` branch. Failing closed is affordable only because it rarely fires on
+real work, which the tests pin in both directions: nine credential syntaxes refused,
+and six prompts that merely mention `auth`, `token`, `secret` or `credential`
+still named. It remains best-effort, and the note is explicit about that: prose
+like "the password is hunter2" carries no syntax to match. The sound alternative —
+never deriving a ref from prompt text at all — would cost branch naming entirely
+for the three ACP-owned agents, since no generated title exists when the branch is
+named.
 
 Ownership also had to account for `BuiltinRuntimeOverrides`. The table describes the
 managed runtime each agent normally launches, but an override can aim the same

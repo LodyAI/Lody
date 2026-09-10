@@ -111,5 +111,5 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   untagged and are trusted (`trustsUntaggedAcpSessionTitle()`); Codex is not — take only its
   `explicit` `_meta.lody.titleSource` with `messagePhase === 'final_answer'`, not its
   first-prompt `fallback`. Untyped chunks, error/warning payloads and instruction tails never
-  qualify. Each isolated run owns and removes a temp dir; branch naming starts none and strips
-  credential-shaped prompt tokens.
+  qualify. Each isolated run owns and removes a temp dir; branch naming starts none and skips
+  prompts carrying credential syntax.

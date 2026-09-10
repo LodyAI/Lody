@@ -112,30 +112,37 @@ describe('branch-name-generator', () => {
     });
 
     // A branch name is a ref: it reaches the remote when the session opens a PR,
-    // so a prompt that mentions a credential must not publish it.
+    // so a prompt carrying a credential must not name the branch. Secrets have no
+    // reliable shape, so the boundary fails closed on the syntax that carries them
+    // and the session keeps its `session/<id>` branch.
     it.each([
-      ['sk_live_ABC123def456', 'Fix API key sk_live_ABC123def456', 'fix/api-key'],
-      ['sk-proj-', 'rotate sk-proj-9aBcDeFgHiJkLmNoPqRs now', 'feat/rotate-now'],
-      ['ghp_', 'update ghp_16C7e42F292c6912E7710c838347Ae178B4a', 'chore/update'],
-      ['AKIA', 'aws creds AKIAIOSFODNN7EXAMPLE leaked', 'feat/aws-creds-leaked'],
-      ['bare hex', 'token is 0123456789abcdef0123456789abcdef', 'feat/token-is'],
+      ['an assignment to a sensitive name', 'Fix DB_PASSWORD=hunter2'],
+      ['a lowercase assignment', 'debug with password: correcthorse'],
+      ['an AWS-style assignment', 'set AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI'],
+      ['URL userinfo', 'Fix https://alice:hunter2@example.com'],
+      ['an Authorization header', 'Authorization: Bearer eyJhbGciOiJIUzI1'],
+      ['a known key prefix', 'Fix API key sk_live_ABC123def456'],
+      ['a GitHub token', 'update ghp_16C7e42F292c6912E7710c838347Ae178B4a'],
+      ['an unprefixed hex secret', 'token is 0123456789abcdef0123456789abcdef'],
       [
-        'PEM block',
-        'paste of -----BEGIN RSA PRIVATE KEY----- MIIEow -----END RSA PRIVATE KEY----- here',
-        'feat/paste-of-here',
+        'a PEM block',
+        'paste -----BEGIN RSA PRIVATE KEY----- MIIEow -----END RSA PRIVATE KEY-----',
       ],
-    ])('strips a %s credential before naming the branch', (_label, prompt, expected) => {
-      const branch = tryBranchName(prompt);
-      expect(branch).toBe(expected);
+    ])('refuses to name a branch after %s', (_label, prompt) => {
+      expect(tryBranchName(prompt)).toBeNull();
     });
 
-    it('leaves ordinary prompts intact', () => {
-      expect(tryBranchName('Fix crash when opening FooBar with empty input')).toBe(
-        'fix/crash-when-opening-foobar-with-empty-input'
-      );
-      expect(tryBranchName('Bump codex to 1.10.1 and grok to 0.1.3')).toBe(
-        'chore/bump-codex-to-1101-and-grok-to-013'
-      );
+    // Failing closed is only affordable because it does not fire on ordinary work.
+    // These all mention a sensitive word without carrying a value.
+    it.each([
+      ['Fix crash when opening FooBar with empty input', 'fix/crash-when-opening-foobar-with-empty-input'],
+      ['Bump codex to 1.10.1 and grok to 0.1.3', 'chore/bump-codex-to-1101-and-grok-to-013'],
+      ['Fix auth redirect loop after logout', 'fix/auth-redirect-loop-after-logout'],
+      ['Add a token bucket rate limiter', 'feat/a-token-bucket-rate-limiter'],
+      ['Support GITHUB_TOKEN in CI', 'feat/support-github-token-in-ci'],
+      ['Write tests for the credential broker', 'feat/write-tests-for-the-credential-broker'],
+    ])('still names a branch after %s', (prompt, expected) => {
+      expect(tryBranchName(prompt)).toBe(expected);
     });
   });
 });

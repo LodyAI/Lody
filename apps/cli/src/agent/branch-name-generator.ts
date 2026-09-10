@@ -139,40 +139,45 @@ export const isValidGitBranchName = (name: string): boolean => {
 };
 
 /**
- * Credential-shaped tokens, removed before a branch name is derived.
+ * Signals that a prompt is carrying a credential.
  *
  * A branch name is a ref: it is written to `.git`, shown in the UI, and pushed to
- * the remote when the session opens a PR. Naming a branch after a prompt therefore
- * publishes whatever the prompt contained, and "rotate sk_live_… before Friday" is
- * an ordinary thing to ask an agent. Stripping beats refusing outright, because
- * "Fix API key sk_live_…" still yields a useful `fix/api-key`.
+ * the remote as soon as the session opens a PR. Naming a branch after a prompt
+ * therefore publishes whatever the prompt held, and "rotate the key before Friday"
+ * is an ordinary thing to ask an agent.
  *
- * The last alternative catches unprefixed high-entropy tokens: a run of at least
- * 20 alphanumerics containing both letters and digits. English prose has no such
- * runs, while hex and base62 credentials do. Over-matching is safe here — the
- * worst case is a slightly shorter branch name.
+ * This list cannot be complete, and is not meant to be: a secret has no reliable
+ * shape, since `hunter2` is both a password and an ordinary word. It recognizes
+ * the *syntax* that carries secrets rather than the secrets themselves, and the
+ * boundary fails closed on a hit — the session keeps its `session/<id>` branch
+ * instead of getting a name derived from that prompt. A false positive costs one
+ * branch name, so the list leans deliberately wide.
  */
-const CREDENTIAL_LIKE_TOKEN = new RegExp(
+const CREDENTIAL_SIGNAL = new RegExp(
   [
-    // Whole block first, so a short body cannot escape between the markers.
+    // A value assigned to a sensitive name: DB_PASSWORD=…, "api key: …".
+    '(?:api[_-]?key|auth|bearer|credential|passwd|password|secret|token)\\w*\\s*[:=]\\s*\\S',
+    // URL userinfo: https://alice:hunter2@example.com
+    '[a-zA-Z][a-zA-Z0-9+.-]*://[^/\\s@]*:[^/\\s@]*@',
+    // Whole PEM block first, so a short body cannot escape between the markers.
     '-----BEGIN[\\s\\S]*?-----END[\\s\\S]*?-----',
     '-----BEGIN[\\s\\S]*?-----',
+    // Known credential prefixes.
     '\\b(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|glpat|shpat|xox[abprs])[-_][A-Za-z0-9_-]{6,}',
     '\\bgithub_pat_[A-Za-z0-9_]{10,}',
     '\\b(?:AKIA|ASIA|AIza)[A-Za-z0-9]{6,}',
+    // Unprefixed high-entropy run: 20+ alphanumerics mixing letters and digits.
+    // English prose has no such runs; hex and base62 credentials do.
     '\\b(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{20,}\\b',
   ].join('|'),
-  'g'
+  // Case-insensitive: DB_PASSWORD and AWS_SECRET_ACCESS_KEY are how these appear.
+  'i'
 );
 
-/**
- * Convert a title or prompt into a valid branch name, or null when it yields none.
- *
- * Kebab conversion drops every non-ASCII character, so a prompt written entirely
- * in another script has no name to give. Callers are expected to leave the
- * existing branch alone in that case rather than invent a meaningless one.
- */
 export const tryBranchName = (base: string): string | null => {
-  const candidate = titleToBranchName(base.replace(CREDENTIAL_LIKE_TOKEN, ' '));
+  if (CREDENTIAL_SIGNAL.test(base)) {
+    return null;
+  }
+  const candidate = titleToBranchName(base);
   return candidate && isValidGitBranchName(candidate) ? candidate : null;
 };

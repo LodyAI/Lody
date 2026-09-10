@@ -215,10 +215,19 @@ character, so this is the normal outcome for a Chinese prompt — the managed `s
 branch is left alone rather than renamed to a timestamp.
 
 Naming a branch after a prompt publishes the prompt: a ref reaches the remote as soon as the
-session opens a PR, and "rotate sk_live_… before Friday" is an ordinary request. `tryBranchName`
-therefore strips credential-shaped tokens — known prefixes, PEM blocks, and unprefixed runs of
-20+ alphanumerics mixing letters and digits — before deriving the name. Over-matching is the
-safe direction; the cost is a shorter branch name.
+session opens a PR, and "rotate the key before Friday" is an ordinary request. `tryBranchName`
+therefore **fails closed** — on any credential signal it returns null and the session keeps its
+`session/<id>` branch. Stripping the offending token was tried first and abandoned: a secret has
+no reliable shape (`hunter2` is both a password and an ordinary word), so removing what looks
+secret-shaped leaves everything that does not. The signals are the *syntax* that carries
+secrets — a value assigned to a sensitive name, URL userinfo, known key prefixes, PEM blocks,
+and 20+ alphanumeric runs mixing letters and digits.
+
+This is best-effort, not a guarantee: prose like "the password is hunter2" carries no syntax to
+match. It leans wide on purpose, because a false positive costs one branch name while a false
+negative publishes a secret. The `it.each` tables in `tests/branch-name-generator.test.ts` pin
+both directions — nine credential syntaxes refused, and six prompts that merely mention `auth`,
+`token`, `secret` or `credential` still named.
 
 ### Local project identity
 
