@@ -99,7 +99,6 @@ import {
   Brain,
   BrushCleaning,
   Check,
-  CircleStop,
   X,
   CheckCircle2,
   ChevronRight,
@@ -168,7 +167,6 @@ import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
 import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
 import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
-import { resolveContextCompactionDisplayStatus } from '@/lib/session-context-compaction';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
@@ -3415,14 +3413,12 @@ const AssistantToolCallVirtualRow = memo(
     sessionId,
     messageId,
     entry,
-    turnFinished,
     onFilePathClick,
     fontSize,
   }: {
     sessionId: SessionId;
     messageId: string;
     entry: AssistantToolCallRenderItem;
-    turnFinished: boolean;
     onFilePathClick?: (filePath: string) => void;
     fontSize: ConversationFontSize;
   }) {
@@ -3447,7 +3443,6 @@ const AssistantToolCallVirtualRow = memo(
       <ToolCallCard
         sessionId={sessionId}
         toolCall={entry.content}
-        turnFinished={turnFinished}
         expanded={expanded}
         onExpandedChange={setExpanded}
         onFilePathClick={onFilePathClick}
@@ -3466,7 +3461,6 @@ const AssistantToolCallVirtualRow = memo(
     prev.messageId === next.messageId &&
     prev.entry.content === next.entry.content &&
     prev.entry.itemIndex === next.entry.itemIndex &&
-    prev.turnFinished === next.turnFinished &&
     prev.onFilePathClick === next.onFilePathClick &&
     prev.fontSize === next.fontSize
 );
@@ -4013,7 +4007,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
           messageId: message.id,
           itemIndex: entry.itemIndex,
           isStreaming: message.finished !== true,
-          turnFinished: message.finished === true,
           onFilePathClick,
           conversationFontSize,
           planAwaitingDecision: hasUnansweredPlanApproval(message.items),
@@ -4041,7 +4034,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
             sessionId={row.item.sessionId}
             messageId={message.id}
             entry={entry}
-            turnFinished={message.finished === true}
             onFilePathClick={onFilePathClick}
             fontSize={conversationFontSize}
           />
@@ -4353,7 +4345,6 @@ const renderAssistantContent = (
     messageId: string;
     itemIndex: number;
     isStreaming?: boolean;
-    turnFinished?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
     /** This turn's plan approval is still unanswered — see `PlanPanel`. */
@@ -4448,7 +4439,6 @@ const renderAssistantContent = (
         <ToolCallCard
           sessionId={sessionId}
           toolCall={content}
-          turnFinished={options?.turnFinished}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
         />
@@ -5713,7 +5703,6 @@ const ToolCallCard = memo(function ToolCallCard({
   onExpandedChange,
   onFilePathClick,
   inlineOutput = false,
-  turnFinished = false,
 }: {
   toolCall: ToolCallMessage;
   sessionId: SessionId;
@@ -5722,7 +5711,6 @@ const ToolCallCard = memo(function ToolCallCard({
   onExpandedChange?: (expanded: boolean) => void;
   onFilePathClick?: (filePath: string) => void;
   inlineOutput?: boolean;
-  turnFinished?: boolean;
 }) {
   const { t } = useTranslation();
   if (toolCall.activityKind === 'codex_retry') {
@@ -5737,15 +5725,8 @@ const ToolCallCard = memo(function ToolCallCard({
     );
   }
   if (toolCall.activityKind === 'context_compaction') {
-    const status = resolveContextCompactionDisplayStatus(toolCall.status, turnFinished);
-    const isCompacting = status === 'pending' || status === 'in_progress';
-    const StatusIcon = isCompacting
-      ? Loader2
-      : status === 'failed'
-        ? AlertCircle
-        : status === 'stopped'
-          ? CircleStop
-          : Check;
+    const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
+    const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
         <StatusIcon
@@ -5755,11 +5736,9 @@ const ToolCallCard = memo(function ToolCallCard({
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
-            : status === 'failed'
+            : toolCall.status === 'failed'
               ? t('sessions.activity.contextCompactionFailed', 'Context compaction failed')
-              : status === 'stopped'
-                ? t('sessions.activity.contextCompactionStopped', 'Context compaction stopped')
-                : t('sessions.activity.contextCompacted', 'Context compacted')}
+              : t('sessions.activity.contextCompacted', 'Context compacted')}
         </span>
       </div>
     );

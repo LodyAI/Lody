@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory } from '@lody/shared';
 
-import {
-  isSessionContextCompacting,
-  resolveContextCompactionDisplayStatus,
-} from '../src/lib/session-context-compaction';
+import { isSessionContextCompacting } from '../src/lib/session-context-compaction';
 
 const historyWithStatus = (
   status: 'pending' | 'in_progress' | 'completed' | 'failed',
@@ -25,20 +22,6 @@ const historyWithStatus = (
     },
   ] as Pick<SessionHistory, 'finished' | 'items'>[];
 
-describe('resolveContextCompactionDisplayStatus', () => {
-  it('ends an unresolved compaction when its owning turn has finished', () => {
-    expect(resolveContextCompactionDisplayStatus('pending', true)).toBe('stopped');
-    expect(resolveContextCompactionDisplayStatus('in_progress', true)).toBe('stopped');
-  });
-
-  it('preserves active compactions and provider terminal states', () => {
-    expect(resolveContextCompactionDisplayStatus('pending', false)).toBe('pending');
-    expect(resolveContextCompactionDisplayStatus('in_progress', false)).toBe('in_progress');
-    expect(resolveContextCompactionDisplayStatus('completed', true)).toBe('completed');
-    expect(resolveContextCompactionDisplayStatus('failed', true)).toBe('failed');
-  });
-});
-
 describe('isSessionContextCompacting', () => {
   it('tracks pending and in-progress compaction tool calls', () => {
     expect(isSessionContextCompacting(historyWithStatus('pending'))).toBe(true);
@@ -50,8 +33,8 @@ describe('isSessionContextCompacting', () => {
     expect(isSessionContextCompacting(historyWithStatus('failed'))).toBe(false);
   });
 
-  it('stops loading when the owning turn finishes without a terminal tool update', () => {
-    expect(isSessionContextCompacting(historyWithStatus('pending', true))).toBe(false);
-    expect(isSessionContextCompacting(historyWithStatus('in_progress', true))).toBe(false);
+  it('does not treat host turn finalization as provider termination', () => {
+    expect(isSessionContextCompacting(historyWithStatus('pending', true))).toBe(true);
+    expect(isSessionContextCompacting(historyWithStatus('in_progress', true))).toBe(true);
   });
 });

@@ -4840,12 +4840,33 @@ describe('SessionExecutionService', () => {
 
   it('records ACP string error data as the visible chat failure message', async () => {
     const upsertDocMeta = vi.fn(async () => {});
+    let history: SessionHistoryInput[] = [
+      {
+        id: 'turn-1',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:00:00.000Z',
+        fileDiff: [],
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-1',
+            title: 'Context compacting',
+            status: 'in_progress',
+            activityKind: 'context_compaction',
+          },
+        ],
+      },
+    ];
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
-      updateHistory: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(
+        async (updater: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = updater(history);
+        }
+      ),
     };
     const acpError = Object.assign(new Error('Invalid params'), {
       code: -32602,
@@ -4892,6 +4913,16 @@ describe('SessionExecutionService', () => {
         getOrOpenSessionCode: vi.fn(async () => null),
         updateAcpCapabilities: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager,
+      turnFinalization: {
+        ...createBaseDeps({}).turnFinalization,
+        finalizeACPState: vi.fn(async (_sessionId, turnId, options) => {
+          history = markAssistantTurnFinished(history, {
+            turnId,
+            endedAt: 42,
+            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+          });
+        }),
+      },
     });
 
     const service = new SessionExecutionService(deps);
@@ -4913,6 +4944,10 @@ describe('SessionExecutionService', () => {
       'acp_invalid_params',
       'No goal is currently set. Use `/goal <objective>` to create one.'
     );
+    expect(history[0]).toMatchObject({
+      finished: true,
+      items: [expect.objectContaining({ toolCallId: 'compact-1', status: 'failed' })],
+    });
   });
 
   it('records a visible failure when a chat turn fails before prompt starts', async () => {
@@ -5231,6 +5266,21 @@ describe('SessionExecutionService', () => {
         status: 'pending',
         read: false,
       },
+      {
+        id: 'assistant-prompt-cancel',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:00:00.000Z',
+        fileDiff: [],
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-cancelled-turn',
+            title: 'Context compacting',
+            status: 'in_progress',
+            activityKind: 'context_compaction',
+          },
+        ],
+      },
     ];
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
@@ -5309,9 +5359,16 @@ describe('SessionExecutionService', () => {
       buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
       processMessageQueue: vi.fn(async () => {}),
     });
-    vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(async () => {
-      expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
-    });
+    vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
+      async (_sessionId, turnId, options) => {
+        history = markAssistantTurnFinished(history as SessionHistoryInput[], {
+          turnId,
+          endedAt: 42,
+          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+        }) as Array<Record<string, unknown>>;
+        expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
+      }
+    );
 
     const onTurnSettled = vi.fn(async () => {});
     service = new SessionExecutionService(deps);
@@ -5336,6 +5393,16 @@ describe('SessionExecutionService', () => {
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
+    expect(history[1]).toMatchObject({
+      id: 'assistant-prompt-cancel',
+      finished: true,
+      items: [
+        expect.objectContaining({
+          toolCallId: 'compact-cancelled-turn',
+          status: 'in_progress',
+        }),
+      ],
+    });
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel', {
       lastHandledUserMsgId: 'turn-prompt-cancel',
       processingUserMsgId: undefined,

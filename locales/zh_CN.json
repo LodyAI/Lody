@@ -1214,7 +1214,6 @@
   "sessions.activity.compactingContext": "正在压缩上下文",
   "sessions.activity.contextCompacted": "上下文已压缩",
   "sessions.activity.contextCompactionFailed": "上下文压缩失败",
-  "sessions.activity.contextCompactionStopped": "上下文压缩已停止",
   "sessions.askQuestion.answered": "已回答",
   "sessions.askQuestion.autoContinueIn": "{{seconds}} 秒后自动继续",
   "sessions.askQuestion.continuing": "正在继续",

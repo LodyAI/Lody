@@ -1,29 +1,14 @@
-import type { MessageContent, SessionHistory } from '@lody/shared';
-
-type ToolCallStatus = Extract<MessageContent, { type: 'tool_call' }>['status'];
-export type ContextCompactionDisplayStatus = ToolCallStatus | 'stopped';
-
-export const resolveContextCompactionDisplayStatus = (
-  status: ToolCallStatus,
-  isTurnFinished: boolean
-): ContextCompactionDisplayStatus => {
-  if (isTurnFinished && (status === 'pending' || status === 'in_progress')) {
-    return 'stopped';
-  }
-  return status;
-};
+import type { SessionHistory } from '@lody/shared';
 
 export const isSessionContextCompacting = (
-  history: readonly Pick<SessionHistory, 'finished' | 'items'>[]
+  history: readonly Pick<SessionHistory, 'items'>[]
 ): boolean => {
   for (let entryIndex = history.length - 1; entryIndex >= 0; entryIndex -= 1) {
-    const entry = history[entryIndex];
-    const items = entry?.items ?? [];
+    const items = history[entryIndex]?.items ?? [];
     for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
       const item = items[itemIndex];
       if (item?.type !== 'tool_call' || item.activityKind !== 'context_compaction') continue;
-      const status = resolveContextCompactionDisplayStatus(item.status, entry?.finished === true);
-      return status === 'pending' || status === 'in_progress';
+      return item.status === 'pending' || item.status === 'in_progress';
     }
   }
   return false;

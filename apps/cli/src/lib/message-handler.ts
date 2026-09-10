@@ -3118,8 +3118,8 @@ export class MessageHandler {
           userTurnId
         ),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId) =>
-          await this.finalizeACPState(sessionId, turnId),
+        finalizeACPState: async (sessionId, turnId, options) =>
+          await this.finalizeACPState(sessionId, turnId, options),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -5822,7 +5822,11 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+  private async finalizeACPState(
+    sessionId: SessionId,
+    turnId?: string,
+    options?: { settleContextCompactionAsFailed?: boolean }
+  ): Promise<void> {
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
@@ -5849,7 +5853,12 @@ export class MessageHandler {
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.updateHistory((history) =>
-        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+        markAssistantTurnFinished(history, {
+          turnId,
+          endedAt,
+          permissionWaitMs,
+          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+        })
       );
       await sessionDoc.waitUntilSynced();
     } catch (error) {

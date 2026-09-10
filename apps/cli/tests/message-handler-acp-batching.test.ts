@@ -18,10 +18,7 @@ import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
-import {
-  isSessionContextCompacting,
-  resolveContextCompactionDisplayStatus,
-} from '../../../packages/components/src/lib/session-context-compaction';
+import { isSessionContextCompacting } from '../../../packages/components/src/lib/session-context-compaction';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -367,7 +364,7 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('recovers a persisted compaction after finalization and accepts later activity', async () => {
+  it('settles only a failed compaction across finalization, reload, and later activity', async () => {
     vi.useRealTimers();
     const sessionId = 'compaction-lifecycle' as SessionId;
     const { repo, docs, handler } = await createHandlerHarness([sessionId]);
@@ -377,7 +374,11 @@ describe('MessageHandler ACP batching', () => {
       beginConversationTurn(sessionId: SessionId): string;
       enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-      finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+      finalizeACPState(
+        sessionId: SessionId,
+        turnId?: string,
+        options?: { settleContextCompactionAsFailed?: boolean }
+      ): Promise<void>;
     };
     const findCompaction = (history: SessionHistoryInput[], toolCallId: string) =>
       history
@@ -414,11 +415,17 @@ describe('MessageHandler ACP batching', () => {
       const staleCompaction = findCompaction(reloadedHistory, 'compact-1');
       expect(reloadedTurn?.finished).toBe(true);
       expect(staleCompaction).toMatchObject({ status: 'in_progress' });
-      if (!staleCompaction || staleCompaction.type !== 'tool_call') {
-        throw new Error('Missing persisted context compaction');
-      }
-      expect(resolveContextCompactionDisplayStatus(staleCompaction.status, true)).toBe('stopped');
-      expect(isSessionContextCompacting(reloadedHistory)).toBe(false);
+      expect(isSessionContextCompacting(reloadedHistory)).toBe(true);
+
+      await host.finalizeACPState(sessionId, turnId, {
+        settleContextCompactionAsFailed: true,
+      });
+      await host.finalizeACPState(sessionId, turnId, {
+        settleContextCompactionAsFailed: true,
+      });
+      const failedHistory = await reopened.getHistory();
+      expect(findCompaction(failedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
+      expect(isSessionContextCompacting(failedHistory)).toBe(false);
 
       host.enqueueACPUpdate(sessionId, {
         sessionId,
@@ -436,9 +443,7 @@ describe('MessageHandler ACP batching', () => {
       if (!completedCompaction || completedCompaction.type !== 'tool_call') {
         throw new Error('Missing completed context compaction');
       }
-      expect(resolveContextCompactionDisplayStatus(completedCompaction.status, true)).toBe(
-        'completed'
-      );
+      expect(isSessionContextCompacting(completedHistory)).toBe(false);
 
       const nextTurnId = host.beginConversationTurn(sessionId);
       host.enqueueACPUpdate(sessionId, {

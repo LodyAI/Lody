@@ -1214,7 +1214,6 @@
   "sessions.activity.compactingContext": "Compacting context",
   "sessions.activity.contextCompacted": "Context compacted",
   "sessions.activity.contextCompactionFailed": "Context compaction failed",
-  "sessions.activity.contextCompactionStopped": "Context compaction stopped",
   "sessions.askQuestion.answered": "Answered",
   "sessions.askQuestion.autoContinueIn": "Continues in {{seconds}}s",
   "sessions.askQuestion.continuing": "Continuing",

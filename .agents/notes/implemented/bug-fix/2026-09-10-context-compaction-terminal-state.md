@@ -1,4 +1,4 @@
-# Stop stale context-compaction indicators at the turn boundary
+# Settle context compaction after provider failure
 
 Status: implemented
 Translation: current
@@ -8,48 +8,42 @@ Translation: current
 ## Abstract
 
 A failed remote context-compaction request could leave its tool-call item in
-`pending` or `in_progress` even after Lody had finalized the containing assistant
-turn, so both the transcript and session-usage footer kept showing an indefinite
-spinner. The UI now treats the finished turn as the authoritative activity
-boundary and projects any unresolved compaction inside it as stopped, while
-preserving the provider's durable history item unchanged. Updated renderers recover
-the display of existing affected histories as well as future failures without a
-protocol simulator, but older renderers still interpret the unchanged raw status.
+`pending` or `in_progress`, so both the transcript and session-usage footer kept
+showing an indefinite spinner. When the provider prompt returns an ACP error or the
+agent disconnects, Lody now persists unresolved compaction activities in that turn
+as `failed`. Renderers continue to follow the durable tool-call status directly.
 
 ## Decision
 
-The compaction activity item and its owning assistant turn have different
-writers. Provider updates own the tool-call status, while Lody's turn finalizer
-owns `SessionHistory.finished`. A transport failure can therefore finalize the
-turn without receiving the tool call's terminal update.
+The compaction activity and its owning assistant turn have different terminal
+signals. `SessionHistory.finished` records host finalization, including interrupted
+turn teardown, and therefore does not prove that the provider prompt stopped. The
+UI must not infer a compaction terminal state from that field.
 
-Rendering now resolves one effective compaction status for both consumers. A
-`pending` or `in_progress` item remains active only while its assistant turn is
-unfinished; once the turn is finished, it is displayed as stopped and no longer
-contributes to the session-level compacting state. `stopped` is a display-only
-inference because the turn boundary does not distinguish failure, cancellation,
-disconnect, or interruption. Explicit `completed` and `failed` provider states
-remain unchanged.
+The prompt error path has stronger evidence: the ACP prompt returned an error, or
+the provider connection ended. Before finalization clears the turn state, it asks
+the finalizer to change only `pending` or `in_progress` context-compaction items in
+that exact assistant turn to `failed`. Ordinary completion and cancellation do not
+request this settlement. Explicit provider terminal states remain unchanged, and a
+late provider update for the same `toolCallId` can still replace `failed` with
+`completed`.
 
-This is a projection rule, not a history migration. Rewriting the persisted tool
-call would erase the distinction between provider evidence and Lody's recovery
-inference, and fixing only the future error path would leave already affected
-sessions stuck. The turn boundary is available in both render paths and is the
-narrowest reliable terminal signal.
+This fixes future error paths and histories that receive a later failure-aware
+finalization. It does not migrate already persisted stale histories, because those
+histories contain no durable evidence that distinguishes #570 from an interrupted
+but still-active provider prompt.
 
 ## Scope and verification
 
 This fixes [issue #570](https://github.com/LodyAI/Lody/issues/570) in
 [PR #573](https://github.com/LodyAI/Lody/pull/573). It is distinct from
 [issue #267](https://github.com/LodyAI/Lody/issues/267), where an interrupted manual
-`/compact` may leave an actually active backend turn; this change does not alter
-ACP lifecycle or cancellation behavior.
+`/compact` may leave an actually active backend prompt. A normal cancellation
+finalization intentionally leaves that compaction active instead of hiding it.
 
-Unit coverage verifies unfinished active states, finished unresolved states, and
-explicit terminal states. A deterministic lifecycle regression drives the production
-ACP history writer and finalizer through an in-progress compaction, repeated
-finalization, Loro document reopening, a late completed update, and a new compaction
-in the next turn; it then checks the same projection used by both UI consumers. No
-Model API Simulator or end-to-end test was added. Issue #267 still requires separate
-runtime cancellation verification because a finished host turn does not prove that
-the provider prompt has stopped.
+Unit coverage verifies that ordinary finalization preserves an unresolved activity
+and that ACP failures request settlement. A deterministic lifecycle regression
+drives the production ACP history writer and finalizer through ordinary and
+failure-aware finalization, Loro document reopening, a late completed update, and a
+new compaction in the next turn. No Model API Simulator or end-to-end test was added;
+issue #267 still requires a separate provider cancellation fix.
