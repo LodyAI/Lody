@@ -1272,6 +1272,7 @@
   "sessions.openedBy.collapse": "收起打开的会话",
   "sessions.openedBy.createdAutomaticallyBy": "此对话由以下对话自动创建",
   "sessions.openedBy.createdSession": "已创建对话",
+  "sessions.openedBy.deletedSession": "已删除的对话",
   "sessions.openedBy.expand": "展开 {{count}} 个打开的会话",
   "sessions.openedBy.backToOpener": "返回创建对话",
   "sessions.openedBy.openOpener": "由此会话打开",

@@ -1,15 +1,15 @@
-# Keep opened Sessions outside opener archive cascades
+# Keep opened Sessions outside opener state cascades
 
 Status: implemented
 Translation: pending
 
 ## Abstract
 
-Desktop and mobile archive and restore treated opened-by provenance as lifecycle
-ownership, so acting on an opener could stop or mutate an independent Session and
-its worktree. Archive-state cascades now follow only `parentSessionId` containment,
-matching CLI/MCP behavior and the existing opened-Session contract. Permanent
-deletion and supervised-worker behavior remain separate decisions.
+Desktop and mobile operations treated opened-by provenance as lifecycle ownership,
+so acting on an opener could stop or delete an independent Session and its worktree.
+Archive, restore, and permanent delete now follow only direct `parentSessionId`
+containment. Surviving Sessions retain opened-by provenance, while reverse navigation
+is available only when its target is known to exist.
 
 ## Evidence and decision
 
@@ -20,15 +20,24 @@ lifecycle; `openedBySessionId` and `openedByRootSessionId` record provenance and
 navigation. A child Tab instead carries `parentSessionId` and shares its root
 Session's lifecycle.
 
-The desktop/mobile behavior now follows
-[#531](https://github.com/LodyAI/Lody/issues/531). Archive and restore select the
-root metadata plus cache entries whose `parentSessionId` equals the root id. This
-is intentionally a one-level, operation-local filter: supported product paths do
-not create nested child Sessions, and CLI/MCP also select only direct children.
-Permanent deletion retains its existing full cascade because preserving an opened
-Session after deleting its opener would otherwise leave a clickable reverse-navigation
-target pointing to a missing Session. That orphan interaction needs an explicit
-contract outside this archive-only fix. Archive presentation remains separate in
+The desktop/mobile archive behavior follows
+[#531](https://github.com/LodyAI/Lody/issues/531). Archive, restore, active delete,
+and archived delete select the root plus cache entries whose `parentSessionId` equals
+the root id. This is intentionally a one-level, operation-local rule: supported
+product paths do not create nested child Sessions, and CLI/MCP also select only
+direct children. The generic `collectSessionLifecycleIds` graph was removed because
+there is no unified lifecycle tree spanning containment and provenance.
+
+Deleting an opener does not rewrite a surviving Session's `openedBySessionId` or
+`openedByRootSessionId`; those fields preserve the causal fact. Once the metadata
+cache is ready, reverse navigation requires both the precise opener and its route
+root to exist. Missing targets therefore render as non-clickable deleted-session
+provenance instead of routing to `SessionNotFound`. Permanent delete refuses to
+select targets before the metadata cache is complete, so a partial cache cannot
+silently omit a direct child from a destructive operation. No tombstone model is
+needed for this bug: the surviving Session already retains the irreducible ids.
+
+Archive presentation remains separate in
 [`buildArchivedSessionTree`](../../../../packages/components/src/lib/archived-session-tree.ts),
 which may still indent two Sessions that were archived independently.
 
@@ -39,12 +48,14 @@ this fix.
 ## Verification
 
 Regression coverage models a root Session, its child Tab, an independently opened
-Session, and a Session opened from the Tab. Archive and restore affect only the
-root and Tab. Tests assert resulting metadata and the terminal, machine Flock,
-legacy archive queue, and restore queue boundaries. Existing delete behavior and
-archived opened-by presentation coverage remain unchanged.
+Session, and a Session opened from the Tab. Archive, restore, and both delete paths
+affect only the root and Tab. The archive-then-delete sequence puts the Sessions on
+the same machine and verifies that surviving documents, worktree delete commands,
+launch configs, and legacy queues remain untouched. Navigation tests cover partial
+hydration, deleted precise openers, and deleted route roots; UI tests verify that
+dangling provenance has no clickable action.
 
-The target set still comes from `sessionMetaCacheAtom`. The cache is populated by a
+Archive and restore targets still come from `sessionMetaCacheAtom`. The cache is populated by a
 full metadata scan before `docMetaCacheReadyAtom` becomes true, but Session Detail
 can expose Archive for an already rendered Session before that scan finishes. A
 direct child not yet present in the cache can therefore be missed. The readiness
@@ -52,8 +63,6 @@ or complete-query contract and its regression coverage are tracked in
 [#574](https://github.com/LodyAI/Lody/issues/574), rather than expanding this
 archive-semantics fix.
 
-The targeted action and lifecycle Vitest files passed 31 tests. Repository formatting, typecheck,
-type-aware lint, documentation, i18n, collaboration-import, platform-boundary, and
-public-boundary checks passed. The full components suite passed 3,349 of 3,350
-tests with an isolated Node localStorage file before stopping on an app-store review
-test that also fails alone. It does not import or exercise the changed Session code.
+The targeted action, navigation, relation-card, header-menu, and archive-tree Vitest
+suites pass 52 tests. Component typechecking also passes. Repository-wide checks are
+recorded in the PR status rather than duplicated here.

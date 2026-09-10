@@ -1272,6 +1272,7 @@
   "sessions.openedBy.collapse": "Hide opened sessions",
   "sessions.openedBy.createdAutomaticallyBy": "This session was automatically created by",
   "sessions.openedBy.createdSession": "Session created",
+  "sessions.openedBy.deletedSession": "Deleted session",
   "sessions.openedBy.expand": "Show {{count}} opened sessions",
   "sessions.openedBy.backToOpener": "Back to session",
   "sessions.openedBy.openOpener": "Opened by",

@@ -998,8 +998,12 @@ export type SessionOwnerMenuState = {
  * conversation — not only from the sidebar tree.
  */
 export type SessionOpenedByMenuState = {
-  /** The Session that created this one, when it is still resolvable. */
-  openedBy?: { sessionId: SessionId; title: string; target: SessionNavigationTarget } | null;
+  /** The Session that created this one; navigation exists only while it resolves. */
+  openedBy?: {
+    sessionId: SessionId;
+    title: string;
+    target: SessionNavigationTarget | null;
+  } | null;
   /** Independent Sessions this Session opened, oldest first. */
   opened?: Array<{ sessionId: SessionId; title: string; target: SessionNavigationTarget }>;
   onOpenSession: (target: SessionNavigationTarget) => void;
@@ -1096,8 +1100,11 @@ export function SessionHeaderMenu({
       <>
         {openedBySession ? (
           <DropdownMenuItem
+            disabled={!openedBySession.target}
             onClick={() => {
-              openedByRelations.onOpenSession(openedBySession.target);
+              if (openedBySession.target) {
+                openedByRelations.onOpenSession(openedBySession.target);
+              }
             }}
             title={openedBySession.title}
           >
@@ -4532,10 +4539,21 @@ export const SessionChatInterface = memo(
     const openerSessionMeta = useAtomValue(
       sessionMetaAtomFamily(openerSessionId ? getSessionRoomId(openerSessionId) : '')
     );
+    const openerRootSessionId = openerSessionId
+      ? (session.openedByRootSessionId ?? openerSessionMeta?.parentSessionId ?? openerSessionId)
+      : null;
+    const openerRootSessionMeta = useAtomValue(
+      sessionMetaAtomFamily(openerRootSessionId ? getSessionRoomId(openerRootSessionId) : '')
+    );
     const openedSessions = useAtomValue(openedSessionsAtomFamily(session.id));
     const openerNavigationTarget = useMemo(
-      () => resolveOpenedByNavigationTarget(session, openerSessionMeta),
-      [openerSessionMeta, session]
+      () =>
+        resolveOpenedByNavigationTarget(session, {
+          metadataReady: docMetaCacheReady,
+          openerSession: openerSessionMeta,
+          rootSession: openerRootSessionMeta,
+        }),
+      [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
     );
     const handleOpenRelatedSession = useCallback(
       (target: SessionNavigationTarget) => {
@@ -4549,15 +4567,15 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      // An opener that is archived or not synced to this client still has a
-      // usable id, so navigation stays available; only the label falls back.
       const openedBy =
-        openerSessionId && openerNavigationTarget
+        openerSessionId
           ? {
               sessionId: openerSessionId,
               title:
                 (openerSessionMeta?.title ?? '').trim() ||
-                t('sessions.untitled', 'Untitled session'),
+                (docMetaCacheReady
+                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                  : t('sessions.untitled', 'Untitled session')),
               target: openerNavigationTarget,
             }
           : null;
@@ -4565,6 +4583,7 @@ export const SessionChatInterface = memo(
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
       handleOpenRelatedSession,
+      docMetaCacheReady,
       openedSessions,
       openerNavigationTarget,
       openerSessionId,
@@ -4574,6 +4593,7 @@ export const SessionChatInterface = memo(
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
+      const target = openedBy.target;
       return (
         <ConversationColumn className="py-2 sm:py-3">
           <SessionRelationCard
@@ -4585,7 +4605,7 @@ export const SessionChatInterface = memo(
             sessionTitle={openedBy.title}
             actionLabel={t('sessions.openedBy.backToOpener', 'Back to session')}
             actionIcon={CornerLeftUp}
-            onAction={() => openedByRelations.onOpenSession(openedBy.target)}
+            onAction={target ? () => openedByRelations.onOpenSession(target) : undefined}
           />
         </ConversationColumn>
       );
