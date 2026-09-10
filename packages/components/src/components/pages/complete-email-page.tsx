@@ -6,8 +6,8 @@ import { Spinner } from '@/ui/spinner';
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 
 export interface CompleteEmailPageProps {
   userLabel: string;
@@ -83,7 +83,9 @@ export function CompleteEmailPage({
             aria-busy={submitting || signingOut}
           >
             <div className="space-y-2">
-              <Label htmlFor="email">{t('completeEmail.emailLabel', 'Email address')}</Label>
+              <UiField.Label htmlFor="email">
+                {t('completeEmail.emailLabel', 'Email address')}
+              </UiField.Label>
               <Input
                 id="email"
                 type="email"

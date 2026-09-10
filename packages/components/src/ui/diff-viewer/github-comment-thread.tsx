@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@lody/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { Badge } from '@/ui/badge';
 import { cn } from '@/lib/utils';
 import type { GitHubReviewThread, GitHubReviewComment } from './session-comment-types';

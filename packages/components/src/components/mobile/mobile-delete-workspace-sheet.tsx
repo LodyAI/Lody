@@ -128,7 +128,7 @@ export function MobileDeleteWorkspaceSheet({
                 'shadow-[0_0_0_3px_hsl(var(--destructive)/0.04)]'
               )}
             >
-              <Label
+              <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
                 className="text-[0.78rem] font-medium text-foreground"
               >
@@ -136,7 +136,7 @@ export function MobileDeleteWorkspaceSheet({
                   workspace: workspaceName,
                   defaultValue: 'Type "{{workspace}}" to confirm',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="mobile-delete-workspace-confirm"
                 value={confirmText}

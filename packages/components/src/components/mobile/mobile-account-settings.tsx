@@ -919,7 +919,9 @@ export function MobileAccountSettings({
               </div>
             ) : (
               <div className="space-y-2 py-4">
-                <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
+                <UiField.Label htmlFor="cli-api-key-note">
+                  {t('settings.account.cliAuth.noteLabel')}
+                </UiField.Label>
                 <Input
                   id="cli-api-key-note"
                   value={cliApiKeyNote}
@@ -1133,11 +1135,11 @@ export function MobileAccountSettings({
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="mobileDeleteAccountConfirmText">
+              <UiField.Label htmlFor="mobileDeleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="mobileDeleteAccountConfirmText"
                 value={deleteAccountConfirmText}

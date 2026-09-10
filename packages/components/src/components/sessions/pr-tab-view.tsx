@@ -43,7 +43,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@/ui/skeleton';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 import { SessionCommentMarkdown } from '@/ui/diff-viewer/session-comment-markdown';
 import { GitHubCommentThread } from '@/ui/diff-viewer/github-comment-thread';
 import { PullRequestBadge } from '@/components/sessions/pull-request-badge';

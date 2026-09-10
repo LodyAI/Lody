@@ -23,7 +23,7 @@ import {
   MentionLabel,
   useMentionContext,
 } from '@/ui/mention';
-import type { TextareaProps } from '@/ui/textarea';
+import type { TextareaProps } from '@lody/ui/textarea';
 
 export type RepoFilePathsResult = {
   repoFullName: string;

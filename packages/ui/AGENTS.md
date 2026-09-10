@@ -16,6 +16,15 @@ into one component at a time. Source-consumed; consumers compile it through
 - No border token exists. Edges are wells, raised shadows, elevation shadows
   and the focus ring. See `src/tokens/RULES.md` before adding a token or a
   component style.
+- A focus or invalid ring is a 2px `box-shadow` composed with the control's own
+  shadow, never an `outline`: the product shell resets every outline with
+  `!important`, which no layer order overrides.
+- Controls in the field family read validity and disabled from `Field.Root`
+  through Base UI's state callback on `className`. A control does not take its
+  own `invalid` or `disabled` colour prop. The invalid ring also follows
+  `aria-invalid`, which `Field.Root` renders onto the control, so the ring and
+  what a screen reader announces are one fact; `src/field/invalid.ts` owns that
+  reading. StyleX cannot express an attribute selector, so it is read in JS.
 - Files that call `defineVars`, `createTheme` or `defineConsts` end in
   `.stylex.ts`. Their arguments are object literals; the compiler cannot
   evaluate helpers. Vars are imported from that file by a specifier ending in
@@ -23,9 +32,11 @@ into one component at a time. Source-consumed; consumers compile it through
 - Component tokens live beside the component as
   `<name>/<name>.tokens.stylex.ts` and reference semantic tokens or literal px.
   A component token that points at a semantic colour also belongs in that file's
-  `createTheme` palette theme, which `ThemeRoot` applies with every forced
-  palette; a custom property declared only at the document root keeps the root
-  palette inside a themed subtree.
+  `createTheme` palette theme, listed in `componentPaletteThemes` in
+  `src/theme/theme.tsx` so `ThemeRoot` applies it with every forced palette; a
+  custom property declared only at the document root keeps the root palette
+  inside a themed subtree. A family shares one group (`field` covers the label,
+  Input, Textarea, help and error) rather than one group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a

@@ -129,9 +129,9 @@ export function InviteMemberDialog({
         ) : (
           <div className="space-y-4 px-5 pb-5">
             <div className="space-y-1.5">
-              <Label htmlFor="invite-email" className="text-xs text-muted-foreground">
+              <UiField.Label htmlFor="invite-email" className="text-xs text-muted-foreground">
                 {t('workspace.invite.email')}
-              </Label>
+              </UiField.Label>
               <Input
                 id="invite-email"
                 value={email}
@@ -147,9 +147,9 @@ export function InviteMemberDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="invite-role" className="text-xs text-muted-foreground">
+              <UiField.Label htmlFor="invite-role" className="text-xs text-muted-foreground">
                 {t('workspace.invite.role')}
-              </Label>
+              </UiField.Label>
               <Select value={role} onValueChange={(value) => setRole(value as InviteMemberRole)}>
                 <SelectTrigger id="invite-role" className="h-9 w-full">
                   <SelectValue />

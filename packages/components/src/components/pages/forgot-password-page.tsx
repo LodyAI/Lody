@@ -6,8 +6,8 @@ import { Spinner } from '@/ui/spinner';
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 
 export interface ForgotPasswordPageProps {
   email: string;
@@ -64,9 +64,9 @@ export function ForgotPasswordPage({
             aria-busy={submitting}
           >
             <div className="grid gap-2">
-              <Label htmlFor="forgot-password-email">
+              <UiField.Label htmlFor="forgot-password-email">
                 {t('forgotPassword.emailLabel', 'Email address')}
-              </Label>
+              </UiField.Label>
               <Input
                 id="forgot-password-email"
                 type="email"

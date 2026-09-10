@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { VList } from 'virtua';
 import type { PagedFileSource } from '@/lib/paged-file-source';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Button } from '@lody/ui/button';
 
 /** One bounded page, virtual rows, no editor/LSP/HTML execution or accumulated cache. */

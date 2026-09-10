@@ -34,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 
 function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
@@ -105,11 +105,7 @@ export function compareUnifiedProjectOptions(
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
->(
-  options: readonly TOption[],
-  query: string,
-  limit?: number
-): TOption[] {
+>(options: readonly TOption[], query: string, limit?: number): TOption[] {
   if (limit !== undefined && limit <= 0) return [];
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visible: TOption[] = [];
@@ -231,11 +227,10 @@ export function buildUnifiedLocalProjectOptions({
   return visible;
 }
 
-export interface UnifiedProjectSelectorViewProps
-  extends Omit<
-    UnifiedProjectSelectorProps,
-    'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
-  > {
+export interface UnifiedProjectSelectorViewProps extends Omit<
+  UnifiedProjectSelectorProps,
+  'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
+> {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
@@ -465,19 +460,16 @@ export function UnifiedProjectSelectorView({
     : undefined;
   const canShareSelectedProject = Boolean(
     selectedOption &&
-      selectedPrivateSharing?.canManage &&
-      selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
-      onShareLocalProjectWithTeam
+    selectedPrivateSharing?.canManage &&
+    selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
+    onShareLocalProjectWithTeam
   );
 
   const isPropertyRow = triggerVariant === 'property-row';
 
   return (
     <div
-      className={cn(
-        'group/project relative flex min-w-0 items-center',
-        isPropertyRow && 'w-full'
-      )}
+      className={cn('group/project relative flex min-w-0 items-center', isPropertyRow && 'w-full')}
     >
       {value.kind !== 'none' && !isPropertyRow ? (
         <button

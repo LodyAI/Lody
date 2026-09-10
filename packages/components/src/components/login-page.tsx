@@ -8,8 +8,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
 import { electronDeepLinkSignInInProgressAtom, nativeSignInInProgressAtom } from '@/atoms';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { PasswordInput } from '@/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
@@ -1554,9 +1554,9 @@ export function LoginPage({
                 className="overflow-hidden"
               >
                 <div className="grid gap-1.5 pb-3">
-                  <Label htmlFor="email-auth-name" className="text-xs font-medium">
+                  <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
                     {t('login.nameLabel', 'Name')}
-                  </Label>
+                  </UiField.Label>
                   <Input
                     id="email-auth-name"
                     autoComplete="name"
@@ -1576,9 +1576,9 @@ export function LoginPage({
           </AnimatePresence>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="email-auth-email" className="text-xs font-medium">
+            <UiField.Label htmlFor="email-auth-email" className="text-xs font-medium">
               {t('login.emailLabel', 'Email address')}
-            </Label>
+            </UiField.Label>
             <Input
               ref={emailInputRef}
               id="email-auth-email"
@@ -1599,9 +1599,9 @@ export function LoginPage({
 
           <div className="grid gap-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="email-auth-password" className="text-xs font-medium">
+              <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
                 {t('login.passwordLabel', 'Password')}
-              </Label>
+              </UiField.Label>
             </div>
             <PasswordInput
               id="email-auth-password"

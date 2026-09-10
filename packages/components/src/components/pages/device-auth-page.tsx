@@ -6,7 +6,7 @@ import { Spinner } from '@/ui/spinner';
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 
 export interface DeviceAuthPageProps {
   userLabel: string;

@@ -949,7 +949,6 @@ This list covers shipped production dependencies plus vendored third-party asset
 - `@radix-ui/react-focus-guards @ 1.1.3` — https://radix-ui.com/primitives
 - `@radix-ui/react-focus-scope @ 1.1.7` — https://radix-ui.com/primitives
 - `@radix-ui/react-id @ 1.1.1, 1.1.2` — https://radix-ui.com/primitives
-- `@radix-ui/react-label @ 2.1.8` — https://radix-ui.com/primitives
 - `@radix-ui/react-menu @ 2.1.16` — https://radix-ui.com/primitives
 - `@radix-ui/react-menubar @ 1.1.16` — https://radix-ui.com/primitives
 - `@radix-ui/react-popover @ 1.1.15` — https://radix-ui.com/primitives

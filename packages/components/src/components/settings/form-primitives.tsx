@@ -54,9 +54,9 @@ export function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon ? <span className="text-muted-foreground">{icon}</span> : null}
-        <Label htmlFor={htmlFor} className="text-xs font-medium">
+        <UiField.Label htmlFor={htmlFor} className="text-xs font-medium">
           {label}
-        </Label>
+        </UiField.Label>
       </div>
       {children}
       {hint ? <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p> : null}
