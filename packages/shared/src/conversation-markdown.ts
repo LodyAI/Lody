@@ -37,6 +37,10 @@
  */
 
 import type { MessageContent, ToolCallContent } from './ai';
+import {
+  formatCommentReferenceForPrompt,
+  formatVisualAnnotationReferenceForPrompt,
+} from './comment-reference-format';
 import type { SessionHistoryInput } from './schema';
 import { redactSensitiveTokens } from './replay-prompt-builder';
 
@@ -466,6 +470,15 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
 
     case 'file':
       return `- **Attachment:** ${toSummaryLine(item.fileName)} (${item.sizeBytes} bytes). _File contents not included._`;
+
+    case 'image':
+      return `- **Image:** ${item.fileName ? toSummaryLine(item.fileName) : 'Attached image'} (${item.mimeType}, ${item.sizeBytes} bytes). _Image contents not included._`;
+
+    case 'comment_reference':
+      return fenceCode(formatCommentReferenceForPrompt(item), 'xml');
+
+    case 'visual_annotation_reference':
+      return fenceCode(formatVisualAnnotationReferenceForPrompt(item), 'xml');
 
     case 'image_group':
       return `- **Images:** ${item.images.length}. _Image contents not included._`;

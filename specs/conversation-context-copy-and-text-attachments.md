@@ -19,7 +19,9 @@ and all preceding history, never subsequent messages. The session menu copies al
 history. A missing selected message fails visibly rather than expanding the range.
 A generating response is copied as a point-in-time partial response and marked so.
 
-User and assistant prose remain complete. Existing Markdown export budgets may
+User and assistant prose, code-comment bodies and replies, and visual-annotation
+bodies remain complete. References retain their code location or visual target;
+standalone user images carry an explicit notice that image bytes are not copied. Existing Markdown export budgets may
 reduce tool details, with an explicit notice. Attachment names and image counts
 are included with a notice that their bytes are not copied. No file migration,
 provider state transfer, or automatic target-session creation is implied.

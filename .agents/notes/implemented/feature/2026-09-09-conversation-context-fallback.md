@@ -19,6 +19,10 @@ conversation action context. Earlier turns, streaming replies and unsupported AC
 providers remain copyable; native fork destinations retain their capability and
 completion gates. A pure range helper rejects a missing boundary. Markdown export
 preserves prose, marks partial responses and discloses omitted attachment bytes.
+Standalone user images also emit that notice. Code comments and visual annotations
+reuse their structured reference formatters inside safe Markdown fences, retaining
+user bodies, replies and target metadata even when the export exceeds its budget.
+This prevents reference-only prompts from silently disappearing.
 
 Desktop user-message fork buttons follow neighboring copy/pin hover and keyboard
 focus behavior, staying visible while their menu is open. Touch actions remain
@@ -34,7 +38,9 @@ No new wire fields, upload lifecycle or backend are part of this PR.
 ## Verification and limits
 
 Synthetic coverage exercises inclusive copy range, unsupported-fork menus,
-streaming copy access and native-fork gating. The streaming regression fails on
+streaming copy access and native-fork gating. Reference-only image, code-comment
+and visual-annotation fixtures cover missing-body regressions and over-budget
+preservation, including comments containing Markdown fences. The streaming regression fails on
 the earlier completion-gated action bar. Existing paste, mention and submission
 suites verify the restored paths. Source comparison against the PR base verifies
 that the withdrawn feature no longer changes those paths.
