@@ -30,33 +30,17 @@ and gateway end-to-end behavior remain unverified.
   needs the submitted checkpoint's ownership, not text equality or an
   unconditional deletion that can erase a replacement invocation.
 
-## Ablation findings
+## Cleanup and coverage scope
 
-The product no longer has variables or expand-and-edit. The old standalone
-prototype modeled both and had no product consumers. Removing that prototype,
-its dedicated story/model tests, and unused editable-annotation/replacement APIs
-preserves the real settings, menu, chip and mobile stories.
+Ablation removed the obsolete prototype, unused editable annotations/replacement
+API, test-only composer compiler and publication helper. Negative controls showed
+that disabling semantic history loses snapshots and accepting stale preparation
+inserts late chips; those protections remain.
 
-`compileShortcutPrompt` is the production composer compiler; the second
-`expandShortcutComposer` implementation had only test consumers. Its useful
-stale/duplicate-range checks now test the production boundary. Likewise, publication
-uses the local store's fresh document, not `fromPublishedState`; runtime tests
-exercise private-history exclusion and late acknowledgements directly.
-
-| Experiment                                                           | Result                                                         |
-| -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Remove prototype                                                     | 26 product regression tests and component types pass           |
-| Remove replacement/annotation API                                    | 36 primitive/editing/modal tests and types pass                |
-| Remove duplicate compiler                                            | 40 real send-path tests and shared snapshot tests pass         |
-| Remove unused publication helper and constant internal loading state | 35 real storage/sync tests and shared types pass               |
-| Inline the identical Shortcut range predicate                        | 44 draft/submission tests and component types pass             |
-| Disable semantic history temporarily                                 | Undo loses the frozen invocation; one test fails               |
-| Accept stale preparation temporarily                                 | Edit-away/back and dismissal insert late chips; two tests fail |
-
-The negative controls were restored. Account/workspace fencing, preparation,
-semantic history, ordered writes and checkpoint ownership remain required.
-Duplicate mention rationale now lives only in the existing mention pipeline
-article, and Settings rules have one scoped owner.
+The feature is temporary. Its dedicated tests, Storybook stories and additions to
+shared test fixtures were subsequently removed to reduce maintenance scope.
+General mention preparation/modal and existing composer tests remain. Earlier
+ablation results are historical evidence, not a claim of retained feature coverage.
 
 ## Verification limits
 

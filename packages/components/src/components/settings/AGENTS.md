@@ -86,11 +86,11 @@ component details.
 - Explicit scope changes remount the source-owning textarea with CURRENT semantic
   ranges, never the saved revision's ranges. Template mode disables token-scanning
   hydration, Sessions, recursive Shortcuts and ACP commands. Skills load on menu
-  activation. Stories render the real exported `ShortcutPromptField`.
+  activation.
 - Warnings compare indexed dependencies to saved scope; they do not claim live
   availability. Publication is background work: local save/delete remain enabled
   while pending or offline. Only local I/O disables duplicate actions; pending is
   durable but not advertised or synced. Retry belongs to the runtime.
 - Other members' shared Shortcuts open read-only in the same shell; no copy-to-mine
-  action exists. Form/list stories and `prompt-shortcut-form.test.tsx` /
-  `prompt-shortcuts-setting.test.tsx` cover scope, ranges, identity and sharing.
+  action exists. This temporary feature has no dedicated Storybook or test suite;
+  retain general composer/mention coverage.

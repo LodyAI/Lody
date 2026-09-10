@@ -49,14 +49,6 @@
 
 ## Validation
 
-From the outer installation root:
-
-```sh
-pnpm --filter @lody/shared exec vitest run tests/prompt-shortcuts.test.ts tests/prompt-shortcut-runtime.test.ts tests/prompt-shortcut-sync.test.ts
-pnpm --filter @lody/shared typecheck
-```
-
-Runtime tests reopen real filesystem-backed LoroRepo stores; do not replace
-that boundary with mocked persistence. Sync tests cover adapters and leases,
-not a deployed Streams gateway. Production authorization/control-plane code is
-owned by the private composition, not imported here.
+This temporary feature has no dedicated test suite. Preserve the general shared
+contracts and run typecheck from the outer installation root. Product-cloud
+integration remains the host's responsibility; no live gateway validation is claimed.

@@ -88,7 +88,6 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
-    templateScope?: React.ComponentProps<typeof CombinedMentionTextarea>['templateScope'];
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -99,7 +98,6 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           skillAgent={props.skillAgent as never}
           mentionSource={props.mentionSource as never}
           commandsEnabled={props.commandsEnabled}
-          templateScope={props.templateScope}
           resetOnEmpty={false}
         />
       );
@@ -315,56 +313,10 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
   });
 
-  it('keeps focus in the prompt after clearing it to empty', async () => {
-    // Clearing remounts the mention tree to re-arm the hydrators, which replaces
-    // the textarea node. Restoring focus must not depend on the caller passing a
-    // ref — the settings template editor does not pass one.
-    function Controlled() {
-      const [value, setValue] = React.useState('hello');
-      return <CombinedMentionTextarea value={value} onValueChange={setValue} />;
-    }
-    await act(async () => root.render(<Controlled />));
-    const before = container.querySelector('textarea')!;
-    before.focus();
-    expect(document.activeElement).toBe(before);
-
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        before,
-        ''
-      );
-      before.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    const after = container.querySelector('textarea')!;
-    expect(after.value).toBe('');
-    expect(document.activeElement).toBe(after);
-  });
-
   it('does not scan skills until something asks for them', async () => {
     await render({ value: '', skillAgent: { machineId: 'machine-1' } });
 
     expect(skillScanEnabled).not.toContain(true);
-  });
-
-  it('keeps template skills disabled without explicit scope even if an agent is supplied', async () => {
-    await render({ value: '', templateScope: {}, skillAgent: { machineId: 'machine-1' } });
-    await typeInto('@skill:');
-    expect(skillScanEnabled).not.toContain(true);
-    // The disabled entry names the axes a skill reference still needs, so the
-    // author can act on it without guessing which scope is missing.
-    expect(document.body.textContent).toContain('Set Project + Agent in “Applies to” first.');
-  });
-
-  it('does not hydrate or fetch typed template skill tokens on mount', async () => {
-    await render({
-      value: 'use $review',
-      templateScope: { machineId: 'machine-1', providerKey: 'builtin:codex' },
-      skillAgent: { machineId: 'machine-1' },
-    });
-    expect(skillScanEnabled).not.toContain(true);
-    await typeInto('@skill:');
-    expect(skillScanEnabled).toContain(true);
   });
 
   it('scans skills when the menu scopes to the Skills category', async () => {

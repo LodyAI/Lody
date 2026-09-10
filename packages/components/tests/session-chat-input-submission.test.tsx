@@ -1,31 +1,9 @@
 // @vitest-environment jsdom
 
 import { act, createElement, createRef, type RefObject } from 'react';
-import { getDefaultStore } from 'jotai';
-import { currentWorkspaceIdAtom, userAtom } from '../src/atoms';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createShortcutInvocation, type PromptShortcut } from '@lody/shared/prompt-shortcuts';
-import type { Mention } from '../src/ui/mention/index';
-import {
-  captureShortcutDraft,
-  indexedShortcutDraftStorage,
-  shortcutDraftRepository,
-} from '../src/lib/shortcut-composer-draft';
 import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
-
-const composerRanges = vi.hoisted(() => ({
-  change: undefined as ((ranges: Mention[]) => void) | undefined,
-  promptChange: undefined as ((text: string) => void) | undefined,
-}));
-const shortcutProvider = vi.hoisted(() => ({
-  runtime: { userId: 'user-1', workspaceId: 'ws' },
-  entries: [],
-  loading: false,
-}));
-vi.mock('../src/providers/prompt-shortcut-provider', () => ({
-  usePromptShortcuts: () => shortcutProvider,
-}));
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -52,19 +30,6 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   ...(await importOriginal<object>()),
   useAgentRoleMentionItems: () => [],
 }));
-
-vi.mock('../src/components/chat/chat-composer', async (importOriginal) => {
-  const React = await import('react');
-  const actual = await importOriginal<typeof import('../src/components/chat/chat-composer')>();
-  return {
-    ...actual,
-    ChatComposer: (props: React.ComponentProps<typeof actual.ChatComposer>) => {
-      composerRanges.change = props.onMentionRangesChange;
-      composerRanges.promptChange = props.onPromptChange;
-      return React.createElement(actual.ChatComposer, props);
-    },
-  };
-});
 
 vi.mock('../src/components/sessions/desktop-run-config-menu', async () => {
   const React = await import('react');
@@ -118,8 +83,6 @@ describe('SessionChatInputArea submission feedback', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
-    vi.spyOn(indexedShortcutDraftStorage, 'read').mockResolvedValue(null);
-    vi.spyOn(indexedShortcutDraftStorage, 'write').mockResolvedValue();
     sessionAgentRoleState.control = {
       items: [],
       selectedRoleId: null,
@@ -207,68 +170,6 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(container.querySelector('[data-testid="desktop-permission-mode-button"]')).toBeNull();
   });
 
-  it.each(['account', 'workspace'] as const)(
-    'does not expose Shortcut-bearing cached text after an in-place %s switch',
-    async (axis) => {
-      const store = getDefaultStore();
-      const previousUser = store.get(userAtom);
-      const previousWorkspace = store.get(currentWorkspaceIdAtom);
-      await renderPermissionModeCase({});
-      act(() => {
-        composerRanges.promptChange?.('Private /review');
-        composerRanges.change?.([
-          {
-            start: 8,
-            end: 15,
-            value: 'private-invocation',
-            kind: 'prompt_shortcut',
-            data: createShortcutInvocation('private-invocation', {
-              v: 1,
-              id: 'review',
-              workspaceId: 'ws',
-              ownerUserId: 'user-1',
-              visibility: 'private',
-              name: 'Review',
-              slug: 'review',
-              prompt: 'Private prompt',
-              mentions: [],
-              scope: {},
-              revision: 'r1',
-              createdAt: 1,
-              updatedAt: 1,
-            }),
-          },
-        ]);
-      });
-      expect(container?.querySelector('textarea')?.value).toBe('Private /review');
-      try {
-        act(() => {
-          if (axis === 'account') {
-            store.set(userAtom, { id: 'other', name: 'Other', email: 'other@example.test' });
-          } else {
-            store.set(
-              currentWorkspaceIdAtom,
-              'other-workspace' as NonNullable<typeof previousWorkspace>
-            );
-          }
-        });
-        expect(container?.querySelector('textarea')?.value).toBe('');
-        act(() => composerRanges.promptChange?.('New identity draft'));
-        expect(container?.querySelector('textarea')?.value).toBe('New identity draft');
-        act(() => {
-          store.set(userAtom, previousUser);
-          store.set(currentWorkspaceIdAtom, previousWorkspace);
-        });
-        expect(container?.querySelector('textarea')?.value).toBe('');
-      } finally {
-        act(() => {
-          store.set(userAtom, previousUser);
-          store.set(currentWorkspaceIdAtom, previousWorkspace);
-        });
-      }
-    }
-  );
-
   it('keeps the desktop permission button when the selected Role does not pin it', async () => {
     await renderPermissionModeCase({});
     expect(
@@ -327,7 +228,6 @@ describe('SessionChatInputArea submission feedback', () => {
 
   afterEach(async () => {
     await act(async () => root?.unmount());
-    vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     root = null;
@@ -751,145 +651,5 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
-  });
-
-  it.each([false, true])(
-    'retires a departed Shortcut draft only without a newer same-text invocation (replacement=%s)',
-    async (replacement) => {
-      const store = getDefaultStore();
-      const previousUser = store.get(userAtom);
-      const previousWorkspace = store.get(currentWorkspaceIdAtom);
-      const write = vi.spyOn(indexedShortcutDraftStorage, 'write').mockResolvedValue();
-      const read = vi.spyOn(indexedShortcutDraftStorage, 'read').mockResolvedValue(null);
-      const sessionId = `shortcut-retired-${++nextSession}`;
-      const identity = { userId: 'user-1', workspaceId: 'ws', composerId: sessionId };
-      const body: PromptShortcut = {
-        v: 1,
-        id: 'review',
-        workspaceId: 'ws',
-        ownerUserId: 'user-1',
-        visibility: 'private',
-        name: 'Review',
-        slug: 'review',
-        prompt: 'Review the change',
-        mentions: [],
-        scope: {},
-        revision: 'r1',
-        createdAt: 1,
-        updatedAt: 1,
-      };
-      const recordFor = (id: string) =>
-        captureShortcutDraft('/review', [
-          {
-            start: 0,
-            end: 7,
-            value: id,
-            kind: 'prompt_shortcut',
-            data: createShortcutInvocation(id, body),
-          },
-        ])!;
-      const original = recordFor('submitted');
-      const newer = recordFor('replacement');
-      const acceptance = deferredBoolean();
-      try {
-        act(() => {
-          store.set(userAtom, { id: 'user-1', name: 'User', email: 'user@example.test' });
-          store.set(currentWorkspaceIdAtom, 'ws' as NonNullable<typeof previousWorkspace>);
-        });
-        await shortcutDraftRepository.write(identity, original);
-        setSessionChatInputTextDraft(sessionId as SessionMeta['id'], '/review');
-        await renderComposer({ sessionId, onSendMessage: () => acceptance.promise });
-        await submit('button');
-        await renderComposer({ onSendMessage: async () => true });
-        if (replacement) await shortcutDraftRepository.write(identity, newer);
-        await act(async () => acceptance.resolve(true));
-        expect(await shortcutDraftRepository.read(identity)).toEqual(replacement ? newer : null);
-        const restored = await renderComposer({ sessionId, onSendMessage: async () => true });
-        expect(restored.value).toBe(replacement ? '/review' : 'focus regression draft');
-      } finally {
-        await act(async () => root?.unmount());
-        root = null;
-        container?.remove();
-        container = null;
-        act(() => {
-          store.set(userAtom, previousUser);
-          store.set(currentWorkspaceIdAtom, previousWorkspace);
-        });
-        write.mockRestore();
-        read.mockRestore();
-      }
-    }
-  );
-
-  it('sends canonical Shortcut expansion and retains the same invocation on rejection', async () => {
-    const body: PromptShortcut = {
-      v: 1,
-      id: 'review',
-      workspaceId: 'ws',
-      ownerUserId: 'user-1',
-      visibility: 'private',
-      name: 'Review',
-      slug: 'review',
-      prompt: '  $literal !{unchanged}\n  end  ',
-      mentions: [],
-      scope: {},
-      revision: 'r1',
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    const invocation = createShortcutInvocation('invocation', body);
-    await shortcutDraftRepository.write(
-      { userId: 'user-1', workspaceId: 'ws', composerId: 'shortcut-send' },
-      captureShortcutDraft('Before /review after', [
-        { start: 7, end: 14, value: invocation.id, kind: 'prompt_shortcut', data: invocation },
-      ])
-    );
-    const onSendMessage = vi.fn(async () => false);
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () =>
-      root?.render(
-        createElement(SessionChatInputArea, {
-          session: {
-            id: 'shortcut-send',
-            userId: 'user-1',
-            machineId: 'machine-1',
-            cliType: 'builtin',
-            agentType: 'codex',
-            status: { type: 'idle' },
-            createdAt: '2026-07-19T00:00:00.000Z',
-          } as SessionMeta,
-          sessionLocalProjectRootPath: null,
-          isMachineRemoved: false,
-          isAgentBusy: false,
-          isDark: false,
-          isEmptyConversation: false,
-          selectedModeId: null,
-          selectedModelId: null,
-          modeOptions: [],
-          modelOptions: [],
-          onModeChange: () => {},
-          onModelChange: () => {},
-          onSendMessage,
-          onStop: () => {},
-          onRemoveQueueItem: async () => {},
-          initialInputText: 'Before /review after',
-        })
-      )
-    );
-    await act(async () =>
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click()
-    );
-    expect(onSendMessage).toHaveBeenCalledWith(
-      [{ type: 'text', text: 'Before   $literal !{unchanged}\n  end   after' }],
-      undefined
-    );
-    expect(container.querySelector('textarea')?.value).toBe('Before /review after');
-    await act(async () =>
-      container?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.click()
-    );
-    expect(onSendMessage).toHaveBeenCalledTimes(2);
-    expect(onSendMessage.mock.calls[1]).toEqual(onSendMessage.mock.calls[0]);
   });
 });

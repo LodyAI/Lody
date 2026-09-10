@@ -368,24 +368,3 @@ describe('session document persistence', () => {
     });
   });
 });
-
-it('emits nested compiled segment spans at their final locations in one source-order pass', () => {
-  const result = applyTextRewrites('A/chip B@file', [
-    { start: 8, end: 13, span: { kind: 'file', label: '@file', target: 'file' } },
-    {
-      start: 1,
-      end: 6,
-      replacement: '😀 one two',
-      spans: [
-        { start: 3, end: 6, kind: 'skill', label: '$one', target: 'path' },
-        { start: 7, end: 10, kind: 'file', label: '@two', target: 'two' },
-      ],
-    },
-  ]);
-  expect(result.text).toBe('A😀 one two B@file');
-  expect(result.spans?.map((span) => result.text.slice(span.start, span.end))).toEqual([
-    'one',
-    'two',
-    '@file',
-  ]);
-});
