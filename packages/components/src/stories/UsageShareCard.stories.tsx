@@ -174,6 +174,16 @@ export const WeekWide: Story = {
   args: { ...cardProps(WEEK, 'Last 7 days'), aspect: 'wide', theme: 'light' },
 };
 
+/** The sign-off moved onto the backdrop, which frees the in-card band entirely. */
+export const CanvasFooter: Story = {
+  args: {
+    ...cardProps(MONTH, 'Last 30 days'),
+    aspect: 'portrait',
+    footer: 'canvas',
+    theme: 'dark',
+  },
+};
+
 /** Cost is opt-in; this is what turning it on looks like. */
 export const WithCost: Story = {
   args: {

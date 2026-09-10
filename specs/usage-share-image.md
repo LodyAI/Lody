@@ -61,8 +61,13 @@ empty on purpose: everything the card has to say is already said by the bands be
 it, and the alternatives — a brand watermark, a second chart — either repeat what is
 there or stand in for content that does not exist.
 
-The footer is a sign-off rather than a status bar: the workspace it belongs to,
-where it came from, and a code that opens it. It borrows the session card's
+The sign-off can sit inside the card or on the backdrop beneath it. On the
+backdrop it costs the card nothing — the in-card band goes away and those pixels
+were empty frame — so the data gains room; it needs a backdrop to print on, and a
+card without one keeps the sign-off inside. Either way it names the workspace it
+belongs to, where it came from, and carries a code that opens it.
+
+The in-card footer is a sign-off rather than a status bar: It borrows the session card's
 identity-and-sub structure without that card's parameter line, which would only
 repeat numbers the bands above already carry. The wide format keeps the same
 content on one row, having no height to spare.

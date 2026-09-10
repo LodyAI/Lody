@@ -119,6 +119,16 @@ rather than out of any information band. It deliberately omits that card's EXIF
 parameter line, which here would only repeat the bands above. The wide format
 keeps the single row.
 
+The session card's `canvas` footer turned out to be worth taking as well, and it is
+the only placement that *gives* the card height rather than taking it: the in-card
+band disappears and the sign-off prints on backdrop pixels that were empty frame.
+It is a sixth knob on a card whose whole argument is few knobs, which is affordable
+because it is a placement rather than a style, and because it degrades honestly —
+with no backdrop there is nothing to print on, so it falls back to the in-card
+footer exactly as the session card does. The other variants were measured and left:
+`stacked` does not fit, `row` is what the wide format already is, `minimal` drops
+the workspace name and the code, and `exif` would repeat the bands above.
+
 **One capture pipeline for both cards.** `lib/chat-share-image-export.ts` became
 `lib/share-image-export.ts` with `copyShareImage` / `exportShareImage(element,
 title, fallback)`; `components/chat-share-theme-scope.ts` became

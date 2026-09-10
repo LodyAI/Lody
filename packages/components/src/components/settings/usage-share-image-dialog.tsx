@@ -15,6 +15,7 @@ import {
   USAGE_SHARE_BACKDROP_STYLES,
   type UsageShareCardAspect,
   type UsageShareCardBackdrop,
+  type UsageShareCardFooter,
   type UsageShareCardSubject,
 } from './usage-share-card';
 import {
@@ -110,6 +111,7 @@ export function UsageShareImageDialog({
   const [subject, setSubject] = useState<UsageShareCardSubject>('personal');
   const [backdrop, setBackdrop] = useState<UsageShareCardBackdrop>('lody');
   const [theme, setTheme] = useState<'app' | 'light' | 'dark'>('dark');
+  const [footer, setFooter] = useState<UsageShareCardFooter>('card');
   const [showCost, setShowCost] = useState(false);
   const [showQr, setShowQr] = useState(true);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -264,6 +266,27 @@ export function UsageShareImageDialog({
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="usage-share-footer">{t('workspace.usage.shareImage.footer')}</Label>
+              <Select
+                value={footer}
+                onValueChange={(value) => setFooter(value as UsageShareCardFooter)}
+                disabled={backdrop === 'none'}
+              >
+                <SelectTrigger id="usage-share-footer" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="card">
+                    {t('workspace.usage.shareImage.footerCard')}
+                  </SelectItem>
+                  <SelectItem value="canvas">
+                    {t('workspace.usage.shareImage.footerCanvas')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label>{t('workspace.usage.shareImage.backdrop')}</Label>
               <div className="grid grid-cols-4 gap-2" role="group">
                 <button
@@ -341,6 +364,7 @@ export function UsageShareImageDialog({
                   aspect={aspect}
                   subject={subject}
                   backdrop={backdrop}
+                  footer={footer}
                   showCost={showCost}
                   showQr={showQr}
                   theme={theme === 'app' ? undefined : theme}

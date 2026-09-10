@@ -25,6 +25,15 @@ export type UsageShareCardSubject = 'personal' | 'team';
 export type UsageShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset';
 
 /**
+ * Where the sign-off lives. `card` keeps it inside, under a rule. `canvas` moves it
+ * onto the backdrop below the card, the way the session card's canvas footer does:
+ * the only placement that *gives* the card height instead of taking it, since the
+ * in-card band goes away entirely and the backdrop is otherwise empty pixels. It
+ * needs a backdrop to sit on, so an unframed card falls back to `card`.
+ */
+export type UsageShareCardFooter = 'card' | 'canvas';
+
+/**
  * These are the whole exported image, backdrop included — so a framed card is
  * 48px shorter than an unframed one, and the layout has to fit the framed case
  * because a backdrop is the default. Both were sized up until the framed
@@ -75,6 +84,8 @@ export interface UsageShareCardProps {
   showCost?: boolean;
   shareUrl?: string;
   showQr?: boolean;
+  /** Sign-off placement; `canvas` needs a backdrop and falls back to `card` without one. */
+  footer?: UsageShareCardFooter;
   /** Pins the exported palette instead of following the app's current theme. */
   theme?: 'light' | 'dark';
   className?: string;
@@ -464,6 +475,7 @@ export function UsageShareCard({
   showCost = false,
   shareUrl = DEFAULT_SHARE_URL,
   showQr = true,
+  footer: footerPlacement = 'card',
   theme,
   className,
   onAssetsReadyChange,
@@ -508,6 +520,8 @@ export function UsageShareCard({
   const size = ASPECT_SIZE[aspect];
   const rhythm = RHYTHM[aspect];
   const framed = backdrop !== 'none';
+  // Without a backdrop there is nothing to print the sign-off on.
+  const onCanvas = footerPlacement === 'canvas' && framed;
   const slices = subject === 'team' ? memberSlices : modelSlices;
   const compact = (value: number) => formatCompactNumber(value, locale);
 
@@ -762,16 +776,51 @@ export function UsageShareCard({
           />
         </div>
       )}
-      {footer}
+      {onCanvas ? null : footer}
+    </div>
+  );
+
+  /**
+   * The canvas sign-off, printed on the backdrop under the card. Its colours are
+   * fixed rather than themed: it sits on a gradient, not on the card surface, so
+   * the card's light/dark tokens do not describe what is behind it.
+   */
+  const canvasSignOff = (
+    <div className="mt-4 flex shrink-0 items-center gap-2.5">
+      <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />
+      <span className={cn('font-semibold tracking-wide text-white/90', TEXT.body)}>
+        {workspaceName?.trim() || 'Lody'}
+      </span>
+      <span className={cn('font-medium text-white/60', TEXT.meta)}>lody.ai</span>
+      {qrDataUrl ? (
+        <img
+          src={qrDataUrl}
+          alt={t('chatShareCard.qrAlt')}
+          className="ml-auto size-9 rounded-[3px] bg-white p-1 shadow-[0_2px_10px_rgba(0,0,0,0.25)]"
+        />
+      ) : null}
     </div>
   );
 
   return (
     <div
-      className={cn('flex', themeScopeClass, framed ? 'p-6' : '', className)}
-      style={{ width: size.width, height: size.height, ...(framed ? USAGE_SHARE_BACKDROP_STYLES[backdrop] : {}) }}
+      className={cn(
+        'flex flex-col',
+        themeScopeClass,
+        framed ? 'p-6' : '',
+        // The sign-off replaces the in-card band, so the card keeps most of the
+        // height it gives up to the canvas row and nets more room for content.
+        onCanvas ? 'pb-5' : '',
+        className
+      )}
+      style={{
+        width: size.width,
+        height: size.height,
+        ...(framed ? USAGE_SHARE_BACKDROP_STYLES[backdrop] : {}),
+      }}
     >
-      {card}
+      <div className="flex min-h-0 flex-1">{card}</div>
+      {onCanvas ? canvasSignOff : null}
     </div>
   );
 }
