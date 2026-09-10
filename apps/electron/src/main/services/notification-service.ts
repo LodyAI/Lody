@@ -1,3 +1,4 @@
+import { productWindows } from '../window-state'
 import { Notification, shell, systemPreferences, type BrowserWindow } from 'electron'
 import type {
   GetNotificationPermissionStatusResult,
@@ -126,6 +127,9 @@ export class NotificationService {
       return { shown: false, reason: 'notification_not_supported' }
     }
 
+    if ([...productWindows].some((window) => window.isFocused())) {
+      return { shown: false, reason: 'app_foreground' }
+    }
     const title = input.title.trim()
     const body = input.body.trim()
     if (!title || !body) {

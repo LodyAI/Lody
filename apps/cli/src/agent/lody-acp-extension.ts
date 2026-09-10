@@ -74,6 +74,7 @@ const LodyCapabilitiesSchema = z
     }).optional(),
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),
+    worktreeProject: VersionOneSchema.optional(),
   })
   .partial();
 

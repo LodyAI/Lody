@@ -81,6 +81,10 @@ never pushed to renderers as local room health.
   back to `loadSession`, which resumes the thread. Publish an imported Session only
   after history and its cursor are durable; legacy `metadata_only` shells stay
   selectable so a later import finishes hydration.
+- Imported history keeps source hashes/ids separate from its stored-content baseline.
+  Bind the baseline to the doc cursor, not metadata; compare existing content exactly,
+  never sanitize it to hide edits. Write history and capture its baseline without an
+  async gap, before publishing meta. Legacy history without a baseline is not migrated.
 - Removing a local project archives every unarchived Session for that machine/project
   before deleting the project row, found through the existence and metadata indexes
   rather than by opening every Session document; a failed archive keeps the delete

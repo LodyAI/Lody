@@ -34,6 +34,7 @@ describe('builtin DeepSeek Harness shared contract', () => {
     const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'deepseek');
     expect(capabilities?.models).toEqual([]);
     expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
+      'plan_mode',
       'mode',
       'agent_preset',
     ]);

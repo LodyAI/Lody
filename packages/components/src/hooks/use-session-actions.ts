@@ -677,7 +677,7 @@ export function useSessionActions(): SessionActions {
       await runtime.writer.startSession(
         sessionId,
         sessionMeta as unknown as Record<string, unknown>,
-        historyEntry as unknown as Record<string, unknown>,
+        historyEntry,
         {
           userTurnId: historyEntry.id,
           userId,
@@ -757,11 +757,7 @@ export function useSessionActions(): SessionActions {
           inputConfig: inputConfig as unknown as Record<string, unknown>,
         };
       }
-      await runtime.writer.appendSessionTurn(
-        sessionId,
-        entry as unknown as Record<string, unknown>,
-        dispatch
-      );
+      await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
       // session/chat fires once for every user message dispatched through Lody —
       // the session-creating turn AND every follow-up — so it tracks active-use
       // frequency, unlike session/start_success which only covers creation. This

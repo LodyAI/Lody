@@ -4,6 +4,18 @@ The composer footer knobs (Agent / Model / Interaction / Reasoning / Permission)
 Agent Role selection on every surface, attachments, and the two durable run-config
 authorities.
 
+Independent Plan uses ACP Core's boolean `plan_mode`. Shared capability discovery
+and selector ordering recognize it as Plan; UI changes and semantic run-config
+dispatch send booleans without changing permissions. Static Codex, Grok, Kimi,
+and DeepSeek Harness capabilities use Core's option factory; Claude retains its
+permission-based Plan mode. Kimi and Grok static permission selectors match their
+adapters' independent permission options rather than offering Plan as permission
+or a second interaction selector. DeepSeek's builtin profile mounts the Plan
+service; a runtime snapshot that omits Plan still removes the provisional control.
+Older agents advertising `collaboration_mode` retain
+their `default`/`plan` select values; do not rewrite those cached contracts into
+new wire ids. A live `configOptions` snapshot determines the current controls.
+
 Scope: `packages/components/src/components/sessions`. Binding rules and the
 pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
@@ -230,4 +242,3 @@ this page is the full text of the rules summarised there.
   `<input type="file">` on every platform (Windows included — the renderer no
   longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
   routes each selection by MIME into the image or file state machine.
-

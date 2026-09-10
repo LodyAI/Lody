@@ -1,3 +1,12 @@
+import { useTranslation } from 'react-i18next';
+import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from '@/ui/context-menu';
+import { isNewWindowClick, openDesktopWindow } from '@/lib/desktop-window';
 import {
   type ComponentPropsWithoutRef,
   type PointerEvent as ReactPointerEvent,
@@ -31,6 +40,7 @@ import {
 } from '@/ui/dropdown-menu';
 import { ScrollArea } from '@/ui/scroll-area';
 import {
+  AppWindow,
   Archive,
   ListTodo,
   BookOpen,
@@ -71,6 +81,7 @@ export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
 
 export type LoroSidebarWorkspace = {
   id: string;
+  slug?: string;
   name: string;
   logo?: string | null;
   /** Paid plan tier for the Plus/Enterprise badge; null/undefined = free. */
@@ -682,6 +693,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
+  const { t } = useTranslation();
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -923,25 +935,58 @@ export const LoroSidebar = memo(function LoroSidebar({
                       onValueChange={(value) => onWorkspaceSelected?.(value)}
                     >
                       {workspaces.map((ws) => (
-                        <DropdownMenuRadioItem key={ws.id} value={ws.id} className="gap-2">
-                          <WorkspaceAvatar
-                            workspace={{ name: ws.name, logo: ws.logo }}
-                            className="h-5 w-5 shrink-0 text-[10px]"
-                          />
-                          <span className="min-w-0 truncate">{ws.name}</span>
-                          {ws.planTier ? (
-                            <Badge
-                              variant="secondary"
-                              className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                        <ContextMenu key={ws.id}>
+                          <ContextMenuTrigger asChild disabled={!isElectronRenderer() || !ws.slug}>
+                            <DropdownMenuRadioItem
+                              value={ws.id}
+                              className="gap-2"
+                              onClickCapture={(event) => {
+                                if (!ws.slug || !isNewWindowClick(event)) return;
+                                if (openDesktopWindow(undefined, ws.slug)) {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }
+                              }}
                             >
-                              {ws.planTier === 'enterprise'
-                                ? mergedLabels.planEnterprise
-                                : mergedLabels.planPlus}
-                            </Badge>
+                              <WorkspaceAvatar
+                                workspace={{ name: ws.name, logo: ws.logo }}
+                                className="h-5 w-5 shrink-0 text-[10px]"
+                              />
+                              <span className="min-w-0 truncate">{ws.name}</span>
+                              {ws.planTier ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                                >
+                                  {ws.planTier === 'enterprise'
+                                    ? mergedLabels.planEnterprise
+                                    : mergedLabels.planPlus}
+                                </Badge>
+                              ) : null}
+                            </DropdownMenuRadioItem>
+                          </ContextMenuTrigger>
+                          {isElectronRenderer() && ws.slug ? (
+                            <ContextMenuContent>
+                              <ContextMenuItem
+                                onSelect={() => {
+                                  openDesktopWindow(undefined, ws.slug);
+                                }}
+                              >
+                                <AppWindow />
+                                {t('workspace.openInNewWindow')}
+                              </ContextMenuItem>
+                            </ContextMenuContent>
                           ) : null}
-                        </DropdownMenuRadioItem>
+                        </ContextMenu>
                       ))}
                     </DropdownMenuRadioGroup>
+                    {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
+                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                        {t('workspace.openInNewWindowHint', {
+                          key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+                        })}
+                      </p>
+                    ) : null}
                     <DropdownMenuSeparator />
                   </>
                 ) : null}

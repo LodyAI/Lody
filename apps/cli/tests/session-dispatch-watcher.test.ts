@@ -4,9 +4,11 @@ import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { LoroDoc } from 'loro-crdt';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import {
   buildMissingEmail,
+  createSessionMirror,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
   type MessageContent,
@@ -1346,7 +1348,10 @@ describe('SessionDispatchWatcher', () => {
         messageQueueUpdatedAt: 1,
       })),
       getHistory: vi.fn(async () => history),
-      popMessageQueue: vi.fn(async () => queue.shift() ?? null),
+      peekReadyMessageQueue: vi.fn(async () => queue[0] ?? null),
+      removeMessageQueueItem: vi.fn(async () => {
+        queue.shift();
+      }),
       appendUserTurn: vi.fn(async (entry: SessionHistoryInput) => {
         history = [...history, entry];
         promotedPointer = entry.id;
@@ -1406,7 +1411,7 @@ describe('SessionDispatchWatcher', () => {
     await vi.waitFor(() => {
       expect(startSession).toHaveBeenCalledTimes(1);
     });
-    expect(sessionDoc.popMessageQueue).toHaveBeenCalledTimes(1);
+    expect(sessionDoc.peekReadyMessageQueue).toHaveBeenCalledTimes(1);
     expect(history[0]).toEqual(
       expect.objectContaining({
         id: 'queued-mq-1',
@@ -1435,6 +1440,89 @@ describe('SessionDispatchWatcher', () => {
     );
   });
 
+  it('repairs activation after a history-only queue commit without duplicating or replaying turns', async () => {
+    const id = 'queue-retry' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-09-09',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      latestUserMsgId: 'previous',
+      lastHandledUserMsgId: 'previous',
+    } as SessionMeta;
+    let rejectPointer = true;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        if (rejectPointer) throw new Error('pointer-unavailable');
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    const loro = new LoroDoc();
+    doc.mirror = createSessionMirror({ doc: loro, initialState: { session: { id }, history: [] } });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const promote = (
+      watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: SessionDocument,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+      }
+    ).promoteNextQueuedMessage.bind(watcher);
+    const enqueue = () =>
+      doc.pushMessageQueue({
+        userTurnId: 'queued',
+        task: 'hello',
+        userId: 'user-1',
+        timestamp: '2026-09-09',
+        acpSessionConfig: {
+          prompt: 'hello',
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+      } as never);
+    try {
+      await enqueue();
+      const attempt = () =>
+        promote(doc, meta, doc.mirror!.getState().history as SessionHistoryInput[]);
+      await expect(attempt()).rejects.toThrow('pointer-unavailable');
+      expect(loro.getList('history').length).toBe(1);
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      await expect(attempt()).rejects.toThrow('pointer-unavailable');
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      rejectPointer = false;
+      meta.latestUserMsgId = 'other';
+      expect(await attempt()).toBeNull();
+      expect(meta.latestUserMsgId).toBe('other');
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      meta.lastHandledUserMsgId = 'other';
+      expect((await attempt())?.id).toBe('queued');
+      expect(getPendingUserTurnActivationId(meta)).toBe('queued');
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+      expect(loro.getList('history').length).toBe(1);
+      // A resurrected queue row must not replay even if history status is stale.
+      meta.lastHandledUserMsgId = 'queued';
+      await enqueue();
+      expect(await attempt()).toBeNull();
+      expect(hasPendingUserTurnActivation(meta)).toBe(false);
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+    } finally {
+      doc.mirror.dispose();
+    }
+  });
+
   it('drops a resurrected queue item whose user turn already exists in history', async () => {
     const sessionId = 'session-mq-resurrected' as SessionId;
     const turnId = 'turn-mq-resurrected';
@@ -1443,7 +1531,7 @@ describe('SessionDispatchWatcher', () => {
       status: 'handled' as const,
       read: true,
     };
-    const popMessageQueue = vi.fn(async () => ({
+    const peekReadyMessageQueue = vi.fn(async () => ({
       $cid: 'mq-resurrected',
       task: 'queued hello',
       userId: 'user-1',
@@ -1479,8 +1567,10 @@ describe('SessionDispatchWatcher', () => {
       watcher as unknown as {
         promoteNextQueuedMessage: (
           sessionDoc: {
-            popMessageQueue: typeof popMessageQueue;
+            peekReadyMessageQueue: typeof peekReadyMessageQueue;
             updateHistory: typeof updateHistory;
+            removeMessageQueueItem: (cid: string) => Promise<void>;
+            appendUserTurn?: (entry: SessionHistoryInput) => Promise<void>;
           },
           meta: SessionMeta,
           history: SessionHistoryInput[]
@@ -1489,7 +1579,7 @@ describe('SessionDispatchWatcher', () => {
     ).promoteNextQueuedMessage.bind(watcher);
 
     const promoted = await promoteNextQueuedMessage(
-      { popMessageQueue, updateHistory },
+      { peekReadyMessageQueue, updateHistory, removeMessageQueueItem: vi.fn(async () => {}) },
       {
         id: sessionId,
         machineId: 'machine-1',
@@ -1503,8 +1593,36 @@ describe('SessionDispatchWatcher', () => {
     );
 
     expect(promoted).toBeNull();
-    expect(popMessageQueue).toHaveBeenCalledTimes(1);
+    expect(peekReadyMessageQueue).toHaveBeenCalledTimes(1);
     expect(updateHistory).not.toHaveBeenCalled();
+    const remainingQueue = [await peekReadyMessageQueue()];
+    const failingDoc = {
+      peekReadyMessageQueue: async () => remainingQueue[0] ?? null,
+      removeMessageQueueItem: async () => {
+        remainingQueue.shift();
+      },
+      appendUserTurn: async () => {
+        throw new Error('synthetic-write-rejected');
+      },
+      updateHistory,
+    };
+    await expect(
+      promoteNextQueuedMessage(
+        failingDoc,
+        {
+          id: sessionId,
+          machineId: 'machine-1',
+          userId: 'user-1',
+          createdAt: '2026-09-09T00:00:00Z',
+          cliType: 'builtin',
+          agentType: 'codex',
+          status: { type: 'idle' },
+        },
+        []
+      )
+    ).rejects.toThrow('synthetic-write-rejected');
+    expect(remainingQueue).toHaveLength(1);
+    expect(remainingQueue[0]?.userTurnId).toBe(turnId);
   });
 
   /**
@@ -1558,7 +1676,7 @@ describe('SessionDispatchWatcher', () => {
       },
     } as unknown as SessionDocument['mirror'];
     const sessionDoc = Object.assign(realDoc, {
-      popMessageQueue: vi.fn(async () => ({
+      peekReadyMessageQueue: vi.fn(async () => ({
         $cid: 'mq-pointer',
         task: 'queued hello',
         userId: 'user-1',

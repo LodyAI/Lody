@@ -127,3 +127,17 @@ Follow-up correction (2026-09-10): the [independent review and ablation](../simp
 found gaps in startup acknowledgement, cross-transport supersession, and cold-session
 status control. Those implementation defects remain unresolved; the intended
 guarantees above are not evidence that these scenarios currently work.
+
+Merge integration (2026-09-10): retain both `SessionGoalAction` and Core's
+`createPlanModeConfigOption` imports when merging main. Core's goal branch now
+also includes main's worktree-project contract (`2812417`), while Codex stays on
+merged PR #39 (`33d897b`). Choosing either old Core pointer alone would drop a
+required contract. Core build/typecheck and Codex typecheck pass with the combined
+contract; CLI ownership/goal tests (122), Codex goal/fork/worktree tests (52), shared
+capability/config tests (26), and goal UI helper tests (5) pass. This resolves the
+dependency mismatch, not the previously recorded host-side P1 findings. The Core
+goal branch still needs its own merge/release before registry-only consumption.
+Full workspace typecheck and lint also pass; `pnpm check` reaches tests but is
+terminated at the five-minute limit, so the full suite is not a passing signal.
+Formatting, docs check, and the public-boundary check pass; unrelated formatter
+churn is excluded from the merge.

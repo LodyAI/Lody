@@ -88,6 +88,7 @@ export type SessionDocUpdater =
   | ((state: Readonly<SessionDocInput>) => SessionDocInput);
 
 export type SessionDocStore = {
+  readonly historyWriter: import('@lody/shared').HistoryWriter;
   readonly sessionId: SessionId;
   readonly roomId: string;
   readonly doc: LoroDoc;

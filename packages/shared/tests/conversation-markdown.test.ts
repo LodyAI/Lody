@@ -294,3 +294,119 @@ describe('buildConversationMarkdown', () => {
     expect(result.stats.pathsCount).toBe(1);
   });
 });
+
+it('records file references without claiming their bytes were copied', () => {
+  const file = { type: 'file', fileName: 'context.txt', sizeBytes: 5001 } as MessageContent;
+  const result = buildConversationMarkdown({ history: [entry('user', [file])] });
+  expect(result.markdown).toContain('context.txt');
+  expect(result.markdown).toContain('File contents not included.');
+});
+
+it('retains standalone user images without exporting their blob identifiers', () => {
+  const image: MessageContent = {
+    type: 'image',
+    imageId: 'private-blob-id',
+    mimeType: 'image/png',
+    fileName: 'screenshot.png',
+    sizeBytes: 512,
+  };
+  const { markdown } = buildConversationMarkdown({ history: [entry('user', [image])] });
+  expect(markdown).toContain('screenshot.png');
+  expect(markdown).toContain('Image contents not included.');
+  expect(markdown).not.toContain('private-blob-id');
+});
+
+it('retains a reference-only code review prompt and its replies even over budget', () => {
+  const ref: MessageContent = {
+    type: 'comment_reference',
+    source: 'github',
+    path: 'src/app.ts',
+    lineNumber: 42,
+    side: 'deletions',
+    authorName: 'Reviewer',
+    commentBody: 'Keep **this check**.\n```ts\nvalidate(input);\n```',
+    replies: [{ authorName: 'Author', body: 'The replacement must reject invalid input.' }],
+  };
+  const { markdown, stats } = buildConversationMarkdown({
+    history: [entry('user', [ref])],
+    maxChars: 20,
+    maxTokens: 5,
+  });
+  expect(markdown).toContain('path="src/app.ts" line="42" side="deletions"');
+  expect(markdown).toContain(ref.commentBody);
+  expect(markdown).toContain('@Author:');
+  expect(markdown).toContain('The replacement must reject invalid input.');
+  expect(markdown).toContain('````xml');
+  expect(stats.overBudget).toBe(true);
+});
+
+const visualAnnotationReference: Extract<MessageContent, { type: 'visual_annotation_reference' }> =
+  {
+    type: 'visual_annotation_reference',
+    source: 'visual_annotation',
+    commentId: 'visual-comment-1',
+    turnId: 'turn-1',
+    body: 'Move this heading closer to the eyebrow.',
+    authorName: 'Ada',
+    status: 'submitted',
+    anchor: {
+      version: 1,
+      page: {
+        url: '/preview',
+        pathname: '/preview',
+        viewport: {
+          width: 960,
+          height: 620,
+          scrollX: 0,
+          scrollY: 0,
+          devicePixelRatio: 2,
+        },
+      },
+      click: {
+        clientX: 120,
+        clientY: 140,
+        pageX: 120,
+        pageY: 140,
+        viewportXRatio: 0.125,
+        viewportYRatio: 0.2258064516,
+      },
+      target: {
+        tag: 'h1',
+        attributes: { 'data-testid': 'hero-title' },
+        text: 'Design reviews should point at pixels.',
+        rect: {
+          x: 100,
+          y: 120,
+          width: 480,
+          height: 96,
+        },
+        rectRatio: {
+          x: 0.1041666667,
+          y: 0.1935483871,
+          width: 0.5,
+          height: 0.1548387097,
+        },
+        selector: 'h1[data-testid="hero-title"]',
+        xpath: '/html/body/main/h1',
+      },
+      context: {
+        ancestors: [{ tag: 'main', selector: 'main' }],
+        nearbyText: ['Preview fixture', 'Design reviews should point at pixels.'],
+      },
+    },
+  };
+
+it('retains a reference-only visual annotation and its target', () => {
+  const { markdown, stats } = buildConversationMarkdown({
+    history: [entry('user', [visualAnnotationReference])],
+    maxChars: 20,
+    maxTokens: 5,
+  });
+  expect(markdown).toContain(visualAnnotationReference.body);
+  expect(markdown).toContain('url="/preview" pathname="/preview"');
+  expect(markdown).toContain('selector="h1[data-testid=&quot;hero-title&quot;]"');
+  expect(markdown).toContain('viewport-x-ratio="0.125"');
+  expect(markdown).toContain('Target text: Design reviews should point at pixels.');
+  expect(markdown).toContain('Preview fixture');
+  expect(stats.overBudget).toBe(true);
+});

@@ -15,6 +15,7 @@ import {
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  HistoryWriteError,
   MachineId,
   WorkspaceId,
   SessionInputBlockSchema,
@@ -5115,8 +5116,8 @@ export class MessageHandler {
     turnId: string;
     targetSource: ACPUpdateTarget['source'];
     modelInfo?: ModelInfo;
-    // Counts notifications (in `args.updates` order) whose history writes
-    // committed. Text batches and rich-content uploads interleave inside one
+    // Counts consumed notifications (committed or explicitly rejected) in
+    // `args.updates` order. Text batches and rich-content uploads interleave inside one
     // call, so a mid-group failure leaves a persisted prefix; the caller must
     // only re-queue past this watermark or short text chunks (intentionally not
     // deduplicated) would duplicate on retry.
@@ -5126,25 +5127,40 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
-      await appendACPNotificationsToAssistantEntry(
-        args.sessionDoc,
-        notifications,
-        args.assistantEntryId,
-        {
-          logger: this.logger,
-          editCallback: async (edits) => {
-            // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
-            // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
-            // them into the diff store (old text chained from the prior recorded state),
-            // keeping the turn-diff badge and its clickable content from the same source.
-            this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+      try {
+        await appendACPNotificationsToAssistantEntry(
+          args.sessionDoc,
+          notifications,
+          args.assistantEntryId,
+          {
+            logger: this.logger,
+            editCallback: async (edits) => {
+              // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
+              // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
+              // them into the diff store (old text chained from the prior recorded state),
+              // keeping the turn-diff badge and its clickable content from the same source.
+              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+            },
+            standardDiffCallback: async (diffs) => {
+              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            },
           },
-          standardDiffCallback: async (diffs) => {
-            await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
-          },
-        },
-        args.modelInfo
-      );
+          args.modelInfo
+        );
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        // The writer rejects before committing history. Isolate deterministic
+        // poison inputs instead of retaining them ahead of every later chunk.
+        if (notifications.length > 1) {
+          for (const notification of notifications) await persistNotifications([notification]);
+          return;
+        }
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        return;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += notifications.length;
       }
@@ -5215,7 +5231,16 @@ export class MessageHandler {
             await this.uploadValidatedSessionFile(uploadArgs),
         }));
       update.materializedContents = contents;
-      await appendContents(contents);
+      try {
+        await appendContents(contents);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP rich-content history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        continue;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += 1;
       }

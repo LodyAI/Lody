@@ -15,9 +15,23 @@ describe('resolveLocalWorkspaceFilePath', () => {
     );
   });
 
+  it('preserves absolute paths only for an explicitly local target', () => {
+    expect(resolveLocalWorkspaceFilePath('/workspace', '/tmp/build/Lody.zip', true)).toBe(
+      '/tmp/build/Lody.zip'
+    );
+    expect(resolveLocalWorkspaceFilePath(null, '/tmp/build/Lody.dmg', true)).toBe(
+      '/tmp/build/Lody.dmg'
+    );
+    expect(resolveLocalWorkspaceFilePath('/workspace', 'C:/build/Lody.zip', true)).toBe(
+      'C:/build/Lody.zip'
+    );
+    expect(resolveLocalWorkspaceFilePath('/workspace', '../Lody.zip', true)).toBe(
+      '/workspace/../Lody.zip'
+    );
+  });
+
   it('refuses a path that is not relative to the workspace', () => {
-    // This is what keeps a remote session from naming a path on THIS machine
-    // for the shell to open: nothing that could escape the root may resolve.
+    // Absolute paths remain rejected unless the caller identifies a local target.
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', '/etc/passwd')).toBeNull();
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', '../../etc/passwd')).toBeNull();
     expect(resolveLocalWorkspaceFilePath('/Users/dev/project', 'src/../../etc/passwd')).toBeNull();

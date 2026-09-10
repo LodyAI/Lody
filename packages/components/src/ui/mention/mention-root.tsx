@@ -540,7 +540,9 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     (payloadValue: string, triggerIndex: number, options?: { commit?: boolean }) => {
       const input = inputRef.current;
 
-      const selectedItem = getEnabledItems().find((item) => item.value === payloadValue);
+      const selectedItem = getItems().find((item) => item.value === payloadValue);
+      // A disabled registered item must not fall through to free-form insertion.
+      if (selectedItem?.disabled) return;
       // A navigation item rewrites the trigger span and keeps the menu open
       // instead of committing. `commit` overrides it, so pressing Enter on a
       // candidate the user already typed out inserts it for real.
@@ -622,7 +624,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       setValue,
       setOpen,
       inputValue,
-      getEnabledItems,
+      getItems,
       filterStore,
       onItemsFilter,
     ]

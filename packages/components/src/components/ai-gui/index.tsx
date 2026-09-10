@@ -94,6 +94,7 @@ export interface SessionChatStreamProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -181,6 +182,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       assistantActions,
       assistantActionsMessageId,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability,
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
@@ -222,6 +224,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const stableOnNavigateSession = useStableCallback((target: SessionNavigationTarget) => {
       onNavigateSession?.(target);
     });
+    const stableOnCopyContext = useStableCallback((messageId: string) =>
+      onCopyContext?.(messageId)
+    );
     const stableOnForkLastAssistant = useStableCallback(
       (turnId: string, destination?: SessionForkDestination) => {
         onForkLastAssistant?.(turnId, destination);
@@ -292,6 +297,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
         assistantActions={assistantActions}
         assistantActionsMessageId={assistantActionsMessageId}
+        onCopyContext={onCopyContext ? stableOnCopyContext : undefined}
         onForkLastAssistant={hasForkLastAssistant ? stableOnForkLastAssistant : undefined}
         forkWorktreeAvailability={forkWorktreeAvailability}
         onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}

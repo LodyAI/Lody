@@ -4,6 +4,9 @@ Shared mention primitive used by composer autocomplete surfaces.
 
 ## Invariants
 
+- `onMentionAdd` rejects disabled registered items before any text/range mutation;
+  filtering them from keyboard navigation alone is insufficient.
+
 - Inserted text comes from the item, not from the trigger. `MentionItem`'s
   `insertText` (commit) and `navigateText` (drill-down) replace the whole span
   from the trigger character to the caret, so each carries its own leading

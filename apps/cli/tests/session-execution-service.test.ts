@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { RequestError, type ContentBlock } from '@agentclientprotocol/sdk';
 import type { Logger } from '../src/utils/logger';
 import {
   SessionExecutionService,
@@ -16,6 +16,7 @@ import {
   type ACPSessionId,
   type AgentConfigMeta,
   type AgentConfigId,
+  type ChatFailedReason,
   type LocalProjectId,
   type MachineId,
   type SessionGoalMessage,
@@ -38,6 +39,25 @@ import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
 import { shouldWatchSession } from '../src/session/session-dispatch-logic';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
+
+/**
+ * A minimal synced conversation: enough for `buildReplayPromptFromHistory` to
+ * produce a non-empty replay, so restore paths that trade a resumable ACP
+ * session for a fresh one can prove they carried the context across.
+ */
+const PRIOR_CONVERSATION_HISTORY: SessionHistoryInput[] = [
+  {
+    id: 'turn-earlier-user',
+    role: 'user',
+    status: 'handled',
+    items: [{ type: 'text', text: 'remember the number 42' }],
+  } as SessionHistoryInput,
+  {
+    id: 'turn-earlier-assistant',
+    role: 'assistant',
+    items: [{ type: 'text', text: 'Noted: 42.' }],
+  } as SessionHistoryInput,
+];
 
 const createLaunchConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConfigMeta => ({
   id: capabilityConfigId,
@@ -2210,6 +2230,91 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it('closes the ACP session gracefully when a turn fails on expired credentials', async () => {
+    const sessionId = 'session-auth-expired' as SessionId;
+    const acpSessionId = 'acp-auth-expired' as ACPSessionId;
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        // Providers report an expired OAuth credential as a plain ACP internal
+        // error; the remedy text is theirs and is not guaranteed to be present.
+        throw {
+          code: -32603,
+          message: 'Internal error',
+          data: { details: 'OAuth session expired' },
+        };
+      }),
+      currentModel: undefined,
+    };
+    const exec = vi.fn(async (command: string, args: string[]) => {
+      const key = `${command} ${args.join(' ')}`;
+      if (key === 'git rev-parse --is-inside-work-tree') return 'true\n';
+      if (key === 'git rev-parse HEAD') return 'abc123\n';
+      return '';
+    });
+    const activeSession = {
+      sessionId,
+      acpSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec,
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => acpSessionId),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+    };
+    const deps = createBaseDeps({});
+    const sessionManager = deps.sessionManager as unknown as {
+      getSession: ReturnType<typeof vi.fn>;
+      terminateSession: ReturnType<typeof vi.fn>;
+    };
+    const workspaceDocument = deps.workspaceDocument as unknown as {
+      getOrCreateSessionDoc: ReturnType<typeof vi.fn>;
+    };
+    sessionManager.getSession.mockReturnValue(activeSession);
+    workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: undefined,
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'claude' },
+      userTurnId: 'turn-user-1',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    expect(deps.recordChatFailure).toHaveBeenCalledWith(
+      sessionDoc,
+      'acp_auth_required',
+      'OAuth session expired'
+    );
+    // Forcing the kill here skips `session/close`, and adapters that flush their
+    // transcript on close would lose the artifact `loadSession` needs — so the
+    // next turn after signing back in would have nothing left to resume into.
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, false);
+  });
+
   it('does not write legacy code-session tags when Code Collab is enabled for new turns', async () => {
     let history: Array<Record<string, unknown>> = [
       {
@@ -2972,6 +3077,134 @@ describe('SessionExecutionService', () => {
     );
     expect(agentClient.prompt).toHaveBeenCalledWith(
       'acp-fresh-restore',
+      [{ type: 'text', text: 'built prompt' }],
+      { signal: expect.any(AbortSignal) }
+    );
+  });
+
+  it('waits for late-syncing history before replacing an unresumable ACP session', async () => {
+    // Reproduces the daemon-restart race: the turn is delivered over RPC before
+    // the history CRDT catches up, so the first read sees only the new turn.
+    // Replacing the agent against that read would answer as if the earlier
+    // conversation never happened.
+    const meta = { repoFullName: 'owner/repo', isArchived: false };
+    const currentTurn: SessionHistoryInput = {
+      id: 'turn-current',
+      role: 'user',
+      timestamp: '2026-09-08T05:31:00.000Z',
+      status: 'pending',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'and now?' }],
+    };
+    const earlierTurn: SessionHistoryInput = {
+      id: 'turn-earlier',
+      role: 'user',
+      timestamp: '2026-09-08T05:30:00.000Z',
+      status: 'handled',
+      fileDiff: [],
+      items: [{ type: 'text', text: 'Build this on the two MIT packages.' }],
+    };
+    let history: SessionHistoryInput[] = [currentTurn];
+    let notifyMirror: (() => void) | undefined;
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => meta),
+      setStatus: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(async () => history),
+      updateHistory: vi.fn(
+        async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = updater(history);
+        }
+      ),
+      mirror: {
+        subscribe: (listener: () => void) => {
+          notifyMirror = listener;
+          // Deliver the backlog on the next microtask, the way a room join
+          // does — no timers, so the wait resolves on the signal alone.
+          queueMicrotask(() => {
+            history = [earlierTurn, currentTurn];
+            notifyMirror?.();
+          });
+          return () => {
+            notifyMirror = undefined;
+          };
+        },
+      },
+    };
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async () => ({})),
+      currentModel: undefined,
+    };
+    const restoredSession = {
+      sessionId: 'session-late-history' as SessionId,
+      acpSessionId: 'acp-replacement' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-replacement'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const createSession = vi
+      .fn(async () => restoredSession as unknown)
+      .mockImplementationOnce(async () => {
+        throw new Error('[ACP_RESUME_FAILED] loadSession: session artifact missing');
+      });
+    const buildAcpPromptBlocks = vi.fn(async () => [{ type: 'text', text: 'built prompt' }] as any);
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession,
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId: 'session-late-history' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: {
+        prompt: 'and now?',
+        cliType: 'builtin',
+        agentType: 'codex',
+        resume: 'acp-existing' as ACPSessionId,
+      },
+      userTurnId: 'turn-current',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(buildAcpPromptBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replayPromptText: expect.stringContaining('Build this on the two MIT packages.'),
+      })
+    );
+    expect(agentClient.prompt).toHaveBeenCalledWith(
+      'acp-replacement',
       [{ type: 'text', text: 'built prompt' }],
       { signal: expect.any(AbortSignal) }
     );
@@ -4289,13 +4522,24 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it.each([
+  it.each<{
+    name: string;
+    errors: unknown[];
+    expectedReason: ChatFailedReason;
+    expectedMessage: unknown;
+    resumeSessionId: ACPSessionId | undefined;
+    history: SessionHistoryInput[];
+    /** How many times the restore path may reach `createSession`. */
+    expectedCreateSessionCalls: number;
+  }>([
     {
       name: 'reports an ordinary restore failure',
       errors: [new Error('restore failed')],
       expectedReason: 'session_restore_failed',
       expectedMessage: 'restore failed',
       resumeSessionId: undefined,
+      history: [],
+      expectedCreateSessionCalls: 1,
     },
     {
       name: 'reports authentication required from the initial restore',
@@ -4303,6 +4547,8 @@ describe('SessionExecutionService', () => {
       expectedReason: 'acp_auth_required',
       expectedMessage: 'Authentication required',
       resumeSessionId: undefined,
+      history: [],
+      expectedCreateSessionCalls: 1,
     },
     {
       name: 'reports authentication required from fallback restore',
@@ -4313,8 +4559,43 @@ describe('SessionExecutionService', () => {
       expectedReason: 'acp_auth_required',
       expectedMessage: 'Authentication required',
       resumeSessionId: 'acp-existing' as ACPSessionId,
+      history: PRIOR_CONVERSATION_HISTORY,
+      expectedCreateSessionCalls: 2,
     },
-  ])('$name', async ({ errors, expectedReason, expectedMessage, resumeSessionId }) => {
+    {
+      name: 'refuses a context-free fallback when history has not synced',
+      errors: [new Error('acp_resume_failed: session unavailable')],
+      expectedReason: 'session_restore_failed',
+      expectedMessage: expect.stringContaining('has not synced the earlier conversation'),
+      resumeSessionId: 'acp-existing' as ACPSessionId,
+      history: [],
+      // The fallback must not even be attempted: creating it would persist a
+      // fresh acpSessionId over the one that still points at the agent's
+      // transcript, for a session we cannot carry any context into.
+      expectedCreateSessionCalls: 1,
+    },
+    {
+      name: 'reports authentication required when the resume failure wraps an auth error',
+      errors: [
+        // The SDK's own rejection shape: an `Error` subclass whose `data` a
+        // flattened cause dump drops, so the wrapper must be walked per link.
+        new Error('[ACP_RESUME_FAILED] loadSession: Internal error', {
+          cause: new RequestError(-32603, 'Internal error', {
+            details: 'OAuth session expired',
+          }),
+        }),
+      ],
+      expectedReason: 'acp_auth_required',
+      expectedMessage: '[ACP_RESUME_FAILED] loadSession: Internal error',
+      resumeSessionId: 'acp-existing' as ACPSessionId,
+      history: PRIOR_CONVERSATION_HISTORY,
+      // Signing in again makes the original ACP session resumable, so the
+      // resume pointer must survive: no replacement session is created.
+      expectedCreateSessionCalls: 1,
+    },
+  ])('$name', async (testCase) => {
+    const { errors, expectedReason, expectedMessage, resumeSessionId, history } = testCase;
+    const expectedCreateSessionCalls = testCase.expectedCreateSessionCalls;
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({
@@ -4323,7 +4604,7 @@ describe('SessionExecutionService', () => {
       })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(async () => history),
       updateHistory: vi.fn(async () => {}),
     };
     const sessionManager = {
@@ -4384,6 +4665,7 @@ describe('SessionExecutionService', () => {
       expectedReason,
       expectedMessage
     );
+    expect(sessionManager.createSession).toHaveBeenCalledTimes(expectedCreateSessionCalls);
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-restore-fail', {
       lastHandledUserMsgId: 'turn-restore-fail',
       processingUserMsgId: undefined,
@@ -5063,31 +5345,69 @@ describe('SessionExecutionService', () => {
     expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
   });
 
-  it('does not wait for ACP cancel before interrupting an in-flight prompt', async () => {
-    let meta: Record<string, unknown> = {};
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
-      meta = { ...meta, ...patch };
-    });
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => ({ isArchived: false })),
-      setStatus: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
-      updateHistory: vi.fn(async () => {}),
-    };
-    let activeTurnId: string | undefined;
-    let promptStarted!: () => void;
-    const promptStartedPromise = new Promise<void>((resolve) => {
-      promptStarted = resolve;
-    });
-    let promptSignal: AbortSignal | undefined;
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(() => new Promise<never>(() => {})),
-      prompt: vi.fn(
-        (_acpSessionId: ACPSessionId, _blocks: unknown[], options?: { signal?: AbortSignal }) => {
+  it.each(['resolved', 'rejected', 'timeout', 'termination-failed'] as const)(
+    'keeps cancelled prompt ownership until raw ACP completion or termination (%s)',
+    async (completion) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const rawPrompt = createDeferred();
+      const termination = createDeferred();
+      const promptStarted = createDeferred();
+      const drainStarted = createDeferred();
+      const terminationStarted = createDeferred();
+      const sessionId = 'session-prompt-cancel-drain' as SessionId;
+      const userTurnId = 'turn-prompt-cancel-drain';
+      let meta: Record<string, unknown> = {};
+      let history: Array<Record<string, unknown>> = [
+        {
+          id: userTurnId,
+          role: 'user',
+          status: 'pending',
+          read: false,
+          items: [{ type: 'text', text: 'old request' }],
+        },
+      ];
+      let status: unknown;
+      const sessionDoc = {
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async (next: unknown) => {
+          status = next;
+        }),
+        setBaseBranch: vi.fn(async () => {}),
+        getHistory: vi.fn(async () => history),
+        updateHistory: vi.fn(async (update: (prev: typeof history) => typeof history) => {
+          history = update(history);
+        }),
+      };
+      let activeTurnId: string | undefined;
+      let promptSignal: AbortSignal | undefined;
+      let rawPending = true;
+      let terminated = false;
+      const delivered: unknown[][] = [];
+      const rawCompletion = rawPrompt.promise.then(
+        () => {
+          rawPending = false;
+        },
+        () => {
+          rawPending = false;
+        }
+      );
+      const agentClient = {
+        isCreated: () => !terminated,
+        // A cancel notification need not acknowledge provider cleanup.
+        cancel: () => new Promise<never>(() => {}),
+        get pendingPromptCompletion(): Promise<void> | null {
+          drainStarted.resolve();
+          return rawPending ? rawCompletion : null;
+        },
+        prompt: (
+          _acpSessionId: ACPSessionId,
+          blocks: unknown[],
+          options?: { signal?: AbortSignal }
+        ) => {
+          delivered.push(blocks);
+          if (delivered.length > 1) return Promise.resolve({});
           promptSignal = options?.signal;
-          promptStarted();
+          promptStarted.resolve();
           return new Promise<never>((_resolve, reject) => {
             if (promptSignal?.aborted) {
               reject(new Error('Agent prompt aborted'));
@@ -5095,102 +5415,141 @@ describe('SessionExecutionService', () => {
             }
             promptSignal?.addEventListener(
               'abort',
-              () => {
-                reject(new Error('Agent prompt aborted'));
-              },
+              () => reject(new Error('Agent prompt aborted')),
               { once: true }
             );
           });
-        }
-      ),
-      currentModel: undefined,
-    };
-    const session = {
-      sessionId: 'session-prompt-cancel-immediate' as SessionId,
-      acpSessionId: 'acp-prompt-cancel-immediate' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-prompt-cancel-immediate'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => session),
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-    const deps = createBaseDeps({
-      sessionManager,
-      beginConversationTurn: vi.fn(() => {
-        activeTurnId = 'assistant-prompt-cancel-immediate';
-        return activeTurnId;
-      }),
-      getActiveTurnId: vi.fn(() => activeTurnId),
-      clearActiveTurnId: vi.fn((_sessionId, turnId) => {
-        if (activeTurnId === turnId) {
-          activeTurnId = undefined;
-        }
-      }),
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta,
-          getDocMeta: vi.fn(async () => ({
-            meta,
-          })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
-      processMessageQueue: vi.fn(async () => {}),
-    });
-
-    const service = new SessionExecutionService(deps);
-    const startPromise = service.continueSession({
-      type: 'session/chat',
-      sessionId: 'session-prompt-cancel-immediate' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-prompt-cancel-immediate',
-      userId: 'user-1',
-      userName: 'User',
-      userEmail: 'user@example.com',
-    });
-
-    await promptStartedPromise;
-    const result = await Promise.race([
-      service.cancelSession({
-        type: 'session/cancel',
-        sessionId: 'session-prompt-cancel-immediate' as SessionId,
+        currentModel: undefined,
+      };
+      const session = {
+        sessionId,
+        acpSessionId: 'acp-prompt-cancel-drain' as ACPSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: async () => {
+          terminationStarted.resolve();
+          await termination.promise;
+          if (completion === 'termination-failed') throw new Error('Synthetic termination failure');
+          terminated = true;
+        },
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-prompt-cancel-drain'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const sessionManager = {
+        getSession: () => session,
+        getPendingSession: () => null,
+        createSession: vi.fn(),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager;
+      const deps = createBaseDeps({
+        sessionManager,
+        beginConversationTurn: (_id, turn) => {
+          activeTurnId = `assistant:${turn}`;
+          return activeTurnId;
+        },
+        getActiveTurnId: () => activeTurnId,
+        clearActiveTurnId: (_id, turn) => {
+          if (activeTurnId === turn) activeTurnId = undefined;
+        },
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: async (_id: string, patch: Record<string, unknown>) => {
+              meta = { ...meta, ...patch };
+            },
+            getDocMeta: async () => ({ meta }),
+          },
+          getOrCreateSessionDoc: async () => sessionDoc,
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
+      });
+      const service = new SessionExecutionService(deps);
+      const message: Parameters<SessionExecutionService['continueSession']>[0] = {
+        type: 'session/chat',
+        sessionId,
         machineId: 'machine-1',
         workspaceId: 'workspace-1' as WorkspaceId,
-        turnId: 'assistant-prompt-cancel-immediate',
-      }),
-      new Promise<{ success: false; error: string }>((resolve) => {
-        setTimeout(() => resolve({ success: false, error: 'timeout' }), 100);
-      }),
-    ]);
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        acpSessionConfig: { prompt: 'old request', cliType: 'builtin', agentType: 'codex' },
+        userTurnId,
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      };
+      const nextMessage = {
+        ...message,
+        userTurnId: 'turn-new-request',
+        acpSessionConfig: { ...message.acpSessionConfig, prompt: 'new request' },
+      };
+      const running = service.continueSession(message);
+      try {
+        await promptStarted.promise;
+        await expect(
+          service.cancelSession({
+            type: 'session/cancel',
+            sessionId,
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            turnId: `assistant:${userTurnId}`,
+          })
+        ).resolves.toEqual({ success: true });
+        await Promise.race([drainStarted.promise, running]);
+        expect(promptSignal?.aborted).toBe(true);
+        expect(status).toEqual(SessionStatusFactory.idle());
+        expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });
+        expect(meta).toMatchObject({
+          lastHandledUserMsgId: userTurnId,
+          processingUserMsgId: undefined,
+        });
+        expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+        await service.continueSession(nextMessage);
+        expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
 
-    expect(result).toEqual({ success: true });
-    expect(promptSignal?.aborted).toBe(true);
-    expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel-immediate');
-    await startPromise;
-    expect(deps.processMessageQueue).not.toHaveBeenCalled();
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel-immediate', {
-      lastHandledUserMsgId: 'turn-prompt-cancel-immediate',
-      processingUserMsgId: undefined,
-    });
-  });
+        if (completion === 'timeout' || completion === 'termination-failed') {
+          await vi.advanceTimersByTimeAsync(5_000);
+          await terminationStarted.promise;
+          expect(terminated).toBe(false);
+          expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+          await service.continueSession(nextMessage);
+          expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
+          termination.resolve();
+          if (completion === 'termination-failed') {
+            await service.continueSession(nextMessage);
+            expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+            expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
+            rawPrompt.resolve();
+          }
+          await running;
+          expect(terminated).toBe(completion === 'timeout');
+        } else {
+          if (completion === 'resolved') rawPrompt.resolve();
+          else rawPrompt.reject(new Error('Synthetic ACP connection closed'));
+          await running;
+          expect(terminated).toBe(false);
+        }
+        expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+        if (completion !== 'timeout') {
+          await service.continueSession(nextMessage);
+          expect(delivered).toEqual([
+            [{ type: 'text', text: 'old request' }],
+            [{ type: 'text', text: 'new request' }],
+          ]);
+        }
+      } finally {
+        rawPrompt.resolve();
+        termination.resolve();
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('flushes cancellation when a cancelled prompt resolves before finalization starts', async () => {
     let meta: Record<string, unknown> = {};
