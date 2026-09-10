@@ -78,7 +78,11 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 }));
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
-import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import {
+  docMetaCacheReadyAtom,
+  docMetaCacheScopeAtom,
+  sessionMetaCacheAtom,
+} from '../src/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   countSessionMentions,
@@ -234,11 +238,18 @@ describe('useSessionActions', () => {
       workspaceSlug?: string | null;
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
+      jotaiStore?: ReturnType<typeof createStore>;
     } = {}
   ): Promise<SessionActions> => {
-    const jotaiStore = createStore();
+    const jotaiStore = options.jotaiStore ?? createStore();
     jotaiStore.set(runtimeAtom, runtime);
     jotaiStore.set(docMetaCacheReadyAtom, options.docMetaCacheReady ?? false);
+    jotaiStore.set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: options.docMetaCacheReady ?? false,
+    });
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
     jotaiStore.set(currentWorkspaceIdAtom, options.workspaceId ?? ('workspace-1' as WorkspaceId));
     jotaiStore.set(currentWorkspaceSlugAtom, options.workspaceSlug ?? 'workspace-slug');
@@ -1051,7 +1062,7 @@ describe('useSessionActions', () => {
         flush: vi.fn(async () => undefined),
       } as unknown as WorkspaceRuntime['repo'],
     });
-    const actions = await renderActions(runtime);
+    const actions = await renderActions(runtime, { docMetaCacheReady: true });
 
     await actions.archiveSession(sessionId);
 
@@ -1080,6 +1091,7 @@ describe('useSessionActions', () => {
       repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
     });
     const actions = await renderActions(runtime, {
+      docMetaCacheReady: true,
       sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
     });
 
@@ -1094,6 +1106,99 @@ describe('useSessionActions', () => {
     await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
       'Session metadata missing'
     );
+  });
+
+  it('waits for complete metadata hydration before archiving a root and its child tab', async () => {
+    const rootSession = {
+      id: 'archive-hydrating-root' as SessionId,
+      machineId: 'machine-root' as MachineId,
+      createdAt: '2026-09-10T00:00:00.000Z',
+    } as SessionMeta;
+    const tabSession = {
+      id: 'archive-hydrating-tab' as SessionId,
+      machineId: rootSession.machineId,
+      parentSessionId: rootSession.id,
+      createdAt: '2026-09-10T00:01:00.000Z',
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const getDocMeta = vi.fn(async (roomId: string) => {
+      if (roomId === getSessionRoomId(rootSession.id)) return { meta: rootSession };
+      if (roomId === getMachineRoomId(rootSession.machineId)) return { meta: {} };
+      return undefined;
+    });
+    const runtime = createRuntime({
+      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const jotaiStore = createStore();
+    const actions = await renderActions(runtime, {
+      jotaiStore,
+      docMetaCacheReady: false,
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+
+    const archivePromise = actions.archiveSession(rootSession.id);
+    await Promise.resolve();
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+
+    jotaiStore.set(sessionMetaCacheAtom, {
+      [getSessionRoomId(rootSession.id)]: rootSession,
+      [getSessionRoomId(tabSession.id)]: tabSession,
+    });
+    jotaiStore.set(docMetaCacheReadyAtom, true);
+    jotaiStore.set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: true,
+    });
+    await archivePromise;
+
+    for (const session of [rootSession, tabSession]) {
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(session.id),
+        expect.objectContaining({ isArchived: true, status: { type: 'idle' } })
+      );
+    }
+  });
+
+  it('cancels a pre-hydration archive when the workspace runtime changes', async () => {
+    const sessionId = 'archive-old-workspace-root' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-old' as MachineId,
+      createdAt: '2026-09-10T00:00:00.000Z',
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const jotaiStore = createStore();
+    const actions = await renderActions(runtime, {
+      jotaiStore,
+      docMetaCacheReady: false,
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
+    });
+
+    const archivePromise = actions.archiveSession(sessionId);
+    const nextRuntime = createRuntime({ workspaceId: 'workspace-2' as WorkspaceId });
+    jotaiStore.set(runtimeAtom, nextRuntime);
+
+    await expect(archivePromise).rejects.toThrow(
+      'Workspace changed while waiting for session metadata'
+    );
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+
+    jotaiStore.set(docMetaCacheReadyAtom, true);
+    jotaiStore.set(docMetaCacheScopeAtom, {
+      runtime: nextRuntime,
+      workspaceId: nextRuntime.workspaceId,
+      workspaceSlug: nextRuntime.workspaceSlug,
+      ready: true,
+    });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('archives child tabs and independently opened session workspaces together', async () => {
@@ -1136,7 +1241,10 @@ describe('useSessionActions', () => {
     const runtime = createRuntime({
       repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
     });
-    const actions = await renderActions(runtime, { sessionMetaCache });
+    const actions = await renderActions(runtime, {
+      docMetaCacheReady: true,
+      sessionMetaCache,
+    });
 
     await actions.archiveSession(rootSession.id);
 

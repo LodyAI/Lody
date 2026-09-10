@@ -90,9 +90,10 @@ class CompatRepoDouble {
 class ScanRacingRepoDouble extends CompatRepoDouble {
   constructor(
     entries: CompatRepoEntry[],
-    private readonly duringScan: () => void
+    private readonly duringScan: () => void,
+    snapshots?: Map<string, Record<string, unknown> | undefined>
   ) {
-    super(entries);
+    super(entries, snapshots);
   }
 
   override async listDoc(): Promise<CompatRepoEntry[]> {
@@ -193,6 +194,283 @@ describe('docMetaSubscriptionAtom', () => {
       unmount();
     }
   });
+
+  it.each(['doc-metadata', 'doc-existence-changed'] as const)(
+    'keeps bootstrap readiness false until a queued %s event is fully projected',
+    async (eventKind) => {
+      vi.useFakeTimers();
+      const rootId = 'bootstrap-race-root' as SessionId;
+      const childId = 'bootstrap-race-child' as SessionId;
+      const rootDocId = getSessionRoomId(rootId);
+      const childDocId = getSessionRoomId(childId);
+      const childMeta = {
+        id: childId,
+        title: 'Child created during bootstrap',
+        createdAt: '2026-09-10T00:00:01.000Z',
+        parentSessionId: rootId,
+      };
+      let resolveChildMeta!: (
+        entry: Record<string, unknown> & { meta: Record<string, unknown> }
+      ) => void;
+      const childMetaLoad = new Promise<
+        Record<string, unknown> & { meta: Record<string, unknown> }
+      >((resolve) => {
+        resolveChildMeta = resolve;
+      });
+      const repo: ScanRacingRepoDouble = new ScanRacingRepoDouble(
+        [
+          {
+            docId: rootDocId,
+            exists: true,
+            meta: {
+              id: rootId,
+              title: 'Bootstrap root',
+              createdAt: '2026-09-10T00:00:00.000Z',
+            },
+          },
+        ],
+        () => {
+          repo.emit(
+            eventKind === 'doc-metadata'
+              ? {
+                  kind: 'doc-metadata',
+                  docId: childDocId,
+                  patch: { title: childMeta.title },
+                  by: 'live',
+                }
+              : {
+                  kind: 'doc-existence-changed',
+                  docId: childDocId,
+                  from: 'missing',
+                  to: 'active',
+                  by: 'live',
+                }
+          );
+        }
+      );
+      const getDocMeta = vi.spyOn(repo, 'getDocMeta').mockImplementation(async (docId) => {
+        if (docId === childDocId) return childMetaLoad;
+        return undefined;
+      });
+
+      const store = createStore();
+      const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+      const runtime = createRuntime(repo as unknown as LoroRepo);
+
+      try {
+        store.set(runtimeAtom, runtime);
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          if (store.get(sessionMetaCacheAtom)[rootDocId]) break;
+          await Promise.resolve();
+        }
+
+        expect(store.get(sessionMetaCacheAtom)[rootDocId]?.id).toBe(rootId);
+        expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+        expect(store.get(docMetaCacheScopeAtom)?.ready).toBe(false);
+        expect(store.get(sessionMetaCacheAtom)[childDocId]).toBeUndefined();
+
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(getDocMeta).toHaveBeenCalledWith(childDocId);
+        expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+        expect(store.get(docMetaCacheScopeAtom)?.ready).toBe(false);
+        expect(store.get(sessionMetaCacheAtom)[childDocId]).toBeUndefined();
+
+        resolveChildMeta({ exists: true, meta: childMeta });
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          if (store.get(docMetaCacheReadyAtom)) break;
+          await Promise.resolve();
+        }
+
+        expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+        expect(store.get(docMetaCacheScopeAtom)).toEqual({
+          runtime,
+          workspaceId: runtime.workspaceId,
+          workspaceSlug: runtime.workspaceSlug,
+          ready: true,
+        });
+        expect(store.get(sessionMetaCacheAtom)[childDocId]).toEqual(childMeta);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('releases bootstrap readiness when a pending active doc is confirmed missing', async () => {
+    vi.useFakeTimers();
+    const rootId = 'missing-race-root' as SessionId;
+    const childId = 'missing-race-child' as SessionId;
+    const rootDocId = getSessionRoomId(rootId);
+    const childDocId = getSessionRoomId(childId);
+    const repo: ScanRacingRepoDouble = new ScanRacingRepoDouble(
+      [
+        {
+          docId: rootDocId,
+          exists: true,
+          meta: {
+            id: rootId,
+            title: 'Missing race root',
+            createdAt: '2026-09-10T00:00:00.000Z',
+          },
+        },
+      ],
+      () => {
+        repo.emit({
+          kind: 'doc-existence-changed',
+          docId: childDocId,
+          from: 'missing',
+          to: 'active',
+          by: 'live',
+        });
+      }
+    );
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (store.get(sessionMetaCacheAtom)[rootDocId]) break;
+        await Promise.resolve();
+      }
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId: childDocId,
+        from: 'active',
+        to: 'missing',
+        by: 'live',
+      });
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+      expect(store.get(sessionMetaCacheAtom)[childDocId]).toBeUndefined();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears cached metadata when a missing event is confirmed by an empty fetch', async () => {
+    vi.useFakeTimers();
+    const sessionId = 'cached-then-missing' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    const repo = new CompatRepoDouble([
+      {
+        docId,
+        exists: true,
+        meta: {
+          id: sessionId,
+          title: 'Cached before missing',
+          createdAt: '2026-09-10T00:00:00.000Z',
+        },
+      },
+    ]);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (store.get(docMetaCacheReadyAtom)) break;
+        await Promise.resolve();
+      }
+      expect(store.get(sessionMetaCacheAtom)[docId]?.id).toBe(sessionId);
+
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId,
+        from: 'active',
+        to: 'missing',
+        by: 'live',
+      });
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(store.get(sessionMetaCacheAtom)[docId]).toBeUndefined();
+      expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['null', 'reject'] as const)(
+    'keeps bootstrap metadata authoritative when an older live fetch finishes with %s',
+    async (fetchOutcome) => {
+      vi.useFakeTimers();
+      const childId = 'snapshot-race-child' as SessionId;
+      const childDocId = getSessionRoomId(childId);
+      const childEntry: CompatRepoEntry = {
+        docId: childDocId,
+        exists: true,
+        meta: {
+          id: childId,
+          title: 'Snapshot race child',
+          createdAt: '2026-09-10T00:00:00.000Z',
+        },
+      };
+      let resolveScan!: (entries: CompatRepoEntry[]) => void;
+      const scan = new Promise<CompatRepoEntry[]>((resolve) => {
+        resolveScan = resolve;
+      });
+      let resolveFetch!: (
+        entry: (Record<string, unknown> & { meta: Record<string, unknown> }) | undefined
+      ) => void;
+      let rejectFetch!: (error: Error) => void;
+      const fetch = new Promise<
+        (Record<string, unknown> & { meta: Record<string, unknown> }) | undefined
+      >((resolve, reject) => {
+        resolveFetch = resolve;
+        rejectFetch = reject;
+      });
+      const repo = new CompatRepoDouble([]);
+      vi.spyOn(repo, 'listDoc').mockReturnValue(scan);
+      vi.spyOn(repo, 'getDocMeta').mockReturnValue(fetch);
+      const store = createStore();
+      const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+
+      try {
+        store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+        await Promise.resolve();
+        repo.emit({
+          kind: 'doc-existence-changed',
+          docId: childDocId,
+          from: 'missing',
+          to: 'active',
+          by: 'live',
+        });
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+
+        resolveScan([childEntry]);
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          if (store.get(sessionMetaCacheAtom)[childDocId]) break;
+          await Promise.resolve();
+        }
+
+        expect(store.get(sessionMetaCacheAtom)[childDocId]).toEqual(childEntry.meta);
+        expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+
+        if (fetchOutcome === 'null') resolveFetch(undefined);
+        else rejectFetch(new Error('metadata unavailable'));
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          if (store.get(docMetaCacheReadyAtom)) break;
+          await Promise.resolve();
+        }
+
+        expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+        expect(store.get(sessionMetaCacheAtom)[childDocId]).toEqual(childEntry.meta);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('immediately projects same-repo archive and restore writes into session lists', async () => {
     const repo = await LoroRepo.create({});

@@ -58,8 +58,9 @@ Ownership and explanations: [README.md](README.md).
   reintroduce a create-then-hand-off flow (pending-turn refs, post-mount ref flushes): a
   promoted tab must not exist before its first message is locally durable, and preserved
   composer text crosses the promotion via the input draft cache, not a component ref.
-  `archiveSession` falls back to the rendered meta cache when the repo read lags
-  hydration, and a close failure surfaces a toast — never a silent no-op.
+  `archiveSession` waits for the initial doc-meta scan before deriving lifecycle
+  descendants, then falls back to the rendered meta cache when an individual repo read
+  lags; a close failure surfaces a toast — never a silent no-op.
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.

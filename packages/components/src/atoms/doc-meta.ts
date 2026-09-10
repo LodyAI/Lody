@@ -533,6 +533,36 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   const existenceEpochByDocId = new Map<string, number>();
   const existenceStateByDocId = new Map<string, DocExistenceState>();
   const fullMetaFetchEpochByDocId = new Map<string, number>();
+  // The bootstrap scan overlaps the live watch. Keep readiness false until any
+  // events observed during that window, including their full-metadata fetches,
+  // have reached the cache projection.
+  const pendingPatches = new Map<string, Record<string, unknown>>();
+  type ExistenceEvent = { docId: string; state: DocExistenceState };
+  const pendingExistenceUpdates: ExistenceEvent[] = [];
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let bootstrapCacheMerged = false;
+  let pendingFullMetaFetches = 0;
+
+  const markCacheReadyIfSettled = () => {
+    if (
+      cancelled ||
+      !bootstrapCacheMerged ||
+      flushTimer !== null ||
+      pendingExistenceUpdates.length > 0 ||
+      pendingPatches.size > 0 ||
+      pendingFullMetaFetches > 0 ||
+      pendingMetaDocIds.size > 0
+    ) {
+      return;
+    }
+    set(docMetaCacheReadyAtom, true);
+    set(docMetaCacheScopeAtom, {
+      runtime,
+      workspaceId: runtime.workspaceId,
+      workspaceSlug: runtime.workspaceSlug,
+      ready: true,
+    });
+  };
 
   const clearCachedDocMeta = (docId: string) => {
     if (isSessionDocRoomId(docId)) {
@@ -603,26 +633,46 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
 
     const fetchEpoch = (fullMetaFetchEpochByDocId.get(docId) ?? 0) + 1;
     fullMetaFetchEpochByDocId.set(docId, fetchEpoch);
+    pendingFullMetaFetches += 1;
 
-    void fetchDocMeta(runtime.repo, docId).then((meta) => {
-      if (cancelled) return;
-      if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
-      if (existenceStateByDocId.get(docId) === 'deleted') return;
-      if (expectedExistence) {
-        if (existenceStateByDocId.get(docId) !== expectedExistence.state) return;
-        if ((existenceEpochByDocId.get(docId) ?? 0) !== expectedExistence.epoch) return;
-      }
-      if (!meta) {
-        if (expectedExistence?.state === 'missing') {
-          clearCachedDocMeta(docId);
-        } else {
-          pendingMetaDocIds.add(docId);
+    void fetchDocMeta(runtime.repo, docId)
+      .then((meta) => {
+        if (cancelled) return;
+        if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
+        if (existenceStateByDocId.get(docId) === 'deleted') return;
+        if (expectedExistence) {
+          if (existenceStateByDocId.get(docId) !== expectedExistence.state) return;
+          if ((existenceEpochByDocId.get(docId) ?? 0) !== expectedExistence.epoch) return;
         }
-        return;
-      }
-      pendingMetaDocIds.delete(docId);
-      setCachedDocMeta(docId, meta);
-    });
+        if (!meta) {
+          if (expectedExistence?.state === 'missing') {
+            pendingMetaDocIds.delete(docId);
+            clearCachedDocMeta(docId);
+          } else if (hasCachedDocMeta(docId)) {
+            pendingMetaDocIds.delete(docId);
+          } else {
+            pendingMetaDocIds.add(docId);
+          }
+          return;
+        }
+        pendingMetaDocIds.delete(docId);
+        setCachedDocMeta(docId, meta);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
+        if (existenceStateByDocId.get(docId) === 'deleted') return;
+        if (hasCachedDocMeta(docId)) {
+          pendingMetaDocIds.delete(docId);
+          return;
+        }
+        pendingMetaDocIds.add(docId);
+        console.warn('[doc-meta] Failed to fetch metadata:', docId, error);
+      })
+      .finally(() => {
+        pendingFullMetaFetches -= 1;
+        markCacheReadyIfSettled();
+      });
   };
 
   const handleDocumentExistence = (docId: string, state: DocExistenceState) => {
@@ -635,6 +685,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     existenceStateByDocId.set(docId, state);
 
     if (state === 'deleted') {
+      pendingMetaDocIds.delete(docId);
       clearCachedDocMeta(docId);
       return;
     }
@@ -695,11 +746,6 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   // Bound each projection turn so reconnect catch-up cannot monopolize the
   // mobile main thread. Rejected: microtask-only batching, which still blocks
   // paint until a large CRDT metadata burst is fully projected into Jotai.
-  const pendingPatches = new Map<string, Record<string, unknown>>();
-  type ExistenceEvent = { docId: string; state: DocExistenceState };
-  const pendingExistenceUpdates: ExistenceEvent[] = [];
-  let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
   const takePendingPatchBatch = (maxEntries: number): Array<[string, Record<string, unknown>]> => {
     const entries: Array<[string, Record<string, unknown>]> = [];
     if (maxEntries <= 0) return entries;
@@ -758,6 +804,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     if (pendingExistenceUpdates.length > 0 || pendingPatches.size > 0) {
       scheduleFlush();
     }
+    markCacheReadyIfSettled();
   };
 
   function scheduleFlush() {
@@ -821,13 +868,11 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     set(agentConfigMetaCacheAtom, (prev) =>
       mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
     );
-    set(docMetaCacheReadyAtom, true);
-    set(docMetaCacheScopeAtom, {
-      runtime,
-      workspaceId: runtime.workspaceId,
-      workspaceSlug: runtime.workspaceSlug,
-      ready: true,
-    });
+    for (const docId of pendingMetaDocIds) {
+      if (hasCachedDocMeta(docId)) pendingMetaDocIds.delete(docId);
+    }
+    bootstrapCacheMerged = true;
+    markCacheReadyIfSettled();
   });
 
   return () => {

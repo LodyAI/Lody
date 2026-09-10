@@ -47,6 +47,8 @@ import debug from 'debug';
 import { v4 as uuidv4 } from 'uuid';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import {
+  docMetaCacheScopeAtom,
+  docMetaCacheReadyAtom,
   setDocMetaByRoomIdAtom,
   sessionMetaCacheAtom,
   sessionMetaCountAtom,
@@ -63,6 +65,68 @@ import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 
 const log = debug('lody:session-actions');
+
+function assertDocMetaCacheReadyForRuntime(
+  store: ReturnType<typeof useStore>,
+  runtime: WorkspaceRuntime
+): void {
+  const activeRuntime = store.get(activeWorkspaceRuntimeAtom);
+  const cacheScope = store.get(docMetaCacheScopeAtom);
+  if (
+    activeRuntime !== runtime ||
+    cacheScope?.runtime !== runtime ||
+    !cacheScope.ready ||
+    !store.get(docMetaCacheReadyAtom)
+  ) {
+    throw new Error('Workspace changed while waiting for session metadata');
+  }
+}
+
+function waitForDocMetaCacheReady(
+  store: ReturnType<typeof useStore>,
+  runtime: WorkspaceRuntime
+): Promise<void> {
+  const isReady = () => {
+    const cacheScope = store.get(docMetaCacheScopeAtom);
+    return (
+      store.get(activeWorkspaceRuntimeAtom) === runtime &&
+      cacheScope?.runtime === runtime &&
+      cacheScope.ready &&
+      store.get(docMetaCacheReadyAtom)
+    );
+  };
+  if (isReady()) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let unsubscribeReady: () => void = () => undefined;
+    let unsubscribeScope: () => void = () => undefined;
+    let unsubscribeRuntime: () => void = () => undefined;
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      unsubscribeReady();
+      unsubscribeScope();
+      unsubscribeRuntime();
+      if (error) reject(error);
+      else resolve();
+    };
+    const check = () => {
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        settle(new Error('Workspace changed while waiting for session metadata'));
+        return;
+      }
+      if (isReady()) settle();
+    };
+
+    unsubscribeReady = store.sub(docMetaCacheReadyAtom, check);
+    unsubscribeScope = store.sub(docMetaCacheScopeAtom, check);
+    unsubscribeRuntime = store.sub(activeWorkspaceRuntimeAtom, check);
+
+    // Close the check-to-subscribe race after installing all subscriptions.
+    check();
+  });
+}
 
 type RepoDocMetaPatch = Parameters<WorkspaceRuntime['repo']['upsertDocMeta']>[1];
 type CreateSessionResult = {
@@ -1208,10 +1272,17 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      // Lifecycle descendants are discovered from the workspace-wide metadata
+      // cache. A rendered root can arrive through bootstrap data before that
+      // cache contains its child tabs, so do not author any archive writes until
+      // the initial scan establishes a complete containment view.
+      await waitForDocMetaCacheReady(store, runtime);
+
       const sessionRoomId = getSessionRoomId(sessionId);
       const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
         | undefined;
+      assertDocMetaCacheReadyForRuntime(store, runtime);
       // The repo read is preferred (freshest lifecycle fields), but it can lag
       // a session the UI already renders. The archive write below is an
       // idempotent patch, so the rendered meta cache is enough to proceed — a

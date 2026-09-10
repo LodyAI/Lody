@@ -52,6 +52,9 @@ Parent `AGENTS.md` files also apply.
   and the mobile workspace stack do not start early. The workspace identity's
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
+- Doc-meta readiness includes live metadata and existence events observed during
+  the bootstrap scan. Do not publish a ready scope until their deferred projection
+  batches and required full-metadata fetches have settled.
 
 ## Billing data
 
