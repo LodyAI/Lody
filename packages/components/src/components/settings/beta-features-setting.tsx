@@ -1,6 +1,6 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,

@@ -26,6 +26,18 @@ export const field = stylex.defineVars({
   gap: space[1.5],
   ringWidth: '2px',
   textareaMinHeight: '72px',
+  // A checkbox and a radio are the rules' "16px things", so they take the mini
+  // radius; a radio overrides it with a full round because it is a circle.
+  boxSize: '16px',
+  boxRadius: radius.mini,
+  // The tick and the dot inside that box, and the switch the same height as it
+  // so a settings row holding both lines up.
+  markSize: '10px',
+  dotSize: '6px',
+  switchWidth: '28px',
+  switchHeight: '16px',
+  switchThumbSize: '12px',
+  switchInset: '2px',
   // The rules put disabled at 45% opacity on the control. It is one value for
   // the whole family, so the control and its label cannot drift apart.
   disabledOpacity: '0.45',
@@ -38,6 +50,17 @@ export const field = stylex.defineVars({
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,
+  // Stored state is ink: the rules give a checked box and a switch that is on
+  // the `label` fill with `background` on top of it, the same pair the primary
+  // button uses, and the same ink edge as its top highlight. `accent` stays on
+  // live state and is not a fill.
+  checkedFill: colors.label,
+  checkedMark: colors.background,
+  checkedEdge: shadow.inkEdge,
+  // The switch thumb is raised on both tracks: it reads against the well when
+  // the switch is off and against the ink when it is on.
+  thumb: colors.raisedBackground,
+  thumbShadow: shadow.raised,
 });
 
 /**
@@ -55,4 +78,9 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,
+  checkedFill: colors.label,
+  checkedMark: colors.background,
+  checkedEdge: shadow.inkEdge,
+  thumb: colors.raisedBackground,
+  thumbShadow: shadow.raised,
 });

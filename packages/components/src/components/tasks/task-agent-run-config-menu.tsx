@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   DropdownMenu,
   DropdownMenuContent,

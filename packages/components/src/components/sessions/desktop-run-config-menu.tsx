@@ -49,7 +49,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Badge } from '@/ui/badge';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
   DropdownMenu,

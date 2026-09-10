@@ -5,7 +5,7 @@ import { Spinner } from '@/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@lody/ui/button';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,

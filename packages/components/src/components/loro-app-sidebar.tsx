@@ -108,7 +108,7 @@ import {
   DialogTitle,
 } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -356,7 +356,7 @@ export function RemoveLocalProjectDialog({
                 className="mt-0.5"
                 checked={cleanupWorktrees}
                 disabled={!canCleanupWorktrees || isRemoving}
-                onCheckedChange={(checked) => void setCleanup(checked === true)}
+                onCheckedChange={(checked) => void setCleanup(checked)}
               />
               <span>
                 <span className="block font-medium text-foreground">

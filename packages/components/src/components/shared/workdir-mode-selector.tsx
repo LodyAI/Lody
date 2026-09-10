@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 
 export type WorkdirMode = 'local' | 'worktree';
 
@@ -54,15 +54,9 @@ export function WorktreeCheckboxPill({
     >
       <Checkbox
         checked={checked}
-        onCheckedChange={(next) => onCheckedChange?.(next === true)}
+        onCheckedChange={(next) => onCheckedChange?.(next)}
         disabled={disabled}
         aria-label={t('chat.workdir.worktreeToggle', 'Use worktree')}
-        className={cn(
-          'size-3 rounded-[3px] border-transparent bg-muted-foreground/15 shadow-none [&_svg]:size-3',
-          'data-[state=checked]:border-transparent data-[state=checked]:bg-muted-foreground/25 data-[state=checked]:text-foreground/80',
-          'dark:bg-muted-foreground/15 dark:data-[state=checked]:bg-muted-foreground/25',
-          'disabled:cursor-not-allowed disabled:opacity-100'
-        )}
       />
       <span>{t('chat.workdir.worktreePill', 'worktree')}</span>
     </label>
