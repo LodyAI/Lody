@@ -3660,7 +3660,8 @@ function WorkspaceChatLanding({
   useEffect(() => {
     if (agentRoleRestored || !defaultsReady) return;
     const storedRoleId = readChatLandingDefaults(workspaceId)?.agentRoleId as
-      AgentRoleId | undefined;
+      | AgentRoleId
+      | undefined;
     if (!storedRoleId) {
       setAgentRoleRestored(true);
       return;
