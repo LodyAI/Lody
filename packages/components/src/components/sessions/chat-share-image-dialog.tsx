@@ -9,10 +9,19 @@ import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useResolvedTheme } from '@/theme-provider';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
+<<<<<<< HEAD
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@/ui/button';
 import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
+=======
+import { Field as UiField } from '@lody/ui/field';
+import { Input } from '@lody/ui/input';
+import { Button } from '@lody/ui/button';
+import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
+import { Switch } from '@lody/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import {
   ChatShareCard,
   CHAT_SHARE_BACKDROPS,

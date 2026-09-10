@@ -22,10 +22,18 @@ import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+<<<<<<< HEAD
 import { Switch } from '@/ui/switch';
 import { Textarea } from '@/ui/textarea';
 import { EmojiField } from './emoji-field';
 import { Field, FormMessage, Section } from './form-primitives';
+=======
+import { Switch } from '@lody/ui/switch';
+import { Textarea } from '@lody/ui/textarea';
+import { Field, Section } from './form-primitives';
+
+const AgentRoleEmojiPicker = lazy(() => import('./agent-role-emoji-picker'));
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 
 export type AgentRoleMachineOption = {
   machineId: MachineId;

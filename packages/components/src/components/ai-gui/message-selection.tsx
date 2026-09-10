@@ -12,8 +12,13 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
 import type { ConversationMessage } from '@lody/shared';
+<<<<<<< HEAD
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
+=======
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { useIsMobile } from '@/hooks/use-mobile';
 

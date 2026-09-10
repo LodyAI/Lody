@@ -9,11 +9,19 @@ import {
   McpTransportIcon,
 } from '@/components/shared/mcp-transport';
 import { cn } from '@/lib/utils';
+<<<<<<< HEAD
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Switch } from '@/ui/switch';
 import { Textarea } from '@/ui/textarea';
+=======
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Switch } from '@lody/ui/switch';
+import { Textarea } from '@lody/ui/textarea';
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import { Field, Section } from './form-primitives';
 
 type KeyValueDraft = { key: string; value: string };

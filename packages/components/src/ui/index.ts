@@ -3,7 +3,6 @@ export * from './accordion';
 export * from './badge';
 export * from './button';
 export * from './card';
-export * from './checkbox';
 export * from './collapsible';
 export * from './command';
 export * from './dialog';
@@ -19,8 +18,11 @@ export * from './sheet';
 // export * from './sidebar-resizer' // Has external dependencies - needs to be refactored
 // export * from './sidebar' // Has external dependencies - needs to be refactored
 export * from './skeleton';
+<<<<<<< HEAD
 export * from './slider';
 export * from './switch';
+=======
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 export * from './tabs';
 export * from './tooltip';
 export * from './workspace-list';

@@ -4,7 +4,7 @@ import { Bot, Folder } from 'lucide-react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { Button } from '@lody/ui/button';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import type { ProjectSettingsRow } from './project-settings';
 
 export type MachineConnectedProject = {

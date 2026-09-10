@@ -2,9 +2,14 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
+<<<<<<< HEAD
 import { ChevronRight, Wrench } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Switch } from '@/ui/switch';
+=======
+import { ChevronRight, Loader2, Wrench } from 'lucide-react';
+import { Switch } from '@lody/ui/switch';
+>>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import { TooltipProvider } from '@/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';

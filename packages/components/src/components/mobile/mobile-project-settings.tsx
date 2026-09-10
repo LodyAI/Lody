@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronRight, Folder, FolderOpen, FolderPlus, Github } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import type { MachineId } from '@lody/shared';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';

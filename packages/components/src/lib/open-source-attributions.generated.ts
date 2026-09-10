@@ -2274,17 +2274,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-checkbox-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-checkbox",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.3.3"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-collapsible-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2502,17 +2491,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-radio-group-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-radio-group",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.3.8"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-roving-focus-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2568,17 +2546,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
         "1.2.3",
         "1.2.4",
         "1.3.0"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-switch-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-switch",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.2.6"
       ]
     },
     {
