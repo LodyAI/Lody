@@ -29,6 +29,7 @@ const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
 const REQUIRED_CONTEXT_HEADINGS = [
   '### Instructions for reviewing agents',
   '### Authoring context',
+  '### Original user prompt',
 ];
 const REVIEW_INSTRUCTION_FIELDS = [
   'Review focus',
@@ -125,6 +126,20 @@ function markdownField(section, field) {
 function isCompleteContext(value) {
   const normalized = value?.replaceAll('`', '').trim() ?? '';
   return isFilledSection(normalized) && !WITHHELD_CONTEXT.test(normalized);
+}
+
+function extractOriginalUserPrompt(section) {
+  if (!section) {
+    return '';
+  }
+
+  for (const match of section.matchAll(/(`{3,}|~{3,})(?:text)?[^\n]*\n([\s\S]*?)\n\1/g)) {
+    const prompt = match[2].replace(/<!--[\s\S]*?-->/g, '').trim();
+    if (prompt) {
+      return prompt;
+    }
+  }
+  return '';
 }
 
 function hasStructuralView(section) {
@@ -226,6 +241,15 @@ export function checkPullRequestBody(body, { changedLines = null } = {}) {
           `Authoring context must fill **${field}** with a meaningful public summary; N/A and redacted values are not accepted.`
         );
       }
+    }
+  }
+
+  if (contextHeadingCounts.get('### Original user prompt') === 1) {
+    const originalPrompt = extractOriginalUserPrompt(sectionBody(text, '### Original user prompt'));
+    if (!originalPrompt) {
+      findings.push(
+        'Original user prompt must contain the triggering prompt inside a fenced code block; the template placeholder does not count.'
+      );
     }
   }
 
