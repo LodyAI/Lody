@@ -188,6 +188,31 @@ generator was asked for a title in the prompt's own language. The isolated sessi
 those sessions paid for could never have produced a usable branch name. A timeout
 now also falls back to the prompt instead of abandoning the rename.
 
+Two issues found in review after the first implementation landed, both fixed here.
+
+Naming a branch after the prompt publishes the prompt. A ref reaches the remote as
+soon as the session opens a PR, and asking an agent to "rotate sk_live_… before
+Friday" is ordinary. This was reachable before this branch too — the old
+`generateTitleIsolated` returned `sanitizeGeneratedTitle(taskPrompt)` on every
+failure path — but it went from a rare fallback to the common path for the three
+ACP-owned agents, so the exposure changed in kind. `tryBranchName` now strips
+credential-shaped tokens before deriving a name: known prefixes (`sk_`, `ghp_`,
+`AKIA`, `xox…`, PEM blocks) plus unprefixed runs of 20+ alphanumerics containing
+both letters and digits, which catches hex and base62 tokens while leaving English
+prose untouched. Stripping beats refusing: "Fix API key sk_live_…" still yields
+`fix/api-key`. Over-matching costs only a shorter branch name.
+
+Ownership also had to account for `BuiltinRuntimeOverrides`. The table describes the
+managed runtime each agent normally launches, but an override can aim the same
+`agentType` at any executable, including one predating the title behaviour — Grok's
+title generation lives in the runtime itself, and Codex's needs an `ephemeral` thread
+its older builds lack. Such a session got no title at all: the isolated generator was
+skipped, nothing arrived over ACP, and the setting that would have fixed it was
+hidden. `acpOwnsSessionTitleGeneration` now returns false whenever an override is
+active, restoring the local generator and the config for it. The trust gate is
+deliberately unchanged: an override that does push a good title still gets it, and
+Claude behaved this way before this branch.
+
 One residual inconsistency is known and left alone: `acpOwnsSessionTitleGeneration`
 gates the settings dialog, but `lody agent-config` and the onboarding provider
 screen still accept and persist a `titleGeneration` block for these agents. The

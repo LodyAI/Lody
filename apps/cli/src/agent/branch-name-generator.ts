@@ -139,6 +139,33 @@ export const isValidGitBranchName = (name: string): boolean => {
 };
 
 /**
+ * Credential-shaped tokens, removed before a branch name is derived.
+ *
+ * A branch name is a ref: it is written to `.git`, shown in the UI, and pushed to
+ * the remote when the session opens a PR. Naming a branch after a prompt therefore
+ * publishes whatever the prompt contained, and "rotate sk_live_… before Friday" is
+ * an ordinary thing to ask an agent. Stripping beats refusing outright, because
+ * "Fix API key sk_live_…" still yields a useful `fix/api-key`.
+ *
+ * The last alternative catches unprefixed high-entropy tokens: a run of at least
+ * 20 alphanumerics containing both letters and digits. English prose has no such
+ * runs, while hex and base62 credentials do. Over-matching is safe here — the
+ * worst case is a slightly shorter branch name.
+ */
+const CREDENTIAL_LIKE_TOKEN = new RegExp(
+  [
+    // Whole block first, so a short body cannot escape between the markers.
+    '-----BEGIN[\\s\\S]*?-----END[\\s\\S]*?-----',
+    '-----BEGIN[\\s\\S]*?-----',
+    '\\b(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|glpat|shpat|xox[abprs])[-_][A-Za-z0-9_-]{6,}',
+    '\\bgithub_pat_[A-Za-z0-9_]{10,}',
+    '\\b(?:AKIA|ASIA|AIza)[A-Za-z0-9]{6,}',
+    '\\b(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{20,}\\b',
+  ].join('|'),
+  'g'
+);
+
+/**
  * Convert a title or prompt into a valid branch name, or null when it yields none.
  *
  * Kebab conversion drops every non-ASCII character, so a prompt written entirely
@@ -146,6 +173,6 @@ export const isValidGitBranchName = (name: string): boolean => {
  * existing branch alone in that case rather than invent a meaningless one.
  */
 export const tryBranchName = (base: string): string | null => {
-  const candidate = titleToBranchName(base);
+  const candidate = titleToBranchName(base.replace(CREDENTIAL_LIKE_TOKEN, ' '));
   return candidate && isValidGitBranchName(candidate) ? candidate : null;
 };

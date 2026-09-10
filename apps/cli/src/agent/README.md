@@ -201,6 +201,11 @@ is true only for the adapters that send no tag at all. Codex owns its generation
 every title and previews the raw first prompt as `fallback`, so trusting it untagged would
 make that preview the session title.
 
+A runtime override revokes ownership. `BuiltinRuntimeOverrides` can aim the same
+`agentType` at an executable predating the title behaviour, and that session would otherwise
+get no title at all — generator skipped, nothing pushed, and the setting that would fix it
+hidden — so an overridden runtime keeps the local generator.
+
 Branch naming never starts an isolated session. `titleToBranchName` is a pure transform, so
 the only thing an agent ever added was compressing the prompt into a shorter title first.
 `deriveWorktreeBranchName` prefers a title already stored or in flight for the session and
@@ -208,6 +213,12 @@ otherwise converts the prompt directly, falling back to the prompt if a pending 
 its budget. When no valid name can be derived — kebab conversion drops every non-ASCII
 character, so this is the normal outcome for a Chinese prompt — the managed `session/<id>`
 branch is left alone rather than renamed to a timestamp.
+
+Naming a branch after a prompt publishes the prompt: a ref reaches the remote as soon as the
+session opens a PR, and "rotate sk_live_… before Friday" is an ordinary request. `tryBranchName`
+therefore strips credential-shaped tokens — known prefixes, PEM blocks, and unprefixed runs of
+20+ alphanumerics mixing letters and digits — before deriving the name. Over-matching is the
+safe direction; the cost is a shorter branch name.
 
 ### Local project identity
 

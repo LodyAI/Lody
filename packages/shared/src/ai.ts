@@ -79,11 +79,23 @@ const builtinAcpTitleOwnership = (
  * Builtin ACP adapters that generate their own session titles, so Lody never
  * starts its isolated title agent for them and hides the title-generation config
  * from their agent settings.
+ *
+ * A runtime override revokes this. The table describes the managed runtime each
+ * agent normally launches, but `BuiltinRuntimeOverrides` can point the same
+ * `agentType` at any executable — including one predating the title behaviour.
+ * Such a session would otherwise get no title at all: the isolated generator is
+ * skipped, no title arrives over ACP, and the settings that would fix it are
+ * hidden. Keeping the local generator for overridden runtimes is the conservative
+ * side to be wrong on, and it costs only the duplicate work this change removed
+ * for the managed case.
  */
 export const acpOwnsSessionTitleGeneration = (
   cliType: AgentConfigCliType | null | undefined,
-  agentType: AgentType | null | undefined
-): boolean => builtinAcpTitleOwnership(cliType, agentType) !== 'none';
+  agentType: AgentType | null | undefined,
+  runtimeOverrides?: BuiltinRuntimeOverrides
+): boolean =>
+  !hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+  builtinAcpTitleOwnership(cliType, agentType) !== 'none';
 
 /**
  * Adapters whose pushed titles are authoritative without a `titleSource` tag.

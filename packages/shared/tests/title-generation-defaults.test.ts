@@ -131,6 +131,27 @@ describe('acpOwnsSessionTitleGeneration', () => {
     expect(acpOwnsSessionTitleGeneration('builtin', 'deepseek')).toBe(false);
   });
 
+  // The table describes each agent's managed runtime. An override can aim the
+  // same agentType at an older executable with no title behaviour, and such a
+  // session would otherwise get no title at all -- generator skipped, nothing
+  // pushed, and the setting that would fix it hidden.
+  it('gives ownership back to the local generator when a runtime is overridden', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '/opt/old-codex' })).toBe(
+      false
+    );
+    expect(acpOwnsSessionTitleGeneration('builtin', 'grok', { grokPath: '/opt/old-grok' })).toBe(
+      false
+    );
+    expect(
+      acpOwnsSessionTitleGeneration('builtin', 'claude', { claudeCodeExecutable: '/opt/old' })
+    ).toBe(false);
+  });
+
+  it('ignores an override object with no usable value', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', {})).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '  ' })).toBe(true);
+  });
+
   it('never applies to registry, custom, or unknown agents', () => {
     expect(acpOwnsSessionTitleGeneration('registry', 'codex')).toBe(false);
     expect(acpOwnsSessionTitleGeneration('custom', 'claude')).toBe(false);

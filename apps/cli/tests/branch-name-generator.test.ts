@@ -110,5 +110,32 @@ describe('branch-name-generator', () => {
     it('returns null when the input has no ASCII words', () => {
       expect(tryBranchName('把标题生成迁移到会话协议')).toBeNull();
     });
+
+    // A branch name is a ref: it reaches the remote when the session opens a PR,
+    // so a prompt that mentions a credential must not publish it.
+    it.each([
+      ['sk_live_ABC123def456', 'Fix API key sk_live_ABC123def456', 'fix/api-key'],
+      ['sk-proj-', 'rotate sk-proj-9aBcDeFgHiJkLmNoPqRs now', 'feat/rotate-now'],
+      ['ghp_', 'update ghp_16C7e42F292c6912E7710c838347Ae178B4a', 'chore/update'],
+      ['AKIA', 'aws creds AKIAIOSFODNN7EXAMPLE leaked', 'feat/aws-creds-leaked'],
+      ['bare hex', 'token is 0123456789abcdef0123456789abcdef', 'feat/token-is'],
+      [
+        'PEM block',
+        'paste of -----BEGIN RSA PRIVATE KEY----- MIIEow -----END RSA PRIVATE KEY----- here',
+        'feat/paste-of-here',
+      ],
+    ])('strips a %s credential before naming the branch', (_label, prompt, expected) => {
+      const branch = tryBranchName(prompt);
+      expect(branch).toBe(expected);
+    });
+
+    it('leaves ordinary prompts intact', () => {
+      expect(tryBranchName('Fix crash when opening FooBar with empty input')).toBe(
+        'fix/crash-when-opening-foobar-with-empty-input'
+      );
+      expect(tryBranchName('Bump codex to 1.10.1 and grok to 0.1.3')).toBe(
+        'chore/bump-codex-to-1101-and-grok-to-013'
+      );
+    });
   });
 });

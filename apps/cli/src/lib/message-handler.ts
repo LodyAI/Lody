@@ -8992,7 +8992,7 @@ export class MessageHandler {
   ): Promise<void> {
     // Builtin Claude, Codex and Grok generate their own titles and publish them
     // as session_info_update; the isolated agent would only duplicate that work.
-    if (acpOwnsSessionTitleGeneration(cliType, agentType)) {
+    if (acpOwnsSessionTitleGeneration(cliType, agentType, runtimeOverrides)) {
       return;
     }
     const existingGeneration = this.titleGenerationInFlight.get(sessionId);

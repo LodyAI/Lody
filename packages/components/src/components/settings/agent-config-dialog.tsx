@@ -1014,7 +1014,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const activePreset = formData.presetId ? PRESETS_BY_ID[formData.presetId] : undefined;
   const isPreset = !!activePreset;
-  const acpProvidesSessionTitle = acpOwnsSessionTitleGeneration(formData.cliType, formData.agentType);
+  const acpProvidesSessionTitle = acpOwnsSessionTitleGeneration(
+    formData.cliType,
+    formData.agentType,
+    formData.runtimeOverrides
+  );
   const activeCredentialMode = activePreset
     ? getPresetCredentialMode(activePreset, formData.presetCredentialModeId)
     : undefined;
