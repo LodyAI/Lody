@@ -1,6 +1,6 @@
 # Feature index
 
-The active suite contains 9 scenarios: 3 `@P0` smoke journeys and 6 `@P1` deeper journeys.
+The active suite contains 10 scenarios: 3 `@P0` smoke journeys and 7 `@P1` deeper journeys.
 
 | Feature                      | Scope                                                                             |
 | ---------------------------- | --------------------------------------------------------------------------------- |
@@ -9,5 +9,5 @@ The active suite contains 9 scenarios: 3 `@P0` smoke journeys and 6 `@P1` deeper
 | `agent-role.feature`         | Agent Role creation, accepted execution freeze, later edits, and cleanup          |
 | `mcp-catalog.feature`        | Workspace MCP creation, explicit Turn selection, dispatch, and deletion           |
 | `project-lifecycle.feature`  | Local project add, selection, removal, and original-directory safety              |
-| `session-management.feature` | Session rename, pin, archive, restore, history, and permanent deletion            |
+| `session-management.feature` | Session metadata, relation-aware archive/delete, hydration, and history           |
 | `session-fork.feature`       | Completed Session fork, origin, independent worktree, and deletion isolation      |

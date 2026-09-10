@@ -9,7 +9,10 @@ import { McpCatalogFixture, type McpCatalogAcpEvent } from './fixtures/mcp-catal
 import type { SyntheticReviewRepository } from './fixtures/synthetic-review-repository.js';
 import { McpCatalogPage } from './pages/mcp-catalog-page.js';
 import { SeededLocalSessionFixture } from './fixtures/seeded-local-session.js';
-import { SessionManagementPage } from './pages/session-management-page.js';
+import {
+  SessionManagementPage,
+  type SessionRelationLifecycleResources,
+} from './pages/session-management-page.js';
 import { SessionForkFixture } from './fixtures/session-fork-fixture.js';
 import { SessionForkPage, type SessionForkResources } from './pages/session-fork-page.js';
 import { ProjectLifecyclePage } from './pages/project-lifecycle-page.js';
@@ -39,6 +42,7 @@ export class LodyWorld extends World {
   mcpSessionEvent: McpCatalogAcpEvent | null = null;
   workResources: WorkSessionResources | null = null;
   sessionForkResources: SessionForkResources | null = null;
+  sessionRelationLifecycleResources: SessionRelationLifecycleResources | null = null;
   agentRoleResources: AgentRoleResources | null = null;
 
   prepare(tags: readonly string[]): void {

@@ -35,3 +35,34 @@ When('用户永久删除恢复后的 Session', async function (this: LodyWorld) 
 Then('Session 已从列表和路由中清理', async function (this: LodyWorld) {
   await this.sessionManagementPage!.expectDeletedFromListAndRoute();
 });
+
+Given('已建立含 child Tab 和两个独立 worktree 的 Session 关系', async function (this: LodyWorld) {
+  await this.sessionForkPage!.addProjectAndSelectAgent();
+  const firstFork = await this.sessionForkPage!.createCompletedSourceAndForkToWorktree();
+  const secondFork = await this.sessionForkPage!.createAdditionalWorktreeFork(firstFork);
+  this.sessionRelationLifecycleResources = await this.sessionManagementPage!.seedRelationLifecycle(
+    firstFork,
+    secondFork
+  );
+});
+
+When('用户归档并永久删除 opener Session', async function (this: LodyWorld) {
+  await this.sessionManagementPage!.archiveRelationRoot(this.sessionRelationLifecycleResources!);
+  await this.sessionManagementPage!.permanentlyDeleteRelationRoot(
+    this.sessionRelationLifecycleResources!
+  );
+});
+
+Then('child Tab 被删除而 opened Sessions 和 worktree 保留', async function (this: LodyWorld) {
+  await this.sessionManagementPage!.expectDanglingProvenanceAndCleanup(
+    this.sessionRelationLifecycleResources!
+  );
+});
+
+Then(
+  'metadata 未完成 hydration 时精确删除 empty child Tab 仍成功',
+  async function (this: LodyWorld) {
+    await this.sessionManagementPage!.expectColdHydrationExactDelete();
+    await this.harness!.capturePostGcSnapshot();
+  }
+);
