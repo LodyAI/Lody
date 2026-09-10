@@ -1429,7 +1429,13 @@ export class AgentClient implements acp.Client {
     prompt: acp.ContentBlock[],
     control: GoalPromptControl
   ): { prompt: acp.ContentBlock[]; _meta?: acp.PromptRequest['_meta'] } {
-    const transport = this.resolveGoalActionTransport(control.action);
+    // This path already owns a prompt (including cold-session restoration).
+    // Prefer the advertised prompt transport, not a live-session request.
+    const transport = resolveGoalActionTransport(
+      this.lodyExtensionCapabilities.goal,
+      control.action,
+      'prompt'
+    );
     if (transport === 'promptMeta') {
       return { prompt, _meta: buildGoalPromptMeta(control) };
     }

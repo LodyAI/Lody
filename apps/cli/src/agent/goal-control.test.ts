@@ -21,6 +21,8 @@ describe('resolveGoalActionTransport', () => {
 
     expect(resolveGoalActionTransport(advertised, 'pause')).toBe('request');
     expect(resolveGoalActionTransport(advertised, 'clear')).toBe('request');
+    expect(resolveGoalActionTransport(advertised, 'pause', 'prompt')).toBe('promptMeta');
+    expect(resolveGoalActionTransport(advertised, 'clear', 'prompt')).toBe('promptMeta');
   });
 
   it('keeps work-starting actions inside a prompt even when the request lists them', () => {
@@ -44,6 +46,9 @@ describe('resolveGoalActionTransport', () => {
 
   it('refuses actions the agent never advertised', () => {
     expect(resolveGoalActionTransport(undefined, 'pause')).toBeNull();
+    expect(
+      resolveGoalActionTransport(capability({ controlActions: ['pause'] }), 'pause', 'prompt')
+    ).toBeNull();
     expect(resolveGoalActionTransport(capability({ actions: ['set'] }), 'resume')).toBeNull();
     expect(
       resolveGoalActionTransport(

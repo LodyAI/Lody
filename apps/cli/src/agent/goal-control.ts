@@ -31,16 +31,22 @@ export type GoalPromptControl = {
  * The out-of-band request wins whenever the agent advertises it, because it is
  * the only transport that does not need a turn — and a goal's own prompt can
  * hold the session's single prompt slot for hours. Everything else runs inside
- * a prompt so the turns it starts belong to a conversation entry.
+ * a prompt so the turns it starts belong to a conversation entry. Inside an
+ * already-owned prompt (including cold restore), select only a prompt transport.
  */
 export function resolveGoalActionTransport(
   capability: LodyGoalCapability | undefined,
-  action: SessionGoalAction
+  action: SessionGoalAction,
+  context: 'control' | 'prompt' = 'control'
 ): GoalActionTransport | null {
   if (!capability?.actions.includes(action)) {
     return null;
   }
-  if (capability.controlActions?.includes(action) && (action === 'pause' || action === 'clear')) {
+  if (
+    context === 'control' &&
+    capability.controlActions?.includes(action) &&
+    (action === 'pause' || action === 'clear')
+  ) {
     return 'request';
   }
   if (capability.promptActions?.includes(action)) {

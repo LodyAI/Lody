@@ -49,21 +49,32 @@ applies the action, adopts any turn it started natively, and keeps that prompt
 open for the goal's remaining turns. The action never appears as user-visible
 command text.
 
+This is the button transport, not a replacement for typed commands. Users can
+still enter `/goal xxx` (and the supported `/goal` subcommands) through the
+ordinary chat path. Both entrances use the agent's same goal state and scheduler.
+
 An agent advertises which actions it supports and which transport carries each.
 Lody offers exactly the advertised actions, for any agent — goal control is not
 Codex-specific product behavior, only Codex-first availability.
 
 ## Guarantees
 
+- An active goal never suppresses turn completion or its notification.
 - A published goal status is authoritative for what the goal will do next. It is
   not a statement about whether a turn is running right now: a paused goal may
   still be draining its final turn.
 - `pause` and `clear` are delivered without waiting for a turn. If the session
-  has no live agent, they fall back to the turn path, which starts the agent.
+  has no live agent, they fall back to the turn path, which starts the agent and
+  uses its advertised prompt transport even if it also advertises requests.
 - `resume` and `set` never run concurrently with another turn. When one is
   running, the action waits for it and then executes; it is not dropped and does
   not require the user to stop the session first. Only the newest queued action
-  survives, so a stale pause cannot undo a later resume.
+  survives, so a stale pause cannot undo a later resume. A newer out-of-band
+  Pause/Clear or a valid Stop also discards any goal action not yet submitted.
+- Work-starting button requests acknowledge acceptance as `queued`, without
+  waiting for the persistent prompt to finish or claiming that execution already
+  started. Startup failures appear through the session's normal failure history;
+  an accepted action must not disappear merely because several turns ran first.
 - A goal turn creates an assistant entry and no user message. It carries no run
   configuration, so resuming a goal cannot silently change model or mode.
 - Stopping a session cancels the turn first and then pauses the goal, so Stop
@@ -90,5 +101,8 @@ Inspected implementation: `packages/acp-extension-core` (`LodyGoalCapability`,
 
 Executed validation: adapter tests for the prompt-metadata transport, CLI tests
 for transport selection and for queueing a resume behind a draining turn, and
-component tests for capability-driven command availability. No live Codex goal
+component tests for capability-driven command availability. Host regressions cover
+prompt-lifetime-independent acceptance, more than three competing turns,
+supersession before provider submission, and visible startup failures. Agent-client
+wire tests cover cold pause/clear and unchanged manual `/goal xxx` prompts. No live Codex goal
 was exercised end to end.

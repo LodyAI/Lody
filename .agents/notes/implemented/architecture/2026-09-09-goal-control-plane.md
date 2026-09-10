@@ -51,14 +51,20 @@ Work-starting actions (`set`, `resume`) need somewhere to put the resulting
 turns, and ACP v1 gives a client exactly one such place: its own prompt. Core
 gained `LodyGoalPromptControl`, carried on `prompt._meta.lody.goalControl`, and
 the adapter routes it into the same code as the slash command. The conversation
-never carries command text, and the adapter still adopts a turn Codex started
+never carries button-generated command text; typed `/goal xxx` and the existing
+subcommands remain supported. The adapter still adopts a turn Codex started
 natively rather than submitting a duplicate.
 
 The CLI owns the ordering. `SessionExecutionService.controlSessionGoal` sends the
-request when the transport allows it; otherwise it opens a goal turn
-(`dispatchSource: 'goal'`, no user message, no run configuration) or queues one
-behind the running turn using the existing `waitForTurnRelease`. One queued action
-per session, newest wins, bounded to three turn waits.
+request when the transport allows it; otherwise it acknowledges `queued` and a
+single session worker opens a goal turn (`dispatchSource: 'goal'`, no user message,
+no run configuration), waiting for ownership through `waitForTurnRelease`.
+Correction after PR #554 review: the original three-turn limit silently dropped
+accepted requests. Accepted work now waits until it can run, is superseded, or
+fails visibly. Metadata-loading contention retries against the new owner; claim
+and pre-submission fences prevent a superseded request from reaching the provider.
+Newer out-of-band Pause/Clear and exact-turn Stop invalidate pending goal work.
+Acceptance does not wait for prompt completion and does not claim `turn_started`.
 
 The UI now reads `goalActions` from the ACP capability cache instead of testing
 `agentType === 'codex'`, and its pending state expires after a minute so a slow
@@ -81,7 +87,9 @@ have to stay.
 **Allow only `set`/`resume` as prompt metadata.** Cleaner conceptually, but it
 leaves no way to clear a goal whose session is not running: the request path needs
 a live agent. Status-only actions are therefore accepted on both transports, with
-the request preferred.
+the request preferred for live control. Inside a restored, already-owned prompt,
+transport selection must use the advertised prompt path instead of selecting a
+request and then rejecting it as incompatible with a prompt.
 
 ## Consequences and limits
 
@@ -89,7 +97,7 @@ the request preferred.
 `goalActions`. Until a session's machine refreshes, goal buttons are hidden rather
 than wrongly shown — the conservative direction.
 
-`acp-extension-core` is now 0.1.2 and the Codex adapter depends on that version.
+`acp-extension-core` is now 0.1.4 and the Codex adapter depends on that version.
 Inside this workspace the pnpm override resolves it to the local source; a
 published adapter build needs the new core release first.
 
@@ -97,7 +105,7 @@ A paused goal can still be draining its last native turn, and that is now visibl
 rather than hidden: the queued resume waits and then runs. It no longer requires
 Stop, but it is not instant either.
 
-Both submodules need their own PRs before the pointer bump here lands.
+Both submodule changes have merged; these host corrections need no new release.
 The [goal control Spec](../../../../specs/session-goal-control.md) is draft.
 
 ## Verification
@@ -125,8 +133,22 @@ managed-runtime build path that consumes a published `acp-extension-core`.
 
 Follow-up correction (2026-09-10): the [independent review and ablation](../simplification/2026-09-10-goal-control-ablation.zh.md)
 found gaps in startup acknowledgement, cross-transport supersession, and cold-session
-status control. Those implementation defects remain unresolved; the intended
-guarantees above are not evidence that these scenarios currently work.
+status control. The host correction above addresses these findings and the
+three-wait drop reported in [PR #554](https://github.com/LodyAI/Lody/pull/554).
+New regression tests execute the actual host turn lifecycle with a deferred
+provider, verify failures in session history, and exercise the AgentClient wire
+payload for cold status controls alongside an unchanged `/goal xxx` prompt.
+The queue remains process-local, not a daemon-restart recovery mechanism; no
+durable queue or new protocol fields were introduced.
+Correction validation: 117 host tests (execution service, AgentClient, transport
+selection) and 36 Codex goal tests pass, including typed slash commands. CLI
+production typecheck, repository lint, targeted formatting, and docs check pass.
+The separate CLI test tsconfig still fails on existing fixture/type errors and
+is not counted as passing validation.
+Pre-commit validation reran `pnpm check`: workspace typecheck and lint passed,
+but the test phase hit the five-minute limit (exit 124), so the complete check
+is not passing evidence. `pnpm format` completed; unrelated Electron formatter
+churn was excluded. Live Codex end-to-end behavior was not rerun.
 
 Merge integration (2026-09-10): retain both `SessionGoalAction` and Core's
 `createPlanModeConfigOption` imports when merging main. Core's goal branch now
@@ -150,4 +172,5 @@ integrity. In a separate clone without the workspace override,
 Codex typechecks plus 52 goal/fork/worktree tests pass. Workspace frozen-lockfile
 installation, Core build, and Codex typecheck also pass. The existing root pnpm
 lock needs no change because Core remains a workspace link. This closes the
-registry dependency gap above; it does not resolve the host-side P1 findings.
+registry dependency gap above; host-side findings are addressed separately by
+the correction recorded in this note.

@@ -247,13 +247,6 @@ type SessionGoalTurnRequest = {
   userEmail: string;
 };
 
-/**
- * How many consecutive turns a queued goal action waits out. Each wait is one
- * whole turn, so this is generous for a drain and still bounded for a session
- * the user keeps chatting in.
- */
-const GOAL_TURN_QUEUE_MAX_WAITS = 3;
-
 type TurnInvocation = {
   /** Causal input Turn for authorization and durable provenance. */
   sourceTurnId: string;
@@ -1253,6 +1246,8 @@ export class SessionExecutionService {
         return respond('unsupported', `Agent does not support goal ${action}`);
       }
       if (transport === 'request') {
+        // A later Pause/Clear supersedes work that has not reached the provider.
+        this.pendingGoalTurnBySession.delete(sessionId);
         try {
           await agentClient.controlGoal(action);
           return respond('applied');
@@ -1278,19 +1273,10 @@ export class SessionExecutionService {
       userName: options.userName,
       userEmail: options.userEmail,
     };
-    if (this.getExecutionSnapshot(sessionId).hasActiveTurn) {
-      this.queueGoalTurn(request);
-      return respond('queued');
-    }
-    try {
-      await this.startGoalTurn(request);
-      return respond('turn_started');
-    } catch (error) {
-      this.deps.logger.warn(
-        `[${sessionId}] Goal ${action} turn failed to start: ${formatErrorMessage(error)}`
-      );
-      return respond('error', formatErrorMessage(error));
-    }
+    // Acceptance is not prompt completion (or even a claim of turn ownership).
+    // The worker reports startup failures through the session's existing history.
+    this.queueGoalTurn(request);
+    return respond('queued');
   }
 
   /**
@@ -1305,40 +1291,55 @@ export class SessionExecutionService {
     if (this.goalTurnWaiterSessions.has(sessionId)) {
       return;
     }
-    void (async () => {
-      // Bounded: a session the user keeps chatting in must not pin this loop.
-      for (let attempt = 0; attempt < GOAL_TURN_QUEUE_MAX_WAITS; attempt += 1) {
-        const snapshot = this.getExecutionSnapshot(sessionId);
-        if (!snapshot.hasActiveTurn || !snapshot.activeTurnId) {
-          break;
-        }
-        await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
-      }
-      const pending = this.pendingGoalTurnBySession.get(sessionId);
-      this.pendingGoalTurnBySession.delete(sessionId);
-      this.goalTurnWaiterSessions.delete(sessionId);
-      if (!pending) return;
-      if (this.getExecutionSnapshot(sessionId).hasActiveTurn) {
-        this.deps.logger.warn(
-          `[${sessionId}] Dropping queued goal ${pending.control.action}: session stayed busy`
-        );
-        return;
-      }
-      await this.startGoalTurn(pending);
-    })().catch((error: unknown) => {
-      this.pendingGoalTurnBySession.delete(sessionId);
-      this.goalTurnWaiterSessions.delete(sessionId);
-      this.deps.logger.error(
-        `[${sessionId}] Queued goal turn failed: ${formatErrorMessage(error)}`
-      );
-    });
     this.goalTurnWaiterSessions.add(sessionId);
+    void (async () => {
+      while (this.pendingGoalTurnBySession.has(sessionId)) {
+        const snapshot = this.getExecutionSnapshot(sessionId);
+        if (snapshot.hasActiveTurn && snapshot.activeTurnId) {
+          await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
+          continue;
+        }
+        const pending = this.pendingGoalTurnBySession.get(sessionId);
+        if (!pending) return;
+        try {
+          const claimed = await this.startGoalTurn(pending);
+          if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
+          // Another dispatch may win while metadata is loading. Retain the
+          // accepted request and wait for its owner instead of reporting success.
+          if (!claimed && this.getExecutionSnapshot(sessionId).hasActiveTurn) continue;
+          if (!claimed) throw new Error('Goal turn could not acquire session ownership');
+          this.pendingGoalTurnBySession.delete(sessionId);
+          // A claimed turn that never submitted its prompt already records its
+          // startup/cancellation outcome through the ordinary turn lifecycle.
+        } catch (error) {
+          if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
+          this.pendingGoalTurnBySession.delete(sessionId);
+          const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          await this.deps.recordChatFailure(
+            sessionDoc,
+            'turn_pre_prompt_failed',
+            `Goal ${pending.control.action} failed: ${formatErrorMessage(error)}`
+          );
+        }
+      }
+    })()
+      .catch((error: unknown) => {
+        this.deps.logger.error(
+          `[${sessionId}] Failed to report queued goal failure: ${formatErrorMessage(error)}`
+        );
+      })
+      .finally(() => {
+        this.goalTurnWaiterSessions.delete(sessionId);
+        const pending = this.pendingGoalTurnBySession.get(sessionId);
+        if (pending) this.queueGoalTurn(pending);
+      });
   }
 
-  private async startGoalTurn(request: SessionGoalTurnRequest): Promise<void> {
+  private async startGoalTurn(request: SessionGoalTurnRequest): Promise<boolean> {
     const { sessionId, control } = request;
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
+    if (this.pendingGoalTurnBySession.get(sessionId) !== request) return false;
     if (!meta) {
       throw new Error(`Session ${sessionId} has no metadata`);
     }
@@ -1349,6 +1350,7 @@ export class SessionExecutionService {
       throw new Error(`Session ${sessionId} has no agent configuration`);
     }
     const resumeAcpSessionId = resolveDispatchAcpSessionId(meta);
+    let claimed = false;
     await this.continueSession(
       {
         type: 'session/chat',
@@ -1372,8 +1374,24 @@ export class SessionExecutionService {
         userName: request.userName,
         userEmail: request.userEmail,
       },
-      { dispatchSource: 'goal', goalControl: control }
+      {
+        dispatchSource: 'goal',
+        goalControl: control,
+        onTurnClaimed: async () => {
+          claimed = this.pendingGoalTurnBySession.get(sessionId) === request;
+          return claimed;
+        },
+        onTurnStarted: async () => {
+          if (this.pendingGoalTurnBySession.get(sessionId) !== request) {
+            await this.handleTurnError(sessionId, sessionDoc);
+            return false;
+          }
+          this.pendingGoalTurnBySession.delete(sessionId);
+          return true;
+        },
+      }
     );
+    return claimed;
   }
 
   async steerSession(options: {
@@ -5287,6 +5305,7 @@ export class SessionExecutionService {
       return { success: true };
     }
 
+    this.pendingGoalTurnBySession.delete(sessionId);
     this.markTurnCancelled(sessionId, turnId);
     const runtime = this.getTurnRuntime(sessionId, turnId);
     if (runtime) {
