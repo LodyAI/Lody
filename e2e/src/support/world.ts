@@ -15,6 +15,7 @@ import { SessionForkPage, type SessionForkResources } from './pages/session-fork
 import { ProjectLifecyclePage } from './pages/project-lifecycle-page.js';
 import { AgentRoleFixture } from './fixtures/agent-role-fixture.js';
 import { AgentRolePage, type AgentRoleResources } from './pages/agent-role-page.js';
+import { ShortcutPage } from './pages/shortcut-page.js';
 import { createScenarioArtifacts, type ScenarioArtifacts } from './world-utils.js';
 
 export class LodyWorld extends World {
@@ -29,6 +30,7 @@ export class LodyWorld extends World {
   sessionForkPage: SessionForkPage | null = null;
   projectLifecyclePage: ProjectLifecyclePage | null = null;
   agentRolePage: AgentRolePage | null = null;
+  shortcutPage: ShortcutPage | null = null;
   workFixture: WorkSessionFixture | null = null;
   mcpFixture: McpCatalogFixture | null = null;
   seededSessionFixture: SeededLocalSessionFixture | null = null;
@@ -58,6 +60,7 @@ export class LodyWorld extends World {
       this.harness.page,
       this.seededSessionFixture
     );
+    this.shortcutPage = new ShortcutPage(this.harness.page);
   }
 
   async configureScriptedAgent(): Promise<void> {

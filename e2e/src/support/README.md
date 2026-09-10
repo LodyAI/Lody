@@ -17,6 +17,7 @@
 | `pages/project-lifecycle-page.ts`         | Local project picker, sidebar, catalog, and removal lifecycle       |
 | `pages/session-management-page.ts`        | Session metadata, Archive restore, history, and deletion            |
 | `pages/session-fork-page.ts`              | Native ACP fork, origin, worktree, and source isolation              |
+| `pages/shortcut-page.ts`                  | Default shortcuts, live rebinding, and renderer reload               |
 | `fixtures/work-session-fixture.ts`        | Synthetic Git workspace and scripted ACP evidence                   |
 | `fixtures/agent-role-fixture.ts`          | File-signaled scripted ACP and Role execution evidence              |
 | `fixtures/mcp-catalog-fixture.ts`         | ACP and stdio MCP process evidence                                  |

@@ -103,6 +103,53 @@
       "estimatedMinutes": 2
     },
     {
+      "id": "LODY-SHORTCUT-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "Preserve default and user-rebound desktop shortcuts across renderer reload",
+      "owner": "desktop-shortcuts",
+      "feature": "src/features/shortcuts.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "134197a59b3e32405bb5fd6000b3590b6a052c8e23fbb745bd4092420cbb92dd",
+      "ownerPaths": [
+        "packages/components/src/lib/commands/",
+        "packages/components/src/components/settings/keyboard-shortcuts-setting.tsx",
+        "packages/components/src/hooks/use-keyboard-navigation.ts"
+      ],
+      "actions": [
+        { "id": "shortcut.openPaletteWithDefaultBinding" },
+        { "id": "shortcut.openSettingsWithPhysicalPunctuation" },
+        { "id": "shortcut.rebindSidebarWithShiftedDigit" },
+        { "id": "shortcut.verifyOldBindingRemoved" },
+        { "id": "renderer.reload" },
+        { "id": "shortcut.verifyUserBindingRestored" }
+      ],
+      "checkpoints": [
+        "default command palette and settings bindings execute",
+        "old sidebar binding stops while the shifted-digit physical key works immediately",
+        "the user binding is restored after renderer reload"
+      ],
+      "cleanup": ["isolated desktop profile and shortcut overrides are deleted"],
+      "coverage": {
+        "renderer": "Command host, settings recorder, sidebar, and renderer reload",
+        "electronIpc": "Real Electron window and renderer lifecycle",
+        "bundledCli": "Real owned runtime for local workspace entry",
+        "durableState": "User shortcut override in isolated localStorage",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
       "id": "LODY-WORK-001",
       "state": "active",
       "priority": "P0",
