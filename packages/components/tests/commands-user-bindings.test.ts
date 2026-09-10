@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commands } from '../src/lib/commands/registry';
-import { USER_BINDINGS_STORAGE_KEY } from '../src/lib/commands/user-bindings';
+import {
+  subscribeUserBindings,
+  USER_BINDINGS_STORAGE_KEY,
+} from '../src/lib/commands/user-bindings';
 
 class MemoryStorage {
   private store = new Map<string, string>();
@@ -19,7 +22,7 @@ class MemoryStorage {
   }
 }
 
-class FakeKeyboardTarget {
+class FakeStorageTarget {
   private listeners = new Map<string, Set<EventListener>>();
   addEventListener(type: string, listener: EventListener): void {
     const listeners = this.listeners.get(type) ?? new Set<EventListener>();
@@ -51,20 +54,17 @@ function ev(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
   } as unknown as KeyboardEvent;
 }
 
-let target: FakeKeyboardTarget;
 let storage: MemoryStorage;
 
 beforeEach(() => {
   storage = new MemoryStorage();
   vi.stubGlobal('localStorage', storage);
-  target = new FakeKeyboardTarget();
-  commands.attach(target as unknown as HTMLElement);
+  commands.reloadUserKeybindings();
 });
 
 afterEach(() => {
   commands.resetAllUserKeybindings();
   for (const cmd of commands.list()) commands.unregister(cmd.id);
-  commands.detach();
   vi.unstubAllGlobals();
 });
 
@@ -84,10 +84,10 @@ describe('user-bindings overrides', () => {
     expect(commands.hasUserOverride('foo')).toBe(true);
 
     // Old binding no longer fires
-    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
     // New binding fires
-    target.dispatch('keydown', ev({ key: 'j', ctrlKey: true }));
+    commands.dispatchKeybinding('$mod+j', ev({ key: 'j', ctrlKey: true }));
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -101,7 +101,7 @@ describe('user-bindings overrides', () => {
     });
     commands.setUserKeybindings('foo', []);
     expect(commands.getKeybindingsFor('foo')).toEqual([]);
-    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -114,12 +114,33 @@ describe('user-bindings overrides', () => {
     expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+b']);
   });
 
-  it('reloads overrides when the registry reattaches', () => {
+  it('reloads overrides from persisted state when a renderer mounts', () => {
     commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run: () => {} });
     commands.setUserKeybindings('foo', ['$mod+j']);
     expect(storage.getItem(USER_BINDINGS_STORAGE_KEY)).toContain('$mod+j');
 
-    commands.detach();
+    storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+k'] }));
+    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
+
+    commands.reloadUserKeybindings();
+    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+k']);
+  });
+
+  it('applies binding changes written by another window', () => {
+    const run = vi.fn();
+    commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run });
+    const target = new FakeStorageTarget();
+    vi.stubGlobal('window', target);
+    const unsubscribe = subscribeUserBindings(() => commands.reloadUserKeybindings());
+    storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+j'] }));
+
+    target.dispatch('storage', {
+      key: USER_BINDINGS_STORAGE_KEY,
+      storageArea: storage,
+    } as unknown as StorageEvent);
+    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
+
+    unsubscribe();
     storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+k'] }));
     target.dispatch('storage', {
       key: USER_BINDINGS_STORAGE_KEY,
@@ -127,25 +148,9 @@ describe('user-bindings overrides', () => {
     } as unknown as StorageEvent);
     expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
 
-    const target2 = new FakeKeyboardTarget();
-    commands.attach(target2 as unknown as HTMLElement);
-    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+k']);
-  });
-
-  it('applies binding changes written by another window', () => {
-    const run = vi.fn();
-    commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run });
-    storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+j'] }));
-
-    target.dispatch('storage', {
-      key: USER_BINDINGS_STORAGE_KEY,
-      storageArea: storage,
-    } as unknown as StorageEvent);
-
-    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
-    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
+    commands.dispatchKeybinding('$mod+b', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
-    target.dispatch('keydown', ev({ key: 'j', ctrlKey: true }));
+    commands.dispatchKeybinding('$mod+j', ev({ key: 'j', ctrlKey: true }));
     expect(run).toHaveBeenCalledOnce();
   });
 

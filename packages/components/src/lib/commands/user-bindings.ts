@@ -50,3 +50,23 @@ export function saveUserBindings(map: UserBindingsMap): void {
     console.warn('[commands] failed to save user bindings', error);
   }
 }
+
+/** Subscribe to persisted binding changes made by another renderer window. */
+export function subscribeUserBindings(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== USER_BINDINGS_STORAGE_KEY) return;
+    if (
+      event.storageArea &&
+      typeof localStorage !== 'undefined' &&
+      event.storageArea !== localStorage
+    ) {
+      return;
+    }
+    listener();
+  };
+
+  window.addEventListener('storage', handleStorage);
+  return () => window.removeEventListener('storage', handleStorage);
+}

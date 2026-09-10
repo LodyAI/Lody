@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  bindingToTinykeys,
   canonicalizeBinding,
   matchesKeyboardEvent,
   parseBinding,
@@ -97,11 +98,7 @@ describe('matchesKeyboardEvent', () => {
       )
     ).toBe(false);
     expect(
-      matchesKeyboardEvent(
-        find,
-        ev({ key: 'f', code: 'KeyF', metaKey: true, ctrlKey: true }),
-        true
-      )
+      matchesKeyboardEvent(find, ev({ key: 'f', code: 'KeyF', metaKey: true, ctrlKey: true }), true)
     ).toBe(false);
     expect(
       matchesKeyboardEvent(
@@ -252,5 +249,21 @@ describe('canonicalizeBinding', () => {
 
   it('returns null for an unparseable binding', () => {
     expect(canonicalizeBinding('Hyper+n')).toBeNull();
+  });
+});
+
+describe('bindingToTinykeys', () => {
+  it('uses event.code syntax for layout-stable letters, numbers, and punctuation', () => {
+    expect(bindingToTinykeys('$mod+Alt+b')).toBe('$mod+Alt+KeyB');
+    expect(bindingToTinykeys('Control+1')).toBe('Control+(Digit1|Numpad1)');
+    expect(bindingToTinykeys('$mod+Shift+[')).toBe('$mod+Shift+BracketLeft');
+    expect(bindingToTinykeys('$mod+Shift+,')).toBe('$mod+Shift+Comma');
+  });
+
+  it('preserves named keys and rejects invalid public bindings', () => {
+    expect(bindingToTinykeys('Shift+Enter')).toBe('Shift+Enter');
+    expect(bindingToTinykeys('Hyper+k')).toBeNull();
+    expect(bindingToTinykeys('(.*)')).toBeNull();
+    expect(bindingToTinykeys('a b')).toBeNull();
   });
 });

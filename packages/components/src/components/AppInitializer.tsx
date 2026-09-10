@@ -3,7 +3,8 @@ import i18next from 'i18next';
 import { syncTime, createServerTimeFetcher } from '@lody/shared';
 import { usePlatformCapability } from '@lody/platform/react';
 import { API_BASE_URL } from '../lib';
-import { commands, registerBuiltInCommands } from '../lib/commands';
+import { registerBuiltInCommands } from '../lib/commands';
+import { CommandShortcutHost } from '../lib/commands/shortcut-host';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
 import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
@@ -89,14 +90,6 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
     });
   }, [hasCloudSync]);
 
-  // Attach the renderer's command listeners once at app boot. Built-ins are registered
-  // during render above, before any descendant effect; listeners read bindings live.
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    commands.attach(window);
-    return () => commands.detach();
-  }, []);
-
   /* Pre-warm the in-memory avatar blob-URL map from the persistent
      CacheStorage so the first `<UserAvatar>` mount after a refresh
      can hit the cache synchronously. Without this, every fresh app
@@ -108,7 +101,12 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
     void rehydrateAvatarMemoryCacheFromPersistent();
   }, []);
 
-  return <>{children}</>;
+  return (
+    <>
+      <CommandShortcutHost />
+      {children}
+    </>
+  );
 };
 
 export default AppInitializer;

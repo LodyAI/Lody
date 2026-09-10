@@ -38,20 +38,24 @@ only tells global dispatch to yield for events originating in its subtree.
   keeps a one-second settle window because macOS may suppress letter keyup while
   Command remains held.
 - User bindings are per-device localStorage state shared by every renderer window.
-  The registry owns both `keydown` and `storage` listeners so changes take effect in all
-  open windows; `[]` explicitly unbinds all defaults and `null` restores defaults.
+  `CommandShortcutHost` owns the renderer lifecycle, tinykeys owns DOM matching, and
+  `user-bindings.ts` owns the storage subscription so changes take effect in all open
+  windows. `[]` explicitly unbinds all defaults and `null` restores defaults.
 
 ## File responsibilities
 
-- `registry.ts`: registration stack, execution, capture-phase dispatch, listener lifecycle,
-  user overrides, and conflict lookup.
+- `registry.ts`: registration stack, execution policy, scopes, user overrides, and conflict
+  lookup. It does not own browser event listeners.
+- `shortcut-host.tsx`: the single renderer-level tinykeys listener and storage-subscription
+  lifecycle. Mount it once through `AppInitializer`.
 - `shortcuts.ts`: `COMMAND_SHORTCUTS` defaults plus the renderer display mirror for OS
   global shortcuts. `@lody/shared`'s `GLOBAL_SHORTCUT_DEFAULTS` owns global ids and
   bindings.
-- `key-matcher.ts`: binding parsing, keyboard-event matching, and physical-key mapping.
+- `key-matcher.ts`: public binding parsing, tinykeys translation, and physical-key mapping
+  for capture and remaining component-local chords.
 - `key-capture.ts`: interactive recording and registry pausing.
 - `built-ins.ts`: palette toggle and placeholder registrations.
-- `user-bindings.ts`: validated localStorage persistence.
+- `user-bindings.ts`: validated localStorage persistence and cross-window subscription.
 - `format.ts`: platform-aware binding/part presentation.
 - `platform.ts`, `types.ts`, `use-commands.ts`, `palette-state.ts`, and `index.ts` provide
   runtime detection, contracts, React registration helpers, state, and exports.

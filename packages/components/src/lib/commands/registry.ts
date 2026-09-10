@@ -1,4 +1,4 @@
-import { matchesKeyboardEvent, parseBinding } from './key-matcher';
+import { parseBinding } from './key-matcher';
 import { getPlatform, getRuntime, isMac } from './platform';
 import {
   createShortcutUsagePayload,
@@ -6,16 +6,10 @@ import {
 } from './shortcut-analytics';
 import { keybindingAppliesToEnvironment, UNINTERCEPTABLE_WEB_KEYS } from './shortcuts';
 import type { Command, KeyBinding, KeyScope } from './types';
-import {
-  loadUserBindings,
-  saveUserBindings,
-  USER_BINDINGS_STORAGE_KEY,
-  type UserBindingsMap,
-} from './user-bindings';
+import { loadUserBindings, saveUserBindings, type UserBindingsMap } from './user-bindings';
 
 type ResolvedBinding = {
   raw: string;
-  parsed: ReturnType<typeof parseBinding>;
   canonical: string;
   preventDefault: boolean;
   when?: KeyBinding['when'];
@@ -29,17 +23,16 @@ type CommandRegistration = {
 
 type ScopeRegistration = {
   scope: KeyScope;
-  /** Parsed once at registration; `undefined` means "claims everything". */
-  parsedClaims: ReturnType<typeof parseBinding>[] | undefined;
+  /** Canonicalized once at registration; `undefined` means "claims everything". */
+  canonicalClaims: Set<string> | undefined;
 };
 
 /**
  * Central command + key-binding registry.
  *
  * Design tradeoffs:
- *   - Single capture-phase `keydown` listener: gives the registry first crack at events
- *     for `preventDefault`. Rejected per-binding listeners (overhead, ordering) and
- *     bubble-phase (loses to Radix focus traps and similar component-local handlers).
+ *   - DOM listener ownership stays in `CommandShortcutHost`, which uses tinykeys for one
+ *     capture-phase listener. The registry only decides which matching command may run.
  *   - Stack duplicate ids so stable built-in definitions stay visible/customizable while
  *     route-scoped components temporarily provide the live handler. Rejected replace-only:
  *     unmounting a session page would remove its shortcut from Settings entirely.
@@ -66,9 +59,6 @@ class CommandRegistry {
   private commandByCanonical = new Map<string, string>();
   private snapshot: Command[] = [];
   private listeners = new Set<() => void>();
-  private target: Window | HTMLElement | null = null;
-  private boundHandler: ((e: KeyboardEvent) => void) | null = null;
-  private boundStorageHandler: ((e: StorageEvent) => void) | null = null;
   private paused = false;
   // Innermost-last, like the command stacks: a scope registered later wins.
   private scopes: ScopeRegistration[] = [];
@@ -104,39 +94,6 @@ class CommandRegistry {
 
   setShortcutAnalyticsHandler(handler: ShortcutUsageAnalyticsHandler | null): void {
     this.shortcutAnalyticsHandler = handler;
-  }
-
-  /**
-   * Start listening on the target. Must be called once at app startup. Calling again is a
-   * no-op unless detach() ran first.
-   */
-  attach(target: Window | HTMLElement = typeof window !== 'undefined' ? window : null!): void {
-    if (this.target) return;
-    if (!target) return;
-    this.reloadUserOverrides();
-    this.target = target;
-    this.boundHandler = (e) => this.handleKeyDown(e);
-    this.boundStorageHandler = (e) => this.handleStorage(e);
-    target.addEventListener('keydown', this.boundHandler as EventListener, { capture: true });
-    target.addEventListener('storage', this.boundStorageHandler as EventListener);
-  }
-
-  detach(): void {
-    if (this.target && this.boundHandler) {
-      this.target.removeEventListener(
-        'keydown',
-        this.boundHandler as EventListener,
-        {
-          capture: true,
-        } as EventListenerOptions
-      );
-    }
-    if (this.target && this.boundStorageHandler) {
-      this.target.removeEventListener('storage', this.boundStorageHandler as EventListener);
-    }
-    this.target = null;
-    this.boundHandler = null;
-    this.boundStorageHandler = null;
   }
 
   /**
@@ -178,7 +135,9 @@ class CommandRegistry {
   registerKeyScope(scope: KeyScope): () => void {
     const registration: ScopeRegistration = {
       scope,
-      parsedClaims: scope.claims?.map((claim) => parseBinding(claim)),
+      canonicalClaims: scope.claims
+        ? new Set(scope.claims.map((claim) => canonicalKey(parseBinding(claim))))
+        : undefined,
     };
     this.scopes.push(registration);
     return () => {
@@ -250,6 +209,28 @@ class CommandRegistry {
   }
 
   /**
+   * Dispatch a keybinding already matched by the renderer shortcut host. tinykeys owns
+   * DOM matching; this method owns command precedence, scopes, guards, and analytics.
+   */
+  dispatchKeybinding(binding: string, event: KeyboardEvent): void {
+    let parsed: ReturnType<typeof parseBinding>;
+    try {
+      parsed = parseBinding(binding);
+    } catch {
+      return;
+    }
+    this.handleKeyDown(canonicalKey(parsed), event);
+  }
+
+  /** Refresh persisted overrides after this renderer mounts or another window changes them. */
+  reloadUserKeybindings(): void {
+    this.userOverrides = loadUserBindings();
+    this.userOverridesLoaded = true;
+    this.rebuildBindings();
+    this.publishSnapshot();
+  }
+
+  /**
    * The command's declared defaults — what user overrides REPLACE. Returns the raw binding
    * strings, ignoring overrides while respecting platform/runtime filters for this device.
    */
@@ -318,25 +299,6 @@ class CommandRegistry {
     this.userOverridesLoaded = true;
   }
 
-  private reloadUserOverrides(): void {
-    this.userOverrides = loadUserBindings();
-    this.userOverridesLoaded = true;
-    this.rebuildBindings();
-    this.publishSnapshot();
-  }
-
-  private handleStorage(event: StorageEvent): void {
-    if (event.key !== null && event.key !== USER_BINDINGS_STORAGE_KEY) return;
-    if (
-      event.storageArea &&
-      typeof localStorage !== 'undefined' &&
-      event.storageArea !== localStorage
-    ) {
-      return;
-    }
-    this.reloadUserOverrides();
-  }
-
   private disposeRegistration(id: string, registration: CommandRegistration): void {
     const stack = this.commandStacks.get(id);
     if (!stack) return;
@@ -402,7 +364,6 @@ class CommandRegistry {
 
         next.push({
           raw: binding.key,
-          parsed,
           canonical,
           preventDefault: binding.preventDefault ?? true,
           when: binding.when,
@@ -419,12 +380,10 @@ class CommandRegistry {
     this.commandByCanonical = byCanonical;
   }
 
-  private handleKeyDown(event: KeyboardEvent): void {
+  private handleKeyDown(canonical: string, event: KeyboardEvent): void {
     if (this.paused) return;
     if (this.bindings.length === 0) return;
     if (event.defaultPrevented) return;
-    const mac = isMac();
-
     // A focused text-editing surface gets the key first. Checked per event
     // rather than per binding, so it holds for user-rebound keys too — the
     // whole reason this is not a `when` on the default binding.
@@ -433,7 +392,7 @@ class CommandRegistry {
     // Iterate in reverse so most-recently-registered wins on collisions.
     for (let i = this.bindings.length - 1; i >= 0; i--) {
       const b = this.bindings[i]!;
-      if (!matchesKeyboardEvent(b.parsed, event, mac)) continue;
+      if (b.canonical !== canonical) continue;
       if (b.when && !b.when(event)) continue;
       const cmd = this.activeCommands.get(b.commandId)?.command;
       if (!cmd) continue;
@@ -441,8 +400,8 @@ class CommandRegistry {
         // Claimed keys (or every key, when the scope claims broadly) belong to
         // the editor. Leave the event alone — no preventDefault — so its own
         // keymap still sees it.
-        const claims = scope.parsedClaims;
-        if (!claims || claims.some((claim) => matchesKeyboardEvent(claim, event, mac))) {
+        const claims = scope.canonicalClaims;
+        if (!claims || claims.has(canonical)) {
           return;
         }
       }
@@ -486,10 +445,11 @@ class CommandRegistry {
 }
 
 function canonicalKey(parsed: ReturnType<typeof parseBinding>): string {
+  const modUsesMeta = parsed.mod && isMac();
+  const modUsesControl = parsed.mod && !modUsesMeta;
   return [
-    parsed.mod ? '$mod' : '',
-    parsed.ctrl ? 'ctrl' : '',
-    parsed.meta ? 'meta' : '',
+    parsed.ctrl || modUsesControl ? 'ctrl' : '',
+    parsed.meta || modUsesMeta ? 'meta' : '',
     parsed.alt ? 'alt' : '',
     parsed.shift ? 'shift' : '',
     parsed.key,

@@ -1,10 +1,8 @@
 /**
- * Minimal keyboard binding matcher.
+ * Public binding syntax normalization and keyboard-capture helpers.
  *
- * Why hand-rolled instead of pulling tinykeys / hotkeys-js: the surface we need is small
- * (single combos, four modifiers, `$mod` cross-platform alias). Owning the matcher keeps
- * the public registry API decoupled from any third-party key syntax and makes
- * `preventDefault` semantics explicit and unit-testable.
+ * DOM matching is delegated to tinykeys by `shortcut-host.tsx`. This module keeps the
+ * public syntax stable and translates layout-stable keys to tinykeys' `event.code` syntax.
  */
 
 type ParsedBinding = {
@@ -162,6 +160,46 @@ export function canonicalizeBinding(binding: string): string | null {
     parsed.shift ? 'shift' : '',
     parsed.key,
   ].join(':');
+}
+
+/** Convert a public Lody binding to tinykeys syntax without changing its physical-key semantics. */
+export function bindingToTinykeys(binding: string): string | null {
+  let parsed: ParsedBinding;
+  try {
+    parsed = parseBinding(binding);
+  } catch {
+    return null;
+  }
+
+  const modifiers = [
+    parsed.mod ? '$mod' : '',
+    parsed.ctrl ? 'Control' : '',
+    parsed.meta ? 'Meta' : '',
+    parsed.alt ? 'Alt' : '',
+    parsed.shift ? 'Shift' : '',
+  ].filter(Boolean);
+
+  let key = parsed.key;
+  if (/^[a-z]$/.test(key)) {
+    key = `Key${key.toUpperCase()}`;
+  } else if (/^[0-9]$/.test(key)) {
+    // Preserve support for both the number row and numpad while still matching
+    // Option-produced glyphs through event.code on macOS.
+    key = `(Digit${key}|Numpad${key})`;
+  } else {
+    // Lody bindings are single chords. Do not expose tinykeys' regex or sequence
+    // grammar through persisted user input; multi-character named keys are DOM names.
+    if (key.length > 1 && !/^[A-Za-z][A-Za-z0-9]*$/.test(key)) return null;
+    key =
+      {
+        '[': 'BracketLeft',
+        ']': 'BracketRight',
+        ',': 'Comma',
+        '.': 'Period',
+      }[key] ?? key;
+  }
+
+  return [...modifiers, key].join('+');
 }
 
 export function matchesKeyboardEvent(
