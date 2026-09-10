@@ -94,12 +94,12 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
   already-running session out from under the daemon. Do not reintroduce a hard-fail Streams ack on
   the dispatch write.
 - MCP create takes run config semantically (`modelId`/`reasoningEffort`/`fastMode`/`planMode`),
-  never raw ACP option ids. `@lody/shared` `acp-run-config.ts` owns the mapping onto each agent's
-  advertised option ids, `applyAgentRunConfigSelection` applies it once the target agent's cached
-  capabilities are read, and `validateSessionCreateOptions({ dispatchConfig })` rejects
-  unsupported selections before the Operation is accepted. Durable create acceptance stores each
-  target's resolved effective dispatch config; recovery must use it instead of inheriting again
-  from mutable requester history.
+  never raw ACP ids. Resolve the inherited target model BEFORE mapping through shared
+  `acp-run-config.ts`. CLI/MCP use `readAgentAcpCapability`: version skew stays readable; incompatible Cursor
+  pre-picker rows trigger one probe and await the full Flock row. Machine protocol governs
+  legacy support. Reject unsupported
+  selections before Operation acceptance; freeze each target's effective dispatch config so
+  recovery never inherits again from mutable history.
 - Local daemon IPC sends the real control request once; do not restore a health preflight. Native
   `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary so MCP can
   preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`: a connection refusal means not

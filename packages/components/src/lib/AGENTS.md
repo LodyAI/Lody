@@ -106,3 +106,14 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.
 - Before creating top-level or child sessions, call `filterAcpSessionConfigOptionValues()`
   so cached values outside the current selector schema are neither dispatched nor persisted.
+
+`filterAcpSessionConfigOptionValuesForTarget` preserves explicit values when the
+capability cache is unavailable. Unknown capabilities are not an empty schema:
+Task Run must not erase the selected model or permission before creating a session.
+
+A model change in the Role editor (`reconcileAgentRoleModelChange`), the Task
+picker, and the Reviewer setting keeps only the config option values the new
+model's composed selectors publish and accept
+(`filterAcpSessionConfigOptionValuesForTarget`), so a previous model's keys are
+never persisted. Task runs filter the same way before dispatch. A saved Role's
+stale keys are reported by `findAgentRoleRunConfigIssues`, never repaired.

@@ -44,6 +44,7 @@ import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Switch } from '@/ui/switch';
 import { Textarea } from '@/ui/textarea';
+import { filterAcpSessionConfigOptionValuesForTarget } from '@/lib/acp-session-config-selection';
 import { cn } from '@/lib/utils';
 import { CompactRow, CompactSection } from './compact-layout';
 
@@ -107,20 +108,29 @@ function ReviewerMachineRow({
           config.agentType === reviewerConfig.reviewer.agentType
       )
     : undefined;
-  const selectorOptions = useAcpSelectorOptions(
-    selectedAgent
-      ? {
-          configId: selectedAgent.id,
-          cliType: selectedAgent.cliType,
-          agentType: selectedAgent.agentType,
-          selectedModeId: reviewerConfig?.reviewer.modeId,
-          selectedModelId: reviewerConfig?.reviewer.modelId,
-          configOptionValues: reviewerConfig?.reviewer.configOptionValues,
-          runtimeOverrides: selectedAgent.runtimeOverrides,
-          machine,
-        }
-      : undefined
+  const selectorTarget = useMemo(
+    () =>
+      selectedAgent
+        ? {
+            configId: selectedAgent.id,
+            cliType: selectedAgent.cliType,
+            agentType: selectedAgent.agentType,
+            selectedModeId: reviewerConfig?.reviewer.modeId,
+            selectedModelId: reviewerConfig?.reviewer.modelId,
+            configOptionValues: reviewerConfig?.reviewer.configOptionValues,
+            runtimeOverrides: selectedAgent.runtimeOverrides,
+            machine,
+          }
+        : undefined,
+    [
+      machine,
+      reviewerConfig?.reviewer.configOptionValues,
+      reviewerConfig?.reviewer.modeId,
+      reviewerConfig?.reviewer.modelId,
+      selectedAgent,
+    ]
   );
+  const selectorOptions = useAcpSelectorOptions(selectorTarget);
   const safeDefaultModeId =
     selectorOptions.modeOptions.find((option) => option.value === ACP_PLAN_PERMISSION_MODE_ID)
       ?.value ?? selectorOptions.defaultModeId;
@@ -169,6 +179,28 @@ function ReviewerMachineRow({
     },
     [commitReviewer, machine, machineAgentConfigs]
   );
+
+  const handleConfigOptionChange = (configId: string, value: AcpConfigOptionValue) => {
+    if (!reviewerConfig) {
+      return;
+    }
+    const merged = {
+      ...reviewerConfig.reviewer.configOptionValues,
+      [configId]: value,
+    };
+    const isModelSelector = selectorOptions.configOptionSelectors.some(
+      (selector) => selector.configId === configId && selector.category === 'model'
+    );
+    commitReviewer({
+      ...reviewerConfig.reviewer,
+      configOptionValues: isModelSelector
+        ? filterAcpSessionConfigOptionValuesForTarget({
+            ...selectorTarget,
+            configOptionValues: merged,
+          })
+        : merged,
+    });
+  };
 
   const selection: AgentSelection | null = selectedAgent
     ? { agentId: selectedAgent.id, machineId: machine.id }
@@ -237,23 +269,21 @@ function ReviewerMachineRow({
               selectedModelId={selectedModelId}
               onModelChange={
                 reviewerConfig
-                  ? (modelId) => commitReviewer({ ...reviewerConfig.reviewer, modelId })
+                  ? (modelId) =>
+                      commitReviewer({
+                        ...reviewerConfig.reviewer,
+                        modelId,
+                        configOptionValues: filterAcpSessionConfigOptionValuesForTarget({
+                          ...selectorTarget,
+                          selectedModelId: modelId,
+                          configOptionValues: reviewerConfig.reviewer.configOptionValues,
+                        }),
+                      })
                   : undefined
               }
               configOptionSelectors={selectorOptions.configOptionSelectors}
               configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-              onConfigOptionChange={
-                reviewerConfig
-                  ? (configId: string, value: AcpConfigOptionValue) =>
-                      commitReviewer({
-                        ...reviewerConfig.reviewer,
-                        configOptionValues: {
-                          ...reviewerConfig.reviewer.configOptionValues,
-                          [configId]: value,
-                        },
-                      })
-                  : undefined
-              }
+              onConfigOptionChange={reviewerConfig ? handleConfigOptionChange : undefined}
             />
 
             {selectedAgent ? (
@@ -267,17 +297,7 @@ function ReviewerMachineRow({
                 }}
                 configOptionSelectors={selectorOptions.configOptionSelectors}
                 configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-                onConfigOptionChange={(configId, value) => {
-                  if (reviewerConfig) {
-                    commitReviewer({
-                      ...reviewerConfig.reviewer,
-                      configOptionValues: {
-                        ...reviewerConfig.reviewer.configOptionValues,
-                        [configId]: value,
-                      },
-                    });
-                  }
-                }}
+                onConfigOptionChange={handleConfigOptionChange}
               />
             ) : null}
 

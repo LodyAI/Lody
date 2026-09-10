@@ -2934,8 +2934,8 @@ export const SessionChatInterface = memo(
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
-        return getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-          capability?.sessionFork === true
+        return getAcpCapabilityCacheEntryAuthority(capability, undefined, sessionMachine) ===
+          'authoritative' && capability?.sessionFork === true
           ? userMessage.id
           : null;
       }
@@ -2950,7 +2950,7 @@ export const SessionChatInterface = memo(
       session.cliType,
       session.isArchived,
       sessionHistory,
-      sessionMachine?.acpCapabilities,
+      sessionMachine,
     ]);
     const handleEditLastUser = useCallback(
       async (message: SessionHistoryParsed, text: string): Promise<boolean> => {

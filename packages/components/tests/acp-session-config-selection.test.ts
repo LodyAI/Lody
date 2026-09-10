@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { type AgentConfigId } from '@lody/shared';
 import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
   areAcpSessionConfigPreferencesEqual,
   buildAcpSessionConfigCandidates,
   fenceAcpSessionUserEdits,
   filterAcpSessionConfigOptionValues,
+  filterAcpSessionConfigOptionValuesForTarget,
   resolveAcpSessionConfigSelection,
   type AcpSessionSelectorOptionsInput,
   type AcpSessionUserConfigEdits,
 } from '../src/lib/acp-session-config-selection';
+import { cursorParameterizedModelCapabilityEntry } from './helpers/cursor-parameterized-model';
 
 const emptyEdits = EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
@@ -344,9 +347,8 @@ describe('ACP session config derivation', () => {
       ).reasoning_effort
     ).toBe('xhigh');
     expect(
-      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [
-        staleGrokReasoningSelector,
-      ]).reasoning_effort
+      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [staleGrokReasoningSelector])
+        .reasoning_effort
     ).toBeUndefined();
   });
 
@@ -491,5 +493,93 @@ describe('fenceAcpSessionUserEdits', () => {
         preferences: { modelId: 'gpt-5.5', configOptionValues: { reasoning_effort: 'high' } },
       })
     ).toBe(EMPTY_ACP_SESSION_USER_CONFIG_EDITS);
+  });
+});
+
+describe('filterAcpSessionConfigOptionValuesForTarget', () => {
+  const configId = 'config-1' as AgentConfigId;
+
+  const registryTarget = (
+    configOptionValues: Record<string, string>
+  ): Parameters<typeof filterAcpSessionConfigOptionValuesForTarget>[0] => ({
+    configId,
+    cliType: 'registry',
+    agentType: 'cursor',
+    configOptionValues,
+    machine: {
+      acpCapabilities: {
+        [configId]: cursorParameterizedModelCapabilityEntry('registry', 'cursor'),
+      },
+    },
+  });
+
+  it('keeps the current model option and the values that model publishes', () => {
+    expect(
+      filterAcpSessionConfigOptionValuesForTarget(registryTarget({ model: 'a', thinking: 'true' }))
+    ).toEqual({ model: 'a', thinking: 'true' });
+  });
+
+  it('drops a previous model key the new model does not publish', () => {
+    expect(
+      filterAcpSessionConfigOptionValuesForTarget(registryTarget({ model: 'b', thinking: 'true' }))
+    ).toEqual({ model: 'b' });
+  });
+
+  it.each(['missing', 'pre-picker'] as const)(
+    'preserves explicit run config while the capability cache is %s',
+    (state) => {
+      const values = { model: 'b', _permission: 'default', reasoning: 'high' };
+      const target = registryTarget(values);
+      target.machine =
+        state === 'missing'
+          ? null
+          : {
+              protocolCapabilities: { cursorParameterizedModelPicker: 1 },
+              acpCapabilities: {
+                [configId]: {
+                  ...cursorParameterizedModelCapabilityEntry('registry', 'cursor'),
+                  sourceVersion: 'cursor@before-picker',
+                },
+              },
+            };
+      expect(filterAcpSessionConfigOptionValuesForTarget(target)).toEqual(values);
+      expect(target.configOptionValues).toEqual(values);
+    }
+  );
+
+  it('drops a published key whose value the new model does not accept', () => {
+    expect(
+      filterAcpSessionConfigOptionValuesForTarget(
+        registryTarget({ model: 'b', reasoning: 'ultra' })
+      )
+    ).toEqual({ model: 'b' });
+  });
+
+  it('selects the model through selectedModelId for a builtin target', () => {
+    const machine = {
+      acpCapabilities: {
+        [configId]: cursorParameterizedModelCapabilityEntry('builtin', 'claude'),
+      },
+    };
+    expect(
+      filterAcpSessionConfigOptionValuesForTarget({
+        configId,
+        cliType: 'builtin',
+        agentType: 'claude',
+        selectedModelId: 'a',
+        configOptionValues: { thinking: 'true' },
+        machine,
+      })
+    ).toEqual({ thinking: 'true' });
+    expect(
+      filterAcpSessionConfigOptionValuesForTarget({
+        configId,
+        cliType: 'builtin',
+        agentType: 'claude',
+        selectedModelId: 'b',
+        configOptionValues: { thinking: 'true' },
+        machine,
+      })
+    ).toEqual({});
   });
 });

@@ -14,6 +14,7 @@ import {
   buildAgentRoleFromForm,
   EMPTY_AGENT_ROLE_FORM_VALUE,
   findAgentRoleRunConfigIssues,
+  reconcileAgentRoleModelChange,
   selectAuthorableAgentRoleConfigOptions,
   validateAgentRoleForm,
   type AgentRoleFormValue,
@@ -334,5 +335,181 @@ describe('run config summary', () => {
 
   it('is empty for a role that pins nothing', () => {
     expect(buildAgentRoleRunConfigSummary({})).toEqual([]);
+  });
+});
+
+describe('model change reconciliation', () => {
+  const modelSelector = (currentValue: string) => ({
+    type: 'select' as const,
+    configId: 'model',
+    label: 'Model',
+    category: 'model',
+    currentValue,
+    options: [
+      { value: 'a', label: 'A' },
+      { value: 'b', label: 'B' },
+    ],
+  });
+
+  const optionsForA = selectorOptions({
+    modelOptions: [],
+    configOptionSelectors: [
+      modelSelector('a'),
+      {
+        type: 'select',
+        configId: 'thinking',
+        label: 'Thinking',
+        currentValue: 'true',
+        options: [
+          { value: 'true', label: 'On' },
+          { value: 'false', label: 'Off' },
+        ],
+      },
+    ],
+  });
+
+  const optionsForB = selectorOptions({
+    modelOptions: [],
+    configOptionSelectors: [
+      modelSelector('b'),
+      {
+        type: 'select',
+        configId: 'reasoning',
+        label: 'Reasoning',
+        currentValue: 'medium',
+        options: [
+          { value: 'low', label: 'Low' },
+          { value: 'medium', label: 'Medium' },
+          { value: 'high', label: 'High' },
+        ],
+      },
+    ],
+  });
+
+  const resolveByConfigModel = (value: AgentRoleFormValue) => {
+    const model = value.configOptionValues.model;
+    if (model === 'a') return optionsForA;
+    if (model === 'b') return optionsForB;
+    return null;
+  };
+
+  it('drops a registry Cursor key the new model no longer publishes, then defaults refill', () => {
+    const previous = formValue({
+      modelId: null,
+      configOptionValues: { model: 'a', thinking: 'true' },
+    });
+    const next = formValue({
+      modelId: null,
+      configOptionValues: { model: 'b', thinking: 'true' },
+    });
+    const result = reconcileAgentRoleModelChange(previous, next, resolveByConfigModel);
+    expect(result.configOptionValues).toEqual({ model: 'b' });
+    expect(applyAgentRoleRunConfigDefaults(result, optionsForB).configOptionValues).toEqual({
+      model: 'b',
+      reasoning: 'medium',
+    });
+  });
+
+  it('keeps a shared key the new model still accepts and drops one it does not', () => {
+    const effortForA = selectorOptions({
+      modelOptions: [],
+      configOptionSelectors: [
+        modelSelector('a'),
+        {
+          type: 'select',
+          configId: 'effort',
+          label: 'Effort',
+          currentValue: 'high',
+          options: [
+            { value: 'high', label: 'High' },
+            { value: 'xhigh', label: 'XHigh' },
+          ],
+        },
+      ],
+    });
+    const effortForB = selectorOptions({
+      modelOptions: [],
+      configOptionSelectors: [
+        modelSelector('b'),
+        {
+          type: 'select',
+          configId: 'effort',
+          label: 'Effort',
+          currentValue: 'high',
+          options: [{ value: 'high', label: 'High' }],
+        },
+      ],
+    });
+    const resolve = (value: AgentRoleFormValue) => {
+      const model = value.configOptionValues.model;
+      if (model === 'a') return effortForA;
+      if (model === 'b') return effortForB;
+      return null;
+    };
+    const previous = formValue({
+      modelId: null,
+      configOptionValues: { model: 'a', effort: 'high' },
+    });
+    const kept = reconcileAgentRoleModelChange(
+      previous,
+      formValue({
+        modelId: null,
+        configOptionValues: { model: 'b', effort: 'high' },
+      }),
+      resolve
+    );
+    expect(kept.configOptionValues).toEqual({ model: 'b', effort: 'high' });
+
+    const dropped = reconcileAgentRoleModelChange(
+      previous,
+      formValue({
+        modelId: null,
+        configOptionValues: { model: 'b', effort: 'xhigh' },
+      }),
+      resolve
+    );
+    expect(dropped.configOptionValues).toEqual({ model: 'b' });
+  });
+
+  it('returns the next value itself when a non-model edit leaves a stale key stored', () => {
+    const previous = formValue({
+      name: 'Reviewer',
+      configOptionValues: { model: 'a', thinking: 'true' },
+    });
+    const next = { ...previous, name: 'Renamed' };
+    expect(reconcileAgentRoleModelChange(previous, next, resolveByConfigModel)).toBe(next);
+  });
+
+  it('prunes by the same rule when a builtin agent changes modelId', () => {
+    const previous = formValue({
+      modelId: 'a',
+      configOptionValues: { thinking: 'true' },
+    });
+    const next = formValue({
+      modelId: 'b',
+      configOptionValues: { thinking: 'true' },
+    });
+    const resolve = (value: AgentRoleFormValue) => {
+      if (value.modelId === 'a') return optionsForA;
+      if (value.modelId === 'b') return optionsForB;
+      return null;
+    };
+    expect(reconcileAgentRoleModelChange(previous, next, resolve).configOptionValues).toEqual({});
+  });
+
+  it('leaves the next value unchanged when the new model capabilities are unavailable', () => {
+    const previous = formValue({
+      modelId: 'a',
+      configOptionValues: { thinking: 'true' },
+    });
+    const next = formValue({
+      modelId: 'b',
+      configOptionValues: { thinking: 'true' },
+    });
+    const result = reconcileAgentRoleModelChange(previous, next, (value) => {
+      if (value.modelId === 'a') return optionsForA;
+      return selectorOptions({ capabilityAuthority: 'unavailable' });
+    });
+    expect(result).toBe(next);
   });
 });

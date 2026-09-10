@@ -13,6 +13,10 @@ import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
 import {
+  machineSupportsCursorParameterizedModelPicker,
+  type MachineProtocolCapabilityCarrier,
+} from './machine-protocol-capabilities';
+import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
 } from './deepseek-harness';
@@ -310,6 +314,14 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * Non-model config options each advertised model exposes, keyed by the
+   * `model` option value. Only an explicit capability probe of an agent that
+   * publishes a whole-catalog method fills it; ACP sessions never do. A model
+   * with no model-dependent options maps to `[]`, while a missing key means the
+   * catalog does not know that model. Absent when the agent exposes no catalog.
+   */
+  configOptionsByModel?: Record<string, AcpConfigOptionSummary[]>;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
@@ -323,9 +335,50 @@ export type AcpCapabilityCacheEntry = {
 
 export const getAcpCapabilityCacheKey = (configId: AgentConfigId): string => configId;
 
+/**
+ * Identity, not command line, decides the Cursor opt-in: a custom or builtin config that
+ * happens to launch the same binary keeps standard ACP behaviour.
+ */
+export const isRegistryCursorAgent = (identity: {
+  cliType: AgentConfigCliType | null | undefined;
+  agentType: string | null | undefined;
+}): boolean => identity.cliType === 'registry' && identity.agentType === 'cursor';
+
+/**
+ * Appended to registry Cursor's capability source version once the daemon declares
+ * `parameterizedModelPicker`. On a machine that advertises the
+ * `cursorParameterizedModelPicker` protocol capability, a registry Cursor row without
+ * the marker was probed before the opt-in: it describes exploded variant model ids the
+ * agent no longer advertises and carries no per-model catalog, so it is never current.
+ * A machine without that capability still launches Cursor in legacy variants mode, and
+ * its unmarked rows are the correct description of what it runs.
+ */
+export const CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX =
+  '+parameterized-model-picker';
+
+/**
+ * The daemon that owns the capability row, as a `protocolCapabilities` carrier
+ * (`MachineMeta` / `MachineViewMeta`). Missing capabilities mean legacy.
+ */
+export type AcpCapabilityMachine = MachineProtocolCapabilityCarrier | null | undefined;
+
+const hasIncompatibleCursorModelIds = (
+  entry: AcpCapabilityCacheEntry,
+  machine: AcpCapabilityMachine
+): boolean =>
+  isRegistryCursorAgent(entry) &&
+  machineSupportsCursorParameterizedModelPicker(machine) &&
+  entry.sourceVersion?.endsWith(CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX) !== true;
+
 export const isAcpCapabilityCacheEntryCurrent = (
-  entry: AcpCapabilityCacheEntry | undefined
-): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
+  entry: AcpCapabilityCacheEntry | undefined,
+  machine: AcpCapabilityMachine
+): entry is AcpCapabilityCacheEntry => {
+  if (entry?.cacheVersion !== ACP_CAPABILITY_CACHE_VERSION) {
+    return false;
+  }
+  return !hasIncompatibleCursorModelIds(entry, machine);
+};
 
 /**
  * A parsed capability entry remains readable regardless of the producer's cache version.
@@ -333,9 +386,10 @@ export const isAcpCapabilityCacheEntryCurrent = (
  * keep using fields they understand while a newer probe converges the stored entry.
  */
 export const getReadableAcpCapabilityCacheEntry = (
-  entry: AcpCapabilityCacheEntry | undefined
+  entry: AcpCapabilityCacheEntry | undefined,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityCacheEntry | undefined => {
-  if (!entry) {
+  if (!entry || hasIncompatibleCursorModelIds(entry, machine)) {
     return undefined;
   }
   // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
@@ -354,9 +408,10 @@ export const getReadableAcpCapabilityCacheEntry = (
 
 export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityCacheEntry | undefined => {
-  const readableEntry = getReadableAcpCapabilityCacheEntry(entry);
+  const readableEntry = getReadableAcpCapabilityCacheEntry(entry, machine);
   if (!readableEntry) {
     return undefined;
   }
@@ -368,9 +423,10 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): entry is AcpCapabilityCacheEntry => {
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return false;
   }
   const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
@@ -379,11 +435,13 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
 
 export const getAcpCapabilityCacheEntryAuthority = (
   entry: AcpCapabilityCacheEntry | undefined,
-  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityAuthority => {
   const readableEntry = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
     entry,
-    runtimeOverrides
+    runtimeOverrides,
+    machine
   );
   if (!readableEntry) {
     return 'unavailable';
@@ -398,12 +456,13 @@ export type AcpCapabilityCacheStaleReason =
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
-  expectedSourceVersion: string
+  expectedSourceVersion: string,
+  machine: AcpCapabilityMachine
 ): AcpCapabilityCacheStaleReason | undefined => {
   if (!entry) {
     return 'missing';
   }
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) {
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) {
     return 'cache-version-mismatch';
   }
   if (entry.sourceVersion !== expectedSourceVersion) {

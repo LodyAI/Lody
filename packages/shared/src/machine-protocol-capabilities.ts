@@ -13,6 +13,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   providerSetup: 'providerSetup',
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
+  cursorParameterizedModelPicker: 'cursorParameterizedModelPicker',
 } as const;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
@@ -20,8 +21,9 @@ export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION = 1;
 
-type MachineProtocolCapabilityCarrier = {
+export type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
 };
 
@@ -55,6 +57,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.cursorParameterizedModelPicker]:
+    CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION,
 };
 
 /** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
@@ -103,6 +107,23 @@ export function machineSupportsAcpProtocolAuthentication(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication,
     ACP_PROTOCOL_AUTHENTICATION_VERSION
+  );
+}
+
+/**
+ * Whether the target daemon launches registry Cursor with
+ * `clientCapabilities._meta.parameterizedModelPicker`. Its capability rows then carry
+ * the `+parameterized-model-picker` source-version marker; a daemon without this
+ * capability still runs Cursor in legacy variants mode, and its unmarked rows are the
+ * correct description of what it launches.
+ */
+export function machineSupportsCursorParameterizedModelPicker(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.cursorParameterizedModelPicker,
+    CURSOR_PARAMETERIZED_MODEL_PICKER_PROTOCOL_VERSION
   );
 }
 

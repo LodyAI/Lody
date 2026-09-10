@@ -8,11 +8,17 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+  cursorParameterizedModelValues,
+} from './cursor-parameterized-model-fixture';
 
 const codexIcon = <AgentIcon cliType="builtin" agentType="codex" />;
 const claudeIcon = <AgentIcon cliType="builtin" agentType="claude" />;
 const minimaxIcon = <AgentIcon cliType="builtin" agentType="minimax" brandId="minimax" />;
 const glmIcon = <AgentIcon cliType="builtin" agentType="glm" brandId="glm" />;
+const cursorIcon = <AgentIcon cliType="registry" agentType="cursor" />;
 
 const codexModeSelector: AcpConfigOptionSelector = {
   type: 'select',
@@ -74,6 +80,8 @@ const claudeModeSelector: AcpConfigOptionSelector = {
     { value: 'dontAsk', label: "Don't Ask" },
   ],
 };
+
+const cursorSelectors = cursorParameterizedModelSelectors('a');
 
 type Case = {
   label: string;
@@ -149,6 +157,14 @@ const CASES: Case[] = [
     values: {},
   },
   {
+    label: 'Registry Cursor catalog',
+    model: 'a',
+    agentIcon: cursorIcon,
+    modelOptions: cursorParameterizedModelOptions,
+    selectors: cursorSelectors,
+    values: cursorParameterizedModelValues,
+  },
+  {
     label: 'Unknown third-party mode — hidden',
     model: 'glm-4.6',
     agentIcon: glmIcon,
@@ -209,3 +225,17 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const FaceStates: Story = {};
+
+export const RegistryCursorCatalog: Story = {
+  render: () => (
+    <MobileRunConfigButton
+      agentIcon={cursorIcon}
+      modelOptions={cursorParameterizedModelOptions}
+      selectedModelId="a"
+      modeOptions={[]}
+      selectedModeId={null}
+      configOptionSelectors={cursorSelectors}
+      configOptionValues={cursorParameterizedModelValues}
+    />
+  ),
+};

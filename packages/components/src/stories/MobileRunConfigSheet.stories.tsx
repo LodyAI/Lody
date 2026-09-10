@@ -22,6 +22,10 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+} from './cursor-parameterized-model-fixture';
 
 /**
  * The mobile composer's consolidated run-config bottom sheet, opened by
@@ -37,6 +41,7 @@ const claudeSessionId = 'session-claude' as SessionId;
 const codexId = 'agent-codex' as AgentConfigId;
 const claudeId = 'agent-claude' as AgentConfigId;
 const deepseekId = 'agent-deepseek' as AgentConfigId;
+const cursorId = 'agent-cursor' as AgentConfigId;
 
 const agents: AgentConfigMeta[] = [
   {
@@ -68,6 +73,16 @@ const agents: AgentConfigMeta[] = [
   },
 ];
 
+const cursorAgent: AgentConfigMeta = {
+  id: cursorId,
+  machineId,
+  name: 'Cursor',
+  description: 'Registry Cursor agent',
+  cliType: 'registry',
+  agentType: 'cursor',
+  env: {},
+};
+
 const codexSession: SessionMeta = {
   id: codexSessionId,
   machineId,
@@ -94,6 +109,15 @@ const deepseekSession: SessionMeta = {
   title: 'DeepSeek session',
   agentType: 'deepseek',
   agentConfigId: deepseekId,
+};
+
+const cursorSession: SessionMeta = {
+  ...codexSession,
+  id: 'session-cursor' as SessionId,
+  title: 'Cursor session',
+  cliType: 'registry',
+  agentType: 'cursor',
+  agentConfigId: cursorId,
 };
 
 const codexModelOptions: AcpSessionSelectOption[] = [
@@ -156,6 +180,8 @@ const codexSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
+const cursorSelectors = cursorParameterizedModelSelectors('a');
+
 const claudeSelectors: AcpConfigOptionSelector[] = [
   {
     type: 'select',
@@ -186,12 +212,13 @@ function StoryShell({
 }) {
   const store = useMemo(() => {
     const s = createStore();
+    const catalog = session.agentConfigId === cursorAgent.id ? [...agents, cursorAgent] : agents;
     s.set(
       agentConfigMetaCacheAtom,
-      Object.fromEntries(agents.map((a) => [getAgentConfigRoomId(a.id), a]))
+      Object.fromEntries(catalog.map((a) => [getAgentConfigRoomId(a.id), a]))
     );
     return s;
-  }, []);
+  }, [session.agentConfigId]);
 
   const [open, setOpen] = useState(true);
   const [model, setModel] = useState<string | null>(modelOptions[0]?.value ?? null);
@@ -227,7 +254,11 @@ function StoryShell({
           modeOptions={[]}
           selectedModeId={null}
           onModeChange={fn()}
-          configOptionSelectors={selectors}
+          configOptionSelectors={
+            session.agentConfigId === cursorAgent.id
+              ? cursorParameterizedModelSelectors(model)
+              : selectors
+          }
           configOptionValues={values}
           onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           agentRoles={
@@ -263,6 +294,14 @@ export const Codex: Story = {
 
 export const Claude: Story = {
   args: { session: claudeSession, modelOptions: claudeModelOptions, selectors: claudeSelectors },
+};
+
+export const RegistryCursorCatalog: Story = {
+  args: {
+    session: cursorSession,
+    modelOptions: cursorParameterizedModelOptions,
+    selectors: cursorSelectors,
+  },
 };
 
 export const DeepSeekDelegationWarning: Story = {

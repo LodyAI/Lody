@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import {
-  Bot,
-  Check,
-  ListChecks,
-  Monitor,
-  ShieldAlert,
-  Zap,
-} from 'lucide-react';
+import { Bot, Check, ListChecks, Monitor, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   classifyPermissionModeFace,
@@ -30,6 +23,7 @@ import {
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
+import { filterAcpSessionConfigOptionValuesForTarget } from '@/lib/acp-session-config-selection';
 import { cn } from '@/lib/utils';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
@@ -246,20 +240,23 @@ export function TaskAgentRunConfigMenu({
     [machines, selectedConfig]
   );
 
-  const selectorOptions = useAcpSelectorOptions(
-    selectedConfig
-      ? {
-          configId: selectedConfig.id,
-          cliType: selectedConfig.cliType,
-          agentType: selectedConfig.agentType,
-          selectedModeId: value?.modeId,
-          selectedModelId: value?.modelId,
-          configOptionValues: value?.configOptionValues,
-          runtimeOverrides: selectedConfig.runtimeOverrides,
-          machine: selectedMachine,
-        }
-      : undefined
+  const selectorTarget = useMemo(
+    () =>
+      selectedConfig
+        ? {
+            configId: selectedConfig.id,
+            cliType: selectedConfig.cliType,
+            agentType: selectedConfig.agentType,
+            selectedModeId: value?.modeId,
+            selectedModelId: value?.modelId,
+            configOptionValues: value?.configOptionValues,
+            runtimeOverrides: selectedConfig.runtimeOverrides,
+            machine: selectedMachine,
+          }
+        : undefined,
+    [selectedConfig, selectedMachine, value?.configOptionValues, value?.modeId, value?.modelId]
   );
+  const selectorOptions = useAcpSelectorOptions(selectorTarget);
 
   const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
   const ordered = useMemo(
@@ -267,13 +264,27 @@ export function TaskAgentRunConfigMenu({
     [configOptionSelectors]
   );
 
-  const modelConfigSelector = ordered.modelSelectors[0] as AcpSelectConfigOptionSelector | undefined;
+  const modelConfigSelector = ordered.modelSelectors[0] as
+    | AcpSelectConfigOptionSelector
+    | undefined;
+  // The Reasoning row binds the effort ladder when there is one; a lone thinking
+  // toggle keeps that row. Any other toggle-shaped thought option stays visible
+  // as a provider-defined select, since this menu has no dedicated toggle rows.
+  const thinkingSelector = useMemo(
+    () =>
+      (ordered.thoughtLevelSelectors.find((s) => s.type === 'select') ??
+        ordered.thoughtToggleSelectors.find((s) => s.type === 'select')) as
+        | AcpSelectConfigOptionSelector
+        | undefined,
+    [ordered.thoughtLevelSelectors, ordered.thoughtToggleSelectors]
+  );
   const extraSelectSelectors = useMemo(
     () =>
-      ordered.otherSelectors.filter(
-        (selector): selector is AcpSelectConfigOptionSelector => selector.type === 'select'
+      [...ordered.otherSelectors, ...ordered.thoughtToggleSelectors].filter(
+        (selector): selector is AcpSelectConfigOptionSelector =>
+          selector.type === 'select' && selector !== thinkingSelector
       ),
-    [ordered.otherSelectors]
+    [ordered.otherSelectors, ordered.thoughtToggleSelectors, thinkingSelector]
   );
   const modelPickerOptions = useMemo(
     () => (modelOptions.length > 0 ? modelOptions : (modelConfigSelector?.options ?? [])),
@@ -291,13 +302,6 @@ export function TaskAgentRunConfigMenu({
   const modelLabel =
     modelPickerOptions.find((opt) => opt.value === modelValue)?.label ?? modelValue;
 
-  const thinkingSelector = useMemo(
-    () =>
-      ordered.thoughtLevelSelectors.find((s) => s.type === 'select') as
-        | AcpSelectConfigOptionSelector
-        | undefined,
-    [ordered.thoughtLevelSelectors]
-  );
   const thinkingValue = thinkingSelector
     ? ((resolveConfigOptionValue(
         thinkingSelector,
@@ -389,10 +393,19 @@ export function TaskAgentRunConfigMenu({
   const patchConfigOption = useCallback(
     (configId: string, optionValue: AcpConfigOptionValue) => {
       if (!value?.agentConfigId) return;
-      const nextValues = {
+      let nextValues: Record<string, string> = {
         ...(value.configOptionValues ?? {}),
         [configId]: String(optionValue),
       };
+      if (selectorTarget && configId === modelConfigSelector?.configId) {
+        const filtered = filterAcpSessionConfigOptionValuesForTarget({
+          ...selectorTarget,
+          configOptionValues: nextValues,
+        });
+        nextValues = Object.fromEntries(
+          Object.entries(filtered).map(([key, filteredValue]) => [key, String(filteredValue)])
+        );
+      }
       commit({
         agentConfigId: value.agentConfigId as AgentConfigId,
         ...(value.modeId ? { modeId: value.modeId } : {}),
@@ -400,7 +413,7 @@ export function TaskAgentRunConfigMenu({
         configOptionValues: nextValues,
       });
     },
-    [commit, value]
+    [commit, modelConfigSelector?.configId, selectorTarget, value]
   );
 
   const selectAgentConfig = useCallback(
@@ -565,11 +578,7 @@ export function TaskAgentRunConfigMenu({
                   />
                 }
                 label={entry.name}
-                description={
-                  entry.online
-                    ? undefined
-                    : t('tasks.slots.offline', 'Offline')
-                }
+                description={entry.online ? undefined : t('tasks.slots.offline', 'Offline')}
                 selected={entry.machineId === machineFilterId}
                 onSelect={() => setMachineFilterId(entry.machineId)}
               />
@@ -659,10 +668,7 @@ export function TaskAgentRunConfigMenu({
 
         {modelPickerOptions.length > 0 ? (
           <DropdownMenuSub>
-            <ValueSubTrigger
-              label={t('chat.runConfig.modelLabel', 'Model')}
-              value={modelLabel}
-            />
+            <ValueSubTrigger label={t('chat.runConfig.modelLabel', 'Model')} value={modelLabel} />
             <DropdownMenuSubContent
               className={tasksMenuClassName('max-w-80')}
               style={{
@@ -680,12 +686,25 @@ export function TaskAgentRunConfigMenu({
                   onSelect={() => {
                     if (!value?.agentConfigId) return;
                     if (modelOptions.length > 0) {
+                      const filtered = selectorTarget
+                        ? filterAcpSessionConfigOptionValuesForTarget({
+                            ...selectorTarget,
+                            selectedModelId: opt.value,
+                            configOptionValues: value.configOptionValues,
+                          })
+                        : (value.configOptionValues ?? {});
+                      const nextValues = Object.fromEntries(
+                        Object.entries(filtered).map(([key, optionValue]) => [
+                          key,
+                          String(optionValue),
+                        ])
+                      );
                       commit({
                         agentConfigId: value.agentConfigId as AgentConfigId,
                         modelId: opt.value,
                         ...(value.modeId ? { modeId: value.modeId } : {}),
-                        ...(value.configOptionValues
-                          ? { configOptionValues: value.configOptionValues }
+                        ...(Object.keys(nextValues).length > 0
+                          ? { configOptionValues: nextValues }
                           : {}),
                       });
                     } else if (modelConfigSelector) {
@@ -704,10 +723,7 @@ export function TaskAgentRunConfigMenu({
               label={t('chat.runConfig.reasoningLabel', 'Reasoning')}
               value={thinkingLabel}
             />
-            <DropdownMenuSubContent
-              className={tasksMenuClassName()}
-              style={tasksMenuSurfaceStyle}
-            >
+            <DropdownMenuSubContent className={tasksMenuClassName()} style={tasksMenuSurfaceStyle}>
               {thinkingSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
@@ -767,9 +783,7 @@ export function TaskAgentRunConfigMenu({
           </DropdownMenuSub>
         ) : null}
 
-        {(planSelector || fastSelector) && value?.agentConfigId ? (
-          <DropdownMenuSeparator />
-        ) : null}
+        {(planSelector || fastSelector) && value?.agentConfigId ? <DropdownMenuSeparator /> : null}
         {planSelector && value?.agentConfigId ? (
           <ToggleItem
             icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}

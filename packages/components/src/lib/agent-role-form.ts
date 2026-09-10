@@ -18,6 +18,7 @@ import {
   isConfigOptionValueValid,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
+import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 
 /**
  * The authoring state of one Agent Role, and the pure rules around it.
@@ -230,6 +231,46 @@ export const applyAgentRoleRunConfigDefaults = (
     return value;
   }
   return { ...value, modelId, modeId, configOptionValues };
+};
+
+/**
+ * A model change drops the config option values the new model's composed
+ * selectors do not publish or accept. A key the form cannot show is one the
+ * user cannot clear, so keeping it would save a Role no surface can repair.
+ * Only a model change may call this — a saved Role's stale keys are reported
+ * by `findAgentRoleRunConfigIssues`, never repaired.
+ * `applyAgentRoleRunConfigDefaults` then refills the new model's defaults on
+ * the next render.
+ */
+export const reconcileAgentRoleModelChange = (
+  previous: AgentRoleFormValue,
+  next: AgentRoleFormValue,
+  resolveSelectorOptions: (value: AgentRoleFormValue) => AcpSelectorOptions | null
+): AgentRoleFormValue => {
+  const previousModelSelectors = (
+    resolveSelectorOptions(previous)?.configOptionSelectors ?? []
+  ).filter((selector) => selector.category === 'model');
+  const modelOptionChanged = previousModelSelectors.some(
+    (selector) =>
+      next.configOptionValues[selector.configId] !== previous.configOptionValues[selector.configId]
+  );
+  if (next.modelId === previous.modelId && !modelOptionChanged) {
+    return next;
+  }
+
+  const options = resolveSelectorOptions(next);
+  if (!options || options.capabilityAuthority === 'unavailable') {
+    return next;
+  }
+
+  const pruned = filterAcpSessionConfigOptionValues(
+    next.configOptionValues,
+    options.configOptionSelectors
+  );
+  if (Object.keys(pruned).length === Object.keys(next.configOptionValues).length) {
+    return next;
+  }
+  return { ...next, configOptionValues: pruned };
 };
 
 // ---------------------------------------------------------------------------

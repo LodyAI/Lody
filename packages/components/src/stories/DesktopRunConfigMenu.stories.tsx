@@ -22,6 +22,10 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import {
+  cursorParameterizedModelOptions,
+  cursorParameterizedModelSelectors,
+} from './cursor-parameterized-model-fixture';
 
 /**
  * The desktop composer's two consolidated footer buttons: the run-config
@@ -34,6 +38,7 @@ const machineId = 'machine-storybook' as MachineId;
 const codexId = 'agent-codex' as AgentConfigId;
 const grokId = 'agent-grok' as AgentConfigId;
 const deepseekId = 'agent-deepseek' as AgentConfigId;
+const cursorId = 'agent-cursor' as AgentConfigId;
 
 const storyPlatform = createLocalPlatformProvider({
   session: createStaticStore({
@@ -87,6 +92,16 @@ const agents: AgentConfigMeta[] = [
     env: {},
   },
 ];
+
+const cursorAgent: AgentConfigMeta = {
+  id: cursorId,
+  machineId,
+  name: 'Cursor',
+  description: 'Registry Cursor agent',
+  cliType: 'registry',
+  agentType: 'cursor',
+  env: {},
+};
 
 const modelOptions: AcpSessionSelectOption[] = [
   { value: 'gpt-5.5', label: '5.5', description: 'Latest frontier Codex model' },
@@ -351,6 +366,46 @@ function DeepSeekWarningShell() {
   );
 }
 
+function CursorCatalogShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(agentConfigMetaCacheAtom, {
+      [getAgentConfigRoomId(cursorAgent.id)]: cursorAgent,
+    });
+    return next;
+  }, []);
+  const [model, setModel] = useState('a');
+  const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>({
+    thinking: 'true',
+    effort: 'low',
+    context: 'default',
+    fast: 'false',
+  });
+  const catalogSelectors = cursorParameterizedModelSelectors(model);
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh items-end bg-background p-8">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+          <DesktopRunConfigMenu
+            agentSelection={{ agentId: cursorId, machineId }}
+            availableAgentConfigs={[cursorAgent]}
+            agentLocked
+            modelOptions={cursorParameterizedModelOptions}
+            selectedModelId={model}
+            onModelChange={setModel}
+            configOptionSelectors={catalogSelectors}
+            configOptionValues={values}
+            onConfigOptionChange={(id, value) =>
+              setValues((previous) => ({ ...previous, [id]: value }))
+            }
+          />
+        </div>
+      </div>
+    </Provider>
+  );
+}
+
 function EmptyMachineScopeShell() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-8">
@@ -397,4 +452,8 @@ export const MachineScope: Story = {
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },
   render: () => <EmptyMachineScopeShell />,
+};
+export const RegistryCursorCatalog: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <CursorCatalogShell />,
 };

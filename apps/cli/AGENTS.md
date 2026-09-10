@@ -3,7 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adapter background:
 [.agents/docs/cli-overview.md](../../.agents/docs/cli-overview.md). Scoped rules live under
-`src/{agent,commands,session,mcp,orchestration,preview,lib}`.
+`src/{agent,commands,session,mcp,orchestration,preview,lib}`. Before changing per-model run
+config or Cursor capability discovery/storage, read [src/AGENTS.md](src/AGENTS.md).
 
 ## Build and packaging
 
@@ -49,13 +50,6 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Child Sessions are one level deep. An independent Session created inside another persists exact
   provenance in `openedBySessionId`, plus `openedByRootSessionId` when the opener is a child Tab;
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
-- INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
-  describe only the model current at probe time. Validate effort against the TARGET model using
-  `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
-  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
-  models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
 - `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.

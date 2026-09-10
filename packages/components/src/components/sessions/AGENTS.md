@@ -68,6 +68,7 @@ changing those files.
 
 ## [Run config and Agent Roles](../../../../../.agents/docs/sessions-run-config.md)
 
+- Thinking/Fast: `../shared/AGENTS.md`.
 - A Role never falls back: `machineId + agentConfigId` are exact, and an
   unavailable one stays listed, disabled, with its reason. A draft authorizes the
   whole Role; an existing session applies only its run config.

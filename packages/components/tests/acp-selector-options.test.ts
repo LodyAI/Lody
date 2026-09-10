@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { orderAcpConfigOptionSelectors } from '../src/lib/acp-selector-order';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX,
+  isRegistryCursorAgent,
   type AcpConfigOptionSummary,
   type AgentConfigId,
   type MachineViewMeta,
@@ -10,15 +12,150 @@ import {
   buildAcpSelectorOptions,
   buildAllConfigOptionSelectors,
   normalizeReasoningEffortSelectors,
+  isFastModeSelector,
+  resolveFastModeSelectorEnabled,
   resolvePlanModeSelectorEnabled,
+  toggleFastModeSelectorValue,
   togglePlanModeSelectorValue,
   type AcpConfigOptionSelector,
+  type AcpSelectorTarget,
 } from '../src/components/shared/acp-selector-options';
 
 const agentConfigId = 'config-1' as AgentConfigId;
 
 const machineWithCapabilities = (acpCapabilities: MachineViewMeta['acpCapabilities']) =>
-  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities'>;
+  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'>;
+
+const cursorThinkingOption = (): AcpConfigOptionSummary => ({
+  id: 'thinking',
+  name: 'Thinking',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'False' },
+    { value: 'true', name: 'True' },
+  ],
+});
+
+const cursorEffortOption = (): AcpConfigOptionSummary => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'high', name: 'High' },
+  ],
+});
+
+const cursorFastOption = (): AcpConfigOptionSummary => ({
+  id: 'fast',
+  name: 'Fast',
+  category: 'model_config',
+  type: 'select',
+  currentValue: 'false',
+  options: [
+    { value: 'false', name: 'False' },
+    { value: 'true', name: 'True' },
+  ],
+});
+
+const cursorContextOption = (): AcpConfigOptionSummary => ({
+  id: 'context',
+  name: 'Context',
+  category: 'model_config',
+  type: 'select',
+  currentValue: '200k',
+  options: [
+    { value: '200k', name: '200k' },
+    { value: '1m', name: '1m' },
+  ],
+});
+
+const cursorReasoningOption = (): AcpConfigOptionSummary => ({
+  id: 'reasoning',
+  name: 'Reasoning',
+  category: 'thought_level',
+  type: 'select',
+  currentValue: 'low',
+  options: [
+    { value: 'low', name: 'Low' },
+    { value: 'medium', name: 'Medium' },
+    { value: 'high', name: 'High' },
+  ],
+});
+
+const cursorSnapshotOptions = (): AcpConfigOptionSummary[] => [
+  {
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select',
+    currentValue: 'a',
+    options: [
+      { value: 'a', name: 'A' },
+      { value: 'b', name: 'B' },
+      { value: 'c', name: 'C' },
+    ],
+  },
+  {
+    id: 'mode',
+    name: 'Mode',
+    category: 'mode',
+    type: 'select',
+    currentValue: 'agent',
+    options: [{ value: 'agent', name: 'Agent' }],
+  },
+  cursorThinkingOption(),
+  cursorEffortOption(),
+  cursorFastOption(),
+  cursorContextOption(),
+];
+
+const cursorCatalogByModel = (): Record<string, AcpConfigOptionSummary[]> => ({
+  a: [cursorThinkingOption(), cursorEffortOption(), cursorFastOption(), cursorContextOption()],
+  b: [cursorReasoningOption(), cursorFastOption()],
+  c: [],
+});
+
+const cursorCapabilityEntry = (
+  cliType: 'registry' | 'builtin',
+  agentType: string
+): NonNullable<MachineViewMeta['acpCapabilities']>[string] => ({
+  cliType,
+  agentType,
+  cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+  provenance: 'runtime',
+  // A registry Cursor row is current only when probed after the picker opt-in.
+  ...(isRegistryCursorAgent({ cliType, agentType })
+    ? {
+        sourceVersion: `cursor@2026.08.31${CURSOR_PARAMETERIZED_MODEL_PICKER_SOURCE_VERSION_SUFFIX}`,
+      }
+    : {}),
+  modes: [],
+  models: [],
+  configOptions: cursorSnapshotOptions(),
+  configOptionsByModel: cursorCatalogByModel(),
+  fetchedAt: 1,
+});
+
+const buildCursorRegistryOptions = (
+  target: Pick<AcpSelectorTarget, 'selectedModelId' | 'configOptionValues'> = {}
+) =>
+  buildAcpSelectorOptions({
+    configId: agentConfigId,
+    cliType: 'registry',
+    agentType: 'cursor',
+    machine: machineWithCapabilities({
+      [agentConfigId]: cursorCapabilityEntry('registry', 'cursor'),
+    }),
+    ...target,
+  });
+
+const selectorIds = (options: ReturnType<typeof buildAcpSelectorOptions>) =>
+  options.configOptionSelectors.map((selector) => selector.configId);
 
 const codexMachineWithConfigOptions = (configOptions: AcpConfigOptionSummary[]) =>
   machineWithCapabilities({
@@ -112,6 +249,93 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it.each(['registry', 'custom', 'builtin'] as const)(
+    'reads the selected model catalog through the %s model selection channel',
+    (cliType) => {
+      const effort: AcpConfigOptionSummary = {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'high',
+        options: [{ value: 'high', name: 'High' }],
+      };
+      const fast: AcpConfigOptionSummary = {
+        id: 'fast',
+        name: 'Fast',
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      };
+      const reasoning: AcpConfigOptionSummary = {
+        ...effort,
+        id: 'reasoning',
+        currentValue: 'low',
+        options: [{ value: 'low', name: 'Low' }],
+      };
+      const target = {
+        configId: agentConfigId,
+        cliType,
+        agentType: 'cursor',
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType,
+            agentType: 'cursor',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            sourceVersion: 'cursor@test+parameterized-model-picker',
+            fetchedAt: 1,
+            modes: [],
+            models: [],
+            configOptions: [
+              {
+                id: 'model',
+                name: 'Model',
+                category: 'model',
+                type: 'select',
+                currentValue: 'a',
+                options: ['a', 'b', 'empty'].map((value) => ({ value, name: value })),
+              },
+              effort,
+              fast,
+            ],
+            configOptionsByModel: { a: [effort, fast], b: [reasoning], empty: [] },
+          },
+        }),
+      };
+      for (const selectedModelId of ['a', 'b', 'empty']) {
+        const selected =
+          cliType === 'builtin'
+            ? { ...target, selectedModelId, configOptionValues: { model: 'a' } }
+            : { ...target, selectedModelId: 'a', configOptionValues: { model: selectedModelId } };
+        const expectedIds =
+          selectedModelId === 'a'
+            ? ['model', 'effort', 'fast']
+            : selectedModelId === 'b'
+              ? ['model', 'reasoning']
+              : ['model'];
+        const composer = buildAcpSelectorOptions(selected).configOptionSelectors;
+        const settings = buildAllConfigOptionSelectors(selected);
+        expect(composer.map((option) => option.configId)).toEqual(
+          cliType === 'builtin' ? expectedIds.filter((id) => id !== 'model') : expectedIds
+        );
+        expect(settings.map((option) => option.configId)).toEqual(expectedIds);
+        expect(
+          settings
+            .find((option) => option.configId === 'model')
+            ?.options.map((option) => option.value)
+        ).toEqual(['a', 'b', 'empty']);
+      }
+      // No explicit selection keeps the whole snapshot, including transient values.
+      // The catalog entry must not replace a snapshot merely because currentValue names a model.
+      target.machine.acpCapabilities![agentConfigId]!.configOptionsByModel!.a = [];
+      expect(buildAllConfigOptionSelectors(target).map((option) => option.configId)).toEqual([
+        'model',
+        'effort',
+        'fast',
+      ]);
+    }
+  );
+
   it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -1210,5 +1434,104 @@ describe('plan mode selector value semantics', () => {
     };
     expect(resolvePlanModeSelectorEnabled(planCurrent, 'bogus')).toBe(true);
     expect(togglePlanModeSelectorValue(planCurrent, 'bogus')).toBe('default');
+  });
+});
+
+describe('per-model catalog composition', () => {
+  it.each([
+    ['b', ['model', 'mode', 'reasoning', 'fast']],
+    ['c', ['model', 'mode']],
+  ] as const)('composes model %s options from its catalog entry', (model, expectedIds) => {
+    const options = buildCursorRegistryOptions({ configOptionValues: { model } });
+    expect(selectorIds(options)).toEqual(expectedIds);
+    expect(
+      options.configOptionSelectors
+        .find((selector) => selector.configId === 'model')
+        ?.options.map((option) => option.value)
+    ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('prefers the registry model config option over a stale selectedModelId', () => {
+    const options = buildCursorRegistryOptions({
+      selectedModelId: 'a',
+      configOptionValues: { model: 'b' },
+    });
+    expect(selectorIds(options)).toEqual(['model', 'mode', 'reasoning', 'fast']);
+  });
+
+  it('returns the probe snapshot when the target has no model', () => {
+    const options = buildCursorRegistryOptions();
+    expect(selectorIds(options)).toEqual([
+      'model',
+      'mode',
+      'thinking',
+      'effort',
+      'fast',
+      'context',
+    ]);
+  });
+
+  it('uses selectedModelId for a builtin target and ignores configOptionValues.model', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'claude',
+      selectedModelId: 'b',
+      configOptionValues: { model: 'a' },
+      machine: machineWithCapabilities({
+        [agentConfigId]: cursorCapabilityEntry('builtin', 'claude'),
+      }),
+    });
+    expect(selectorIds(options)).toEqual(['reasoning', 'fast']);
+  });
+});
+
+describe('fast mode selector value semantics', () => {
+  const trueFalseFastSelector: AcpConfigOptionSelector = {
+    configId: 'fast',
+    label: 'Fast',
+    category: 'model_config',
+    type: 'select',
+    currentValue: 'false',
+    options: [
+      { value: 'false', label: 'False' },
+      { value: 'true', label: 'True' },
+    ],
+  };
+  const onOffFastSelector: AcpConfigOptionSelector = {
+    configId: 'fast',
+    label: 'Fast',
+    type: 'select',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+    ],
+  };
+  const booleanFastSelector: AcpConfigOptionSelector = {
+    configId: 'fast',
+    label: 'Fast',
+    type: 'boolean',
+    currentValue: true,
+    options: [],
+  };
+
+  it('classifies a true/false fast select from the Cursor catalog as a fast-mode toggle', () => {
+    const options = buildCursorRegistryOptions();
+    const selector = options.configOptionSelectors.find(
+      (candidate) => candidate.configId === 'fast'
+    );
+    expect(selector && isFastModeSelector(selector)).toBe(true);
+    expect(resolveFastModeSelectorEnabled(trueFalseFastSelector, 'true')).toBe(true);
+    expect(toggleFastModeSelectorValue(trueFalseFastSelector, 'true')).toBe('false');
+  });
+
+  it('toggles on/off and boolean fast selectors to their own value families', () => {
+    expect(isFastModeSelector(onOffFastSelector)).toBe(true);
+    expect(toggleFastModeSelectorValue(onOffFastSelector, 'on')).toBe('off');
+    expect(toggleFastModeSelectorValue(onOffFastSelector, 'off')).toBe('on');
+    expect(isFastModeSelector(booleanFastSelector)).toBe(true);
+    expect(toggleFastModeSelectorValue(booleanFastSelector, true)).toBe(false);
+    expect(toggleFastModeSelectorValue(booleanFastSelector, false)).toBe(true);
   });
 });

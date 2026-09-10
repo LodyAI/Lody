@@ -91,6 +91,7 @@ before touching gestures.
 
 ## Run config, pickers, and sheets
 
+- Thinking/Fast rows follow `../shared/AGENTS.md`.
 - ONE control (`mobile-session-run-config.tsx`) serves both the in-session
   composer and the new-chat sheet: it takes `agentSelection` (no SessionMeta
   dependency) plus model/mode/config props. Explicit permission selectors

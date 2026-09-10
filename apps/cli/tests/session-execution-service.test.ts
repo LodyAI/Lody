@@ -14,6 +14,7 @@ import {
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
+  type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
   type AgentConfigId,
   type ChatFailedReason,
@@ -31,6 +32,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   AcpAuthenticationRequiredError,
   AgentSteerNotDeliveredError,
+  type AgentClient,
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
@@ -231,6 +233,169 @@ const createBaseDeps = (
   );
 
   return deps;
+};
+
+const createdSessionCursorCatalogPayload = {
+  models: [
+    {
+      value: 'model-full',
+      name: 'Full',
+      configOptions: [
+        {
+          type: 'select' as const,
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          currentValue: 'model-full',
+          options: [{ value: 'model-full', name: 'Full' }],
+        },
+        {
+          type: 'select' as const,
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'true',
+          options: [{ value: 'true', name: 'On' }],
+        },
+      ],
+    },
+  ],
+};
+
+const createdSessionCursorCatalog = {
+  'model-full': [
+    {
+      id: 'thinking',
+      name: 'Thinking',
+      description: undefined,
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: 'true',
+      options: [{ value: 'true', name: 'On', description: undefined }],
+    },
+  ],
+};
+
+const createdSessionCapabilitySnapshot = {
+  modes: [{ id: 'agent', name: 'Agent' }],
+  models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+  configOptions: [
+    {
+      id: 'reasoning',
+      name: 'Reasoning',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: 'high',
+      options: [{ value: 'high', name: 'High' }],
+    },
+  ],
+  availableCommands: [{ name: 'review', description: 'Review changes' }],
+  sessionFork: false,
+  acknowledgedSteer: true,
+};
+
+const startCreatedSessionForCatalogWrite = async (options: {
+  cliType: 'registry' | 'builtin';
+  agentType: string;
+  requestExtMethod: AgentClient['requestExtMethod'];
+}) => {
+  const sessionId = `session-catalog-${options.cliType}-${options.agentType}` as SessionId;
+  const acpSessionId = `acp-catalog-${options.cliType}-${options.agentType}` as ACPSessionId;
+  const prompt = vi.fn(async () => ({}));
+  const agentClient = {
+    isCreated: vi.fn(() => true),
+    cancel: vi.fn(async () => {}),
+    prompt,
+    currentModel: undefined,
+    requestExtMethod: options.requestExtMethod,
+  };
+  const createdSession = {
+    sessionId,
+    acpSessionId,
+    agentClient,
+    getAcpCapabilities: () => createdSessionCapabilitySnapshot,
+    terminalManager: {} as unknown,
+    getWorkdir: () => '/tmp',
+    getHostWorkdir: () => '/tmp',
+    getParentSessionId: () => undefined,
+    exec: vi.fn(async () => ''),
+    terminate: vi.fn(async () => {}),
+    updateGitIdentity: vi.fn(),
+    createAgent: vi.fn(async () => acpSessionId),
+    applyExecutionPlaneLimits: vi.fn(async () => {}),
+  };
+  const updateAcpCapabilities = vi.fn(async () => {});
+  const sessionDoc = {
+    getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
+    getHistory: vi.fn(async () => []),
+    setStatus: vi.fn(async () => {}),
+    setProject: vi.fn(async () => {}),
+    setBaseBranch: vi.fn(async () => {}),
+    updateHistory: vi.fn(async () => {}),
+    roomId: `session-${sessionId}`,
+  };
+  const deps = createBaseDeps({
+    sessionManager: {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(async () => createdSession as unknown),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager,
+    workspaceDocument: {
+      repo: {
+        upsertDocMeta: vi.fn(async () => {}),
+        getDocMeta: vi.fn(async () => undefined),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getAcpCapabilities: vi.fn(async () => undefined),
+      updateAcpCapabilities,
+    } as unknown as LoroDocumentManager,
+  });
+
+  const service = new SessionExecutionService(deps);
+  await service.startSession({
+    type: 'session/create',
+    sessionId,
+    machineId: 'machine-1',
+    workspaceId: 'workspace-1' as WorkspaceId,
+    project: undefined,
+    acpSessionConfig: {
+      prompt: 'hello',
+      cliType: options.cliType,
+      agentType: options.agentType,
+    },
+    userTurnId: `turn-${sessionId}`,
+    userId: 'user-2',
+    userName: 'User 2',
+    userEmail: 'user2@example.com',
+  });
+
+  return { updateAcpCapabilities, prompt, requestExtMethod: options.requestExtMethod };
+};
+
+const expectCreatedSessionCapabilityWrite = (
+  updateAcpCapabilities: ReturnType<typeof vi.fn>,
+  cliType: 'registry' | 'builtin',
+  agentType: string,
+  options: { configOptionsByModel?: unknown } | Record<string, never>
+) => {
+  expect(updateAcpCapabilities).toHaveBeenCalledWith(
+    'machine-1',
+    capabilityConfigId,
+    cliType,
+    agentType,
+    createdSessionCapabilitySnapshot.modes,
+    createdSessionCapabilitySnapshot.models,
+    createdSessionCapabilitySnapshot.configOptions,
+    createdSessionCapabilitySnapshot.availableCommands,
+    false,
+    expect.any(String),
+    undefined,
+    true,
+    options
+  );
 };
 
 describe('SessionExecutionService', () => {
@@ -2551,9 +2716,90 @@ describe('SessionExecutionService', () => {
         // Per-model reasoning efforts: absent for this agent, which publishes no
         // legacy `model[effort]` combination list.
         undefined,
-        true
+        true,
+        {}
       )
     );
+  });
+
+  it('fetches the Cursor model catalog from a created session without blocking the first prompt', async () => {
+    const catalogFetch = createDeferred<Record<string, unknown>>();
+    const requestExtMethod = vi.fn(async () => catalogFetch.promise);
+    const { updateAcpCapabilities, prompt } = await startCreatedSessionForCatalogWrite({
+      cliType: 'registry',
+      agentType: 'cursor',
+      requestExtMethod,
+    });
+
+    expect(prompt).toHaveBeenCalled();
+    expect(updateAcpCapabilities).not.toHaveBeenCalled();
+
+    catalogFetch.resolve(createdSessionCursorCatalogPayload);
+    await vi.waitFor(() =>
+      expectCreatedSessionCapabilityWrite(updateAcpCapabilities, 'registry', 'cursor', {
+        configOptionsByModel: createdSessionCursorCatalog,
+      })
+    );
+  });
+
+  it('clears the stored Cursor model catalog when a created session reports method not found', async () => {
+    const requestExtMethod = vi.fn(async () => {
+      throw Object.assign(new Error('Method not found'), { code: -32601 });
+    });
+    const { updateAcpCapabilities } = await startCreatedSessionForCatalogWrite({
+      cliType: 'registry',
+      agentType: 'cursor',
+      requestExtMethod,
+    });
+
+    await vi.waitFor(() =>
+      expectCreatedSessionCapabilityWrite(updateAcpCapabilities, 'registry', 'cursor', {
+        configOptionsByModel: null,
+      })
+    );
+  });
+
+  it('keeps the stored Cursor model catalog when a created session catalog fetch fails', async () => {
+    const requestExtMethod = vi.fn(async () => {
+      throw new Error('catalog unavailable');
+    });
+    const { updateAcpCapabilities } = await startCreatedSessionForCatalogWrite({
+      cliType: 'registry',
+      agentType: 'cursor',
+      requestExtMethod,
+    });
+
+    await vi.waitFor(() =>
+      expectCreatedSessionCapabilityWrite(updateAcpCapabilities, 'registry', 'cursor', {})
+    );
+    const failedFetchOptions = updateAcpCapabilities.mock.calls[0]?.[12];
+    expect(
+      failedFetchOptions === undefined ||
+        (typeof failedFetchOptions === 'object' &&
+          failedFetchOptions !== null &&
+          !Object.hasOwn(failedFetchOptions, 'configOptionsByModel'))
+    ).toBe(true);
+  });
+
+  it('does not fetch a Cursor model catalog for a created non-Cursor session', async () => {
+    const requestExtMethod = vi.fn(async () => createdSessionCursorCatalogPayload);
+    const { updateAcpCapabilities } = await startCreatedSessionForCatalogWrite({
+      cliType: 'builtin',
+      agentType: 'codex',
+      requestExtMethod,
+    });
+
+    await vi.waitFor(() =>
+      expectCreatedSessionCapabilityWrite(updateAcpCapabilities, 'builtin', 'codex', {})
+    );
+    expect(requestExtMethod).not.toHaveBeenCalled();
+    const nonCursorWriteOptions = updateAcpCapabilities.mock.calls[0]?.[12];
+    expect(
+      nonCursorWriteOptions === undefined ||
+        (typeof nonCursorWriteOptions === 'object' &&
+          nonCursorWriteOptions !== null &&
+          !Object.hasOwn(nonCursorWriteOptions, 'configOptionsByModel'))
+    ).toBe(true);
   });
 
   it('rejects session creation before spawning an agent when memory pressure persists', async () => {
@@ -6541,6 +6787,142 @@ describe('SessionExecutionService', () => {
         capability,
       })
     );
+  });
+
+  const refreshCursorCapabilities = async (
+    models: AcpCapabilityCacheEntry['models'],
+    configOptionsByModel: AcpCapabilityCacheEntry['configOptionsByModel'] | null
+  ) => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'registry',
+      agentType: 'cursor',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'registry:cursor:unknown',
+      modes: [],
+      models,
+      sessionFork: false,
+      acknowledgedSteer: false,
+      sessionForkWorktree: false,
+      fetchedAt: 1,
+      ...(configOptionsByModel === null ? {} : { configOptionsByModel }),
+    };
+    const updateAcpCapabilities = vi.fn(async () => capability);
+    const fetchAcpCapabilities = vi.fn(async () => ({
+      modes: [],
+      models: capability.models,
+      configOptionsByModel,
+      sessionFork: false,
+      acknowledgedSteer: false,
+    }));
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(),
+          updateAcpCapabilities,
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ agentType: 'cursor' })
+          ),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+      })
+    );
+    const result = await service.refreshMachineAcpCapabilities({
+      type: 'machine/acp-capabilities-refresh',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      configId: capabilityConfigId,
+    });
+    return { capability, result, updateAcpCapabilities };
+  };
+
+  it('forwards a confirmed missing Cursor model catalog as a null capability write', async () => {
+    const { capability, result, updateAcpCapabilities } = await refreshCursorCapabilities(
+      [{ modelId: 'auto', name: 'Auto' }],
+      null
+    );
+
+    expect(updateAcpCapabilities).toHaveBeenCalledWith(
+      'machine-1',
+      capabilityConfigId,
+      'registry',
+      'cursor',
+      [],
+      capability.models,
+      undefined,
+      undefined,
+      false,
+      expect.any(String),
+      undefined,
+      false,
+      expect.objectContaining({ configOptionsByModel: null })
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        type: 'machine/acp-capabilities-refresh_response',
+        success: true,
+        capability,
+      })
+    );
+    expect(result.capability).not.toEqual(expect.objectContaining({ configOptionsByModel: null }));
+  });
+
+  it('omits the stored per-model catalog from the refresh response capability', async () => {
+    const catalog = {
+      'model-a': [
+        {
+          id: 'thinking',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'true',
+          options: [{ value: 'true', name: 'On' }],
+        },
+      ],
+      'model-b': [],
+    };
+    const {
+      capability: storedCapability,
+      result,
+      updateAcpCapabilities,
+    } = await refreshCursorCapabilities(
+      [
+        { modelId: 'model-a', name: 'Model A' },
+        { modelId: 'model-b', name: 'Model B' },
+      ],
+      catalog
+    );
+
+    // The catalog is written durably...
+    expect(updateAcpCapabilities).toHaveBeenCalledWith(
+      'machine-1',
+      capabilityConfigId,
+      'registry',
+      'cursor',
+      [],
+      storedCapability.models,
+      undefined,
+      undefined,
+      false,
+      expect.any(String),
+      undefined,
+      false,
+      expect.objectContaining({ configOptionsByModel: catalog })
+    );
+    // ...but the response carries the entry without it, so a client whose strict
+    // capability schema predates the field still parses a successful refresh.
+    expect(result.success).toBe(true);
+    expect(result.capability).toBeDefined();
+    expect(result.capability && 'configOptionsByModel' in result.capability).toBe(false);
+    const expectedWireCapability: Record<string, unknown> = { ...storedCapability };
+    delete expectedWireCapability.configOptionsByModel;
+    expect(result.capability).toEqual(expectedWireCapability);
+    // The stored entry itself is untouched.
+    expect(storedCapability.configOptionsByModel).toEqual(catalog);
   });
 
   it('deduplicates concurrent ACP capability refreshes for the same config and launch inputs', async () => {

@@ -16,6 +16,11 @@ source-specific: capability data collected for a different override must not be 
 because its structure is readable. Data that fails the wire or storage schema is outside this
 guarantee and may be rejected at the parsing boundary.
 
+Registry Cursor model IDs are a known protocol incompatibility: a Machine advertising the
+parameterized picker cannot use a row produced before that opt-in. Readers require the picker
+source marker on that Machine and refresh an incompatible row; a legacy Machine keeps using its
+unmarked variant IDs. A marked row remains readable across cache versions.
+
 Evidence: `packages/shared/tests/ai-capability-cache.test.ts`,
 `packages/components/tests/acp-selector-options.test.ts`, and
 `packages/components/tests/provider-status.test.ts`. Draft for human review; tests do not grant

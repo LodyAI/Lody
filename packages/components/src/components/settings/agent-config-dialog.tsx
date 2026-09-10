@@ -879,7 +879,7 @@ function resolveInitialTestedCustomKey(
   const config = mode.config;
   if (config.cliType !== 'custom' || !config.customAcp) return null;
   const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(config.id)];
-  if (!isAcpCapabilityCacheEntryCurrent(entry)) return null;
+  if (!isAcpCapabilityCacheEntryCurrent(entry, machine)) return null;
   if (entry.sourceVersion !== `custom:${serializeCustomAcpLaunchSpec(config.customAcp)}`) {
     return null;
   }
@@ -1092,7 +1092,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const cacheKey = getAcpCapabilityCacheKey(agentConfigId);
   const cachedCapabilityAuthority = getAcpCapabilityCacheEntryAuthority(
     machine.acpCapabilities?.[cacheKey],
-    formData.runtimeOverrides
+    formData.runtimeOverrides,
+    machine
   );
   const hasCachedCaps =
     formData.cliType === 'builtin' && formData.agentType === 'kimi'
