@@ -1,3 +1,4 @@
+import { isAuxiliaryWindow } from '@/lib/desktop-window';
 import {
   Archive,
   ArchiveRestore,
@@ -4210,6 +4211,7 @@ const SessionDetail = ({
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
       if (target.kind === 'landing') {
+        if (isAuxiliaryWindow()) return 'unhandled';
         handleBackToList();
         return 'handled';
       }

@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type LocalProjectId,
-  type AcpCapabilitySources,
-  type MachineFlockKey,
   type MachineLegacyMetaFields,
   type MachineId,
   type MachineMeta,
@@ -59,33 +57,12 @@ describe('MessageHandler machine registration', () => {
       lastSeen: 123,
     };
 
-    const rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
-    const flock = {
-      scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
-        [...rows.values()].filter(
-          (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
-        ),
-      set: (key: MachineFlockKey, value: unknown) => {
-        rows.set(JSON.stringify(key), { key, value });
-      },
-      commit: () => {},
-      subscribe: () => () => {},
-    };
-    let sourceAtRegistration: AcpCapabilitySources | undefined;
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
       restoreMachineDocument: vi.fn(async () => {}),
       watchMachineDocumentExistence: vi.fn(() => {}),
-      registerMachine: vi.fn(async () => {
-        sourceAtRegistration = rows.get('["acpCapabilitySources"]')?.value as
-          | AcpCapabilitySources
-          | undefined;
-      }),
-      markMachineFlockDocDirty: () => {},
+      registerMachine: vi.fn(async () => {}),
       repo: {
-        openFlockDoc: async () => ({ flock }),
-        flush: async () => {},
-        getMeta: () => ({ scan: async () => [] }),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         getDocMeta: vi.fn(async () => ({ meta: existingMachineMeta })),
       },
@@ -129,11 +106,6 @@ describe('MessageHandler machine registration', () => {
       .calls[0] as [MachineId, MachineMeta & MachineLegacyMetaFields];
 
     expect(registeredMachineId).toBe(machineId);
-    expect(registeredMeta.acpCapabilitySourceEpoch).toEqual(expect.any(String));
-    expect(sourceAtRegistration).toEqual({
-      epoch: registeredMeta.acpCapabilitySourceEpoch,
-      versions: {},
-    });
     expect(registeredMeta.localProjects).toBeUndefined();
     expect(registeredMeta.needToArchiveSessions).toBeUndefined();
     expect(registeredMeta.needToDeleteSessions).toBeUndefined();
@@ -216,7 +188,6 @@ describe('MessageHandler machine registration', () => {
       providerSetup: 1,
       acpProtocolAuthentication: 2,
       cursorParameterizedModelPicker: 1,
-      acpCapabilitySources: 1,
     });
 
     await handler.cleanup();

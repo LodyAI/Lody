@@ -21,15 +21,6 @@ parameterized picker cannot use a row produced before that opt-in. Readers requi
 source marker on that Machine and refresh an incompatible row; a legacy Machine keeps using its
 unmarked variant IDs. A marked row remains readable across cache versions.
 
-Role availability additionally requires evidence from the bound daemon's current source.
-A daemon advertising `acpCapabilitySources` publishes an independent expected-source snapshot;
-its epoch must match Machine metadata, and the Role's observed `sourceVersion` must match the
-snapshot for that config. Missing discovery, a previous daemon epoch, or a runtime revision
-mismatch leaves capability-dependent availability unknown until matching evidence arrives.
-A late result from an old runtime cannot redefine the expected source. Daemons without this
-protocol retain existing readable-cache behavior, including mixed cache versions; clients
-must not infer a remote source from their own bundled versions.
-
 Evidence: `packages/shared/tests/ai-capability-cache.test.ts`,
 `packages/components/tests/acp-selector-options.test.ts`, and
 `packages/components/tests/provider-status.test.ts`. Draft for human review; tests do not grant

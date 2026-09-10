@@ -3,7 +3,7 @@
  * resolved against an agent's ACP capabilities.
  *
  * ACP agents express these as arbitrary `configOptions` whose ids differ per
- * agent (Codex uses `reasoning_effort` + `fast-mode` + `collaboration_mode`, Claude Code
+ * agent (Codex uses `reasoning_effort` + `fast-mode` + Core's `plan_mode`, Claude Code
  * uses `effort` + `fast` and expresses planning as a permission mode). Callers
  * that only know the semantics — the MCP session tools — describe what they want
  * here and let this module map it onto the concrete option ids the target agent
@@ -11,6 +11,8 @@
  */
 
 import type { AcpCapabilityCacheEntry, AcpConfigOptionSummary, AcpConfigOptionValue } from './ai';
+import { LODY_PLAN_MODE_CONFIG_ID } from 'acp-extension-core';
+export { LODY_PLAN_MODE_CONFIG_ID } from 'acp-extension-core';
 
 /**
  * Config option ids that carry the agent's "fast mode" toggle: Codex publishes
@@ -18,7 +20,7 @@ import type { AcpCapabilityCacheEntry, AcpConfigOptionSummary, AcpConfigOptionVa
  */
 export const ACP_FAST_MODE_CONFIG_IDS = ['fast-mode', 'fast'] as const;
 
-/** Upstream Codex config option id for default/plan collaboration mode. */
+/** Legacy Codex config option, retained for older agents and capability caches. */
 export const ACP_COLLABORATION_MODE_CONFIG_ID = 'collaboration_mode';
 export const ACP_COLLABORATION_MODE_DEFAULT_VALUE = 'default';
 export const ACP_COLLABORATION_MODE_PLAN_VALUE = 'plan';
@@ -70,12 +72,11 @@ export const isAcpThoughtLevelConfigOption = (option: ConfigOptionIdentity): boo
   option.id === ACP_REASONING_EFFORT_CONFIG_ID || option.category === ACP_THOUGHT_LEVEL_CATEGORY;
 
 /**
- * Codex is the only agent that carries plan mode as a config option, and it
- * publishes exactly one shape: `collaboration_mode`, a select over
- * `default` / `plan`. Claude expresses planning as the `plan` PERMISSION mode
- * instead (see `findPlanPermissionModeId`), so it never matches here.
+ * Core planning is independent of permissions. Older Codex agents advertise
+ * a collaboration_mode select; retain that identity for mixed-version clients.
  */
 export const isAcpPlanModeConfigOption = (option: ConfigOptionIdentity): boolean =>
+  option.id === LODY_PLAN_MODE_CONFIG_ID ||
   option.id === ACP_COLLABORATION_MODE_CONFIG_ID ||
   option.category === ACP_COLLABORATION_MODE_CONFIG_ID;
 
@@ -249,11 +250,22 @@ const findPlanModeOption = (
 ): AcpConfigOptionSummary | undefined =>
   findConfigOption(
     capability,
-    (option) => isAcpPlanModeConfigOption(option) && isCollaborationModeSelect(option)
+    (option) => option.id === LODY_PLAN_MODE_CONFIG_ID && option.type === 'boolean'
+  ) ??
+  findConfigOption(
+    capability,
+    (option) =>
+      option.id !== LODY_PLAN_MODE_CONFIG_ID &&
+      isAcpPlanModeConfigOption(option) &&
+      isCollaborationModeSelect(option)
   );
 
-const planModeValue = (enabled: boolean): AcpConfigOptionValue =>
-  enabled ? ACP_COLLABORATION_MODE_PLAN_VALUE : ACP_COLLABORATION_MODE_DEFAULT_VALUE;
+const planModeValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfigOptionValue =>
+  option.type === 'boolean'
+    ? enabled
+    : enabled
+      ? ACP_COLLABORATION_MODE_PLAN_VALUE
+      : ACP_COLLABORATION_MODE_DEFAULT_VALUE;
 
 /**
  * Permission mode that means "plan only", for agents (Claude Code, Kimi) that
@@ -421,7 +433,7 @@ export const resolveAgentRunConfigSelection = (
   if (selection.planMode !== undefined) {
     const option = findPlanModeOption(capability);
     if (option) {
-      configOptionValues[option.id] = planModeValue(selection.planMode);
+      configOptionValues[option.id] = planModeValue(option, selection.planMode);
     } else if (selection.planMode) {
       const planModeId = findPlanPermissionModeId(capability);
       if (!planModeId) {

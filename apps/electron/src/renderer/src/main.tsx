@@ -1,3 +1,4 @@
+import { isSessionWindow } from '@lody/components/lib/desktop-window'
 import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
@@ -152,6 +153,16 @@ try {
     },
     history: isFileProtocol ? createHashHistory() : undefined
   })
+  if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
+    const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
+    if (sessionId) {
+      router.history.replace(router.history.location.href, {
+        ...router.history.location.state,
+        focusComposerSessionId: sessionId
+      })
+      sessionStorage.setItem('lody:windowFocusConsumed', '1')
+    }
+  }
   createRoot(rootElement, {
     // ErrorBoundary remains the single owner of caught-error UI and PostHog.
     // React 19 no longer rethrows render errors, so these root callbacks only

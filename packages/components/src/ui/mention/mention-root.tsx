@@ -191,13 +191,14 @@ interface MentionContextValue {
   onMentionsChange: React.Dispatch<React.SetStateAction<Mention[]>>;
   onMentionAdd: (value: string, triggerIndex: number, options?: { commit?: boolean }) => void;
   /**
-   * Write a mention the menu did not produce, and take focus.
+   * Write one or a batch of mentions outside the menu, and take focus.
+   * Batch insertion indices refer to the text after preceding entries.
    *
    * Product-neutral by construction: the caller supplies the text, the payload,
    * and the kind, so reaching this from a new mention category does not touch
    * this package.
    */
-  onMentionInsert: (request: MentionInsertRequest) => void;
+  onMentionInsert: (request: MentionInsertRequest | MentionInsertRequest[]) => void;
   /**
    * Pop the text between the trigger and the caret back to the bare trigger,
    * undoing one drill-down step. Returns false when there is no trigger to pop
@@ -539,7 +540,9 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     (payloadValue: string, triggerIndex: number, options?: { commit?: boolean }) => {
       const input = inputRef.current;
 
-      const selectedItem = getEnabledItems().find((item) => item.value === payloadValue);
+      const selectedItem = getItems().find((item) => item.value === payloadValue);
+      // A disabled registered item must not fall through to free-form insertion.
+      if (selectedItem?.disabled) return;
       // A navigation item rewrites the trigger span and keeps the menu open
       // instead of committing. `commit` overrides it, so pressing Enter on a
       // candidate the user already typed out inserts it for real.
@@ -621,34 +624,46 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       setValue,
       setOpen,
       inputValue,
-      getEnabledItems,
+      getItems,
       filterStore,
       onItemsFilter,
     ]
   );
 
   const onMentionInsert = React.useCallback(
-    (request: MentionInsertRequest) => {
+    (request: MentionInsertRequest | MentionInsertRequest[]) => {
+      const requests = Array.isArray(request) ? request : [request];
+      if (requests.length === 0) return;
       const input = inputRef.current;
       const sourceValue = input?.value ?? inputValue;
-      const at = Math.max(0, Math.min(sourceValue.length, request.at ?? sourceValue.length));
-      const splice: MentionSplice = {
-        replaceStart: at,
-        replaceEnd: at,
-        prefix: resolveMentionInsertPrefix(sourceValue, at, request.separate),
-        text: request.text,
-        suffix: request.suffix,
-        value: request.value,
-        kind: request.kind,
-        commitRange: true,
+      // Every insert reads the result of the previous one, then the controlled
+      // text and ranges are published once for the entire gesture.
+      const applyRequests = (initialMentions: Mention[]) => {
+        let result = { value: sourceValue, mentions: initialMentions, caret: sourceValue.length };
+        for (const entry of requests) {
+          const at = Math.max(0, Math.min(result.value.length, entry.at ?? result.value.length));
+          result = applyMentionSplice(result.value, result.mentions, {
+            replaceStart: at,
+            replaceEnd: at,
+            prefix: resolveMentionInsertPrefix(result.value, at, entry.separate),
+            text: entry.text,
+            suffix: entry.suffix,
+            value: entry.value,
+            kind: entry.kind,
+            commitRange: true,
+          });
+        }
+        return result;
       };
 
-      const { value: newValue, caret } = applyMentionSplice(sourceValue, EMPTY_MENTIONS, splice);
-      setMentions((prev) => applyMentionSplice(sourceValue, prev, splice).mentions);
+      const { value: newValue, caret } = applyRequests(EMPTY_MENTIONS);
+      setMentions((prev) => applyRequests(prev).mentions);
       setInputValue(newValue);
       setValue((prev) => {
         const next = [...(prev ?? [])];
-        if (!next.includes(request.value)) next.push(request.value);
+        for (const entry of requests) {
+          if (!next.includes(entry.value)) next.push(entry.value);
+        }
         return next;
       });
       setPendingSelection({ start: caret, end: caret, expectedValue: newValue });

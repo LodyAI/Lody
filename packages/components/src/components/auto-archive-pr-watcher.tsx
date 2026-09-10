@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
+import { useContext, useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import type { SessionMeta } from '@lody/shared';
 import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom, userAtom } from '@/atoms';
@@ -19,8 +20,9 @@ import { useAppCapability } from '@/lib/app-platform';
 // when we actually observe the status flip during this app session.
 // (Same shape as electron-session-completion-notifier's initializedRef + prev-status map.)
 export function AutoArchivePrWatcher() {
+  const owner = useContext(WorkspaceWindowOwnerContext);
   const githubIntegrationAvailable = useAppCapability('githubIntegration');
-  if (!githubIntegrationAvailable) {
+  if (!githubIntegrationAvailable || !owner) {
     return null;
   }
   return <CloudAutoArchivePrWatcher />;

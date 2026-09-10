@@ -1,4 +1,3 @@
-import { subscribeManagedRuntimeInstallationChanges } from './managed-agent-runtime';
 import { existsSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -375,20 +374,7 @@ describe('ManagedAgentRuntimeManager', () => {
         fetchImpl,
       });
 
-      let committedStatus: ReturnType<typeof downloadingManager.getRuntimeStatus> | undefined;
-      const unsubscribe = subscribeManagedRuntimeInstallationChanges(() => {
-        committedStatus = downloadingManager.getRuntimeStatus('kimi-code');
-      });
-      const unsubscribeThrower = subscribeManagedRuntimeInstallationChanges(() => {
-        throw new Error('observer failed');
-      });
       const installation = await downloadingManager.ensureCurrentRuntime('kimi-code');
-      unsubscribe();
-      unsubscribeThrower();
-      await expect(committedStatus).resolves.toMatchObject({
-        kind: 'installed',
-        version: KIMI_CODE_VERSION,
-      });
 
       expect(fetchImpl).toHaveBeenCalledTimes(1);
       expect(installation.command).toBe(

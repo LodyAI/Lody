@@ -30,6 +30,7 @@ import {
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { applyAgentRoleEmojiChip } from '@/components/mentions/mention-chips';
+import { toPathMentionInsertion, type PathMentionInsertion } from '@/lib/dropped-local-path';
 import { useMentionHydration } from '@/components/mentions/mention-hydration';
 import {
   sanitizeMentionRanges,
@@ -38,6 +39,7 @@ import {
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
   buildMentionFileIndex,
+  MENTION_TRIGGER,
   useMentionCategories,
   type MentionCategorySources,
 } from '@/components/mentions/mention-registry';
@@ -501,6 +503,13 @@ export type CombinedMentionTextareaHandle = {
    * unknown/archived/own session, or one the draft already mentions.
    */
   insertSessionMention: (sessionId: string) => boolean;
+  /**
+   * Append `@path` mentions in one transaction for paths outside the menu —
+   * folders dropped from the OS. Each writes text plus a committed range,
+   * so chips and the before-send rewrite see the same artefact as a menu commit.
+   * Returns false when every path is empty.
+   */
+  insertPathMentions: (insertions: PathMentionInsertion[]) => boolean;
 };
 
 /**
@@ -529,6 +538,24 @@ function MentionActionsBridge({
         const insertion = buildSessionMentionInsertion(mentions, item);
         if (!insertion) return false;
         onMentionInsert(insertion);
+        return true;
+      },
+      insertPathMentions: (insertions) => {
+        const requests = insertions.flatMap(({ path, kind }) => {
+          const token = toPathMentionInsertion(path, kind).path;
+          if (!token) return [];
+          return [
+            {
+              text: `${MENTION_TRIGGER}${token}`,
+              value: kind === 'dir' && !token.endsWith('/') ? `${token}/` : token,
+              kind,
+              separate: true,
+              suffix: ' ',
+            },
+          ];
+        });
+        if (requests.length === 0) return false;
+        onMentionInsert(requests);
         return true;
       },
     }),
@@ -713,12 +740,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       [mentionSource]
     );
     const agentRoleContext = React.useMemo(
-      () =>
-        buildAgentRoleMentionContext({
-          mentionSource,
-          currentMachineId: skillAgent?.machineId,
-        }),
-      [mentionSource, skillAgent?.machineId]
+      () => buildAgentRoleMentionContext({ mentionSource }),
+      [mentionSource]
     );
     const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
     // A committed range carries only the Role id, so the caller's chip resolver

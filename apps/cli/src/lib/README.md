@@ -11,8 +11,6 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   RPC wiring, local project control, session file upload/send, and the turn cloud
   side-effect gate. Turn execution itself lives in
   `../session/session-execution-service.ts`.
-- `acp-capability-source-publisher.ts` — coalesced owner source discovery, invalidation,
-  and generation-fenced Machine Flock publication for Role availability.
 - `machine-runtime.ts` — machine runtime bootstrap; still hosts the DEPRECATED hosted
   WS control-plane listener, and serializes remote bridge attach/detach/revoke through
   `runBridgeTransition`.

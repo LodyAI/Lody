@@ -20,7 +20,6 @@ import {
   type AgentRoleAvailabilityContext,
 } from '../src/agent-role';
 import type { AgentConfigId, AgentRoleId, MachineId } from '../src/ids';
-import type { AcpCapabilityCacheEntry, AcpConfigOptionSummary } from '../src/ai';
 
 const role = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   v: AGENT_ROLE_VERSION,
@@ -44,24 +43,8 @@ const context = (
   onlineMachineIds: new Set(['machine-1' as MachineId]),
   agentConfigMachineIds: new Map([['config-1' as AgentConfigId, 'machine-1' as MachineId]]),
   loadedAgentConfigMachineIds: new Set(['machine-1' as MachineId]),
-  agentConfigCapabilities: new Map([
-    ['config-1' as AgentConfigId, { models: [{ modelId: 'gpt-5.6', name: 'GPT' }], modes: [] }],
-  ]),
   ...overrides,
 });
-
-const selector = (category: 'model' | 'mode', values: string[]): AcpConfigOptionSummary => ({
-  id: `${category}-selection`,
-  name: category,
-  category,
-  type: 'select',
-  currentValue: values[0] ?? '',
-  options: values.map((value) => ({ value, name: value })),
-});
-
-const capabilityContext = (
-  capability: Pick<AcpCapabilityCacheEntry, 'models' | 'modes' | 'configOptions'>
-) => context({ agentConfigCapabilities: new Map([['config-1' as AgentConfigId, capability]]) });
 
 describe('agent role mention slug', () => {
   it('keeps non-ASCII text but removes what an `@` token cannot carry', () => {
@@ -215,137 +198,6 @@ describe('agent role availability', () => {
       resolveAgentRoleAvailability(role(), context({ loadedAgentConfigMachineIds: new Set() }))
     ).toEqual({ kind: 'unknown' });
   });
-
-  it('keeps a retired model role in the catalog but excludes it from mentions', () => {
-    const retired = role({ runConfig: { modelId: 'sonnet-4.5-thinking' } });
-    const capability = capabilityContext({
-      models: [],
-      modes: [],
-      configOptions: [selector('model', ['sonnet-4.5'])],
-    });
-
-    expect(resolveAgentRoleAvailability(retired, capability)).toEqual({
-      kind: 'unavailable',
-      reason: 'model_unsupported',
-    });
-    expect(listAccessibleAgentRoles([retired], 'user-1')).toEqual([retired]);
-    expect(
-      selectMentionableAgentRoles([retired], {
-        currentUserId: 'user-1',
-        scope: { kind: 'machine', machineId: 'machine-1' as MachineId },
-        getAvailability: (candidate) => resolveAgentRoleAvailability(candidate, capability),
-      })
-    ).toEqual([]);
-    expect(retired.runConfig).toEqual({ modelId: 'sonnet-4.5-thinking' });
-  });
-
-  it.each(['model', 'mode'] as const)(
-    'checks both saved %s channels against its category selector',
-    (category) => {
-      const capability = capabilityContext({
-        models: [],
-        modes: [],
-        configOptions: [selector(category, ['supported'])],
-      });
-      for (const runConfig of [
-        { [`${category}Id`]: 'retired' },
-        { configOptionValues: { [`${category}-selection`]: 'retired' } },
-        {
-          [`${category}Id`]: 'supported',
-          configOptionValues: { [`${category}-selection`]: 'retired' },
-        },
-      ]) {
-        expect(resolveAgentRoleAvailability(role({ runConfig }), capability)).toEqual({
-          kind: 'unavailable',
-          reason: `${category}_unsupported`,
-        });
-      }
-      expect(
-        resolveAgentRoleAvailability(
-          role({
-            runConfig: {
-              [`${category}Id`]: 'supported',
-              configOptionValues: { [`${category}-selection`]: 'supported' },
-            },
-          }),
-          capability
-        )
-      ).toEqual({ kind: 'available' });
-    }
-  );
-
-  it('uses current category selectors ahead of the legacy model and mode lists', () => {
-    const capability = capabilityContext({
-      models: [{ modelId: 'retired-model', name: 'Retired model' }],
-      modes: [{ id: 'retired-mode', name: 'Retired mode' }],
-      configOptions: [selector('model', ['current-model']), selector('mode', ['current-mode'])],
-    });
-    expect(
-      resolveAgentRoleAvailability(role({ runConfig: { modelId: 'retired-model' } }), capability)
-    ).toEqual({ kind: 'unavailable', reason: 'model_unsupported' });
-    expect(
-      resolveAgentRoleAvailability(role({ runConfig: { modeId: 'retired-mode' } }), capability)
-    ).toEqual({ kind: 'unavailable', reason: 'mode_unsupported' });
-  });
-
-  it('still supports agents publishing only legacy model and mode lists', () => {
-    const capability = capabilityContext({
-      models: [{ modelId: 'legacy-model', name: 'Legacy model' }],
-      modes: [{ id: 'legacy-mode', name: 'Legacy mode' }],
-    });
-    expect(
-      resolveAgentRoleAvailability(
-        role({ runConfig: { modelId: 'legacy-model', modeId: 'legacy-mode' } }),
-        capability
-      )
-    ).toEqual({ kind: 'available' });
-    expect(
-      resolveAgentRoleAvailability(role({ runConfig: { modeId: 'retired-mode' } }), capability)
-    ).toEqual({ kind: 'unavailable', reason: 'mode_unsupported' });
-  });
-
-  it('waits for capability data without reporting a broken role or offering it as a mention', () => {
-    const unread = context({ agentConfigCapabilities: new Map() });
-    const pinned = role();
-    expect(resolveAgentRoleAvailability(pinned, unread)).toEqual({ kind: 'unknown' });
-    expect(
-      selectMentionableAgentRoles([pinned], {
-        currentUserId: 'user-1',
-        scope: { kind: 'machine', machineId: 'machine-1' as MachineId },
-        getAvailability: (candidate) => resolveAgentRoleAvailability(candidate, unread),
-      })
-    ).toEqual([]);
-    expect(resolveAgentRoleAvailability(role({ runConfig: {} }), unread)).toEqual({
-      kind: 'available',
-    });
-  });
-
-  it.each(['model', 'mode'] as const)(
-    'keeps a saved %s unknown if the agent publishes no corresponding list',
-    (category) => {
-      const saved = role({ runConfig: { [`${category}Id`]: 'selected' } });
-      expect(
-        resolveAgentRoleAvailability(saved, capabilityContext({ models: [], modes: [] }))
-      ).toEqual({ kind: 'unknown' });
-      expect(
-        resolveAgentRoleAvailability(
-          saved,
-          capabilityContext({ models: [], modes: [], configOptions: [selector(category, [])] })
-        )
-      ).toEqual({ kind: 'unavailable', reason: `${category}_unsupported` });
-    }
-  );
-
-  it('does not validate model-dependent options against the probe model snapshot', () => {
-    expect(
-      resolveAgentRoleAvailability(
-        role({
-          runConfig: { modelId: 'gpt-5.6', configOptionValues: { reasoning_effort: 'high' } },
-        }),
-        context()
-      )
-    ).toEqual({ kind: 'available' });
-  });
 });
 
 describe('agent role mention scope', () => {
@@ -364,10 +216,6 @@ describe('agent role mention scope', () => {
       ['config-2' as AgentConfigId, 'machine-2' as MachineId],
     ]),
     loadedAgentConfigMachineIds: new Set(['machine-1', 'machine-2'] as MachineId[]),
-    agentConfigCapabilities: new Map([
-      ...context().agentConfigCapabilities,
-      ['config-2' as AgentConfigId, { models: [{ modelId: 'gpt-5.6', name: 'GPT' }], modes: [] }],
-    ]),
   });
   const getAvailability = (candidate: AgentRole) =>
     resolveAgentRoleAvailability(candidate, bothMachines);

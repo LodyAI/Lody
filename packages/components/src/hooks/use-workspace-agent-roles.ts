@@ -2,11 +2,8 @@ import { useCallback, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
-  getAcpCapabilityCacheKey,
-  getReadableAcpCapabilityCacheEntryForConfig,
   listAccessibleAgentRoles,
   resolveAgentRoleAvailability,
-  type AcpCapabilityCacheEntry,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleAvailability,
@@ -103,26 +100,14 @@ export function useAgentRoleAvailability(
 
   const context = useMemo<AgentRoleAvailabilityContext>(() => {
     const agentConfigMachineIds = new Map<AgentConfigId, MachineId>();
-    const agentConfigCapabilities = new Map<AgentConfigId, AcpCapabilityCacheEntry>();
     for (const config of agentConfigs) {
-      if (!config.machineId) continue;
-      agentConfigMachineIds.set(config.id, config.machineId);
-      const machine = machines.get(config.machineId);
-      const capability = getReadableAcpCapabilityCacheEntryForConfig(
-        machine?.acpCapabilities?.[getAcpCapabilityCacheKey(config.id)],
-        config,
-        machine
-      );
-      if (capability) {
-        agentConfigCapabilities.set(config.id, capability);
-      }
+      if (config.machineId) agentConfigMachineIds.set(config.id, config.machineId);
     }
     return {
       authorizedMachineIds: new Set(machines.keys()),
       onlineMachineIds,
       agentConfigMachineIds,
       loadedAgentConfigMachineIds: new Set(loadedMachineIds),
-      agentConfigCapabilities,
     };
   }, [agentConfigs, loadedMachineIds, machines, onlineMachineIds]);
 

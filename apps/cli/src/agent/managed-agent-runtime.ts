@@ -555,16 +555,6 @@ async function sha256File(
   };
 }
 
-const installationListeners = new Set<() => void>();
-
-/** Observe committed installs without requiring the process channel during handler construction. */
-export function subscribeManagedRuntimeInstallationChanges(listener: () => void): () => void {
-  installationListeners.add(listener);
-  return () => {
-    installationListeners.delete(listener);
-  };
-}
-
 export class ManagedAgentRuntimeManager {
   private readonly rootDir: string;
   private readonly runtimeBaseUrl: string | null;
@@ -1197,14 +1187,6 @@ export class ManagedAgentRuntimeManager {
       );
       signal.throwIfAborted();
       await writeFile(join(dir, COMPLETE_MARKER), '');
-      // The marker commits an eligible runtime, even if PATH publication later fails.
-      for (const listener of installationListeners) {
-        try {
-          listener();
-        } catch {
-          /* Observers cannot fail a committed installation. */
-        }
-      }
       signal.throwIfAborted();
       // A repacked JS package is an internal ACP runtime, not a complete user
       // CLI. Publishing its partial command surface on PATH would make commands

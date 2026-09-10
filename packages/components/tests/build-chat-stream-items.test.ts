@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { resolveSessionHistoryDurationMs } from '../src/lib/session-history-duration';
 
 const sessionId = 'session-test' as SessionId;
 
@@ -139,6 +140,50 @@ describe('buildChatStreamItems', () => {
     );
 
     expect(lastAssistantMessageId).toBe('a1');
+  });
+
+  it('copies permissionWaitMs onto rendered assistant messages so Worked-for can subtract it', () => {
+    const opened = '2026-06-18T00:00:00.000Z';
+    const { items } = buildChatStreamItems(
+      [
+        {
+          ...entry({ id: 'assistant-1', role: 'assistant', items: [text('done')] }),
+          timestamp: opened,
+          endedAt: Date.parse(opened) + 87_000,
+          permissionWaitMs: 62_269,
+          finished: true,
+        },
+      ],
+      sessionId
+    );
+
+    const item = items[0];
+    expect(item?.type).toBe('message');
+    if (item?.type !== 'message') return;
+    expect(item.message.permissionWaitMs).toBe(62_269);
+    expect(resolveSessionHistoryDurationMs(item.message)).toBe(87_000 - 62_269);
+  });
+
+  it('does not reuse a cached item when permissionWaitMs changes', () => {
+    const opened = '2026-06-18T00:00:00.000Z';
+    const base = {
+      ...entry({ id: 'assistant-1', role: 'assistant', items: [text('done')] }),
+      timestamp: opened,
+      endedAt: Date.parse(opened) + 87_000,
+      finished: true,
+    };
+    const first = buildChatStreamItems([{ ...base, permissionWaitMs: 1_000 }], sessionId);
+    const second = buildChatStreamItems(
+      [{ ...base, permissionWaitMs: 62_269 }],
+      sessionId,
+      first.cache
+    );
+
+    expect(second.items[0]).not.toBe(first.items[0]);
+    expect(second.items[0]).toMatchObject({
+      type: 'message',
+      message: { permissionWaitMs: 62_269 },
+    });
   });
 
   it('reuses unchanged message item objects across shallow history array copies', () => {

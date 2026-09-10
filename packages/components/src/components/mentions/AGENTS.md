@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Product-level mention sources on `src/ui/mention`. Files: [README.md](README.md).
+Mention sources on `src/ui/mention`. Files: [README.md](README.md).
 Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md).
 
 ## Triggers, menu, and candidates
@@ -21,9 +21,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
   `insertText` (`@dir`, commit).
 - `MentionCategory.getCandidates` stays lazy: a query scoped to one category
-  must never rank the file index, and a bare `@` must call none. `limit` is a
-  hint; `selectMentionMenuView` enforces the cap. Every category caps its
-  candidates.
+  never ranks files for other categories; bare `@` calls none. Aggregate results
+  are capped by `selectMentionMenuView`; the Role category lists all readable Roles.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
   by `useMentionCategories`.
 - File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
@@ -42,7 +41,7 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   `sourceKey`.
 - Activation means "make sure this is loaded", not "revalidate": Issues/PRs gate
   on `ISSUE_PR_FRESH_FOR_MS`, and only explicit gestures pass `refresh({ force:
-  true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
+true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   An unasked source reports `loading`, never `ready` with zero rows.
 
 ## Hydration and drafts
@@ -122,17 +121,16 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 - An Agent Role mention has the session mention's shape (plain `@<token>`,
   stable Role id on the committed RANGE), but its rewrite asks the agent to
   CREATE a Session and carries the Role id only (root `AGENTS.md` owns MCP
-  create/freeze). A Role the composer no longer offers stays plain text and
-  produces no create instruction. The token is DERIVED from the Role's name
-  (`getAgentRoleMentionSlug`), never a second authored field: renaming renames
-  the mention, and uniqueness is checked on the derived token.
+  create/freeze). An unavailable Role stays plain text at send time. The token
+  is DERIVED from the Role's name
+  (`getAgentRoleMentionSlug`); renaming changes it, and uniqueness uses that token.
 - A Role candidate's emoji REPLACES the category glyph
   (`MentionCandidate.iconEmoji`), defaulted through `getAgentRoleEmoji`, and its
   candidate sets no detail `title`. The committed range shows that emoji through
   `applyAgentRoleEmojiChip`, boxed to the icon slot and clipped; its agent
   config and machine ride on `AgentRoleMentionItem`.
 - Role candidates pass visibility, executability, then work context: Local
-  Project (and V1 plain chat) pins to its own machine, while a GitHub project
-  may reach any authorized machine unless already checked out (`localWorktree`).
-  An unavailable Role is never a submittable candidate — no fallback machine,
-  provider, or model.
+  Project pins to its machine; plain chat and GitHub may use authorized machines
+  unless bound to a `localWorktree`. List all readable Roles; disabled rows follow
+  available matches with a reason below the name. Only available Roles can be
+  selected, hydrated from text, or expanded before send; never fall back.

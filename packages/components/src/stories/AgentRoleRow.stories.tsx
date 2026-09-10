@@ -85,17 +85,6 @@ export const AgentConfigMissing: Story = {
   },
 };
 
-export const SavedCursorModelUnavailable: Story = {
-  args: {
-    role: {
-      ...base,
-      runConfig: { configOptionValues: { model: 'sonnet-4.5-thinking' } },
-    },
-    agentConfig: { cliType: 'registry', agentType: 'cursor', env: {}, name: 'Cursor' },
-    availability: { kind: 'unavailable', reason: 'model_unsupported' },
-  },
-};
-
 /** That machine's configs have not been read yet, so nothing is claimed. */
 export const CheckingAvailability: Story = {
   args: { availability: { kind: 'unknown' } },

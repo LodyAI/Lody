@@ -284,7 +284,22 @@ export function SessionFileErrorState({
 }) {
   const { t } = useTranslation();
   const presentation = getSessionFileErrorPresentation(message, reason, t);
-  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : null;
+  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : undefined;
+  return <SessionFileNoticeCard presentation={presentation} fileActions={actions} />;
+}
+
+/** Shared presentation for files that cannot be displayed inline. */
+export function SessionFileNoticeCard({
+  presentation,
+  fileActions: actions,
+}: {
+  readonly presentation: Pick<
+    SessionFileErrorPresentation,
+    'title' | 'description' | 'technicalDetails'
+  >;
+  readonly fileActions?: SessionFileErrorActions;
+}) {
+  const { t } = useTranslation();
   const localHost = actions?.localHost;
 
   return (
