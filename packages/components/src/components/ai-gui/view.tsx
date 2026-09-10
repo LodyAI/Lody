@@ -3730,7 +3730,7 @@ const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {showFinishedMetadata && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -3754,7 +3754,7 @@ const AssistantTurnFooter = ({
               className="shrink-0 tabular-nums"
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
-              {mobileDurationLabel}
+              {showFinishedMetadata ? mobileDurationLabel : ''}
             </span>
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
@@ -3797,28 +3797,28 @@ const AssistantTurnFooter = ({
                 </TooltipProvider>
               ) : null}
               {/* The turn config lives below the output on every layout. */}
-              {hasTurnConfigInfo ? (
+              {showFinishedMetadata && hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
                   className="h-7 w-7"
                 />
               ) : null}
-              {onFork || copyContext ? (
+              {(showFinishedMetadata && onFork) || copyContext ? (
                 <AssistantForkButton
                   turnId={message.id}
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
-                  onFork={onFork}
+                  onFork={showFinishedMetadata ? onFork : undefined}
                   onWorktreeMenuOpen={onForkWorktreeMenuOpen}
                 />
               ) : null}
             </div>
           ) : null}
-          {completionTimestampLabel ? (
+          {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
           ) : null}
-          {!isMobile && showDuration && durationLabel ? (
+          {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
               <span className="font-mono tabular-nums">{durationLabel}</span>

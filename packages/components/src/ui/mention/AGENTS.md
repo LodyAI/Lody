@@ -27,6 +27,9 @@ Shared mention primitive used by composer autocomplete surfaces.
   commits a highlighted non-navigation item the same way Enter does.
   Shift+Tab still closes the menu so the composer mode-cycle binding
   is not stolen.
+- External text replacement goes through `onTextSplice`: text, ranges and
+  selected values commit together using `applyMentionSplice`. Do not bypass it
+  with a controlled input value write for toolbar/editor transformations.
 - A committed mention is an atomic editing range. A collapsed caret placed
   inside it by pointer/focus/selection changes snaps to the nearest boundary;
   otherwise the chip mirror hides the native caret and the next edit silently

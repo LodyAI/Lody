@@ -37,6 +37,9 @@ never automatically converts it to prose. Users may copy its contents, remove it
 or restore it as message text. The composer add menu can turn ordinary message
 text into a file even below the threshold. The same editing surface applies to
 new sessions, existing sessions and side chats, and pasted content in edit/resend.
+Conversion, editing and removal update committed mention ranges with the same
+text edit. Mentions inside replaced prose stop carrying session context; mentions
+outside the edit keep their identity at their new offsets.
 
 On send, the current draft bytes become a plain-text file using existing attachment
 transport. Same-machine Electron handoff stays local; optional cloud transport is

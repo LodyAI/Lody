@@ -19,6 +19,7 @@ import * as React from 'react';
 import type { ContentElement } from './mention-content';
 import {
   applyMentionSplice,
+  getMentionValuesFromMentions,
   resolveMentionInsertPrefix,
   type MentionSplice,
 } from './mention-input-core';
@@ -189,6 +190,8 @@ interface MentionContextValue {
   onHighlightMove: (direction: HighlightingDirection) => void;
   mentions: Mention[];
   onMentionsChange: React.Dispatch<React.SetStateAction<Mention[]>>;
+  /** Replace text without taking focus from an external editor. */
+  onTextSplice: (start: number, end: number, text: string) => void;
   onMentionAdd: (value: string, triggerIndex: number, options?: { commit?: boolean }) => void;
   /**
    * Write one or a batch of mentions outside the menu, and take focus.
@@ -630,6 +633,31 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     ]
   );
 
+  const onTextSplice = React.useCallback(
+    (start: number, end: number, text: string) => {
+      const sourceValue = inputRef.current?.value ?? inputValue;
+      const splice: MentionSplice = {
+        replaceStart: start,
+        replaceEnd: end,
+        text,
+        value: '',
+        commitRange: false,
+      };
+      setMentions((previous) => {
+        const result = applyMentionSplice(sourceValue, previous, splice);
+        setValue(getMentionValuesFromMentions(result.mentions));
+        return result.mentions;
+      });
+      const result = applyMentionSplice(sourceValue, EMPTY_MENTIONS, splice);
+      setInputValue(result.value);
+      setPendingSelection({ start: result.caret, end: result.caret, expectedValue: result.value });
+      setOpen(false);
+      setHighlightedItem(null);
+      filterStore.search = '';
+    },
+    [filterStore, inputValue, setInputValue, setMentions, setOpen, setValue]
+  );
+
   const onMentionInsert = React.useCallback(
     (request: MentionInsertRequest | MentionInsertRequest[]) => {
       const requests = Array.isArray(request) ? request : [request];
@@ -771,6 +799,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       mentions={mentions}
       onMentionsChange={setMentions}
       onMentionAdd={onMentionAdd}
+      onTextSplice={onTextSplice}
       onMentionInsert={onMentionInsert}
       onNavigateBack={onNavigateBack}
       onMentionsRemove={onMentionsRemove}

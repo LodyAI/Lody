@@ -19,7 +19,8 @@ defines the boundary. Message actions share the copy callback through the existi
 conversation action context; earlier turns and unsupported ACP providers do not
 inherit native-fork restrictions. A pure history-range helper rejects a missing
 boundary. Existing Markdown serialization and omission notices remain in use,
-with explicit references for omitted attachment bytes.
+with explicit references for omitted attachment bytes. Streaming footers expose
+copy actions while completion metadata and native fork remain completion-gated.
 
 The composer retains pasted-text identity and editing, but emits a small file-name
 reference instead of expanding full content into the prompt. The shared
@@ -38,6 +39,12 @@ expands at send. Higher 30000/60000 thresholds and a separate 1024-character fol
 tier were considered; manual conversion in both directions retains control
 without per-model token estimates. No new wire fields or backend are introduced.
 
+Programmatic conversion, chip-label edits and removal use the mention primitive's
+`onTextSplice` through the composer action handle. The shared splice removes ranges
+inside replaced text and shifts surviving ranges, committing selected values with
+the text. Direct controlled-value writes left stale session identities behind and
+could corrupt the final prompt; clearing all ranges would lose unrelated mentions.
+
 ## Verification and limits
 
 The pending upload tests exercise the real status surface through progress,
@@ -49,7 +56,11 @@ offer upload retry. Pending state and unsent drafts are still memory-only.
 
 
 Synthetic tests cover inclusive copy range, unsupported-fork menus, exact edited
-file bytes, local/cloud routing and failures, and mention offsets. Existing
+file bytes, local/cloud routing and failures, and mention offsets. Composer regressions cover conversion of a committed session
+mention, editing the file, restoration/removal with another session mention after
+it, and final text/file blocks plus exact file bytes. A rendered streaming message
+opens the real copy menu before completion; native fork stays unavailable. Both
+regressions fail on the preceding `704fe4af` source and pass with the fix. Existing
 composer focus and submission feedback tests pass. The header-menu suite opens the
 real submenu and verifies selected destinations, disabled pending destinations, and
 copying without native fork support. The copy handler catches and reports errors;

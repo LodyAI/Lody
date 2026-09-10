@@ -1,3 +1,4 @@
+import { useComposedRefs } from '@diceui/shared';
 import { toast } from 'sonner';
 import {
   useEffect,
@@ -351,6 +352,8 @@ export function ChatComposer({
       ),
     [numberFormatter, t]
   );
+  const textActionsRef = useRef<CombinedMentionTextareaHandle>(null);
+  const combinedMentionActionsRef = useComposedRefs(textActionsRef, mentionActionsRef);
   const pastedTextMentions = useMemo<MentionRange[]>(
     () =>
       pastedTextDrafts.map((draft) => ({
@@ -416,13 +419,16 @@ export function ChatComposer({
 
       if (!result) return;
 
-      onPromptChange(result.nextValue);
+      textActionsRef.current?.replaceText(
+        previewPastedTextDraft.start,
+        previewPastedTextDraft.end,
+        displayText
+      );
       onPastedTextDraftsChange(result.nextDrafts);
     },
     [
       formatPastedTextInlineLabel,
       onPastedTextDraftsChange,
-      onPromptChange,
       pastedTextDrafts,
       previewPastedTextDraft,
       promptDisabled,
@@ -904,7 +910,7 @@ export function ChatComposer({
                 onMentionRangesChange={onMentionRangesChange}
                 persistedMentions={persistedMentions}
                 draftKey={draftKey}
-                mentionActionsRef={mentionActionsRef}
+                mentionActionsRef={combinedMentionActionsRef}
                 onKeyDown={onPromptKeyDown}
                 onPaste={onPromptPaste}
                 onCopy={handlePromptCopy}
@@ -964,7 +970,11 @@ export function ChatComposer({
                             selectionEnd: promptValue.length,
                           });
                           if (!result) return;
-                          onPromptChange(result.nextValue);
+                          textActionsRef.current?.replaceText(
+                            0,
+                            promptValue.length,
+                            result.nextValue
+                          );
                           onPastedTextDraftsChange([result.draft]);
                         }
                       : undefined
@@ -1023,7 +1033,7 @@ export function ChatComposer({
               onMentionRangesChange={onMentionRangesChange}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
-              mentionActionsRef={mentionActionsRef}
+              mentionActionsRef={combinedMentionActionsRef}
               onKeyDown={onPromptKeyDown}
               onPaste={onPromptPaste}
               onCopy={handlePromptCopy}
@@ -1108,7 +1118,11 @@ export function ChatComposer({
             text
           );
           if (!result) return;
-          onPromptChange(result.nextValue);
+          textActionsRef.current?.replaceText(
+            previewPastedTextDraft.start,
+            previewPastedTextDraft.end,
+            text
+          );
           onPastedTextDraftsChange(result.nextDrafts);
           handlePastedTextOpenChange(false);
         };
