@@ -69,6 +69,10 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   All Changes, or the removed v1 capture. File/diff reads retain cross-render in-flight
   limits; active requests release slots only on settlement.
 
+- Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
+  on the session's own machine may invoke them; explicit local absolute artifact
+  paths stay absolute, and remote paths never launch on the viewer's machine.
+
 ## File identity, caching, and errors
 
 - `session-file-open-target.ts` alone owns path normalization. Canonical workspace-relative
@@ -85,6 +89,16 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 - Known gaps and their repair constraints: [path provenance and skipped entries](../../../../.agents/docs/components-file-paths.md#known-gaps).
   When repairing skipped entries, distinguish directory read failures and account for
   `openFile` retaining index `readonly`; an openable result must not become uneditable.
+
+## Dropped files and folders
+
+- `file-drop.ts` splits one OS drop into `files` and `directories` by
+  `webkitGetAsEntry().isDirectory`; a folder is never an upload candidate.
+  `dropped-local-path.ts` is the ONE path bridge (Electron
+  `webUtils.getPathForFile`, absolute, forward-slash); web/mobile have no path,
+  so a directory drop inserts nothing. A drop commits all paths together via
+  `mentionActionsRef.insertPathMentions`, with one `dir` range per path. Preserve
+  POSIX and Windows drive roots (`/`, `C:/`) during normalization and insertion.
 
 ## ACP dispatch
 

@@ -38,7 +38,7 @@ PR [#344](https://github.com/LodyAI/Lody/pull/344) adds a protocol-specific exce
 upgraded registry Cursor daemon launches clean model IDs, so its pre-picker rows are incompatible.
 The shared readable entry helper takes the owning Machine and rejects those rows, while retaining
 marked rows across cache versions. A legacy daemon still accepts its unmarked rows. Selectors,
-commands, Role availability, and CLI dispatch share this rule. CLI refreshes the incompatible row
+commands, and CLI dispatch share this rule. CLI refreshes the incompatible row
 and waits for the complete Flock publication before accepting its catalog.
 
 Renderer refresh catch-up uses that same owning-Machine boundary. A successfully read legacy
@@ -52,3 +52,9 @@ failure; accepting all Cursor rows would instead dispatch legacy variant IDs to 
 Regression tests cover both boundaries with synthetic cache rows, stale replicas, metadata failure,
 and explicit publication signals.
 These tests do not establish compatibility with a live Cursor service or Windows desktop runtime.
+
+## Contribution scope
+
+General Role availability and restoration are separated from the Cursor contribution.
+See the [ablation decision](../../proposed/simplification/2026-09-10-cursor-catalog-contribution-scope.md)
+for evidence, retained behavior, and the guarantees left to the separate Role patch.

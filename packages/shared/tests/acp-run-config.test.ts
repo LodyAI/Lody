@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createPlanModeConfigOption } from 'acp-extension-core';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
@@ -7,6 +8,7 @@ import {
   isAcpTrueFalseSelectValues,
   resolveAcpConfigOptionsForModel,
   resolveAcpTargetModelId,
+  getStaticBuiltinAcpCapabilities,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   toggleAcpSelectOptionValue,
@@ -14,7 +16,26 @@ import {
   type AcpConfigOptionSummary,
 } from '../src';
 
-/** Codex-shaped agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
+describe('builtin independent Plan preflight', () => {
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'dispatches boolean Plan for %s without selecting a permission mode',
+    (agentType) => {
+      const capability = getStaticBuiltinAcpCapabilities('builtin', agentType);
+      expect(capability?.configOptions.find((option) => option.id === 'plan_mode')).toEqual({
+        ...createPlanModeConfigOption(false),
+        options: [],
+      });
+      expect(summarizeAgentRunConfigCapabilities(capability).planMode).toBe(true);
+      for (const planMode of [true, false]) {
+        expect(resolveAgentRunConfigSelection({ planMode }, capability)).toEqual({
+          configOptionValues: { plan_mode: planMode },
+        });
+      }
+    }
+  );
+});
+
+/** Legacy Codex agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
 const codexCapability = (): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
   agentType: 'codex',
@@ -167,10 +188,24 @@ describe('agent run config selection', () => {
     });
   });
 
-  it('rejects a plan-mode option that is not the collaboration_mode select', () => {
-    /* Codex publishes exactly one plan shape. An on/off option under some other
-       id is not plan mode, so the request must fail loudly rather than run with
-       planning silently off. */
+  it.each([false, true])('dispatches Core plan_mode=%s without changing permissions', (enabled) => {
+    const capability = codexCapability();
+    capability.configOptions = [{ ...createPlanModeConfigOption(false), options: [] }];
+    expect(summarizeAgentRunConfigCapabilities(capability).planMode).toBe(true);
+    expect(resolveAgentRunConfigSelection({ planMode: enabled }, capability)).toEqual({
+      configOptionValues: { plan_mode: enabled },
+    });
+  });
+
+  it('prefers Core planning when both generations are advertised', () => {
+    const capability = codexCapability();
+    capability.configOptions?.push({ ...createPlanModeConfigOption(false), options: [] });
+    expect(resolveAgentRunConfigSelection({ planMode: true }, capability)).toEqual({
+      configOptionValues: { plan_mode: true },
+    });
+  });
+
+  it('rejects unknown plan option identities', () => {
     const other = codexCapability();
     other.configOptions = other.configOptions?.map((option) =>
       option.id === 'collaboration_mode'

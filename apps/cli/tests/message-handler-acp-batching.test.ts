@@ -143,6 +143,63 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
 };
 
 describe('MessageHandler ACP batching', () => {
+  it('isolates a malformed tool notification and continues flushing valid output', async () => {
+    const sessionId = 'poison-session' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing synthetic doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+    };
+    try {
+      host.beginConversationTurn(sessionId);
+      const text = (value: string): AcpSessionNotification => ({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } },
+      });
+      host.enqueueACPUpdate(sessionId, text('before'));
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-tool',
+          title: 'Synthetic',
+          kind: 'execute',
+          status: 'in_progress',
+          content: [{ type: 'content', content: { type: 'text', text: 42 } }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-location',
+          title: 'Synthetic',
+          kind: 'other',
+          status: 'in_progress',
+          locations: [{ path: 'synthetic.ts', line: 'invalid' }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, text('after'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+      expect(readItems((await doc.getHistory())[0])).toEqual([
+        { type: 'text', text: 'beforeafter' },
+      ]);
+      host.enqueueACPUpdate(sessionId, text('later'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(readItems((await doc.getHistory())[0])).toEqual([
+        { type: 'text', text: 'beforeafterlater' },
+      ]);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';

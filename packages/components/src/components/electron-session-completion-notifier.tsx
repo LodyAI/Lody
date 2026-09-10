@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
+import { useContext, useEffect, useRef } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -47,6 +48,7 @@ function isNonEmptyString(value: string | undefined | null): value is string {
 }
 
 export function ElectronSessionCompletionNotifier() {
+  const owner = useContext(WorkspaceWindowOwnerContext);
   const router = useRouter();
   const { t } = useTranslation();
   const { sessions } = useVisibleSessionMetas();
@@ -63,7 +65,9 @@ export function ElectronSessionCompletionNotifier() {
   latestSessionsByIdRef.current = new Map(sessions.map((session) => [session.id, session]));
 
   useEffect(() => {
-    if (!isElectron || typeof window === 'undefined') {
+    if (!owner || !isElectron || typeof window === 'undefined') {
+      initializedRef.current = false;
+      previousStatusBySessionRef.current.clear();
       return undefined;
     }
 
@@ -173,7 +177,7 @@ export function ElectronSessionCompletionNotifier() {
       initializedRef.current = true;
     }
     return undefined;
-  }, [currentUserId, enabled, isElectron, sessions, t, workspaceSlug]);
+  }, [owner, currentUserId, enabled, isElectron, sessions, t, workspaceSlug]);
 
   useEffect(() => {
     if (!isElectron || typeof window === 'undefined') {
@@ -186,7 +190,7 @@ export function ElectronSessionCompletionNotifier() {
       }
       timers.clear();
     };
-  }, [isElectron]);
+  }, [isElectron, owner]);
 
   useEffect(() => {
     if (!isElectron || typeof window === 'undefined') {

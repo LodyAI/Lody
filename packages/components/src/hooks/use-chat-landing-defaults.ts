@@ -7,58 +7,12 @@ import type {
   MachineViewMeta,
 } from '@lody/shared';
 import type { AgentSelection } from '@/components/shared';
-import type { ComposerAgentRoleItem } from '@/lib/composer-agent-roles';
 import {
   readChatLandingDefaults,
   resolvePreferredChatLandingAgentSelection,
   writeChatLandingDefaults,
 } from '@/lib/chat-landing-defaults';
 type LocalProjectSelection = { machineId: MachineId; localProjectId: LocalProjectId };
-
-/**
- * Restore only after both the catalog and the bound agent's capabilities can answer.
- * The caller must complete restoration (`setRestored(true)`) on any explicit user
- * selection while the stored Role is still unknown; otherwise the deferred
- * `onSelect` would overwrite that selection.
- */
-export function useRestoreChatLandingAgentRole({
-  workspaceId,
-  defaultsReady,
-  restored,
-  setRestored,
-  items,
-  catalogSynced,
-  onSelect,
-}: {
-  workspaceId: string | null;
-  defaultsReady: boolean;
-  restored: boolean;
-  setRestored: (restored: boolean) => void;
-  items: readonly ComposerAgentRoleItem[];
-  catalogSynced: boolean;
-  onSelect: (roleId: AgentRoleId) => void;
-}): void {
-  useEffect(() => {
-    if (restored || !defaultsReady) return;
-    const storedRoleId = readChatLandingDefaults(workspaceId)?.agentRoleId as
-      | AgentRoleId
-      | undefined;
-    if (!storedRoleId) {
-      setRestored(true);
-      return;
-    }
-    const item = items.find((entry) => entry.role.id === storedRoleId);
-    if (!item) {
-      if (catalogSynced) setRestored(true);
-      return;
-    }
-    // Completing now would persist None before a current capability snapshot
-    // can restore a still-supported Role, permanently losing its saved choice.
-    if (item.availability.kind === 'unknown') return;
-    setRestored(true);
-    if (item.availability.kind === 'available') onSelect(storedRoleId);
-  }, [catalogSynced, defaultsReady, items, onSelect, restored, setRestored, workspaceId]);
-}
 
 type UseChatLandingDefaultsArgs = {
   workspaceId: string | null;

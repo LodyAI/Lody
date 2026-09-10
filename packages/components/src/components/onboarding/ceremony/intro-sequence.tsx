@@ -142,6 +142,9 @@ const INTRO_MOTION_CSS = `
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-8px); }
 }
+/* Keep departing copy hidden when reduced motion removes its animation.
+   A running animation still overrides this resting state for the crossfade. */
+.lody-intro-copy-leaving { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .lody-intro-motion { animation: none !important; transition-duration: 0ms !important; }
 }
@@ -370,7 +373,7 @@ export function IntroSequence({
               <div
                 key={`out-${outgoing}`}
                 aria-hidden
-                className="lody-intro-motion absolute inset-0 flex flex-col justify-center"
+                className="lody-intro-motion lody-intro-copy-leaving absolute inset-0 flex flex-col justify-center"
                 style={{ animation: 'lody-intro-copy-out 320ms ease both' }}
               >
                 <IntroCopy chinese={chinese} {...copyFor(outgoing)} />

@@ -35,3 +35,11 @@ this page is the full text of the rules summarised there.
   shown as base fallback, but must not be copied or labeled as current. The
   mobile bottom `SessionInfoBar` omits branch information; desktop keeps it.
 
+## Desktop windows
+
+`MainLayout` uses one Web Lock per workspace for completion notifications, dock
+badge, PR auto-archive and Task status checks. The lock releases on renderer exit;
+Task Index stays mounted in every workspace window because visible Tasks pages
+also consume it. Sidebar hiding unmounts the sidebar subtree and disables the
+runtime eager-sync environment until it is shown again. Current Session sync is
+independent of that prefetch gate. See [window behavior](../../specs/desktop-windows.zh.md).

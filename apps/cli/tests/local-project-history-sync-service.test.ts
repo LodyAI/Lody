@@ -187,7 +187,7 @@ describe('decideHistoryRefresh', () => {
     });
   });
 
-  it('appends from current local length when the stored cursor is ahead of a matching local prefix', () => {
+  it('does not silently restore turns deleted from the imported prefix', () => {
     expect(
       decideHistoryRefresh({
         externalHistory: externalHistory({
@@ -199,9 +199,8 @@ describe('decideHistoryRefresh', () => {
         currentHistoryHashes: ['hash-1', 'hash-2'],
       })
     ).toEqual({
-      status: 'refreshed',
-      reason: 'prefix_append',
-      appendFromIndex: 2,
+      status: 'conflicted',
+      reason: 'local_history_has_untracked_suffix',
     });
   });
 });
@@ -421,6 +420,17 @@ describe('history import persistence', () => {
     let importedTurnHashes: string[] = [];
     const calls: string[] = [];
     const sessionDoc = {
+      updateHistoryAndCursor: vi.fn(
+        async (
+          update: (history: SessionHistoryInput[]) => SessionHistoryInput[],
+          createCursor: (history: SessionHistoryInput[]) => { importedTurnHashes?: string[] }
+        ) => {
+          calls.push('history');
+          storedHistory = update(storedHistory);
+          calls.push('cursor');
+          importedTurnHashes = createCursor(storedHistory).importedTurnHashes ?? [];
+        }
+      ),
       getExternalHistoryCursor: vi.fn(async () => ({ importedTurnHashes })),
       setExternalHistoryCursor: vi.fn(async (cursor: { importedTurnHashes: string[] }) => {
         calls.push('cursor');

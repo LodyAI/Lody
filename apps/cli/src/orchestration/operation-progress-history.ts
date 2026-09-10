@@ -1,4 +1,4 @@
-import type { Loro, LoroList, LoroMap } from 'loro-crdt';
+import type { Loro } from 'loro-crdt';
 import {
   getServerNow,
   type LodyOperationItemResult,
@@ -122,27 +122,9 @@ export const upsertOperationProgressHistory = async (
 ): Promise<void> => {
   if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') return;
   const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
-  // Mirror's history list is keyed by id and cannot diff duplicate ids safely.
-  // Give legacy duplicates recoverable, container-stable aliases first; the next
-  // validated update merges their contents and removes the aliases. A crash
-  // between these commits retains every target state for the next reconciliation.
+  // The shared HistoryWriter identifies existing rows before applying deletions,
+  // so duplicate legacy ids can be merged without raw CRDT alias writes.
   const duplicatePrefix = `${id}:duplicate:`;
-  const doc = sessionDoc.handle?.doc;
-  if (doc) {
-    const list = doc.getList('history') as LoroList<LoroMap>;
-    let seen = false;
-    let renamed = false;
-    for (let index = 0; index < list.length; index++) {
-      const row = list.get(index);
-      if (row?.get('id') !== id || row.get('role') !== 'system') continue;
-      if (seen) {
-        row.set('id', `${duplicatePrefix}${row.id}`);
-        renamed = true;
-      }
-      seen = true;
-    }
-    if (renamed) doc.commit();
-  }
   const isProgressRow = (entry: SessionHistoryInput) =>
     entry.role === 'system' && (entry.id === id || entry.id.startsWith(duplicatePrefix));
   const timestamp = new Date(now()).toISOString();

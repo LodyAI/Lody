@@ -10,6 +10,9 @@ import {
   getServerNow,
   sanitizeGoalObjective,
   truncateTerminalOutputForHistory,
+  ToolCallContentSchema,
+  parseHistoryWrite,
+  HistoryWriteError,
 } from '@lody/shared';
 import type { ModelInfo } from '@lody/shared';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
@@ -173,20 +176,33 @@ export const handleACPUpdateMessage = async (
 
   try {
     if (persistableBatch.length > 0) {
-      await doc.updateHistory((history) => {
-        const targetTurnId = getTargetTurnId();
-        if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
-          callbacks?.logger?.warn(
-            `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
-          );
-          return history;
-        }
-        const createId = targetTurnId ? () => targetTurnId : uuidV4;
-        return applyNotificationOnHistory(history, persistableBatch, model, {
-          createId,
-          ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
-        });
-      });
+      const targetTurnId = getTargetTurnId();
+      // Tool/subagent updates can belong to older turns. Only text/thought
+      // chunks have a target-local ownership contract; retain full routing otherwise.
+      const targetOnly =
+        targetTurnId &&
+        persistableBatch.every(
+          ({ update }) =>
+            (update.sessionUpdate === 'agent_message_chunk' ||
+              update.sessionUpdate === 'agent_thought_chunk') &&
+            update.content.type === 'text'
+        );
+      await doc.updateHistory(
+        (history) => {
+          if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
+            callbacks?.logger?.warn(
+              `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
+            );
+            return history;
+          }
+          const createId = targetTurnId ? () => targetTurnId : uuidV4;
+          return applyNotificationOnHistory(history, persistableBatch, model, {
+            createId,
+            ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
+          });
+        },
+        targetOnly ? { onlyEntryId: targetTurnId } : undefined
+      );
     }
     // Evidence is derived from the same enriched notification, but it is only
     // safe to publish after the corresponding history write commits. Otherwise
@@ -265,7 +281,25 @@ const filterInvalidNotifications = (
   const out: AcpSessionNotification[] = [];
   for (const message of batch) {
     const { update, sessionId } = message;
-    const validation = validateNotificationForHistory(update);
+    let validation = validateNotificationForHistory(update);
+    if (
+      validation.ok &&
+      (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') &&
+      update.content != null
+    ) {
+      try {
+        // Validate before enrichment touches known block fields (e.g. text.trim).
+        // Unknown provider variants remain JSON, rather than masquerading as known text.
+        parseHistoryWrite(ToolCallContentSchema.array(), update.content);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        validation = {
+          ok: false,
+          reason: 'invalid_tool_content',
+          details: { issues: error.issues },
+        };
+      }
+    }
     if (validation.ok) {
       out.push(message);
       continue;

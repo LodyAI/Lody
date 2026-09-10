@@ -366,9 +366,8 @@ export class SessionEditAndResendService {
           ...pending,
           id: spec.replacementUserTurnId,
         };
-        let historyBeforeWrite: SessionHistoryInput[] | null = null;
         let previousUserId: string | undefined;
-        await sessionDoc.updateHistory((currentHistory) => {
+        const rollbackHistory = await sessionDoc.updateHistoryWithRollback((currentHistory) => {
           const currentGoal =
             resolveLatestSessionGoalFromHistory(currentHistory) ??
             (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
@@ -383,7 +382,6 @@ export class SessionEditAndResendService {
               '[STALE_USER_TURN] The editable history boundary changed before commit.'
             );
           }
-          historyBeforeWrite = currentHistory;
           const prefix = currentHistory.slice(0, currentEditable.userIndex);
           previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
           return [...prefix, replacement];
@@ -401,14 +399,12 @@ export class SessionEditAndResendService {
           });
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
         } catch (error) {
-          if (historyBeforeWrite) {
-            await sessionDoc
-              .updateHistory(() => historyBeforeWrite ?? [])
-              .catch((rollbackError) => {
-                this.deps.logger.error(
-                  `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`
-                );
-              });
+          try {
+            rollbackHistory();
+          } catch (rollbackError) {
+            this.deps.logger.error(
+              `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`
+            );
           }
           await this.deps.workspaceDocument.repo
             .upsertDocMeta(getSessionRoomId(spec.sessionId), {

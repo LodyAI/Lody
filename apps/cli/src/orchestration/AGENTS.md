@@ -66,8 +66,8 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   with `DELIVERY_ATTEMPTS_EXHAUSTED` without ACP. Pre-claim migration is uncertain.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
-  replicas. It is durable UI state, never agent input/dispatch. Repair duplicate ids before keyed
-  Mirror updates. Publish cards only from materialized Session/UserTurn evidence or an existing
+  replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through
+  HistoryWriter without raw alias writes. Publish cards only from materialized Session/UserTurn evidence or an existing
   target, and merge status monotonically by exact target.
   Progress failures must not fail acceptance, materialization, cancellation, finalization,
   Delivery, or target cancellation. Set `progressMessageId` only when the row covers every durable

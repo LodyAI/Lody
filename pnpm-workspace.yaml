@@ -37,9 +37,9 @@ catalog:
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: ^1.15.1
-  loro-mirror: 2.3.1
-  loro-mirror-jotai: 2.3.1
-  loro-mirror-react: 2.3.1
+  loro-mirror: 2.3.2
+  loro-mirror-jotai: 2.3.2
+  loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
   loro-repo: ^0.20.0
   loro-websocket: ^0.6.2

@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Folder } from 'lucide-react';
+import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { cn } from '@/lib/utils';
@@ -97,7 +97,11 @@ function DestinationRow({
 export function SessionForkDestinationList({
   worktreeAvailability,
   onSelect,
+  onCopyContext,
+  nativeForkAvailable = true,
 }: {
+  onCopyContext?: () => void;
+  nativeForkAvailable?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
   onSelect: (destination: SessionForkDestination) => void;
 }) {
@@ -105,22 +109,38 @@ export function SessionForkDestinationList({
   const options = getSessionForkDestinationOptions(t, worktreeAvailability);
   return (
     <div className="flex flex-col">
-      {options.map((option) => (
-        <DestinationRow
-          key={option.id}
-          icon={
-            option.id === 'new-worktree' ? (
-              <WorktreeIcon className="h-3.5 w-3.5" />
-            ) : (
-              <Folder className="h-3.5 w-3.5" />
-            )
-          }
-          label={option.label}
-          hint={option.hint}
-          disabled={option.disabled}
-          onSelect={() => onSelect(option.id)}
-        />
-      ))}
+      {nativeForkAvailable &&
+        options.map((option) => (
+          <DestinationRow
+            key={option.id}
+            icon={
+              option.id === 'new-worktree' ? (
+                <WorktreeIcon className="h-3.5 w-3.5" />
+              ) : (
+                <Folder className="h-3.5 w-3.5" />
+              )
+            }
+            label={option.label}
+            hint={option.hint}
+            disabled={option.disabled}
+            onSelect={() => onSelect(option.id)}
+          />
+        ))}
+      {onCopyContext && (
+        <>
+          {nativeForkAvailable && <div className="my-1 border-t border-border" />}
+          <DestinationRow
+            icon={<Copy className="h-3.5 w-3.5" />}
+            label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+            hint={t(
+              'sessions.copyContextMarkdownHint',
+              'Copy the conversation through this message'
+            )}
+            disabled={false}
+            onSelect={onCopyContext}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -133,10 +153,14 @@ export function SessionForkDestinationPopover({
   disabled = false,
   onSelect,
   tooltip,
+  onCopyContext,
+  nativeForkAvailable,
   side = 'top',
   align = 'start',
 }: {
   children: ReactNode;
+  onCopyContext?: () => void;
+  nativeForkAvailable?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   worktreeAvailability: SessionForkWorktreeAvailability;
@@ -182,6 +206,15 @@ export function SessionForkDestinationPopover({
       >
         <SessionForkDestinationList
           worktreeAvailability={worktreeAvailability}
+          nativeForkAvailable={nativeForkAvailable}
+          onCopyContext={
+            onCopyContext
+              ? () => {
+                  handleOpenChange(false);
+                  onCopyContext();
+                }
+              : undefined
+          }
           onSelect={(destination) => {
             handleOpenChange(false);
             onSelect(destination);

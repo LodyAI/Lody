@@ -31,7 +31,7 @@ import {
   WorktreeSetupScriptConfig,
 } from '.';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
-import type { AcpCapabilitySources, ModelInfo } from './ai';
+import type { ModelInfo } from './ai';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
@@ -331,7 +331,12 @@ const historyMessageItemSchema = schema
               ? true
               : 'Missing visual annotation reference metadata';
           default:
-            return `Unknown type: ${type}`;
+            // Synced history may contain variants written by newer peers.
+            // Rejecting one here blocks every subsequent Mirror.setState,
+            // including unrelated user messages and control-field updates.
+            // Preserve the opaque item without extending MessageContentSchema's
+            // accepted input types. Known variants keep their existing guards.
+            return true;
         }
       },
     }
@@ -505,6 +510,8 @@ export const sessionPreviewDocSchema = schema.LoroMap(
 export const sessionExternalHistoryCursorDocSchema = schema.LoroMap(
   {
     importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+    // One atomic value: concurrent clients must not merge half of two baselines.
+    storedHistoryBaseline: schema.String({ required: false }),
   },
   { required: false }
 );
@@ -732,6 +739,8 @@ export type SessionPreviewLegacyMetaFields = {
 
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
+  /** Versioned JSON bound to this cursor's source hashes, not the metadata digest. */
+  storedHistoryBaseline?: string;
 };
 
 /**
@@ -1152,8 +1161,6 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
-  /** Binds the independently published source snapshot to this daemon lifetime. */
-  acpCapabilitySourceEpoch?: string;
 };
 
 /**
@@ -1177,7 +1184,6 @@ export type MachineLegacyMetaFields = {
  */
 export type MachineViewMeta = MachineMeta &
   Omit<MachineLegacyMetaFields, 'raceLimits'> & {
-    acpCapabilitySources?: AcpCapabilitySources;
     raceLimits: Record<string, RateLimit>;
   };
 

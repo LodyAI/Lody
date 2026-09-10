@@ -9,7 +9,8 @@ import { z } from 'zod';
 import {
   LODY_OPERATION_COMMAND_MAX_BYTES,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
-  LodyErrorSchema,
+  LodyOperationItemSchema as OperationItemSchema,
+  LodyOperationCompletionSchema as OperationCompletionSchema,
   LodyOperationIdSchema,
   type FrozenOperationContinuationConfig,
   type LodyError,
@@ -47,78 +48,6 @@ const OperationKindSchema = z.enum([
   'session_create_many',
   'session_chat',
   'session_chat_many',
-]);
-
-const OperationTargetSchema = z.object({ sessionId: z.string(), userTurnId: z.string() }).strict();
-const OperationOutputPreviewSchema = z
-  .object({
-    text: z.string(),
-    truncated: z.literal(true).optional(),
-    omittedBytes: z.number().int().nonnegative().optional(),
-  })
-  .strict();
-
-const OperationItemSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('active'),
-      label: z.string().optional(),
-      target: OperationTargetSchema,
-      inputDurable: z.boolean(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('succeeded'),
-      label: z.string().optional(),
-      target: OperationTargetSchema,
-      assistantTurnId: z.string(),
-      output: OperationOutputPreviewSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('failed'),
-      label: z.string().optional(),
-      target: OperationTargetSchema.optional(),
-      error: LodyErrorSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('cancelled'),
-      label: z.string().optional(),
-      target: OperationTargetSchema.optional(),
-    })
-    .strict(),
-]);
-
-const OperationResultSchema = z.object({ items: z.array(OperationItemSchema) }).strict();
-const CompletionTruncationSchema = z
-  .object({ truncated: z.literal(true), omittedBytes: z.number().int().nonnegative() })
-  .strict();
-const OperationCompletionSchema = z.discriminatedUnion('type', [
-  z
-    .object({
-      type: z.literal('result'),
-      value: OperationResultSchema,
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('error'),
-      error: LodyErrorSchema,
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('cancelled'),
-      partial: OperationResultSchema.optional(),
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
 ]);
 
 const FrozenConfigSchema = z

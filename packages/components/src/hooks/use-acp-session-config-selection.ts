@@ -50,8 +50,6 @@ export type UseAcpSessionConfigSelectionStateArgs = {
   preferences: AcpSessionConfigPreferences;
   runtimePreferences?: AcpSessionConfigPreferences | null;
   preserveUnsentUserEdits?: boolean;
-  /** Explicit edit boundary; derived capability/preference updates do not invoke it. */
-  onUserChange?: () => void;
 };
 
 const EMPTY_PREFERENCES: AcpSessionConfigPreferences = {};
@@ -83,7 +81,6 @@ export function useAcpSessionConfigSelectionState({
   preferences,
   runtimePreferences,
   preserveUnsentUserEdits = false,
-  onUserChange,
 }: UseAcpSessionConfigSelectionStateArgs): AcpSessionConfigSelectionHandle {
   const [fence, setFence] = useState<EditsFence>({
     targetKey: null,
@@ -144,15 +141,12 @@ export function useAcpSessionConfigSelectionState({
   const candidates = useMemo(() => buildAcpSessionConfigCandidates(selection), [selection]);
 
   const selectMode = useCallback((value: string | null) => {
-    onUserChange?.();
     setFence((prev) => ({ ...prev, edits: { ...prev.edits, mode: { value } } }));
-  }, [onUserChange]);
+  }, []);
   const selectModel = useCallback((value: string | null) => {
-    onUserChange?.();
     setFence((prev) => ({ ...prev, edits: { ...prev.edits, model: { value } } }));
-  }, [onUserChange]);
+  }, []);
   const selectConfigOption = useCallback((configId: string, value: AcpConfigOptionValue) => {
-    onUserChange?.();
     setFence((prev) => ({
       ...prev,
       edits: {
@@ -160,14 +154,13 @@ export function useAcpSessionConfigSelectionState({
         configOptions: { ...prev.edits.configOptions, [configId]: value },
       },
     }));
-  }, [onUserChange]);
+  }, []);
   const replaceConfigOptions = useCallback((values: Record<string, AcpConfigOptionValue>) => {
-    onUserChange?.();
     setFence((prev) => ({
       ...prev,
       edits: { ...prev.edits, configOptions: { ...values } },
     }));
-  }, [onUserChange]);
+  }, []);
 
   return {
     selection,

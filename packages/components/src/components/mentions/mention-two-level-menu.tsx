@@ -155,6 +155,11 @@ function CandidateRow({
       value={candidate.value}
       label={candidate.label}
       kind={candidate.kind}
+      disabled={candidate.disabled}
+      aria-disabled={candidate.disabled || undefined}
+      className={
+        candidate.disabled ? 'text-muted-foreground data-[disabled]:opacity-100' : undefined
+      }
       insertText={candidate.insertText}
       navigateText={candidate.navigateText}
       onMentionSelect={onSelect}
@@ -175,7 +180,9 @@ function CandidateRow({
           {candidate.title}
         </span>
         {candidate.subtitle ? (
-          <span className="truncate text-xs text-muted-foreground">{candidate.subtitle}</span>
+          <span className="whitespace-normal text-xs text-muted-foreground">
+            {candidate.subtitle}
+          </span>
         ) : null}
       </div>
       {candidate.trailing ? (

@@ -209,8 +209,6 @@ export const AGENT_ROLE_UNAVAILABLE_REASON_KEYS = {
   machine_offline: 'settings.agentRoles.unavailable.machineOffline',
   agent_config_missing: 'settings.agentRoles.unavailable.agentConfigMissing',
   agent_config_machine_mismatch: 'settings.agentRoles.unavailable.agentConfigMismatch',
-  model_unsupported: 'settings.agentRoles.unavailable.modelUnsupported',
-  mode_unsupported: 'settings.agentRoles.unavailable.modeUnsupported',
 } as const satisfies Record<AgentRoleUnavailableReason, string>;
 
 export type ComposerRunConfigValues = {

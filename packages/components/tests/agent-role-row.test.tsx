@@ -122,19 +122,6 @@ describe('AgentRoleRow', () => {
     expect(view.textContent).not.toContain('Unavailable');
   });
 
-  it.each(['model', 'mode'] as const)(
-    'keeps a role with an unsupported %s visible and editable',
-    async (selection) => {
-      const view = await render({
-        availability: { kind: 'unavailable', reason: `${selection}_unsupported` },
-      });
-      expect(view.textContent).toContain('Code Reviewer');
-      expect(view.textContent).toContain(`its saved ${selection} is no longer supported`);
-      expect(view.textContent).toContain(`edit the role to choose another ${selection}`);
-      expect(view.querySelector('button[aria-label="Edit"]')).not.toBeNull();
-    }
-  );
-
   it('names the agent config when a role pins no run config of its own', async () => {
     const view = await render({ role: { ...role, runConfig: {} } });
     expect(view.textContent).toContain('Codex');

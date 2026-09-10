@@ -65,6 +65,14 @@ Repository map and entry points: [README.md](README.md#repository).
 - Tests use explicit signals, injected clocks, fake timers, and deterministic
   fixtures; no real sleeps, wall-clock races, network, machine load, or scheduler
   luck. Assert observable behavior, not mock call counts.
+- Delete shallow tests in the changed scope: source-string/regex assertions,
+  mock-call-only checks and duplicates that cannot detect a behavioral regression.
+  Test the real boundary and resulting state, including failure paths; retain
+  meaningful compile-failure contracts. Extend the owning suite instead of adding
+  a file per small fix. Do not delete behavioral coverage merely to reduce counts.
+- Keep PR documentation compact: update the owning Spec and Note instead of adding
+  incremental fix/run-log documents. Consolidate redundant PR-local notes, retaining
+  decisions, reproducible evidence and unresolved limits; repair inbound links.
 - Keep edits traceable to the request and preserve unrelated work. Prefer explicit
   contracts over hidden fallbacks; remove only unused code. Update the nearest
   public `AGENTS.md` when an invariant or boundary changes.

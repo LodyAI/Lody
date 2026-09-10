@@ -1,5 +1,4 @@
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
-import type { AcpCapabilityCacheEntry } from './ai';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 
 /**
@@ -320,13 +319,11 @@ export type AgentRoleUnavailableReason =
   | 'machine_unknown'
   | 'machine_offline'
   | 'agent_config_missing'
-  | 'agent_config_machine_mismatch'
-  | 'model_unsupported'
-  | 'mode_unsupported';
+  | 'agent_config_machine_mismatch';
 
 export type AgentRoleAvailability =
   | { kind: 'available' }
-  /** The binding or its pinned model/mode cannot be judged from loaded capabilities yet. */
+  /** The binding cannot be judged yet — that machine's configs are not loaded. */
   | { kind: 'unknown' }
   | { kind: 'unavailable'; reason: AgentRoleUnavailableReason };
 
@@ -343,14 +340,6 @@ export type AgentRoleAvailabilityContext = {
    * falling back to another config.
    */
   loadedAgentConfigMachineIds: ReadonlySet<MachineId>;
-  /**
-   * Current capability entries for each config, filtered by the caller against
-   * its runtime overrides. Missing or stale data cannot prove a pin unsupported.
-   */
-  agentConfigCapabilities: ReadonlyMap<
-    AgentConfigId,
-    Pick<AcpCapabilityCacheEntry, 'models' | 'modes' | 'configOptions'>
-  >;
 };
 
 export const resolveAgentRoleAvailability = (
@@ -373,45 +362,7 @@ export const resolveAgentRoleAvailability = (
   if (!context.onlineMachineIds.has(role.machineId)) {
     return { kind: 'unavailable', reason: 'machine_offline' };
   }
-
-  const { runConfig } = role;
-  const capability = context.agentConfigCapabilities.get(role.agentConfigId);
-  if (!capability) {
-    const hasSelection =
-      Boolean(runConfig.modelId || runConfig.modeId) ||
-      Object.keys(runConfig.configOptionValues ?? {}).length > 0;
-    return { kind: hasSelection ? 'unknown' : 'available' };
-  }
-
-  let hasUnknownSelection = false;
-  for (const category of ['model', 'mode'] as const) {
-    const option = capability.configOptions?.find(
-      (candidate) => candidate.category === category && candidate.type === 'select'
-    );
-    const selectedValues = [
-      runConfig[`${category}Id`],
-      option ? runConfig.configOptionValues?.[option.id] : undefined,
-    ].filter((value) => value !== undefined);
-    if (selectedValues.length === 0) continue;
-
-    // Category selectors supersede the legacy lists. Their values describe
-    // model/mode identities even when model-dependent option catalogs are absent.
-    const supportedValues = option
-      ? option.options.map((value) => value.value)
-      : category === 'model'
-        ? capability.models.map((model) => model.modelId)
-        : capability.modes.map((mode) => mode.id);
-    if (!option && supportedValues.length === 0) {
-      hasUnknownSelection = true;
-      continue;
-    }
-    if (
-      selectedValues.some((value) => typeof value !== 'string' || !supportedValues.includes(value))
-    ) {
-      return { kind: 'unavailable', reason: `${category}_unsupported` };
-    }
-  }
-  return { kind: hasUnknownSelection ? 'unknown' : 'available' };
+  return { kind: 'available' };
 };
 
 // ---------------------------------------------------------------------------
@@ -424,11 +375,8 @@ export const resolveAgentRoleAvailability = (
  *
  * - `machine`: a Local Project, or a child Session that shares this physical
  *   workspace — the target has to be the same machine.
- * - `authorized_machines`: a GitHub project, where the target Session clones
- *   the repo itself and may therefore live on another authorized machine.
- *
- * A plain chat with no project uses `machine` in V1; opening it up is a
- * separate decision, not a default.
+ * - `authorized_machines`: plain chat or a GitHub project whose target Session
+ *   can clone the repo itself on another authorized machine.
  */
 export type AgentRoleMentionScope =
   | { kind: 'machine'; machineId: MachineId | null }
@@ -443,7 +391,7 @@ export const isAgentRoleInMentionScope = (
     : scope.machineIds.has(role.machineId);
 
 /**
- * The Roles a composer may offer: readable by this user, executable right now,
+ * The Roles a composer may execute: readable by this user, executable right now,
  * and inside the current work context.
  *
  * Order is visibility- and scope-independent so the menu stays stable: name

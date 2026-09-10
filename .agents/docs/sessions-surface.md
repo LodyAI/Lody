@@ -29,6 +29,9 @@ this page is the full text of the rules summarised there.
   the budget returns `overBudget` instead of cutting it. Whatever was trimmed
   must reach the toast (`describeCopiedConversation`); silent truncation reads
   as "I copied everything".
+  Message fork menus copy the inclusive history prefix independently of ACP fork
+  capability. Missing boundaries fail; generating replies are marked as partial.
+  Attachment bytes are not exported. The session header copies all history.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,
   `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.
