@@ -19,4 +19,4 @@ Translation: pending
 
 命令域的 6 个测试文件共 72 个测试通过，覆盖 detach 后旧 target 停止同步、重新 attach 时刷新持久化状态，以及模拟另一窗口写入后旧绑定停止触发、新绑定立即触发；改动文件的 lint 和格式检查通过，TypeScript 输出中没有改动文件的诊断。完整 `pnpm check` 在执行检查前因隔离 worktree 的系统缺少 `corepack` 而停止，components 全量类型检查也受未安装的 Electron 和 workspace 依赖阻断。文档检查只报告分支开始时已存在的 12 个失效链接；没有启动桌面应用做双窗口手工验证。
 
-需求：[Issue #288](https://github.com/LodyAI/Lody/issues/288)。
+需求：[Issue #288](https://github.com/LodyAI/Lody/issues/288)。PR：[#572](https://github.com/LodyAI/Lody/pull/572)。
