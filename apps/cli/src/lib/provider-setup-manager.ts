@@ -1,11 +1,14 @@
 import {
   applyProviderSetupCancellationToFlock,
+  ALL_PROVIDER_CREDENTIAL_REVISIONS,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
   getMachineFlockProviderSetups,
   findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderCredentialCleanups,
+  getLodyCodexCustomProvider,
   getServerNow,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -23,7 +26,10 @@ import type { LoroRepo } from 'loro-repo';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
-import { clearCodexProviderCredential } from '@/agent/provider-credential-store';
+import {
+  clearCodexProviderCredential,
+  retainCodexProviderCredential,
+} from '@/agent/provider-credential-store';
 
 type ProviderSetupExecution = Pick<
   SessionExecutionService,
@@ -42,12 +48,14 @@ export type ProviderSetupManagerOptions = {
   sync: ProviderSetupSyncScheduler;
   logger: Logger;
   clearCredential?: typeof clearCodexProviderCredential;
+  retainCredential?: typeof retainCodexProviderCredential;
 };
 
 const RESUMABLE_STATUSES = new Set<ProviderSetupStatus>([
   'queued',
   'preparing-runtime',
   'verifying',
+  'verified',
 ]);
 
 /**
@@ -64,6 +72,7 @@ export class ProviderSetupManager {
   private readonly sync: ProviderSetupSyncScheduler;
   private readonly logger: Logger;
   private readonly clearCredential: typeof clearCodexProviderCredential;
+  private readonly retainCredential: typeof retainCodexProviderCredential;
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
@@ -76,6 +85,7 @@ export class ProviderSetupManager {
     this.sync = options.sync;
     this.logger = options.logger;
     this.clearCredential = options.clearCredential ?? clearCodexProviderCredential;
+    this.retainCredential = options.retainCredential ?? retainCodexProviderCredential;
   }
 
   kick(): Promise<void> {
@@ -115,6 +125,24 @@ export class ProviderSetupManager {
     void this.kick();
   }
 
+  async publishAfterCredentialVerification(
+    setupId: AgentConfigId,
+    credentialRevision: string
+  ): Promise<void> {
+    if (this.stopped) return;
+    const setup = await this.readSetup(setupId);
+    if (
+      !setup ||
+      setup.status !== 'awaiting-auth' ||
+      setup.credentialRevision !== credentialRevision
+    ) {
+      return;
+    }
+    const verified = await this.updateStatus(setup.id, setup.attempt, 'verified');
+    if (!verified) return;
+    await this.publishVerifiedConfig(verified.id, verified.attempt);
+  }
+
   private async waitUntilIdle(): Promise<void> {
     while (this.drainPromise) {
       await this.drainPromise;
@@ -125,6 +153,7 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
+      await this.reconcileCredentialCleanups();
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);
@@ -142,8 +171,13 @@ export class ProviderSetupManager {
       return;
     }
 
+    if (setup.status === 'verified') {
+      await this.publishVerifiedConfig(setup.id, setup.attempt);
+      return;
+    }
+
     const existingConfig = await this.readAgentConfig(setup.id);
-    if (existingConfig) {
+    if (existingConfig && setup.operation !== 'replace') {
       await this.deleteSetup(setup.id);
       return;
     }
@@ -222,16 +256,24 @@ export class ProviderSetupManager {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
     );
-    const cancellations = Object.values(
-      getMachineFlockProviderSetupCancellations(
-        readMachineFlockRowsFromFlock(handle.flock, {
-          families: ['providerSetupCancellation'],
-        })
-      )
-    ).filter((cancellation) => cancellation.machineId === this.machineId);
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      families: ['providerSetupCancellation', 'providerSetup'],
+    });
+    const setups = getMachineFlockProviderSetups(rows);
+    const cancellations = Object.values(getMachineFlockProviderSetupCancellations(rows)).filter(
+      (cancellation) => cancellation.machineId === this.machineId
+    );
     let changed = false;
     for (const cancellation of cancellations) {
-      await this.clearCredential(this.workspaceId, cancellation.id);
+      const setupRevision = setups[cancellation.id]?.credentialRevision;
+      if (setupRevision && setupRevision !== cancellation.credentialRevision) {
+        continue;
+      }
+      await this.clearCredential(
+        this.workspaceId,
+        cancellation.id,
+        cancellation.credentialRevision
+      );
       changed =
         applyProviderSetupCancellationToFlock(
           handle.flock,
@@ -244,6 +286,50 @@ export class ProviderSetupManager {
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
   }
 
+  private async reconcileCredentialCleanups(): Promise<void> {
+    const handle = await this.repo.openFlockDoc(
+      getMachineFlockDocId(this.workspaceId, this.machineId)
+    );
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      families: ['providerCredentialCleanup', 'providerSetup', 'agentConfig'],
+    });
+    const configs = getMachineFlockAgentConfigs(rows);
+    const setups = getMachineFlockProviderSetups(rows);
+    let changed = false;
+    for (const cleanup of getMachineFlockProviderCredentialCleanups(rows)) {
+      if (cleanup.machineId !== this.machineId) continue;
+      const publishedRevision = getLodyCodexCustomProvider(
+        configs[cleanup.id]?.env
+      )?.credentialRevision;
+      const stagedRevision = setups[cleanup.id]?.credentialRevision;
+      const clearAll = cleanup.credentialRevision === ALL_PROVIDER_CREDENTIAL_REVISIONS;
+      if (
+        (clearAll &&
+          (getLodyCodexCustomProvider(configs[cleanup.id]?.env) ||
+            getLodyCodexCustomProvider(setups[cleanup.id]?.config.env))) ||
+        (!clearAll &&
+          (publishedRevision === cleanup.credentialRevision ||
+            stagedRevision === cleanup.credentialRevision))
+      ) {
+        continue;
+      }
+      await this.clearCredential(
+        this.workspaceId,
+        cleanup.id,
+        clearAll ? undefined : cleanup.credentialRevision
+      );
+      changed =
+        deleteMachineFlockRowFromFlock(
+          handle.flock,
+          machineFlockKeys.providerCredentialCleanup(cleanup.id, cleanup.credentialRevision),
+          getServerNow()
+        ) || changed;
+    }
+    if (!changed) return;
+    await this.repo.flush();
+    this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-credential-cleanup' });
+  }
+
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
@@ -254,10 +340,17 @@ export class ProviderSetupManager {
         machineFlockKeys.providerSetupCancellation(setupId),
       ],
     });
-    if (getMachineFlockProviderSetupCancellations(rows)[setupId]) {
+    const setup = getMachineFlockProviderSetups(rows)[setupId];
+    const cancellation = getMachineFlockProviderSetupCancellations(rows)[setupId];
+    if (
+      cancellation &&
+      (!setup?.credentialRevision ||
+        !cancellation.credentialRevision ||
+        setup.credentialRevision === cancellation.credentialRevision)
+    ) {
       return undefined;
     }
-    return getMachineFlockProviderSetups(rows)[setupId];
+    return setup;
   }
 
   private async readAgentConfig(setupId: AgentConfigId) {
@@ -347,7 +440,13 @@ export class ProviderSetupManager {
       families: ['builtinAgentOptOut'],
     });
     const cancellation = getMachineFlockProviderSetupCancellations(rows)[setupId];
-    if (cancellation) {
+    if (
+      cancellation &&
+      (!getMachineFlockProviderSetups(rows)[setupId]?.credentialRevision ||
+        !cancellation.credentialRevision ||
+        getMachineFlockProviderSetups(rows)[setupId]?.credentialRevision ===
+          cancellation.credentialRevision)
+    ) {
       const changed = applyProviderSetupCancellationToFlock(
         handle.flock,
         cancellation,
@@ -360,10 +459,15 @@ export class ProviderSetupManager {
       return;
     }
     const setup = getMachineFlockProviderSetups(rows)[setupId];
-    if (!setup || setup.attempt !== attempt || setup.status !== 'verifying' || this.stopped) {
+    if (
+      !setup ||
+      setup.attempt !== attempt ||
+      (setup.status !== 'verifying' && setup.status !== 'verified') ||
+      this.stopped
+    ) {
       return;
     }
-    if (getMachineFlockAgentConfigs(rows)[setupId]) {
+    if (getMachineFlockAgentConfigs(rows)[setupId] && setup.operation !== 'replace') {
       await this.deleteSetup(setupId);
       return;
     }
@@ -382,5 +486,8 @@ export class ProviderSetupManager {
     flock.commit();
     await this.repo.flush();
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-publish' });
+    if (setup.credentialRevision) {
+      await this.retainCredential(this.workspaceId, setup.id, setup.credentialRevision);
+    }
   }
 }

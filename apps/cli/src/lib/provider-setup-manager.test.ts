@@ -6,6 +6,8 @@ import {
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
   getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderCredentialCleanups,
+  buildLodyCodexCustomProviderEnv,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   writeMachineFlockRowToFlock,
@@ -119,6 +121,7 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
   } as ProviderSetupManagerOptions['execution'];
   const markMachineFlockDocDirty = vi.fn();
   const clearCredential = vi.fn(async () => undefined);
+  const retainCredential = vi.fn(async () => undefined);
   const manager = new ProviderSetupManager({
     repo,
     workspaceId,
@@ -127,8 +130,17 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     sync: { markMachineFlockDocDirty },
     logger: createSilentLogger(),
     clearCredential,
+    retainCredential,
   });
-  return { flock, flush, execution, markMachineFlockDocDirty, clearCredential, manager };
+  return {
+    flock,
+    flush,
+    execution,
+    markMachineFlockDocDirty,
+    clearCredential,
+    retainCredential,
+    manager,
+  };
 }
 
 function createHarness(overrides: Partial<ProviderSetupManagerOptions['execution']> = {}) {
@@ -148,6 +160,7 @@ function readState(flock: MachineFlockWritableFlock) {
     setup: getMachineFlockProviderSetups(rows)[setupId],
     config: getMachineFlockAgentConfigs(rows)[setupId],
     cancellation: getMachineFlockProviderSetupCancellations(rows)[setupId],
+    cleanups: getMachineFlockProviderCredentialCleanups(rows),
   };
 }
 
@@ -306,6 +319,7 @@ describe('ProviderSetupManager', () => {
       setup: undefined,
       config: undefined,
       cancellation: undefined,
+      cleanups: [],
     });
     expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
     harness.manager.stop();
@@ -372,9 +386,104 @@ describe('ProviderSetupManager', () => {
         setup: undefined,
         config: undefined,
         cancellation: expect.objectContaining({ id: setupId, machineId }),
+        cleanups: [],
       });
     }
-    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId);
+    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId, undefined);
+    harness.manager.stop();
+  });
+
+  it('atomically replaces a published config only after its credential revision is verified', async () => {
+    const harness = createHarness();
+    const oldConfig = createSetup().config;
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: oldConfig,
+    });
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      operation: 'replace',
+      credentialRevision: 'revision-new',
+      config: {
+        ...oldConfig,
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
+        ),
+      },
+    };
+    seedSetup(harness.flock, replacement);
+
+    await harness.manager.publishAfterCredentialVerification(setupId, 'revision-new');
+
+    expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
+    expect(readState(harness.flock).setup).toBeUndefined();
+    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    expect(harness.retainCredential).toHaveBeenCalledWith(workspaceId, setupId, 'revision-new');
+    harness.manager.stop();
+  });
+
+  it('finishes a durable verified replacement after restart without probing the stale live config', async () => {
+    const harness = createHarness();
+    const oldConfig = createSetup().config;
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: oldConfig,
+    });
+    const replacement = {
+      ...createSetup('verified'),
+      operation: 'replace' as const,
+      credentialRevision: 'revision-new',
+      config: {
+        ...oldConfig,
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
+        ),
+      },
+    };
+    seedSetup(harness.flock, replacement);
+
+    await harness.manager.kick();
+
+    expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
+    expect(readState(harness.flock).setup).toBeUndefined();
+    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    harness.manager.stop();
+  });
+
+  it('replays credential cleanup after the referenced config disappears', async () => {
+    const harness = createHarness();
+    const config = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv(
+        {},
+        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-old' }
+      ),
+    };
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: config,
+    });
+    writeMachineFlockRowToFlock(harness.flock, {
+      key: machineFlockKeys.providerCredentialCleanup(setupId, 'revision-old'),
+      value: {
+        v: 1,
+        id: setupId,
+        machineId,
+        credentialRevision: 'revision-old',
+        requestedAt: 20,
+      },
+    });
+
+    await harness.manager.kick();
+    expect(harness.clearCredential).not.toHaveBeenCalled();
+    expect(readState(harness.flock).cleanups).toHaveLength(1);
+
+    deleteMachineFlockRowFromFlock(harness.flock, machineFlockKeys.agentConfig(setupId));
+    await harness.manager.kick();
+    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId, 'revision-old');
+    expect(readState(harness.flock).cleanups).toEqual([]);
     harness.manager.stop();
   });
 });

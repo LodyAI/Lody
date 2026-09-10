@@ -289,6 +289,8 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
         requestId: z.string().trim().min(1).max(1024),
         action: z.literal('start'),
         configId: AgentConfigIdSchema,
+        purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
+        credentialRevision: z.string().trim().min(1).max(1024).optional(),
       })
       .strict(),
     z
@@ -2426,7 +2428,12 @@ export class LoroStreamsMachineRpcClient {
       onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
       timeoutMs?: number;
     } & (
-      | { action: 'start'; configId: AgentConfigId }
+      | {
+          action: 'start';
+          configId: AgentConfigId;
+          purpose?: 'authenticate' | 'provision-provider-credential';
+          credentialRevision?: string;
+        }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
           action: 'submit-code';
@@ -2509,6 +2516,10 @@ export class LoroStreamsMachineRpcClient {
               requestId: options.requestId,
               action: options.action,
               configId: options.configId,
+              ...(options.purpose ? { purpose: options.purpose } : {}),
+              ...(options.credentialRevision
+                ? { credentialRevision: options.credentialRevision }
+                : {}),
             } as const;
           case 'cancel':
             return {
@@ -3053,7 +3064,13 @@ export class LoroStreamsMachineRpcClient {
           timeoutMs: number;
           onAcpAuthenticationProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
           params:
-            | { requestId: string; action: 'start'; configId: AgentConfigId }
+            | {
+                requestId: string;
+                action: 'start';
+                configId: AgentConfigId;
+                purpose?: 'authenticate' | 'provision-provider-credential';
+                credentialRevision?: string;
+              }
             | { requestId: string; action: 'cancel'; authenticationRequestId: string }
             | {
                 requestId: string;

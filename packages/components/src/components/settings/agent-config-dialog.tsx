@@ -836,12 +836,16 @@ function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, s
   return env;
 }
 
-function buildCodexSubmitEnv(formData: AgentConfigFormData): Record<string, string> {
+function buildCodexSubmitEnv(
+  formData: AgentConfigFormData,
+  credentialRevision: string
+): Record<string, string> {
   if (formData.codexAuthenticationMode !== 'api-key') {
     return removeLodyCodexCustomProviderEnv(formData.env);
   }
   return buildLodyCodexCustomProviderEnv(formData.env, {
     baseUrl: formData.codexBaseUrl ?? '',
+    credentialRevision,
   });
 }
 
@@ -1185,9 +1189,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // per-caller flag can disagree with the machine it travels with.
   const backgroundManagedBuiltinSetup =
     machineSupportsProviderSetupProtocol(machine) &&
-    requiresBuiltinCreationVerification &&
-    usesDefaultManagedRuntime;
+    ((isCodexBuiltin && codexAuthenticationMode === 'api-key') ||
+      (requiresBuiltinCreationVerification && usesDefaultManagedRuntime));
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
+  const codexCredentialRevisionRef = useRef(crypto.randomUUID());
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
@@ -1195,7 +1200,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     } else if (isDeepSeekBuiltinForm(formData)) {
       env = buildDeepSeekSubmitEnv(formData);
     } else if (isCodexBuiltinForm(formData)) {
-      env = buildCodexSubmitEnv(formData);
+      env = buildCodexSubmitEnv(formData, codexCredentialRevisionRef.current);
     }
     const agentType = formData.agentType as AgentType;
     const titleGeneration = acpProvidesSessionTitle

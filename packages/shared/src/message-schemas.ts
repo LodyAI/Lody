@@ -1387,6 +1387,8 @@ export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action'
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('start'),
     configId: AgentConfigIdSchema,
+    purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
+    credentialRevision: z.string().trim().min(1).max(1024).optional(),
   }).strict(),
   MachineAcpAuthenticateRequestBaseSchema.extend({
     action: z.literal('cancel'),

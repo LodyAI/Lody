@@ -19,8 +19,11 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   Codex offers ChatGPT sign-in or a Base URL + API Key path. The latter persists only
   generated `CODEX_CONFIG` metadata with `requires_openai_auth=false`; send the key
   through encrypted Machine ACP authentication input for machine-local storage and
-  launch-time injection. Additional env cannot override managed keys, and arbitrary
-  user-authored `CODEX_CONFIG` remains untouched.
+  launch-time injection. Credential-changing edits stage a revision in provider setup;
+  never update the published config before the target daemon verifies that revision.
+  Delete and ChatGPT transitions write durable cleanup intent and never wait for the
+  machine. Additional env cannot override managed keys, and arbitrary user-authored
+  `CODEX_CONFIG` remains untouched.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
   `https://api.deepseek.com`) and never a new AgentConfigMeta field. Model ids come from

@@ -33,6 +33,7 @@ import {
   type MachineFlockKey,
   type MachineFlockWritableFlock,
 } from '../src/machine-flock';
+import { buildLodyCodexCustomProviderEnv } from '../src/codex-provider-config';
 import {
   getRateLimitEntryKey,
   getAcpCapabilityCacheKey,
@@ -758,6 +759,53 @@ describe('machine Flock helpers', () => {
       });
 
       expect(optOuts(flock)).toEqual(new Set());
+    });
+
+    it('does not apply a stale cancellation to a newer credential revision', () => {
+      const flock = new FakeMachineFlock();
+      const id = 'setup-1' as AgentConfigId;
+      const config = {
+        ...kimi(id),
+        agentType: 'codex' as const,
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          {
+            baseUrl: 'https://relay.example.test/v1',
+            credentialRevision: 'revision-new',
+          }
+        ),
+      };
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.providerSetup(id),
+        value: {
+          v: 1,
+          id,
+          machineId,
+          config,
+          status: 'awaiting-auth',
+          operation: 'replace',
+          credentialRevision: 'revision-new',
+          attempt: 1,
+          createdAt: 10,
+          updatedAt: 10,
+        },
+      });
+
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          credentialRevision: 'revision-old',
+          preservePublishedConfig: true,
+          cancelledAt: 20,
+        })
+      ).toBe(false);
+      expect(
+        readMachineFlockRowsFromFlock(flock, {
+          prefixes: [machineFlockKeys.providerSetup(id)],
+        })
+      ).not.toEqual({});
     });
 
     it('rejects an agentType that has no managed runtime', () => {

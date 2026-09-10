@@ -13,6 +13,8 @@ export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+  purpose?: 'authenticate' | 'provision-provider-credential';
+  credentialRevision?: string;
 };
 
 export type MachineAcpAuthenticationCodeArgs = {
@@ -106,6 +108,8 @@ export function useMachineAcpAuthentication(
             requestId,
             action: 'start',
             configId: args.configId,
+            ...(args.purpose ? { purpose: args.purpose } : {}),
+            ...(args.credentialRevision ? { credentialRevision: args.credentialRevision } : {}),
           });
           const response = await responsePromise;
           if (!response) {

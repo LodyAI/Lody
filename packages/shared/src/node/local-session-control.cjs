@@ -515,6 +515,14 @@ function isLocalSessionControlRequest(value) {
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.purpose === 'undefined' ||
+            value.purpose === 'authenticate' ||
+            value.purpose === 'provision-provider-credential') &&
+          (value.purpose === 'provision-provider-credential'
+            ? typeof value.credentialRevision === 'string' &&
+              value.credentialRevision.trim().length > 0 &&
+              value.credentialRevision.length <= 1024
+            : typeof value.credentialRevision === 'undefined') &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&

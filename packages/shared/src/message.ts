@@ -388,6 +388,10 @@ export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
         action: 'start';
         /** Daemon-authoritative persisted Provider config. No launch fields cross RPC. */
         configId: AgentConfigId;
+        /** Explicit credential mutation; ordinary authentication never rotates stored keys. */
+        purpose?: 'authenticate' | 'provision-provider-credential';
+        /** Exact staged setup generation required for credential provisioning. */
+        credentialRevision?: string;
       }
     | {
         action: 'cancel';

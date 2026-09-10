@@ -14,6 +14,7 @@ export function useCodexProviderCredential(
     async (args: {
       machineId: MachineId;
       configId: AgentConfigId;
+      credentialRevision: string;
       apiKey: string;
     }): Promise<void> => {
       let inputSubmitted = false;
@@ -24,6 +25,8 @@ export function useCodexProviderCredential(
       const authentication = startAuthentication({
         machineId: args.machineId,
         configId: args.configId,
+        purpose: 'provision-provider-credential',
+        credentialRevision: args.credentialRevision,
         onProgress: (progress) => {
           if (
             progress.status !== 'input-required' ||

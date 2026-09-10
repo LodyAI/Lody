@@ -1425,6 +1425,58 @@ export class LoroDocumentManager {
       : null;
   }
 
+  async waitForProviderSetupConfig(
+    agentConfigId: AgentConfigId,
+    machineId: MachineId,
+    credentialRevision: string,
+    options: { timeoutMs?: number } = {}
+  ): Promise<AgentConfigMeta | null> {
+    const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
+    const read = (): AgentConfigMeta | null | undefined => {
+      const rows = readMachineFlockRowsFromFlock(handle.flock, {
+        prefixes: [
+          machineFlockKeys.providerSetup(agentConfigId),
+          machineFlockKeys.providerSetupCancellation(agentConfigId),
+        ],
+      });
+      const cancellation = getMachineFlockProviderSetupCancellations(rows)[agentConfigId];
+      if (
+        cancellation &&
+        (!cancellation.credentialRevision || cancellation.credentialRevision === credentialRevision)
+      ) {
+        return null;
+      }
+      const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
+      if (!setup || setup.credentialRevision !== credentialRevision) return undefined;
+      return setup.machineId === machineId &&
+        isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
+        ? setup.config
+        : null;
+    };
+    const initial = read();
+    if (initial !== undefined) return initial;
+    return await new Promise<AgentConfigMeta | null>((resolve) => {
+      let settled = false;
+      let unsubscribe = (): void => {};
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const finish = (value: AgentConfigMeta | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        unsubscribe();
+        resolve(value);
+      };
+      unsubscribe = handle.flock.subscribe(() => {
+        const value = read();
+        if (value !== undefined) finish(value);
+      });
+      timeout = setTimeout(() => finish(null), options.timeoutMs ?? 60_000);
+      timeout.unref?.();
+      const afterSubscribe = read();
+      if (afterSubscribe !== undefined) finish(afterSubscribe);
+    });
+  }
+
   async createAgentConfig(
     cliType: AgentConfigCliType,
     agentType: AgentType,

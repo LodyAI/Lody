@@ -18,23 +18,31 @@ and IP loopback. The shared builder enforces the same rule as the form.
 
 The API key is one-shot renderer state. It must never enter `AgentConfig.env`, a
 `ProviderSetupTask`, logs, or another workspace-readable document. The renderer submits it
-through the encrypted Machine ACP authentication-input path. The target CLI stores it in an
-owner-only machine-local credential record and injects it under the generated provider's
-`env_key` only when the current launch configuration matches the record's binding. A changed
-endpoint, proxy, runtime, agent type, or custom launch command must fail closed.
+through the encrypted Machine ACP authentication-input path. The target CLI stores it in a
+machine-local credential record and injects it under the generated provider's `env_key` only
+when the current launch configuration names the exact credential revision and matches the
+record's binding. A changed endpoint, proxy, runtime, agent type, custom launch command, or
+revision must fail closed. POSIX storage uses `0700` directories and `0600` files; Windows relies
+on the inherited ACL of Lody's per-user data directory.
 
-Creation uses a non-secret durable setup draft. The target machine accepts the credential,
-performs the live provider probe, and publishes the final non-secret AgentConfig only after that
-probe succeeds. Failed verification rolls back the staged credential; cancellation removes the
-setup and its local credential. Machines that do not advertise the credential protocol cannot
+Creation and credential-changing edits use a non-secret durable setup draft with an exact
+credential revision. The credential RPC waits for that revision to become visible on the target
+daemon, accepts or replaces its key through an explicit provisioning action, and probes the
+staged config. A successful probe publishes the final non-secret AgentConfig and removes the
+setup in one Flock commit. During an edit, the previous published config and credential remain
+usable until that commit. A crash, failed verification, or cancellation therefore cannot expose
+a half-configured live provider. Machines that do not advertise the credential protocol cannot
 submit this mode.
 
 The dedicated form owns only the provider entry and ownership marker it generates. Returning to
-ChatGPT restores the prior `model_provider` selector and removes the generated provider, marker,
-and machine-local credential. Existing `CODEX_API_KEY`, unrelated providers, and other
-environment values remain unchanged. A malformed `CODEX_CONFIG`, reserved provider-id
-collision, or marker collision is rejected instead of overwritten. Arbitrary hand-written Codex
-configuration remains an advanced environment override.
+ChatGPT restores the prior `model_provider` selector and removes the generated provider and
+marker. Switching modes and deleting a provider also writes a durable credential-cleanup intent
+before changing or deleting the config. The target daemon replays that intent whenever it is
+online and removes the referenced local revision only after no published config or setup still
+uses it; cleanup does not depend on observing an intermediate config revision. Existing
+`CODEX_API_KEY`, unrelated providers, and other environment values remain unchanged. A malformed
+`CODEX_CONFIG`, reserved provider-id collision, or marker collision is rejected instead of
+overwritten. Arbitrary hand-written Codex configuration remains an advanced environment override.
 
 The custom endpoint changes authentication and request routing, not runtime ownership. Lody
 continues to install and manage the same Codex runtime unless the user separately supplies a

@@ -17,7 +17,10 @@ const workspaceId = 'workspace-test' as WorkspaceId;
 let dataDir = '';
 let previousDataDir: string | undefined;
 
-function config(baseUrl = 'https://relay.example.com/v1'): AgentConfigMeta {
+function config(
+  baseUrl = 'https://relay.example.com/v1',
+  credentialRevision = 'revision-1'
+): AgentConfigMeta {
   return {
     id: 'codex-test',
     machineId: 'machine-test',
@@ -25,7 +28,7 @@ function config(baseUrl = 'https://relay.example.com/v1'): AgentConfigMeta {
     description: undefined,
     cliType: 'builtin',
     agentType: 'codex',
-    env: buildLodyCodexCustomProviderEnv({}, { baseUrl }),
+    env: buildLodyCodexCustomProviderEnv({}, { baseUrl, credentialRevision }),
   } as AgentConfigMeta;
 }
 
@@ -83,5 +86,19 @@ describe('provider credential store', () => {
     expect(
       (await hydrateCodexProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
+  });
+
+  it('keeps the published key active while staging a same-endpoint rotation', async () => {
+    const published = config('https://relay.example.com/v1', 'revision-old');
+    const staged = config('https://relay.example.com/v1', 'revision-new');
+    await storeCodexProviderCredential(workspaceId, published, 'old-key');
+    await storeCodexProviderCredential(workspaceId, staged, 'new-key');
+
+    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
+    });
+    expect((await hydrateCodexProviderCredential(workspaceId, staged)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'new-key',
+    });
   });
 });

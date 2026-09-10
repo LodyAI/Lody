@@ -521,7 +521,12 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'providerCredentialCleanup' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
@@ -3297,7 +3302,13 @@ export class MessageHandler {
           const message: MachineAcpAuthenticateRequestValidated = (() => {
             switch (args.action) {
               case 'start':
-                return { ...common, action: args.action, configId: args.configId };
+                return {
+                  ...common,
+                  action: args.action,
+                  configId: args.configId,
+                  purpose: args.purpose,
+                  credentialRevision: args.credentialRevision,
+                };
               case 'cancel':
                 return {
                   ...common,
@@ -8382,7 +8393,14 @@ export class MessageHandler {
       try {
         // Re-read and probe the durable task's own config. Never publish based
         // on caller-supplied launch fields from this unauthenticated RPC.
-        await this.providerSetupManager.resumeAfterAuthentication(message.configId);
+        if (message.purpose === 'provision-provider-credential' && message.credentialRevision) {
+          await this.providerSetupManager.publishAfterCredentialVerification(
+            message.configId,
+            message.credentialRevision
+          );
+        } else {
+          await this.providerSetupManager.resumeAfterAuthentication(message.configId);
+        }
       } catch (error) {
         this.logger.debug(
           `[provider-setup] Failed to resume ${message.configId} after authentication: ${formatErrorMessage(

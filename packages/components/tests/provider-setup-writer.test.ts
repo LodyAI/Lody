@@ -15,6 +15,7 @@ import {
 
 import {
   cmdCreateProviderSetupAtom,
+  cmdRequestProviderCredentialCleanupAtom,
   cmdRetryProviderSetupAtom,
   deleteProviderSetupAtom,
   getAllAgentConfigAtom,
@@ -89,7 +90,10 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       description: undefined,
       cliType: 'builtin',
       agentType: 'codex',
-      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+      env: buildLodyCodexCustomProviderEnv(
+        {},
+        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
+      ),
       prompt: '',
     };
 
@@ -103,6 +107,8 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
         machineId,
         status: 'awaiting-auth',
         attempt: 1,
+        operation: 'create',
+        credentialRevision: 'revision-1',
       }),
     ]);
     expect(store.get(getAllProviderSetupsAtom)).toEqual([
@@ -166,12 +172,14 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       cancellationKey,
       expect.objectContaining({ v: 1, id: setupId, machineId }),
     ]);
-    expect(flockRowDelete).not.toHaveBeenCalled();
+    expect(flockRowDelete).toHaveBeenCalledTimes(2);
 
     markerAccepted.resolve();
     await cancelPromise;
 
     expect(flockRowDelete.mock.calls).toEqual([
+      [flockDocId, cancellationKey],
+      [flockDocId, cancellationKey],
       [flockDocId, setupKey],
       [flockDocId, configKey],
     ]);
@@ -196,5 +204,20 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     expect(rendererCommit).not.toHaveBeenCalled();
     expect(flush).not.toHaveBeenCalled();
     expect(syncOnce).not.toHaveBeenCalled();
+
+    await store.set(cmdRequestProviderCredentialCleanupAtom, {
+      id: setupId,
+      machineId,
+      credentialRevision: 'revision-1',
+    });
+    expect(flockRowPut).toHaveBeenLastCalledWith(
+      flockDocId,
+      machineFlockKeys.providerCredentialCleanup(setupId, 'revision-1'),
+      expect.objectContaining({
+        id: setupId,
+        machineId,
+        credentialRevision: 'revision-1',
+      })
+    );
   });
 });

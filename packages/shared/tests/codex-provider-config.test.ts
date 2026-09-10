@@ -15,7 +15,7 @@ describe('Lody Codex custom provider config', () => {
   it('keeps the credential out of durable env and routes Codex through Responses', () => {
     const env = buildLodyCodexCustomProviderEnv(
       { HTTPS_PROXY: 'http://127.0.0.1:7890' },
-      { baseUrl: '  https://relay.example.com/v1  ' }
+      { baseUrl: '  https://relay.example.com/v1  ', credentialRevision: 'revision-1' }
     );
 
     expect(env[CODEX_API_KEY_ENV]).toBeUndefined();
@@ -33,6 +33,7 @@ describe('Lody Codex custom provider config', () => {
     });
     expect(getLodyCodexCustomProvider(env)).toEqual({
       baseUrl: 'https://relay.example.com/v1',
+      credentialRevision: 'revision-1',
     });
   });
 
@@ -48,6 +49,7 @@ describe('Lody Codex custom provider config', () => {
     };
     const configured = buildLodyCodexCustomProviderEnv(original, {
       baseUrl: 'https://relay.example.com',
+      credentialRevision: 'revision-1',
     });
 
     expect(removeLodyCodexCustomProviderEnv(configured)).toEqual(original);
@@ -61,13 +63,13 @@ describe('Lody Codex custom provider config', () => {
             model_providers: { [LODY_CODEX_MODEL_PROVIDER_ID]: { base_url: 'https://corp.test' } },
           }),
         },
-        { baseUrl: 'https://relay.example.com' }
+        { baseUrl: 'https://relay.example.com', credentialRevision: 'revision-1' }
       )
     ).toThrow(/already defines/);
     expect(() =>
       buildLodyCodexCustomProviderEnv(
         { [CODEX_CONFIG_ENV]: '{not-json' },
-        { baseUrl: 'https://relay.example.com' }
+        { baseUrl: 'https://relay.example.com', credentialRevision: 'revision-1' }
       )
     ).toThrow(/JSON object/);
   });

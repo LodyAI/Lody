@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentConfigId, MachineId } from '../src/ids';
+import { buildLodyCodexCustomProviderEnv } from '../src/codex-provider-config';
 import {
   getMachineFlockProviderSetups,
   machineFlockKeys,
@@ -88,5 +89,32 @@ describe('machine flock provider setup rows', () => {
         config: { ...setup.config, env: { CODEX_API_KEY: 'sk-must-not-sync' } },
       })
     ).toBeUndefined();
+  });
+
+  it('rejects custom provider rows whose top-level revision is missing or mismatched', () => {
+    const config = {
+      ...setup.config,
+      env: buildLodyCodexCustomProviderEnv(
+        {},
+        { baseUrl: 'https://relay.example.test/v1', credentialRevision: 'revision-2' }
+      ),
+    };
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), { ...setup, config })
+    ).toBeUndefined();
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config,
+        credentialRevision: 'revision-1',
+      })
+    ).toBeUndefined();
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config,
+        credentialRevision: 'revision-2',
+      })
+    ).toBeDefined();
   });
 });

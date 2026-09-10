@@ -63,6 +63,11 @@ describe('local session control node validators', () => {
       action: 'start',
       configId: 'config-1',
     };
+    const provision = {
+      ...request,
+      purpose: 'provision-provider-credential',
+      credentialRevision: 'revision-1',
+    };
     const progress = {
       type: 'machine/acp-authentication-progress',
       machineId: 'machine-1',
@@ -129,6 +134,14 @@ describe('local session control node validators', () => {
     };
     expect(isLocalSessionControlRequest(request)).toBe(true);
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+    expect(isLocalSessionControlRequest(provision)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(provision)).toBe(true);
+    expect(isLocalSessionControlRequest({ ...provision, credentialRevision: undefined })).toBe(
+      false
+    );
+    expect(isLocalSessionControlRequestCjs({ ...provision, credentialRevision: undefined })).toBe(
+      false
+    );
     expect(isLocalSessionControlRequest(submitCode)).toBe(true);
     expect(isLocalSessionControlRequestCjs(submitCode)).toBe(true);
     expect(isLocalSessionControlRequest(submitInput)).toBe(true);

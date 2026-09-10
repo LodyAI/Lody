@@ -13,9 +13,9 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
+  ALL_PROVIDER_CREDENTIAL_REVISIONS,
   REGISTRY_ACP_AGENTS,
   getLodyCodexCustomProvider,
-  removeLodyCodexCustomProviderEnv,
   getBuiltinAgentByAgentType,
   isManagedBuiltinAgentType,
   type AgentBrandId,
@@ -46,6 +46,7 @@ import { cn } from '@/lib/utils';
 import {
   cmdCreateAgentConfigAtom,
   cmdCreateProviderSetupAtom,
+  cmdRequestProviderCredentialCleanupAtom,
   cmdRetryProviderSetupAtom,
   cmdUpdateAgentConfigAtom,
   deleteAgentConfigAtom,
@@ -709,6 +710,7 @@ export function ProvidersScreen({
   const allSetups = useAtomValue(getAllProviderSetupsAtom);
   const createConfig = useSetAtom(cmdCreateAgentConfigAtom);
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
+  const requestCredentialCleanup = useSetAtom(cmdRequestProviderCredentialCleanupAtom);
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
   const updateConfig = useSetAtom(cmdUpdateAgentConfigAtom);
   const deleteConfig = useSetAtom(deleteAgentConfigAtom);
@@ -1064,10 +1066,13 @@ export function ProvidersScreen({
             await createConfig(config);
           }
           if (payload.codexApiKey) {
+            const provider = getLodyCodexCustomProvider(config.env);
+            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
             try {
               await provisionCodexCredential({
                 machineId: config.machineId,
                 configId: config.id,
+                credentialRevision: provider.credentialRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
@@ -1096,24 +1101,43 @@ export function ProvidersScreen({
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
           };
-          await updateConfig(nextConfig);
           if (payload.codexApiKey) {
+            const provider = getLodyCodexCustomProvider(nextConfig.env);
+            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
+            const previous = getLodyCodexCustomProvider(dialogMode.config.env);
+            if (previous) {
+              await requestCredentialCleanup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                credentialRevision:
+                  previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+              });
+            }
+            await createSetup(nextConfig);
             try {
               await provisionCodexCredential({
                 machineId: nextConfig.machineId,
                 configId: nextConfig.id,
+                credentialRevision: provider.credentialRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              await updateConfig(dialogMode.config);
+              await deleteSetup(nextConfig.id);
               throw error;
             }
-          }
-          if (removingCodexCredential) {
-            await refreshCapabilities({
-              machineId: nextConfig.machineId,
-              configId: nextConfig.id,
-            }).catch(() => undefined);
+          } else {
+            if (removingCodexCredential) {
+              const previous = getLodyCodexCustomProvider(dialogMode.config.env);
+              if (previous) {
+                await requestCredentialCleanup({
+                  id: nextConfig.id,
+                  machineId: nextConfig.machineId,
+                  credentialRevision:
+                    previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+                });
+              }
+            }
+            await updateConfig(nextConfig);
           }
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.
@@ -1153,7 +1177,7 @@ export function ProvidersScreen({
       invalidateTestRun,
       localMachineId,
       provisionCodexCredential,
-      refreshCapabilities,
+      requestCredentialCleanup,
       t,
       updateConfig,
     ]
@@ -1236,15 +1260,13 @@ export function ProvidersScreen({
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
-      if (getLodyCodexCustomProvider(pendingDelete.env)) {
-        await updateConfig({
-          ...pendingDelete,
-          env: removeLodyCodexCustomProviderEnv(pendingDelete.env),
-        });
-        await refreshCapabilities({
+      const provider = getLodyCodexCustomProvider(pendingDelete.env);
+      if (provider) {
+        await requestCredentialCleanup({
+          id: pendingDelete.id,
           machineId: pendingDelete.machineId,
-          configId: pendingDelete.id,
-        }).catch(() => undefined);
+          credentialRevision: provider.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+        });
       }
       await deleteConfig(pendingDelete.id);
       clearFailureReason(pendingDelete.id);

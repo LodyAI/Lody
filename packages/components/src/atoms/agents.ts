@@ -28,6 +28,7 @@ import {
   type MachineFlockRowMap,
   type MachineId,
   type ProviderSetupCancellation,
+  type ProviderCredentialCleanup,
   type ProviderSetupTask,
   type TitleGenerationConfig,
   getAgentConfigRoomId,
@@ -100,6 +101,10 @@ async function writeProviderSetupToMachineFlock(
   }
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
   const key = machineFlockKeys.providerSetup(setup.id);
+  await runtime.writer.flockRowDelete(
+    flockDocId,
+    machineFlockKeys.providerSetupCancellation(setup.id)
+  );
   await runtime.writer.flockRowPut(flockDocId, key, setup);
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   return {
@@ -120,6 +125,8 @@ async function cancelProviderSetupInMachineFlock(
     id: setup.id,
     machineId: setup.machineId,
     cancelledAt,
+    ...(setup.operation === 'replace' ? { preservePublishedConfig: true } : {}),
+    ...(setup.credentialRevision ? { credentialRevision: setup.credentialRevision } : {}),
   };
   const cancellationKey = machineFlockKeys.providerSetupCancellation(setup.id);
   const setupKey = machineFlockKeys.providerSetup(setup.id);
@@ -151,13 +158,13 @@ async function cancelProviderSetupInMachineFlock(
     await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
     rows[serializeMachineFlockKey(optOut.key)] = optOut;
   }
-  await Promise.allSettled([
-    runtime.writer.flockRowDelete(flockDocId, setupKey),
-    runtime.writer.flockRowDelete(flockDocId, configKey),
-  ]);
+  const cleanup = [runtime.writer.flockRowDelete(flockDocId, setupKey)];
+  if (setup.operation !== 'replace')
+    cleanup.push(runtime.writer.flockRowDelete(flockDocId, configKey));
+  await Promise.allSettled(cleanup);
 
   delete rows[serializeMachineFlockKey(setupKey)];
-  delete rows[serializeMachineFlockKey(configKey)];
+  if (setup.operation !== 'replace') delete rows[serializeMachineFlockKey(configKey)];
   return rows;
 }
 
@@ -381,10 +388,12 @@ export const cmdCreateAgentConfigAtom = atom(
 export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: AgentConfigMeta) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   if (!runtime) throw new Error('Runtime not ready');
+  const provider = getLodyCodexCustomProvider(config.env);
   if (
     config.cliType !== 'builtin' ||
     !isManagedBuiltinAgentType(config.agentType) ||
-    hasBuiltinRuntimeOverrideValues(config.runtimeOverrides)
+    (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
+      !(config.agentType === 'codex' && provider?.credentialRevision))
   ) {
     throw new Error('Provider setup is only supported for managed builtin agents');
   }
@@ -392,15 +401,23 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
     throw new Error('Provider setup rows cannot contain credentials');
   }
   const now = getServerNow();
+  if (provider && !provider.credentialRevision) {
+    throw new Error('Codex provider setup requires a credential revision');
+  }
+  const operation = get(getAllAgentConfigAtom).some((entry) => entry.id === config.id)
+    ? 'replace'
+    : 'create';
   const setup: ProviderSetupTask = {
     v: 1,
     id: config.id,
     machineId: config.machineId,
     config,
-    status: getLodyCodexCustomProvider(config.env) ? 'awaiting-auth' : 'queued',
+    status: provider ? 'awaiting-auth' : 'queued',
     attempt: 1,
     createdAt: now,
     updatedAt: now,
+    operation,
+    ...(provider?.credentialRevision ? { credentialRevision: provider.credentialRevision } : {}),
   };
   const rows = await writeProviderSetupToMachineFlock(runtime, setup);
   set(setMachineFlockRowsForMachineAtom, {
@@ -411,6 +428,24 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
   });
   return setup.id;
 });
+
+export const cmdRequestProviderCredentialCleanupAtom = atom(
+  null,
+  async (_get, _set, cleanup: Omit<ProviderCredentialCleanup, 'v' | 'requestedAt'>) => {
+    const runtime = _get(activeWorkspaceRuntimeAtom);
+    if (!runtime) throw new Error('Runtime not ready');
+    const value: ProviderCredentialCleanup = {
+      v: 1,
+      ...cleanup,
+      requestedAt: getServerNow(),
+    };
+    await runtime.writer.flockRowPut(
+      getMachineFlockDocId(runtime.workspaceId, cleanup.machineId),
+      machineFlockKeys.providerCredentialCleanup(cleanup.id, cleanup.credentialRevision),
+      value
+    );
+  }
+);
 
 export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
   const runtime = get(activeWorkspaceRuntimeAtom);

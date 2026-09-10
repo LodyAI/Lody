@@ -21,7 +21,7 @@ export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
-export const CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION = 1;
+export const CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION = 2;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;

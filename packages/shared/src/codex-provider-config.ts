@@ -5,9 +5,14 @@ export const LODY_CODEX_PROVIDER_STATE_ENV = 'LODY_CODEX_CUSTOM_ENDPOINT_STATE';
 export const LODY_CODEX_MODEL_PROVIDER_ID = 'lody-custom-endpoint';
 
 export type CodexAuthenticationMode = 'chatgpt' | 'api-key';
-export type LodyCodexCustomProvider = { baseUrl: string };
-type ProviderState = {
+export type LodyCodexCustomProvider = { baseUrl: string; credentialRevision?: string };
+type ProviderStateV1 = {
   v: 1;
+  previousModelProvider: { present: false } | { present: true; value: unknown };
+};
+type ProviderState = {
+  v: 2;
+  credentialRevision: string;
   previousModelProvider: { present: false } | { present: true; value: unknown };
 };
 
@@ -26,13 +31,18 @@ function parseRecord(value: string | undefined): Record<string, unknown> | null 
   }
 }
 
-function parseState(value: string | undefined): ProviderState | null {
+function parseState(value: string | undefined): ProviderState | ProviderStateV1 | null {
   const state = parseRecord(value);
   const previous = asRecord(state?.previousModelProvider);
-  if (state?.v !== 1 || typeof previous?.present !== 'boolean') return null;
-  return previous.present
-    ? { v: 1, previousModelProvider: { present: true, value: previous.value } }
-    : { v: 1, previousModelProvider: { present: false } };
+  if (typeof previous?.present !== 'boolean') return null;
+  const previousModelProvider = previous.present
+    ? ({ present: true, value: previous.value } as const)
+    : ({ present: false } as const);
+  if (state?.v === 1) return { v: 1, previousModelProvider };
+  if (state?.v !== 2 || typeof state.credentialRevision !== 'string') return null;
+  const credentialRevision = state.credentialRevision.trim();
+  if (!credentialRevision) return null;
+  return { v: 2, credentialRevision, previousModelProvider };
 }
 
 export function isAllowedCredentialEndpoint(value: string): boolean {
@@ -59,7 +69,8 @@ export function getLodyCodexCustomProvider(
   env: Record<string, string | undefined> | undefined
 ): LodyCodexCustomProvider | null {
   const config = parseRecord(env?.[CODEX_CONFIG_ENV]);
-  if (!parseState(env?.[LODY_CODEX_PROVIDER_STATE_ENV])) return null;
+  const state = parseState(env?.[LODY_CODEX_PROVIDER_STATE_ENV]);
+  if (!state) return null;
   if (config?.model_provider !== LODY_CODEX_MODEL_PROVIDER_ID) return null;
   const provider = asRecord(asRecord(config.model_providers)?.[LODY_CODEX_MODEL_PROVIDER_ID]);
   if (
@@ -71,7 +82,10 @@ export function getLodyCodexCustomProvider(
   ) {
     return null;
   }
-  return { baseUrl: provider.base_url };
+  return {
+    baseUrl: provider.base_url,
+    ...(state.v === 2 ? { credentialRevision: state.credentialRevision } : {}),
+  };
 }
 
 export function buildLodyCodexCustomProviderEnv(
@@ -94,11 +108,14 @@ export function buildLodyCodexCustomProviderEnv(
   if (!existingState && LODY_CODEX_MODEL_PROVIDER_ID in providers) {
     throw new Error(`CODEX_CONFIG already defines ${LODY_CODEX_MODEL_PROVIDER_ID}`);
   }
-  const state: ProviderState =
-    existingState ??
+  const credentialRevision = input.credentialRevision?.trim();
+  if (!credentialRevision) throw new Error('Codex credential revision is required');
+  const previousModelProvider =
+    existingState?.previousModelProvider ??
     (Object.prototype.hasOwnProperty.call(config, 'model_provider')
-      ? { v: 1, previousModelProvider: { present: true, value: config.model_provider } }
-      : { v: 1, previousModelProvider: { present: false } });
+      ? { present: true as const, value: config.model_provider }
+      : { present: false as const });
+  const state: ProviderState = { v: 2, credentialRevision, previousModelProvider };
   providers[LODY_CODEX_MODEL_PROVIDER_ID] = {
     name: 'Custom OpenAI-compatible endpoint',
     base_url: baseUrl,

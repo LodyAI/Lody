@@ -92,7 +92,10 @@ import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
 } from '@/agent/acp-authentication';
-import { storeCodexProviderCredential } from '@/agent/provider-credential-store';
+import {
+  hydrateCodexProviderCredential,
+  storeCodexProviderCredential,
+} from '@/agent/provider-credential-store';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
@@ -5121,10 +5124,26 @@ export class SessionExecutionService {
       };
     }
 
-    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-      message.configId,
-      this.deps.machineId
-    );
+    const provisioning = message.purpose === 'provision-provider-credential';
+    if (provisioning && !message.credentialRevision?.trim()) {
+      return {
+        ...base,
+        success: false,
+        disposition: 'error',
+        error: 'Credential provisioning requires an exact setup revision',
+      };
+    }
+    const config = provisioning
+      ? await this.deps.workspaceDocument.waitForProviderSetupConfig(
+          message.configId,
+          this.deps.machineId,
+          message.credentialRevision ?? '',
+          { timeoutMs: 60_000 }
+        )
+      : await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          message.configId,
+          this.deps.machineId
+        );
     if (!config || (config.cliType === 'custom' && !config.customAcp)) {
       return {
         ...base,
@@ -5164,6 +5183,7 @@ export class SessionExecutionService {
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
       env: config.env,
+      forceCodexApiKeyInput: provisioning,
       storeCodexApiKey: async (apiKey) => {
         rollbackCredential = await storeCodexProviderCredential(
           this.deps.workspaceId,
@@ -5174,11 +5194,12 @@ export class SessionExecutionService {
       onProgress,
     });
     if (result.success && result.disposition === 'authenticated') {
-      const verifiedConfig =
-        (await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-          message.configId,
-          this.deps.machineId
-        )) ?? config;
+      const verifiedConfig = provisioning
+        ? await hydrateCodexProviderCredential(this.deps.workspaceId, config)
+        : ((await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+            message.configId,
+            this.deps.machineId
+          )) ?? config);
       const refreshController = new AbortController();
       const refreshTimeoutMs = Math.max(
         1,

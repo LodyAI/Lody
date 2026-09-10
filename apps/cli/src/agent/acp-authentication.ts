@@ -535,6 +535,7 @@ export class AcpAuthenticationManager {
     runtimeOverrides?: BuiltinRuntimeOverrides;
     env?: Record<string, string>;
     storeCodexApiKey?: (apiKey: string) => Promise<void>;
+    forceCodexApiKeyInput?: boolean;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
     const isBuiltinAuthentication =
@@ -599,7 +600,7 @@ export class AcpAuthenticationManager {
       const codexProvider = agentType === 'codex' ? getLodyCodexCustomProvider(options.env) : null;
       if (
         codexProvider &&
-        !options.env?.[LODY_CODEX_API_KEY_ENV]?.trim() &&
+        (options.forceCodexApiKeyInput || !options.env?.[LODY_CODEX_API_KEY_ENV]?.trim()) &&
         options.storeCodexApiKey
       ) {
         const interactionId = randomUUID();

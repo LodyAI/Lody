@@ -5,8 +5,8 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
+  ALL_PROVIDER_CREDENTIAL_REVISIONS,
   getLodyCodexCustomProvider,
-  removeLodyCodexCustomProviderEnv,
   type AcpSessionMonitorSnapshot,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -27,6 +27,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import {
   cmdCreateAgentConfigAtom,
   cmdCreateProviderSetupAtom,
+  cmdRequestProviderCredentialCleanupAtom,
   cmdRetryProviderSetupAtom,
   cmdUpdateAgentConfigAtom,
   deleteAgentConfigAtom,
@@ -217,6 +218,7 @@ export function MachineAgentSettings({
   useProviderSetupRuntimeProgress(runtime, workspaceId, allSetups);
   const createConfig = useSetAtom(cmdCreateAgentConfigAtom);
   const createSetup = useSetAtom(cmdCreateProviderSetupAtom);
+  const requestCredentialCleanup = useSetAtom(cmdRequestProviderCredentialCleanupAtom);
   const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
   const updateConfig = useSetAtom(cmdUpdateAgentConfigAtom);
   const deleteConfig = useSetAtom(deleteAgentConfigAtom);
@@ -917,10 +919,13 @@ export function MachineAgentSettings({
             await createConfig(config);
           }
           if (payload.codexApiKey) {
+            const provider = getLodyCodexCustomProvider(config.env);
+            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
             try {
               await provisionCodexCredential({
                 machineId: config.machineId,
                 configId: config.id,
+                credentialRevision: provider.credentialRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
@@ -947,24 +952,43 @@ export function MachineAgentSettings({
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
           };
-          await updateConfig(nextConfig);
           if (payload.codexApiKey) {
+            const provider = getLodyCodexCustomProvider(nextConfig.env);
+            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
+            const previous = getLodyCodexCustomProvider(dialogMode.config.env);
+            if (previous) {
+              await requestCredentialCleanup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                credentialRevision:
+                  previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+              });
+            }
+            await createSetup(nextConfig);
             try {
               await provisionCodexCredential({
                 machineId: nextConfig.machineId,
                 configId: nextConfig.id,
+                credentialRevision: provider.credentialRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
-              await updateConfig(dialogMode.config);
+              await deleteSetup(nextConfig.id);
               throw error;
             }
-          }
-          if (removingCodexCredential) {
-            await refreshCapabilities({
-              machineId: nextConfig.machineId,
-              configId: nextConfig.id,
-            }).catch(() => undefined);
+          } else {
+            if (removingCodexCredential) {
+              const previous = getLodyCodexCustomProvider(dialogMode.config.env);
+              if (previous) {
+                await requestCredentialCleanup({
+                  id: nextConfig.id,
+                  machineId: nextConfig.machineId,
+                  credentialRevision:
+                    previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+                });
+              }
+            }
+            await updateConfig(nextConfig);
           }
         }
       } catch (error) {
@@ -985,7 +1009,7 @@ export function MachineAgentSettings({
       deleteConfig,
       deleteSetup,
       provisionCodexCredential,
-      refreshCapabilities,
+      requestCredentialCleanup,
       updateConfig,
       t,
     ]
@@ -1019,14 +1043,14 @@ export function MachineAgentSettings({
     async (config: AgentConfigMeta) => {
       try {
         if (getLodyCodexCustomProvider(config.env)) {
-          await updateConfig({
-            ...config,
-            env: removeLodyCodexCustomProviderEnv(config.env),
-          });
-          await refreshCapabilities({
-            machineId: config.machineId,
-            configId: config.id,
-          }).catch(() => undefined);
+          const provider = getLodyCodexCustomProvider(config.env);
+          if (provider) {
+            await requestCredentialCleanup({
+              id: config.id,
+              machineId: config.machineId,
+              credentialRevision: provider.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
+            });
+          }
         }
         await deleteConfig(config.id);
       } catch (error) {
@@ -1035,7 +1059,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [deleteConfig, refreshCapabilities, t, updateConfig]
+    [deleteConfig, requestCredentialCleanup, t]
   );
 
   const showBanner = mode === 'agents' && migration.status === 'running';

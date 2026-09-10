@@ -657,7 +657,7 @@ describe('AgentConfigDialog', () => {
   it('hydrates a Codex custom endpoint and does not offer ChatGPT reauthentication', async () => {
     const env = buildLodyCodexCustomProviderEnv(
       { EXTRA_FLAG: '1' },
-      { baseUrl: 'https://relay.example.com/v1' }
+      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
     );
     await renderDialog(
       {
@@ -690,7 +690,7 @@ describe('AgentConfigDialog', () => {
         EXTRA_FLAG: '1',
         CODEX_CONFIG: JSON.stringify({ model: 'gpt-custom' }),
       },
-      { baseUrl: 'https://relay.example.com/v1' }
+      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
     );
     await renderDialog(
       {

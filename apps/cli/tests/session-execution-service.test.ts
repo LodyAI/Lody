@@ -5978,6 +5978,53 @@ describe('SessionExecutionService', () => {
     }
   });
 
+  it('waits for the exact staged revision before provisioning a credential', async () => {
+    const visibleSetup = createDeferred<AgentConfigMeta | null>();
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockResolvedValue({ success: true, disposition: 'cancelled' });
+    const config = createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {} });
+    const waitForProviderSetupConfig = vi.fn(() => visibleSetup.promise);
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          waitForProviderSetupConfig,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      const result = service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'provision-waits-for-flock',
+        action: 'start',
+        configId: capabilityConfigId,
+        purpose: 'provision-provider-credential',
+        credentialRevision: 'revision-new',
+      });
+      await Promise.resolve();
+      expect(authenticate).not.toHaveBeenCalled();
+
+      visibleSetup.resolve(config);
+      await expect(result).resolves.toEqual(
+        expect.objectContaining({ success: true, disposition: 'cancelled' })
+      );
+      expect(waitForProviderSetupConfig).toHaveBeenCalledWith(
+        capabilityConfigId,
+        'machine-1',
+        'revision-new',
+        { timeoutMs: 60_000 }
+      );
+      expect(authenticate).toHaveBeenCalledWith(
+        expect.objectContaining({ forceCodexApiKeyInput: true })
+      );
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
   it('bounds the post-authentication capability proof inside the renderer deadline', async () => {
     vi.useFakeTimers();
     const authenticate = vi

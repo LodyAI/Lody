@@ -2,7 +2,11 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
-import { ACP_AUTHORIZATION_URL_MAX_LENGTH, buildLodyCodexCustomProviderEnv } from '@lody/shared';
+import {
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
+} from '@lody/shared';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -60,7 +64,10 @@ describe('AcpAuthenticationManager', () => {
       requestId: 'codex-credential',
       cliType: 'builtin',
       agentType: 'codex',
-      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+      env: buildLodyCodexCustomProviderEnv(
+        {},
+        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
+      ),
       storeCodexApiKey,
       onProgress: (progress) => {
         if (progress.status !== 'input-required') return;
@@ -80,6 +87,36 @@ describe('AcpAuthenticationManager', () => {
     await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
     expect(storeCodexApiKey).toHaveBeenCalledWith('sk-encrypted-input');
     expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('requests a replacement key during explicit provisioning even when an old key is hydrated', async () => {
+    const storeCodexApiKey = vi.fn(async () => {});
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn() as never,
+    });
+    const env = buildLodyCodexCustomProviderEnv(
+      {},
+      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
+    );
+    const result = manager.authenticate({
+      requestId: 'codex-rotation',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: { ...env, [LODY_CODEX_API_KEY_ENV]: 'old-key' },
+      forceCodexApiKeyInput: true,
+      storeCodexApiKey,
+      onProgress: (progress) => {
+        if (progress.status !== 'input-required') return;
+        manager.submitAuthenticationInput(
+          'codex-rotation',
+          progress.interactionId,
+          JSON.stringify({ action: 'accept', content: { apiKey: 'new-key' } })
+        );
+      },
+    });
+
+    await expect(result).resolves.toEqual({ success: true, disposition: 'authenticated' });
+    expect(storeCodexApiKey).toHaveBeenCalledWith('new-key');
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {
