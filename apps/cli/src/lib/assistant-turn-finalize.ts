@@ -31,12 +31,29 @@ export const markAssistantTurnFinished = (
     turnId?: string | undefined;
     endedAt: number;
     permissionWaitMs?: number | undefined;
+    /** The provider prompt returned an error before its compaction emitted a terminal update. */
+    settleContextCompactionAsFailed?: boolean | undefined;
   }
 ): SessionHistoryInput[] => {
-  const { turnId, endedAt, permissionWaitMs } = options;
+  const { turnId, endedAt, permissionWaitMs, settleContextCompactionAsFailed } = options;
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
     if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+      if (settleContextCompactionAsFailed && entry.items) {
+        let changed = false;
+        const items = entry.items.map((item) => {
+          if (
+            item.type !== 'tool_call' ||
+            item.activityKind !== 'context_compaction' ||
+            (item.status !== 'pending' && item.status !== 'in_progress')
+          ) {
+            return item;
+          }
+          changed = true;
+          return { ...item, status: 'failed' as const };
+        });
+        if (changed) entry.items = items;
+      }
       // Already finalized: its terminal timing is the truth, not this call's clock.
       if (entry.finished === true) break;
       entry.finished = true;

@@ -1,7 +1,9 @@
-import { lazy, Suspense, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import NumberFlow from '@number-flow/react';
 import { useTranslation } from 'react-i18next';
-import { Coins, DollarSign } from 'lucide-react';
+import { Coins, DollarSign, Share2 } from 'lucide-react';
+import { Button } from '@/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -50,6 +52,11 @@ export type StatsSettingsViewProps = {
    * so large totals ($23,740) fit the tile without clipping.
    */
   costFractionDigits?: number;
+  /**
+   * Opt-in share entry. Off by default so the public landing demo neither shows
+   * an action it cannot perform nor pulls the capture pipeline into its bundle.
+   */
+  shareCard?: boolean;
 };
 
 const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
@@ -60,6 +67,12 @@ const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
 const UsageCalendarVisualization = lazy(async () => {
   const module = await import('./usage-calendar-visualization');
   return { default: module.UsageCalendarVisualization };
+});
+
+// snapdom + qrcode are only needed once someone opens the share dialog.
+const UsageShareImageDialog = lazy(async () => {
+  const module = await import('./usage-share-image-dialog');
+  return { default: module.UsageShareImageDialog };
 });
 
 export function formatTokens(value: number, locale?: string | null): string {
@@ -191,8 +204,10 @@ export function StatsSettingsView({
   tintModelSeriesLabel,
   tintMemberSeriesLabel,
   costFractionDigits = 2,
+  shareCard = false,
 }: StatsSettingsViewProps) {
   const { t, i18n } = useTranslation();
+  const [shareOpen, setShareOpen] = useState(false);
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const windowCaption = t(`workspace.usage.window.${range}.long`);
   const costDigits = Math.max(0, Math.min(2, costFractionDigits));
@@ -211,8 +226,38 @@ export function StatsSettingsView({
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{windowCaption}</p>
         </div>
-        <RangeSelector range={range} onRangeChange={onRangeChange} />
+        <div className="flex items-center gap-1.5">
+          <RangeSelector range={range} onRangeChange={onRangeChange} />
+          {shareCard && usageCalendar ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={t('workspace.usage.shareImage.action')}
+                  onClick={() => setShareOpen(true)}
+                >
+                  <Share2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workspace.usage.shareImage.action')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
       </div>
+
+      {shareCard && usageCalendar && shareOpen ? (
+        <Suspense fallback={null}>
+          <UsageShareImageDialog
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            calendar={usageCalendar}
+            timeline={usageTimeline}
+            range={range}
+            workspaceName={workspaceName}
+          />
+        </Suspense>
+      ) : null}
 
       {/* KPI overview band — 2 cards with icon watermarks. */}
       <div className="grid grid-cols-2 gap-3">

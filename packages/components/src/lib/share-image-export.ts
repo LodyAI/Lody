@@ -1,3 +1,8 @@
+/**
+ * Shared PNG capture for the product's share cards (session conversation,
+ * workspace usage). One pipeline so both surfaces get the same font/image
+ * readiness, the same Electron save/clipboard bridge, and the same failures.
+ */
 import { getImagePreviewExportBridge } from './image-preview-export';
 
 function pinOrderedListValues(element: HTMLElement): () => void {
@@ -24,7 +29,7 @@ function pinOrderedListValues(element: HTMLElement): () => void {
   };
 }
 
-async function captureChatShareImage(element: HTMLElement): Promise<Blob> {
+async function captureShareImage(element: HTMLElement): Promise<Blob> {
   await document.fonts.ready;
   await Promise.all(Array.from(element.querySelectorAll('img')).map((image) => image.decode()));
   const { snapdom } = await import('@zumer/snapdom');
@@ -41,7 +46,7 @@ async function captureChatShareImage(element: HTMLElement): Promise<Blob> {
       compress: false,
       plugins: [
         {
-          name: 'chat-share-hide-scrollbars',
+          name: 'lody-share-hide-scrollbars',
           beforeRender(context) {
             // Replace copied scrollbar rules only in the serialized image.
             context.scrollbarCSS =
@@ -57,10 +62,10 @@ async function captureChatShareImage(element: HTMLElement): Promise<Blob> {
   return blob;
 }
 
-export async function copyChatShareImage(element: HTMLElement): Promise<void> {
+export async function copyShareImage(element: HTMLElement): Promise<void> {
   const bridge = getImagePreviewExportBridge();
   if (bridge) {
-    const blob = await captureChatShareImage(element);
+    const blob = await captureShareImage(element);
     const result = await bridge.copyToClipboard({ pngBytes: await blob.arrayBuffer() });
     if (!result.copied) throw new Error(result.error || 'Image copy failed');
     return;
@@ -72,18 +77,27 @@ export async function copyChatShareImage(element: HTMLElement): Promise<void> {
 
   // WebKit revokes transient user activation after an await. Start the clipboard
   // write synchronously and let ClipboardItem await the PNG capture itself.
-  const png = captureChatShareImage(element);
+  const png = captureShareImage(element);
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
 }
 
-export async function exportChatShareImage(element: HTMLElement, title?: string): Promise<void> {
-  const blob = await captureChatShareImage(element);
+/**
+ * Saves the captured PNG. `title` is the user-facing name the card was built
+ * from (a session title, a workspace name); `fallback` is the surface's own
+ * stem, used when the title is empty or sanitizes away to nothing.
+ */
+export async function exportShareImage(
+  element: HTMLElement,
+  title: string | undefined,
+  fallback: string
+): Promise<void> {
+  const blob = await captureShareImage(element);
 
   const name =
-    (title?.trim() || 'lody-conversation')
+    (title?.trim() || fallback)
       .replace(/[<>:"/\\|?*\p{Cc}]/gu, '-')
       .replace(/[. ]+$/g, '')
-      .slice(0, 120) || 'lody-conversation';
+      .slice(0, 120) || fallback;
   const fileName = `${name}.png`;
   const bridge = getImagePreviewExportBridge();
   if (bridge) {

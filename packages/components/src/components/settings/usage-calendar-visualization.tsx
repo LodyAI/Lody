@@ -14,22 +14,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import {
-  Box,
-  Copy,
-  Download,
-  FileText,
-  LoaderCircle,
-  MousePointerClick,
-  Share2,
-  X,
-} from 'lucide-react';
+import { Box, Copy, Download, FileText, MousePointerClick, X } from 'lucide-react';
 import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -62,20 +52,8 @@ import {
   type UsageCalendarMetric,
   type UsageCalendarModel,
 } from './usage-calendar-model';
-import { createUsageShareCard, type UsageShareCardStyle } from './usage-share-card';
-import { scheduleUsageShareCardFontPreload } from './usage-share-card-fonts';
-
-type UsageShareCardPreview = {
-  file: File;
-  style: UsageShareCardStyle;
-  url: string;
-};
-
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
-// Share card is hidden while its ticket art is being reworked. The renderer, the
-// preview popover, and the Storybook gallery all stay wired up behind this flag.
-const SHOW_SHARE_CARD = false;
 
 /**
  * The heatmap paints one theme token at varying alpha instead of a fixed five-step
@@ -2136,12 +2114,8 @@ export function UsageCalendarVisualization({
   const [collapsingDay, setCollapsingDay] = useState<UsageSelectedDay | null>(null);
   const notifiedDayRef = useRef<number | null>(null);
   const [metric, setMetric] = useState<UsageCalendarMetric>('tokens');
-  const [shareCardStyle, setShareCardStyle] = useState<UsageShareCardStyle>('isometric');
-  const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
-  const [sharePreview, setSharePreview] = useState<UsageShareCardPreview | null>(null);
-  const [isSharePreviewLoading, setIsSharePreviewLoading] = useState(false);
-  // Exports and the share card are always token-denominated; only the on-screen
-  // views follow the metric toggle.
+  // Exports are always token-denominated; only the on-screen views follow the
+  // metric toggle.
   const tokenModel = useMemo(() => createUsageCalendarModel(calendar, 'tokens'), [calendar]);
   const costModel = useMemo(() => createUsageCalendarModel(calendar, 'costUSD'), [calendar]);
   const model = metric === 'tokens' ? tokenModel : costModel;
@@ -2156,10 +2130,6 @@ export function UsageCalendarVisualization({
   const rings = useUsageRingComposition(hourlyTimeline ?? undefined);
   const ascii = useMemo(() => createUsageSkylineAscii(tokenModel), [tokenModel]);
   const stem = fileStem(workspaceName || 'lody-usage');
-
-  useEffect(() => {
-    scheduleUsageShareCardFontPreload();
-  }, []);
 
   const selectDay = useCallback(
     (day: UsageSelectedDay | null) => {
@@ -2209,66 +2179,6 @@ export function UsageCalendarVisualization({
     );
   };
 
-  const createCard = useCallback(async () => {
-    const card = await createUsageShareCard(
-      tokenModel,
-      workspaceName || t('workspace.usage.title'),
-      `${formatTokens(tokenModel.totalValue)} ${t('workspace.usage.tokens')}`,
-      shareCardStyle
-    );
-    const cardKind = shareCardStyle === 'flat' ? 'heatmap' : 'skyline';
-    return new File([card], `${stem}-usage-${cardKind}.png`, { type: 'image/png' });
-  }, [shareCardStyle, stem, t, tokenModel, workspaceName]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (sharePopoverOpen) {
-      setIsSharePreviewLoading(true);
-      setSharePreview(null);
-
-      void createCard()
-        .then((file) => {
-          const url = URL.createObjectURL(file);
-          if (cancelled) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          setSharePreview({ file, style: shareCardStyle, url });
-        })
-        .catch(() => {
-          if (!cancelled) toast.error(t('workspace.usage.skyline.cardFailed'));
-        })
-        .finally(() => {
-          if (!cancelled) setIsSharePreviewLoading(false);
-        });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [createCard, shareCardStyle, sharePopoverOpen, t]);
-
-  useEffect(() => {
-    const url = sharePreview?.url;
-    return () => {
-      if (url !== undefined) URL.revokeObjectURL(url);
-    };
-  }, [sharePreview]);
-
-  const shareCard = async () => {
-    try {
-      const file = sharePreview?.style === shareCardStyle ? sharePreview.file : await createCard();
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: t('workspace.usage.skyline.shareCard') });
-      } else {
-        downloadBlob(file, file.name);
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      toast.error(t('workspace.usage.skyline.cardFailed'));
-    }
-  };
-
   return (
     <section className="overflow-hidden rounded-lg border border-border/60 bg-card/40">
       <header className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
@@ -2294,65 +2204,6 @@ export function UsageCalendarVisualization({
               { value: 'costUSD', label: t('workspace.usage.cost') },
             ]}
           />
-          {SHOW_SHARE_CARD ? (
-            <Popover open={sharePopoverOpen} onOpenChange={setSharePopoverOpen}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <PopoverTrigger asChild>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label={t('workspace.usage.skyline.shareCard')}
-                    >
-                      <Share2 />
-                    </Button>
-                  </PopoverTrigger>
-                </TooltipTrigger>
-                <TooltipContent>{t('workspace.usage.skyline.shareCard')}</TooltipContent>
-              </Tooltip>
-              <PopoverContent align="end" className="w-[min(24rem,calc(100vw-1rem))] p-0">
-                <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-                  <p className="text-xs font-medium text-popover-foreground/70">
-                    {t('workspace.usage.skyline.shareCard')}
-                  </p>
-                  <SegmentedControl
-                    label={t('workspace.usage.skyline.view')}
-                    value={shareCardStyle}
-                    onChange={setShareCardStyle}
-                    options={[
-                      { value: 'flat', label: '2D' },
-                      { value: 'isometric', label: '3D' },
-                    ]}
-                  />
-                </div>
-                <div className="p-3">
-                  <div className="relative aspect-[40/21] overflow-hidden rounded-sm border border-border/70 bg-muted/40">
-                    {sharePreview ? (
-                      <img
-                        src={sharePreview.url}
-                        alt={t('workspace.usage.skyline.shareCard')}
-                        className="h-full w-full object-contain"
-                      />
-                    ) : null}
-                    {isSharePreviewLoading ? (
-                      <LoaderCircle className="absolute inset-0 m-auto h-5 w-5 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </div>
-                  <div className="mt-3 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={isSharePreviewLoading}
-                      onClick={() => void shareCard()}
-                    >
-                      <Share2 className="h-4 w-4" />
-                      {t('workspace.usage.skyline.shareCard')}
-                    </Button>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          ) : null}
         </div>
       </header>
 

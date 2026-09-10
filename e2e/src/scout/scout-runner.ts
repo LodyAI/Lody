@@ -214,8 +214,8 @@ async function runJourney(
 
     if (journey === 'review') {
       reviewRepository = createSyntheticReviewRepository();
-      const project = await context.review.registerLocalProject(reviewRepository.rootPath);
-      await context.work.selectLocalProject(project.name);
+      await context.work.addLocalProject(reviewRepository.rootPath, reviewRepository.name);
+      await context.work.selectLocalProject(reviewRepository.name);
     } else if (journey === 'work') {
       await context.work.addLocalProject(fixture.projectRoot, fixture.projectName);
       await context.work.selectAgent(SCRIPTED_AGENT_NAME);

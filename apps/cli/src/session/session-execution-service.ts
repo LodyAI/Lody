@@ -67,7 +67,7 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
-import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
+import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
   checkoutLocalProjectBranchAtRootPath,
@@ -178,7 +178,11 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
+  finalizeACPState: (
+    sessionId: SessionId,
+    turnId?: string,
+    options?: { settleContextCompactionAsFailed?: boolean }
+  ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -1947,6 +1951,46 @@ export class SessionExecutionService {
         'Failed to clear cancel request',
         self.tryPromise(() => self.clearCancelRequest(options.sessionId))
       );
+
+      const sessionToDrain = options.session;
+      const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
+      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+        // Keep the execution owner until ACP has actually finished. Otherwise
+        // the next queued turn can reach the still-busy adapter after local abort.
+        yield* self
+          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
+          .pipe(
+            Effect.catchAll(() =>
+              self.tryPromise(async () => {
+                self.deps.logger.warn(
+                  `[${options.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+                );
+                try {
+                  await sessionToDrain.terminate(true);
+                } catch (error) {
+                  self.deps.logger.warn(
+                    `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+                  );
+                  // Failed termination is not permission to reuse a busy agent.
+                  await pendingPrompt;
+                }
+              })
+            )
+          );
+      }
+
+      if (runtime?.promptStarted) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to settle context compaction after cancelled ACP prompt stopped',
+          self.tryPromise(async () => {
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
+              settleContextCompactionAsFailed: true,
+            });
+            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
+          })
+        );
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -2164,7 +2208,9 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
+      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
+    });
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2267,9 +2313,19 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown
+    error?: unknown,
+    options?: { providerPromptSettled?: boolean }
   ): Promise<void> {
-    await this.deps.turnFinalization.finalizeACPState(sessionId);
+    const acpError = error ? parseACPError(error) : null;
+    const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
+    await this.deps.turnFinalization.finalizeACPState(
+      sessionId,
+      this.currentTurnBySession.get(sessionId),
+      {
+        settleContextCompactionAsFailed:
+          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
+      }
+    );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
       this.currentTurnBySession.get(sessionId)
@@ -2277,8 +2333,6 @@ export class SessionExecutionService {
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
-      const acpError = parseACPError(error);
-
       if (acpError) {
         const failureReason = mapACPErrorToFailureReason(acpError);
         const userMessage = getACPErrorUserMessage(acpError);
@@ -2319,7 +2373,7 @@ export class SessionExecutionService {
             );
           }
         }
-      } else if (isAgentDisconnectedError(error)) {
+      } else if (providerDisconnected) {
         this.deps.logger.warn(
           `[${sessionId}] Agent disconnected during chat, terminating session for clean restart`
         );
