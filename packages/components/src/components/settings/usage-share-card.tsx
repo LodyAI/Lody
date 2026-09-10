@@ -632,30 +632,58 @@ export function UsageShareCard({
     </div>
   );
 
+  /**
+   * A sign-off, not a status bar. It borrows the session card's identity-plus-sub
+   * structure — who this is, then where it came from — without that card's EXIF
+   * parameter line, which would only repeat numbers the bands above already carry.
+   * 4:5 stacks the two lines and takes a full-size QR; 16:9 has no height to spare
+   * and keeps the single row.
+   */
   const footer = (
     <div
       className={cn(
-        'relative mt-auto flex items-center gap-2 border-t py-3',
+        'relative mt-auto flex items-center border-t',
+        wide ? 'gap-2 py-3' : 'gap-3 py-4',
         PAD_X,
         framed
           ? 'border-border bg-white dark:bg-white/[0.04]'
           : 'border-black/[0.06] dark:border-white/[0.08]'
       )}
     >
-      <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />
-      <div className={cn('min-w-0 truncate font-semibold text-foreground', TEXT.body)}>
-        {workspaceName?.trim() || 'Lody'}
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        <span className={cn('font-medium text-muted-foreground', TEXT.meta)}>lody.ai</span>
-        {qrDataUrl ? (
-          <img
-            src={qrDataUrl}
-            alt={t('chatShareCard.qrAlt')}
-            className="size-8 rounded-[3px] bg-white p-1 dark:bg-white/90"
-          />
-        ) : null}
-      </div>
+      <img
+        src={lodyLogo}
+        alt=""
+        className={cn('scale-[1.64] rounded-md', wide ? 'size-5' : 'size-6')}
+      />
+      {wide ? (
+        <>
+          <div className={cn('min-w-0 truncate font-semibold text-foreground', TEXT.body)}>
+            {workspaceName?.trim() || 'Lody'}
+          </div>
+          <span className={cn('ml-auto font-medium text-muted-foreground', TEXT.meta)}>
+            lody.ai
+          </span>
+        </>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <div className={cn('truncate font-semibold leading-tight text-foreground', TEXT.body)}>
+            {workspaceName?.trim() || 'Lody'}
+          </div>
+          <div className={cn('mt-0.5 truncate leading-tight text-muted-foreground', TEXT.meta)}>
+            lody.ai
+          </div>
+        </div>
+      )}
+      {qrDataUrl ? (
+        <img
+          src={qrDataUrl}
+          alt={t('chatShareCard.qrAlt')}
+          className={cn(
+            'shrink-0 rounded-[3px] bg-white p-1 dark:bg-white/90',
+            wide ? 'ml-2 size-8' : 'size-10'
+          )}
+        />
+      ) : null}
     </div>
   );
 

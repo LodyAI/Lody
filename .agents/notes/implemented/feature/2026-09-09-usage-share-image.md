@@ -107,6 +107,18 @@ its footer by 23px while flex quietly ate the bottom padding instead of reportin
 it. Only the headline band may flex now; every other band is `shrink-0`, so a
 layout that does not fit fails visibly rather than silently compressing.
 
+**The footer is a sign-off, and it was measurably thinner than it looked.** Read
+against the session card it seemed to be missing things; measured against it, the
+usage footer was already identical to that card's `row` variant — 57px, a 33px
+mark — and carried one field more, the workspace name. What it was being compared
+to was the `stacked` variant at 154px, which a 720px card cannot spend 21% of its
+height on and a 396px one cannot fit at all. So the portrait footer takes the
+middle: the session card's identity-plus-sub structure (workspace, then `lody.ai`
+under it) with a full-size code, 73px, paid for out of the headline band's slack
+rather than out of any information band. It deliberately omits that card's EXIF
+parameter line, which here would only repeat the bands above. The wide format
+keeps the single row.
+
 **One capture pipeline for both cards.** `lib/chat-share-image-export.ts` became
 `lib/share-image-export.ts` with `copyShareImage` / `exportShareImage(element,
 title, fallback)`; `components/chat-share-theme-scope.ts` became

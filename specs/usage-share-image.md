@@ -61,6 +61,12 @@ empty on purpose: everything the card has to say is already said by the bands be
 it, and the alternatives — a brand watermark, a second chart — either repeat what is
 there or stand in for content that does not exist.
 
+The footer is a sign-off rather than a status bar: the workspace it belongs to,
+where it came from, and a code that opens it. It borrows the session card's
+identity-and-sub structure without that card's parameter line, which would only
+repeat numbers the bands above already carry. The wide format keeps the same
+content on one row, having no height to spare.
+
 A chosen backdrop is part of the image, not a border added around it, so a framed
 card has less room for its content than an unframed one. The layout is sized for
 the framed case, and only the headline band absorbs spare height; every other band
