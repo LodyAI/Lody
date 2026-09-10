@@ -5,7 +5,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
-  ALL_PROVIDER_CREDENTIAL_REVISIONS,
   getLodyCodexCustomProvider,
   type AcpSessionMonitorSnapshot,
   type AgentConfigId,
@@ -914,18 +913,17 @@ export function MachineAgentSettings({
             machineId: dialogMachine.id,
           };
           if (payload.backgroundSetup) {
-            await createSetup(config);
+            await createSetup({ config, setupRevision: payload.setupRevision });
           } else {
             await createConfig(config);
           }
           if (payload.codexApiKey) {
-            const provider = getLodyCodexCustomProvider(config.env);
-            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
             try {
               await provisionCodexCredential({
                 machineId: config.machineId,
                 configId: config.id,
-                credentialRevision: provider.credentialRevision,
+                setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
@@ -953,23 +951,13 @@ export function MachineAgentSettings({
             brandId: payload.brandId,
           };
           if (payload.codexApiKey) {
-            const provider = getLodyCodexCustomProvider(nextConfig.env);
-            if (!provider?.credentialRevision) throw new Error('Missing Codex credential revision');
-            const previous = getLodyCodexCustomProvider(dialogMode.config.env);
-            if (previous) {
-              await requestCredentialCleanup({
-                id: nextConfig.id,
-                machineId: nextConfig.machineId,
-                credentialRevision:
-                  previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
-              });
-            }
-            await createSetup(nextConfig);
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
             try {
               await provisionCodexCredential({
                 machineId: nextConfig.machineId,
                 configId: nextConfig.id,
-                credentialRevision: provider.credentialRevision,
+                setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
             } catch (error) {
@@ -978,15 +966,10 @@ export function MachineAgentSettings({
             }
           } else {
             if (removingCodexCredential) {
-              const previous = getLodyCodexCustomProvider(dialogMode.config.env);
-              if (previous) {
-                await requestCredentialCleanup({
-                  id: nextConfig.id,
-                  machineId: nextConfig.machineId,
-                  credentialRevision:
-                    previous.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
-                });
-              }
+              await requestCredentialCleanup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+              });
             }
             await updateConfig(nextConfig);
           }
@@ -1043,14 +1026,7 @@ export function MachineAgentSettings({
     async (config: AgentConfigMeta) => {
       try {
         if (getLodyCodexCustomProvider(config.env)) {
-          const provider = getLodyCodexCustomProvider(config.env);
-          if (provider) {
-            await requestCredentialCleanup({
-              id: config.id,
-              machineId: config.machineId,
-              credentialRevision: provider.credentialRevision ?? ALL_PROVIDER_CREDENTIAL_REVISIONS,
-            });
-          }
+          await requestCredentialCleanup({ id: config.id, machineId: config.machineId });
         }
         await deleteConfig(config.id);
       } catch (error) {

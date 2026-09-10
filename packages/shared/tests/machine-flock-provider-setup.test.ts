@@ -82,21 +82,41 @@ describe('machine flock provider setup rows', () => {
     expect(parsed?.value).not.toHaveProperty('userCode');
   });
 
-  it('rejects a setup config containing credential environment values', () => {
+  it('rejects a setup config containing the one-shot Codex credential', () => {
     expect(
       parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
         ...setup,
-        config: { ...setup.config, env: { CODEX_API_KEY: 'sk-must-not-sync' } },
+        config: {
+          ...setup.config,
+          env: { LODY_CODEX_CUSTOM_ENDPOINT_API_KEY: 'sk-must-not-sync' },
+        },
       })
     ).toBeUndefined();
   });
 
-  it('rejects custom provider rows whose top-level revision is missing or mismatched', () => {
+  it('does not guess that unrelated user-owned env values are protocol credentials', () => {
+    const config = {
+      ...setup.config,
+      env: buildLodyCodexCustomProviderEnv(
+        { CODEX_API_KEY: 'preserved-user-value', TOKENIZERS_PARALLELISM: 'false' },
+        { baseUrl: 'https://relay.example.test/v1' }
+      ),
+    };
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config,
+        setupRevision: 'revision-1',
+      })
+    ).toBeDefined();
+  });
+
+  it('requires an exact setup revision for a custom Codex provider row', () => {
     const config = {
       ...setup.config,
       env: buildLodyCodexCustomProviderEnv(
         {},
-        { baseUrl: 'https://relay.example.test/v1', credentialRevision: 'revision-2' }
+        { baseUrl: 'https://relay.example.test/v1' }
       ),
     };
     expect(
@@ -106,14 +126,7 @@ describe('machine flock provider setup rows', () => {
       parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
         ...setup,
         config,
-        credentialRevision: 'revision-1',
-      })
-    ).toBeUndefined();
-    expect(
-      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
-        ...setup,
-        config,
-        credentialRevision: 'revision-2',
+        setupRevision: 'revision-2',
       })
     ).toBeDefined();
   });

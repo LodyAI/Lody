@@ -92,12 +92,12 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       agentType: 'codex',
       env: buildLodyCodexCustomProviderEnv(
         {},
-        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
+        { baseUrl: 'https://relay.example.com/v1' }
       ),
       prompt: '',
     };
 
-    await store.set(cmdCreateProviderSetupAtom, config);
+    await store.set(cmdCreateProviderSetupAtom, { config, setupRevision: 'revision-1' });
 
     expect(flockRowPut.mock.calls[0]).toEqual([
       flockDocId,
@@ -107,8 +107,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
         machineId,
         status: 'awaiting-auth',
         attempt: 1,
-        operation: 'create',
-        credentialRevision: 'revision-1',
+        setupRevision: 'revision-1',
       }),
     ]);
     expect(store.get(getAllProviderSetupsAtom)).toEqual([
@@ -208,15 +207,13 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     await store.set(cmdRequestProviderCredentialCleanupAtom, {
       id: setupId,
       machineId,
-      credentialRevision: 'revision-1',
     });
     expect(flockRowPut).toHaveBeenLastCalledWith(
       flockDocId,
-      machineFlockKeys.providerCredentialCleanup(setupId, 'revision-1'),
+      machineFlockKeys.providerCredentialCleanup(setupId),
       expect.objectContaining({
         id: setupId,
         machineId,
-        credentialRevision: 'revision-1',
       })
     );
   });

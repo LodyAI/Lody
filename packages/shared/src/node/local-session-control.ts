@@ -534,10 +534,10 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
             value.purpose === 'authenticate' ||
             value.purpose === 'provision-provider-credential') &&
           (value.purpose === 'provision-provider-credential'
-            ? typeof value.credentialRevision === 'string' &&
-              value.credentialRevision.trim().length > 0 &&
-              value.credentialRevision.length <= 1024
-            : typeof value.credentialRevision === 'undefined') &&
+            ? typeof value.setupRevision === 'string' &&
+              value.setupRevision.trim().length > 0 &&
+              value.setupRevision.length <= 1024
+            : typeof value.setupRevision === 'undefined') &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&

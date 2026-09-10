@@ -7,6 +7,8 @@ import {
   buildSessionPreparationClaimKey,
   buildSessionPreparationRequestKey,
   buildSessionLaunchConfig,
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
   normalizeSessionPreparationRunConfigForDedup,
   type AgentConfigId,
   type LocalProjectId,
@@ -33,6 +35,7 @@ import {
   type SessionPreparationResource,
 } from './session-preparation-service';
 import { createLocalCloudPort } from '@lody/platform';
+import { storeCodexProviderCredential } from '../agent/provider-credential-store';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -876,6 +879,68 @@ describe('SessionManager.requestSessionTerminate', () => {
     ).pendingSessionCreates.set(sessionId, Promise.resolve({ terminate } as unknown as ISession));
 
     await expect(manager.requestSessionTerminate(sessionId)).rejects.toThrow('terminate failed');
+  });
+});
+
+describe('SessionManager launch credential boundary', () => {
+  it('injects the machine-local Codex key only while resolving the process launch', async () => {
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'lody-session-launch-credential-'));
+    vi.stubEnv('LODY_DATA_DIR', dataDir);
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const configId = 'codex-relay' as AgentConfigId;
+    const env = buildLodyCodexCustomProviderEnv(
+      {},
+      {
+        baseUrl: 'https://relay.example.test/v1',
+      }
+    );
+    await storeCodexProviderCredential(
+      workspaceId,
+      {
+        id: configId,
+        machineId: 'machine-1' as MachineId,
+        name: 'Codex Relay',
+        cliType: 'builtin',
+        agentType: 'codex',
+        runtimeOverrides: { codexPath: process.execPath },
+        env,
+      },
+      'local-launch-key'
+    );
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      workspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+    try {
+      const launch = await (
+        manager as unknown as {
+          resolveSessionProcessLaunch(
+            config: SessionConfig
+          ): Promise<{ env: Record<string, string> }>;
+        }
+      ).resolveSessionProcessLaunch(
+        createSessionConfig({
+          sessionId: 'credential-launch' as SessionId,
+          agentConfigId: configId,
+          runtimeOverrides: { codexPath: process.execPath },
+          env,
+        })
+      );
+
+      expect(launch.env[LODY_CODEX_API_KEY_ENV]).toBe('local-launch-key');
+      expect(env[LODY_CODEX_API_KEY_ENV]).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });
 

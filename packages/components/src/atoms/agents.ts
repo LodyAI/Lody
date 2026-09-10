@@ -15,7 +15,7 @@ import {
   machineFlockKeys,
   findBuiltinAgentOptOutToRetract,
   planBuiltinAgentOptOutForDeletedConfig,
-  providerSetupContainsCredential,
+  providerSetupContainsCodexCredential,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   type AgentBrandId,
@@ -96,7 +96,7 @@ async function writeProviderSetupToMachineFlock(
   runtime: WorkspaceRuntime,
   setup: ProviderSetupTask
 ): Promise<MachineFlockRowMap> {
-  if (providerSetupContainsCredential(setup.config)) {
+  if (providerSetupContainsCodexCredential(setup.config)) {
     throw new Error('Provider setup rows cannot contain credentials');
   }
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
@@ -120,17 +120,17 @@ async function cancelProviderSetupInMachineFlock(
 ): Promise<MachineFlockRowMap> {
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
   const cancelledAt = getServerNow();
+  const preservePublishedConfig = setup.replacesPublishedConfig === true;
   const cancellation: ProviderSetupCancellation = {
     v: 1,
     id: setup.id,
     machineId: setup.machineId,
     cancelledAt,
-    ...(setup.operation === 'replace' ? { preservePublishedConfig: true } : {}),
-    ...(setup.credentialRevision ? { credentialRevision: setup.credentialRevision } : {}),
+    ...(preservePublishedConfig ? { preservePublishedConfig: true } : {}),
+    ...(setup.setupRevision ? { setupRevision: setup.setupRevision } : {}),
   };
   const cancellationKey = machineFlockKeys.providerSetupCancellation(setup.id);
   const setupKey = machineFlockKeys.providerSetup(setup.id);
-  const configKey = machineFlockKeys.agentConfig(setup.id);
 
   // The durable marker is the cancellation accept boundary. The target CLI can
   // reconcile both rows from it even if either best-effort cleanup is interrupted.
@@ -146,25 +146,16 @@ async function cancelProviderSetupInMachineFlock(
       value: cancellation,
     },
   };
-  // Once the setup is published as an agentConfig, cancelling is the user removing this
-  // provider and needs the same removal record as deleting it from the list, or the next
-  // CLI startup adds it back.
-  const publishedConfigs = getMachineFlockAgentConfigs(rows);
-  const optOut =
-    setup.id in publishedConfigs
-      ? planBuiltinAgentOptOutForDeletedConfig(rows, publishedConfigs[setup.id], cancelledAt)
-      : null;
-  if (optOut) {
-    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
-    rows[serializeMachineFlockKey(optOut.key)] = optOut;
-  }
   const cleanup = [runtime.writer.flockRowDelete(flockDocId, setupKey)];
-  if (setup.operation !== 'replace')
-    cleanup.push(runtime.writer.flockRowDelete(flockDocId, configKey));
+  if (!preservePublishedConfig) {
+    cleanup.push(runtime.writer.flockRowDelete(flockDocId, machineFlockKeys.agentConfig(setup.id)));
+  }
   await Promise.allSettled(cleanup);
 
   delete rows[serializeMachineFlockKey(setupKey)];
-  if (setup.operation !== 'replace') delete rows[serializeMachineFlockKey(configKey)];
+  if (!preservePublishedConfig) {
+    delete rows[serializeMachineFlockKey(machineFlockKeys.agentConfig(setup.id))];
+  }
   return rows;
 }
 
@@ -385,49 +376,58 @@ export const cmdCreateAgentConfigAtom = atom(
   }
 );
 
-export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: AgentConfigMeta) => {
-  const runtime = get(activeWorkspaceRuntimeAtom);
-  if (!runtime) throw new Error('Runtime not ready');
-  const provider = getLodyCodexCustomProvider(config.env);
-  if (
-    config.cliType !== 'builtin' ||
-    !isManagedBuiltinAgentType(config.agentType) ||
-    (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
-      !(config.agentType === 'codex' && provider?.credentialRevision))
-  ) {
-    throw new Error('Provider setup is only supported for managed builtin agents');
+export type CreateProviderSetupInput = {
+  config: AgentConfigMeta;
+  setupRevision?: string;
+};
+
+export const cmdCreateProviderSetupAtom = atom(
+  null,
+  async (get, set, input: CreateProviderSetupInput) => {
+    const { config, setupRevision } = input;
+    const runtime = get(activeWorkspaceRuntimeAtom);
+    if (!runtime) throw new Error('Runtime not ready');
+    const provider = getLodyCodexCustomProvider(config.env);
+    if (
+      config.cliType !== 'builtin' ||
+      !isManagedBuiltinAgentType(config.agentType) ||
+      (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
+        !(config.agentType === 'codex' && provider && setupRevision))
+    ) {
+      throw new Error('Provider setup is only supported for managed builtin agents');
+    }
+    if (providerSetupContainsCodexCredential(config)) {
+      throw new Error('Provider setup rows cannot contain credentials');
+    }
+    const now = getServerNow();
+    const replacesPublishedConfig = get(getAllAgentConfigAtom).some(
+      (entry) => entry.id === config.id
+    );
+    if (provider && !setupRevision?.trim()) {
+      throw new Error('Codex provider setup requires an exact setup revision');
+    }
+    const setup: ProviderSetupTask = {
+      v: 1,
+      id: config.id,
+      machineId: config.machineId,
+      config,
+      status: provider ? 'awaiting-auth' : 'queued',
+      attempt: 1,
+      createdAt: now,
+      updatedAt: now,
+      ...(replacesPublishedConfig ? { replacesPublishedConfig: true } : {}),
+      ...(setupRevision ? { setupRevision } : {}),
+    };
+    const rows = await writeProviderSetupToMachineFlock(runtime, setup);
+    set(setMachineFlockRowsForMachineAtom, {
+      workspaceId: runtime.workspaceId,
+      machineId: setup.machineId,
+      rows,
+      mode: 'merge',
+    });
+    return setup.id;
   }
-  if (providerSetupContainsCredential(config)) {
-    throw new Error('Provider setup rows cannot contain credentials');
-  }
-  const now = getServerNow();
-  if (provider && !provider.credentialRevision) {
-    throw new Error('Codex provider setup requires a credential revision');
-  }
-  const operation = get(getAllAgentConfigAtom).some((entry) => entry.id === config.id)
-    ? 'replace'
-    : 'create';
-  const setup: ProviderSetupTask = {
-    v: 1,
-    id: config.id,
-    machineId: config.machineId,
-    config,
-    status: provider ? 'awaiting-auth' : 'queued',
-    attempt: 1,
-    createdAt: now,
-    updatedAt: now,
-    operation,
-    ...(provider?.credentialRevision ? { credentialRevision: provider.credentialRevision } : {}),
-  };
-  const rows = await writeProviderSetupToMachineFlock(runtime, setup);
-  set(setMachineFlockRowsForMachineAtom, {
-    workspaceId: runtime.workspaceId,
-    machineId: setup.machineId,
-    rows,
-    mode: 'merge',
-  });
-  return setup.id;
-});
+);
 
 export const cmdRequestProviderCredentialCleanupAtom = atom(
   null,
@@ -441,7 +441,7 @@ export const cmdRequestProviderCredentialCleanupAtom = atom(
     };
     await runtime.writer.flockRowPut(
       getMachineFlockDocId(runtime.workspaceId, cleanup.machineId),
-      machineFlockKeys.providerCredentialCleanup(cleanup.id, cleanup.credentialRevision),
+      machineFlockKeys.providerCredentialCleanup(cleanup.id),
       value
     );
   }

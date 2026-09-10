@@ -657,7 +657,7 @@ describe('AgentConfigDialog', () => {
   it('hydrates a Codex custom endpoint and does not offer ChatGPT reauthentication', async () => {
     const env = buildLodyCodexCustomProviderEnv(
       { EXTRA_FLAG: '1' },
-      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
+      { baseUrl: 'https://relay.example.com/v1' }
     );
     await renderDialog(
       {
@@ -683,6 +683,49 @@ describe('AgentConfigDialog', () => {
     expect(findSignInAgainButton()).toBeUndefined();
   });
 
+  it('saves a metadata-only Codex edit without asking for or rotating the API key', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const env = buildLodyCodexCustomProviderEnv(
+      { EXTRA_FLAG: '1' },
+      { baseUrl: 'https://relay.example.com/v1' }
+    );
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: codexConfigId,
+          machineId,
+          name: 'Codex Relay',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'codex',
+          env,
+        },
+      },
+      createCodexMachine(),
+      onSubmit
+    );
+
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#agent-config-name')!,
+        'Renamed Relay'
+      );
+    });
+    const save = getPrimaryAction('Save');
+    expect(save.disabled).toBe(false);
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    const payload = onSubmit.mock.calls[0]![0];
+    expect(payload).toMatchObject({ name: 'Renamed Relay', env });
+    expect(payload).not.toHaveProperty('codexApiKey');
+    expect(payload).not.toHaveProperty('backgroundSetup');
+    expect(payload).not.toHaveProperty('setupRevision');
+  });
+
   it('switches a managed Codex endpoint back to ChatGPT without dropping other config', async () => {
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     const env = buildLodyCodexCustomProviderEnv(
@@ -690,7 +733,7 @@ describe('AgentConfigDialog', () => {
         EXTRA_FLAG: '1',
         CODEX_CONFIG: JSON.stringify({ model: 'gpt-custom' }),
       },
-      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
+      { baseUrl: 'https://relay.example.com/v1' }
     );
     await renderDialog(
       {

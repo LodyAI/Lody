@@ -45,8 +45,7 @@ export function ProviderSetupRow({
   const active =
     setup.status === 'queued' ||
     setup.status === 'preparing-runtime' ||
-    setup.status === 'verifying' ||
-    setup.status === 'verified';
+    setup.status === 'verifying';
   const downloadPercent =
     setup.status === 'preparing-runtime' &&
     runtimeProgress?.status === 'downloading' &&
@@ -76,7 +75,6 @@ export function ProviderSetupRow({
           ? formatRuntimeProgress(t, runtimeProgress)
           : t('settings.agent.setup.preparingRuntime', 'Downloading the agent runtime…');
       case 'verifying':
-      case 'verified':
         return t('settings.agent.setup.verifying', 'Checking credentials and provider access…');
       case 'awaiting-auth':
         return t('settings.agent.setup.awaitingAuth', 'Sign in to finish this provider setup.');
@@ -228,6 +226,8 @@ export function ProviderSetupRow({
             customAcp={config.customAcp}
             runtimeOverrides={config.runtimeOverrides}
             env={config.env}
+            purpose={setup.setupRevision ? 'provision-provider-credential' : undefined}
+            setupRevision={setup.setupRevision}
             compact
           />
         </div>

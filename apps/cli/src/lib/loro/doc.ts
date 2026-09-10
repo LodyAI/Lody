@@ -1428,7 +1428,7 @@ export class LoroDocumentManager {
   async waitForProviderSetupConfig(
     agentConfigId: AgentConfigId,
     machineId: MachineId,
-    credentialRevision: string,
+    setupRevision: string,
     options: { timeoutMs?: number } = {}
   ): Promise<AgentConfigMeta | null> {
     const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
@@ -1442,12 +1442,12 @@ export class LoroDocumentManager {
       const cancellation = getMachineFlockProviderSetupCancellations(rows)[agentConfigId];
       if (
         cancellation &&
-        (!cancellation.credentialRevision || cancellation.credentialRevision === credentialRevision)
+        (!cancellation.setupRevision || cancellation.setupRevision === setupRevision)
       ) {
         return null;
       }
       const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
-      if (!setup || setup.credentialRevision !== credentialRevision) return undefined;
+      if (!setup || setup.setupRevision !== setupRevision) return undefined;
       return setup.machineId === machineId &&
         isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
         ? setup.config

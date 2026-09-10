@@ -64,10 +64,7 @@ describe('AcpAuthenticationManager', () => {
       requestId: 'codex-credential',
       cliType: 'builtin',
       agentType: 'codex',
-      env: buildLodyCodexCustomProviderEnv(
-        {},
-        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-1' }
-      ),
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
       storeCodexApiKey,
       onProgress: (progress) => {
         if (progress.status !== 'input-required') return;
@@ -94,10 +91,7 @@ describe('AcpAuthenticationManager', () => {
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
       spawnProcess: vi.fn() as never,
     });
-    const env = buildLodyCodexCustomProviderEnv(
-      {},
-      { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
-    );
+    const env = buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' });
     const result = manager.authenticate({
       requestId: 'codex-rotation',
       cliType: 'builtin',

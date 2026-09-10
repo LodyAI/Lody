@@ -15,6 +15,7 @@ import {
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getLodyCodexCustomProvider,
+  getLodyCodexCredentialBinding,
   isAllowedCredentialEndpoint,
   LODY_CODEX_API_KEY_ENV,
   LODY_CODEX_PROVIDER_STATE_ENV,
@@ -605,6 +606,8 @@ export type AgentConfigSubmitPayload = {
   backgroundSetup?: true;
   /** One-shot secret sent through the encrypted machine authentication flow. */
   codexApiKey?: string;
+  /** Causal token for matching the durable setup row to the one-shot RPC. */
+  setupRevision?: string;
 };
 
 export type AgentConfigDialogMode =
@@ -836,16 +839,12 @@ function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, s
   return env;
 }
 
-function buildCodexSubmitEnv(
-  formData: AgentConfigFormData,
-  credentialRevision: string
-): Record<string, string> {
+function buildCodexSubmitEnv(formData: AgentConfigFormData): Record<string, string> {
   if (formData.codexAuthenticationMode !== 'api-key') {
     return removeLodyCodexCustomProviderEnv(formData.env);
   }
   return buildLodyCodexCustomProviderEnv(formData.env, {
     baseUrl: formData.codexBaseUrl ?? '',
-    credentialRevision,
   });
 }
 
@@ -1187,12 +1186,48 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // only safe once that daemon advertises the protocol. Derived here rather
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
+  const codexSubmitEnv = useMemo(() => {
+    if (
+      !isCodexBuiltin ||
+      codexAuthenticationMode !== 'api-key' ||
+      !isAllowedCredentialEndpoint(formData.codexBaseUrl ?? '')
+    ) {
+      return null;
+    }
+    try {
+      return buildCodexSubmitEnv(formData);
+    } catch {
+      return null;
+    }
+  }, [codexAuthenticationMode, formData, isCodexBuiltin]);
+  const codexCredentialProvisioningRequired = useMemo(() => {
+    if (!isCodexBuiltin || codexAuthenticationMode !== 'api-key') return false;
+    if (mode.kind === 'create' || formData.codexApiKey?.trim()) return true;
+    if (!codexSubmitEnv) return true;
+    return (
+      getLodyCodexCredentialBinding(mode.config) !==
+      getLodyCodexCredentialBinding({
+        cliType: formData.cliType,
+        agentType: formData.agentType,
+        customAcp: parsedCustomAcp ?? undefined,
+        runtimeOverrides: formData.runtimeOverrides,
+        env: codexSubmitEnv,
+      })
+    );
+  }, [
+    codexAuthenticationMode,
+    codexSubmitEnv,
+    formData,
+    isCodexBuiltin,
+    mode,
+    parsedCustomAcp,
+  ]);
   const backgroundManagedBuiltinSetup =
     machineSupportsProviderSetupProtocol(machine) &&
-    ((isCodexBuiltin && codexAuthenticationMode === 'api-key') ||
+    ((isCodexBuiltin && codexCredentialProvisioningRequired) ||
       (requiresBuiltinCreationVerification && usesDefaultManagedRuntime));
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
-  const codexCredentialRevisionRef = useRef(crypto.randomUUID());
+  const codexSetupRevisionRef = useRef(crypto.randomUUID());
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
@@ -1200,7 +1235,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     } else if (isDeepSeekBuiltinForm(formData)) {
       env = buildDeepSeekSubmitEnv(formData);
     } else if (isCodexBuiltinForm(formData)) {
-      env = buildCodexSubmitEnv(formData, codexCredentialRevisionRef.current);
+      env = codexSubmitEnv ?? buildCodexSubmitEnv(formData);
     }
     const agentType = formData.agentType as AgentType;
     const titleGeneration = acpProvidesSessionTitle
@@ -1221,8 +1256,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       description: undefined,
       brandId: resolvedBrandId,
       ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
-      ...(isCodexBuiltinForm(formData) && formData.codexAuthenticationMode === 'api-key'
-        ? { codexApiKey: formData.codexApiKey?.trim() }
+      ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
+        ? {
+            codexApiKey: formData.codexApiKey?.trim(),
+            setupRevision: codexSetupRevisionRef.current,
+          }
         : {}),
     };
   }, [
@@ -1231,6 +1269,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     acpProvidesSessionTitle,
     agentConfigId,
     backgroundManagedBuiltinSetup,
+    codexCredentialProvisioningRequired,
+    codexSubmitEnv,
     formData,
     isCustom,
     isPreset,
@@ -1809,15 +1849,16 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     }
     if (isCodexBuiltin && codexAuthenticationMode === 'api-key') {
       if (
-        !machineSupportsProviderSetupProtocol(machine) ||
-        !machineSupportsCodexCustomEndpointCredentials(machine)
+        codexCredentialProvisioningRequired &&
+        (!machineSupportsProviderSetupProtocol(machine) ||
+          !machineSupportsCodexCustomEndpointCredentials(machine))
       ) {
         return t(
           'agents.disableReason.codexCredentialProtocol',
           'Update Lody on this machine to configure a Codex API key securely'
         );
       }
-      if (!(formData.codexApiKey ?? '').trim()) {
+      if (codexCredentialProvisioningRequired && !(formData.codexApiKey ?? '').trim()) {
         return t('agents.disableReason.missingCodexApiKey', 'Please enter your Codex API Key');
       }
       const baseUrl = (formData.codexBaseUrl ?? '').trim();

@@ -12,11 +12,14 @@ on the execution host.
 ## Decision
 
 Workspace state stores only non-secret provider metadata. The renderer passes the API key through
-the existing encrypted ACP authentication-input exchange. The target CLI stores it under
-`provider-credentials`, hardens POSIX directories/files to `0700`/`0600`, and binds each local
-record to both an explicit credential revision and the complete launch-relevant configuration.
-Windows inherits the ACL of Lody's per-user data directory. Capability probes and sessions inject
-the key only on an exact revision and binding match.
+the existing encrypted ACP authentication-input exchange. A candidate remains in daemon memory
+through the live probe and is stored under `provider-credentials` only after that probe succeeds.
+The store has one active record per workspace/config and binds it to the complete launch-relevant
+configuration; it has no candidate generations or migration layer for this unreleased feature.
+POSIX directories/files are hardened to `0700`/`0600`. Windows inherits the ACL of Lody's
+per-user data directory. Every session spawn, including cold fork and edit-and-resend recovery,
+injects the key at the shared `SessionManager` process-launch boundary only on an exact binding
+match.
 
 The provider uses a Lody-owned environment key and a separate ownership marker. The marker records
 the previous `model_provider` selector so switching back to ChatGPT is reversible without
@@ -24,33 +27,40 @@ copying an existing `CODEX_API_KEY` or reserved provider into Lody state. Invali
 namespace collisions fail rather than being normalized or overwritten.
 
 The feature requires a negotiated `codexCustomEndpointCredentials` capability. A setup row names
-the expected non-secret credential revision and starts in `awaiting-auth`. The explicit
+an expected non-secret setup revision and starts in `awaiting-auth`. The explicit
 credential-provisioning RPC waits for that exact row on the target daemon, so an asynchronous
-Flock upload cannot race config lookup. It always elicits and replaces the submitted key, even
-when the same endpoint already has a hydrated credential. Remote HTTP endpoints are rejected;
-HTTPS and loopback HTTP are accepted.
+Flock upload cannot race config lookup. It always requests and replaces the submitted key, even
+when the same endpoint already has a credential. The revision exists only in the setup and RPC;
+it is not part of the published Codex config or credential record. Remote HTTP endpoints are
+rejected; HTTPS and loopback HTTP are accepted.
 
 ## Failure and cleanup
 
-A credential-changing edit is a replacement setup saga: the old AgentConfig remains published
-while the new revision and key are staged and probed. The target daemon atomically publishes the
-new config only after verification. A renderer crash at any earlier point leaves the old config
-usable, and cancellation removes only the staged revision.
+A credential-changing edit is a replacement setup: the old `AgentConfig` remains published while
+the desired config and in-memory key are probed. After the probe, the target daemon stores the
+single active credential and publishes the desired config before returning success. A stale or
+superseded setup returns a conflict. Metadata-only edits bypass provisioning, so changing a name,
+prompt, brand, or title-generation setting does not ask for the existing API key.
 
 Switching to ChatGPT or deleting a provider writes a durable cleanup intent before changing the
 config. The UI never waits for the target machine. Its daemon reconciles the intent on events and
-authoritative rescans, removes the requested local revision only after no published config or
-setup references it, then consumes the intent. This also covers a daemon that observes only
+authoritative rescans, removes the local credential only after no published config or setup
+references it, then consumes the intent. This also covers a daemon that observes only
 `custom → deleted` and never sees an intermediate non-custom config.
+
+The cleanup tombstone is retained because current initial Machine Flock synchronization does not
+expose a proof that a local scan is authoritative and complete. Once that boundary exists, local
+garbage collection can replace the tombstone without risking deletion during partial sync.
 
 ## Evidence
 
 The [draft specification](../../../../specs/codex-custom-endpoint-authentication.md) owns the
 behavior. Shared tests cover endpoint policy, reversible overlays, collision rejection, malformed
-configuration, credential revisions, and setup-row rejection. CLI tests cover delayed setup
-visibility, forced key rotation, concurrent old/new local revisions, replacement publication,
-durable cleanup replay, and binding mismatch. Component tests cover the one-shot payload and the
-actual setup/cleanup Flock writer boundaries. A controlled loopback relay run with bundled Codex
-0.153.4 observed a streamed
+configuration, setup revision parsing, and rejection of the protocol-owned one-shot secret at the
+setup-row boundary. CLI tests cover delayed setup visibility, forced key rotation, stale setup
+conflicts, publication failure, durable cleanup replay, binding mismatch, and credential injection
+at the common session launch boundary. Component tests cover metadata-only edits, the one-shot
+payload, and the actual setup/cleanup Flock writer boundaries. A controlled loopback relay run
+with bundled Codex 0.153.4 observed a streamed
 `POST /v1/responses` request with the configured model and matching bearer credential; the relay
 returned an intentional 401 after recording only the boolean credential match.

@@ -883,7 +883,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!agentConfigMatchesPreparation(agentConfig, spec, this.machineId)) {
       throw new Error(`Agent config no longer matches preparation ${spec.preparationId}`);
     }
-    agentConfig = await hydrateCodexProviderCredential(this.workspaceId, agentConfig);
     const user = await this.preparationUserResolver.resolve(spec.requestedByUserId);
     signal.throwIfAborted();
 
@@ -947,13 +946,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-    });
+    const launch = await this.resolveSessionProcessLaunch(config);
     signal.throwIfAborted();
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
 
@@ -1326,6 +1319,34 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     };
   }
 
+  private async resolveSessionProcessLaunch(
+    config: SessionConfig,
+    options: { onManagedRuntimeProgress?: (event: ManagedRuntimeProgressEvent) => void } = {}
+  ): Promise<ResolvedAcpProcessLaunch> {
+    const launchConfig = config.agentConfigId
+      ? await hydrateCodexProviderCredential(this.workspaceId, {
+          id: config.agentConfigId,
+          cliType: config.agentCliType,
+          agentType: config.agentType,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+          env: config.env ?? {},
+        })
+      : config;
+    const launch = await resolveACPProcessLaunchAsync({
+      cliType: config.agentCliType,
+      agentType: config.agentType,
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
+      env: launchConfig.env,
+      onManagedRuntimeProgress: options.onManagedRuntimeProgress,
+    });
+    return {
+      ...launch,
+      env: { ...(launchConfig.env ?? {}), ...(launch.env ?? {}) },
+    };
+  }
+
   private async createSessionInnerWithAgent(
     config: SessionConfig,
     agentStart?: AgentStartConfig
@@ -1364,12 +1385,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     const launchResolutionStartedAt = performance.now();
     let managedRuntimeReadyLogged = false;
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
+    const launch = await this.resolveSessionProcessLaunch(config, {
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
         if (event.phase === 'complete' && !managedRuntimeReadyLogged) {

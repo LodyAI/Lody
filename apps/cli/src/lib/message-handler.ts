@@ -3307,7 +3307,7 @@ export class MessageHandler {
                   action: args.action,
                   configId: args.configId,
                   purpose: args.purpose,
-                  credentialRevision: args.credentialRevision,
+                  setupRevision: args.setupRevision,
                 };
               case 'cancel':
                 return {
@@ -8383,7 +8383,15 @@ export class MessageHandler {
     message: MachineAcpAuthenticateRequestValidated,
     options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {}
   ): Promise<MachineAcpAuthenticateResponse> {
-    const response = await this.executionService.authenticateMachineAcp(message, options);
+    const response = await this.executionService.authenticateMachineAcp(message, {
+      ...options,
+      ...(message.action === 'start' && message.purpose === 'provision-provider-credential'
+        ? {
+            commitCodexProviderCredential: ({ configId, setupRevision, apiKey }) =>
+              this.providerSetupManager.commitCredentialSetup(configId, setupRevision, apiKey),
+          }
+        : {}),
+    });
     if (
       message.action === 'start' &&
       response.success &&
@@ -8393,12 +8401,7 @@ export class MessageHandler {
       try {
         // Re-read and probe the durable task's own config. Never publish based
         // on caller-supplied launch fields from this unauthenticated RPC.
-        if (message.purpose === 'provision-provider-credential' && message.credentialRevision) {
-          await this.providerSetupManager.publishAfterCredentialVerification(
-            message.configId,
-            message.credentialRevision
-          );
-        } else {
+        if (message.purpose !== 'provision-provider-credential') {
           await this.providerSetupManager.resumeAfterAuthentication(message.configId);
         }
       } catch (error) {

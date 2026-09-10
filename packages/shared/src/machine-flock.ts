@@ -32,7 +32,7 @@ import type {
   SessionLaunchConfig,
   SessionMeta,
 } from './schema';
-import { getLodyCodexCustomProvider } from './codex-provider-config';
+import { getLodyCodexCustomProvider, LODY_CODEX_API_KEY_ENV } from './codex-provider-config';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
 
@@ -176,7 +176,6 @@ export type ProviderSetupStatus =
   | 'queued'
   | 'preparing-runtime'
   | 'verifying'
-  | 'verified'
   | 'awaiting-auth'
   | 'failed';
 
@@ -203,20 +202,15 @@ export type ProviderSetupTask = {
   createdAt: number;
   updatedAt: number;
   failureCode?: ProviderSetupFailureCode;
-  /** Replacement setups leave the currently published config live until verification succeeds. */
-  operation?: 'create' | 'replace';
-  /** Exact non-secret credential generation expected by the target-machine provision RPC. */
-  credentialRevision?: string;
+  /** Snapshot of whether this setup stages over an already-published config. */
+  replacesPublishedConfig?: true;
+  /** Exact non-secret setup generation expected by the target-machine provision RPC. */
+  setupRevision?: string;
 };
 
-const PROVIDER_SETUP_SECRET_ENV_KEY =
-  /(?:api[_-]?key|auth|bearer|credential|password|passwd|secret|token)/i;
-
-/** Setup rows are workspace-readable and may contain only non-secret launch metadata. */
-export function providerSetupContainsCredential(config: AgentConfigMeta): boolean {
-  return Object.entries(config.env).some(
-    ([key, value]) => value.length > 0 && PROVIDER_SETUP_SECRET_ENV_KEY.test(key)
-  );
+/** Guard the one-shot secret owned by this protocol at its workspace-state boundary. */
+export function providerSetupContainsCodexCredential(config: AgentConfigMeta): boolean {
+  return Boolean(config.env[LODY_CODEX_API_KEY_ENV]?.trim());
 }
 
 /**
@@ -230,21 +224,18 @@ export type ProviderSetupCancellation = {
   id: AgentConfigId;
   machineId: MachineId;
   cancelledAt: number;
-  /** Cancelling a replacement must not delete the previously published config. */
+  /** Preserve a config that was already published before this setup began. */
   preservePublishedConfig?: boolean;
-  credentialRevision?: string;
+  setupRevision?: string;
 };
 
-/** Replayable request for the target machine to remove one local credential generation. */
+/** Replayable request for the target machine to remove its local credential. */
 export type ProviderCredentialCleanup = {
   v: 1;
   id: AgentConfigId;
   machineId: MachineId;
-  credentialRevision: string;
   requestedAt: number;
 };
-
-export const ALL_PROVIDER_CREDENTIAL_REVISIONS = '*';
 
 /**
  * Record that the user removed a managed builtin provider on this machine.
@@ -275,11 +266,7 @@ export type MachineFlockLocalProjectKey = ['localProject', LocalProjectId];
 export type MachineFlockAgentConfigKey = ['agentConfig', AgentConfigId];
 export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
-export type MachineFlockProviderCredentialCleanupKey = [
-  'providerCredentialCleanup',
-  AgentConfigId,
-  string,
-];
+export type MachineFlockProviderCredentialCleanupKey = ['providerCredentialCleanup', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
@@ -336,7 +323,6 @@ export type ParsedMachineFlockKey =
       kind: 'providerCredentialCleanup';
       key: MachineFlockProviderCredentialCleanupKey;
       agentConfigId: AgentConfigId;
-      credentialRevision: string;
     }
   | {
       kind: 'agentConfigIndex';
@@ -396,13 +382,8 @@ export const machineFlockKeys = {
     providerSetupId: AgentConfigId
   ): MachineFlockProviderSetupCancellationKey => ['providerSetupCancellation', providerSetupId],
   providerCredentialCleanup: (
-    agentConfigId: AgentConfigId,
-    credentialRevision: string
-  ): MachineFlockProviderCredentialCleanupKey => [
-    'providerCredentialCleanup',
-    agentConfigId,
-    credentialRevision,
-  ],
+    agentConfigId: AgentConfigId
+  ): MachineFlockProviderCredentialCleanupKey => ['providerCredentialCleanup', agentConfigId],
   agentConfigIndex: (agentConfigId: AgentConfigId): MachineFlockAgentConfigIndexKey => [
     'agentConfigIndex',
     agentConfigId,
@@ -513,16 +494,14 @@ export const parseMachineFlockKey = (
   }
 
   if (
-    key.length === 3 &&
+    key.length === 2 &&
     key[0] === 'providerCredentialCleanup' &&
-    isNonEmptyString(key[1]) &&
-    isNonEmptyString(key[2])
+    isNonEmptyString(key[1])
   ) {
     return {
       kind: 'providerCredentialCleanup',
-      key: machineFlockKeys.providerCredentialCleanup(key[1] as AgentConfigId, key[2]),
+      key: machineFlockKeys.providerCredentialCleanup(key[1] as AgentConfigId),
       agentConfigId: key[1] as AgentConfigId,
-      credentialRevision: key[2],
     };
   }
 
@@ -870,7 +849,7 @@ export function applyProviderSetupCancellationToFlock(
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
-  if (setup?.credentialRevision && setup.credentialRevision !== cancellation.credentialRevision) {
+  if (setup?.setupRevision && setup.setupRevision !== cancellation.setupRevision) {
     return false;
   }
   if (existingCancellation && !setup && (!config || cancellation.preservePublishedConfig)) {
@@ -883,12 +862,8 @@ export function applyProviderSetupCancellationToFlock(
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
   if (config && !cancellation.preservePublishedConfig) {
-    // Cancelling a published setup is the user removing this provider, so it needs
-    // the same removal record as deleting it from the list.
     const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
-    if (optOut) {
-      flock.set(optOut.key, optOut.value, nowMs);
-    }
+    if (optOut) flock.set(optOut.key, optOut.value, nowMs);
     flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
   }
   flock.commit();
@@ -1230,9 +1205,7 @@ export function parseMachineFlockRow(
     }
     case 'providerCredentialCleanup': {
       const cleanup = normalizeProviderCredentialCleanup(value);
-      return cleanup &&
-        cleanup.id === parsedKey.agentConfigId &&
-        cleanup.credentialRevision === parsedKey.credentialRevision
+      return cleanup && cleanup.id === parsedKey.agentConfigId
         ? { key: parsedKey.key, value: cleanup }
         : undefined;
     }
@@ -1608,7 +1581,6 @@ const isProviderSetupStatus = (value: unknown): value is ProviderSetupStatus =>
   value === 'queued' ||
   value === 'preparing-runtime' ||
   value === 'verifying' ||
-  value === 'verified' ||
   value === 'awaiting-auth' ||
   value === 'failed';
 
@@ -1636,8 +1608,8 @@ const normalizeProviderSetupTask = (value: unknown): ProviderSetupTask | undefin
   }
   const config = normalizeAgentConfigMeta(value.config);
   const codexProvider = config ? getLodyCodexCustomProvider(config.env) : null;
-  const credentialRevision = isNonEmptyString(value.credentialRevision)
-    ? value.credentialRevision
+  const setupRevision = isNonEmptyString(value.setupRevision)
+    ? value.setupRevision
     : undefined;
   if (
     !config ||
@@ -1646,12 +1618,12 @@ const normalizeProviderSetupTask = (value: unknown): ProviderSetupTask | undefin
     config.cliType !== 'builtin' ||
     !isBuiltinAgentType(config.agentType) ||
     (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
-      !(config.agentType === 'codex' && codexProvider?.credentialRevision)) ||
-    providerSetupContainsCredential(config)
+      !(config.agentType === 'codex' && codexProvider && setupRevision)) ||
+    providerSetupContainsCodexCredential(config)
   ) {
     return undefined;
   }
-  if (codexProvider?.credentialRevision !== credentialRevision) {
+  if (Boolean(codexProvider) !== Boolean(setupRevision)) {
     return undefined;
   }
   if (!isMissing(value.failureCode) && !isProviderSetupFailureCode(value.failureCode)) {
@@ -1668,10 +1640,8 @@ const normalizeProviderSetupTask = (value: unknown): ProviderSetupTask | undefin
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     ...(value.failureCode ? { failureCode: value.failureCode } : {}),
-    ...(value.operation === 'create' || value.operation === 'replace'
-      ? { operation: value.operation }
-      : {}),
-    ...(credentialRevision ? { credentialRevision } : {}),
+    ...(value.replacesPublishedConfig === true ? { replacesPublishedConfig: true } : {}),
+    ...(setupRevision ? { setupRevision } : {}),
   };
 };
 
@@ -1694,8 +1664,8 @@ const normalizeProviderSetupCancellation = (
     machineId: value.machineId as MachineId,
     cancelledAt: value.cancelledAt,
     ...(value.preservePublishedConfig === true ? { preservePublishedConfig: true } : {}),
-    ...(isNonEmptyString(value.credentialRevision)
-      ? { credentialRevision: value.credentialRevision }
+    ...(isNonEmptyString(value.setupRevision)
+      ? { setupRevision: value.setupRevision }
       : {}),
   };
 };
@@ -1708,7 +1678,6 @@ const normalizeProviderCredentialCleanup = (
     value.v !== 1 ||
     !isNonEmptyString(value.id) ||
     !isNonEmptyString(value.machineId) ||
-    !isNonEmptyString(value.credentialRevision) ||
     typeof value.requestedAt !== 'number' ||
     !Number.isFinite(value.requestedAt)
   ) {
@@ -1718,7 +1687,6 @@ const normalizeProviderCredentialCleanup = (
     v: 1,
     id: value.id as AgentConfigId,
     machineId: value.machineId as MachineId,
-    credentialRevision: value.credentialRevision,
     requestedAt: value.requestedAt,
   };
 };

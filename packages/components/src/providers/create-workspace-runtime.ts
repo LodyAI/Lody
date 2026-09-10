@@ -1970,7 +1970,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               action: message.action,
               configId: message.configId,
               purpose: message.purpose,
-              credentialRevision: message.credentialRevision,
+              setupRevision: message.setupRevision,
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({

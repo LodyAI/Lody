@@ -11,6 +11,8 @@ import {
 } from '../src/session/session-execution-service';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
@@ -6002,7 +6004,7 @@ describe('SessionExecutionService', () => {
         action: 'start',
         configId: capabilityConfigId,
         purpose: 'provision-provider-credential',
-        credentialRevision: 'revision-new',
+        setupRevision: 'revision-new',
       });
       await Promise.resolve();
       expect(authenticate).not.toHaveBeenCalled();
@@ -6019,6 +6021,71 @@ describe('SessionExecutionService', () => {
       );
       expect(authenticate).toHaveBeenCalledWith(
         expect.objectContaining({ forceCodexApiKeyInput: true })
+      );
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('keeps the one-shot key in memory and reports publish failure instead of success', async () => {
+    const config = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      runtimeOverrides: { codexPath: '/bin/echo' },
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+    });
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockImplementation(async (options) => {
+        await options.storeCodexApiKey?.('new-key');
+        return { success: true, disposition: 'authenticated' };
+      });
+    const commitCodexProviderCredential = vi.fn(async () => {
+      throw new Error('publish flush failed');
+    });
+    const fetchAcpCapabilities = vi.fn(async () => ({ modes: [], models: [] }));
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities,
+        workspaceDocument: {
+          waitForProviderSetupConfig: vi.fn(async () => config),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      await expect(
+        service.authenticateMachineAcp(
+          {
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'provision-publish-fails',
+            action: 'start',
+            configId: capabilityConfigId,
+            purpose: 'provision-provider-credential',
+            setupRevision: 'revision-new',
+          },
+          { commitCodexProviderCredential }
+        )
+      ).resolves.toEqual(
+        expect.objectContaining({
+          success: false,
+          disposition: 'error',
+          error: 'publish flush failed',
+        })
+      );
+      expect(commitCodexProviderCredential).toHaveBeenCalledWith({
+        configId: capabilityConfigId,
+        setupRevision: 'revision-new',
+        apiKey: 'new-key',
+      });
+      expect(fetchAcpCapabilities.mock.calls[0]?.[2]).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'new-key',
+      });
+      expect(fetchAcpCapabilities.mock.invocationCallOrder[0]).toBeLessThan(
+        commitCodexProviderCredential.mock.invocationCallOrder[0]!
       );
     } finally {
       authenticate.mockRestore();

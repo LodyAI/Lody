@@ -1000,7 +1000,7 @@ describe('LoroDocumentManager provider setup visibility', () => {
     const workspaceId = 'workspace-causal' as WorkspaceId;
     const machineId = 'machine-causal' as MachineId;
     const configId = 'config-causal' as AgentConfigId;
-    const credentialRevision = 'revision-2';
+    const setupRevision = 'revision-2';
     const rendererFlock = new Flock('renderer-causal');
     const daemonFlock = new Flock('daemon-causal');
     const repo = {
@@ -1011,7 +1011,7 @@ describe('LoroDocumentManager provider setup visibility', () => {
       workspaceId,
     }) as LoroDocumentManager;
 
-    const pending = manager.waitForProviderSetupConfig(configId, machineId, credentialRevision, {
+    const pending = manager.waitForProviderSetupConfig(configId, machineId, setupRevision, {
       timeoutMs: 1_000,
     });
     let settled = false;
@@ -1033,13 +1033,12 @@ describe('LoroDocumentManager provider setup visibility', () => {
         agentType: 'codex',
         env: buildLodyCodexCustomProviderEnv(
           {},
-          { baseUrl: 'https://relay.example.test/v1', credentialRevision }
+          { baseUrl: 'https://relay.example.test/v1' }
         ),
         prompt: '',
       },
       status: 'awaiting-auth',
-      operation: 'create',
-      credentialRevision,
+      setupRevision,
       attempt: 1,
       createdAt: 10,
       updatedAt: 10,
@@ -1054,9 +1053,7 @@ describe('LoroDocumentManager provider setup visibility', () => {
     await expect(pending).resolves.toMatchObject({
       id: configId,
       machineId,
-      env: expect.objectContaining({
-        LODY_CODEX_CUSTOM_ENDPOINT_STATE: expect.stringContaining(credentialRevision),
-      }),
+      env: expect.objectContaining({ LODY_CODEX_CUSTOM_ENDPOINT_STATE: expect.any(String) }),
     });
   });
 });

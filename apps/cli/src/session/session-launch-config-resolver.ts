@@ -17,7 +17,6 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
-import { hydrateCodexProviderCredential } from '@/agent/provider-credential-store';
 
 type LoggerLike = {
   debug(message: string): void;
@@ -183,10 +182,9 @@ export async function resolveSessionLaunchConfig(input: {
   }
 
   if (snapshot.agentConfig) {
-    const hydrated = await hydrateCodexProviderCredential(input.workspaceId, snapshot.agentConfig);
     return resolveSessionLaunchConfigFromSources({
       legacy: snapshot.legacy,
-      agentConfig: hydrated,
+      agentConfig: snapshot.agentConfig,
     });
   }
 
@@ -203,7 +201,7 @@ export async function resolveSessionLaunchConfig(input: {
     }
     return resolveSessionLaunchConfigFromSources({
       legacy: snapshot.legacy,
-      agentConfig: await hydrateCodexProviderCredential(input.workspaceId, agentConfig),
+      agentConfig,
     });
   } catch (error) {
     input.logger.debug(

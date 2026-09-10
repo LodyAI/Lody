@@ -316,7 +316,7 @@ type RpcServerDeps = {
           action: 'start';
           configId: AgentConfigId;
           purpose?: 'authenticate' | 'provision-provider-credential';
-          credentialRevision?: string;
+          setupRevision?: string;
         }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
@@ -942,7 +942,7 @@ export class LoroStreamsMachineRpcServer {
                     action: request.params.action,
                     configId: request.params.configId as AgentConfigId,
                     purpose: request.params.purpose,
-                    credentialRevision: request.params.credentialRevision,
+                    setupRevision: request.params.setupRevision,
                     onProgress: appendProgress,
                   });
                 case 'cancel':

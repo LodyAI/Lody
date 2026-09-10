@@ -43,7 +43,6 @@ describe('hasBuiltinEnvAuthentication', () => {
       {},
       {
         baseUrl: 'https://relay.example.com/v1',
-        credentialRevision: 'revision-1',
       }
     );
     expect(hasBuiltinEnvAuthentication('codex', env)).toBe(true);

@@ -66,7 +66,7 @@ describe('local session control node validators', () => {
     const provision = {
       ...request,
       purpose: 'provision-provider-credential',
-      credentialRevision: 'revision-1',
+      setupRevision: 'revision-1',
     };
     const progress = {
       type: 'machine/acp-authentication-progress',
@@ -136,10 +136,10 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
     expect(isLocalSessionControlRequest(provision)).toBe(true);
     expect(isLocalSessionControlRequestCjs(provision)).toBe(true);
-    expect(isLocalSessionControlRequest({ ...provision, credentialRevision: undefined })).toBe(
+    expect(isLocalSessionControlRequest({ ...provision, setupRevision: undefined })).toBe(
       false
     );
-    expect(isLocalSessionControlRequestCjs({ ...provision, credentialRevision: undefined })).toBe(
+    expect(isLocalSessionControlRequestCjs({ ...provision, setupRevision: undefined })).toBe(
       false
     );
     expect(isLocalSessionControlRequest(submitCode)).toBe(true);

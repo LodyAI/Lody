@@ -391,7 +391,7 @@ export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
         /** Explicit credential mutation; ordinary authentication never rotates stored keys. */
         purpose?: 'authenticate' | 'provision-provider-credential';
         /** Exact staged setup generation required for credential provisioning. */
-        credentialRevision?: string;
+        setupRevision?: string;
       }
     | {
         action: 'cancel';

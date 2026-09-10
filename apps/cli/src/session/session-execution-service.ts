@@ -55,6 +55,7 @@ import {
   hasBuiltinRuntimeOverrideValues,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
+  LODY_CODEX_API_KEY_ENV,
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
@@ -92,10 +93,6 @@ import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
 } from '@/agent/acp-authentication';
-import {
-  hydrateCodexProviderCredential,
-  storeCodexProviderCredential,
-} from '@/agent/provider-credential-store';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
@@ -643,6 +640,11 @@ function createAcpRefreshAbortError(): DOMException {
 
 type AcpAuthenticationOptions = {
   onProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+  commitCodexProviderCredential?: (input: {
+    configId: AgentConfigId;
+    setupRevision: string;
+    apiKey: string;
+  }) => Promise<void>;
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
@@ -5125,7 +5127,7 @@ export class SessionExecutionService {
     }
 
     const provisioning = message.purpose === 'provision-provider-credential';
-    if (provisioning && !message.credentialRevision?.trim()) {
+    if (provisioning && !message.setupRevision?.trim()) {
       return {
         ...base,
         success: false,
@@ -5137,7 +5139,7 @@ export class SessionExecutionService {
       ? await this.deps.workspaceDocument.waitForProviderSetupConfig(
           message.configId,
           this.deps.machineId,
-          message.credentialRevision ?? '',
+          message.setupRevision ?? '',
           { timeoutMs: 60_000 }
         )
       : await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
@@ -5175,7 +5177,7 @@ export class SessionExecutionService {
         ...event,
       });
     };
-    let rollbackCredential: (() => Promise<void>) | undefined;
+    let candidateApiKey: string | undefined;
     const result = await this.acpAuthenticationManager.authenticate({
       requestId: message.requestId,
       cliType: config.cliType,
@@ -5185,21 +5187,21 @@ export class SessionExecutionService {
       env: config.env,
       forceCodexApiKeyInput: provisioning,
       storeCodexApiKey: async (apiKey) => {
-        rollbackCredential = await storeCodexProviderCredential(
-          this.deps.workspaceId,
-          config,
-          apiKey
-        );
+        candidateApiKey = apiKey.trim();
       },
       onProgress,
     });
     if (result.success && result.disposition === 'authenticated') {
-      const verifiedConfig = provisioning
-        ? await hydrateCodexProviderCredential(this.deps.workspaceId, config)
-        : ((await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
-            message.configId,
-            this.deps.machineId
-          )) ?? config);
+      const verifiedConfig =
+        provisioning && candidateApiKey
+          ? {
+              ...config,
+              env: { ...config.env, [LODY_CODEX_API_KEY_ENV]: candidateApiKey },
+            }
+          : ((await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+              message.configId,
+              this.deps.machineId
+            )) ?? config);
       const refreshController = new AbortController();
       const refreshTimeoutMs = Math.max(
         1,
@@ -5242,7 +5244,6 @@ export class SessionExecutionService {
         clearTimeout(refreshTimeout);
       }
       if (!refresh.success) {
-        await rollbackCredential?.().catch(() => undefined);
         return {
           ...resolvedBase,
           ...result,
@@ -5251,6 +5252,30 @@ export class SessionExecutionService {
           authMethods: refresh.authMethods,
           error: refresh.error ?? 'Authentication succeeded, but capability refresh failed',
         };
+      }
+      if (provisioning) {
+        if (!candidateApiKey || !message.setupRevision || !options.commitCodexProviderCredential) {
+          return {
+            ...resolvedBase,
+            success: false,
+            disposition: 'error',
+            error: 'Codex credential setup could not be committed',
+          };
+        }
+        try {
+          await options.commitCodexProviderCredential({
+            configId: message.configId,
+            setupRevision: message.setupRevision,
+            apiKey: candidateApiKey,
+          });
+        } catch (error) {
+          return {
+            ...resolvedBase,
+            success: false,
+            disposition: 'error',
+            error: formatErrorMessage(error),
+          };
+        }
       }
       return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
     }

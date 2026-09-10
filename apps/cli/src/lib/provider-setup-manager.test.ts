@@ -121,7 +121,8 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
   } as ProviderSetupManagerOptions['execution'];
   const markMachineFlockDocDirty = vi.fn();
   const clearCredential = vi.fn(async () => undefined);
-  const retainCredential = vi.fn(async () => undefined);
+  const rollbackCredential = vi.fn(async () => undefined);
+  const storeCredential = vi.fn(async () => rollbackCredential);
   const manager = new ProviderSetupManager({
     repo,
     workspaceId,
@@ -130,7 +131,7 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     sync: { markMachineFlockDocDirty },
     logger: createSilentLogger(),
     clearCredential,
-    retainCredential,
+    storeCredential,
   });
   return {
     flock,
@@ -138,7 +139,8 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     execution,
     markMachineFlockDocDirty,
     clearCredential,
-    retainCredential,
+    storeCredential,
+    rollbackCredential,
     manager,
   };
 }
@@ -389,11 +391,11 @@ describe('ProviderSetupManager', () => {
         cleanups: [],
       });
     }
-    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId, undefined);
+    expect(harness.clearCredential).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
-  it('atomically replaces a published config only after its credential revision is verified', async () => {
+  it('stores the verified key and publishes only for the exact setup revision', async () => {
     const harness = createHarness();
     const oldConfig = createSetup().config;
     writeMachineFlockRowToFlock(harness.flock, {
@@ -402,53 +404,51 @@ describe('ProviderSetupManager', () => {
     });
     const replacement: ProviderSetupTask = {
       ...createSetup('awaiting-auth'),
-      operation: 'replace',
-      credentialRevision: 'revision-new',
+      setupRevision: 'revision-new',
       config: {
         ...oldConfig,
-        env: buildLodyCodexCustomProviderEnv(
-          {},
-          { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
-        ),
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
       },
     };
     seedSetup(harness.flock, replacement);
 
-    await harness.manager.publishAfterCredentialVerification(setupId, 'revision-new');
+    await harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key');
 
     expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
     expect(readState(harness.flock).setup).toBeUndefined();
     expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
-    expect(harness.retainCredential).toHaveBeenCalledWith(workspaceId, setupId, 'revision-new');
+    expect(harness.storeCredential).toHaveBeenCalledWith(
+      workspaceId,
+      replacement.config,
+      'new-key'
+    );
     harness.manager.stop();
   });
 
-  it('finishes a durable verified replacement after restart without probing the stale live config', async () => {
+  it('rejects a superseded credential RPC without storing an orphan key', async () => {
     const harness = createHarness();
     const oldConfig = createSetup().config;
     writeMachineFlockRowToFlock(harness.flock, {
       key: machineFlockKeys.agentConfig(setupId),
       value: oldConfig,
     });
-    const replacement = {
-      ...createSetup('verified'),
-      operation: 'replace' as const,
-      credentialRevision: 'revision-new',
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-new',
       config: {
         ...oldConfig,
-        env: buildLodyCodexCustomProviderEnv(
-          {},
-          { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-new' }
-        ),
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
       },
     };
     seedSetup(harness.flock, replacement);
 
-    await harness.manager.kick();
+    await expect(
+      harness.manager.commitCredentialSetup(setupId, 'revision-old', 'old-candidate-key')
+    ).rejects.toThrow(/cancelled or replaced/);
 
-    expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
-    expect(readState(harness.flock).setup).toBeUndefined();
-    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    expect(readState(harness.flock).config).toEqual(oldConfig);
+    expect(readState(harness.flock).setup).toEqual(replacement);
+    expect(harness.storeCredential).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -456,22 +456,18 @@ describe('ProviderSetupManager', () => {
     const harness = createHarness();
     const config = {
       ...createSetup().config,
-      env: buildLodyCodexCustomProviderEnv(
-        {},
-        { baseUrl: 'https://relay.example.com/v1', credentialRevision: 'revision-old' }
-      ),
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
     };
     writeMachineFlockRowToFlock(harness.flock, {
       key: machineFlockKeys.agentConfig(setupId),
       value: config,
     });
     writeMachineFlockRowToFlock(harness.flock, {
-      key: machineFlockKeys.providerCredentialCleanup(setupId, 'revision-old'),
+      key: machineFlockKeys.providerCredentialCleanup(setupId),
       value: {
         v: 1,
         id: setupId,
         machineId,
-        credentialRevision: 'revision-old',
         requestedAt: 20,
       },
     });
@@ -482,7 +478,7 @@ describe('ProviderSetupManager', () => {
 
     deleteMachineFlockRowFromFlock(harness.flock, machineFlockKeys.agentConfig(setupId));
     await harness.manager.kick();
-    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId, 'revision-old');
+    expect(harness.clearCredential).toHaveBeenCalledWith(workspaceId, setupId);
     expect(readState(harness.flock).cleanups).toEqual([]);
     harness.manager.stop();
   });

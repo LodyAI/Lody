@@ -290,7 +290,7 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
         action: z.literal('start'),
         configId: AgentConfigIdSchema,
         purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
-        credentialRevision: z.string().trim().min(1).max(1024).optional(),
+        setupRevision: z.string().trim().min(1).max(1024).optional(),
       })
       .strict(),
     z
@@ -2432,7 +2432,7 @@ export class LoroStreamsMachineRpcClient {
           action: 'start';
           configId: AgentConfigId;
           purpose?: 'authenticate' | 'provision-provider-credential';
-          credentialRevision?: string;
+          setupRevision?: string;
         }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
@@ -2517,8 +2517,8 @@ export class LoroStreamsMachineRpcClient {
               action: options.action,
               configId: options.configId,
               ...(options.purpose ? { purpose: options.purpose } : {}),
-              ...(options.credentialRevision
-                ? { credentialRevision: options.credentialRevision }
+              ...(options.setupRevision
+                ? { setupRevision: options.setupRevision }
                 : {}),
             } as const;
           case 'cancel':
@@ -3069,7 +3069,7 @@ export class LoroStreamsMachineRpcClient {
                 action: 'start';
                 configId: AgentConfigId;
                 purpose?: 'authenticate' | 'provision-provider-credential';
-                credentialRevision?: string;
+                setupRevision?: string;
               }
             | { requestId: string; action: 'cancel'; authenticationRequestId: string }
             | {

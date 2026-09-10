@@ -771,7 +771,6 @@ describe('machine Flock helpers', () => {
           {},
           {
             baseUrl: 'https://relay.example.test/v1',
-            credentialRevision: 'revision-new',
           }
         ),
       };
@@ -783,8 +782,7 @@ describe('machine Flock helpers', () => {
           machineId,
           config,
           status: 'awaiting-auth',
-          operation: 'replace',
-          credentialRevision: 'revision-new',
+          setupRevision: 'revision-new',
           attempt: 1,
           createdAt: 10,
           updatedAt: 10,
@@ -796,7 +794,7 @@ describe('machine Flock helpers', () => {
           v: 1,
           id,
           machineId,
-          credentialRevision: 'revision-old',
+          setupRevision: 'revision-old',
           preservePublishedConfig: true,
           cancelledAt: 20,
         })
