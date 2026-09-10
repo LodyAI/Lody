@@ -57,7 +57,6 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
-import { collectSessionContainmentIds } from '@/lib/session-containment';
 import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
@@ -225,6 +224,19 @@ export function isArchivedLocalProjectRestoreUnavailableError(
   error: unknown
 ): error is ArchivedLocalProjectRestoreUnavailableError {
   return error instanceof ArchivedLocalProjectRestoreUnavailableError;
+}
+
+function getSessionArchiveTargets(
+  sessionId: SessionId,
+  rootMeta: SessionMeta,
+  sessions: readonly SessionMeta[]
+): SessionMeta[] {
+  return [
+    { ...rootMeta, id: rootMeta.id ?? sessionId },
+    ...sessions.filter(
+      (session) => session.id !== sessionId && session.parentSessionId === sessionId
+    ),
+  ];
 }
 
 async function assertArchivedLocalProjectCanRestore(
@@ -560,22 +572,6 @@ export function useSessionActions(): SessionActions {
       });
     },
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
-  );
-
-  const getSessionContainmentMetas = useCallback(
-    (sessionId: SessionId, rootMeta: SessionMeta): SessionMeta[] => {
-      const cache = store.get(sessionMetaCacheAtom);
-      const sessionsById = new Map(
-        Object.values(cache).map((session) => [session.id, session] as const)
-      );
-      sessionsById.set(sessionId, { ...rootMeta, id: rootMeta.id ?? sessionId });
-      return collectSessionContainmentIds(sessionId, [...sessionsById.values()]).map((id) => {
-        const session = sessionsById.get(id);
-        if (!session) throw new Error(`Session metadata missing for contained child ${id}`);
-        return session;
-      });
-    },
-    [store]
   );
 
   const getSessionLifecycleMetas = useCallback(
@@ -1243,8 +1239,12 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const containedSessions = getSessionContainmentMetas(sessionId, sessionMeta);
-      for (const session of containedSessions) {
+      const archiveTargets = getSessionArchiveTargets(
+        sessionId,
+        sessionMeta,
+        Object.values(store.get(sessionMetaCacheAtom))
+      );
+      for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
         }
@@ -1280,10 +1280,10 @@ export function useSessionActions(): SessionActions {
       }
       log('[session-archive] containment archived', {
         sessionId,
-        containedSessionIds: containedSessions.map((session) => session.id),
+        containedSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store, getSessionContainmentMetas]
+    [runtime, store]
   );
 
   const restoreSession = useCallback(
@@ -1301,9 +1301,13 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const containedSessions = getSessionContainmentMetas(sessionId, sessionMeta);
+      const archiveTargets = getSessionArchiveTargets(
+        sessionId,
+        sessionMeta,
+        Object.values(store.get(sessionMetaCacheAtom))
+      );
 
-      for (const session of containedSessions) {
+      for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
         } as Partial<SessionMeta>);
@@ -1318,10 +1322,10 @@ export function useSessionActions(): SessionActions {
       }
       log('[session-restore] containment restored', {
         sessionId,
-        containedSessionIds: containedSessions.map((session) => session.id),
+        containedSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, getSessionContainmentMetas]
+    [runtime, store]
   );
 
   const deleteArchivedSessionMeta = useCallback(

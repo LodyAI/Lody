@@ -1216,13 +1216,22 @@ describe('useSessionActions', () => {
   it('restores child tabs without restoring independently opened session workspaces', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('restore', true);
+    openedSession.machineId = rootSession.machineId;
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    for (const session of [rootSession, openedSession, openedFromTabSession]) {
-      metaRepo.setMeta(getMachineRoomId(session.machineId), {
-        needToArchiveSessions: { [session.id]: true },
-        needToDeleteSessions: { [session.id]: true },
-      });
-    }
+    metaRepo.setMeta(getMachineRoomId(rootSession.machineId), {
+      needToArchiveSessions: {
+        [rootSession.id]: true,
+        [openedSession.id]: true,
+      },
+      needToDeleteSessions: {
+        [rootSession.id]: true,
+        [openedSession.id]: true,
+      },
+    });
+    metaRepo.setMeta(getMachineRoomId(openedFromTabSession.machineId), {
+      needToArchiveSessions: { [openedFromTabSession.id]: true },
+      needToDeleteSessions: { [openedFromTabSession.id]: true },
+    });
     const runtime = createRuntime({ repo: metaRepo.repo });
     const actions = await renderActions(runtime, { sessionMetaCache });
 
@@ -1247,8 +1256,8 @@ describe('useSessionActions', () => {
       );
     }
     expect(metaRepo.getMeta(getMachineRoomId(rootSession.machineId))).toMatchObject({
-      needToArchiveSessions: {},
-      needToDeleteSessions: {},
+      needToArchiveSessions: { [openedSession.id]: true },
+      needToDeleteSessions: { [openedSession.id]: true },
     });
     expect(runtime.writer.flockRowDelete).toHaveBeenCalledTimes(2);
     expect(runtime.writer.flockRowDelete).toHaveBeenCalledWith(
