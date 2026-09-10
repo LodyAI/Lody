@@ -47,9 +47,9 @@ Contract: specs/session-orchestration.md.
 - Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
   never gate status or meta writes.
 - An `active` session goal must not suppress turn completion or its notification.
-- Never mint a second visible turn while a `TurnRuntimeState` is registered; derive assistant
-  entry ids from `userTurnId`. `invocation` atomically owns source Turn, requester, and input
-  config; steer replaces it before tool execution.
+- Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
+  second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
+  owns source Turn, requester and config; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.

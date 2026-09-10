@@ -22,13 +22,31 @@ this page is the full text of the rules summarised there.
   `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
   NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay
   prompt and its budget behaviour is load-bearing for CLI resume; keep the two
-  separate. The copy targets ~20k estimated tokens AND 50k characters (both
+  separate. The copy targets ~60k estimated tokens AND 150k characters (both
   bounds, because CJK is ~1 token/char) and gets there by degrading tool
-  output, terminal output, then thinking, oldest turns first.
-  **Message text is never trimmed** — a conversation whose prose alone exceeds
-  the budget returns `overBudget` instead of cutting it. Whatever was trimmed
-  must reach the toast (`describeCopiedConversation`); silent truncation reads
-  as "I copied everything".
+  results, terminal output, then collapsing tool calls to per-turn counted
+  summaries, and only then capping thinking — oldest turns first.
+  **Message text is never trimmed and thinking is never dropped** — the export
+  exists to move context to another agent, so prose-shaped content outranks
+  everything the agent produced around it. Thinking degrades by capping (head +
+  tail, middle elided) so the receiving conversation always inherits some of the
+  reasoning; a conversation whose prose alone exceeds the budget returns
+  `overBudget` instead of cutting it. Whatever was trimmed must reach the toast
+  (`describeCopiedConversation`); silent truncation reads as "I copied
+  everything". The one edit allowed on prose is heading level: bodies routinely
+  contain `#`/`##` headings that would outrank the `##` turn headings and
+  destroy the outline, so `demoteMarkdownHeadings` shifts them down two levels
+  outside fenced blocks. Turn headings carry a round number, local time, and —
+  for assistant turns — the recorded model and effective working time; speaker
+  names appear only when the conversation has more than one human in it.
+  The trim notice lives in the header blockquote, not the footer, so a reader
+  learns the transcript is incomplete before reading it rather than after.
+  Message fork menus copy the inclusive history prefix independently of ACP fork
+  capability. Missing boundaries fail. A reply that was still generating is marked
+  through the builder's `incompleteFinalResponse` option, so the warning lands in
+  the header blockquote with the trim notice rather than as a trailing line —
+  callers must not append their own note after the transcript.
+  Attachment bytes are not exported. The session header copies all history.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,
   `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.

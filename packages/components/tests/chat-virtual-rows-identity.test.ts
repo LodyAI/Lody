@@ -142,3 +142,18 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     });
   });
 });
+
+it('exposes copying during streaming and invalidates only when availability changes', () => {
+  const item = wrap(makeMessage('stream-copy', 'assistant', [text('partial')], false));
+  const args = { items: [item], lastAssistantMessageId: 'stream-copy', expansionVersion: 0 };
+  const before = buildChatVirtualRows(args);
+  expect(before.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    false
+  );
+  const withCopy = buildChatVirtualRows({ ...args, copyContextAvailable: true });
+  expect(withCopy.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    true
+  );
+  const unchanged = buildChatVirtualRows({ ...args, copyContextAvailable: true });
+  expect(unchanged.every((row, index) => row === withCopy[index])).toBe(true);
+});
