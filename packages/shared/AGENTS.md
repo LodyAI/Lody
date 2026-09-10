@@ -33,7 +33,12 @@
   of untouched rows and later appended rows. Reject changes to existing row identity/order and edits inside that range,
   except pending-to-seen read acknowledgement on newly inserted user rows.
   External ACP imports remain new input.
-- Tool fields other than type/toolCallId are independent
+- A `tool_call` is identified by `toolCallId` (full call) or a valid `ref` (sealed
+  skeleton); the TS type, Zod parser and Loro `validate` accept both and reject
+  neither-identity. A skeleton has no payload (`content`/`rawInput`/`rawOutput`), is
+  never a merge target matched by id, and its `ref.index` must survive filtering,
+  hashing and unrelated edits. The payload fetch is not implemented.
+- Tool fields other than type/toolCallId/ref are independent
   edits: derive their parsers from the tool message schema and validate changed fields,
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
   authored blocks; tool identity changes still use the complete item parser.

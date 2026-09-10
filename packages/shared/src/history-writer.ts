@@ -118,10 +118,13 @@ const cleanNew = (schema: z.ZodType, input: unknown, old?: unknown): unknown => 
 };
 
 // One independently editable group, derived from the message definition rather
-// than a second set of validators. Tool identity stays outside this group.
+// than a second set of validators. Tool identity stays outside this group:
+// `toolCallId` for a full call and `ref` for a sealed skeleton, so changing
+// either uses the complete item parser.
 const ToolStateWriteSchema = ToolCallMessageSchema.omit({
   type: true,
   toolCallId: true,
+  ref: true,
 });
 
 function prepareObjectFields(

@@ -113,6 +113,10 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   without per-file pills.
 - Update `message-content-guards.ts` with every shared `MessageContent` variant.
   `isMessageContent` gates rendering; a missing case silently drops the item.
+- A sealed `tool_call` skeleton has no `toolCallId`/`content`; `ref` points at the
+  origin machine. `tool-call-skeleton.ts` owns the runtime guards, and each reader
+  classifies from `kind`/`status`/`locations` without reading `content`.
+  `use-tool-call-payload.ts` always reports `unavailable` (no Machine RPC yet).
 - A user entry marked by `SessionMeta.lastMissingHistoryUserMsgId` renders the
   terminal "Not delivered" label. That label is the only recovery entry: its
   dialog resends the same content as a new ordinary message, then marks the old

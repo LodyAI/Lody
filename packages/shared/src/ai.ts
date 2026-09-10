@@ -8,7 +8,7 @@ import {
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
 import { createPlanModeConfigOption } from 'acp-extension-core';
-import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
+import type { AgentConfigId, AgentRoleId, MachineId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
@@ -1537,7 +1537,12 @@ export type MessageContent =
   | {
       type: 'tool_call';
       _meta?: { [k: string]: unknown } | null;
-      toolCallId: string;
+      /**
+       * ACP-assigned id. Present on every live/full tool call. A sealed skeleton
+       * omits it and identifies itself with `ref` instead, so this is optional in
+       * the type to match the runtime contract exactly.
+       */
+      toolCallId?: string;
       title?: string | null;
       status: ToolCallStatus;
       kind?: ToolKind;
@@ -1545,6 +1550,13 @@ export type MessageContent =
       locations?: ToolCallLocation[];
       rawInput?: { [k: string]: unknown };
       rawOutput?: { [k: string]: unknown };
+      /**
+       * Payload pointer of a sealed skeleton. The execution payload
+       * (`content`/`rawInput`/`rawOutput`) stays on the origin machine; readers
+       * must tolerate its absence whenever `ref` is present and never treat a
+       * skeleton as a merge target for a live tool call.
+       */
+      ref?: ToolCallRef;
       /** Small provider-neutral marker for tool-like status rows rendered in the transcript. */
       activityKind?: 'context_compaction' | 'codex_retry';
       /**
@@ -1607,6 +1619,40 @@ export type MessageContent =
   | ({
       type: 'visual_annotation_reference';
     } & VisualAnnotationReferencePayload);
+
+/**
+ * Pointer from a sealed tool_call skeleton to its full execution payload. The
+ * payload lives in the origin machine's local store, keyed by the owning turn
+ * and the item's index inside that turn's `items` list. The index is the
+ * skeleton's anchor: reader paths must preserve item positions and must never
+ * renumber a skeleton when they filter or edit unrelated items.
+ */
+export type ToolCallRef = {
+  machineId: MachineId;
+  turnId: string;
+  index: number;
+};
+
+/**
+ * The execution payload a sealed skeleton omits. Fetched on demand from the
+ * origin machine; until that transport exists, readers resolve it to an
+ * `unavailable` state and render the skeleton itself.
+ */
+export type ToolCallPayload = {
+  content?: ToolCallContent[];
+  rawInput?: { [k: string]: unknown };
+  rawOutput?: { [k: string]: unknown };
+};
+
+/** Runtime guard for a skeleton's payload pointer; shared by every reader. */
+export const isToolCallRef = (value: unknown): value is ToolCallRef =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  typeof (value as ToolCallRef).machineId === 'string' &&
+  typeof (value as ToolCallRef).turnId === 'string' &&
+  typeof (value as ToolCallRef).index === 'number' &&
+  Number.isFinite((value as ToolCallRef).index);
 
 export type TerminalExitStatus = {
   exitCode?: number | null;

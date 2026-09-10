@@ -46,10 +46,18 @@ That tolerance must not authorize creating new malformed items locally.
   External provider imports remain new inputs, not privileged stored-history copies.
 - Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
-- Tool fields other than type/toolCallId
+- Tool fields other than type/toolCallId/ref
   parse only changed fields without reparsing untouched tool payloads; outcome-only
   edits retain existing request information. Identity changes require complete item parsing;
   changed content blocks are parsed separately. Invalid new fields reject the command before any write.
+- A `tool_call` item is identified by `toolCallId` (full call) or a valid `ref` (sealed
+  skeleton); the TypeScript type, the Zod input parser and the Loro schema accept both and
+  reject an item with neither identity. A skeleton carries no execution payload, so readers
+  classify it from `kind`/`status`/`locations` and never from `content`; it is never a merge
+  target keyed by `toolCallId`, and reader paths preserve its `ref.index` without renumbering
+  items around it. Fetching the payload from the origin machine is explicitly out of scope:
+  the reader-side resolver reports `unavailable` and the skeleton renders with a
+  "stored on <machine>" note.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
   stored history. Steer config and same-identity task-proposal edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
@@ -92,17 +100,24 @@ arbitrary reordering of existing turns in a plain LoroList.
 The current full-Mirror read path still materializes history; this change is not
 the 3000-round performance acceptance or the windowed ConversationView rollout.
 Non-history control-field validation remains outside this HistoryWriter contract.
-The v2 canonical form is defined for the shapes this repository writes. The full
-sealed-skeleton feature (a reader-side `ref` payload fetch, payload hooks, and the
-UI that consumes them) is not implemented here; this change only prevents a future
-sealed turn from looking like a hash conflict once such skeletons exist.
+The v2 canonical form is defined for the shapes this repository writes. Reader-side
+skeleton compatibility is implemented (type, Zod/Loro validation, ACP apply, UI render,
+CLI export/transcript), but turning a full call into a skeleton is NOT: there is no
+payload stripping, no writer that seals turns, no derived `summary`/`live` fields, and
+no Machine RPC to fetch a skeleton's payload. `useToolCallPayload` therefore always
+resolves to `unavailable`, and an unknown turn-level `summary`/`live` key is ignored on
+read rather than surfaced.
 
 ## Implementation evidence
 
-- `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
+- `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema,message-schemas,ai}.ts`
+- `packages/shared/src/acp/history-apply.ts`
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
-- `packages/shared/tests/{history-writer,history-storage-policy}.test.ts` and `history-writer.contract.ts`
+- `apps/cli/src/lib/session-export/{formatters,markdown,types}.ts`
+- `packages/components/src/components/ai-gui/{tool-call-skeleton,use-tool-call-payload,message-content-guards,assistant-turn-render-blocks,view}.ts(x)`
+- `packages/shared/tests/{history-writer,history-storage-policy,session-history-shapes,acp-history-apply}.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`
+- `packages/components/tests/tool-call-skeleton.test.ts`
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)

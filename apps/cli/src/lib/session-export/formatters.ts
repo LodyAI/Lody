@@ -43,9 +43,7 @@ function sanitizeTranscriptItem(item: MessageContent): MessageContent {
   return {
     ...item,
     content: (item.content ?? []).filter(
-      (
-        content
-      ): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
+      (content): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
         content.type !== 'diff'
     ),
   };
@@ -164,7 +162,9 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
           turnId: entry.id,
           timestamp: entry.timestamp,
           role: entry.role,
-          toolCallId: item.toolCallId,
+          // A sealed skeleton has no `toolCallId`; its `ref` points at the
+          // origin machine's payload instead.
+          toolCallId: typeof item.toolCallId === 'string' ? item.toolCallId : null,
           title: normalizeString(item.title),
           kind: normalizeString(item.kind),
           status: item.status,
@@ -178,6 +178,7 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
           ),
           rawInput: item.rawInput,
           rawOutput: item.rawOutput,
+          ...(item.ref ? { ref: item.ref } : {}),
         });
         continue;
       }

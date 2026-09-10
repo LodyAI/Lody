@@ -1,5 +1,7 @@
 import { SESSION_IMAGE_MAX_COUNT, type MessageContent } from '@lody/shared';
 
+import { isToolCallRef } from './tool-call-skeleton';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -137,7 +139,14 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
         (value.updatedAt === undefined || typeof value.updatedAt === 'number')
       );
     case 'tool_call':
-      return typeof value.toolCallId === 'string' && typeof value.status === 'string';
+      // A full call carries `toolCallId`; a sealed skeleton omits it and points
+      // at the origin machine's payload with a valid `ref`. A skeleton has no
+      // `content`; a full call's `content`, when present, must be an array.
+      return (
+        typeof value.status === 'string' &&
+        (typeof value.toolCallId === 'string' || isToolCallRef(value.ref)) &&
+        (value.content === undefined || Array.isArray(value.content))
+      );
     case 'subagent_task':
       return typeof value.taskId === 'string' && typeof value.status === 'string';
     case 'available_commands':

@@ -3173,10 +3173,22 @@ export const ChatFailedMetaSchema = z.object({
   message: z.string().optional(),
 });
 
+/**
+ * Payload pointer of a sealed tool_call skeleton. Mirrors `ToolCallRef` in
+ * `ai.ts`; the `index` is the item's position in the owning turn's `items`, so
+ * reader paths must never renumber items around a skeleton.
+ */
+export const ToolCallRefSchema = z.object({
+  machineId: z.string(),
+  turnId: z.string(),
+  index: z.number(),
+});
+
 export const ToolCallMessageSchema = z.object({
   type: z.literal('tool_call'),
   _meta: PermissionMetaSchema.optional(),
-  toolCallId: z.string(),
+  /** Absent on a sealed skeleton, which identifies itself with `ref` instead. */
+  toolCallId: z.string().optional(),
   title: z.string().nullable().optional(),
   status: ToolCallStatusSchema,
   kind: ToolKindSchema.optional(),
@@ -3184,6 +3196,8 @@ export const ToolCallMessageSchema = z.object({
   locations: z.array(ToolCallLocationSchema).optional(),
   rawInput: z.record(z.string(), z.unknown()).optional(),
   rawOutput: z.record(z.string(), z.unknown()).optional(),
+  /** Present only on a sealed skeleton; it never carries the execution payload. */
+  ref: ToolCallRefSchema.optional(),
   activityKind: z.enum(['context_compaction', 'codex_retry']).optional(),
   // Canonical tool name, when the agent published one (ACP `title` is human-facing).
   toolName: z.string().optional(),
@@ -3357,6 +3371,17 @@ export const MessageContentSchema = z
   .union([NonSystemNoticeMessageContentSchema, SystemNoticeSchema, WorktreeScriptContentSchema])
   .superRefine((item, ctx) => {
     if (item.type === 'file') refineSessionFileBlock(item, ctx);
+    // A tool_call is identified by `toolCallId` (full/live) or `ref` (sealed
+    // skeleton). The discriminated union above keeps `ToolCallMessageSchema` an
+    // object so it stays usable with `.omit`; the identity requirement lives
+    // here so no writer can persist an unaddressable tool call.
+    if (item.type === 'tool_call' && typeof item.toolCallId !== 'string' && !item.ref) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'tool_call requires toolCallId or ref',
+        path: ['toolCallId'],
+      });
+    }
   });
 
 export const MessageContentArraySchema = z.array(MessageContentSchema);

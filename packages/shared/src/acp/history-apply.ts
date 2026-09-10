@@ -1404,6 +1404,8 @@ class NotificationOnHistoryApplier {
 
       for (const content of items) {
         if (content.type !== 'tool_call') continue;
+        // A sealed skeleton may omit `toolCallId`; it is never a merge target.
+        if (typeof content.toolCallId !== 'string') continue;
         if (!unresolved.has(content.toolCallId)) continue;
         this.toolCallEntryIndexById.set(content.toolCallId, i);
         unresolved.delete(content.toolCallId);
@@ -1563,14 +1565,21 @@ class NotificationOnHistoryApplier {
         return;
       }
       case 'tool_call': {
-        const existingEntryIndex = this.resolveToolCallEntryIndex(message.toolCallId);
+        // A message without a `toolCallId` (e.g. a replayed sealed skeleton) can
+        // never match a live item; append it like any unknown id, but do not index it.
+        const existingEntryIndex =
+          typeof message.toolCallId === 'string'
+            ? this.resolveToolCallEntryIndex(message.toolCallId)
+            : undefined;
         if (existingEntryIndex !== undefined) {
           this.upsertToolCall(existingEntryIndex, message);
           return;
         }
         const entryIndex = this.ensureActiveAssistantEntry();
         this.upsertToolCall(entryIndex, this.stampSchedulingToolCall(message));
-        this.toolCallEntryIndexById.set(message.toolCallId, entryIndex);
+        if (typeof message.toolCallId === 'string') {
+          this.toolCallEntryIndexById.set(message.toolCallId, entryIndex);
+        }
         return;
       }
       case 'subagent_task': {
@@ -1706,8 +1715,13 @@ class NotificationOnHistoryApplier {
     if (!entry) return;
 
     const items = this.ensureEntryItems(entryIndex);
+    // A sealed skeleton may omit `toolCallId`; an id-less incoming item must
+    // never match it on an `undefined === undefined` key and overwrite it.
     const toolIndex = items.findIndex(
-      (m) => m.type === 'tool_call' && (m as ToolCallMessage).toolCallId === incoming.toolCallId
+      (m) =>
+        m.type === 'tool_call' &&
+        typeof (m as ToolCallMessage).toolCallId === 'string' &&
+        (m as ToolCallMessage).toolCallId === incoming.toolCallId
     );
     if (toolIndex >= 0) {
       const prevTool = items[toolIndex] as ToolCallMessage;
@@ -2010,8 +2024,13 @@ export const applyMessageContentsBatch = (
 
     // Tool calls are keyed by `toolCallId` (not by position).
     // We merge updates into the original entry whenever possible.
+    // A sealed skeleton may omit `toolCallId`; an id-less incoming item must
+    // never match it on an `undefined === undefined` key and overwrite it.
     const toolIndex = state.items.findIndex(
-      (m) => m.type === 'tool_call' && (m as ToolCallMessage).toolCallId === incoming.toolCallId
+      (m) =>
+        m.type === 'tool_call' &&
+        typeof (m as ToolCallMessage).toolCallId === 'string' &&
+        (m as ToolCallMessage).toolCallId === incoming.toolCallId
     );
     if (toolIndex >= 0) {
       const prevTool = state.items[toolIndex] as ToolCallMessage;
@@ -2039,12 +2058,14 @@ export const applyMessageContentsBatch = (
 
   // Build an index of existing tool calls so updates can be applied to the entry where the
   // tool call originally appeared (instead of always appending to the latest assistant entry).
+  // Sealed skeleton items may omit `toolCallId`; skip them so they never collide on an
+  // `undefined` key or become merge targets.
   const toolCallEntryIndexById = new Map<string, number>();
   for (let i = 0; i < entryStates.length; i++) {
     const state = entryStates[i];
     if (!state) continue;
     for (const content of state.items) {
-      if (content.type === 'tool_call') {
+      if (content.type === 'tool_call' && typeof content.toolCallId === 'string') {
         toolCallEntryIndexById.set(content.toolCallId, i);
       }
     }
@@ -2090,13 +2111,20 @@ export const applyMessageContentsBatch = (
       case 'tool_call': {
         // Unlike other message types, tool calls can receive future updates that should
         // modify the original tool call entry (by `toolCallId`), not the "current" entry.
-        const existingEntryIndex = toolCallEntryIndexById.get(message.toolCallId);
+        // A message without a `toolCallId` (e.g. a replayed sealed skeleton) can never
+        // match a live item; append it like any unknown id, but do not index it.
+        const existingEntryIndex =
+          typeof message.toolCallId === 'string'
+            ? toolCallEntryIndexById.get(message.toolCallId)
+            : undefined;
         if (existingEntryIndex !== undefined) {
           upsertToolCall(existingEntryIndex, message);
         } else {
           const entryIndex = ensureActiveAssistantEntry();
           upsertToolCall(entryIndex, message);
-          toolCallEntryIndexById.set(message.toolCallId, entryIndex);
+          if (typeof message.toolCallId === 'string') {
+            toolCallEntryIndexById.set(message.toolCallId, entryIndex);
+          }
         }
         break;
       }

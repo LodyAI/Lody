@@ -122,3 +122,4 @@ not a windowed-reader or attachment-externalization rollout.
   its "no #359 hash-v2 rollout" line describes the earlier PR's scope, not current behavior)
 - Spec: [session history writes](../../../../specs/session-history-writes.md)
 - Supersedes the storage-policy portion of PR #443; see the PR body for the exact base/head.
+- Follow-up reader work: [ref-only tool_call skeletons in every reader](2026-09-10-ref-only-tool-call-skeleton-readers.md).
