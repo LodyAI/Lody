@@ -203,6 +203,69 @@ const createSessionPayload = (sessionId: SessionId): SessionToCreate =>
     env: {},
   }) as SessionToCreate;
 
+function createContainmentSessions(prefix: string, isArchived: boolean) {
+  const rootSession = {
+    id: `${prefix}-root` as SessionId,
+    machineId: `${prefix}-root-machine` as MachineId,
+    isArchived,
+    createdAt: '2026-08-24T00:00:00.000Z',
+  } as SessionMeta;
+  const tabSession = {
+    id: `${prefix}-tab` as SessionId,
+    machineId: rootSession.machineId,
+    parentSessionId: rootSession.id,
+    openedBySessionId: rootSession.id,
+    isArchived,
+    createdAt: '2026-08-24T00:01:00.000Z',
+  } as SessionMeta;
+  const openedSession = {
+    id: `${prefix}-opened` as SessionId,
+    machineId: `${prefix}-opened-machine` as MachineId,
+    openedBySessionId: rootSession.id,
+    isArchived,
+    createdAt: '2026-08-24T00:02:00.000Z',
+  } as SessionMeta;
+  const openedFromTabSession = {
+    id: `${prefix}-opened-from-tab` as SessionId,
+    machineId: `${prefix}-opened-from-tab-machine` as MachineId,
+    openedBySessionId: tabSession.id,
+    openedByRootSessionId: rootSession.id,
+    isArchived,
+    createdAt: '2026-08-24T00:03:00.000Z',
+  } as SessionMeta;
+  const sessions = [rootSession, tabSession, openedSession, openedFromTabSession];
+  return {
+    rootSession,
+    tabSession,
+    openedSession,
+    openedFromTabSession,
+    sessions,
+    sessionMetaCache: Object.fromEntries(
+      sessions.map((session) => [getSessionRoomId(session.id), session])
+    ),
+  };
+}
+
+function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
+  const docs = new Map<string, Record<string, unknown>>(
+    sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
+  );
+  const repo = {
+    getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
+    upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
+      docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
+    }),
+    deleteDoc: vi.fn(async (roomId: string) => {
+      docs.delete(roomId);
+    }),
+  } as unknown as WorkspaceRuntime['repo'];
+  return {
+    repo,
+    getSession: (sessionId: SessionId) =>
+      docs.get(getSessionRoomId(sessionId)) as SessionMeta | undefined,
+  };
+}
+
 describe('useSessionActions', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -1096,67 +1159,73 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('archives child tabs and independently opened session workspaces together', async () => {
-    const rootSession = {
-      id: 'archive-root' as SessionId,
-      machineId: 'machine-root' as MachineId,
-      createdAt: '2026-08-24T00:00:00.000Z',
-    } as SessionMeta;
-    const tabSession = {
-      id: 'archive-tab' as SessionId,
-      machineId: rootSession.machineId,
-      parentSessionId: rootSession.id,
-      openedBySessionId: rootSession.id,
-      createdAt: '2026-08-24T00:01:00.000Z',
-    } as SessionMeta;
-    const openedSession = {
-      id: 'archive-opened' as SessionId,
-      machineId: 'machine-opened' as MachineId,
-      openedBySessionId: rootSession.id,
-      createdAt: '2026-08-24T00:02:00.000Z',
-    } as SessionMeta;
-    const openedFromTabSession = {
-      id: 'archive-opened-from-tab' as SessionId,
-      machineId: 'machine-opened-from-tab' as MachineId,
-      openedBySessionId: tabSession.id,
-      openedByRootSessionId: rootSession.id,
-      createdAt: '2026-08-24T00:03:00.000Z',
-    } as SessionMeta;
-    const sessionMetaCache = Object.fromEntries(
-      [rootSession, tabSession, openedSession, openedFromTabSession].map((session) => [
-        getSessionRoomId(session.id),
-        session,
-      ])
-    );
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      const session = sessionMetaCache[roomId];
-      return { meta: session ?? {} };
-    });
-    const runtime = createRuntime({
-      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
-    });
+  it('archives child tabs without archiving independently opened session workspaces', async () => {
+    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
+      createContainmentSessions('archive', false);
+    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    const runtime = createRuntime({ repo: metaRepo.repo });
     const actions = await renderActions(runtime, { sessionMetaCache });
 
     await actions.archiveSession(rootSession.id);
 
-    for (const session of [rootSession, tabSession, openedSession, openedFromTabSession]) {
-      expect(upsertDocMeta).toHaveBeenCalledWith(
-        getSessionRoomId(session.id),
-        expect.objectContaining({ isArchived: true, status: { type: 'idle' } })
-      );
+    for (const session of [rootSession, tabSession]) {
+      expect(metaRepo.getSession(session.id)).toMatchObject({
+        isArchived: true,
+        status: { type: 'idle' },
+      });
     }
-    expect(runtime.writer.flockRowPut).toHaveBeenCalledTimes(3);
-    expect(runtime.writer.flockRowPut).toHaveBeenCalledWith(
-      expect.any(String),
-      machineFlockKeys.archiveSessionCommand(rootSession.id),
-      expect.any(Object)
-    );
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalledWith(
-      expect.any(String),
-      machineFlockKeys.archiveSessionCommand(tabSession.id),
-      expect.any(Object)
-    );
+    for (const session of [openedSession, openedFromTabSession]) {
+      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
+    }
+  });
+
+  it('restores child tabs without restoring independently opened session workspaces', async () => {
+    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
+      createContainmentSessions('restore', true);
+    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { sessionMetaCache });
+
+    await actions.restoreSession(rootSession.id);
+
+    for (const session of [rootSession, tabSession]) {
+      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
+    }
+    for (const session of [openedSession, openedFromTabSession]) {
+      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
+    }
+  });
+
+  it('deletes archived containment without deleting independently opened workspaces', async () => {
+    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
+      createContainmentSessions('delete-archived', true);
+    openedSession.isArchived = false;
+    openedFromTabSession.isArchived = false;
+    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { sessionMetaCache });
+
+    await actions.deleteArchivedSession(rootSession.id);
+
+    expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
+    expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
+    expect(metaRepo.getSession(openedSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(openedFromTabSession.id)).toMatchObject({ isArchived: false });
+  });
+
+  it('deletes active containment without deleting independently opened workspaces', async () => {
+    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
+      createContainmentSessions('delete-active', false);
+    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { sessionMetaCache });
+
+    await actions.deleteSessions([rootSession.id]);
+
+    expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
+    expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
+    expect(metaRepo.getSession(openedSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(openedFromTabSession.id)).toMatchObject({ isArchived: false });
   });
 
   it('writes legacy delete queue before deleting archived code sessions', async () => {

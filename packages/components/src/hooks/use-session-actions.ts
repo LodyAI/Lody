@@ -57,7 +57,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
-import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
+import { collectSessionContainmentIds } from '@/lib/session-containment';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
@@ -561,16 +561,16 @@ export function useSessionActions(): SessionActions {
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
   );
 
-  const getSessionLifecycleMetas = useCallback(
+  const getSessionContainmentMetas = useCallback(
     (sessionId: SessionId, rootMeta: SessionMeta): SessionMeta[] => {
       const cache = store.get(sessionMetaCacheAtom);
       const sessionsById = new Map(
         Object.values(cache).map((session) => [session.id, session] as const)
       );
       sessionsById.set(sessionId, { ...rootMeta, id: rootMeta.id ?? sessionId });
-      return collectSessionLifecycleIds(sessionId, [...sessionsById.values()]).map((id) => {
+      return collectSessionContainmentIds(sessionId, [...sessionsById.values()]).map((id) => {
         const session = sessionsById.get(id);
-        if (!session) throw new Error(`Session metadata missing for lifecycle child ${id}`);
+        if (!session) throw new Error(`Session metadata missing for contained child ${id}`);
         return session;
       });
     },
@@ -1187,8 +1187,8 @@ export function useSessionActions(): SessionActions {
       const sessions = Object.values(store.get(sessionMetaCacheAtom));
       const allIds = new Set(sessionIds);
       for (const id of sessionIds) {
-        for (const lifecycleId of collectSessionLifecycleIds(id, sessions)) {
-          allIds.add(lifecycleId);
+        for (const containedId of collectSessionContainmentIds(id, sessions)) {
+          allIds.add(containedId);
         }
       }
       const uniqueIds = Array.from(allIds);
@@ -1226,8 +1226,8 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-      for (const session of lifecycleSessions) {
+      const containedSessions = getSessionContainmentMetas(sessionId, sessionMeta);
+      for (const session of containedSessions) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
         }
@@ -1261,12 +1261,12 @@ export function useSessionActions(): SessionActions {
           },
         } as unknown as RepoDocMetaPatch);
       }
-      log('[session-archive] lifecycle archived', {
+      log('[session-archive] containment archived', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        containedSessionIds: containedSessions.map((session) => session.id),
       });
     },
-    [runtime, store, getSessionLifecycleMetas]
+    [runtime, store, getSessionContainmentMetas]
   );
 
   const restoreSession = useCallback(
@@ -1284,9 +1284,9 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
+      const containedSessions = getSessionContainmentMetas(sessionId, sessionMeta);
 
-      for (const session of lifecycleSessions) {
+      for (const session of containedSessions) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
         } as Partial<SessionMeta>);
@@ -1299,12 +1299,12 @@ export function useSessionActions(): SessionActions {
           );
         }
       }
-      log('[session-restore] lifecycle restored', {
+      log('[session-restore] containment restored', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        containedSessionIds: containedSessions.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, getSessionContainmentMetas]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -1399,14 +1399,14 @@ export function useSessionActions(): SessionActions {
         | undefined;
       if (!loadedMeta) throw new Error(`Session metadata missing for ${sessionId}`);
       const rootMeta = { ...loadedMeta, id: loadedMeta.id ?? sessionId };
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, rootMeta);
+      const containedSessions = getSessionContainmentMetas(sessionId, rootMeta);
 
-      for (const session of lifecycleSessions.reverse()) {
+      for (const session of containedSessions.reverse()) {
         await deleteArchivedSessionMeta(session);
       }
-      log('[session-delete] lifecycle deleted', { sessionId });
+      log('[session-delete] containment deleted', { sessionId });
     },
-    [runtime, getSessionLifecycleMetas, deleteArchivedSessionMeta]
+    [runtime, getSessionContainmentMetas, deleteArchivedSessionMeta]
   );
 
   const setSessionPinned = useCallback(
