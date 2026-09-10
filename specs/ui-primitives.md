@@ -29,6 +29,21 @@ The composition provides a text input in small, medium, and large sizes, a
 multi-line control, a checkbox, a group of radio options, and a switch, and
 associates the label with the control without the caller naming an identifier.
 
+The composition also provides a control that picks one value from a list the
+person opens, and one that filters that list as they type. These are two parts:
+the control a person sees at rest sits with the rest of the family and answers to
+the field root the same way, and the list it opens is a floating surface with its
+own appearance. A person reaches the list with the keyboard, walks it with the
+arrow keys, and takes a row with Enter; the row that holds the value is marked so
+they can see which one it is, and the row they are on is marked separately,
+because those are two different facts. A list that is open reports what it is to
+a screen reader, and a control tells one which list it opens.
+
+A surface that owns a modal states where the popups inside it belong. A modal
+holds the keyboard and the scroll inside its panel, so a list that opens outside
+that panel is unreachable in it; the surface names the panel once and the lists
+under it follow. Product surfaces do not otherwise place these lists.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is
@@ -98,3 +113,6 @@ ring suppression in the desktop shell are recorded in the
 The checkbox, radio and switch that join that family, and the ink they use for a
 stored value, are recorded in the
 [UI choice controls note](../.agents/notes/implemented/feature/2026-09-10-ui-choice-controls.md).
+The select and the combobox, the separate token group their lists take, and the
+container a modal names for them are recorded in the
+[UI select and combobox note](../.agents/notes/implemented/feature/2026-09-10-ui-select-combobox.md).

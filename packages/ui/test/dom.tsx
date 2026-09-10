@@ -131,7 +131,7 @@ export async function press(key: string): Promise<void> {
 }
 
 /** Types into a text control the way a person does, one value change at a time. */
-export async function type(input: HTMLInputElement, value: string): Promise<void> {
+export async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
   await step(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, value);

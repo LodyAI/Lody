@@ -4,7 +4,7 @@ import { Combobox } from '../src/field/combobox';
 import { Field } from '../src/field/field';
 import { Input } from '../src/field/input';
 import { Select } from '../src/field/select';
-import { all, classesOf, click, mount, one, press, type, type Mounted } from './dom';
+import { all, classesOf, click, mount, one, press, typeInto, type Mounted } from './dom';
 
 const LANGUAGES = ['TypeScript', 'Rust', 'Python', 'Ruby'];
 
@@ -69,7 +69,7 @@ describe('Combobox input', () => {
     await click(input());
     expect(labels()).toEqual(LANGUAGES);
 
-    await type(input(), 'ru');
+    await typeInto(input(), 'ru');
     // The filter is Base UI's, not ours; what this pins is that the primitive
     // hands it the query rather than swallowing it.
     expect(labels()).toEqual(['Rust', 'Ruby']);
@@ -78,7 +78,7 @@ describe('Combobox input', () => {
   test('a query that matches nothing says so instead of showing an empty box', async () => {
     mounted = await mount(<Languages />);
     await click(input());
-    await type(input(), 'zzz');
+    await typeInto(input(), 'zzz');
     expect(options()).toHaveLength(0);
     expect(one('[role="listbox"]').parentElement?.textContent).toContain('No language matches.');
   });
@@ -86,7 +86,7 @@ describe('Combobox input', () => {
   test('the arrow keys walk the filtered list and Enter takes the highlighted row', async () => {
     mounted = await mount(<Languages />);
     await click(input());
-    await type(input(), 'ru');
+    await typeInto(input(), 'ru');
     await press('ArrowDown');
     expect(options()[0].hasAttribute('data-highlighted')).toBe(true);
     await press('ArrowDown');
