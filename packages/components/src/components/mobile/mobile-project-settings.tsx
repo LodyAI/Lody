@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Folder, FolderOpen, FolderPlus, Github, Loader2 } from 'lucide-react';
 import type { MachineId } from '@lody/shared';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';

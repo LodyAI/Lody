@@ -29,7 +29,7 @@ import {
 } from '@/atoms/focus-layer';
 import { buildSessionRowOpenedByTreeSlot } from '@/components/sidebar-row-shared';
 import { cn } from '@/lib/utils';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1428,7 +1428,7 @@ function SelectionToolbar({
         onClick={onToggleAll}
         className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
       >
-        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none h-4 w-4" />
+        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none" />
         <span>{countLabel}</span>
       </button>
       <div className="flex items-center gap-1">

@@ -86,7 +86,7 @@ describe('chat message selection', () => {
     await click('Question');
     await click('Preview image');
     expect(container.querySelector('output')?.textContent).toBe('user,assistant');
-    expect(container.querySelectorAll('[role="checkbox"][data-state="checked"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[role="checkbox"][data-checked]')).toHaveLength(2);
     await click('Answer');
     await click('Preview image');
     expect(container.querySelector('output')?.textContent).toBe('user');
@@ -98,7 +98,7 @@ describe('chat message selection', () => {
     await click('Preview image');
     expect(container.querySelector('output')?.textContent).toBe('user,assistant,followup');
     await click('Clear selection');
-    expect(container.querySelectorAll('[data-state="checked"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[role="checkbox"][data-checked]')).toHaveLength(0);
     await click('Cancel');
     expect(container.querySelector('[role="checkbox"]')).toBeNull();
     await click('Start');
@@ -121,7 +121,7 @@ describe('chat message selection', () => {
     };
     const selectedIds = () =>
       [...container.querySelectorAll('[data-message-selection-id]')]
-        .filter((element) => element.querySelector('[role="checkbox"][data-state="checked"]'))
+        .filter((element) => element.querySelector('[role="checkbox"][data-checked]'))
         .map((element) => element.getAttribute('data-message-selection-id'));
 
     await pointer('user', 'pointerdown');
@@ -198,7 +198,7 @@ describe('chat message selection', () => {
         });
       }
       expect(container.scrollTop).toBeGreaterThan(0);
-      expect(container.querySelectorAll('[role="checkbox"][data-state="checked"]')).toHaveLength(3);
+      expect(container.querySelectorAll('[role="checkbox"][data-checked]')).toHaveLength(3);
       await act(async () => {
         window.dispatchEvent(new MouseEvent('pointerup'));
       });

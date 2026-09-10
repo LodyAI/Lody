@@ -84,6 +84,26 @@ describe('UiGallery', () => {
     }
   });
 
+  test('shows the choice controls: every state of each, and their own tokens', () => {
+    expect(board).toContain('role="checkbox"');
+    expect(board).toContain('role="radiogroup"');
+    expect(board).toContain('role="switch"');
+    // Base UI marks these on the rendered control, so their presence is the
+    // state reaching it rather than the board describing it.
+    expect(board).toContain('aria-checked="mixed"');
+    expect(board).toContain('data-checked=""');
+    expect(board).toContain('data-unchecked=""');
+    for (const name of [
+      'field.checkedFill',
+      'field.checkedMark',
+      'field.checkedEdge',
+      'field.thumb',
+      'field.thumbShadow',
+    ]) {
+      expect(board, `${name} is missing from the board`).toContain(name);
+    }
+  });
+
   test('renders one palette when asked for one', () => {
     const light = renderToStaticMarkup(<UiGallery palettes="light" />);
     expect(light).toContain('Lody Light');

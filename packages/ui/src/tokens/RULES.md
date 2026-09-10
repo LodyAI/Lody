@@ -44,17 +44,32 @@ One rung per component. The rung fixes background and shadow together.
 
 A control is the well rung: `wellBackground` plus `shadow.inset`, never a
 border. One component token group, `field`, serves the whole family — input,
-textarea, and the selects, checkboxes and switches that follow — so a state has
+textarea, checkbox, radio, switch, and the selects that follow — so a state has
 one colour in one place instead of one per component.
 
-| state       | what it is                                                        |
-| ----------- | ----------------------------------------------------------------- |
-| rest        | `field.background` and `field.well`; the value in `field.value`   |
-| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label |
-| focus       | 2px `field.ring` (accent), tight to the control, no offset        |
-| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused  |
-| disabled    | 45% opacity on the control; the label and help dim with it        |
-| selected    | `selectedFill` on the row that is current, not on the control     |
+| state       | what it is                                                                     |
+| ----------- | ------------------------------------------------------------------------------ |
+| rest        | `field.background` and `field.well`; the value in `field.value`                |
+| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label              |
+| focus       | 2px `field.ring` (accent), tight to the control, no offset                     |
+| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused               |
+| disabled    | 45% opacity on the control; the label and help dim with it                     |
+| checked, on | ink: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
+| mixed       | the checked appearance with the dash, and it announces `mixed`                 |
+| selected    | `selectedFill` on the row that is current, not on the control                  |
+
+A checkbox and a radio are the "16px things" the corner rule names: a
+`field.boxSize` box at `radius.mini`, round for a radio. A switch is a
+`field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
+`field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
+so a settings row carrying both lines up. Off is the well; on is the ink, which
+is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
+append to a box-shadow list, a control that changes its edge restates the ring
+with it, the way each Button variant does.
+
+These three render a real `<button>` with Base UI's hidden input beside it, so
+`:disabled` and `:focus-visible` reach them the way they reach an `<input>` and
+a `<label>` can point at them.
 
 The control's own text follows the control rule at every size on the ladder: 13
 at weight 500 with `text.controlTracking`. Label at 12 weight 500 in

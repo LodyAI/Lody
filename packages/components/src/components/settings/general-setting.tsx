@@ -7,7 +7,7 @@ import type {
 import { Trash2 } from 'lucide-react';
 import { Loading } from '@/ui';
 import { Button } from '@lody/ui/button';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { toast } from 'sonner';
 import {

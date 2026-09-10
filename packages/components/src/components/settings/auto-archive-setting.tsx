@@ -1,7 +1,7 @@
 import { useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '@/atoms';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { CompactRow, CompactSection } from './compact-layout';
 
 export function AutoArchiveSection() {

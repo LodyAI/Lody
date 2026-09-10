@@ -18,7 +18,11 @@ into one component at a time. Source-consumed; consumers compile it through
   component style.
 - A focus or invalid ring is a 2px `box-shadow` composed with the control's own
   shadow, never an `outline`: the product shell resets every outline with
-  `!important`, which no layer order overrides.
+  `!important`, which no layer order overrides. A control that changes its edge
+  with its state restates the ring with it; CSS cannot append to a box-shadow.
+- Checkbox, Radio and Switch render a real `<button>` through Base UI's
+  `nativeButton`, so `:disabled` and `:focus-visible` reach them the way they
+  reach an `<input>` and a `<label>` can point at them.
 - Controls in the field family read validity and disabled from `Field.Root`
   through Base UI's state callback on `className`. A control does not take its
   own `invalid` or `disabled` colour prop. The invalid ring also follows
@@ -36,7 +40,8 @@ into one component at a time. Source-consumed; consumers compile it through
   `src/theme/theme.tsx` so `ThemeRoot` applies it with every forced palette; a
   custom property declared only at the document root keeps the root palette
   inside a themed subtree. A family shares one group (`field` covers the label,
-  Input, Textarea, help and error) rather than one group per component.
+  Input, Textarea, Checkbox, Radio, Switch, help and error) rather than one
+  group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a

@@ -42,7 +42,7 @@ import {
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CompactRow, CompactSection } from './compact-layout';

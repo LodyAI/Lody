@@ -28,7 +28,7 @@ import {
 import { Badge } from '@/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   DropdownMenu,
   DropdownMenuContent,

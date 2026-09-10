@@ -23,7 +23,7 @@ import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { Field, Section } from './form-primitives';
 

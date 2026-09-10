@@ -4,7 +4,7 @@ import { useAtom } from 'jotai';
 import { Loader2, CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import { BetaFeaturesSection } from './beta-features-setting';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';

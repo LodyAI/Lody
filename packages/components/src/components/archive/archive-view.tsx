@@ -26,7 +26,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -895,12 +895,6 @@ export function ArchivedSessionGroupSection({
   const allSelected = selectedInGroup === group.sessions.length && group.sessions.length > 0;
   const someSelected = selectedInGroup > 0 && !allSelected;
 
-  const groupCheckboxState: boolean | 'indeterminate' = allSelected
-    ? true
-    : someSelected
-      ? 'indeterminate'
-      : false;
-
   const showHeader = !hideGroupHeader;
   const showSessions = hideGroupHeader || !group.collapsed;
   const sessionTree = useMemo(() => buildArchivedSessionTree(group.sessions), [group.sessions]);
@@ -928,7 +922,8 @@ export function ArchivedSessionGroupSection({
               }}
             >
               <Checkbox
-                checked={groupCheckboxState}
+                checked={allSelected}
+                indeterminate={someSelected}
                 onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
                 aria-label={`Select all in ${label}`}
               />
