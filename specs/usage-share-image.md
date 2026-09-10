@@ -46,13 +46,15 @@ range. Each row carries both its absolute tokens and its share: a percentage
 alone hides scale, and half of a quiet week is not half of a heavy month. A range
 without recorded usage simply has no split block.
 
-The headline number leaves a void beside it, and the brand mark fills exactly that
-corner: the same mark the brand row and footer carry, flattened to a monochrome
-silhouette, oversized and clipped by the card's top and right edges. It stops above
-the rule under the headline cells, because the bands below are dense and do not
-want a shadow behind them. It is atmosphere rather than a second logo, and it is
-decoration with a fixed place — never a layout participant, so it can neither
-displace a number nor change where anything sits.
+The portrait format's headline number leaves a void beside it, and the brand mark
+fills exactly that corner: the same mark the brand row and footer carry, flattened
+to a monochrome silhouette, oversized and bleeding off the right edge alone so the
+mark stays whole and the crop reads as deliberate. It clears the brand row above it
+and the rule below it, because the bands below are dense and do not want a shadow
+behind them. The wide format has no such void and therefore no mark. It is
+atmosphere rather than a second logo, and decoration with a fixed place — never a
+layout participant, so it can neither displace a number nor change where anything
+sits.
 
 A chosen backdrop is part of the image, not a border added around it, so a framed
 card has less room for its content than an unframed one. The layout is sized for

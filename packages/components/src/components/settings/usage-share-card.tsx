@@ -145,15 +145,18 @@ const RHYTHM: Record<
  * artwork to a pure silhouette (alpha survives, colour does not), inverted on a
  * dark card so the shadow is light instead of invisible.
  *
- * Its whole job is the void beside the headline number, so it is anchored to the
- * top-right corner and stops above the rule under the stat row — the bands below
- * are dense and do not want a shadow behind them. It bleeds off the top and right
- * edges and is clipped by the card, so it fills that corner without ever reading
- * as a second copy of the icon already in the brand row.
+ * Its whole job is the void beside the headline number. It starts below the brand
+ * row and bleeds off one edge only — the right — so the bell stays whole and the
+ * crop reads as deliberate rather than as a shape sliced at random. Cropping it
+ * against the card's top edge instead cut the bell flat and left a smudge.
+ *
+ * 16:9 gets none: it has no void to fill, and the only place a shadow could go is
+ * over the right end of the heatmap, which is exactly the window the card is
+ * highlighting. A watermark that has nothing to fill is just something in the way.
  */
-const WATERMARK: Record<UsageShareCardAspect, string> = {
-  portrait: 'h-[44%] left-[56%] -top-[12%]',
-  wide: 'h-[62%] left-[80%] -top-[20%]',
+const WATERMARK: Record<UsageShareCardAspect, string | null> = {
+  portrait: 'h-[31%] -right-[10%] top-[8%]',
+  wide: null,
 };
 
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */
@@ -563,14 +566,16 @@ export function UsageShareCard({
           : 'border border-black/[0.08] bg-card dark:border-white/[0.09]'
       )}
     >
-      <img
-        src={lodyLogo}
-        alt=""
-        className={cn(
-          'pointer-events-none absolute w-auto brightness-0 opacity-[0.045] dark:opacity-[0.07] dark:invert',
-          WATERMARK[aspect]
-        )}
-      />
+      {WATERMARK[aspect] ? (
+        <img
+          src={lodyLogo}
+          alt=""
+          className={cn(
+            'pointer-events-none absolute w-auto brightness-0 opacity-[0.045] dark:opacity-[0.07] dark:invert',
+            WATERMARK[aspect]
+          )}
+        />
+      ) : null}
       {wide ? (
         // Two columns: the number and its trio read as one headline on the
         // left, the year and the split as one graphic on the right. Stacking
