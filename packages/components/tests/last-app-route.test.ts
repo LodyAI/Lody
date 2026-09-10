@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   clearLastAppRoutePath,
@@ -45,9 +45,11 @@ const installWindowStorage = () => {
     configurable: true,
     writable: true,
   });
+  return storage;
 };
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   if (originalWindowDescriptor) {
     Object.defineProperty(globalThis, 'window', originalWindowDescriptor);
   } else {
@@ -153,5 +155,28 @@ describe('last app route storage', () => {
     expect(readLastAppRoutePath()).toBeNull();
     expect(() => writeLastAppRoutePath('/loro-dev/chat')).not.toThrow();
     expect(() => clearLastAppRoutePath()).not.toThrow();
+  });
+});
+
+describe('desktop window navigation isolation', () => {
+  it('preserves primary history while auxiliary windows navigate and reload independently', () => {
+    const primary = installWindowStorage();
+    writeLastAppRoutePath('/local/sessions/original');
+    const auxiliary = installWindowStorage();
+    vi.stubGlobal('localStorage', primary);
+    vi.stubGlobal('sessionStorage', auxiliary);
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true });
+    vi.stubGlobal('location', { href: 'file:///index.html#/local/sessions/second?window=session' });
+
+    expect(readLastAppRoutePath()).toBeNull();
+    writeLastAppRoutePath('/local/sessions/second');
+    vi.stubGlobal('location', { href: 'file:///index.html#/local/sessions/second' });
+    expect(readLastAppRoutePath()).toBe('/local/sessions/second');
+    clearLastAppRoutePath();
+    expect(readLastAppRoutePath()).toBeNull();
+
+    auxiliary.clear();
+    vi.stubGlobal('location', { href: 'file:///index.html#/' });
+    expect(readLastAppRoutePath()).toBe('/local/sessions/original');
   });
 });

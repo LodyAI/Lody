@@ -33,6 +33,10 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Renderer and window integration
 
+- Only factory-registered product windows may invoke product-window IPC. Dialogs,
+  embedded browsers, navigation and close actions belong to their source window;
+  auxiliary windows must not overwrite the primary window's persisted view state.
+
 - Desktop devbar diagnostics stay runtime opt-in (`LODY_DEVBAR=true`) and local to
   memory. The compact GPU field identifies process CPU/RSS in its hover text;
   never describe these measurements as hardware GPU usage or VRAM.

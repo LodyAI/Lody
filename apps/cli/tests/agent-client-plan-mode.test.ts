@@ -9,6 +9,8 @@ import type {
 import { parseAskUserQuestionPermissionMeta } from '@lody/shared';
 import type {
   CreateElicitationRequest,
+  PromptRequest,
+  PromptResponse,
   SessionNotification,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
@@ -359,6 +361,91 @@ describe('AgentClient plan mode permission restoration', () => {
   });
 
   describe('ACP extension updates', () => {
+    it.each(['resolve', 'reject'] as const)(
+      'keeps cancelled raw prompts pending until they %s',
+      async (outcome) => {
+        const { client } = createTestClient();
+        const raw = Promise.withResolvers<PromptResponse>();
+        // @ts-expect-error - focused transport-boundary setup
+        client.connection = { prompt: () => raw.promise, cancel: async () => {} };
+        const controller = new AbortController();
+        const local = client.prompt('acp-test' as ACPSessionId, [], {
+          signal: controller.signal,
+        });
+        controller.abort();
+        await expect(local).rejects.toThrow('Agent prompt aborted');
+
+        const drain = client.pendingPromptCompletion;
+        expect(drain).not.toBeNull();
+        let drained = false;
+        void drain?.then(() => {
+          drained = true;
+        });
+        await Promise.resolve();
+        expect(drained).toBe(false);
+
+        if (outcome === 'resolve') raw.resolve({ stopReason: 'cancelled' });
+        else raw.reject(new Error('ACP connection closed'));
+        await drain;
+        expect(client.pendingPromptCompletion).toBeNull();
+      }
+    );
+
+    it.each(['original', 'steer'] as const)(
+      'drains both Claude handoff requests when %s finishes first',
+      async (first) => {
+        const { client } = createTestClient({ agentType: 'claude' });
+        const original = Promise.withResolvers<PromptResponse>();
+        const steered = Promise.withResolvers<PromptResponse>();
+        let steerId = '';
+        const sendPrompt = (request: PromptRequest) => {
+          const metadata = request._meta?.claudeCode as { steer?: { id: string } } | undefined;
+          if (metadata?.steer) {
+            steerId = metadata.steer.id;
+            return steered.promise;
+          }
+          return original.promise;
+        };
+        // @ts-expect-error - focused transport-boundary setup
+        client.connection = { prompt: sendPrompt };
+        // @ts-expect-error - focused capability-negotiation setup
+        client.acknowledgedSteerCapability = {
+          transport: 'prompt',
+          promptMetaNamespace: 'claudeCode',
+          appliedNotificationMethod: 'claude/steerApplied',
+          upstreamTurn: 'handoff',
+          configPolicy: 'apply',
+        };
+        const initial = client.prompt('acp-test' as ACPSessionId, []);
+        const steer = client.steerPrompt('acp-test' as ACPSessionId, []);
+        const application = client.extNotification?.('_claude/steerApplied', {
+          sessionId: 'acp-test',
+          steerId,
+        });
+        const lease = await steer.applied;
+        lease.release();
+        await application;
+        const drain = client.pendingPromptCompletion;
+        let drained = false;
+        void drain?.then(() => {
+          drained = true;
+        });
+        if (first === 'original') {
+          original.resolve({ stopReason: 'end_turn' });
+          await initial;
+        } else {
+          steered.resolve({ stopReason: 'end_turn' });
+          await steer.completion;
+        }
+        expect(drained).toBe(false);
+        expect(client.pendingPromptCompletion).not.toBeNull();
+        original.resolve({ stopReason: 'end_turn' });
+        steered.resolve({ stopReason: 'end_turn' });
+        await Promise.all([initial, steer.completion, drain]);
+        expect(client.pendingPromptCompletion).toBeNull();
+      }
+    );
+
     it('holds the steer application notification until its ownership lease is released', async () => {
       const { client, onUpdateMessage } = createTestClient({ agentType: 'claude' });
       const prompt = vi.fn(() => new Promise(() => {}));

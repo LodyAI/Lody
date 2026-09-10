@@ -7,6 +7,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
+import { createPlanModeConfigOption } from 'acp-extension-core';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
@@ -465,6 +466,7 @@ export const getBuiltinDefaultModeId = (
     : undefined;
 
 const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'mode',
     name: 'Permission',
@@ -600,20 +602,8 @@ const CODEX_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     options: [],
   },
   {
-    id: 'collaboration_mode',
-    name: 'Collaboration mode',
-    description: 'How Codex collaborates for subsequent turns',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', name: 'Default' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan before making changes',
-      },
-    ],
+    ...createPlanModeConfigOption(false),
+    options: [],
   },
 ];
 
@@ -826,17 +816,18 @@ const KIMI_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
 
 const KIMI_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
   {
-    id: 'mode',
-    name: 'Mode',
-    category: 'mode',
+    id: 'permission_mode',
+    name: 'Permission',
+    category: '_permission',
     type: 'select',
     currentValue: BUILTIN_DEFAULT_MODE_IDS.kimi,
-    options: KIMI_STATIC_MODES.map((mode) => ({
+    options: KIMI_STATIC_MODES.filter((mode) => mode.id !== 'plan').map((mode) => ({
       value: mode.id,
       name: mode.name,
       description: mode.description ?? undefined,
     })),
   },
+  { ...createPlanModeConfigOption(false), options: [] },
 ];
 
 const GROK_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
@@ -865,22 +856,7 @@ const GROK_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
 ];
 
 const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
-  {
-    id: 'interaction_mode',
-    name: 'Interaction Mode',
-    description: 'Controls whether the agent acts, plans, or answers read-only questions',
-    category: 'mode',
-    type: 'select',
-    currentValue: BUILTIN_DEFAULT_MODE_IDS.grok,
-    options: [
-      { value: 'agent', name: 'Agent', description: 'Use tools and make changes when needed' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan and reason without modifying the workspace',
-      },
-    ],
-  },
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'permission_mode',
     name: 'Permission Mode',
@@ -893,11 +869,6 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
         value: 'ask',
         name: 'Ask Every Time',
         description: 'Request approval before protected actions',
-      },
-      {
-        value: 'auto',
-        name: 'Auto',
-        description: 'Let Grok decide when approval is required (experimental)',
       },
       {
         value: 'always-approve',

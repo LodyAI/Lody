@@ -69,6 +69,10 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   All Changes, or the removed v1 capture. File/diff reads retain cross-render in-flight
   limits; active requests release slots only on settlement.
 
+- Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
+  on the session's own machine may invoke them; explicit local absolute artifact
+  paths stay absolute, and remote paths never launch on the viewer's machine.
+
 ## File identity, caching, and errors
 
 - `session-file-open-target.ts` alone owns path normalization. Canonical workspace-relative

@@ -142,19 +142,89 @@ export function useSessionFileActions({
   );
 
   const resolveHostPath = useCallback(
-    (filePath: string) => resolveLocalWorkspaceFilePath(workspacePath, filePath),
-    [workspacePath]
+    (filePath: string) => resolveLocalWorkspaceFilePath(workspacePath, filePath, isLocalMachine),
+    [isLocalMachine, workspacePath]
   );
 
-  const reportOpenFailure = useCallback(
-    (missing: boolean) => {
-      toast.error(
-        missing
-          ? t('sessions.fileActions.fileMissing', 'That file no longer exists.')
-          : t('sessions.fileActions.openFailed', 'Could not open that file.')
-      );
+  const reportLocalActionFailure = useCallback(
+    (
+      action: 'reveal' | 'open' | 'editor',
+      filePath: string,
+      resolvedPath: string | null,
+      error: unknown
+    ) => {
+      const errorText =
+        error instanceof Error
+          ? error.message
+          : error && typeof error === 'object' && 'error' in error
+            ? String(error.error)
+            : String(error);
+      const details = {
+        action,
+        filePath,
+        resolvedPath,
+        workspacePath,
+        sessionId: session?.id,
+        machineId: session?.machineId,
+        localMachineId,
+        error: errorText,
+        ...(error && typeof error === 'object' && !(error instanceof Error)
+          ? { result: error }
+          : {}),
+        ...(error instanceof Error ? { stack: error.stack } : {}),
+      };
+      console.error('[session-file-actions] Local file action failed', details, error);
+      const description =
+        errorText === 'path_unresolved' || errorText === 'invalid_path'
+          ? t(
+              'sessions.fileActions.pathUnresolved',
+              'The file path could not be resolved. Copy the details to check the requested path and workspace folder.'
+            )
+          : errorText === 'ipc_unavailable'
+            ? t(
+                'sessions.fileActions.bridgeUnavailable',
+                'The desktop connection is unavailable. Restart Lody and try again.'
+              )
+            : errorText === 'not_found' || errorText === 'ENOENT' || errorText === 'ENOTDIR'
+              ? t(
+                  'sessions.fileActions.missingHelp',
+                  'The file may have moved or been deleted. Refresh the preview and check its location.'
+                )
+              : errorText === 'EACCES' || errorText === 'EPERM'
+                ? t(
+                    'sessions.fileActions.permissionHelp',
+                    'Lody cannot access this file. Check file permissions and system privacy settings.'
+                  )
+                : action === 'editor'
+                  ? t(
+                      'sessions.fileActions.editorHelp',
+                      'Check that the selected editor is installed and its command is correct in Settings. You can also reveal the file in your file manager.'
+                    )
+                  : t(
+                      'sessions.fileActions.systemOpenHelp',
+                      'Try opening the file from your file manager. Copy the details below to inspect the system error.'
+                    );
+      const title =
+        action === 'reveal'
+          ? t('sessions.fileActions.revealFailed', 'Could not reveal that file.')
+          : action === 'editor'
+            ? t('sessions.pathLaunchFailed', 'Failed to open path')
+            : t('sessions.fileActions.openFailed', 'Could not open that file.');
+      toast.error(title, {
+        description,
+        duration: 10_000,
+        action: {
+          label: t('sessions.fileActions.copyErrorDetails', 'Copy error details'),
+          onClick: () => {
+            void writeTextToClipboard(JSON.stringify(details, null, 2)).then((copied) => {
+              if (!copied)
+                toast.error(t('sessions.fileViewer.pathCopyFailed', 'Failed to copy file path'));
+            });
+          },
+        },
+      });
     },
-    [t]
+    [localMachineId, session?.id, session?.machineId, t, workspacePath]
   );
 
   const copyPath = useCallback(
@@ -207,31 +277,46 @@ export function useSessionFileActions({
   const localHost = useMemo<SessionFileLocalHostActionSet | null>(() => {
     if (!session || !availability.localHost) return null;
 
-    const withHostPath = (filePath: string, run: (path: string) => void) => {
+    const runLocalAction = (
+      action: 'reveal' | 'open' | 'editor',
+      filePath: string,
+      run: (
+        services: NonNullable<ReturnType<typeof getIpcServices>>,
+        path: string
+      ) => Promise<unknown | null>
+    ) => {
       const path = resolveHostPath(filePath);
       if (!path) {
-        reportOpenFailure(false);
+        reportLocalActionFailure(action, filePath, null, 'path_unresolved');
         return;
       }
-      run(path);
+      void (async () => {
+        try {
+          const services = getIpcServices();
+          if (!services) {
+            reportLocalActionFailure(action, filePath, path, 'ipc_unavailable');
+            return;
+          }
+          const failure = await run(services, path);
+          if (failure !== null) reportLocalActionFailure(action, filePath, path, failure);
+        } catch (error) {
+          reportLocalActionFailure(action, filePath, path, error);
+        }
+      })();
     };
 
     return {
       revealLabel: resolveRevealFileLabel(platform, t),
       openLabel: (filePath: string) => resolveOpenFileLabel(filePath, t),
       reveal: (filePath) =>
-        withHostPath(filePath, (path) => {
-          void (async () => {
-            const result = await getIpcServices()?.app.revealLocalPath(path);
-            if (result && !result.revealed) reportOpenFailure(result.error === 'not_found');
-          })();
+        runLocalAction('reveal', filePath, async (services, path) => {
+          const result = await services.app.revealLocalPath(path);
+          return result.revealed ? null : result;
         }),
       openInDefaultApp: (filePath) =>
-        withHostPath(filePath, (path) => {
-          void (async () => {
-            const result = await getIpcServices()?.app.openLocalPath(path);
-            if (result && !result.opened) reportOpenFailure(result.error === 'not_found');
-          })();
+        runLocalAction('open', filePath, async (services, path) => {
+          const result = await services.app.openLocalPath(path);
+          return result.opened ? null : result;
         }),
       editor: editorLauncher
         ? {
@@ -239,17 +324,11 @@ export function useSessionFileActions({
               editor: editorLauncher.label,
             }),
             open: (filePath) =>
-              withHostPath(filePath, (path) => {
-                void (async () => {
-                  const services = getIpcServices();
-                  if (!services) return;
-                  const result = await services.app.launchLocalPath(
-                    buildPathLauncherLaunchInput(editorLauncher, path, platform)
-                  );
-                  if (!result.launched) {
-                    toast.error(t('sessions.pathLaunchFailed', 'Failed to open path'));
-                  }
-                })();
+              runLocalAction('editor', filePath, async (services, path) => {
+                const result = await services.app.launchLocalPath(
+                  buildPathLauncherLaunchInput(editorLauncher, path, platform, 'file')
+                );
+                return result.launched ? null : result;
               }),
           }
         : null,
@@ -258,7 +337,7 @@ export function useSessionFileActions({
     availability.localHost,
     editorLauncher,
     platform,
-    reportOpenFailure,
+    reportLocalActionFailure,
     resolveHostPath,
     session,
     t,

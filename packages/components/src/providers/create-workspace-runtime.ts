@@ -1,3 +1,6 @@
+import { jotaiStore } from '@/lib/utils';
+import { desktopWindowId } from '@/lib/desktop-window';
+import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import { getMachineRoomId, type MachineMeta } from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
@@ -393,7 +396,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repo = await LoroRepo.create({
     storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: 'lody-loro-repo-db-' + deps.workspaceId,
+      dbName:
+        'lody-loro-repo-db-' +
+        deps.workspaceId +
+        (desktopWindowId() ? ':' + desktopWindowId() : ''),
     }),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
@@ -4274,10 +4280,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         env: {
           isOnline: () => isBrowserOnline(),
           isAppVisible: () =>
-            typeof document === 'undefined' || document.visibilityState === 'visible',
+            !jotaiStore.get(navigationSidebarHiddenAtom) &&
+            (typeof document === 'undefined' || document.visibilityState === 'visible'),
           subscribe: (onChange) => {
             backgroundSyncEnvListeners.add(onChange);
+            const unsubscribeSidebar = jotaiStore.sub(navigationSidebarHiddenAtom, onChange);
             return () => {
+              unsubscribeSidebar();
               backgroundSyncEnvListeners.delete(onChange);
             };
           },
