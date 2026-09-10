@@ -1401,7 +1401,7 @@ export class AgentClient implements acp.Client {
     );
     const parsed = z
       .object({ goal: LodyGoalSnapshotSchema.nullable().optional() })
-      .safeParse(response ?? {});
+      .safeParse(response);
     if (!parsed.success) {
       throw new Error(
         `[ACP_GOAL_INVALID_RESPONSE] Agent returned an invalid goal control response: ${parsed.error.message}`

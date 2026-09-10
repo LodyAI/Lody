@@ -122,3 +122,8 @@ advertisement. Typecheck passes for shared, RPC, CLI, and components.
 
 Not verified: a live Codex session pausing and resuming a real goal, and the
 managed-runtime build path that consumes a published `acp-extension-core`.
+
+Follow-up correction (2026-09-10): the [independent review and ablation](../simplification/2026-09-10-goal-control-ablation.zh.md)
+found gaps in startup acknowledgement, cross-transport supersession, and cold-session
+status control. Those implementation defects remain unresolved; the intended
+guarantees above are not evidence that these scenarios currently work.

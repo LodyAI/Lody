@@ -17,10 +17,6 @@ export const SESSION_GOAL_ACTIONS = ['set', 'pause', 'resume', 'clear'] as const
 
 export type SessionGoalAction = (typeof SESSION_GOAL_ACTIONS)[number];
 
-/** Actions that never start work, so they can be delivered out-of-band. */
-export const isStatusOnlySessionGoalAction = (action: SessionGoalAction): boolean =>
-  action === 'pause' || action === 'clear';
-
 export const sanitizeLodyInternalInstructions = (text: string): string => {
   const markerIndex = LODY_INTERNAL_PROMPT_MARKERS.reduce<number | null>((earliest, marker) => {
     const index = text.indexOf(marker);

@@ -213,7 +213,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
         action: z.enum(SESSION_GOAL_ACTIONS),
         objective: z.string().trim().min(1).optional(),
         userId: z.string().trim().min(1),
-        timestamp: z.string().trim().min(1),
       })
       .strict(),
   }).strict(),

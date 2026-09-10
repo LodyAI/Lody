@@ -4,8 +4,6 @@ import {
   type SessionGoalCommand,
 } from '@lody/shared';
 
-const NO_GOAL_COMMANDS: readonly SessionGoalCommand[] = [];
-
 /**
  * Goal commands the session's agent actually implements.
  *
@@ -15,18 +13,8 @@ const NO_GOAL_COMMANDS: readonly SessionGoalCommand[] = [];
  */
 export const getSessionGoalCommands = (
   capability: Pick<AcpCapabilityCacheEntry, 'goalActions'> | undefined
-): readonly SessionGoalCommand[] => {
-  const actions = capability?.goalActions;
-  if (!actions?.length) {
-    return NO_GOAL_COMMANDS;
-  }
-  const supported = SESSION_GOAL_COMMANDS.filter((command) => actions.includes(command));
-  return supported.length > 0 ? supported : NO_GOAL_COMMANDS;
-};
-
-export const canPauseSessionGoal = (
-  capability: Pick<AcpCapabilityCacheEntry, 'goalActions'> | undefined
-): boolean => getSessionGoalCommands(capability).includes('pause');
+): readonly SessionGoalCommand[] =>
+  SESSION_GOAL_COMMANDS.filter((command) => capability?.goalActions?.includes(command));
 
 /**
  * How long a goal command may sit in its pending state before the UI stops

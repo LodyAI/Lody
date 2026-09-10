@@ -1,6 +1,6 @@
 import type * as acp from '@agentclientprotocol/sdk';
 import { LODY_EXTENSION_METHODS, type LodyGoalCapability } from 'acp-extension-core';
-import { isStatusOnlySessionGoalAction, type SessionGoalAction } from '@lody/shared';
+import type { SessionGoalAction } from '@lody/shared';
 
 export const GOAL_CONTROL_METHOD = LODY_EXTENSION_METHODS.sessionGoal;
 
@@ -40,7 +40,7 @@ export function resolveGoalActionTransport(
   if (!capability?.actions.includes(action)) {
     return null;
   }
-  if (capability.controlActions?.includes(action) && isStatusOnlySessionGoalAction(action)) {
+  if (capability.controlActions?.includes(action) && (action === 'pause' || action === 'clear')) {
     return 'request';
   }
   if (capability.promptActions?.includes(action)) {

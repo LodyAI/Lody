@@ -763,7 +763,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       action: SessionGoalAction;
       objective?: string;
       userId: string;
-      timestamp: string;
     },
     options?: { timeoutMs?: number }
   ): Promise<SessionGoalResponse | null> => {

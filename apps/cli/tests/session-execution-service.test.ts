@@ -6533,44 +6533,34 @@ describe('SessionExecutionService', () => {
 describe('SessionExecutionService goal control', () => {
   const goalSessionId = 'session-goal' as SessionId;
 
-  const createGoalService = (
-    overrides: {
-      transport?: 'request' | 'promptMeta' | 'slashCommand' | null;
-      hasSession?: boolean;
-    } = {}
-  ) => {
+  const createGoalService = ({
+    transport = 'request',
+  }: {
+    transport?: 'request' | 'promptMeta' | 'slashCommand' | null;
+  } = {}) => {
     const controlGoal = vi.fn(async () => {});
     const agentClient = {
-      isCreated: vi.fn(() => true),
-      resolveGoalActionTransport: vi.fn(() =>
-        'transport' in overrides ? overrides.transport : 'request'
-      ),
+      resolveGoalActionTransport: () => transport,
       controlGoal,
-      currentModel: undefined,
     };
-    const getSession = vi.fn(() =>
-      overrides.hasSession === false ? null : { agentClient, acpSessionId: 'acp-goal' }
-    );
     const deps = createBaseDeps({
       sessionManager: {
-        getSession,
-        getPendingSession: vi.fn(() => null),
+        getSession: () => ({ agentClient }),
+        getPendingSession: () => null,
       } as unknown as SessionManager,
       workspaceDocument: {
-        repo: { upsertDocMeta: vi.fn(async () => {}) },
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getMetaState: vi.fn(async () => ({
+        getOrCreateSessionDoc: async () => ({
+          getMetaState: async () => ({
             id: goalSessionId,
             cliType: 'builtin',
             agentType: 'codex',
             acpSessionId: 'acp-goal',
-          })),
-          updateHistory: vi.fn(async () => {}),
-        })),
+          }),
+        }),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
-    return { service, controlGoal, agentClient };
+    return { service, controlGoal };
   };
 
   const goalArgs = {
@@ -6616,19 +6606,20 @@ describe('SessionExecutionService goal control', () => {
       dispatchSource: 'goal',
       goalControl: { action: 'resume' },
     });
-    // No user message: the turn exists to carry the goal, not to say anything.
-    expect(request.userTurnId.startsWith('goal:resume:')).toBe(true);
+    // Resuming a goal must not select a new model or mode.
     expect(request.acpSessionConfig.modelId).toBeUndefined();
     expect(request.acpSessionConfig.modeId).toBeUndefined();
   });
 
   it('waits for the running turn to release instead of dropping the resume', async () => {
     const { service } = createGoalService({ transport: 'promptMeta' });
-    const continueSession = vi.spyOn(service, 'continueSession').mockResolvedValue(undefined);
+    const continuationStarted = createDeferred<void>();
+    const continueSession = vi.spyOn(service, 'continueSession').mockImplementation(async () => {
+      continuationStarted.resolve();
+    });
     const internals = service as unknown as {
       currentTurnBySession: Map<SessionId, string>;
       clearCurrentTurn: (sessionId: SessionId, turnId?: string) => void;
-      goalTurnWaiterBySession: Map<SessionId, Promise<void>>;
     };
     internals.currentTurnBySession.set(goalSessionId, 'draining-turn');
 
@@ -6638,7 +6629,7 @@ describe('SessionExecutionService goal control', () => {
     expect(continueSession).not.toHaveBeenCalled();
 
     internals.clearCurrentTurn(goalSessionId, 'draining-turn');
-    await internals.goalTurnWaiterBySession.get(goalSessionId);
+    await continuationStarted.promise;
 
     expect(continueSession).toHaveBeenCalledTimes(1);
     expect(continueSession.mock.calls[0]![1]).toMatchObject({ dispatchSource: 'goal' });
@@ -6646,11 +6637,13 @@ describe('SessionExecutionService goal control', () => {
 
   it('keeps only the newest queued action so a stale pause cannot undo a resume', async () => {
     const { service } = createGoalService({ transport: 'promptMeta' });
-    const continueSession = vi.spyOn(service, 'continueSession').mockResolvedValue(undefined);
+    const continuationStarted = createDeferred<void>();
+    const continueSession = vi.spyOn(service, 'continueSession').mockImplementation(async () => {
+      continuationStarted.resolve();
+    });
     const internals = service as unknown as {
       currentTurnBySession: Map<SessionId, string>;
       clearCurrentTurn: (sessionId: SessionId, turnId?: string) => void;
-      goalTurnWaiterBySession: Map<SessionId, Promise<void>>;
     };
     internals.currentTurnBySession.set(goalSessionId, 'draining-turn');
 
@@ -6658,7 +6651,7 @@ describe('SessionExecutionService goal control', () => {
     await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
 
     internals.clearCurrentTurn(goalSessionId, 'draining-turn');
-    await internals.goalTurnWaiterBySession.get(goalSessionId);
+    await continuationStarted.promise;
 
     expect(continueSession).toHaveBeenCalledTimes(1);
     expect(continueSession.mock.calls[0]![1]).toMatchObject({

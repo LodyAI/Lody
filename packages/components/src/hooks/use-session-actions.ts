@@ -946,7 +946,6 @@ export function useSessionActions(): SessionActions {
         action,
         ...(options?.objective ? { objective: options.objective } : {}),
         userId,
-        timestamp: new Date().toISOString(),
       });
     },
     [runtime]

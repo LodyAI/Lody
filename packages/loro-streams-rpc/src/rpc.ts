@@ -453,7 +453,6 @@ export const LoroSessionGoalRpcRequestSchema = BaseRpcRequestSchema.extend({
       action: z.enum(SESSION_GOAL_ACTIONS),
       objective: z.string().trim().min(1).optional(),
       userId: z.string().trim().min(1),
-      timestamp: z.string().trim().min(1),
     })
     .strict(),
 }).strict();
@@ -2695,7 +2694,6 @@ export class LoroStreamsMachineRpcClient {
     action: SessionGoalAction;
     objective?: string;
     userId: string;
-    timestamp: string;
     timeoutMs?: number;
   }): Promise<SessionGoalResponse | null> {
     return (await this.sendRequest({
@@ -2706,7 +2704,6 @@ export class LoroStreamsMachineRpcClient {
         action: options.action,
         ...(options.objective ? { objective: options.objective } : {}),
         userId: options.userId,
-        timestamp: options.timestamp,
       },
     })) as SessionGoalResponse | null;
   }
@@ -3188,7 +3185,6 @@ export class LoroStreamsMachineRpcClient {
             action: SessionGoalAction;
             objective?: string;
             userId: string;
-            timestamp: string;
           };
         }
       | {

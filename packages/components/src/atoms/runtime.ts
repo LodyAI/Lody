@@ -308,7 +308,6 @@ export type WorkspaceRuntime = {
       action: SessionGoalAction;
       objective?: string;
       userId: string;
-      timestamp: string;
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionGoalResponse | null>;

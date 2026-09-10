@@ -374,14 +374,6 @@ type VisibleSessionTurnPlan = {
 /** How the turn payload reached this machine (RPC fast path vs CRDT history vs queue promotion). */
 export type SessionDispatchSource = 'rpc' | 'crdt' | 'queue' | 'delivery' | 'goal';
 
-/**
- * Turns caused by Lody itself rather than by a user message. They own an
- * assistant entry but must never touch user dispatch pointers, because no user
- * turn is waiting on them.
- */
-const isSystemCausedDispatch = (source: SessionDispatchSource | undefined): boolean =>
-  source === 'delivery' || source === 'goal';
-
 type SessionDispatchOptions = {
   dispatchSource?: SessionDispatchSource;
   /** Goal action this turn exists to run; travels to the agent as prompt metadata. */
@@ -741,7 +733,7 @@ export class SessionExecutionService {
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
   /** At most one goal action waits per session; a newer action replaces it. */
   private readonly pendingGoalTurnBySession = new Map<SessionId, SessionGoalTurnRequest>();
-  private readonly goalTurnWaiterBySession = new Map<SessionId, Promise<void>>();
+  private readonly goalTurnWaiterSessions = new Set<SessionId>();
   // Serializes ownership mutations per session so prompt completion and steer
   // application never race the boundary. No global concurrency cap (Infinity):
   // this is pure per-session serialization, matching the old hand-rolled lock.
@@ -1290,10 +1282,10 @@ export class SessionExecutionService {
   private queueGoalTurn(request: SessionGoalTurnRequest): void {
     const { sessionId } = request;
     this.pendingGoalTurnBySession.set(sessionId, request);
-    if (this.goalTurnWaiterBySession.has(sessionId)) {
+    if (this.goalTurnWaiterSessions.has(sessionId)) {
       return;
     }
-    const waiter = (async () => {
+    void (async () => {
       // Bounded: a session the user keeps chatting in must not pin this loop.
       for (let attempt = 0; attempt < GOAL_TURN_QUEUE_MAX_WAITS; attempt += 1) {
         const snapshot = this.getExecutionSnapshot(sessionId);
@@ -1304,7 +1296,7 @@ export class SessionExecutionService {
       }
       const pending = this.pendingGoalTurnBySession.get(sessionId);
       this.pendingGoalTurnBySession.delete(sessionId);
-      this.goalTurnWaiterBySession.delete(sessionId);
+      this.goalTurnWaiterSessions.delete(sessionId);
       if (!pending) return;
       if (this.getExecutionSnapshot(sessionId).hasActiveTurn) {
         this.deps.logger.warn(
@@ -1315,12 +1307,12 @@ export class SessionExecutionService {
       await this.startGoalTurn(pending);
     })().catch((error: unknown) => {
       this.pendingGoalTurnBySession.delete(sessionId);
-      this.goalTurnWaiterBySession.delete(sessionId);
+      this.goalTurnWaiterSessions.delete(sessionId);
       this.deps.logger.error(
         `[${sessionId}] Queued goal turn failed: ${formatErrorMessage(error)}`
       );
     });
-    this.goalTurnWaiterBySession.set(sessionId, waiter);
+    this.goalTurnWaiterSessions.add(sessionId);
   }
 
   private async startGoalTurn(request: SessionGoalTurnRequest): Promise<void> {
@@ -3669,9 +3661,11 @@ export class SessionExecutionService {
     prepareOptions?: { sessionDoc?: SessionDocument }
   ): Promise<VisibleSessionTurnPlan> {
     const { sessionId, acpSessionConfig, userId, userName, userEmail, userTurnId } = message;
-    const executionUserTurnId = isSystemCausedDispatch(dispatchOptions?.dispatchSource)
-      ? undefined
-      : userTurnId;
+    // System-caused turns own an assistant entry, not a user dispatch pointer.
+    const executionUserTurnId =
+      dispatchOptions?.dispatchSource === 'delivery' || dispatchOptions?.dispatchSource === 'goal'
+        ? undefined
+        : userTurnId;
     const sessionDoc =
       prepareOptions?.sessionDoc ??
       (await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId));
