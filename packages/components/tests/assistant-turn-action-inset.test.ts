@@ -1,7 +1,21 @@
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import { describe, expect, it } from 'vitest';
 
-import { MOBILE_TURN_ACTION_LEADING_INSET_PX } from '../src/components/ai-gui/view';
+import {
+  AssistantTurnFooter,
+  MOBILE_TURN_ACTION_LEADING_INSET_PX,
+} from '../src/components/ai-gui/view';
 import { EDGE_ZONE_PX } from '../src/components/mobile/mobile-edge-back-swipe';
+import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
+import { initI18n } from '../src/i18n';
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 /*
  * The mobile assistant-turn action bar puts the turn duration in front of the
@@ -27,5 +41,47 @@ describe('mobile assistant-turn action bar inset', () => {
        the gutter changed. */
     expect(MOBILE_TURN_ACTION_LEADING_INSET_PX).toBeGreaterThan(0);
     expect(EDGE_ZONE_PX).toBeGreaterThan(0);
+  });
+});
+
+describe('desktop assistant-turn action bar visibility', () => {
+  it('keeps the whole action group visible while a fork is pending', async () => {
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const message = {
+      id: 'assistant-turn-forking',
+      role: 'assistant',
+      timestamp: '2026-09-10T03:00:00.000Z',
+      endedAt: '2026-09-10T03:00:01.000Z',
+      finished: true,
+      items: [{ type: 'text', text: 'A completed response.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceDesktopLayoutProvider,
+          null,
+          createElement(AssistantTurnFooter, {
+            message,
+            sessionId: 'session-forking' as SessionId,
+            showDuration: true,
+            isTurnHovered: false,
+            onFork: () => undefined,
+            isForking: true,
+          })
+        )
+      );
+    });
+
+    const actions = container.querySelector('[data-assistant-turn-actions]');
+    expect(actions?.classList.contains('opacity-100')).toBe(true);
+    expect(container.querySelector('[aria-label="Copy response"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Fork session"] .animate-spin')).not.toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 });
