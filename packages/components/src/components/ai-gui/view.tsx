@@ -99,6 +99,7 @@ import {
   Brain,
   BrushCleaning,
   Check,
+  CircleStop,
   X,
   CheckCircle2,
   ChevronRight,
@@ -5738,7 +5739,13 @@ const ToolCallCard = memo(function ToolCallCard({
   if (toolCall.activityKind === 'context_compaction') {
     const status = resolveContextCompactionDisplayStatus(toolCall.status, turnFinished);
     const isCompacting = status === 'pending' || status === 'in_progress';
-    const StatusIcon = isCompacting ? Loader2 : status === 'failed' ? AlertCircle : Check;
+    const StatusIcon = isCompacting
+      ? Loader2
+      : status === 'failed'
+        ? AlertCircle
+        : status === 'stopped'
+          ? CircleStop
+          : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
         <StatusIcon
@@ -5750,7 +5757,9 @@ const ToolCallCard = memo(function ToolCallCard({
             ? t('sessions.activity.compactingContext', 'Compacting context')
             : status === 'failed'
               ? t('sessions.activity.contextCompactionFailed', 'Context compaction failed')
-              : t('sessions.activity.contextCompacted', 'Context compacted')}
+              : status === 'stopped'
+                ? t('sessions.activity.contextCompactionStopped', 'Context compaction stopped')
+                : t('sessions.activity.contextCompacted', 'Context compacted')}
         </span>
       </div>
     );

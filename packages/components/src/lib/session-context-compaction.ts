@@ -1,13 +1,14 @@
 import type { MessageContent, SessionHistory } from '@lody/shared';
 
 type ToolCallStatus = Extract<MessageContent, { type: 'tool_call' }>['status'];
+export type ContextCompactionDisplayStatus = ToolCallStatus | 'stopped';
 
 export const resolveContextCompactionDisplayStatus = (
   status: ToolCallStatus,
   isTurnFinished: boolean
-): ToolCallStatus => {
+): ContextCompactionDisplayStatus => {
   if (isTurnFinished && (status === 'pending' || status === 'in_progress')) {
-    return 'failed';
+    return 'stopped';
   }
   return status;
 };

@@ -27,8 +27,8 @@ const historyWithStatus = (
 
 describe('resolveContextCompactionDisplayStatus', () => {
   it('ends an unresolved compaction when its owning turn has finished', () => {
-    expect(resolveContextCompactionDisplayStatus('pending', true)).toBe('failed');
-    expect(resolveContextCompactionDisplayStatus('in_progress', true)).toBe('failed');
+    expect(resolveContextCompactionDisplayStatus('pending', true)).toBe('stopped');
+    expect(resolveContextCompactionDisplayStatus('in_progress', true)).toBe('stopped');
   });
 
   it('preserves active compactions and provider terminal states', () => {
