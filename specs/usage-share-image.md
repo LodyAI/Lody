@@ -37,9 +37,10 @@ depends on which range it describes.
 The calendar carries month ticks so a burst can be placed in time rather than only
 seen, lights the shared range's window and lets the surrounding year recede. The
 all-time range lights the whole calendar, because no part of it is out of scope.
-The hourly graphics carry an hour axis, and the week's rows are labelled with both
-weekday and day number, because seven days of hours touch eight calendar days
-whenever the window does not begin at midnight.
+The hourly graphics carry an hour axis. The week's rows run oldest to newest and
+carry no per-day label: seven days of hours touch eight calendar days whenever the
+window does not begin at midnight, and eight rows inside the shared box leave no
+room for a legible one. The headline already names the span.
 
 The card is always token-denominated; the screen's tokens/cost toggle is a
 reading aid and does not travel into the image. USD spend appears only when the

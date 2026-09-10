@@ -48,6 +48,15 @@ line up, because a card is only ever compared against the same range. The layout
 surface is contained by giving the graphic one fixed box (`GRAPHIC_H`) that every
 kind fits, so the card's height does not depend on its range.
 
+That box also settled the week grid's labels. Seven days of hour buckets touch
+eight calendar days whenever the window does not start at midnight, so a per-row
+label has to disambiguate the repeated weekday — but eight rows in a 58px box leave
+7px each, which holds no size on the card's own type scale. The first attempt
+reached for an off-scale 8px and produced exactly the squeezed left column the
+scale exists to prevent. The rows now carry no label at all: they run oldest to
+newest, the grid shares the same left edge as every other band, and the headline
+already names the span.
+
 **Privacy defaults follow the data, not the gesture.** Sharing activity does not
 imply sharing spend, so USD is an explicit opt-in switch rather than a field of
 the card. Member identification is a second opt-in, is offered only when the range

@@ -300,36 +300,27 @@ function UsageShareHours({ values, axisGap }: { values: number[]; axisGap: strin
  */
 function UsageShareWeekHours({
   rows,
-  locale,
   axisGap,
 }: {
   rows: Array<{ dayStartMs: number; values: number[] }>;
-  locale: string;
   axisGap: string;
 }) {
   const max = Math.max(0, ...rows.flatMap((row) => row.values));
-  // Seven days of hour buckets touch eight calendar days whenever the window does
-  // not start at midnight, so the weekday alone repeats. The day number settles it,
-  // the same way the Usage screen labels its own week matrix.
-  const weekday = new Intl.DateTimeFormat(locale, { weekday: 'narrow', timeZone: 'UTC' });
-  const dayOfMonth = new Intl.DateTimeFormat(locale, { day: 'numeric', timeZone: 'UTC' });
   return (
     <div>
-      <div className="pl-8">
-        <HourAxis gap={axisGap} />
-      </div>
-      {/* Rows divide the shared box, so seven days fit the same height as a year. */}
+      <HourAxis gap={axisGap} />
+      {/* Rows divide the shared box, so a week fits the same height as a year.
+          They carry no per-day label on purpose: eight rows in this box leave 7px
+          each, which cannot hold any size on the card's type scale — the first
+          attempt used an off-scale 8px and read as a squeezed column. Rows run
+          oldest to newest, and the headline already names the span. */}
       <div className={cn('flex flex-col justify-between', GRAPHIC_H)}>
         {rows.map((row) => (
-          <div key={row.dayStartMs} className="flex flex-1 items-center gap-1">
-            <span className="flex w-7 shrink-0 items-baseline justify-end gap-[2px] text-[8px] leading-none text-muted-foreground/70">
-              <span>{weekday.format(new Date(row.dayStartMs))}</span>
-              <span className="tabular-nums">{dayOfMonth.format(new Date(row.dayStartMs))}</span>
-            </span>
+          <div key={row.dayStartMs} className="flex flex-1 items-center">
             <div className="flex flex-1 items-center gap-px">
               {row.values.map((value, hour) => {
                 const share = max > 0 ? value / max : 0;
-                const size = value > 0 ? 2.5 + share * 4 : 2;
+                const size = value > 0 ? 2.5 + share * 4.5 : 2;
                 return (
                   <div key={hour} className="flex min-w-0 flex-1 justify-center">
                     <div
@@ -617,7 +608,7 @@ export function UsageShareCard({
       {graphic.kind === 'hours' ? (
         <UsageShareHours values={graphic.values} axisGap={rhythm.axis} />
       ) : graphic.kind === 'weekHours' ? (
-        <UsageShareWeekHours rows={graphic.rows} locale={locale} axisGap={rhythm.axis} />
+        <UsageShareWeekHours rows={graphic.rows} axisGap={rhythm.axis} />
       ) : (
         <UsageShareHeatmap
           calendar={calendar}
