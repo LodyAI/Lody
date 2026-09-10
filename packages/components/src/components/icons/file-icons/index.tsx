@@ -1,4 +1,5 @@
 import { useMemo, type ComponentType } from 'react';
+import { getFileIconUrl, getFolderIconUrl } from '@/components/icons/file-icons/asset-url';
 import {
   compoundExtensionMap,
   extensionMap,
@@ -70,14 +71,6 @@ interface FolderIconProps {
   className?: string;
 }
 
-// Create icon URL from icon name
-const getFileIconUrl = (iconName: string): string => {
-  return new URL(`./files/${iconName}.svg`, import.meta.url).href;
-};
-
-const getFolderIconUrl = (iconName: string): string => {
-  return new URL(`./folders/${iconName}.svg`, import.meta.url).href;
-};
 
 export const FileIcon = ({ filePath, className = 'h-4 w-4' }: FileIconProps) => {
   const iconUrl = useMemo(() => {

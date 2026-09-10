@@ -169,7 +169,6 @@
     "prosemirror-flat-list": "^0.7.1",
     "qrcode": "^1.5.4",
     "react": "catalog:",
-    "react-day-picker": "^9.8.0",
     "react-dom": "catalog:",
     "react-hook-form": "^7.60.0",
     "react-i18next": "^15.6.0",
