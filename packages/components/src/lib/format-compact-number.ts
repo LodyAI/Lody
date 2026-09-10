@@ -36,3 +36,25 @@ export function formatUsdAmount(
       options?.maximumFractionDigits ?? (abs > 0 && abs < 1 ? 3 : 2),
   }).format(safeValue);
 }
+
+/** Below this a dollar figure is both short and worth stating exactly. */
+const USD_COMPACT_FROM = 1000;
+
+/**
+ * A dollar figure short enough to sit beside other numbers in a fixed layout.
+ * The usage share card speaks in compact units everywhere else (`1.3B`, `42M`),
+ * and a full `$1,234,567.89` beside them grows without bound — in the 16:9 card
+ * it closed the gap to the headline cells to nothing and eventually overlapped
+ * them. Small amounts keep their exact value, where the cents are the point and
+ * the string is short anyway.
+ */
+export function formatUsdCompact(value: number, locale: string | null | undefined): string {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  if (Math.abs(safeValue) < USD_COMPACT_FROM) return formatUsdAmount(safeValue, locale);
+  return new Intl.NumberFormat(locale ?? 'en', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(safeValue);
+}

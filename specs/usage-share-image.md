@@ -49,7 +49,12 @@ the subject. Tokens are the default, because a workspace's spend is not implied 
 a request to share activity; naming cost as the measure is a deliberate act, and it
 substitutes for tokens rather than joining them. A deployment that reports no
 per-model cost simply has no split block on a cost card, the same as any range
-without recorded usage. The card names the workspace and, by default, no one else. The
+without recorded usage.
+
+Money is stated compactly above a thousand and exactly below it. A fixed layout
+budgets a fixed width for its headline, and a figure written out in full grows
+without bound; below a thousand the cents are the point and the string is short
+anyway. The card names the workspace and, by default, no one else. The
 member mode is an explicit choice, is offered only when the range has more than
 one contributor, and identifies members by display name and avatar; an email is
 never drawn onto the image.

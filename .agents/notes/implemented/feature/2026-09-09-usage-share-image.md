@@ -64,7 +64,16 @@ headline; making it the card's *measure* instead is both better product and a
 tighter default, because the two units now substitute rather than accumulate — a
 cost card cannot leak a token count alongside the spend. Everything follows the
 choice: headline, cells, the heatmap's own intensity scale, and both splits, all
-derived once with the metric threaded through `usage-share-stats.ts`. Member identification is a second opt-in, is offered only when the range
+derived once with the metric threaded through `usage-share-stats.ts`.
+
+Cost had to learn the card's numeric language to fit it. Tokens were compact
+everywhere (`1.3B`, `42M`) while money was written out in full, and a string that
+grows with its value does not belong in a fixed layout: measured in the 16:9 card,
+the gap between the headline and the stat cells fell from 208px at `1.3B` to 119px
+at `$5,297.05`, 10px at `$123,456,789.01`, and **−18px** — an overlap — at ten
+figures. `formatUsdCompact` compacts from a thousand up and keeps smaller amounts
+exact, where the cents are the point and the string is short regardless; the gap is
+now flat at ~180px whatever the magnitude. Member identification is a second opt-in, is offered only when the range
 has more than one contributor, and carries display name and avatar only — the
 timeline also holds emails, and `computeUsageShareMemberSlices` never reads them.
 A test asserts no email reaches the slices.

@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { cn } from '@/lib/utils';
-import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
+import { formatCompactNumber, formatUsdCompact } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
@@ -530,9 +530,7 @@ export function UsageShareCard({
   // Every number on the card goes through this, so a cost card can never print a
   // token count beside a dollar figure.
   const formatValue = (value: number) =>
-    metric === 'tokens'
-      ? formatCompactNumber(value, locale)
-      : formatUsdAmount(value, locale);
+    metric === 'tokens' ? formatCompactNumber(value, locale) : formatUsdCompact(value, locale);
 
   // Same four facts at every range, only the unit changes: how often, how
   // consistently, how much on a typical unit, how much at the best one.
