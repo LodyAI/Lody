@@ -55,24 +55,20 @@ the heatmap (a year of texture with no time scale cannot answer "when"), a fourt
 headline cell, absolute dates beside the range's name, and absolute token counts
 beside each split percentage.
 
-The brand mark went through three revisions before it stopped being a problem.
-Stroking `lody.svg` into an outline put two different jellyfish on one card, since
-that vector is not the product icon; there is no vector of the product icon, so CSS
-cannot cut a real outline from the raster. Ghosting `lody-icon.png` at low opacity
-fixed the identity but still read as a second copy of the logo sitting in a corner.
-What works is treating it as a cast shadow rather than a mark: `brightness-0`
-flattens the artwork to a pure silhouette (alpha survives, colour does not),
-inverted on a dark card so the shadow is light instead of invisible, and oversized.
-Placement took as many passes as treatment. Running it down the full card height
-put a shadow behind the heatmap and the legend, the two densest bands. Cropping it
-against the card's top edge to confine it sliced the bell flat and left a smudge
-sitting under the range chip. What works is bleeding off one edge only — the right
-— starting below the brand row and ending above the rule under the stat row, so the
-mark stays whole and the crop looks chosen. The wide format gets none at all: it
-has no void to fill, and the only place a shadow fits there is over the lit end of
-the heatmap, which is the very window the card is highlighting. The mark sits on
-the card root with every band positioned above it, so it can never displace a
-number.
+**The void beside the headline wanted content, not decoration.** Four attempts went
+into filling it with the brand mark — stroking `lody.svg` into an outline (two
+different jellyfish on one card), ghosting `lody-icon.png` at low opacity (read as a
+second logo parked in a corner), a full-height silhouette (a shadow behind the
+heatmap and the legend, the densest bands), and a top-cropped one (the bell sliced
+flat into a smudge under the range chip). Each fixed the previous symptom and none
+fixed the cause: a faded logo is decoration standing in for content.
+
+What belongs there is the range's own profile — one bar per bucket of the period the
+headline counts. The card already showed the 53-week year and the totals but never
+what *these* thirty days looked like, which is the one thing the headline cannot say
+by itself. It is available at every range, since every range has `timeline.buckets`,
+and it folds into a fixed slot count by summing so long periods keep an honest total.
+The brand mark is gone from the card body; the header and footer already carry it.
 
 **The card declares its own type and spacing scale.** Built element by element it
 accumulated ten font sizes (10, 10.5, 11, 11.5, 13, 15px …) whose half-pixel steps

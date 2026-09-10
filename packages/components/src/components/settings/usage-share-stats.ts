@@ -39,7 +39,32 @@ export type UsageShareStats = {
    * card about", which a shared image must state even when nothing is highlighted.
    */
   periodMs: { fromMs: number; toMs: number };
+  /**
+   * The range's own profile, one value per bucket, for the shape drawn beside the
+   * headline. The heatmap answers "which year is this"; this answers "what did
+   * the range the headline counts actually look like" — flat, a late ramp, one
+   * burst — which nothing else on the card says.
+   */
+  shape: number[];
 };
+
+/** Bars thinner than a pixel are noise, so long ranges fold into fixed slots. */
+const MAX_SHAPE_POINTS = 48;
+
+/**
+ * Downsamples to at most {@link MAX_SHAPE_POINTS} slots by summing whole buckets
+ * into each slot. Summing rather than averaging keeps the profile's total honest
+ * and its peaks where they happened.
+ */
+export function resampleShape(values: number[], maxPoints = MAX_SHAPE_POINTS): number[] {
+  if (values.length <= maxPoints) return values;
+  const slots = new Array<number>(maxPoints).fill(0);
+  for (const [index, value] of values.entries()) {
+    const slot = Math.min(maxPoints - 1, Math.floor((index * maxPoints) / values.length));
+    slots[slot] += value;
+  }
+  return slots;
+}
 
 const MAX_SLICES = 4;
 
@@ -83,6 +108,7 @@ export function computeUsageShareStats(
       peak: values.length > 0 ? Math.max(...values) : 0,
       litDayStartMs: { fromMs: timeline.startMs, toMs: timeline.endMs },
       periodMs: { fromMs: timeline.startMs, toMs: timeline.endMs },
+      shape: resampleShape(values),
     };
   }
 
@@ -123,6 +149,13 @@ export function computeUsageShareStats(
           fromMs: window[0]?.dayStartMs ?? 0,
           toMs: window.at(-1)?.dayStartMs ?? 0,
         },
+    // The timeline is the range's own series; the calendar window is the fallback
+    // when its query has not landed yet.
+    shape: resampleShape(
+      timeline && timeline.buckets.length > 0
+        ? timeline.buckets.map((bucket) => bucket.tokens)
+        : values
+    ),
   };
 }
 

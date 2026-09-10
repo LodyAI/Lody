@@ -140,25 +140,6 @@ const RHYTHM: Record<
   },
 };
 
-/**
- * The mark as a cast shadow rather than a logo: `brightness-0` flattens the
- * artwork to a pure silhouette (alpha survives, colour does not), inverted on a
- * dark card so the shadow is light instead of invisible.
- *
- * Its whole job is the void beside the headline number. It starts below the brand
- * row and bleeds off one edge only — the right — so the bell stays whole and the
- * crop reads as deliberate rather than as a shape sliced at random. Cropping it
- * against the card's top edge instead cut the bell flat and left a smudge.
- *
- * 16:9 gets none: it has no void to fill, and the only place a shadow could go is
- * over the right end of the heatmap, which is exactly the window the card is
- * highlighting. A watermark that has nothing to fill is just something in the way.
- */
-const WATERMARK: Record<UsageShareCardAspect, string | null> = {
-  portrait: 'h-[31%] -right-[10%] top-[8%]',
-  wide: null,
-};
-
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */
 const HEAT_CELL = 10;
 const HEAT_GAP = 2.6;
@@ -249,6 +230,33 @@ function UsageShareHeatmap({
           );
         })}
       </svg>
+    </div>
+  );
+}
+
+/**
+ * The range's profile as plain bars. Rendered in HTML rather than SVG so the bars
+ * keep square corners and exact gaps at any width — a stretched `viewBox` would
+ * distort both. A quiet bucket keeps a stub so "no usage" stays distinguishable
+ * from "a little usage" instead of vanishing into the baseline.
+ */
+function UsageShareRangeShape({ values }: { values: number[] }) {
+  if (values.length === 0) return null;
+  const max = Math.max(...values);
+  if (max <= 0) return null;
+  return (
+    <div className="flex h-[64px] items-end gap-px border-b border-border/60 pb-px">
+      {values.map((value, index) => (
+        <div
+          key={index}
+          className="min-w-0 flex-1 rounded-t-[1px]"
+          style={{
+            height: value > 0 ? `${Math.max(6, (value / max) * 100)}%` : '2px',
+            backgroundColor:
+              value > 0 ? 'hsl(var(--chart-1) / 0.62)' : 'hsl(var(--muted-foreground) / 0.22)',
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -566,16 +574,6 @@ export function UsageShareCard({
           : 'border border-black/[0.08] bg-card dark:border-white/[0.09]'
       )}
     >
-      {WATERMARK[aspect] ? (
-        <img
-          src={lodyLogo}
-          alt=""
-          className={cn(
-            'pointer-events-none absolute w-auto brightness-0 opacity-[0.045] dark:opacity-[0.07] dark:invert',
-            WATERMARK[aspect]
-          )}
-        />
-      ) : null}
       {wide ? (
         // Two columns: the number and its trio read as one headline on the
         // left, the year and the split as one graphic on the right. Stacking
@@ -622,7 +620,15 @@ export function UsageShareCard({
       ) : (
         <div className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}>
           {header}
-          <div className="flex-1">{hero}</div>
+          {/* The headline and the shape of what it counts, side by side. The
+              profile takes the void beside the number rather than a decoration
+              standing in for content. */}
+          <div className="my-auto flex items-end gap-6">
+            {hero}
+            <div className="min-w-0 flex-1">
+              <UsageShareRangeShape values={stats.shape} />
+            </div>
+          </div>
           <div className="grid shrink-0 grid-cols-4 gap-4 border-y border-border/60 py-3">
             {trioCells.map((cell) => (
               <StatCell key={cell.label} {...cell} />
