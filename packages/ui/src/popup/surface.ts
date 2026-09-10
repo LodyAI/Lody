@@ -85,6 +85,13 @@ export const surface = stylex.create({
     cursor: 'default',
     userSelect: 'none',
     outlineStyle: 'none',
+    // A row owns its edge, which is no edge. Base UI moves DOM focus onto the
+    // highlighted row, and the product shell puts an inset accent ring on any
+    // focused `[tabindex]` through a zero-specificity `:where()` rule — it
+    // already exempts `[role="menuitem"]` for this exact reason, and an option
+    // is the same case. Stating `none` here means the row cannot pick up a ring
+    // from any host: the fill is how this system says where the keyboard is.
+    boxShadow: 'none',
     scrollMarginBlock: popup.inset,
     transitionProperty: 'background-color, opacity',
     transitionDuration: duration.fast,
@@ -145,13 +152,24 @@ export const surface = stylex.create({
     marginInline: `calc(-1 * ${popup.inset})`,
     backgroundColor: popup.separator,
   },
-  /** "No matches": a hint rather than a row, because it cannot be picked. */
+  /**
+   * "No matches": a hint rather than a row, because it cannot be picked.
+   *
+   * Base UI keeps this element mounted whether or not the list is empty, so a
+   * screen reader has a live region to announce the change into, and swaps its
+   * children instead. It therefore has to take no room while it holds nothing,
+   * or every popup opens with a blank row above its first item. `:empty` is the
+   * right lever: the element stays rendered and in the accessibility tree, it
+   * just has no height. Hiding it with `display: none`, `hidden` or
+   * `aria-hidden` would take the live region out of the tree, which is what
+   * Base UI warns against.
+   */
   empty: {
     boxSizing: 'border-box',
     display: 'flex',
     alignItems: 'center',
-    minHeight: popup.itemHeight,
-    paddingInline: popup.itemPaddingX,
+    minHeight: { default: popup.itemHeight, ':empty': 0 },
+    paddingInline: { default: popup.itemPaddingX, ':empty': 0 },
     color: popup.hint,
     fontWeight: 400,
     userSelect: 'none',

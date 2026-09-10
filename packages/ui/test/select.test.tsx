@@ -6,6 +6,7 @@ import { Field } from '../src/field/field';
 import { Input } from '../src/field/input';
 import { Select } from '../src/field/select';
 import { PopupContainerProvider } from '../src/popup/portal-container';
+import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
 
 const FRUIT = [
@@ -320,6 +321,40 @@ describe('Select list', () => {
     // A separator inside a listbox is decorative, so Base UI gives it
     // `role="presentation"` rather than announcing it as a landmark.
     expect(all('[role="listbox"] > [role="presentation"]')).toHaveLength(1);
+  });
+});
+
+describe('the palette a portalled popup uses', () => {
+  const positioner = () => one('[role="listbox"]').parentElement?.parentElement as HTMLElement;
+
+  test('follows the forced palette of the subtree the trigger is in', async () => {
+    mounted = await mount(
+      <ThemeRoot mode="dark">
+        <Fruit />
+      </ThemeRoot>
+    );
+    await click(trigger());
+    // A forced theme works by cascade and a popup is portalled out of the
+    // subtree that declares it, so without this a dark panel on a light page
+    // opens a light list. The classes travel to the element it mounts on.
+    const dark = forcedThemeClassNames('dark');
+    expect(dark.length).toBeGreaterThan(0);
+    expect(classesOf(positioner())).toEqual(expect.arrayContaining(dark));
+
+    const lightOnly = forcedThemeClassNames('light').filter((name) => !dark.includes(name));
+    expect(lightOnly.length).toBeGreaterThan(0);
+    for (const name of lightOnly) {
+      expect(classesOf(positioner())).not.toContain(name);
+    }
+  });
+
+  test('carries nothing when nothing is forced, so the document palette wins', async () => {
+    mounted = await mount(<Fruit />);
+    await click(trigger());
+    const forced = [...forcedThemeClassNames('light'), ...forcedThemeClassNames('dark')];
+    for (const name of forced) {
+      expect(classesOf(positioner())).not.toContain(name);
+    }
   });
 });
 

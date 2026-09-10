@@ -119,6 +119,14 @@ A popup opens anchored 4px under its control and rises into place, rather than
 overlapping it to line the current row up with the value. That is the motion
 rule applied: a popup rises from 4px below at `duration.regular`.
 
+A row has no edge of its own, and says so. A popup moves keyboard focus onto the
+highlighted row, and a host that rings any focused element would draw a border
+around it; the fill is how this system marks where the keyboard is, so the row
+declares `box-shadow: none` rather than leaving the property unclaimed. The
+"nothing matches" line collapses to nothing while it holds nothing, because it
+stays mounted for a screen reader to announce into and would otherwise open
+every popup with a blank row.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback

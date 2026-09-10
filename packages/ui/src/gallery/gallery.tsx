@@ -232,6 +232,14 @@ const styles = stylex.create({
   // than a sample: it carries the real class and reports its transform into the
   // metrics list instead of leaving a blank gap on the board.
   riseProbe: { position: 'absolute', width: '1px', height: '1px', minWidth: 0, padding: 0 },
+  replicaCaption: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '220px',
+  },
   scrollArrowGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
   // A row is picked, not pressed, so the board shows the two fills side by side
   // rather than asking the reader to hover one.
@@ -828,7 +836,7 @@ function PopupReplica() {
 
   return (
     <Row>
-      <LegendKey>popup</LegendKey>
+      <LegendKey>{'list \u00b7 stand-in'}</LegendKey>
       <div
         ref={(node) => {
           surfaceShadow.ref.current = node;
@@ -883,14 +891,20 @@ function PopupReplica() {
         aria-hidden="true"
         {...stylex.props(surface.popup, styles.popupReplica, styles.riseProbe, surface.popupHidden)}
       />
-      <dl {...stylex.props(styles.constList)}>
-        {metrics.map((entry) => (
-          <div key={entry.name} {...stylex.props(styles.constRow)}>
-            <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
-            <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          Every row state at once, from the rules the real list applies. Open a trigger above and
+          the list that appears is this one, in this palette.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
     </Row>
   );
 }

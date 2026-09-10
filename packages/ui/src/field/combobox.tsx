@@ -4,6 +4,7 @@ import { createContext, forwardRef, useContext, type ComponentProps, type ReactN
 import { appendClassName } from '../internal/class-name';
 import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
@@ -335,6 +336,10 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
     ref
   ) {
     const inheritedContainer = usePopupContainer();
+    // A portalled popup leaves the subtree whose palette it should be using, so
+    // the classes that declare that palette travel with it and land on the
+    // positioner, where they cascade into the popup and its rows.
+    const palette = useForcedThemeClassNames();
     const mountPoint = container ?? inheritedContainer;
     // A popup mounted into a named container is inside a subtree the host owns,
     // and a modal panel typically centres itself with `translate`, which makes
@@ -351,7 +356,9 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
           {...rest}
           sideOffset={sideOffset}
           positionMethod={strategy}
-          className={stylex.props(styles.positioner).className}
+          className={[stylex.props(styles.positioner).className, ...palette]
+            .filter(Boolean)
+            .join(' ')}
         >
           <BaseCombobox.Popup
             className={(state) => {

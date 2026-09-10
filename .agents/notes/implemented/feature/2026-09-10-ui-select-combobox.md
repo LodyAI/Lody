@@ -152,6 +152,53 @@ or the product was opened in Chromium.
    needed as well: the overlapping mode pins `position: fixed` itself and ignores
    the strategy.
 
+## Correction: four more the board found after review
+
+The slice was opened for review with the board looking right at rest. Pulling it
+down and *clicking* the controls found four more, all of them the same class of
+bug as the three above — a popup is not where it was written, so anything that
+depends on where it is breaks quietly.
+
+**A blank row above every list.** `Combobox.Empty` must stay mounted so a screen
+reader has a live region to announce into; Base UI swaps its children rather
+than the element. `surface.empty` gave it `min-height: 28px` unconditionally, so
+an empty announcement region reserved a row at the top of every popup. It now
+collapses through `:empty` — the element stays rendered and in the accessibility
+tree at zero height, which `display: none`, `hidden` or `aria-hidden` would not.
+Measured on the board: 0px with no padding while empty, 28px with the hint
+colour once a query matches nothing, and the first row now sits 4px from the top,
+which is `popup.inset` and nothing else.
+
+**A light popup opening from a dark panel.** A forced theme works by cascade, and
+a portalled popup is not in the subtree that declares it, so it inherited the
+document palette. That contradicts the spec directly: "A forced theme applies to
+the subtree it is placed on, including the primitives inside it… so two palettes
+can be shown at once on one page." `ThemeRoot` now publishes its mode and
+`Content` re-declares the palette on the positioner — the same fix
+`componentPaletteThemes` already makes for a custom property declared only at the
+document root, applied one level further out. The board's Vesper panel now opens
+`rgb(35, 35, 35)` with white text and the dark accent on its focus ring, and the
+Lody Light panel opens `rgb(238, 240, 243)`.
+
+**A stray blue ring on the highlighted row.** Measured
+`rgba(91, 141, 239, 0.5) 0px 0px 0px 1px inset` on the row Base UI had moved
+focus to — not ours. The product shell's "Pro focus style" rings any focused
+`[tabindex]` through a zero-specificity `:where()` rule, and its exemption list
+already carries `[role="menuitem"]` with a comment describing this exact
+failure; an option is the same case and was not on the list. Rather than extend
+the shell's list, `surface.item` states `box-shadow: none`: the row owns its
+edge, which is no edge, and no host can put one on it. The fill is how this
+system marks where the keyboard is.
+
+**The board's stand-in read as a second, different list.** With the palette fixed
+the two are now identical, which is the point — but nothing said so. The legend
+is `list · stand-in` and a caption under it says that opening a trigger above
+shows this same list in this same palette.
+
+The first two are the reason this correction exists rather than a follow-up: a
+blank row and a wrong-palette popup are visible to anyone who opens a Select, and
+both were invisible to a suite that never opens one in a themed subtree.
+
 ## Testing a popup in jsdom
 
 Four things about driving Base UI in jsdom are load-bearing, and `test/dom.tsx`
@@ -181,7 +228,7 @@ that collects elements skips anything inside a `[hidden]` subtree.
 
 ## Verification
 
-`pnpm --filter @lody/ui test` (83 tests, 34 of them new) and
+`pnpm --filter @lody/ui test` (85 tests, 36 of them new) and
 `pnpm --filter @lody/ui typecheck` pass, as does
 `pnpm --filter @lody/components typecheck`.
 `NODE_ENV=development pnpm --filter @lody/components test` reports 3305 passing
@@ -213,7 +260,10 @@ option, and shows the machine name with its online dot. The console reported no
 errors.
 
 Limits: no test asserts a rendered colour, which is what let the two invisible
-fills ship as far as the board. Only Chromium was checked and no mobile surface
+fills ship as far as the board, and what makes the collapsed announcement region
+and the absent row edge browser-verified rather than unit-tested — jsdom applies
+no stylesheet, so the tests pin the mechanism (one element, one class list, a
+declared `box-shadow`) and the board pins the value. Only Chromium was checked and no mobile surface
 was opened. `Combobox` has no in-repo caller — `OptionSelector`, the cmdk-based
 searchable picker with 61 call sites, is the caller it is for and is a slice of
 its own. `pnpm check` was not run to completion for the whole repository in this

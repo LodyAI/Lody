@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Combobox } from '../src/field/combobox';
@@ -81,6 +82,31 @@ describe('Combobox input', () => {
     await typeInto(input(), 'zzz');
     expect(options()).toHaveLength(0);
     expect(one('[role="listbox"]').parentElement?.textContent).toContain('No language matches.');
+  });
+
+  test('the announcement region takes no room while it announces nothing', async () => {
+    mounted = await mount(<Languages />);
+    await click(input());
+    // Base UI keeps this element mounted so a screen reader has a live region
+    // to announce into, and swaps its children rather than the element. It must
+    // therefore collapse while it is empty, or every popup opens with a blank
+    // row above its first item.
+    const region = one('[role="listbox"]').parentElement?.firstElementChild as HTMLElement;
+    expect(region.textContent).toBe('');
+    const collapsed = classesOf(region);
+
+    await typeInto(input(), 'zzz');
+    expect(region.textContent).toContain('No language matches.');
+
+    // The same element, and the same classes: the height it takes is a `:empty`
+    // rule inside them, so the collapse cannot be a second element or a second
+    // mechanism. It is not hidden either, which would take the live region out
+    // of the accessibility tree — the height in each state is read off the
+    // board in a browser, since jsdom applies no stylesheet.
+    expect(one('[role="listbox"]').parentElement?.firstElementChild).toBe(region);
+    expect(classesOf(region)).toEqual(collapsed);
+    expect(region.hasAttribute('hidden')).toBe(false);
+    expect(region.getAttribute('aria-hidden')).toBeNull();
   });
 
   test('the arrow keys walk the filtered list and Enter takes the highlighted row', async () => {
@@ -229,6 +255,19 @@ describe('Combobox input group', () => {
 });
 
 describe('the surface Select and Combobox share', () => {
+  test('a row declares its own edge, so a host cannot put a ring on it', async () => {
+    mounted = await mount(<Languages />);
+    await click(input());
+    // StyleX hashes a class per property and value, so re-declaring the rule
+    // here yields the class a row carries; derived from the compiler rather
+    // than written down. Base UI moves DOM focus onto the highlighted row, and
+    // a host that rings any focused `[tabindex]` would draw a stray border
+    // around it — the fill is how this system says where the keyboard is.
+    const none = stylex.props(stylex.create({ flat: { boxShadow: 'none' } }).flat).className;
+    expect(none).toBeTruthy();
+    expect(classesOf(options()[0])).toContain(none);
+  });
+
   test('a row in either list is the same row', async () => {
     const combobox = await mount(<Languages />);
     await click(one('input[role="combobox"]'));
