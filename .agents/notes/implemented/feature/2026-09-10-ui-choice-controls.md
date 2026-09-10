@@ -193,6 +193,33 @@ is derived from the compiler rather than written down: the switch and the radio
 must carry the round class and not the squircle one, the checkbox must carry the
 squircle at its 5px radius, and the two classes must differ at all.
 
+## Correction: the local suite failure was real, and it hid three others
+
+This note first recorded that `packages/components`' suite fails on this machine
+"before and after the change" with `act is not a function`, and called it
+environmental. That reading was wrong, and it was wrong in the way that costs
+the most: it dismissed the one signal that was working.
+
+React 19 exports `act` only from its development build, so the suite needs
+`NODE_ENV=development`. Without it nearly every file fails, which is exactly why
+the base commit failed the same way — the comparison that seemed to prove the
+failure was pre-existing proved only that the same variable was missing on both
+sides. `NODE_ENV=development pnpm --filter @lody/components test` reproduces CI.
+
+Under that blanket failure sat three real ones, and they reached CI:
+
+- Base UI's Switch constructs a `PointerEvent`, which jsdom does not implement,
+  so `mobile-about-developer-mode` and `tasks-beta-gate` needed a polyfill. The
+  fix that added it also moved `act` to `react-dom/client`, which does not
+  export it, and that is what CI then reported. `act` comes from `react`.
+- `message-selection` proved its auto-scroll loop had stopped by counting
+  outstanding `requestAnimationFrame` callbacks. Base UI's scheduler keeps its
+  last native frame queued on purpose and turns it into a no-op instead of
+  cancelling it, so a checked box in the tree leaves one behind and the count
+  can never reach zero. No product change fixes that; the test now asserts that
+  draining further frames does not advance the scroll, which is the behaviour
+  its own name claims.
+
 ## Verification
 
 `pnpm --filter @lody/ui test` (46 tests, 16 of them new) and
@@ -227,10 +254,9 @@ the atom the surface reads.
 Limits: no test asserts a rendered appearance, and the board itself draws no
 focus ring, because a board cannot hold focus while it is read — the rings above
 were read by focusing a control in the browser rather than from a sample.
-`pnpm check` was not run to completion for the whole repository in this session;
-`packages/components`' test suite fails on this machine before and after the
-change with `act is not a function`, which was confirmed by running the same
-file against the base commit and is unrelated. `THIRD_PARTY_NOTICES.md` still
+`pnpm check` was not run to completion for the whole repository in this session,
+and the first version of this note wrongly excused a local test failure rather
+than reading it; see the correction above. `THIRD_PARTY_NOTICES.md` still
 lists the three removed packages: regenerating it here would rewrite the whole
 file against a different dependency snapshot, and the field migration left it in
 the same state. Only Chromium was checked, and no mobile surface was opened.
