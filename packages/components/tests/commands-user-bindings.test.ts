@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { commands } from '../src/lib/commands/registry';
+import { USER_BINDINGS_STORAGE_KEY } from '../src/lib/commands/user-bindings';
 
 class MemoryStorage {
   private store = new Map<string, string>();
@@ -19,15 +20,17 @@ class MemoryStorage {
 }
 
 class FakeKeyboardTarget {
-  private listeners = new Set<(e: KeyboardEvent) => void>();
-  addEventListener(_type: string, listener: (e: KeyboardEvent) => void): void {
-    this.listeners.add(listener);
+  private listeners = new Map<string, Set<EventListener>>();
+  addEventListener(type: string, listener: EventListener): void {
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
   }
-  removeEventListener(_type: string, listener: (e: KeyboardEvent) => void): void {
-    this.listeners.delete(listener);
+  removeEventListener(type: string, listener: EventListener): void {
+    this.listeners.get(type)?.delete(listener);
   }
-  dispatch(event: KeyboardEvent): void {
-    for (const l of this.listeners) l(event);
+  dispatch(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 }
 
@@ -81,10 +84,10 @@ describe('user-bindings overrides', () => {
     expect(commands.hasUserOverride('foo')).toBe(true);
 
     // Old binding no longer fires
-    target.dispatch(ev({ key: 'b', ctrlKey: true }));
+    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
     // New binding fires
-    target.dispatch(ev({ key: 'j', ctrlKey: true }));
+    target.dispatch('keydown', ev({ key: 'j', ctrlKey: true }));
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -98,7 +101,7 @@ describe('user-bindings overrides', () => {
     });
     commands.setUserKeybindings('foo', []);
     expect(commands.getKeybindingsFor('foo')).toEqual([]);
-    target.dispatch(ev({ key: 'b', ctrlKey: true }));
+    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -111,19 +114,39 @@ describe('user-bindings overrides', () => {
     expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+b']);
   });
 
-  it('overrides persist across registry attaches via localStorage', () => {
+  it('reloads overrides when the registry reattaches', () => {
     commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run: () => {} });
     commands.setUserKeybindings('foo', ['$mod+j']);
-    expect(storage.getItem('lody.commandOverrides.v1')).toContain('$mod+j');
+    expect(storage.getItem(USER_BINDINGS_STORAGE_KEY)).toContain('$mod+j');
 
-    // Simulate a reload: detach + re-attach. The override should reload.
-    commands.unregister('foo');
     commands.detach();
-    // New target; same localStorage.
+    storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+k'] }));
+    target.dispatch('storage', {
+      key: USER_BINDINGS_STORAGE_KEY,
+      storageArea: storage,
+    } as unknown as StorageEvent);
+    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
+
     const target2 = new FakeKeyboardTarget();
     commands.attach(target2 as unknown as HTMLElement);
-    commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run: () => {} });
+    expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+k']);
+  });
+
+  it('applies binding changes written by another window', () => {
+    const run = vi.fn();
+    commands.register({ id: 'foo', title: 'Foo', keybindings: ['$mod+b'], run });
+    storage.setItem(USER_BINDINGS_STORAGE_KEY, JSON.stringify({ foo: ['$mod+j'] }));
+
+    target.dispatch('storage', {
+      key: USER_BINDINGS_STORAGE_KEY,
+      storageArea: storage,
+    } as unknown as StorageEvent);
+
     expect(commands.getKeybindingsFor('foo')).toEqual(['$mod+j']);
+    target.dispatch('keydown', ev({ key: 'b', ctrlKey: true }));
+    expect(run).not.toHaveBeenCalled();
+    target.dispatch('keydown', ev({ key: 'j', ctrlKey: true }));
+    expect(run).toHaveBeenCalledOnce();
   });
 
   it('resetAllUserKeybindings clears every override', () => {

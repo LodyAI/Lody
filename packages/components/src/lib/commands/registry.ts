@@ -6,7 +6,12 @@ import {
 } from './shortcut-analytics';
 import { keybindingAppliesToEnvironment, UNINTERCEPTABLE_WEB_KEYS } from './shortcuts';
 import type { Command, KeyBinding, KeyScope } from './types';
-import { loadUserBindings, saveUserBindings, type UserBindingsMap } from './user-bindings';
+import {
+  loadUserBindings,
+  saveUserBindings,
+  USER_BINDINGS_STORAGE_KEY,
+  type UserBindingsMap,
+} from './user-bindings';
 
 type ResolvedBinding = {
   raw: string;
@@ -63,6 +68,7 @@ class CommandRegistry {
   private listeners = new Set<() => void>();
   private target: Window | HTMLElement | null = null;
   private boundHandler: ((e: KeyboardEvent) => void) | null = null;
+  private boundStorageHandler: ((e: StorageEvent) => void) | null = null;
   private paused = false;
   // Innermost-last, like the command stacks: a scope registered later wins.
   private scopes: ScopeRegistration[] = [];
@@ -107,10 +113,12 @@ class CommandRegistry {
   attach(target: Window | HTMLElement = typeof window !== 'undefined' ? window : null!): void {
     if (this.target) return;
     if (!target) return;
-    this.ensureUserOverridesLoaded();
+    this.reloadUserOverrides();
     this.target = target;
     this.boundHandler = (e) => this.handleKeyDown(e);
+    this.boundStorageHandler = (e) => this.handleStorage(e);
     target.addEventListener('keydown', this.boundHandler as EventListener, { capture: true });
+    target.addEventListener('storage', this.boundStorageHandler as EventListener);
   }
 
   detach(): void {
@@ -123,8 +131,12 @@ class CommandRegistry {
         } as EventListenerOptions
       );
     }
+    if (this.target && this.boundStorageHandler) {
+      this.target.removeEventListener('storage', this.boundStorageHandler as EventListener);
+    }
     this.target = null;
     this.boundHandler = null;
+    this.boundStorageHandler = null;
   }
 
   /**
@@ -304,6 +316,25 @@ class CommandRegistry {
     if (this.userOverridesLoaded) return;
     this.userOverrides = loadUserBindings();
     this.userOverridesLoaded = true;
+  }
+
+  private reloadUserOverrides(): void {
+    this.userOverrides = loadUserBindings();
+    this.userOverridesLoaded = true;
+    this.rebuildBindings();
+    this.publishSnapshot();
+  }
+
+  private handleStorage(event: StorageEvent): void {
+    if (event.key !== null && event.key !== USER_BINDINGS_STORAGE_KEY) return;
+    if (
+      event.storageArea &&
+      typeof localStorage !== 'undefined' &&
+      event.storageArea !== localStorage
+    ) {
+      return;
+    }
+    this.reloadUserOverrides();
   }
 
   private disposeRegistration(id: string, registration: CommandRegistration): void {

@@ -89,15 +89,12 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
     });
   }, [hasCloudSync]);
 
-  // Attach the global command registry's capture-phase keydown listener once at app boot.
-  // (Built-in commands are registered during render above — before any descendant effect —
-  // not here.) Attaching after registration is fine: the listener reads bindings live.
+  // Attach the renderer's command listeners once at app boot. Built-ins are registered
+  // during render above, before any descendant effect; listeners read bindings live.
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     commands.attach(window);
-    // No detach on unmount — AppInitializer is the app root and we want the listener
-    // to live as long as the renderer process.
-    return undefined;
+    return () => commands.detach();
   }, []);
 
   /* Pre-warm the in-memory avatar blob-URL map from the persistent

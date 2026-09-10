@@ -37,12 +37,13 @@ only tells global dispatch to yield for events originating in its subtree.
 - Shortcut capture pauses dispatch. It finishes after the last modifier is released and
   keeps a one-second settle window because macOS may suppress letter keyup while
   Command remains held.
-- User bindings are per-device localStorage state. `[]` explicitly unbinds all defaults;
-  `null` restores defaults.
+- User bindings are per-device localStorage state shared by every renderer window.
+  The registry owns both `keydown` and `storage` listeners so changes take effect in all
+  open windows; `[]` explicitly unbinds all defaults and `null` restores defaults.
 
 ## File responsibilities
 
-- `registry.ts`: registration stack, execution, capture-phase dispatch, pause state,
+- `registry.ts`: registration stack, execution, capture-phase dispatch, listener lifecycle,
   user overrides, and conflict lookup.
 - `shortcuts.ts`: `COMMAND_SHORTCUTS` defaults plus the renderer display mirror for OS
   global shortcuts. `@lody/shared`'s `GLOBAL_SHORTCUT_DEFAULTS` owns global ids and
