@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: pending
+PR: [#585](https://github.com/LodyAI/Lody/pull/585)
 
 ## 摘要
 
