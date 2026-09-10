@@ -55,20 +55,19 @@ the heatmap (a year of texture with no time scale cannot answer "when"), a fourt
 headline cell, absolute dates beside the range's name, and absolute token counts
 beside each split percentage.
 
-**The void beside the headline wanted content, not decoration.** Four attempts went
-into filling it with the brand mark — stroking `lody.svg` into an outline (two
-different jellyfish on one card), ghosting `lody-icon.png` at low opacity (read as a
-second logo parked in a corner), a full-height silhouette (a shadow behind the
-heatmap and the legend, the densest bands), and a top-cropped one (the bell sliced
-flat into a smudge under the range chip). Each fixed the previous symptom and none
-fixed the cause: a faded logo is decoration standing in for content.
+**The space beside the headline stays empty.** Six attempts went into filling it.
+Five were the brand mark: an outline stroked from `lody.svg` (a different jellyfish
+than the product icon, so one card carried two), a low-opacity ghost of
+`lody-icon.png` (read as a second logo parked in a corner), a full-height silhouette
+(a shadow behind the heatmap and the legend, the densest bands), a top-cropped one
+(the bell sliced flat into a smudge under the range chip), and a right-bleeding one
+that finally looked deliberate but was still decoration. The sixth put the range's
+own bucket profile there, which was at least content — and it was still one graphic
+too many next to a card that already carries a year heatmap and a model split.
 
-What belongs there is the range's own profile — one bar per bucket of the period the
-headline counts. The card already showed the 53-week year and the totals but never
-what *these* thirty days looked like, which is the one thing the headline cannot say
-by itself. It is available at every range, since every range has `timeline.buckets`,
-and it folds into a fixed slot count by summing so long periods keep an honest total.
-The brand mark is gone from the card body; the header and footer already carry it.
+The conclusion is the record here: that space is empty by choice. Whitespace beside
+a headline is a normal thing for a poster to have, and every attempt to fill it
+either repeated a band below or invented something to occupy the reader.
 
 **The card declares its own type and spacing scale.** Built element by element it
 accumulated ten font sizes (10, 10.5, 11, 11.5, 13, 15px …) whose half-pixel steps

@@ -46,13 +46,10 @@ range. Each row carries both its absolute tokens and its share: a percentage
 alone hides scale, and half of a quiet week is not half of a heavy month. A range
 without recorded usage simply has no split block.
 
-Beside the headline number, the portrait format draws the range's own profile: one
-bar per bucket of the period the headline counts. The heatmap answers which year
-this is; the profile answers what these particular days looked like — flat, a late
-ramp, one burst — which nothing else on the card says. A quiet bucket keeps a stub
-so an idle day stays distinguishable from a small one, and a long period folds into
-a fixed number of slots by summing, so the profile's total stays honest at every
-range. The wide format has no room for it and does without.
+The headline number owns its band alone. The space beside and around it is left
+empty on purpose: everything the card has to say is already said by the bands below
+it, and the alternatives — a brand watermark, a second chart — either repeat what is
+there or stand in for content that does not exist.
 
 A chosen backdrop is part of the image, not a border added around it, so a framed
 card has less room for its content than an unframed one. The layout is sized for

@@ -44,9 +44,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   shares one left edge. `ASPECT_SIZE` is the whole exported image including the
   backdrop, so a framed card is 48px shorter — size the layout against the framed
   case, and keep every band but the headline `shrink-0` so a card that does not fit
-  overflows visibly instead of eating its own padding. The space beside the headline
-  carries the range's own profile from `stats.shape`, not a brand watermark — four
-  decoration attempts failed there before content replaced them.
+  overflows visibly instead of eating its own padding. The space beside the
+  headline number is empty by choice: six attempts to fill it (five brand-mark
+  treatments, one range chart) each either repeated a band below or read as
+  decoration. Leave it alone.
 
 ## Agent Roles
 

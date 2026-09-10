@@ -8,7 +8,6 @@ import {
   computeUsageShareMemberSlices,
   computeUsageShareModelSlices,
   computeUsageShareStats,
-  resampleShape,
 } from '../src/components/settings/usage-share-stats';
 import type {
   SettingsUsageTimelineBucket,
@@ -212,40 +211,6 @@ describe('usage share stats', () => {
       { id: 'u2', label: 'Unknown member', tokens: 10, share: 0.1, image: null },
     ]);
     expect(JSON.stringify(slices)).not.toContain('@example.com');
-  });
-
-  it('takes the headline profile from the range series, not the calendar', () => {
-    const calendar = createUsageCalendarModel(createCalendar({ 0: 999, 1: 999 }), 'tokens');
-    const timeline = createTimeline({
-      range: 'month',
-      totals: { tokens: 60, costUSD: 0 },
-      buckets: [
-        bucket(START_MS, 10),
-        bucket(START_MS + DAY_MS, 0),
-        bucket(START_MS + 2 * DAY_MS, 50),
-      ],
-    });
-
-    expect(computeUsageShareStats(calendar, timeline, 'month').shape).toEqual([10, 0, 50]);
-  });
-
-  it('falls back to the calendar window for the profile when no timeline has landed', () => {
-    const calendar = createUsageCalendarModel(createCalendar({ 0: 5, 2: 15 }), 'tokens');
-
-    const shape = computeUsageShareStats(calendar, undefined, 'month').shape;
-
-    // 371 elapsed days fold into the fixed slot count, and the total survives.
-    expect(shape).toHaveLength(48);
-    expect(shape.reduce((sum, value) => sum + value, 0)).toBe(20);
-  });
-
-  it('folds a long series into fixed slots by summing, keeping totals and peaks', () => {
-    expect(resampleShape([1, 2, 3], 8)).toEqual([1, 2, 3]);
-
-    const folded = resampleShape([1, 1, 9, 1, 1, 1], 3);
-
-    expect(folded).toEqual([2, 10, 2]);
-    expect(folded.reduce((sum, value) => sum + value, 0)).toBe(14);
   });
 
   it('returns no slices when the range recorded no usage', () => {

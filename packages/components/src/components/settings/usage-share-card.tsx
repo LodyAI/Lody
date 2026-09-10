@@ -234,33 +234,6 @@ function UsageShareHeatmap({
   );
 }
 
-/**
- * The range's profile as plain bars. Rendered in HTML rather than SVG so the bars
- * keep square corners and exact gaps at any width — a stretched `viewBox` would
- * distort both. A quiet bucket keeps a stub so "no usage" stays distinguishable
- * from "a little usage" instead of vanishing into the baseline.
- */
-function UsageShareRangeShape({ values }: { values: number[] }) {
-  if (values.length === 0) return null;
-  const max = Math.max(...values);
-  if (max <= 0) return null;
-  return (
-    <div className="flex h-[64px] items-end gap-px border-b border-border/60 pb-px">
-      {values.map((value, index) => (
-        <div
-          key={index}
-          className="min-w-0 flex-1 rounded-t-[1px]"
-          style={{
-            height: value > 0 ? `${Math.max(6, (value / max) * 100)}%` : '2px',
-            backgroundColor:
-              value > 0 ? 'hsl(var(--chart-1) / 0.62)' : 'hsl(var(--muted-foreground) / 0.22)',
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 /** 100% bar + legend. One shape for models and members; only the mark differs. */
 function UsageShareSplit({
   slices,
@@ -620,15 +593,9 @@ export function UsageShareCard({
       ) : (
         <div className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}>
           {header}
-          {/* The headline and the shape of what it counts, side by side. The
-              profile takes the void beside the number rather than a decoration
-              standing in for content. */}
-          <div className="my-auto flex items-end gap-6">
-            {hero}
-            <div className="min-w-0 flex-1">
-              <UsageShareRangeShape values={stats.shape} />
-            </div>
-          </div>
+          {/* The headline owns this band alone. The space beside and around it is
+              deliberate: see the AGENTS note before filling it with anything. */}
+          <div className="my-auto">{hero}</div>
           <div className="grid shrink-0 grid-cols-4 gap-4 border-y border-border/60 py-3">
             {trioCells.map((cell) => (
               <StatCell key={cell.label} {...cell} />
