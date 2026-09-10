@@ -10,7 +10,9 @@ import { Button } from '@/ui/button';
 
 function ForkTrigger({
   worktreeAvailability,
+  nativeForkAvailable = true,
 }: {
+  nativeForkAvailable?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
 }) {
   const [open, setOpen] = useState(true);
@@ -22,6 +24,8 @@ function ForkTrigger({
         open={open}
         onOpenChange={setOpen}
         worktreeAvailability={worktreeAvailability}
+        nativeForkAvailable={nativeForkAvailable}
+        onCopyContext={() => setLastChoice('copied')}
         onSelect={(destination) => setLastChoice(destination)}
       >
         <Button
@@ -55,4 +59,8 @@ export const Available: Story = {};
 
 export const CheckingGit: Story = {
   args: { worktreeAvailability: 'checking' },
+};
+
+export const CopyOnly: Story = {
+  args: { nativeForkAvailable: false, worktreeAvailability: 'hidden' },
 };

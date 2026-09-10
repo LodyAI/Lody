@@ -1189,9 +1189,9 @@
   "sessions.forkPartial": "会话已分叉，但部分历史内容不可用",
   "sessions.forkDestination.title": "分叉对话",
   "sessions.forkDestination.currentWorkspace": "当前工作区",
-  "sessions.forkDestination.currentWorkspaceHint": "新标签页 · 共享文件和未提交改动",
+  "sessions.forkDestination.currentWorkspaceHint": "新标签页 · 共享当前文件",
   "sessions.forkDestination.newWorktree": "新 Worktree",
-  "sessions.forkDestination.newWorktreeHint": "新会话 · 基于最新已提交的 HEAD",
+  "sessions.forkDestination.newWorktreeHint": "新会话 · 基于最新提交",
   "sessions.forkDestination.newWorktreeChecking": "正在检查 Git 状态…",
   "sessions.forkDirty.title": "发现未提交的改动",
   "sessions.forkDirty.description": "新 Worktree 只包含当前 HEAD 已提交的内容。未提交和未跟踪的文件不会被复制。",
@@ -3960,5 +3960,8 @@
   "sessions.fileViewer.previousPage": "上一页",
   "sessions.fileViewer.nextPage": "下一页",
   "sessions.fileViewer.page": "页码",
-  "sessions.fileViewer.pageUnavailable": "文件已更改或无法读取，请重新打开预览。"
+  "sessions.fileViewer.pageUnavailable": "文件已更改或无法读取，请重新打开预览。",
+  "sessions.copyContextMarkdown": "复制上下文为 Markdown",
+  "sessions.copyContextMarkdownHint": "复制截至此条的对话",
+  "sessions.copyContextIncomplete": "复制时，最后一条回复仍在生成。"
 }

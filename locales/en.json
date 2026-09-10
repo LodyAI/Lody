@@ -3960,5 +3960,8 @@
   "sessions.fileViewer.previousPage": "Previous page",
   "sessions.fileViewer.nextPage": "Next page",
   "sessions.fileViewer.page": "Page",
-  "sessions.fileViewer.pageUnavailable": "File changed or is unavailable. Reopen the preview."
+  "sessions.fileViewer.pageUnavailable": "File changed or is unavailable. Reopen the preview.",
+  "sessions.copyContextMarkdown": "Copy context as Markdown",
+  "sessions.copyContextMarkdownHint": "Copy the conversation through this message",
+  "sessions.copyContextIncomplete": "The last response was still generating when copied."
 }

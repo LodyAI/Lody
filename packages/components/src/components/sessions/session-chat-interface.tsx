@@ -1,3 +1,4 @@
+import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
@@ -1305,9 +1306,9 @@ export function SessionHeaderMenu({
             </DropdownMenuItem>
           )}
 
-          {onFork && !isArchived && forkWorktreeAvailability !== 'hidden' ? (
+          {onFork || onCopyConversationHistory ? (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger disabled={isForking}>
+              <DropdownMenuSubTrigger>
                 {isForking ? (
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
                 ) : (
@@ -1318,46 +1319,42 @@ export function SessionHeaderMenu({
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="min-w-[16rem]">
-                {getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
+                {onFork &&
+                  !isArchived &&
+                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
+                    <DropdownMenuItem
+                      key={option.id}
+                      disabled={option.disabled || isForking}
+                      className="items-start py-1.5"
+                      onSelect={() => {
+                        void onFork(option.id);
+                      }}
+                    >
+                      {option.id === 'new-worktree' ? (
+                        <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="leading-tight">{option.label}</span>
+                        <span className="text-xs font-normal leading-snug text-muted-foreground">
+                          {option.hint}
+                        </span>
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                {onCopyConversationHistory && (
                   <DropdownMenuItem
-                    key={option.id}
-                    disabled={option.disabled || isForking}
-                    className="items-start py-1.5"
                     onSelect={() => {
-                      void onFork(option.id);
+                      void onCopyConversationHistory();
                     }}
                   >
-                    {option.id === 'new-worktree' ? (
-                      <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    ) : (
-                      <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    )}
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="leading-tight">{option.label}</span>
-                      <span className="text-xs font-normal leading-snug text-muted-foreground">
-                        {option.hint}
-                      </span>
-                    </span>
+                    <Copy className="h-3.5 w-3.5" />
+                    {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                   </DropdownMenuItem>
-                ))}
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-          ) : onFork && !isArchived ? (
-            <DropdownMenuItem
-              disabled={isForking}
-              onClick={() => {
-                if (!isForking) {
-                  void onFork('shared');
-                }
-              }}
-            >
-              {isForking ? (
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-              ) : (
-                <GitFork className="h-3.5 w-3.5 shrink-0" />
-              )}
-              {t('sessions.forkSession', 'Fork session')}
-            </DropdownMenuItem>
           ) : null}
 
           {onRename && !isArchived && (
@@ -3342,7 +3339,7 @@ export const SessionChatInterface = memo(
     const conversationCopySource = useMemo(() => {
       const repo = (resolveProjectGitHubRepo(session.project) ?? session.repoFullName)?.trim();
       const branch = session.branchName?.trim();
-      return [repo, branch].filter(Boolean).join(' · ') || undefined;
+      return [repo, branch].filter(Boolean).join(' \u00b7 ') || undefined;
     }, [session.branchName, session.project, session.repoFullName]);
 
     const conversationCopyParticipants = useMemo(() => {
@@ -3353,55 +3350,66 @@ export const SessionChatInterface = memo(
       return names;
     }, [workspaceMembers]);
 
-    const handleCopyConversationHistory = useCallback(async () => {
-      if (!sessionDoc?.history?.length) {
-        captureSessionEvent('session/history_copy_failed', {
-          reason: 'empty_history',
-          history_count: 0,
-        });
-        toast.error(t('sessions.copyConversationHistoryEmpty', 'No conversation history to copy'));
-        return;
-      }
+    const handleCopyConversationHistory = useCallback(
+      async (throughMessageId?: string) => {
+        if (!sessionDoc?.history?.length) {
+          captureSessionEvent('session/history_copy_failed', {
+            reason: 'empty_history',
+            history_count: 0,
+          });
+          toast.error(
+            t('sessions.copyConversationHistoryEmpty', 'No conversation history to copy')
+          );
+          return;
+        }
 
-      try {
-        const { markdown, stats } = buildConversationMarkdown({
-          history: sessionDoc.history as Parameters<typeof buildConversationMarkdown>[0]['history'],
-          title: session.title ?? undefined,
-          source: conversationCopySource,
-          participants: conversationCopyParticipants,
-        });
-        await navigator.clipboard.writeText(markdown);
-        captureSessionEvent('session/history_copy_succeeded', {
-          history_count: sessionDoc.history.length,
-          prompt_length: stats.chars,
-          estimated_tokens: stats.estimatedTokens,
-          over_budget: stats.overBudget,
-          thinking_truncated: stats.thinkingTruncated,
-          terminal_omitted: stats.terminalOutputOmitted,
-          tool_calls_collapsed: stats.toolCallsCollapsed,
-          tool_results_truncated: stats.toolResultsTruncated,
-        });
-        toast.success(describeCopiedConversation(stats, t));
-      } catch (error) {
-        console.error('Failed to copy conversation history', error);
-        captureSessionEvent('session/history_copy_failed', {
-          reason: 'clipboard_error',
-          history_count: sessionDoc.history.length,
-          error_name: error instanceof Error ? error.name : typeof error,
-          error_message: error instanceof Error ? error.message : String(error),
-        });
-        toast.error(
-          t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
-        );
-      }
-    }, [
-      captureSessionEvent,
-      conversationCopyParticipants,
-      conversationCopySource,
-      session.title,
-      sessionDoc?.history,
-      t,
-    ]);
+        try {
+          const history = conversationCopyRange(sessionDoc.history, throughMessageId);
+          const { markdown, stats } = buildConversationMarkdown({
+            history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+            title: session.title ?? undefined,
+            source: conversationCopySource,
+            participants: conversationCopyParticipants,
+          });
+          const last = history.at(-1);
+          const suffix =
+            last?.role === 'assistant' && !last.finished
+              ? `\n_${t('sessions.copyContextIncomplete', 'The last response was still generating when copied.')}_\n`
+              : '';
+          await navigator.clipboard.writeText(markdown + suffix);
+          captureSessionEvent('session/history_copy_succeeded', {
+            history_count: sessionDoc.history.length,
+            prompt_length: stats.chars,
+            estimated_tokens: stats.estimatedTokens,
+            over_budget: stats.overBudget,
+            thinking_truncated: stats.thinkingTruncated,
+            terminal_omitted: stats.terminalOutputOmitted,
+            tool_calls_collapsed: stats.toolCallsCollapsed,
+            tool_results_truncated: stats.toolResultsTruncated,
+          });
+          toast.success(describeCopiedConversation(stats, t));
+        } catch (error) {
+          console.error('Failed to copy conversation history', error);
+          captureSessionEvent('session/history_copy_failed', {
+            reason: 'clipboard_error',
+            history_count: sessionDoc.history.length,
+            error_name: error instanceof Error ? error.name : typeof error,
+            error_message: error instanceof Error ? error.message : String(error),
+          });
+          toast.error(
+            t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
+          );
+        }
+      },
+      [
+        captureSessionEvent,
+        conversationCopyParticipants,
+        conversationCopySource,
+        session.title,
+        sessionDoc?.history,
+        t,
+      ]
+    );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
     // being mounted is not evidence the user saw this conversation: only the
@@ -5944,6 +5952,9 @@ export const SessionChatInterface = memo(
                             messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                             assistantActions={assistantQuickActions}
                             assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                            onCopyContext={(messageId) => {
+                              void handleCopyConversationHistory(messageId);
+                            }}
                             onForkLastAssistant={onForkLastAssistant}
                             forkWorktreeAvailability={forkWorktreeAvailability}
                             onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}

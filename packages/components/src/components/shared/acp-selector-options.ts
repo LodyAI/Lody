@@ -149,29 +149,25 @@ export const toggleFastModeSelectorValue = (
 ): AcpConfigOptionValue => toggleOnOffConfigOptionValue(selector, value);
 
 /**
- * Plan mode is NOT an on/off toggle. Codex — the only agent that carries plan
- * mode as a config option — publishes `collaboration_mode`, a select over
- * `default` / `plan`. (Claude expresses planning as the `plan` PERMISSION mode,
- * so it reaches the UI through the mode selector, never through these.)
- *
- * Plan surfaces must use these two helpers rather than the on/off pair: reading
- * `collaboration_mode` with `resolveOnOffConfigOptionEnabled` always reports
- * "off", and writing `on` produces a value the selector rejects, so
- * `resolveConfigOptionValue` falls back to `currentValue` and the control
- * silently never changes.
+ * Core plan_mode uses booleans. Legacy collaboration_mode uses default/plan;
+ * preserve the advertised value shape when reading or toggling either option.
  */
 export const resolvePlanModeSelectorEnabled = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
-): boolean => resolveConfigOptionValue(selector, value) === CODEX_COLLABORATION_MODE_PLAN_VALUE;
+): boolean =>
+  resolveConfigOptionValue(selector, value) ===
+  (selector.type === 'boolean' ? true : CODEX_COLLABORATION_MODE_PLAN_VALUE);
 
 export const togglePlanModeSelectorValue = (
   selector: AcpConfigOptionSelector,
   value: AcpConfigOptionValue | undefined
 ): AcpConfigOptionValue =>
-  resolvePlanModeSelectorEnabled(selector, value)
-    ? CODEX_COLLABORATION_MODE_DEFAULT_VALUE
-    : CODEX_COLLABORATION_MODE_PLAN_VALUE;
+  selector.type === 'boolean'
+    ? !resolvePlanModeSelectorEnabled(selector, value)
+    : resolvePlanModeSelectorEnabled(selector, value)
+      ? CODEX_COLLABORATION_MODE_DEFAULT_VALUE
+      : CODEX_COLLABORATION_MODE_PLAN_VALUE;
 
 /**
  * Classifies a selector as a "thought level" (reasoning effort) control. Registry agents

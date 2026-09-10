@@ -973,6 +973,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <ContextMenu onOpenChange={setRowMenuOpen}>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[180px]">
+        <SessionRowOpenedByMenuItems
+          opener={openedByOpener}
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
         {canTogglePin ? (
           <ContextMenuItem
             onSelect={() => {
@@ -1003,7 +1007,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.rename}
           </ContextMenuItem>
         ) : null}
-        {(canTogglePin || canMarkUnread || canRename) &&
+        {(openedByOpener || canTogglePin || canMarkUnread || canRename) &&
         (canCopyUrl || branchName || shareMenuState) ? (
           <ContextMenuSeparator />
         ) : null}
@@ -1050,16 +1054,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
-        {(canTogglePin ||
+        {(openedByOpener ||
+          canTogglePin ||
           canMarkUnread ||
           canRename ||
           canCopyUrl ||
           branchName ||
           shareMenuState) &&
-        (handlePrOpen ||
-          (canGoToOpener && openerSessionId) ||
-          openedByOpener ||
-          isElectronRenderer()) ? (
+        (handlePrOpen || (canGoToOpener && openerSessionId) || isElectronRenderer()) ? (
           <ContextMenuSeparator />
         ) : null}
         {handlePrOpen ? (
@@ -1073,7 +1075,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           </ContextMenuItem>
         ) : null}
         <SessionRowOpenedByMenuItems
-          opener={openedByOpener}
           goToOpener={
             canGoToOpener && openerSessionId
               ? () => onSelect?.(openerRootSessionId ?? openerSessionId, openerSessionId)
@@ -1082,7 +1083,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
         <SessionWindowMenuItem sessionId={item.id} />
-        {(canTogglePin ||
+        {(openedByOpener ||
+          canTogglePin ||
           canMarkUnread ||
           canRename ||
           canCopyUrl ||
@@ -1090,7 +1092,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           shareMenuState ||
           handlePrOpen ||
           (canGoToOpener && openerSessionId) ||
-          openedByOpener ||
           isElectronRenderer()) &&
         canArchive ? (
           <ContextMenuSeparator />

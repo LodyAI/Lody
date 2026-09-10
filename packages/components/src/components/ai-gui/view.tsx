@@ -439,6 +439,7 @@ export interface SessionChatStreamViewProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -460,6 +461,7 @@ export interface SessionChatStreamViewProps {
 const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
@@ -830,6 +832,7 @@ type AssistantTurnRowsCacheEntry = {
   scopedAssistantActions: AssistantMessageAction[] | undefined;
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
+  copyContextAvailable: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
@@ -842,6 +845,7 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId,
   activeSearchBlockId,
   expansionVersion,
+  copyContextAvailable = false,
 }: {
   items: ChatStreamItem[];
   lastAssistantMessageId: string | null;
@@ -850,6 +854,7 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId?: string | null;
   activeSearchBlockId?: string | null;
   expansionVersion: number;
+  copyContextAvailable?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -885,6 +890,7 @@ export const buildChatVirtualRows = ({
       cachedRows.fileDiffs === fileDiffs &&
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
+      cachedRows.copyContextAvailable === copyContextAvailable &&
       cachedRows.expansionVersion === expansionVersion
     ) {
       rows.push(...cachedRows.rows);
@@ -1120,6 +1126,7 @@ export const buildChatVirtualRows = ({
 
     const showDurationInFooter = !anySegmentUsesWorkedGroup;
     if (
+      copyContextAvailable ||
       shouldRenderAssistantFooter({
         message,
         renderEntries: entries,
@@ -1148,6 +1155,7 @@ export const buildChatVirtualRows = ({
       scopedAssistantActions,
       activeSearchBlockId,
       expansionVersion,
+      copyContextAvailable,
     });
     rows.push(...assistantRows);
   }
@@ -1189,6 +1197,7 @@ export const SessionChatStreamView = forwardRef<
       assistantActions,
       assistantActionsMessageId = null,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability = 'hidden',
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
@@ -1281,6 +1290,7 @@ export const SessionChatStreamView = forwardRef<
       });
     }, []);
 
+    const copyContextAvailable = onCopyContext !== undefined;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1293,12 +1303,14 @@ export const SessionChatStreamView = forwardRef<
         assistantActionsMessageId,
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
+        copyContextAvailable,
       });
     }, [
       activeSearchBlockId,
       assistantActions,
       assistantActionsMessageId,
       assistantExpansionVersion,
+      copyContextAvailable,
       items,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
@@ -1631,10 +1643,11 @@ export const SessionChatStreamView = forwardRef<
     );
     const chatActionContextValue = useMemo(
       () => ({
+        copyContext: onCopyContext,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
       }),
-      [onOpenHtmlFile, sendMessage]
+      [onCopyContext, onOpenHtmlFile, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -2709,6 +2722,7 @@ const UserMessageRowView = ({
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -2819,7 +2833,7 @@ const UserMessageRowView = ({
           data-testid="user-message-metadata"
         >
           {showSenderIdentity && user?.name ? (
-            <span className="max-w-40 truncate font-medium text-foreground/70" title={user.name}>
+            <span className="max-w-40 truncate font-medium" title={user.name}>
               {user.name}
             </span>
           ) : null}
@@ -2914,8 +2928,19 @@ const UserMessageRowView = ({
         </div>
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
-        {hasTextContent && !isEditing ? (
+        {(hasTextContent || copyContext) && !isEditing ? (
           <div className="flex gap-0.5">
+            {copyContext && (
+              <AssistantForkButton
+                turnId={message.id}
+                worktreeAvailability="hidden"
+                className={cn(
+                  'transition-opacity',
+                  !isMobile &&
+                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                )}
+              />
+            )}
             {onEdit ? (
               <TooltipProvider>
                 <Tooltip delayDuration={500}>
@@ -3552,28 +3577,31 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 const AssistantForkButton = ({
   turnId,
+  className,
   isForking,
   worktreeAvailability,
   onFork,
   onWorktreeMenuOpen,
 }: {
   turnId: string;
+  className?: string;
   isForking?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
-  onFork: (turnId: string, destination?: SessionForkDestination) => void;
+  onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   onWorktreeMenuOpen?: () => void;
 }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const offerWorktree = worktreeAvailability !== 'hidden';
+  const { copyContext } = useContext(SessionChatActionContext);
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-      onClick={offerWorktree ? undefined : () => onFork(turnId, 'shared')}
-      disabled={isForking}
+      className={cn(
+        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
+        className
+      )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
       {isForking ? (
@@ -3584,17 +3612,6 @@ const AssistantForkButton = ({
     </Button>
   );
 
-  if (!offerWorktree) {
-    return (
-      <TooltipProvider>
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{t('sessions.forkSession', 'Fork session')}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-
   return (
     <SessionForkDestinationPopover
       open={menuOpen}
@@ -3603,8 +3620,9 @@ const AssistantForkButton = ({
         if (open) onWorktreeMenuOpen?.();
       }}
       worktreeAvailability={worktreeAvailability}
-      disabled={isForking}
-      onSelect={(destination) => onFork(turnId, destination)}
+      nativeForkAvailable={!!onFork && !isForking}
+      onCopyContext={copyContext ? () => copyContext(turnId) : undefined}
+      onSelect={(destination) => onFork?.(turnId, destination)}
     >
       {button}
     </SessionForkDestinationPopover>
@@ -3637,6 +3655,7 @@ const AssistantTurnFooter = ({
   isForking?: boolean;
 }) => {
   const { t, i18n } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   const [didCopy, setDidCopy] = useState(false);
   const textContent = useMemo(() => {
@@ -3680,7 +3699,7 @@ const AssistantTurnFooter = ({
     completionTimestampLabel.length > 0 ||
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
-  const showActionBar = hasActionBarContent || onFork !== undefined;
+  const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
@@ -3712,7 +3731,7 @@ const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {showFinishedMetadata && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -3736,7 +3755,7 @@ const AssistantTurnFooter = ({
               className="shrink-0 tabular-nums"
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
-              {mobileDurationLabel}
+              {showFinishedMetadata ? mobileDurationLabel : ''}
             </span>
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
@@ -3747,7 +3766,7 @@ const AssistantTurnFooter = ({
              render, the timestamp must stay on the plain gutter. Mobile pulls
              only the trailing edge — its leading glyph aligns to the duration
              label, not to the answer text. */}
-          {hasCopyableText || hasTurnConfigInfo || onFork ? (
+          {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
               {hasCopyableText ? (
                 <TooltipProvider>
@@ -3779,28 +3798,29 @@ const AssistantTurnFooter = ({
                 </TooltipProvider>
               ) : null}
               {/* The turn config lives below the output on every layout. */}
-              {hasTurnConfigInfo ? (
+              {showFinishedMetadata && hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
                   className="h-7 w-7"
                 />
               ) : null}
-              {onFork ? (
+              {(showFinishedMetadata && onFork) || copyContext ? (
                 <AssistantForkButton
                   turnId={message.id}
+                  className="mr-2"
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
-                  onFork={onFork}
+                  onFork={showFinishedMetadata ? onFork : undefined}
                   onWorktreeMenuOpen={onForkWorktreeMenuOpen}
                 />
               ) : null}
             </div>
           ) : null}
-          {completionTimestampLabel ? (
+          {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
           ) : null}
-          {!isMobile && showDuration && durationLabel ? (
+          {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
               <span className="font-mono tabular-nums">{durationLabel}</span>

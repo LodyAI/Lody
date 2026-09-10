@@ -51,6 +51,10 @@
  */
 
 import type { MessageContent, ToolCallContent } from './ai';
+import {
+  formatCommentReferenceForPrompt,
+  formatVisualAnnotationReferenceForPrompt,
+} from './comment-reference-format';
 import type { SessionHistoryInput } from './schema';
 import { redactSensitiveTokens } from './replay-prompt-builder';
 
@@ -579,6 +583,21 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
     case 'text':
       // Message text is never trimmed; only heading levels move.
       return item.text?.trim() ? demoteMarkdownHeadings(item.text) : null;
+
+    case 'file':
+      return `- **Attachment:** ${toSummaryLine(item.fileName)} (${item.sizeBytes} bytes). _File contents not included._`;
+
+    case 'image':
+      return `- **Image:** ${item.fileName ? toSummaryLine(item.fileName) : 'Attached image'} (${item.mimeType}, ${item.sizeBytes} bytes). _Image contents not included._`;
+
+    case 'comment_reference':
+      return fenceCode(formatCommentReferenceForPrompt(item), 'xml');
+
+    case 'visual_annotation_reference':
+      return fenceCode(formatVisualAnnotationReferenceForPrompt(item), 'xml');
+
+    case 'image_group':
+      return `- **Images:** ${item.images.length}. _Image contents not included._`;
 
     case 'proposed_plan':
       // Extracted out of the assistant text upstream, so dropping it would lose

@@ -58,6 +58,11 @@ per-turn MCP selection, or Role-based session creation and dispatch.
 
 ## Machine protocol negotiation
 
+- Independent Plan configuration uses Core's boolean `plan_mode`, including static
+  capabilities, semantic dispatch, and UI toggles. Preserve `collaboration_mode`
+  default/plan only for agents that advertise the legacy option; planning must not
+  change permission policy.
+
 - Daemon-backed workflows negotiate versions through
   `MachineMeta.protocolCapabilities`; never infer from the CLI release. Missing
   capabilities mean unsupported. Set and version checks share one binding in
