@@ -103,3 +103,17 @@ it('enforces the final prompt byte budget including semantic rewrites', () => {
   expect(compileShortcutPrompt({ ...input, maxBytes: bytes })).toEqual(result);
   expect(() => compileShortcutPrompt({ ...input, maxBytes: bytes - 1 })).toThrow();
 });
+
+it('rejects stale chip text and duplicate invocation identities on the real send path', () => {
+  const input = fixture();
+  expect(() =>
+    compileShortcutPrompt({ ...input, text: input.text.replace('/review', '/wrong!') })
+  ).toThrow('Incomplete or stale invocation range');
+  const first = input.mentions[0]!;
+  expect(() =>
+    compileShortcutPrompt({
+      ...input,
+      mentions: [first, { ...input.mentions[1]!, value: first.value, data: first.data }],
+    })
+  ).toThrow('Incomplete or stale invocation range');
+});

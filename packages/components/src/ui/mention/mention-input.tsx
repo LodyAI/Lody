@@ -93,10 +93,7 @@ function constrainCaretToMentionBoundary(input: InputElement, mentions: readonly
   if (selectionStart !== selectionEnd) return;
 
   const mention = mentions.find(
-    (candidate) =>
-      candidate.atomic !== false &&
-      selectionStart > candidate.start &&
-      selectionStart < candidate.end
+    (candidate) => selectionStart > candidate.start && selectionStart < candidate.end
   );
   if (!mention) return;
 
@@ -346,10 +343,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
 
       for (const { trigger, index: lastTriggerIndex } of candidates) {
         const mentionAtTrigger = context.mentions.find(
-          (mention) =>
-            mention.atomic !== false &&
-            mention.start <= lastTriggerIndex &&
-            mention.end > lastTriggerIndex
+          (mention) => mention.start <= lastTriggerIndex && mention.end > lastTriggerIndex
         );
 
         const isDirectoryMentionAtEnd =
@@ -539,10 +533,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const mentionAtClick =
         selectionStart === selectionEnd
           ? context.mentions.find(
-              (mention) =>
-                mention.atomic !== false &&
-                selectionStart >= mention.start &&
-                selectionStart <= mention.end
+              (mention) => selectionStart >= mention.start && selectionStart <= mention.end
             )
           : undefined;
 
@@ -850,10 +841,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       }
       if (inputType === 'deleteContentBackward') {
         const mentionAtCursor = context.mentions.find(
-          (mention) =>
-            mention.atomic !== false &&
-            cursorPosition > mention.start &&
-            cursorPosition <= mention.end
+          (mention) => cursorPosition > mention.start && cursorPosition <= mention.end
         );
 
         if (mentionAtCursor) {

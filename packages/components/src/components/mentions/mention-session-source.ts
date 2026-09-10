@@ -375,10 +375,5 @@ export function hydrateSessionMentionsFromText(
   slugToId: ReadonlyMap<string, string>,
   knownFileTokens?: ReadonlySet<string>
 ): HydratedMentions {
-  return hydrateSlugMentionsFromText({
-    text,
-    slugToValue: slugToId,
-    kind: 'session',
-    knownFileTokens,
-  });
+  return hydrateSlugMentionsFromText({ text, slugToValue: slugToId, kind: 'session', knownFileTokens });
 }

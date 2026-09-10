@@ -86,10 +86,6 @@ interface Mention extends Omit<ItemData, 'label' | 'disabled'> {
   kind?: MentionKind;
   /** Opaque committed data owned by the product, never interpreted by this primitive. */
   data?: unknown;
-  /** Editable annotations opt out of atomic caret/deletion behavior. */
-  atomic?: boolean;
-  /** Invisible provenance annotations still move through edits. */
-  highlight?: boolean;
 }
 
 export type PreparedMention = { value: string; text: string; kind?: MentionKind; data?: unknown };
@@ -224,13 +220,6 @@ interface MentionContextValue {
    * this package.
    */
   onMentionInsert: (request: MentionInsertRequest | MentionInsertRequest[]) => void;
-  /** Replace one source region with text and relative ranges as one undoable edit. */
-  onMentionReplace: (request: {
-    start: number;
-    end: number;
-    text: string;
-    mentions: Mention[];
-  }) => void;
   /**
    * Pop the text between the trigger and the caret back to the bare trigger,
    * undoing one drill-down step. Returns false when there is no trigger to pop
@@ -537,36 +526,6 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
   renderedDraft.current = { text: inputValue, mentions };
   const [pendingSelection, setPendingSelection] = React.useState<MentionSelectionRange | null>(
     null
-  );
-
-  const onMentionReplace = React.useCallback(
-    (request: { start: number; end: number; text: string; mentions: Mention[] }) => {
-      if (disabled || readonly) return;
-      const sourceValue = inputRef.current?.value ?? inputValue;
-      const splice: MentionSplice = {
-        replaceStart: request.start,
-        replaceEnd: request.end,
-        text: request.text,
-        value: '',
-        commitRange: false,
-      };
-      const next = applyMentionSplice(sourceValue, mentions, splice);
-      const nextMentions = [
-        ...next.mentions,
-        ...request.mentions.map((range) => ({
-          ...range,
-          start: request.start + range.start,
-          end: request.start + range.end,
-        })),
-      ].sort((a, b) => a.start - b.start);
-      setMentions(nextMentions);
-      setValue(nextMentions.filter((range) => range.atomic !== false).map((range) => range.value));
-      setInputValue(next.value);
-      setOpen(false);
-      setPendingSelection({ start: next.caret, end: next.caret, expectedValue: next.value });
-      inputRef.current?.focus();
-    },
-    [disabled, inputValue, mentions, readonly, setInputValue, setMentions, setOpen, setValue]
   );
 
   const onHistoryRestore = React.useCallback(
@@ -921,7 +880,6 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       onMentionsChange={setMentions}
       onMentionAdd={onMentionAdd}
       onMentionInsert={onMentionInsert}
-      onMentionReplace={onMentionReplace}
       onNavigateBack={onNavigateBack}
       onMentionsRemove={onMentionsRemove}
       onMentionClick={onMentionClick}

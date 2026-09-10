@@ -4,7 +4,6 @@ import {
   canAccessShortcutDomain,
   createShortcutInvocation,
   expandShortcut,
-  expandShortcutComposer,
   getShortcutBodyStreamId,
   getShortcutIndexStreamId,
   getShortcutMentionGate,
@@ -193,64 +192,11 @@ describe('shortcut compilation', () => {
     expect(output.text.slice(output.mentions[0]!.start, output.mentions[0]!.end)).toBe('@Reviewer');
   });
 
-  it('expands multiple chips in place without adding separators', () => {
-    const first = createShortcutInvocation('i1', template());
-    const second = createShortcutInvocation('i2', template());
-    expect(
-      expandShortcutComposer({
-        text: 'Before /review between /review after !{literal}',
-        mentions: [],
-        invocations: [
-          { start: 7, end: 14, invocation: first },
-          { start: 23, end: 30, invocation: second },
-        ],
-        maxBytes: 1000,
-      }).text
-    ).toBe('Before Review !{topic} between Review !{topic} after !{literal}');
-  });
-
   it('snapshots do not alias mutable catalog objects', () => {
     const source = template();
     const invocation = createShortcutInvocation('i1', source);
     source.prompt = 'changed';
     expect(invocation.snapshot.prompt).toBe('Review !{topic}');
-  });
-
-  it('rejects stale ranges, overlapping chips and oversized UTF-8 output without truncating', () => {
-    const invocation = createShortcutInvocation('i1', template({ prompt: '中'.repeat(6) }));
-    expect(
-      errorCode(() =>
-        expandShortcutComposer({
-          text: '/review',
-          mentions: [],
-          invocations: [{ start: 0, end: 7, invocation }],
-          maxBytes: 12,
-        })
-      )
-    ).toBe('size_limit');
-    expect(
-      errorCode(() =>
-        expandShortcutComposer({
-          text: '/wrong!',
-          mentions: [],
-          invocations: [{ start: 0, end: 7, invocation }],
-          maxBytes: 100,
-        })
-      )
-    ).toBe('invalid_ranges');
-    expect(
-      errorCode(() =>
-        expandShortcutComposer({
-          text: '/review',
-          mentions: [],
-          invocations: [
-            { start: 0, end: 7, invocation },
-            { start: 0, end: 7, invocation },
-          ],
-          maxBytes: 100,
-        })
-      )
-    ).toBe('invalid_ranges');
   });
 });
 
@@ -301,19 +247,6 @@ describe('LoroDoc saved revisions', () => {
     expect(
       errorCode(() => document.save(template({ revision: 'r2', visibility: 'workspace' }), ['r1']))
     ).toBe('invalid_template');
-  });
-
-  it('publishes only the current state, never earlier private revisions', () => {
-    const original = new PromptShortcutDocument(new LoroDoc());
-    original.save(template({ prompt: 'private draft' }), []);
-    original.save(template({ revision: 'r2', prompt: 'publishable' }), ['r1']);
-    const published = PromptShortcutDocument.fromPublishedState({
-      ...original.read()!,
-      visibility: 'workspace',
-    });
-    expect(published.read()?.prompt).toBe('publishable');
-    expect(published.doc.getMap('revisions').keys()).toEqual(['r2']);
-    expect(JSON.stringify(published.doc.toJSON())).not.toContain('private draft');
   });
 });
 

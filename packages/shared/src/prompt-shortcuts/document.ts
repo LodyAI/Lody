@@ -1,4 +1,4 @@
-import { LoroDoc } from 'loro-crdt';
+import type { LoroDoc } from 'loro-crdt';
 import { z } from 'zod';
 import { parsePromptShortcut } from './compiler';
 import { PromptShortcutError, type PromptShortcut } from './model';
@@ -158,12 +158,5 @@ export class PromptShortcutDocument {
     for (const parent of expectedParents) this.doc.getMap('contents').delete(parent);
     this.doc.commit();
     return content;
-  }
-
-  /** Sharing exports the current value into a fresh history, never the private CRDT snapshot. */
-  static fromPublishedState(value: unknown): PromptShortcutDocument {
-    const result = new PromptShortcutDocument(new LoroDoc());
-    result.save(value, []);
-    return result;
   }
 }

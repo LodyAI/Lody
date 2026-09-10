@@ -1,4 +1,4 @@
-import { isShortcutDraftRange } from '@/components/mentions/shortcut-composer-state';
+import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
 import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
 import { captureShortcutDraft, shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
 import {
@@ -828,7 +828,7 @@ export const SessionChatInputArea = memo(
     );
     const handleMentionRangesChange = useCallback(
       (ranges: MentionRange[]) => {
-        if (ranges.some(isShortcutDraftRange))
+        if (ranges.some(isShortcutMention))
           sessionShortcutDraftOwners.set(session.id, draftOwnerKey);
         mentionRangesRef.current = ranges;
         setSessionMentionRanges(session.id, toPersistedMentionRanges(ranges));

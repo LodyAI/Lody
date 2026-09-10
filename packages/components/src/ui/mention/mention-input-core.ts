@@ -145,7 +145,7 @@ export function getMentionValuesFromMentions(mentions: Mention[]) {
   const values: string[] = [];
 
   for (const mention of mentions) {
-    if (mention.kind === 'pasted_text' || mention.atomic === false) continue;
+    if (mention.kind === 'pasted_text') continue;
     if (seen.has(mention.value)) continue;
     seen.add(mention.value);
     values.push(mention.value);
@@ -169,9 +169,7 @@ export function areMentionsEqual(current: Mention[], next: Mention[]) {
       currentMention.end !== nextMention.end ||
       currentMention.value !== nextMention.value ||
       currentMention.kind !== nextMention.kind ||
-      currentMention.data !== nextMention.data ||
-      currentMention.atomic !== nextMention.atomic ||
-      currentMention.highlight !== nextMention.highlight
+      currentMention.data !== nextMention.data
     ) {
       return false;
     }
@@ -258,7 +256,6 @@ export function findAdjacentMentionForHorizontalNavigation({
 
   return (
     mentions.find((mention) => {
-      if (mention.atomic === false) return false;
       if (isLeftArrow) {
         const textBetween = value.slice(mention.end, cursorPosition);
         const isOnlySpaces = /^\s*$/.test(textBetween);
@@ -309,7 +306,6 @@ export function findMentionBeforeCursorForDeletion({
 }: BackspaceMentionOptions): Mention | null {
   return (
     mentions.find((mention) => {
-      if (mention.atomic === false) return false;
       if (!isCtrlOrCmd) {
         return (
           cursorPosition === mention.end ||

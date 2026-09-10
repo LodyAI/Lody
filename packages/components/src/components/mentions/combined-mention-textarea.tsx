@@ -1,4 +1,3 @@
-import { isShortcutDraftRange } from './shortcut-composer-state';
 import { useShortcutComposerDraft } from './use-shortcut-composer-draft';
 import { shortcutDraftMentions } from '@/lib/shortcut-composer-draft';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
@@ -890,7 +889,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         });
     }, [externalMentions, internalMentions]);
 
-    const suspendShortcutDraft = draftSuspended && internalMentions.some(isShortcutDraftRange);
+    const suspendShortcutDraft = draftSuspended && internalMentions.some(isShortcutMention);
     const shortcutDraft = useShortcutComposerDraft({
       suspended: suspendShortcutDraft,
       enabled: enablePromptShortcuts && !templateScope,

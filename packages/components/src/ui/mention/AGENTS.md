@@ -100,10 +100,6 @@ Shared mention primitive used by composer autocomplete surfaces.
   disposal cancel preparation. Existing synchronous items stay synchronous.
   Prepared items replace only the query span without an implicit space suffix.
 
-- Ranges may opt into editable annotations with `atomic: false`; caret and
-  deletion remain native, intersecting edits decommit the annotation.
-  `highlight: false` keeps provenance invisible without changing editing.
-  `onMentionReplace` commits text plus relative ranges as one history step.
 - `mention-history.ts` retains bounded immutable text/range snapshots for opt-in
   semantic undo/redo. Capture happens before text commits, including same-text
   prepared selections. Native text-only history cannot recover opaque payloads.

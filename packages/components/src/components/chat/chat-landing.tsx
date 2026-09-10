@@ -1,4 +1,4 @@
-import { isShortcutDraftRange } from '@/components/mentions/shortcut-composer-state';
+import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
 import { captureShortcutDraft, shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
 import { useLandingSubmissionOwner } from './use-landing-submission-owner';
 import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
@@ -998,7 +998,7 @@ function WorkspaceChatLanding({
   const [shortcutUnavailable, setShortcutUnavailable] = useState(false);
   const handleMentionRangesChange = useCallback(
     (ranges: MentionRange[]) => {
-      shortcutRangesRef.current = ranges.filter(isShortcutDraftRange);
+      shortcutRangesRef.current = ranges.filter(isShortcutMention);
       // Stored with the prompt so a returning draft does not have to have its
       // mentions recognised again from the text — which only works once each
       // source has loaded, and not at all for one that never does.
@@ -1008,7 +1008,7 @@ function WorkspaceChatLanding({
           previous.shortcutWorkspaceId && previous.shortcutWorkspaceId !== workspaceId
             ? { prompt: '', pastedTextDrafts: [], mentionRanges: [] }
             : previous;
-        const shortcutWorkspaceId = ranges.some(isShortcutDraftRange)
+        const shortcutWorkspaceId = ranges.some(isShortcutMention)
           ? (workspaceId ?? undefined)
           : prev.shortcutWorkspaceId;
         return arePersistedMentionRangesEqual(prev.mentionRanges ?? [], persisted) &&

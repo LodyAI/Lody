@@ -18,11 +18,6 @@ export function isShortcutMention(mention: Mention): mention is ShortcutMention 
   return mention.kind === 'prompt_shortcut' && !!mention.data;
 }
 
-/** Ranges the Shortcut draft owns, as opposed to ordinary composer mentions. */
-export function isShortcutDraftRange(mention: Mention): boolean {
-  return isShortcutMention(mention);
-}
-
 export function shortcutComposerScope(
   source?: MentionProjectSource,
   agent?: SkillMentionAgent

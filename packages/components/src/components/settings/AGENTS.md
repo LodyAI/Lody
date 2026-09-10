@@ -67,24 +67,30 @@ component details.
   and active organization after success; cache refresh failure must not claim transfer
   failed. Card changes use the billing Portal separately; transfer keeps the current card.
 
-## The shared editor grammar
+## Shared editors and Prompt Shortcuts
 
-`emoji-field.tsx` is the one emoji control (button, lazy `emoji-picker-panel`,
-and reset), shared by the Agent Role and Prompt Shortcut editors.
-
-`form-primitives.tsx` owns `Section`, `Field`, `FormMessage` and
-`AutoGrowTextarea` (a one-row field that tracks its content's height; it must
-re-measure on width changes, because wrapping is what decides the row count).
-Every settings editor — MCP connection, Agent Role, Prompt Shortcut — is the same stack:
-a dialog `header` (`px-5 py-3 pr-12`), a scrolling `scrollbar-pro` body of
-bordered sections, and a bordered footer with Cancel plus the primary action.
-Lists share one row grammar too (`rounded-lg bg-foreground/[0.04]`, a row body
-button that opens the editor, a trailing ghost action cluster, a dashed empty
-state). Copy a local variant of any of these and three surfaces that are meant
-to read as one drift apart a padding value at a time.
-
-## Prompt Shortcuts
-
-Before changing Prompt Shortcuts, read [Prompt Shortcut contracts](prompt-shortcuts.md).
-Keep the developer gate, account/workspace isolation, read-only sharing and
-non-recursive template restrictions intact; templates have no variables.
+- Reuse `emoji-field.tsx` and `form-primitives.tsx` across Role, MCP and Shortcut
+  editors. `AutoGrowTextarea` starts at one row and remeasures on width changes.
+- `promptShortcutsFeatureEnabledAtom` requires Developer mode and a default-off
+  Beta opt-in. Gate navigation, direct panels, discovery and runtime together;
+  disabling never deletes saved data.
+- `prompt-shortcuts-setting.tsx` owns list/editor state, keyed by account/workspace
+  to fence stale drafts and reads. Storage/publication belongs to the provider and
+  shared domain. Resolve scope labels once for the whole panel.
+- `prompt-shortcut-form.tsx` is presentational: scope starts empty, sharing private;
+  name follows through to slug only until a new Shortcut's slug is manually edited.
+  Templates contain no variables or invocation parameters; `!{name}` is literal.
+- `prompt-shortcut-scope.tsx` orders Project → Machine → Agent. Unset axes show
+  Workspace scope, never shared visibility. Emoji lives in the bounded shared
+  schema/index and falls back to `DEFAULT_PROMPT_SHORTCUT_EMOJI`.
+- Explicit scope changes remount the source-owning textarea with CURRENT semantic
+  ranges, never the saved revision's ranges. Template mode disables token-scanning
+  hydration, Sessions, recursive Shortcuts and ACP commands. Skills load on menu
+  activation. Stories render the real exported `ShortcutPromptField`.
+- Warnings compare indexed dependencies to saved scope; they do not claim live
+  availability. Publication is background work: local save/delete remain enabled
+  while pending or offline. Only local I/O disables duplicate actions; pending is
+  durable but not advertised or synced. Retry belongs to the runtime.
+- Other members' shared Shortcuts open read-only in the same shell; no copy-to-mine
+  action exists. Form/list stories and `prompt-shortcut-form.test.tsx` /
+  `prompt-shortcuts-setting.test.tsx` cover scope, ranges, identity and sharing.

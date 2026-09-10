@@ -335,7 +335,7 @@ const MentionHighlighter = React.memo(
     const onSegmentsRender = React.useCallback(
       () =>
         getMentionHighlightSegments(mirroredValue, mirroredMentions).map((segment) => {
-          if (segment.type !== 'mention' || segment.mention.highlight === false) {
+          if (segment.type !== 'mention') {
             return <span key={segment.key}>{segment.text}</span>;
           }
 

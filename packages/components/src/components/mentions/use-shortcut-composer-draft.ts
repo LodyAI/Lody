@@ -1,4 +1,4 @@
-import { isShortcutDraftRange } from './shortcut-composer-state';
+import { isShortcutMention } from './shortcut-composer-state';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import {
@@ -45,7 +45,7 @@ export function useShortcutComposerDraft(input: {
       current.current.input.restore({ v: 1, text: '', mentions: [], invocations: [] });
     }
     previousDomain.current = domain;
-    previouslyHadShortcut.current = input.mentions.some(isShortcutDraftRange);
+    previouslyHadShortcut.current = input.mentions.some(isShortcutMention);
   }, [domain, input.mentions]);
   const markEdited = useCallback(() => {
     generation.current += 1;

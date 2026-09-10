@@ -42,7 +42,6 @@ export class PromptShortcutRuntime {
   private tasks = new Set<Promise<unknown>>();
   private flushing: Promise<void> | null = null;
   private errors: Record<string, unknown> = {};
-  private loading: boolean;
   private snapshot: ShortcutRuntimeSnapshot;
   private indexes = new Map<
     string,
@@ -57,8 +56,7 @@ export class PromptShortcutRuntime {
     const cached = store.discovery();
     this.directory = cached.directory;
     this.remoteEntries = cached.entries;
-    this.loading = false; // Local readiness never waits for the cloud directory.
-    this.snapshot = { entries: [], pendingIds: [], errors: {}, loading: this.loading };
+    this.snapshot = { entries: [], pendingIds: [], errors: {}, loading: false };
     this.publish();
   }
   get workspaceId() {
@@ -123,7 +121,7 @@ export class PromptShortcutRuntime {
       entries: [...entries.values()].sort((a, b) => a.name.localeCompare(b.name)),
       pendingIds: records.filter((row) => row.operation).map((row) => row.entry.id),
       errors: { ...this.errors },
-      loading: this.loading,
+      loading: false,
     };
     for (const listener of this.listeners) listener();
   }
@@ -273,13 +271,11 @@ export class PromptShortcutRuntime {
           await this.openIndex(domain);
         }
         if (!this.disposed && version === this.directoryVersion) {
-          this.loading = false;
           delete this.errors.directory;
           this.refreshIndexes();
         }
       })().catch((error) => {
         if (!this.disposed && version === this.directoryVersion) {
-          this.loading = false;
           this.errors.directory = error;
           this.publish();
         }

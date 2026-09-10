@@ -19,7 +19,7 @@ lives in its `README.md`.
    expensive one, which is why `getCandidates` must stay lazy and a bare `@` calls
    none of them.
 3. **Commit.** The candidate's `insertText` is what the user sees in the prompt;
-   the committed *range* is what carries structured identity (a session id, a Role
+   the committed _range_ is what carries structured identity (a session id, a Role
    id) that no text form could.
 4. **Draft persistence and hydration.** Ranges are stored beside the draft, and
    rebuilding them from text is only a fallback.
@@ -52,7 +52,7 @@ every return looking like plain text — and never came back at all if the sourc
 never loaded. Hence persistence of the narrow `PersistedMentionRange`: the live
 range carries callbacks, which `JSON.stringify` writes as `{}`.
 
-`mergeHydratedMentions` rejects an *overlapping* range, not just an exact
+`mergeHydratedMentions` rejects an _overlapping_ range, not just an exact
 duplicate, because a session and a path are now the same shape: two sources can
 each claim `@fix-ci` at different ends, and only rejecting overlaps keeps the
 restored range authoritative.
@@ -71,8 +71,6 @@ default and reads storage in `onMount`, so latching at mount latches `''` and th
 
 A session mention commits as a plain `@<title-slug>`: the old `session:` marker
 was only ever an anchor for the before-send rewrite, and the user had to read it.
-It is still the only type whose displayed text differs from what the agent
-receives.
 
 Dropping the marker is why hydration has to break a tie:
 `hydrateSessionMentionsFromText` skips any token the file source already knows.
@@ -133,3 +131,16 @@ instruction — so the neutral rows were a second description that had already
 drifted (printing stored ids raw, labelling the permission mode "Reasoning"). That
 pane is desktop-only: the docked mobile strip is too narrow and has no hover to
 preview with.
+
+## Prompt Shortcuts
+
+The Slash menu has separate ACP-command and Shortcut sources. Shortcut discovery
+reads the index; selecting a result loads and freezes its body before committing
+an inline range. Opaque payload history preserves that snapshot through Undo.
+`compileShortcutPrompt` combines ordinary rewrites with `expandShortcut` output
+in original coordinates, producing the final text and spans together.
+
+Template editors reuse these primitives with explicit author-selected scope and
+exclude Sessions, recursive Shortcuts and ACP commands. Product constraints live
+in the [mention rules](../../packages/components/src/components/mentions/AGENTS.md)
+and [settings rules](../../packages/components/src/components/settings/AGENTS.md).
