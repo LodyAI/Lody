@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import { sessionDocSchema } from '@lody/shared';
+import { createSessionMirror, sessionDocSchema } from '@lody/shared';
 
 import type {
   LodyOperationItemResult,
@@ -585,17 +585,13 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
   leftDoc.import(base);
   const rightDoc = new Loro();
   rightDoc.import(base);
-  const left = new Mirror({
+  const left = createSessionMirror({
     doc: leftDoc,
-    schema: sessionDocSchema,
-    strict: false,
-    throwOnValidationError: true,
+    initialState: { session: { id: 'requester-1' as SessionId }, history: [] },
   });
-  const right = new Mirror({
+  const right = createSessionMirror({
     doc: rightDoc,
-    schema: sessionDocSchema,
-    strict: false,
-    throwOnValidationError: true,
+    initialState: { session: { id: 'requester-1' as SessionId }, history: [] },
   });
   const adapter = (mirror: typeof left) => ({
     handle: { doc: mirror === left ? leftDoc : rightDoc },
@@ -619,17 +615,17 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
           handle: { doc: leftDoc },
           getHistory: async () => left.getState().history,
           updateHistory: async () => {
-            throw new Error('interrupted after durable aliasing');
+            throw new Error('interrupted before writing');
           },
         },
         created,
         () => 1
       )
-    ).rejects.toThrow('interrupted after durable aliasing');
-    // A peer can recover the intermediate state without losing either snapshot.
+    ).rejects.toThrow('interrupted before writing');
+    // The writer needs no alias commit: both original containers survive failure.
     rightDoc.import(leftDoc.export({ mode: 'snapshot' }));
     expect(right.getState().history).toHaveLength(2);
-    expect(new Set(right.getState().history.map((row) => row.id)).size).toBe(2);
+    expect(new Set(right.getState().history.map((row) => row.id)).size).toBe(1);
     await upsertOperationProgressHistory(adapter(left), created, () => 1);
     expect(left.getState().history).toHaveLength(1);
     expect(left.getState().history[0]?.items).toMatchObject([

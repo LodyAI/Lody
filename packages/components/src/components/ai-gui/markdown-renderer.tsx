@@ -35,7 +35,7 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { parseTaskImageMarkdownUrl } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { FileIcon } from '@/components/icons/file-icons';
+import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import {
   isMarkdownAgentFileHref,
   parseMarkdownAgentFileHref,
@@ -963,17 +963,17 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-px align-[-0.15em] font-mono text-[0.92em] leading-tight text-foreground no-underline shadow-none transition-colors',
-        'hover:border-border hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.15em] text-sky-700 dark:text-sky-400 no-underline shadow-none transition-colors',
+        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
-      <FileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
+      <MonochromeFileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" />
+          <Check className="h-3 w-3 shrink-0" />
         ) : (
-          <Copy className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <Copy className="h-3 w-3 shrink-0" />
         )
       ) : null}
     </button>

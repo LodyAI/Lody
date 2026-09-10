@@ -679,7 +679,14 @@ export class AuthService {
     return await authClient.organization.list(withAuthorization({}, sessionToken))
   }
 
-  async getActiveOrganization(options?: unknown) {
+  async getActiveOrganization(
+    options?: unknown,
+    query?: { organizationId?: string; organizationSlug?: string }
+  ) {
+    if (query) {
+      const token = await this.getSessionToken(options)
+      return await authClient.organization.getFullOrganization(withAuthorization({ query }, token))
+    }
     const sessionToken = await this.getSessionToken(options)
     const activeOrganizationResponse = await authClient.organization.getFullOrganization(
       withAuthorization({}, sessionToken)

@@ -31,6 +31,35 @@ instance.
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
 
+### Desktop performance bar
+
+Set `LODY_DEVBAR=true` when launching Desktop to show the bottom performance bar.
+The same runtime switch works for Dev, Staging, and Prod builds; it is off by
+default:
+
+```bash
+LODY_DEVBAR=true pnpm start:local
+LODY_DEVBAR=true /path/to/Lody.AppImage
+LODY_DEVBAR=true /Applications/Lody.app/Contents/MacOS/Lody
+```
+
+On Windows PowerShell, use `$env:LODY_DEVBAR='true'` before launching the `.exe`.
+Fully quit the existing app first. Unset the variable or set it to `false` to
+disable the bar. This switch does not select a deployment; the public build
+remains local-only. The same packaged artifact can be inspected without rebuilding.
+
+The right side shows renderer animation-callback FPS, session-window CLS,
+aggregate Electron RSS/CPU, current renderer `Heap xxxM`, and GPU-process CPU/RSS
+in one `GPU xx% xxxM` field
+(M = MiB, explained on hover). GPU CPU is **not** hardware
+utilization, and GPU RSS is **not** VRAM. RSS sums resident working sets (shared
+pages may be counted more than once); CLI/agent descendants outside Electron's
+metrics are excluded. Missing/warming-up measurements show `—`. Sampling pauses
+while the window is hidden. Values stay in memory and are never uploaded.
+Heap uses Chromium's JS heap estimate for the current renderer, not other
+worker/renderer heaps or total app memory. Enabling devbar at launch also enables
+precise Chromium memory readings; unavailable readings display `Heap —`.
+
 ### Build
 
 Every build command below uses the local OSS renderer, embeds the local-only

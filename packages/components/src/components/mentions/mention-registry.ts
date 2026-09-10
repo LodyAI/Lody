@@ -24,6 +24,7 @@ import {
   selectAgentRoleMentionCandidates,
   type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
+import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import type { MentionKind } from '@/ui/mention/index';
@@ -93,6 +94,7 @@ export type MentionCandidate = {
   icon: MentionIcon;
   title: string;
   subtitle?: string;
+  disabled?: boolean;
   trailing?: string;
   /** Render the title in the monospace face (paths, tokens). */
   mono?: boolean;
@@ -489,7 +491,10 @@ export function buildSessionCandidates(
  * generic rows had already drifted — they printed the stored ids raw and
  * labelled the permission mode "Reasoning".
  */
-export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandidate {
+export function toAgentRoleCandidate(
+  item: AgentRoleMentionItem,
+  availabilityText?: string
+): MentionCandidate {
   const { role } = item;
   // The emoji REPLACES the category glyph on the row: the category header above
   // already says these are Agent Roles, so a second generic glyph only crowds
@@ -505,10 +510,12 @@ export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandida
     icon: 'agent_role',
     iconEmoji: emoji,
     title: role.name,
+    disabled: item.availability.kind !== 'available',
+    subtitle: availabilityText,
     detail: {
       // No `title` and no badges: the pane heads itself with the Role's own
       // mark and name, and visibility is deliberately absent — every Role the menu
-      // offers is one this user may run, so private-vs-workspace changes
+      // lists is one this user may read, so private-vs-workspace changes
       // nothing about accepting it. It is a Settings concern.
       agentRole: {
         role,
@@ -526,9 +533,12 @@ export function toAgentRoleCandidate(item: AgentRoleMentionItem): MentionCandida
 export function buildAgentRoleCandidates(
   items: readonly AgentRoleMentionItem[],
   term: string,
-  limit?: number
+  limit?: number,
+  availabilityText?: (item: AgentRoleMentionItem) => string | undefined
 ): MentionCandidate[] {
-  return selectAgentRoleMentionCandidates(items, term, limit).map(toAgentRoleCandidate);
+  return selectAgentRoleMentionCandidates(items, term, limit).map((item) =>
+    toAgentRoleCandidate(item, availabilityText?.(item))
+  );
 }
 
 export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
@@ -714,7 +724,17 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.agentRole.label', 'Agent Roles'),
         icon: 'agent_role',
         ...sourceCategoryFields('agentRole', agentRole),
-        getCandidates: (term, limit) => buildAgentRoleCandidates(agentRole.items, term, limit),
+        getCandidates: (term, limit) =>
+          buildAgentRoleCandidates(agentRole.items, term, limit, (item) => {
+            const { availability } = item;
+            if (availability.kind === 'available') return undefined;
+            if (availability.kind === 'unknown') return t('settings.agentRoles.status.checking');
+            const reason =
+              availability.reason === 'outside_work_context'
+                ? t('mention.agentRole.unavailable.workContext')
+                : t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
+            return t('settings.agentRoles.unavailable.label', { reason });
+          }),
       });
     }
 

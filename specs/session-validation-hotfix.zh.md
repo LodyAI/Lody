@@ -14,5 +14,5 @@ writer 替换仍需单独审查（#460）；通过局部输入校验恢复保护
 未更新的客户端仍保持旧行为。
 
 证据：`packages/shared/tests/session-validation-hotfix.test.ts` 和
-`mirror-construction-sites.test.ts`。不声称已完成发布端验收。
+`session-doc-forward-compat.test.ts`。不声称已完成发布端验收。
 本文件为待人工审查的草稿，测试不构成批准。

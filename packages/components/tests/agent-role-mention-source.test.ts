@@ -19,6 +19,7 @@ import {
   buildAgentRoleMentionRewrites,
   hydrateAgentRoleMentionsFromText,
   resolveAgentRoleMentionScope,
+  resolveAgentRoleMentionAvailability,
   selectAgentRoleMentionCandidates,
   type AgentRoleMentionItem,
 } from '../src/components/mentions/mention-agent-role-source';
@@ -45,6 +46,7 @@ const agentConfig = { cliType: 'builtin', agentType: 'codex', env: {}, name: 'Co
 
 const items = (...roles: AgentRole[]): AgentRoleMentionItem[] =>
   buildAgentRoleMentionItems(roles, {
+    availability: () => ({ kind: 'available' }),
     machine: () => ({ name: 'Studio' }),
     agentConfig: () => agentConfig,
   });
@@ -59,7 +61,6 @@ describe('agent role mention work context', () => {
           workspaceId: 'w' as WorkspaceId,
           localProjectId: 'p' as LocalProjectId,
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-2' });
   });
@@ -75,7 +76,6 @@ describe('agent role mention work context', () => {
           },
           githubRepoFullName: 'loro-dev/lody',
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-2' });
   });
@@ -83,9 +83,8 @@ describe('agent role mention work context', () => {
   it('lets a github project reach every authorized machine', () => {
     const context = buildAgentRoleMentionContext({
       mentionSource: { kind: 'github', repoFullName: 'loro-dev/lody' },
-      currentMachineId: machineId,
     });
-    expect(context).toEqual({ kind: 'github' });
+    expect(context).toEqual({ kind: 'authorized_machines' });
     const authorized = new Set([machineId, 'machine-2' as MachineId]);
     expect(resolveAgentRoleMentionScope(context, authorized)).toEqual({
       kind: 'authorized_machines',
@@ -105,21 +104,20 @@ describe('agent role mention work context', () => {
             sessionId: 's' as SessionId,
           },
         },
-        currentMachineId: machineId,
       })
     ).toEqual({ kind: 'machine', machineId: 'machine-3' });
   });
 
-  it('keeps a plain chat on the current machine, and offers nothing without one', () => {
-    expect(
-      buildAgentRoleMentionContext({ mentionSource: undefined, currentMachineId: machineId })
-    ).toEqual({ kind: 'machine', machineId });
+  it('opens plain chat to authorized machines', () => {
+    expect(buildAgentRoleMentionContext({ mentionSource: undefined })).toEqual({
+      kind: 'authorized_machines',
+    });
     expect(
       resolveAgentRoleMentionScope(
-        buildAgentRoleMentionContext({ mentionSource: undefined, currentMachineId: undefined }),
+        buildAgentRoleMentionContext({ mentionSource: undefined }),
         new Set([machineId])
       )
-    ).toEqual({ kind: 'machine', machineId: null });
+    ).toEqual({ kind: 'authorized_machines', machineIds: new Set([machineId]) });
   });
 });
 
@@ -140,13 +138,66 @@ describe('agent role candidates', () => {
     expect(selectAgentRoleMentionCandidates(list, 'nope')).toEqual([]);
   });
 
-  it('caps the row count', () => {
+  it('lists the entire role catalog, with an explicit cap for aggregate search', () => {
     const many = items(
       ...Array.from({ length: 60 }, (_unused, index) =>
         role({ id: `role-${index}` as AgentRoleId, name: `Reviewer ${index}` })
       )
     );
-    expect(selectAgentRoleMentionCandidates(many, '')).toHaveLength(50);
+    expect(selectAgentRoleMentionCandidates(many, '')).toHaveLength(60);
+    expect(selectAgentRoleMentionCandidates(many, '', 4)).toHaveLength(4);
+  });
+});
+
+describe('agent role availability in mentions', () => {
+  it('marks a remote role outside a local work context without hiding its row', () => {
+    const remote = role({ machineId: 'remote' as MachineId });
+    const list = buildAgentRoleMentionItems([remote], {
+      machine: () => null,
+      agentConfig: () => undefined,
+      availability: (entry) =>
+        resolveAgentRoleMentionAvailability(entry, { kind: 'machine', machineId }, () => ({
+          kind: 'available',
+        })),
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]?.availability).toEqual({ kind: 'unavailable', reason: 'outside_work_context' });
+  });
+
+  it.each([
+    'machine_unknown',
+    'machine_offline',
+    'agent_config_missing',
+    'agent_config_machine_mismatch',
+  ] as const)('preserves the binding failure %s', (reason) => {
+    expect(
+      resolveAgentRoleMentionAvailability(
+        role(),
+        { kind: 'machine', machineId: 'another' as MachineId },
+        () => ({ kind: 'unavailable', reason })
+      )
+    ).toEqual({ kind: 'unavailable', reason });
+  });
+
+  it('puts available matches first even when a disabled match has a higher score', () => {
+    const available = items(role({ id: 'ready' as AgentRoleId, name: 'Deep Reviewer' }))[0]!;
+    const offline = {
+      ...items(role({ name: 'Reviewer' }))[0]!,
+      availability: { kind: 'unavailable', reason: 'machine_offline' } as const,
+    };
+    const loading = {
+      ...available,
+      role: role({ id: 'loading' as AgentRoleId }),
+      availability: { kind: 'unknown' } as const,
+    };
+    const list = [offline, loading, available];
+    expect(selectAgentRoleMentionCandidates(list, '').map((item) => item.role.id)).toEqual([
+      'ready',
+      'role-1',
+      'loading',
+    ]);
+    expect(selectAgentRoleMentionCandidates(list, 'rev', 1)).toEqual([available]);
+    expect(selectAgentRoleMentionCandidates([offline, loading], 'rev')).toHaveLength(2);
   });
 });
 
@@ -184,6 +235,27 @@ describe('agent role menu rows', () => {
     // visibility changes nothing about accepting it.
     expect(candidate?.detail?.badges).toBeUndefined();
   });
+
+  it.each([{ kind: 'unknown' }, { kind: 'unavailable', reason: 'machine_offline' }] as const)(
+    'disables unavailable/loading rows and carries the reason below the title',
+    (availability) => {
+      const list = [{ ...items(role())[0]!, availability }];
+      const [candidate] = buildAgentRoleCandidates(list, '', undefined, () => 'Machine offline');
+      expect(candidate).toMatchObject({
+        disabled: true,
+        subtitle: 'Machine offline',
+        title: 'Code Reviewer',
+      });
+      expect(
+        buildAgentRoleMentionRewrites(
+          '@Code-Reviewer',
+          [{ start: 0, end: 14, kind: 'agent_role', value: 'role-1' }],
+          list
+        )
+      ).toEqual([]);
+      expect(hydrateAgentRoleMentionsFromText('@Code-Reviewer', list).mentions).toEqual([]);
+    }
+  );
 
   it('falls back to the shared default mark', () => {
     const [candidate] = buildAgentRoleCandidates(items(role({ emoji: undefined })), '');

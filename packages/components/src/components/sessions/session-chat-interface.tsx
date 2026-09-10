@@ -1,3 +1,4 @@
+import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
   MessageSelectionToolbar,
@@ -54,7 +55,7 @@ import { getIpcServices } from '@/lib/electron-ipc-client';
 import { isMac } from '@/lib/commands/platform';
 import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
 import { isSessionContextCompacting } from '@/lib/session-context-compaction';
-import { hasFileTransfer, getFilesFromDataTransfer } from '@/lib/file-drop';
+import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
@@ -1164,6 +1165,7 @@ export function SessionHeaderMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[200px] max-w-[320px]">
+          <SessionWindowMenuItem sessionId={session.id} dropdown />
           {/* One compact context group keeps useful identity visible. Separate labels make
               every value pay for two rows, while a submenu hides context behind another step. */}
           {!compact && showSessionContext ? (
@@ -3214,9 +3216,12 @@ export const SessionChatInterface = memo(
       enabled: canHandlePageDrop,
       accepts: hasFileTransfer,
       onDrop: useCallback((dataTransfer: DataTransfer) => {
-        const files = getFilesFromDataTransfer(dataTransfer);
+        const { files, directories } = readDroppedTransfer(dataTransfer);
         if (files.length > 0) {
           inputAreaRef.current?.handleImageDrop(files);
+        }
+        if (directories.length > 0) {
+          inputAreaRef.current?.handleDirectoryDrop(directories);
         }
       }, []),
     });
@@ -5896,6 +5901,7 @@ export const SessionChatInterface = memo(
                             ref={chatStreamRef}
                             sessionId={session?.id}
                             workspaceId={workspaceId}
+                            showSenderIdentity={isMultiMember}
                             sessionDoc={sessionDoc}
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}

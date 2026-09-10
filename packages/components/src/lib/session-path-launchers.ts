@@ -176,7 +176,9 @@ export function validateCustomPathLauncherCommandTemplate(
 function parseCustomPathLauncherCommandTemplate(
   commandTemplate: string,
   targetPath: string
-): { ok: true; command: LocalPathCommandSpec } | Exclude<CustomPathLauncherTemplateValidation, { ok: true }> {
+):
+  | { ok: true; command: LocalPathCommandSpec }
+  | Exclude<CustomPathLauncherTemplateValidation, { ok: true }> {
   const trimmed = commandTemplate.trim();
   if (!trimmed) {
     return { ok: false, reason: 'empty' };
@@ -339,11 +341,15 @@ function isEditorCliLauncherId(id: string): id is keyof typeof EDITOR_CLI_LAUNCH
   return Object.prototype.hasOwnProperty.call(EDITOR_CLI_LAUNCHERS, id);
 }
 
-export function buildVSCodePathLauncherFallbackUrl(targetPath: string): string {
+export function buildVSCodePathLauncherFallbackUrl(
+  targetPath: string,
+  targetKind: 'file' | 'directory' = 'directory'
+): string {
   const normalizedPath = targetPath.replaceAll('\\', '/');
   const absolutePath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
-  const directoryPath = absolutePath.endsWith('/') ? absolutePath : `${absolutePath}/`;
-  const encodedPath = directoryPath
+  const urlPath =
+    targetKind === 'directory' && !absolutePath.endsWith('/') ? `${absolutePath}/` : absolutePath;
+  const encodedPath = urlPath
     .split('/')
     .map((segment, index) =>
       index === 1 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)
@@ -357,7 +363,8 @@ function buildEditorCliLauncherInput(
   id: keyof typeof EDITOR_CLI_LAUNCHERS,
   targetPath: string,
   platform: PathLauncherPlatform,
-  label: string
+  label: string,
+  targetKind: 'file' | 'directory'
 ): LaunchLocalPathInput {
   const spec = EDITOR_CLI_LAUNCHERS[id];
   const make = (command: string): LocalPathCommandSpec => ({
@@ -388,7 +395,9 @@ function buildEditorCliLauncherInput(
     kind: 'command',
     command: make(spec.cli),
     ...(fallbackCommands.length > 0 ? { fallbackCommands } : {}),
-    ...(id === 'vscode' ? { fallbackUrl: buildVSCodePathLauncherFallbackUrl(targetPath) } : {}),
+    ...(id === 'vscode'
+      ? { fallbackUrl: buildVSCodePathLauncherFallbackUrl(targetPath, targetKind) }
+      : {}),
     targetPath,
     label,
   };
@@ -397,7 +406,8 @@ function buildEditorCliLauncherInput(
 export function buildPathLauncherLaunchInput(
   launcher: PathLauncherOption,
   targetPath: string,
-  platform?: string | null
+  platform?: string | null,
+  targetKind: 'file' | 'directory' = 'directory'
 ): LaunchLocalPathInput {
   if (launcher.kind === 'custom') {
     const parsed = parseCustomPathLauncherCommandTemplate(launcher.commandTemplate, targetPath);
@@ -417,7 +427,8 @@ export function buildPathLauncherLaunchInput(
       launcher.id,
       targetPath,
       normalizePlatform(platform),
-      launcher.label
+      launcher.label,
+      targetKind
     );
   }
 

@@ -7,13 +7,14 @@ Lody 是做 **multi-agent coding** 的团队工作空间：你可以同时开多
 会话使用 [Worktree](/zh/docs/worktrees) 时——GitHub 会话总会用，本地项目也可以开——该会话会有自己的工作目录，
 多个 Agent 可以并排改文件，而不互相覆盖。
 
-搜 “Claude Code team” 或 “parallel coding agents” 的人，要的通常就是这个：好几台 Agent 同时干活，
-而且同事看得到。Lody 提供的是这个工作空间，不是 Claude 专用产品。你可以在同一个工作空间里把
-Claude Code 和 Codex、Kimi、DeepSeek，或任意 [ACP](/zh/docs/cli-runtimes) 运行时放在一起跑。
+你可以同时运行多个 Claude Code 会话，也可以把 Claude Code 与 Codex、Kimi、Grok、DeepSeek，
+或其他 [ACP](/zh/docs/cli-runtimes) 运行时放在同一个工作空间中使用。
 
 另见 [Agent Config](/zh/docs/agents)、[团队功能](/zh/docs/team)、
 [共享并交接 Agent 会话](/zh/docs/session-handoff) 和
 [Agent 对话控制](/zh/docs/session-orchestration)。
+
+需要让 Agent 分派任务、通过 `@` 会话交流上下文，或审查彼此的改动？参见[多 Agent 协作指南](/zh/docs/agent-collaboration/)，了解 Claude Code 如何协调 Codex、Kimi 和 Grok 跨仓库、跨机器工作。
 
 ## 隔离的 Worktree
 
@@ -95,8 +96,7 @@ Fork 从已提交的 `HEAD` 起步；未提交的改动仍留在源会话。
 
 ### 能不能让一个 Agent 去开其他 Agent？
 
-可以，通过 [Agent 对话控制](/zh/docs/session-orchestration)——需要先打开 **开发者模式** 和 **Tasks**
-beta。在一条对话里让它创建专注的会话、盯进度、再汇总。范围仅限 Lody 自己的对话数据，不是通用后台调度器。
+可以，通过 [Agent 对话控制](/zh/docs/session-orchestration)。在一条对话里让它创建专注的会话、与其他 Agent 互发消息、跟进任务，再汇总结果。范围仅限 Lody 自己的对话数据，不是通用后台调度器。
 
 ### 什么时候该交接，而不是再开一个 Agent？
 

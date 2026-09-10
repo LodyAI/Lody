@@ -286,6 +286,10 @@ export function renderCoverage(registry) {
   return lines.join('\n');
 }
 
+export function coverageMatchesRegistry(coverage, registry) {
+  return coverage.replaceAll('\r\n', '\n') === renderCoverage(registry);
+}
+
 function normalizePath(path) {
   return path.trim().replaceAll('\\', '/').replace(/^\.\//u, '');
 }

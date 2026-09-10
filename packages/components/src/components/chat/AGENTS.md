@@ -75,7 +75,8 @@ Index and rationale: [README.md](README.md).
 - `chat-landing-view.tsx` renders `ChatComposer`; stateful loading stays in
   `chat-landing.tsx`, session-mention drop handling in the view. Paint the page-level
   `ConversationDropOverlay` when sidebar drag starts, before `dragenter`. Desktop
-  only: mobile passes the handle but installs no HTML5 drop target.
+  only: mobile passes the handle but installs no HTML5 drop target. A dropped folder
+  takes the same handle and becomes a `@<absolute path>` mention, never an upload.
 - Apply `select-none` to composer dropdown/toggle chrome: top/footer selectors,
   bottom bar, ACP booleans, Workdir/agent/model/branch triggers, mobile inline
   triggers, and option rows. Keep prompt, pasted-text editor, and picker search

@@ -104,7 +104,10 @@ replacing) user Harness config and launches the pinned explicit package closure 
 `dsh-acp-demo`. The all-in-one `@deepseek-ai/dsh` product CLI is deliberately not used
 because this ACP host excludes product UI and telemetry packages. CLI production and dev
 builds copy the extension's pinned official presets beside `deepseek-acp.js`; the generated
-roster also discovers `$DSH_HOME/.agent-presets`. Harness JSONL roots are single-encoding
+roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
+provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
+capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` still uses
+the endpoint's `/models` list rather than local catalog additions. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
 
@@ -176,6 +179,11 @@ per-model reasoning-effort ladders on that session response as
 Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
 is a context window). Vendor model `_meta` never enters the CLI.
 
+Capability cache versions are freshness markers, not read barriers. A newer client continues
+to render understood fields from an older daemon's parsed entry while scheduling a replacement
+probe; likewise, an older client may use the understood portion of a newer entry. Runtime
+override entries still apply only when their source-version suffix matches the selected override.
+
 ### Session titles
 
 Builtin Claude, Codex and Grok own session title generation through ACP
@@ -209,3 +217,15 @@ its real `SessionTitleService` stays reachable only from kap-server and the node
 engine's `SessionMeta.titleKind` is discarded at the ACP boundary), and the DeepSeek Harness
 pins `@deepseek-ai/dsh-session-title` in its dependency closure but never mounts it in
 `createDeepSeekHarnessCordisConfig`.
+
+### Local project identity
+
+For local project sessions, `SessionManager` supplies a resolver for the original
+root in the local project catalog. `Session` and `createAcpClient` carry it to
+`AgentClient`, which invokes it only after the adapter advertises Core
+`worktreeProject` version 1 and the final execution directory has been claimed.
+The resolved metadata accompanies new/load/resume/fork and replacement sessions;
+ACP cwd remains the actual worktree. This also covers local child sessions,
+whose execution directory comes from their parent but whose project identity
+comes from the local project record. GitHub-only and projectless sessions do not
+send a local project identity. See the [draft contract](../../../../specs/local-project-acp-identity.zh.md).

@@ -23,15 +23,17 @@ so session titles no longer start an extra ACP agent anywhere.
 
 ## The audit
 
-Each adapter was read at the commit this repository pins.
+Each adapter was read at the commit this repository pins; the versions below were
+re-confirmed after merging main, which moved the Codex, Grok and Harness pins
+without changing any of these findings.
 
 | Adapter | Version | Publishes a title | `_meta.lody.titleSource` | Real generation |
 | --- | --- | --- | --- | --- |
 | `acp-extension-claude` | 0.70.0 | yes | no `_meta` at all | yes — SDK `generate_session_title` control request |
-| `acp-extension-codex` | 1.10.0 (since 1.8.0) | yes | yes, generated titles are `explicit` | yes — cheap-model turn on an ephemeral thread |
-| `acp-extension-grok` | 0.1.0 (runtime 1.0.13) | yes — the runtime pushes it and the proxy forwards it | no `_meta` at all | yes — upstream `title_refresh.rs` |
+| `acp-extension-codex` | 1.10.1 (since 1.8.0) | yes | yes, generated titles are `explicit` | yes — cheap-model turn on an ephemeral thread |
+| `acp-extension-grok` | 0.1.3 (runtime 1.0.13) | yes — the runtime pushes it and the proxy forwards it | no `_meta` at all | yes — upstream `title_refresh.rs` |
 | `acp-extension-kimi` | acp-server 0.0.1 | yes, but the title is the first prompt truncated to 200 chars | no `_meta` at all | no |
-| `acp-extension-dsh` | 0.1.1 | no | no | no |
+| `acp-extension-dsh` | 0.1.2 | no | no | no |
 
 Two near-misses are worth recording because they change what "add title support"
 would cost later. Kimi's engine already tracks
@@ -114,9 +116,9 @@ and Grok, as it already was for Claude.
 "Unreachable" has to hold on every path, not just the settings form. Branch
 naming resolved the persisted `titleGeneration` for whatever agent it was naming
 a branch for, so a value stored before this change would have kept steering
-Claude, Codex and Grok runs after their config disappeared from the UI. Branch naming
-now skips that lookup for ACP-owned agents and lets
-`computeTitleGenerationDefaults()` pick from the live `configOptions` instead.
+Claude, Codex and Grok runs after their config disappeared from the UI. That
+lookup is gone outright: branch naming no longer reads the agent config for any
+provider (see the branch-naming change below).
 
 ## Trade-offs and limits
 

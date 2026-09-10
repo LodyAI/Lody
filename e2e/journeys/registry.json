@@ -199,11 +199,12 @@
     },
     {
       "id": "LODY-MCP-001",
-      "state": "backlog",
+      "state": "active",
       "priority": "P1",
       "runtime": "simulator",
       "title": "Create a workspace MCP server and preserve explicit turn selection through dispatch",
       "owner": "workspace-catalog",
+      "feature": "src/features/mcp-catalog.feature",
       "fixture": "synthetic-stdio-mcp-and-scripted-acp",
       "fingerprint": "6b0a21b7f13f9d43adfa0ec34d26d4cae3a4a63871a67dbbcad1ea1eb307cba4",
       "ownerPaths": [
@@ -233,11 +234,6 @@
         "durableState": "Workspace catalog plus turn input selection",
         "externalWire": "Synthetic stdio MCP and scripted ACP"
       },
-      "gap": "No desktop journey proves that an explicit MCP selection survives the renderer, IPC, durable turn input, and bundled CLI dispatch boundaries.",
-      "evidence": [
-        "apps/cli/src/agent/session-mcp-resolver.test.ts",
-        "packages/components/src/hooks/use-session-mcp-selection.ts"
-      ],
       "signals": {
         "criticality": 5,
         "boundaryRisk": 5,
@@ -251,11 +247,12 @@
     },
     {
       "id": "LODY-ROLE-001",
-      "state": "backlog",
+      "state": "active",
       "priority": "P1",
       "runtime": "simulator",
       "title": "Create an Agent Role and freeze its execution target into a Session",
       "owner": "workspace-catalog",
+      "feature": "src/features/agent-role.feature",
       "fixture": "scripted-agent-role",
       "fingerprint": "1f2bc41853b8b774bf33944b5c7319b200f27190b39f4cd0ef2b773009a2772e",
       "ownerPaths": [
@@ -285,11 +282,6 @@
         "durableState": "Role catalog plus Session provenance",
         "externalWire": "Scripted ACP"
       },
-      "gap": "No desktop journey spans Agent Role creation, composer selection, accepted-operation freezing, and Session provenance.",
-      "evidence": [
-        "packages/components/src/components/settings/agent-roles-setting.tsx",
-        "packages/components/src/hooks/use-session-agent-role.ts"
-      ],
       "signals": {
         "criticality": 5,
         "boundaryRisk": 5,
@@ -298,14 +290,15 @@
       },
       "freshness": 4,
       "scoutJourneys": ["session"],
-      "blockedReason": "A deterministic Agent Role revision fixture and stable Settings Page Object actions are not registered yet.",
+      "blockedReason": null,
       "estimatedMinutes": 7
     },
     {
       "id": "LODY-FORK-001",
-      "state": "backlog",
+      "state": "active",
       "priority": "P1",
       "runtime": "simulator",
+      "feature": "src/features/session-fork.feature",
       "title": "Fork a completed Session into an independent worktree Session",
       "owner": "session-lifecycle",
       "fixture": "synthetic-git-and-scripted-acp",
@@ -335,16 +328,11 @@
         "durableState": "Independent Session history and worktree",
         "externalWire": "Scripted ACP"
       },
-      "gap": "Fork durability and compensation have Node coverage but no real desktop journey across renderer, IPC, CLI, Git, and persisted history.",
-      "evidence": [
-        "apps/cli/src/session/session-fork-service.test.ts",
-        "packages/components/src/components/sessions/session-fork-destination-menu.tsx"
-      ],
       "signals": {
         "criticality": 5,
         "boundaryRisk": 5,
         "changeFrequency": 3,
-        "escapedDefect": false
+        "escapedDefect": true
       },
       "freshness": 4,
       "scoutJourneys": ["session", "work"],
@@ -353,11 +341,12 @@
     },
     {
       "id": "LODY-SESSION-002",
-      "state": "backlog",
+      "state": "active",
       "priority": "P1",
       "runtime": "none",
       "title": "Rename, pin, archive, and restore a local Session",
       "owner": "session-lifecycle",
+      "feature": "src/features/session-management.feature",
       "fixture": "seeded-local-session",
       "fingerprint": "846a5f9696ec4ea5751872782a0a4e294aeafcf3ad30687d96ab5bef01964506",
       "ownerPaths": [
@@ -386,11 +375,6 @@
         "durableState": "Title, pin, archive, and restore",
         "externalWire": "None"
       },
-      "gap": "The current lifecycle deletes an archived Session but never verifies common metadata edits or restoration from Archive.",
-      "evidence": [
-        "packages/components/src/components/sessions/rename-session-dialog.tsx",
-        "packages/components/src/components/archive/archive-view.tsx"
-      ],
       "signals": {
         "criticality": 4,
         "boundaryRisk": 3,
@@ -401,6 +385,52 @@
       "scoutJourneys": ["session"],
       "blockedReason": null,
       "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-PROJECT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Add, select, and remove a local project without deleting its directory",
+      "owner": "local-project-lifecycle",
+      "feature": "src/features/project-lifecycle.feature",
+      "fixture": "synthetic-git-project",
+      "fingerprint": "33767160306fc2657e3d630e9fbc6aed5e91eb6c20b79a2f74b8f0f2f1dba6e4",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "packages/components/src/components/loro-app-sidebar.tsx",
+        "packages/components/src/hooks/use-remove-local-project.ts"
+      ],
+      "actions": [
+        { "id": "project.createSyntheticGit" },
+        { "id": "project.addThroughPicker" },
+        { "id": "project.selectFromSidebar" },
+        { "id": "project.confirmRemoval" },
+        { "id": "project.verifyOriginalDirectory" }
+      ],
+      "checkpoints": [
+        "local project appears in the bundled CLI catalog and sidebar",
+        "removal confirmation states that the original directory is preserved",
+        "removed project disappears while its original files remain"
+      ],
+      "cleanup": ["synthetic project fixture directory is deleted after verification"],
+      "coverage": {
+        "renderer": "Project picker, sidebar selection, and removal confirmation",
+        "electronIpc": "Real window and local project control bridge",
+        "bundledCli": "Project catalog add, list, and delete",
+        "durableState": "Workspace project catalog lifecycle",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["work"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
     }
   ]
 }
