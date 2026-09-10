@@ -58,8 +58,8 @@ changing those files.
 - Read receipts are gated on VISIBILITY, not on being mounted: keep the
   explicit per-surface `isVisible` prop.
 - "Copy as Markdown" uses `buildConversationMarkdown`, never
-  `buildReplayPromptFromHistory`; message text is never trimmed and what was
-  trimmed must reach the toast.
+  `buildReplayPromptFromHistory`; message text is never trimmed, thinking only
+  capped, and what was trimmed must reach the toast.
 - Read ACP capabilities via `useResolvedMachineMeta()` and selectors via
   `useSessionAcpSelectorContext()`; the controlled composer must not recompute
   selector options.
