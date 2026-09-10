@@ -23,9 +23,15 @@ import {
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 
+const { sendIpcMock } = vi.hoisted(() => ({ sendIpcMock: vi.fn() }));
+
 vi.mock('@/lib/auth-bootstrap', () => ({
   readBootstrappedCurrentUser: () => null,
   readStoredAuthToken: () => null,
+}));
+
+vi.mock('../src/lib/electron-ipc-client', () => ({
+  sendIpc: sendIpcMock,
 }));
 
 const recordMyWorkspaceDailyActiveUser = vi.fn(async () => ({}));
@@ -261,8 +267,12 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
   } as unknown as WorkspaceRuntime['repo'];
   return {
     repo,
+    getMeta: (roomId: string) => docs.get(roomId),
     getSession: (sessionId: SessionId) =>
       docs.get(getSessionRoomId(sessionId)) as SessionMeta | undefined,
+    setMeta: (roomId: string, meta: Record<string, unknown>) => {
+      docs.set(roomId, { ...meta });
+    },
   };
 }
 
@@ -273,6 +283,7 @@ describe('useSessionActions', () => {
   beforeEach(() => {
     recordMyWorkspaceDailyActiveUser.mockClear();
     requestAuthRecovery.mockClear();
+    sendIpcMock.mockClear();
     convexAuthState.isAuthenticated = true;
     billingEntitlementState.effectivePlanTier = 'plus';
     billingEntitlementState.checkoutPending = false;
@@ -1165,6 +1176,7 @@ describe('useSessionActions', () => {
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
     const runtime = createRuntime({ repo: metaRepo.repo });
     const actions = await renderActions(runtime, { sessionMetaCache });
+    sendIpcMock.mockClear();
 
     await actions.archiveSession(rootSession.id);
 
@@ -1177,12 +1189,40 @@ describe('useSessionActions', () => {
     for (const session of [openedSession, openedFromTabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
     }
+
+    expect(sendIpcMock.mock.calls).toEqual([
+      ['terminal.closeSession', { sessionId: rootSession.id }],
+      ['terminal.closeSession', { sessionId: tabSession.id }],
+    ]);
+    expect(runtime.writer.flockRowPut).toHaveBeenCalledTimes(1);
+    expect(runtime.writer.flockRowPut).toHaveBeenCalledWith(
+      expect.any(String),
+      machineFlockKeys.archiveSessionCommand(rootSession.id),
+      expect.any(Object)
+    );
+    for (const session of [openedSession, openedFromTabSession]) {
+      expect(runtime.writer.flockRowPut).not.toHaveBeenCalledWith(
+        expect.any(String),
+        machineFlockKeys.archiveSessionCommand(session.id),
+        expect.any(Object)
+      );
+      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
+    }
+    expect(metaRepo.getMeta(getMachineRoomId(rootSession.machineId))).toMatchObject({
+      needToArchiveSessions: { [rootSession.id]: true },
+    });
   });
 
   it('restores child tabs without restoring independently opened session workspaces', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('restore', true);
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    for (const session of [rootSession, openedSession, openedFromTabSession]) {
+      metaRepo.setMeta(getMachineRoomId(session.machineId), {
+        needToArchiveSessions: { [session.id]: true },
+        needToDeleteSessions: { [session.id]: true },
+      });
+    }
     const runtime = createRuntime({ repo: metaRepo.repo });
     const actions = await renderActions(runtime, { sessionMetaCache });
 
@@ -1193,39 +1233,32 @@ describe('useSessionActions', () => {
     }
     for (const session of [openedSession, openedFromTabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
+      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toMatchObject({
+        needToArchiveSessions: { [session.id]: true },
+        needToDeleteSessions: { [session.id]: true },
+      });
+      expect(runtime.writer.flockRowDelete).not.toHaveBeenCalledWith(
+        expect.any(String),
+        machineFlockKeys.archiveSessionCommand(session.id)
+      );
+      expect(runtime.writer.flockRowDelete).not.toHaveBeenCalledWith(
+        expect.any(String),
+        machineFlockKeys.deleteSessionCommand(session.id)
+      );
     }
-  });
-
-  it('deletes archived containment without deleting independently opened workspaces', async () => {
-    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
-      createContainmentSessions('delete-archived', true);
-    openedSession.isArchived = false;
-    openedFromTabSession.isArchived = false;
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, { sessionMetaCache });
-
-    await actions.deleteArchivedSession(rootSession.id);
-
-    expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
-    expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
-    expect(metaRepo.getSession(openedSession.id)).toMatchObject({ isArchived: false });
-    expect(metaRepo.getSession(openedFromTabSession.id)).toMatchObject({ isArchived: false });
-  });
-
-  it('deletes active containment without deleting independently opened workspaces', async () => {
-    const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
-      createContainmentSessions('delete-active', false);
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, { sessionMetaCache });
-
-    await actions.deleteSessions([rootSession.id]);
-
-    expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
-    expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
-    expect(metaRepo.getSession(openedSession.id)).toMatchObject({ isArchived: false });
-    expect(metaRepo.getSession(openedFromTabSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getMeta(getMachineRoomId(rootSession.machineId))).toMatchObject({
+      needToArchiveSessions: {},
+      needToDeleteSessions: {},
+    });
+    expect(runtime.writer.flockRowDelete).toHaveBeenCalledTimes(2);
+    expect(runtime.writer.flockRowDelete).toHaveBeenCalledWith(
+      expect.any(String),
+      machineFlockKeys.archiveSessionCommand(rootSession.id)
+    );
+    expect(runtime.writer.flockRowDelete).toHaveBeenCalledWith(
+      expect.any(String),
+      machineFlockKeys.deleteSessionCommand(rootSession.id)
+    );
   });
 
   it('writes legacy delete queue before deleting archived code sessions', async () => {

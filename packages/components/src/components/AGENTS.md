@@ -44,10 +44,12 @@ Ownership and explanations: [README.md](README.md).
   Opener Session", `SessionHeaderMenu.openedByRelations`, and conversation cards for
   successful create Operations / the precise opener. Mobile lists use the same two
   fields and per-bucket tree without disclosure, per [mobile/AGENTS.md](mobile/AGENTS.md).
-- Root archive/restore/delete traverses only its `parentSessionId` child Tabs. An
-  independently opened Session keeps its own lifecycle even when its opener is archived
-  or deleted. Archived lists still use opened-by provenance for indentation, with child
-  Tabs inside their owning Session's archived-tab UI.
+- Root archive/restore traverses only its `parentSessionId` child Tabs. An independently
+  opened Session keeps its own archive state when its opener is archived or restored.
+  Permanent delete retains the legacy opened-Session cascade until orphan provenance and
+  reverse navigation have an explicit contract. Archived lists still use opened-by
+  provenance for indentation, with child Tabs inside their owning Session's archived-tab
+  UI.
 
 ## Entry points, drafts, and layout
 

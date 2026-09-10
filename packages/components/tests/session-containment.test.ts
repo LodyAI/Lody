@@ -14,7 +14,6 @@ describe('collectSessionContainmentIds', () => {
         parentSessionId: 'root' as SessionId,
         openedBySessionId: 'root' as SessionId,
       }),
-      session('nested-tab', { parentSessionId: 'tab' as SessionId }),
       session('opened', { openedBySessionId: 'root' as SessionId }),
       session('opened-from-tab', {
         openedBySessionId: 'tab' as SessionId,
@@ -24,10 +23,6 @@ describe('collectSessionContainmentIds', () => {
       session('unrelated'),
     ];
 
-    expect(collectSessionContainmentIds('root' as SessionId, sessions)).toEqual([
-      'root',
-      'tab',
-      'nested-tab',
-    ]);
+    expect(collectSessionContainmentIds('root' as SessionId, sessions)).toEqual(['root', 'tab']);
   });
 });
