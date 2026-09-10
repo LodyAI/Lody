@@ -107,11 +107,11 @@
       "state": "active",
       "priority": "P0",
       "runtime": "none",
-      "title": "Preserve default and user-rebound desktop shortcuts across renderer reload",
+      "title": "Synchronize user-rebound desktop shortcuts across windows and renderer reload",
       "owner": "desktop-shortcuts",
       "feature": "src/features/shortcuts.feature",
       "fixture": "fresh-local-workspace",
-      "fingerprint": "134197a59b3e32405bb5fd6000b3590b6a052c8e23fbb745bd4092420cbb92dd",
+      "fingerprint": "ca40a75b29ba41bb0e96b2e86fbbff3d18b42f40878b35d631857d2addb3844f",
       "ownerPaths": [
         "packages/components/src/lib/commands/",
         "packages/components/src/components/settings/keyboard-shortcuts-setting.tsx",
@@ -120,20 +120,22 @@
       "actions": [
         { "id": "shortcut.openPaletteWithDefaultBinding" },
         { "id": "shortcut.openSettingsWithPhysicalPunctuation" },
+        { "id": "window.openSecondaryWorkspace" },
+        { "id": "shortcut.verifySecondaryDefaults" },
         { "id": "shortcut.rebindSidebarWithShiftedDigit" },
-        { "id": "shortcut.verifyOldBindingRemoved" },
-        { "id": "renderer.reload" },
-        { "id": "shortcut.verifyUserBindingRestored" }
+        { "id": "shortcut.verifyOldBindingRemovedInBothWindows" },
+        { "id": "renderer.reloadSecondary" },
+        { "id": "shortcut.verifyUserBindingRestoredInSecondary" }
       ],
       "checkpoints": [
-        "default command palette and settings bindings execute",
-        "old sidebar binding stops while the shifted-digit physical key works immediately",
-        "the user binding is restored after renderer reload"
+        "default command palette and settings bindings execute in both Electron windows",
+        "the old sidebar binding stops while the shifted-digit physical key works immediately in both windows",
+        "the user binding is restored in the secondary window after its renderer reload"
       ],
       "cleanup": ["isolated desktop profile and shortcut overrides are deleted"],
       "coverage": {
-        "renderer": "Command host, settings recorder, sidebar, and renderer reload",
-        "electronIpc": "Real Electron window and renderer lifecycle",
+        "renderer": "Two command hosts, settings recorder, sidebars, and secondary renderer reload",
+        "electronIpc": "Real primary and auxiliary Electron windows through app.openWindow IPC",
         "bundledCli": "Real owned runtime for local workspace entry",
         "durableState": "User shortcut override in isolated localStorage",
         "externalWire": "None"

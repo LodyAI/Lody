@@ -23,6 +23,6 @@ TanStack Hotkeys 0.8.0 仍为 alpha，因此依赖精确锁定，不允许 semve
 
 ## 验证
 
-命令域测试覆盖 registry 决策、真实 DOM 捕获、TanStack 标准化与匹配、物理键录制、动态改绑、宿主卸载、挂载时刷新持久化状态、旧数据迁移，以及模拟另一窗口写入后旧绑定停止触发、新绑定立即触发；shared 契约测试覆盖 `Mod` 到 Electron accelerator 的转换和 `$mod` 兼容。`AppInitializer` 平台时间测试继续覆盖唯一宿主入口。桌面 P0 E2E 在真实 Electron renderer 中覆盖默认 `Mod+K`、物理标点 `Mod+,`、把侧栏改绑到产生移位字符的 `Mod+Shift+9`、旧绑定立即失效，以及 renderer 重载后用户绑定恢复。未做双窗口桌面手工验证。
+命令域测试覆盖 registry 决策、真实 DOM 捕获、TanStack 标准化与匹配、物理键录制、动态改绑、宿主卸载、挂载时刷新持久化状态、旧数据迁移，以及模拟另一窗口写入后旧绑定停止触发、新绑定立即触发；shared 契约测试覆盖 `Mod` 到 Electron accelerator 的转换和 `$mod` 兼容。`AppInitializer` 平台时间测试继续覆盖唯一宿主入口。桌面 P0 E2E 通过产品 `app.openWindow` IPC 打开共享同一 Electron session/localStorage 的第二个真实窗口，覆盖两个 renderer 中的默认 `Mod+K` 和物理标点 `Mod+,`、在主窗口把侧栏改绑到产生移位字符的 `Mod+Shift+9`、两个窗口中的旧绑定立即失效与新绑定生效，以及辅助 renderer 重载后用户绑定恢复。
 
 需求：[Issue #288](https://github.com/LodyAI/Lody/issues/288)。PR：[#572](https://github.com/LodyAI/Lody/pull/572)。

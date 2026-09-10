@@ -8,5 +8,5 @@
 | `mcp-catalog.steps.ts`        | Carries an explicit MCP selection through catalog, composer, and dispatch       |
 | `project-lifecycle.steps.ts`  | Adds, selects, removes, and verifies a synthetic local project                  |
 | `session-management.steps.ts` | Exercises metadata, Archive restore, history, and deletion                      |
-| `session-fork.steps.ts`       | Forks a completed Session to a worktree and verifies origin and cleanup          |
-| `shortcuts.steps.ts`          | Verifies default shortcuts, live rebinding, and renderer reload                  |
+| `session-fork.steps.ts`       | Forks a completed Session to a worktree and verifies origin and cleanup         |
+| `shortcuts.steps.ts`          | Verifies default shortcuts, cross-window rebinding, and renderer reload         |
