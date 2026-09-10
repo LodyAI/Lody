@@ -14,14 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
@@ -191,71 +184,75 @@ export function PathLaunchersSettings({
             'Pick the app the Open button uses in session headers.'
           )}
         >
-          <Select
+          <Select.Root
             open={selectOpen}
             onOpenChange={setSelectOpen}
             value={selectedLauncherId}
-            onValueChange={handleSelectDefault}
+            onValueChange={(value) => {
+              if (value != null) handleSelectDefault(value);
+            }}
           >
-            <SelectTrigger
+            <Select.Trigger
               aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
-              className="w-full sm:w-[220px]"
+              className="sm:w-[220px]"
             >
-              <SelectValue>
+              <Select.Value>
                 <LauncherOptionContent launcher={selectedLauncher} />
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+              </Select.Value>
+            </Select.Trigger>
+            <Select.Content>
               {pathLauncherOptions.map((launcher) => {
                 const launcherId = getPathLauncherId(launcher);
                 const customLauncherId = launcher.kind === 'custom' ? launcher.id : null;
                 return (
-                  <SelectItem
+                  <Select.Item
                     key={launcherId}
                     value={launcherId}
-                    className={cn(customLauncherId && 'group/path-launcher pr-14')}
+                    className={cn(customLauncherId && 'group/path-launcher')}
+                    endContent={
+                      customLauncherId ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          tabIndex={-1}
+                          size="mini"
+                          icon
+                          className="pointer-events-none shrink-0 opacity-0 group-hover/path-launcher:pointer-events-auto group-hover/path-launcher:opacity-100 group-focus/path-launcher:pointer-events-auto group-focus/path-launcher:opacity-100"
+                          aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
+                          title={t('settings.pathLaunchers.editAction', 'Edit')}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onPointerUp={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleEditCustomLauncher(customLauncherId);
+                          }}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                      ) : null
+                    }
                   >
                     <LauncherOptionContent launcher={launcher} />
-                    {customLauncherId ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        tabIndex={-1}
-                        size="mini"
-                        icon
-                        className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 opacity-0 group-hover/path-launcher:pointer-events-auto group-hover/path-launcher:opacity-100 group-focus/path-launcher:pointer-events-auto group-focus/path-launcher:opacity-100"
-                        aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
-                        title={t('settings.pathLaunchers.editAction', 'Edit')}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onPointerUp={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          handleEditCustomLauncher(customLauncherId);
-                        }}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                    ) : null}
-                  </SelectItem>
+                  </Select.Item>
                 );
               })}
               {isElectron ? (
                 <>
-                  <SelectSeparator />
-                  <SelectItem value={ADD_CUSTOM_LAUNCHER_VALUE}>
+                  <Select.Separator />
+                  <Select.Item value={ADD_CUSTOM_LAUNCHER_VALUE}>
                     <span className="flex items-center gap-2 text-muted-foreground">
                       <Plus className="size-4 shrink-0" />
                       <span>{t('settings.pathLaunchers.addCustom', 'Custom launcher')}</span>
                     </span>
-                  </SelectItem>
+                  </Select.Item>
                 </>
               ) : null}
-            </SelectContent>
-          </Select>
+            </Select.Content>
+          </Select.Root>
         </CompactRow>
       </CompactSection>
 

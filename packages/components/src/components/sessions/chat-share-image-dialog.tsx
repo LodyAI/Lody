@@ -11,7 +11,7 @@ import { Input } from '@lody/ui/input';
 import { Button } from '@lody/ui/button';
 import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@lody/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import {
   ChatShareCard,
   type ChatShareCardBackdrop,
@@ -130,6 +130,29 @@ export function ChatShareImageDialog({
   const { t, i18n } = useTranslation();
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const modelName = messages.findLast((message) => message.role === 'assistant')?.modelName;
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so each list is stated once and drives both.
+  const themeOptions = useMemo(
+    () => [
+      { value: 'app' as const, label: t('sessions.shareImage.themeApp', 'Follow app') },
+      { value: 'light' as const, label: t('sessions.shareImage.themeLight', 'Light') },
+      { value: 'dark' as const, label: t('sessions.shareImage.themeDark', 'Dark') },
+    ],
+    [t]
+  );
+  const paddingOptions = useMemo(
+    () => [
+      { value: 'compact' as const, label: t('sessions.shareImage.paddingCompact', 'Compact') },
+      { value: 'regular' as const, label: t('sessions.shareImage.paddingRegular', 'Regular') },
+      { value: 'spacious' as const, label: t('sessions.shareImage.paddingSpacious', 'Spacious') },
+    ],
+    [t]
+  );
+  const footerOptions = useMemo(
+    () => FOOTER_VARIANTS.map((value) => ({ value, label: value })),
+    []
+  );
+
   const selectedTokenCount = useMemo(
     () =>
       messages.reduce(
@@ -242,23 +265,22 @@ export function ChatShareImageDialog({
               <UiField.Label htmlFor="chat-share-theme">
                 {t('sessions.shareImage.theme', 'Theme')}
               </UiField.Label>
-              <Select
+              <Select.Root
+                items={themeOptions}
                 value={theme}
                 onValueChange={(value) => setTheme(value as 'app' | 'light' | 'dark')}
               >
-                <SelectTrigger id="chat-share-theme" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="app">
-                    {t('sessions.shareImage.themeApp', 'Follow app')}
-                  </SelectItem>
-                  <SelectItem value="light">
-                    {t('sessions.shareImage.themeLight', 'Light')}
-                  </SelectItem>
-                  <SelectItem value="dark">{t('sessions.shareImage.themeDark', 'Dark')}</SelectItem>
-                </SelectContent>
-              </Select>
+                <Select.Trigger id="chat-share-theme">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {themeOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">
@@ -317,49 +339,47 @@ export function ChatShareImageDialog({
               <UiField.Label htmlFor="chat-share-padding">
                 {t('sessions.shareImage.framePadding', 'Backdrop padding')}
               </UiField.Label>
-              <Select
+              <Select.Root
+                items={paddingOptions}
                 value={framePadding}
                 onValueChange={(value) =>
                   setFramePadding(value as 'compact' | 'regular' | 'spacious')
                 }
                 disabled={backdrop === 'none'}
               >
-                <SelectTrigger id="chat-share-padding" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="compact">
-                    {t('sessions.shareImage.paddingCompact', 'Compact')}
-                  </SelectItem>
-                  <SelectItem value="regular">
-                    {t('sessions.shareImage.paddingRegular', 'Regular')}
-                  </SelectItem>
-                  <SelectItem value="spacious">
-                    {t('sessions.shareImage.paddingSpacious', 'Spacious')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                <Select.Trigger id="chat-share-padding">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {paddingOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">
               <UiField.Label htmlFor="chat-share-footer">
                 {t('sessions.shareImage.footer', 'Footer')}
               </UiField.Label>
-              <Select
+              <Select.Root
+                items={footerOptions}
                 value={footerVariant}
                 onValueChange={(value) => setFooterVariant(value as ChatShareCardFooterVariant)}
               >
-                <SelectTrigger id="chat-share-footer" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
+                <Select.Trigger id="chat-share-footer">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
                   {FOOTER_VARIANTS.map((value) => (
-                    <SelectItem key={value} value={value}>
+                    <Select.Item key={value} value={value}>
                       {value}
-                    </SelectItem>
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">

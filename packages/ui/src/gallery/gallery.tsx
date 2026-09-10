@@ -228,7 +228,10 @@ const styles = stylex.create({
     zIndex: 'auto',
   },
   popupList: { overflowY: 'visible' },
-  riseReplica: { alignSelf: 'flex-start', width: '180px' },
+  // The far end of the rise is invisible by definition, so it is a probe rather
+  // than a sample: it carries the real class and reports its transform into the
+  // metrics list instead of leaving a blank gap on the board.
+  riseProbe: { position: 'absolute', width: '1px', height: '1px', minWidth: 0, padding: 0 },
   scrollArrowGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
   // A row is picked, not pressed, so the board shows the two fills side by side
   // rather than asking the reader to hover one.
@@ -460,9 +463,9 @@ const POPUP_COLORS = [
 ];
 
 const SELECT_SIZES = [
-  { name: 'small \u00b7 28', size: 'small' as const },
-  { name: 'medium \u00b7 32', size: 'medium' as const },
-  { name: 'large \u00b7 36', size: 'large' as const },
+  { name: 'small · 28', size: 'small' as const },
+  { name: 'medium · 32', size: 'medium' as const },
+  { name: 'large · 36', size: 'large' as const },
 ];
 
 const FRUIT = [
@@ -870,22 +873,16 @@ function PopupReplica() {
         </div>
       </div>
       {/*
-        The other end of the rise. A popup starts and ends 4px below at opacity
-        0, and StyleX cannot express `[data-starting-style]`, so the primitives
-        read Base UI's transition status in JS and apply this class; the board
-        applies the same class to show what that end looks like.
+        A popup starts and ends 4px below at opacity 0. StyleX cannot express
+        `[data-starting-style]`, so the primitives read Base UI's transition
+        status in JS and apply this class; the board applies the same class here
+        and reports what it resolves to as `popup.rise`.
       */}
       <div
         ref={rise.ref}
-        {...stylex.props(
-          surface.popup,
-          styles.popupReplica,
-          styles.riseReplica,
-          surface.popupHidden
-        )}
-      >
-        <ReplicaRow label="Rising into place" />
-      </div>
+        aria-hidden="true"
+        {...stylex.props(surface.popup, styles.popupReplica, styles.riseProbe, surface.popupHidden)}
+      />
       <dl {...stylex.props(styles.constList)}>
         {metrics.map((entry) => (
           <div key={entry.name} {...stylex.props(styles.constRow)}>
@@ -1408,7 +1405,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         </PaletteSplit>
       </Section>
       <Section
-        title="Select \u00b7 trigger and list"
+        title="Select · trigger and list"
         rule="A trigger is a control on the well rung, so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
       >
         <PaletteSplit palettes={palettes}>
@@ -1453,7 +1450,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
 
       <Section
-        title="Combobox \u00b7 filter and list"
+        title="Combobox · filter and list"
         rule="The same well and the same list, with a query in front of them. On its own the input is the whole control; inside an input group the group is the well and the input is bare, so a chevron beside it lands inside one control rather than beside a second one. The ring follows focus inside the group, and disabled dims it from state because :disabled cannot reach a div."
       >
         <PaletteSplit palettes={palettes}>

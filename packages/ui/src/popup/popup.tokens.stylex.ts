@@ -36,11 +36,20 @@ export const popup = stylex.defineVars({
   groupLabel: colors.secondaryLabel,
   separator: colors.separator,
   // Two different facts about a row: `highlighted` is where the keyboard or the
-  // pointer is right now, `selected` is the row that holds the value. The rules
-  // give the first hoverFill and the second selectedFill, and the tick keeps
-  // saying which is current when the highlight moves onto it.
-  highlight: colors.hoverFill,
-  selected: colors.selectedFill,
+  // pointer is right now, `selected` is the row that holds the value, and the
+  // tick keeps saying which is current when the highlight moves onto it.
+  //
+  // Both are derived from the rung they sit on rather than taken from
+  // `hoverFill` and `selectedFill`, which the rules name for a row but which
+  // were tuned against the page and card rungs at 100% lightness. On the
+  // floating rung they collapse: measured in Chromium, `hoverFill` lands 2/255
+  // from `raisedBackground` in Lody Light and `selectedFill` resolves to
+  // exactly `raisedBackground` in Vesper, so one state is invisible in each
+  // palette. Mixing toward `label` steps away from the surface in both
+  // directions at once — darker in a light palette, lighter in a dark one —
+  // which is the same derivation `Button` uses for a secondary button's hover.
+  highlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
+  selected: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
   indicator: colors.label,
 });
 
@@ -56,7 +65,7 @@ export const popupPaletteTheme = stylex.createTheme(popup, {
   hint: colors.tertiaryLabel,
   groupLabel: colors.secondaryLabel,
   separator: colors.separator,
-  highlight: colors.hoverFill,
-  selected: colors.selectedFill,
+  highlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
+  selected: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
   indicator: colors.label,
 });

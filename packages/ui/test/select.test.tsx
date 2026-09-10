@@ -52,9 +52,9 @@ const RING_CLASSES = (() => {
 
 const trigger = () => one('button[role="combobox"]');
 /**
- * Whether the list is open. The popup is kept mounted while it transitions out,
- * so the count of rows in the document is not the state — what the trigger
- * announces is, and it is also what a screen reader is told.
+ * Whether the list is open. A Select keeps its list mounted once it has been
+ * opened and hides the closed one, so this reads what the trigger announces —
+ * which is also what a screen reader is told.
  */
 const isOpen = () => trigger().getAttribute('aria-expanded') === 'true';
 const options = () => all('[role="listbox"] [role="option"]');
@@ -95,6 +95,32 @@ describe('Select trigger', () => {
     // else about the value changes with it.
     expect(empty.filter((name) => !filled.includes(name))).toHaveLength(1);
     expect(filled.filter((name) => !empty.includes(name))).toHaveLength(0);
+  });
+
+  test('shows the label of the row it holds, which it reads from the root items', async () => {
+    mounted = await mount(<Fruit defaultValue="pink" />);
+    // The rows carry the labels a person reads, but the trigger resolves its
+    // own text from `Select.Root items` — so a caller whose row text differs
+    // from its value must state the list there as well.
+    expect(trigger().textContent).toContain('Pink Lady');
+  });
+
+  test('without items it can only show the raw value', async () => {
+    mounted = await mount(
+      <Select.Root defaultValue="pink">
+        <Select.Trigger>
+          <Select.Value placeholder="Pick a fruit" />
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="pink">Pink Lady</Select.Item>
+        </Select.Content>
+      </Select.Root>
+    );
+    // Pinned because it is the trap: this is what a migrated caller gets if it
+    // drops `items`, and it is quiet — the control still works, it just names
+    // the value instead of the row.
+    expect(trigger().textContent).toContain('pink');
+    expect(trigger().textContent).not.toContain('Pink Lady');
   });
 
   test('wears the same invalid ring a text control does', async () => {
@@ -155,6 +181,9 @@ describe('Select list', () => {
 
     await press('Escape');
     expect(isOpen()).toBe(false);
+    // The rows go with it: the closed list is hidden, so nothing in it is on
+    // screen or in the accessibility tree.
+    expect(options()).toHaveLength(0);
     expect(trigger().textContent).toContain('Gala');
     // Escape hands focus back, so the keyboard is not stranded on a gone popup.
     expect(document.activeElement).toBe(trigger());

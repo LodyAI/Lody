@@ -139,9 +139,18 @@ export async function type(input: HTMLInputElement, value: string): Promise<void
   });
 }
 
-/** Every element matching a selector, anywhere in the document. */
+/**
+ * Every element matching a selector that is actually on screen.
+ *
+ * A Select keeps its list mounted once it has been opened and marks the closed
+ * positioner `hidden`, which takes the rows out of the accessibility tree and
+ * off the screen without removing them from the document. Counting raw matches
+ * would therefore count a list nobody can see.
+ */
 export function all(selector: string): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>(selector)];
+  return [...document.querySelectorAll<HTMLElement>(selector)].filter(
+    (node) => node.closest('[hidden]') == null
+  );
 }
 
 /** The first element matching a selector, or a failure the caller can read. */

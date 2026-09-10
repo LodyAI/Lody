@@ -9,6 +9,9 @@ import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
 
+/** The gap between a control and the list it opens; the rules' rise distance. */
+const POPUP_GAP = 4;
+
 /** The control sits on the same 28 / 32 / 36 ladder as `Input`. */
 export type ComboboxSize = 'small' | 'medium' | 'large';
 
@@ -327,13 +330,27 @@ export const ComboboxSeparator = forwardRef<HTMLDivElement, ComboboxSeparatorPro
  * because Base UI keeps that region mounted to announce the change.
  */
 export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
-  function ComboboxContent({ className, children, empty, container, ...rest }, ref) {
+  function ComboboxContent(
+    { className, children, empty, container, sideOffset = POPUP_GAP, ...rest },
+    ref
+  ) {
     const inheritedContainer = usePopupContainer();
+    const mountPoint = container ?? inheritedContainer;
+    // A popup mounted into a named container is inside a subtree the host owns,
+    // and a modal panel typically centres itself with `translate`, which makes
+    // it the containing block for every `position: fixed` descendant. Floating
+    // UI's fixed strategy then resolves the coordinates it computed against the
+    // viewport relative to that panel instead, and the list lands as far off as
+    // the panel is from the viewport corner. The absolute strategy resolves
+    // against the offset parent, which is the panel, so the two agree again.
+    const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
     return (
-      <BaseCombobox.Portal container={container ?? inheritedContainer}>
+      <BaseCombobox.Portal container={mountPoint}>
         <BaseCombobox.Positioner
           ref={ref}
           {...rest}
+          sideOffset={sideOffset}
+          positionMethod={strategy}
           className={stylex.props(styles.positioner).className}
         >
           <BaseCombobox.Popup

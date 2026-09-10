@@ -9,6 +9,9 @@ import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
 
+/** The gap between a control and the list it opens; the rules' rise distance. */
+const POPUP_GAP = 4;
+
 /** The trigger sits on the same 28 / 32 / 36 ladder as `Input`. */
 export type SelectSize = 'small' | 'medium' | 'large';
 
@@ -43,6 +46,12 @@ export interface SelectContentProps extends Omit<
 
 export interface SelectItemProps extends Omit<ItemBaseProps, 'className' | 'children'> {
   children?: ReactNode;
+  /**
+   * An affordance at the end of the row, before the tick — an edit button on
+   * the row it belongs to. It sits outside the row's label, so what the trigger
+   * shows for the selected row stays the label alone.
+   */
+  endContent?: ReactNode;
   className?: string;
 }
 
@@ -172,7 +181,7 @@ export const SelectValue = forwardRef<HTMLSpanElement, SelectValueProps>(functio
 
 /** A row in the list: its label, and the tick when it holds the value. */
 export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(function SelectItem(
-  { className, children, ...rest },
+  { className, children, endContent, ...rest },
   ref
 ) {
   return (
@@ -197,6 +206,7 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(function S
       <BaseSelect.ItemText className={stylex.props(surface.itemText).className}>
         {children}
       </BaseSelect.ItemText>
+      {endContent}
       <span {...stylex.props(surface.indicator)}>
         <BaseSelect.ItemIndicator
           className={stylex.props(surface.indicatorGlyph).className}
@@ -251,15 +261,42 @@ export const SelectSeparator = forwardRef<HTMLDivElement, SelectSeparatorProps>(
  * outside. The caller supplies rows and nothing else.
  */
 export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(function SelectContent(
-  { className, children, container, ...rest },
+  {
+    className,
+    children,
+    container,
+    // Base UI's default overlaps the popup with its trigger so the selected
+    // row's text lands on the value, the way a macOS pop-up button does. This
+    // package's motion rule says a popup rises from 4px below the control
+    // instead, so the list is anchored under the trigger by default. That also
+    // keeps the popup on the anchored positioning path: the overlapping mode
+    // computes viewport coordinates and pins `position: fixed` itself, which a
+    // container that centres itself with `translate` then reinterprets as its
+    // own origin. A caller that wants the overlap can still ask for it.
+    alignItemWithTrigger = false,
+    sideOffset = POPUP_GAP,
+    ...rest
+  },
   ref
 ) {
   const inheritedContainer = usePopupContainer();
+  const mountPoint = container ?? inheritedContainer;
+  // A popup mounted into a named container is inside a subtree the host owns,
+  // and a modal panel typically centres itself with `translate`, which makes it
+  // the containing block for every `position: fixed` descendant. Floating UI's
+  // fixed strategy then resolves the coordinates it computed against the
+  // viewport relative to that panel instead, and the list lands as far off as
+  // the panel is from the viewport corner. The absolute strategy resolves
+  // against the offset parent, which is the panel, so the two agree again.
+  const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
   return (
-    <BaseSelect.Portal container={container ?? inheritedContainer}>
+    <BaseSelect.Portal container={mountPoint}>
       <BaseSelect.Positioner
         ref={ref}
         {...rest}
+        alignItemWithTrigger={alignItemWithTrigger}
+        sideOffset={sideOffset}
+        positionMethod={strategy}
         className={stylex.props(styles.positioner).className}
       >
         <BaseSelect.Popup

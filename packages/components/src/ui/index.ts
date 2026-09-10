@@ -14,7 +14,6 @@ export * from './loading';
 export * from './menubar';
 export * from './popover';
 export * from './scroll-area';
-export * from './select';
 export * from './separator';
 export * from './sheet';
 // export * from './sidebar-resizer' // Has external dependencies - needs to be refactored
