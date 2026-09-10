@@ -79,7 +79,8 @@ export function getMapFieldSchema(
   if (!isMapSchema(schema)) return undefined;
   if (Object.prototype.hasOwnProperty.call(schema.definition, key)) {
     const field = schema.definition[key];
-    // #443's optional hints require coordinated adoption of its Mirror patch.
+    // `schema.ts` marks genuinely streaming fields with an explicit `storageSchema`
+    // insertion hint. It is a storage policy, never a validation constraint.
     const storage =
       field?.type === 'any'
         ? (field.options as InferContainerOptions & { storageSchema?: SchemaType }).storageSchema

@@ -857,7 +857,7 @@ describe('single history writer', () => {
     mirror.dispose();
   });
 
-  it('uses the same new storage shape as Mirror before #443', () => {
+  it('uses the same new storage shape as a Mirror write', () => {
     const oldDoc = new Loro();
     const newDoc = new Loro();
     oldDoc.setPeerId('1');

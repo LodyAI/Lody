@@ -91,6 +91,8 @@ export type MaterializedReplay = {
   turnHashes: string[];
   replayDigest: string;
   droppedNotifications: number;
+  /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
+  hashVersion: number;
 };
 
 type HistoryCatalogSnapshot = {
@@ -148,9 +150,21 @@ function stableJson(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-function hashText(value: string): string {
+export function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
+
+/**
+ * Canonical-hash versions. v1 hashed `{ role, items, plan }` verbatim; v2 hashes a
+ * canonical item form so a sealed tool_call skeleton
+ * (`{ type, kind, status, title?, locations?, ref }`) and the full tool_call shape it
+ * was sealed from produce the same hash. A stored cursor without a `hashVersion` is v1,
+ * written by a CLI that predates skeletons.
+ */
+export const HASH_VERSION_V1 = 1;
+export const HASH_VERSION_V2 = 2;
+/** Version new imports write. */
+export const HASH_VERSION = HASH_VERSION_V2;
 
 // Both stored legacy items and parsed new items are hashed as opaque content.
 type HistoryHashInput = {
@@ -159,6 +173,7 @@ type HistoryHashInput = {
   plan?: readonly unknown[];
 };
 
+/** v1 (legacy) hash input: only the parts of an entry that come from the source transcript. */
 function normalizeHistoryEntryForHash(entry: HistoryHashInput): unknown {
   return {
     role: entry.role,
@@ -167,11 +182,95 @@ function normalizeHistoryEntryForHash(entry: HistoryHashInput): unknown {
   };
 }
 
-function hashHistoryEntry(entry: HistoryHashInput): string {
+export function hashHistoryEntry(entry: HistoryHashInput): string {
   return hashText(stableJson(normalizeHistoryEntryForHash(entry)));
 }
 
-function materializeReplay(args: {
+/**
+ * Keys stripped from every item in the v2 canonical form. These are either
+ * import-time/runtime-only annotations or fields a sealed tool_call skeleton omits, so
+ * hashing them would make the same transcript hash differently once its turns are sealed.
+ */
+const VOLATILE_ITEM_KEYS_V2: ReadonlySet<string> = new Set([
+  'toolCallId',
+  'content',
+  'rawInput',
+  'rawOutput',
+  'ref',
+  'activityKind',
+  'permissionRequest',
+  'toolName',
+  'schedulingTimeZone',
+  'turnId',
+  'isLatest',
+  'startedAt',
+  'endedAt',
+  'startedAtEpochSeconds',
+  'endedAtEpochSeconds',
+]);
+
+const isHashRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * v2 canonical form of a tool_call item: exactly the fields a sealed skeleton keeps,
+ * minus `ref`. `title: null` (ACP "no title") is treated as absent so null, undefined and
+ * missing hash identically.
+ */
+function canonicalizeToolCallItemForHashV2(item: Record<string, unknown>): Record<string, unknown> {
+  const canonical: Record<string, unknown> = { type: 'tool_call' };
+  if (typeof item.title === 'string') canonical.title = item.title;
+  if (item.kind !== undefined) canonical.kind = item.kind;
+  if (item.status !== undefined) canonical.status = item.status;
+  if (item.locations !== undefined) canonical.locations = item.locations;
+  return canonical;
+}
+
+function canonicalizeItemForHashV2(item: unknown): unknown {
+  if (!isHashRecord(item)) return item;
+  if (item.type === 'text' || item.type === 'thought') {
+    // `spans` are mention regions derived from `text`; they add no transcript content.
+    return { type: item.type, text: item.text };
+  }
+  if (item.type === 'tool_call') return canonicalizeToolCallItemForHashV2(item);
+  const canonical: Record<string, unknown> = {};
+  for (const key of Object.keys(item)) {
+    if (VOLATILE_ITEM_KEYS_V2.has(key) || item[key] === undefined) continue;
+    canonical[key] = item[key];
+  }
+  return canonical;
+}
+
+/** v2 counterpart of the v1 normalizer: same entry shape, each item canonicalized. */
+function normalizeHistoryEntryForHashV2(entry: HistoryHashInput): unknown {
+  return {
+    role: entry.role,
+    items: (entry.items ?? []).map(canonicalizeItemForHashV2),
+    plan: entry.plan ?? [],
+  };
+}
+
+export function hashHistoryEntryV2(entry: HistoryHashInput): string {
+  return hashText(stableJson(normalizeHistoryEntryForHashV2(entry)));
+}
+
+/**
+ * Hash one entry with an explicit canonical version. Used when comparing a new replay
+ * against a stored cursor written by an older CLI, so an upgrade never looks like a
+ * conflict.
+ */
+export function hashHistoryEntryForVersion(entry: HistoryHashInput, version: number): string {
+  if (version === HASH_VERSION_V1) return hashHistoryEntry(entry);
+  if (version === HASH_VERSION_V2) return hashHistoryEntryV2(entry);
+  throw new Error(`Unsupported history hash version: ${version}`);
+}
+
+/** Cursors written before the field existed are v1. */
+export function resolveStoredHashVersion(source: { hashVersion?: number } | undefined): number {
+  return source?.hashVersion ?? HASH_VERSION_V1;
+}
+
+export function materializeReplay(args: {
   provider: LocalProjectHistoryProvider;
   acpSessionId: ACPSessionId;
   replayNotifications: Parameters<typeof buildHistoryReplayImport>[0];
@@ -188,7 +287,7 @@ function materializeReplay(args: {
     createId: () => `${providerKey}:${args.acpSessionId}:tmp:${tempId++}`,
     mode: 'imported_snapshot',
   });
-  const turnHashes = replay.history.map(hashHistoryEntry);
+  const turnHashes = replay.history.map(hashHistoryEntryV2);
   const history = replay.history.map((entry, index) => ({
     ...entry,
     id: `${providerKey}:${args.acpSessionId}:turn:${index}:${turnHashes[index]!.slice(0, 16)}`,
@@ -199,6 +298,7 @@ function materializeReplay(args: {
     turnHashes,
     replayDigest: hashText(turnHashes.join('\n')),
     droppedNotifications: replay.droppedNotifications,
+    hashVersion: HASH_VERSION,
   };
 }
 
@@ -223,6 +323,9 @@ function resolveImportedTurnHashes(
 
 const StoredHistoryBaselineSchema = z.object({
   version: z.literal(1),
+  // Absent on baselines written before hash versions; those are v1 and must not be
+  // interpreted against a v2 source.
+  hashVersion: z.number().optional(),
   sourceDigest: z.string(),
   turnHashes: z.array(z.string()),
 });
@@ -240,6 +343,7 @@ function storedBaselineHashes(
       );
       if (
         parsed.success &&
+        parsed.data.hashVersion === resolveStoredHashVersion(cursor) &&
         areStringArraysEqual(cursor.importedTurnHashes, sourceHashes) &&
         parsed.data.sourceDigest === hashText(sourceHashes.join('\n')) &&
         parsed.data.turnHashes.length === sourceHashes.length
@@ -254,28 +358,116 @@ function storedBaselineHashes(
 
 function createImportCursor(
   sourceHashes: readonly string[],
-  stored: readonly SessionHistoryInput[]
+  stored: readonly SessionHistoryInput[],
+  hashVersion: number
 ): SessionExternalHistoryCursorDocState {
   return {
     importedTurnHashes: [...sourceHashes],
+    hashVersion,
     storedHistoryBaseline: JSON.stringify({
       version: 1,
+      hashVersion,
       sourceDigest: hashText(sourceHashes.join('\n')),
-      turnHashes: stored.map(hashHistoryEntry),
+      turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, hashVersion)),
     } satisfies z.infer<typeof StoredHistoryBaselineSchema>),
   };
 }
 
-export function decideHistoryRefresh(args: {
-  externalHistory: ExternalAcpHistorySyncMeta;
-  importedTurnHashes?: readonly string[];
+/**
+ * Subset of a materialized replay the decisions need to recompute hashes in the stored
+ * cursor's version. `hashVersion` may be absent in legacy fixtures; absent means "already
+ * in the stored version" (no recomputation).
+ */
+export type MaterializedReplayHashSource = Pick<MaterializedReplay, 'history'> & {
+  hashVersion?: number;
+};
+
+/**
+ * Express a replay's digest/turn hashes in an explicit canonical version. When the replay
+ * was materialized with a newer canonical form than the stored cursor (a v1 cursor from an
+ * older CLI versus a v2 replay), the stored-version hashes are recomputed from the replay
+ * history so an upgrade never produces a false conflict. Recomputation changes hashes but
+ * never the turn count, so `appendFromIndex` still indexes the materialized history.
+ */
+function resolveReplayHashesForStoredVersion(args: {
   replayDigest: string;
   turnHashes: readonly string[];
+  replayHashVersion: number;
+  storedHashVersion: number;
+  replayHistory?: readonly SessionHistoryInput[];
+}): { replayDigest: string; turnHashes: readonly string[] } {
+  if (args.replayHashVersion === args.storedHashVersion) {
+    return { replayDigest: args.replayDigest, turnHashes: args.turnHashes };
+  }
+  if (!args.replayHistory) {
+    throw new Error(
+      'History decisions need the materialized replay history to compare a ' +
+        `v${args.replayHashVersion} replay against a v${args.storedHashVersion} stored cursor.`
+    );
+  }
+  const turnHashes = args.replayHistory.map((entry) =>
+    hashHistoryEntryForVersion(entry, args.storedHashVersion)
+  );
+  return { replayDigest: hashText(turnHashes.join('\n')), turnHashes };
+}
+
+export function decideHistoryRefresh(args: {
+  externalHistory: ExternalAcpHistorySyncMeta;
+  /**
+   * Stored cursor hashes. Pass their own version alongside them when the hashes come from
+   * the session doc rather than the sync metadata.
+   */
+  importedTurnHashes?: readonly string[];
+  /** Version paired with the explicit cursor hashes; metadata may advance separately. */
+  importedTurnHashVersion?: number;
+  replayDigest: string;
+  turnHashes: readonly string[];
+  /**
+   * The materialized replay `replayDigest`/`turnHashes` came from. Pass it whenever the
+   * replay's `hashVersion` may differ from the stored cursor's version.
+   */
+  materialized?: MaterializedReplayHashSource;
+  /**
+   * Version of `replayDigest`/`turnHashes`. Defaults to `materialized.hashVersion`, or to
+   * the stored version when no materialized replay is passed (legacy callers compared
+   * same-version hashes).
+   */
+  replayHashVersion?: number;
+  /**
+   * Hashes of the locally stored turns. Callers must compute these with the STORED hash
+   * version, since they are compared against stored-version replay hashes here.
+   */
   currentHistoryHashes?: readonly string[];
   storedHistoryHashes?: readonly string[];
   projectedTurnHashes?: readonly string[];
 }): HistoryRefreshDecision {
-  if (!args.currentHistoryHashes && args.replayDigest === args.externalHistory.replayDigest) {
+  const metadataHashVersion = resolveStoredHashVersion(args.externalHistory);
+  const storedHashVersion = args.importedTurnHashVersion ?? metadataHashVersion;
+  const replay = resolveReplayHashesForStoredVersion({
+    replayDigest: args.replayDigest,
+    turnHashes: args.turnHashes,
+    replayHashVersion:
+      args.replayHashVersion ?? args.materialized?.hashVersion ?? storedHashVersion,
+    storedHashVersion,
+    replayHistory: args.materialized?.history,
+  });
+  // The metadata digest is paired with the metadata's own version, which may have advanced
+  // independently of the doc cursor.
+  const metadataReplay =
+    metadataHashVersion === storedHashVersion
+      ? replay
+      : resolveReplayHashesForStoredVersion({
+          replayDigest: args.replayDigest,
+          turnHashes: args.turnHashes,
+          replayHashVersion:
+            args.replayHashVersion ?? args.materialized?.hashVersion ?? metadataHashVersion,
+          storedHashVersion: metadataHashVersion,
+          replayHistory: args.materialized?.history,
+        });
+  if (
+    !args.currentHistoryHashes &&
+    metadataReplay.replayDigest === args.externalHistory.replayDigest
+  ) {
     return { status: 'skipped', reason: 'digest_match' };
   }
 
@@ -283,31 +475,31 @@ export function decideHistoryRefresh(args: {
     args.externalHistory,
     args.importedTurnHashes
   );
-  if (!isPrefix(importedTurnHashes, args.turnHashes)) {
+  if (!isPrefix(importedTurnHashes, replay.turnHashes)) {
     return { status: 'conflicted', reason: 'prefix_mismatch' };
   }
 
   if (args.currentHistoryHashes) {
+    const appendFromIndex = args.currentHistoryHashes.length;
+    // A caller-supplied projection is already expressed in the stored version. Default to
+    // the same-version replay hashes (identity when versions match).
+    const projectedTurnHashes = args.projectedTurnHashes ?? replay.turnHashes;
     const expected = args.storedHistoryHashes
-      ? [
-          ...args.storedHistoryHashes,
-          ...(args.projectedTurnHashes ?? args.turnHashes).slice(importedTurnHashes.length),
-        ]
-      : args.turnHashes;
+      ? [...args.storedHistoryHashes, ...projectedTurnHashes.slice(importedTurnHashes.length)]
+      : projectedTurnHashes;
     if (
       args.currentHistoryHashes.length < importedTurnHashes.length ||
       !isPrefix(args.currentHistoryHashes, expected)
     ) {
       return { status: 'conflicted', reason: 'local_history_has_untracked_suffix' };
     }
-    const appendFromIndex = args.currentHistoryHashes.length;
-    return args.turnHashes.length > appendFromIndex
+    return replay.turnHashes.length > appendFromIndex
       ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
       : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
   }
 
   const appendFromIndex = args.externalHistory.importedTurnCount;
-  return args.turnHashes.length > appendFromIndex
+  return replay.turnHashes.length > appendFromIndex
     ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
     : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
 }
@@ -319,9 +511,22 @@ function areStringArraysEqual(left: readonly string[], right: readonly string[])
 async function readSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
   externalHistory: ExternalAcpHistorySyncMeta
-): Promise<readonly string[]> {
+): Promise<{ importedTurnHashes: readonly string[]; importedTurnHashVersion: number }> {
   const cursor = await sessionDoc.getExternalHistoryCursor();
-  return resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes);
+  return {
+    importedTurnHashes: resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes),
+    importedTurnHashVersion: resolveStoredHashVersion(
+      cursor?.importedTurnHashes !== undefined ? cursor : externalHistory
+    ),
+  };
+}
+
+/** Hash locally stored turns in the version of the stored sync cursor. */
+function hashHistoryForStoredVersion(
+  history: readonly SessionHistoryInput[],
+  hashVersion: number
+): string[] {
+  return history.map((entry) => hashHistoryEntryForVersion(entry, hashVersion));
 }
 
 function hasPendingDispatchHistory(history: readonly SessionHistoryInput[]): boolean {
@@ -330,11 +535,20 @@ function hasPendingDispatchHistory(history: readonly SessionHistoryInput[]): boo
 
 export function decideHistoryConflictResolution(args: {
   externalHistory: ExternalAcpHistorySyncMeta;
+  /** Stored cursor hashes, paired with importedTurnHashVersion when supplied. */
   importedTurnHashes?: readonly string[];
+  /** Version paired with the explicit cursor hashes; metadata may advance separately. */
+  importedTurnHashVersion?: number;
   materialized: Pick<
     MaterializedReplay,
     'history' | 'turnHashes' | 'replayDigest' | 'droppedNotifications'
-  >;
+  > & {
+    /**
+     * Version of `turnHashes`/`replayDigest`. Absent means "already in the stored
+     * version" (legacy callers); a real `MaterializedReplay` always carries it.
+     */
+    hashVersion?: number;
+  };
   currentHistoryHashes: readonly string[];
   storedHistoryHashes?: readonly string[];
   currentHistoryHasPendingDispatch: boolean;
@@ -342,6 +556,28 @@ export function decideHistoryConflictResolution(args: {
   if (args.currentHistoryHasPendingDispatch) {
     return { status: 'blocked', reason: 'session_has_pending_local_turn' };
   }
+
+  const metadataHashVersion = resolveStoredHashVersion(args.externalHistory);
+  const storedHashVersion = args.importedTurnHashVersion ?? metadataHashVersion;
+  const replay = resolveReplayHashesForStoredVersion({
+    replayDigest: args.materialized.replayDigest,
+    turnHashes: args.materialized.turnHashes,
+    replayHashVersion: args.materialized.hashVersion ?? storedHashVersion,
+    storedHashVersion,
+    replayHistory: args.materialized.history,
+  });
+  // `markConflict` advances only the metadata; compare its digest in its own version so a
+  // v1 doc cursor is not misread as v2.
+  const metadataReplay =
+    metadataHashVersion === storedHashVersion
+      ? replay
+      : resolveReplayHashesForStoredVersion({
+          replayDigest: args.materialized.replayDigest,
+          turnHashes: args.materialized.turnHashes,
+          replayHashVersion: args.materialized.hashVersion ?? metadataHashVersion,
+          storedHashVersion: metadataHashVersion,
+          replayHistory: args.materialized.history,
+        });
 
   const importedTurnHashes = resolveImportedTurnHashes(
     args.externalHistory,
@@ -354,8 +590,8 @@ export function decideHistoryConflictResolution(args: {
       args.storedHistoryHashes ?? importedTurnHashes
     ) ||
       (!args.storedHistoryHashes &&
-        args.externalHistory.replayDigest === args.materialized.replayDigest &&
-        areStringArraysEqual(args.currentHistoryHashes, args.materialized.turnHashes)));
+        args.externalHistory.replayDigest === metadataReplay.replayDigest &&
+        areStringArraysEqual(args.currentHistoryHashes, replay.turnHashes)));
   if (alreadyResolved) {
     return { status: 'already_resolved' };
   }
@@ -372,7 +608,7 @@ export function decideHistoryConflictResolution(args: {
     return { status: 'blocked', reason: 'source_replay_empty' };
   }
 
-  if (args.materialized.turnHashes.length < importedTurnHashes.length) {
+  if (replay.turnHashes.length < importedTurnHashes.length) {
     return { status: 'blocked', reason: 'source_replay_behind_import_cursor' };
   }
 
@@ -596,6 +832,8 @@ function buildExternalHistoryMeta(args: {
     sourceAcpSessionId: args.sourceAcpSessionId,
     sourceUpdatedAt: args.sourceUpdatedAt ?? undefined,
     replayDigest: args.materialized.replayDigest,
+    // Versions the digest only. The doc cursor versions its own importedTurnHashes.
+    hashVersion: args.materialized.hashVersion,
     importedTurnCount: args.materialized.turnHashes.length,
     lastSyncAt: getServerNow(),
     status: args.status ?? 'synced',
@@ -854,13 +1092,13 @@ export class LocalProjectHistorySyncService {
     }
     if (existingExternalHistory.status !== 'sync_conflict') {
       const cursor = await sessionDoc.getExternalHistoryCursor();
-      const importedTurnHashes = await readSessionImportedTurnHashes(
+      const { importedTurnHashes, importedTurnHashVersion } = await readSessionImportedTurnHashes(
         sessionDoc,
         existingExternalHistory
       );
       if (
         areStringArraysEqual(
-          currentHistoryBeforeReplay.map(hashHistoryEntry),
+          hashHistoryForStoredVersion(currentHistoryBeforeReplay, importedTurnHashVersion),
           storedBaselineHashes(cursor, importedTurnHashes)
         )
       ) {
@@ -904,17 +1142,21 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
 
-    const latestImportedTurnHashes = await readSessionImportedTurnHashes(
-      sessionDoc,
-      latestExternalHistory
-    );
+    const {
+      importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
+    } = await readSessionImportedTurnHashes(sessionDoc, latestExternalHistory);
     const latestCursor = await sessionDoc.getExternalHistoryCursor();
     const latestHistory = await sessionDoc.getHistory();
     const decision = decideHistoryConflictResolution({
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
       materialized,
-      currentHistoryHashes: latestHistory.map(hashHistoryEntry),
+      currentHistoryHashes: hashHistoryForStoredVersion(
+        latestHistory,
+        latestImportedTurnHashVersion
+      ),
       storedHistoryHashes: storedBaselineHashes(latestCursor, latestImportedTurnHashes),
       currentHistoryHasPendingDispatch: hasPendingDispatchHistory(latestHistory),
     });
@@ -939,12 +1181,17 @@ export class LocalProjectHistorySyncService {
           latestExternalHistory,
           cursor?.importedTurnHashes
         );
+        // The cursor's own version governs the comparison; metadata may have advanced.
+        const storedHashVersion = resolveStoredHashVersion(
+          cursor?.importedTurnHashes !== undefined ? cursor : latestExternalHistory
+        );
         const writeTimeDecision = decideHistoryConflictResolution({
           externalHistory: latestExternalHistory,
           importedTurnHashes: sourceHashes,
+          importedTurnHashVersion: storedHashVersion,
           storedHistoryHashes: storedBaselineHashes(cursor, sourceHashes),
           materialized,
-          currentHistoryHashes: history.map(hashHistoryEntry),
+          currentHistoryHashes: hashHistoryForStoredVersion(history, storedHashVersion),
           currentHistoryHasPendingDispatch: hasPendingDispatchHistory(history),
         });
         if (writeTimeDecision.status !== 'replace') {
@@ -956,7 +1203,7 @@ export class LocalProjectHistorySyncService {
         }
         return materialized.history;
       },
-      (stored) => createImportCursor(materialized.turnHashes, stored)
+      (stored) => createImportCursor(materialized.turnHashes, stored, materialized.hashVersion)
     );
     await this.manager.repo.upsertDocMeta(roomId, {
       origin: 'external-acp',
@@ -1143,7 +1390,8 @@ export class LocalProjectHistorySyncService {
       const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
       await sessionDoc.updateHistoryAndCursor(
         () => args.materialized.history,
-        (stored) => createImportCursor(args.materialized.turnHashes, stored)
+        (stored) =>
+          createImportCursor(args.materialized.turnHashes, stored, args.materialized.hashVersion)
       );
       await this.manager.repo.upsertDocMeta(roomId, meta);
       const synced = await sessionDoc.waitUntilSynced();
@@ -1219,14 +1467,20 @@ export class LocalProjectHistorySyncService {
             externalHistory,
             cursor?.importedTurnHashes
           );
+          // Pair the comparison with the cursor's own version: metadata may have advanced.
+          const storedHashVersion = resolveStoredHashVersion(
+            cursor?.importedTurnHashes !== undefined ? cursor : externalHistory
+          );
           // Check the actual state inside the synchronous write boundary. A matching
           // metadata digest must not bless local edits or an independently stale cursor.
           const decision = decideHistoryRefresh({
             externalHistory,
             importedTurnHashes,
+            importedTurnHashVersion: storedHashVersion,
             replayDigest: materialized.replayDigest,
             turnHashes: materialized.turnHashes,
-            currentHistoryHashes: history.map(hashHistoryEntry),
+            materialized,
+            currentHistoryHashes: hashHistoryForStoredVersion(history, storedHashVersion),
             storedHistoryHashes: storedBaselineHashes(cursor, importedTurnHashes),
             // Only project the new source suffix, never existing storage or the
             // already imported source prefix. A peer's body may arrive before
@@ -1236,7 +1490,10 @@ export class LocalProjectHistorySyncService {
               ...materialized.history
                 .slice(importedTurnHashes.length)
                 .map((entry) =>
-                  hashHistoryEntry(parseHistoryWrite(HistoryEntryWriteSchema, entry))
+                  hashHistoryEntryForVersion(
+                    parseHistoryWrite(HistoryEntryWriteSchema, entry),
+                    storedHashVersion
+                  )
                 ),
             ],
           });
@@ -1245,7 +1502,7 @@ export class LocalProjectHistorySyncService {
           appended = suffix.length;
           return [...history, ...suffix];
         },
-        (stored) => createImportCursor(materialized.turnHashes, stored)
+        (stored) => createImportCursor(materialized.turnHashes, stored, materialized.hashVersion)
       );
     } catch (error) {
       if (!(error instanceof HistoryRefreshConflict)) throw error;

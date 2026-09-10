@@ -132,5 +132,10 @@ Superseded intermediate claims and detailed run logs remain recoverable in Git h
 through 123e9132. Remove source-string-only tests; retain real behavior and compile-failure
 contracts. Future refinements update the owning note rather than adding a note per fix.
 
+Later turns changed two of this record's statements without changing its decision: new writes
+now insert ordinary metadata as primitives and reserve `LoroText` for streaming fields, and
+canonical turn hashes gained a version. See
+[versioned turn hashes and primitive metadata insertion](2026-09-10-versioned-history-hashes-and-primitive-metadata.md).
+
 Intent: [draft Spec](../../../../specs/session-history-writes.md).
 PR: [#460](https://github.com/LodyAI/Lody/pull/460).

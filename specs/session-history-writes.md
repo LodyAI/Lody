@@ -24,7 +24,12 @@ That tolerance must not authorize creating new malformed items locally.
   dictionaries remain JSON-valued. Preserve unknown stored fields and untouched
   unknown/damaged items; reading is not a migration or permission to scrub data.
 - Existing primitive strings remain primitive; existing Text edits retain their
-  container identity. Storage-layout changes are separately reviewed.
+  container identity. New writes store an ordinary metadata string (tool `title`/`status`/
+  `kind`/`toolCallId`, a `locations[].path`) as a primitive, and create a Text container
+  only for fields that stream (`text`/`thought`, `markdown`, tool `content`, worktree
+  `steps`). This is an insertion policy: it is not a migration, does not rewrap stored
+  values, and adds no validation constraint on old or sealed payloads. Storage-layout
+  changes are separately reviewed.
 - Fork is a stored-history copy, not new-message authoring. Copy from a snapshot
   captured by the writer, retaining target initialization rows and unchanged unknown fields
   and opaque items. Explicit changes and new fork notices still require parsing.
@@ -55,6 +60,15 @@ That tolerance must not authorize creating new malformed items locally.
   A local deletion is a conflict, not permission to restore deleted turns automatically.
   Baselines are bound to their own cursor's source hashes, never an independently newer
   metadata digest. Explicit conflict replacement records a fresh baseline.
+- Canonical turn hashes are versioned. v1 hashed `{role, items, plan}` verbatim; v2 hashes
+  a canonical item form so a sealed tool_call skeleton and the full tool_call it was sealed
+  from produce the same hash. A missing version means v1. Every hash is compared only against
+  a hash of its own version, and each stored cursor records the version of its own
+  `importedTurnHashes` while the sync metadata versions its own `replayDigest`
+  independently. `markConflict` may advance only the metadata; a v1 document cursor must
+  never be read as v2, which would manufacture a false `prefix_mismatch`. A mismatch
+  without the replay history to recompute is an error, not a permissive guess. New writes
+  use v2; existing v1 canonicalization is unchanged.
 
 This adds optional cursor metadata, not a body migration. Old readers can ignore it;
 old importers do not understand the stored baseline and may still report conflicts
@@ -72,11 +86,17 @@ arbitrary reordering of existing turns in a plain LoroList.
 The current full-Mirror read path still materializes history; this change is not
 the 3000-round performance acceptance or the windowed ConversationView rollout.
 Non-history control-field validation remains outside this HistoryWriter contract.
+The v2 canonical form is defined for the shapes this repository writes. The full
+sealed-skeleton feature (a reader-side `ref` payload fetch, payload hooks, and the
+UI that consumes them) is not implemented here; this change only prevents a future
+sealed turn from looking like a hash conflict once such skeletons exist.
 
 ## Implementation evidence
 
-- `packages/shared/src/{history-writer,history-write-schema,session-mirror}.ts`
-- `packages/shared/tests/history-writer.test.ts` and `history-writer.contract.ts`
+- `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
+- `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `packages/shared/tests/{history-writer,history-storage-policy}.test.ts` and `history-writer.contract.ts`
+- `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)

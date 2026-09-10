@@ -15,7 +15,12 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 
-import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  LocalProjectHistorySyncService,
+} from '../src/lib/local-project-history-sync-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import type { Logger } from '../src/utils/logger';
 
@@ -150,8 +155,22 @@ async function createHarness() {
     const loro = await rawDoc();
     location(loro).set('endColumn', 12);
     loro.commit();
-    const cursor = await doc.getExternalHistoryCursor();
-    await doc.setExternalHistoryCursor({ importedTurnHashes: cursor?.importedTurnHashes });
+    // Model a real v1 client: recompute the source hashes in v1 and write a cursor shape
+    // that predates `hashVersion`. Neither the hashes nor their version are v2, so the
+    // stored cursor is internally consistent instead of wearing a v2 array as v1.
+    const stored = loro.getList('history').toJSON() as SessionHistoryInput[];
+    const importedTurnHashes = stored.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    await doc.setExternalHistoryCursor({
+      importedTurnHashes,
+      storedHistoryBaseline: JSON.stringify({
+        version: 1,
+        hashVersion: HASH_VERSION_V1,
+        sourceDigest: hashText(importedTurnHashes.join('\n')),
+        turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1)),
+      }),
+    });
     return loro;
   }
   return { repo, service, importTurns, getOnlyDoc, getMeta, rawDoc, makeLegacy };
