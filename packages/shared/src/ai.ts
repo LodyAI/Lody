@@ -8,7 +8,7 @@ import {
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
 import { createPlanModeConfigOption } from 'acp-extension-core';
-import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
+import type { AgentConfigId, AgentRoleId, MachineId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
 import type { WorktreeScriptPhase } from './project';
@@ -1534,10 +1534,9 @@ export type MessageContent =
       isLatest: boolean;
     }
   | SessionGoalContent
-  | {
+  | ({
       type: 'tool_call';
       _meta?: { [k: string]: unknown } | null;
-      toolCallId: string;
       title?: string | null;
       status: ToolCallStatus;
       kind?: ToolKind;
@@ -1576,7 +1575,7 @@ export type MessageContent =
         _meta?: Record<string, unknown>;
         outcome?: PermissionOutcome;
       };
-    }
+    } & ToolCallIdentity)
   | ({
       type: 'subagent_task';
     } & SubagentTaskPayload)
@@ -1607,6 +1606,50 @@ export type MessageContent =
   | ({
       type: 'visual_annotation_reference';
     } & VisualAnnotationReferencePayload);
+
+/**
+ * Pointer from a sealed tool_call skeleton to its full execution payload. The
+ * payload lives in the origin machine's local store, keyed by the owning turn
+ * and the item's index inside that turn's `items` list. The index is the
+ * skeleton's anchor: reader paths must preserve item positions and must never
+ * renumber a skeleton when they filter or edit unrelated items.
+ */
+export type ToolCallRef = {
+  machineId: MachineId;
+  turnId: string;
+  index: number;
+};
+
+/**
+ * A `tool_call` carries at least one identity: `toolCallId` for a live/full call or
+ * `ref` for a sealed skeleton. Expressing it as a union makes the TypeScript type
+ * reject an identity-less tool_call exactly like the Zod parser and the Loro
+ * `validate` guard do. A full call may additionally carry a `ref`.
+ */
+export type ToolCallIdentity =
+  | { toolCallId: string; ref?: ToolCallRef }
+  | { toolCallId?: undefined; ref: ToolCallRef };
+
+/**
+ * The execution payload a sealed skeleton omits. Fetched on demand from the
+ * origin machine; until that transport exists, readers resolve it to an
+ * `unavailable` state and render the skeleton itself.
+ */
+export type ToolCallPayload = {
+  content?: ToolCallContent[];
+  rawInput?: { [k: string]: unknown };
+  rawOutput?: { [k: string]: unknown };
+};
+
+/** Runtime guard for a skeleton's payload pointer; shared by every reader. */
+export const isToolCallRef = (value: unknown): value is ToolCallRef =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  typeof (value as ToolCallRef).machineId === 'string' &&
+  typeof (value as ToolCallRef).turnId === 'string' &&
+  typeof (value as ToolCallRef).index === 'number' &&
+  Number.isFinite((value as ToolCallRef).index);
 
 export type TerminalExitStatus = {
   exitCode?: number | null;

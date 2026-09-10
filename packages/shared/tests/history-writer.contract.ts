@@ -2,6 +2,7 @@ import type { HistoryWriter } from '../src/history-writer';
 import type { SessionHistory } from '../src/schema';
 import type { HistoryEntryWrite, HistoryEntryWriteSchema } from '../src/history-write-schema';
 import type { MessageContent } from '../src/ai';
+import type { MachineId } from '../src/ids';
 import type { MessageContentValidated } from '../src/message-schemas';
 
 type AssertNever<T extends never> = T;
@@ -76,6 +77,33 @@ export type MissingNestedFieldIsDetected = AssertNever<
   // @ts-expect-error a newly declared nested field must fail the coverage guard
   MissingFields<{ content: { newField: string }[] }, { content: { text: string }[] }>
 >;
+
+// The TS type must express the same identity requirement as the Zod parser and the
+// Loro `validate` guard: a tool_call carries `toolCallId` (full call) or `ref` (sealed
+// skeleton). If the type ever becomes permissive again, these `@ts-expect-error`
+// lines fail the build.
+const toolCallWithId: MessageContent = {
+  type: 'tool_call',
+  toolCallId: 'call-1',
+  status: 'completed',
+};
+const toolCallWithRef: MessageContent = {
+  type: 'tool_call',
+  status: 'completed',
+  ref: { machineId: 'machine-1' as MachineId, turnId: 'turn-1', index: 0 },
+};
+// @ts-expect-error a tool_call needs toolCallId or ref, not only status
+const toolCallWithoutIdentity: MessageContent = { type: 'tool_call', status: 'completed' };
+// @ts-expect-error an explicit undefined id is not an identity
+const toolCallWithUndefinedId: MessageContent = {
+  type: 'tool_call',
+  toolCallId: undefined,
+  status: 'completed',
+};
+void toolCallWithId;
+void toolCallWithRef;
+void toolCallWithoutIdentity;
+void toolCallWithUndefinedId;
 
 // Included by the normal shared typecheck, not executed by the test runner.
 export function historyWriterTypeContract(writer: HistoryWriter, entry: SessionHistory) {

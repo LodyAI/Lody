@@ -11,6 +11,7 @@ import {
   type LocalProjectGitState,
   type MachineId,
   type MachineMeta,
+  type MessageContent,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
@@ -1414,6 +1415,16 @@ describe('session command helpers', () => {
   });
 
   it('builds transcript entries from visible user and assistant content only', () => {
+    // Sealed turns persist tool_call skeletons (no toolCallId/content); the
+    // transcript path shared by `session history` and MCP `lody_session_history`
+    // must skip them like any other tool call.
+    const skeleton: MessageContent = {
+      type: 'tool_call',
+      kind: 'execute',
+      status: 'completed',
+      title: 'Shell: ls',
+      ref: { machineId: 'machine-id' as MachineId, turnId: 'assistant-entry', index: 1 },
+    };
     expect(
       toSessionTranscriptEntries([
         createHistoryEntry({
@@ -1442,6 +1453,7 @@ describe('session command helpers', () => {
             { type: 'thought', text: 'internal reasoning' },
             { type: 'tool_call', toolCallId: 'tool-1', status: 'completed' },
             { type: 'text', text: 'Final answer' },
+            skeleton,
             { type: 'text', text: 'Second paragraph' },
             { type: 'tool_call', toolCallId: 'tool-2', status: 'completed' },
           ],
@@ -1526,6 +1538,17 @@ describe('session command helpers', () => {
     expect(renderAssistantTurnCompletion([{ type: 'tool_call', toolCallId: 'tool-1' }])).toBe(
       'No visible assistant reply found.'
     );
+    // A sealed tool_call skeleton (no toolCallId/content) is likewise invisible.
+    expect(
+      renderAssistantTurnCompletion([
+        {
+          type: 'tool_call',
+          kind: 'execute',
+          status: 'completed',
+          ref: { machineId: 'machine-id' as MachineId, turnId: 'turn-1', index: 0 },
+        },
+      ])
+    ).toBe('No visible assistant reply found.');
   });
 
   it('waits only when --wait is explicit, independently of JSON output', () => {

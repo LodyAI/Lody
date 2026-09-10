@@ -18,10 +18,9 @@
   retain JSON data, not arbitrary JS objects. Storage layout stays separate and is an
   insertion policy, never a migration or a validation constraint: new writes store
   ordinary metadata strings as primitives and create `LoroText` only for fields that
-  stream. That holds at every nesting level — a tool content or worktree-step `command`,
-  `path`, `args` or terminal id is metadata, so only payloads like tool `text`/`output`
-  and nested `content.text` are declared Text in `schema.ts`. Stored values keep their
-  representation, and opening a document never rewraps them. Rationale:
+  stream, at every nesting level — nested tool/worktree `command`/`path`/`args` are
+  metadata, only payloads like `text`/`output`/nested `content.text` are Text. Stored
+  values keep their representation, and opening a document never rewraps them. Rationale:
   [single writer](../../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md).
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the
@@ -33,10 +32,15 @@
   of untouched rows and later appended rows. Reject changes to existing row identity/order and edits inside that range,
   except pending-to-seen read acknowledgement on newly inserted user rows.
   External ACP imports remain new input.
-- Tool fields other than type/toolCallId are independent
-  edits: derive their parsers from the tool message schema and validate changed fields,
-  not untouched stored payloads. Content-list edits retain unchanged blocks and parse
-  authored blocks; tool identity changes still use the complete item parser.
+- A `tool_call` carries `toolCallId` (full call) or `ref` (sealed skeleton) in one
+  `ToolCallIdentity` union; the TS type, Zod parser and Loro `validate` all reject
+  neither-identity (`history-writer.contract.ts` compiles that guard). A skeleton is a
+  *no-payload* item, not merely any item carrying `ref` (a full call may carry one too);
+  it is never a merge target and its `ref.index` must survive filtering, hashing and
+  unrelated edits. The payload fetch is not implemented.
+- Tool fields other than type/toolCallId/ref parse only authored changes, derived from
+  the tool message schema, not untouched stored payloads. Content-list edits retain
+  unchanged blocks and parse authored blocks; identity changes use the complete item parser.
 - Normalize legacy built-in CLI selectors on new history input only. Independent stored
   input-config and task-proposal metadata edits validate changed fields, not untouched
   historical values; proposal identity changes still require complete parsing.

@@ -31,7 +31,7 @@ import {
   WorktreeSetupScriptConfig,
 } from '.';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
-import type { ModelInfo } from './ai';
+import { isToolCallRef, type ModelInfo } from './ai';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
@@ -322,7 +322,10 @@ const historyMessageItemSchema = schema
               ? true
               : 'Missing goal metadata';
           case 'tool_call':
-            return typeof v.toolCallId === 'string' && typeof v.status === 'string'
+            // A full tool call carries `toolCallId`; a sealed skeleton omits it
+            // and points at the origin machine's payload with a valid `ref`.
+            return typeof v.status === 'string' &&
+              (typeof v.toolCallId === 'string' || isToolCallRef(v.ref))
               ? true
               : 'Missing toolCallId/status';
           case 'subagent_task':
