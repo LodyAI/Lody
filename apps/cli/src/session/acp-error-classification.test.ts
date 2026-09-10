@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RequestError } from '@agentclientprotocol/sdk';
 import {
   ACP_ERROR_CODES,
   getACPErrorUserMessage,
@@ -180,39 +181,56 @@ describe('ACP error classification', () => {
     expect(mapACPErrorToFailureReason(parsed)).toBe('acp_internal_error');
   });
 
-  it('sees authentication failures through the resume wrapper', () => {
-    // AgentClient.startSession rewraps a failed loadSession like this. Reading
-    // only the outer error would send the restore path down the fallback that
-    // replaces the resumable ACP session with a fresh one.
-    const wrapped = new Error('[ACP_RESUME_FAILED] loadSession: Internal error', {
-      cause: {
+  // `AgentClient.startSession` rewraps a failed loadSession/resumeSession like
+  // this. Reading only the outer error sends the restore path into the fallback
+  // that replaces the resumable ACP session with a fresh one.
+  const wrapResumeFailure = (cause: unknown): Error =>
+    new Error('[ACP_RESUME_FAILED] loadSession: Internal error', { cause });
+
+  // The SDK rejects with `RequestError`, an `Error` subclass; some adapters
+  // surface the raw JSON-RPC object instead. Both shapes must classify the
+  // same, and only the `Error` one hides `data.details` from a flattened cause
+  // dump — which is exactly how a wrapped auth failure escaped detection.
+  const acpErrorShapes = [
+    {
+      shape: 'SDK RequestError',
+      build: (details: string): unknown =>
+        new RequestError(ACP_ERROR_CODES.INTERNAL_ERROR, 'Internal error', { details }),
+    },
+    {
+      shape: 'raw JSON-RPC object',
+      build: (details: string): unknown => ({
         code: ACP_ERROR_CODES.INTERNAL_ERROR,
         message: 'Internal error',
-        data: { details: 'OAuth session expired' },
-      },
-    });
+        data: { details },
+      }),
+    },
+  ] as const;
 
-    expect(isAuthenticationRequiredACPError(wrapped)).toBe(true);
-  });
+  it.each(acpErrorShapes)(
+    'sees an expired credential through the resume wrapper: $shape',
+    ({ build }) => {
+      expect(
+        isAuthenticationRequiredACPError(wrapResumeFailure(build('OAuth session expired')))
+      ).toBe(true);
+    }
+  );
+
+  it.each(acpErrorShapes)(
+    'does not read an ordinary resume failure as an authentication failure: $shape',
+    ({ build }) => {
+      expect(
+        isAuthenticationRequiredACPError(wrapResumeFailure(build('Session artifact is corrupt')))
+      ).toBe(false);
+    }
+  );
 
   it('sees the dedicated auth-required code through the resume wrapper', () => {
-    const wrapped = new Error('[ACP_RESUME_FAILED] resumeSession failed', {
-      cause: { code: ACP_ERROR_CODES.AUTH_REQUIRED, message: 'Authentication required' },
-    });
+    const wrapped = wrapResumeFailure(
+      new RequestError(ACP_ERROR_CODES.AUTH_REQUIRED, 'Authentication required')
+    );
 
     expect(isAuthenticationRequiredACPError(wrapped)).toBe(true);
-  });
-
-  it('does not read an ordinary resume failure as an authentication failure', () => {
-    const wrapped = new Error('[ACP_RESUME_FAILED] loadSession: Internal error', {
-      cause: {
-        code: ACP_ERROR_CODES.INTERNAL_ERROR,
-        message: 'Internal error',
-        data: { details: 'Session artifact is corrupt' },
-      },
-    });
-
-    expect(isAuthenticationRequiredACPError(wrapped)).toBe(false);
   });
 
   it('does not treat unrelated token refresh errors as provider login failures', () => {

@@ -31,7 +31,12 @@ fallback 也会拒绝启动一个没有上下文的会话，而不是无声降�
    的 Provider 文案（"please run /login"）。裸的 "OAuth session expired" 会落到
    `acp_internal_error`，而 restore 路径看到的是被包装的 `[ACP_RESUME_FAILED] …`
    而非底下的认证原因。现在它会遍历 `cause` 链，并接受指明认证名词的凭据过期文案；
-   无关的过期（证书、试用期、缓存）仍被排除，测试从正反两侧都做了约束。
+   无关的过期（证书、试用期、缓存）仍被排除，测试从正反两侧都做了约束。文本匹配是
+   **逐链接**执行的，而不是在展平后的文本上做一次：SDK 抛出的 `RequestError` 是
+   `Error` 子类，而 `formatErrorWithCauses` 对嵌套 `Error` 只打印 message，会丢掉承载
+   Provider 文案的 `data.details`。本修复的第一版是在展平文本上匹配的，在评审中被发现；
+   它的测试之所以通过，只是因为用了普通对象作为 `cause`，而 `JSON.stringify` 会完整
+   保留 `data`。现在的用例改用 SDK 类型。
 3. restore 的 fallback 过去对任何 resume 失败都会触发。凭据过期是可恢复的——
    transcript 仍在磁盘上，用户重新登录后 `loadSession` 就能工作——因此 fallback
    替换掉了一个只需要重新登录的会话。现在认证失败时跳过 fallback，并以

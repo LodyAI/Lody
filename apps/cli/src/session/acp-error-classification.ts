@@ -167,6 +167,9 @@ const getACPAuthDiagnosticText = (error: unknown, parsedError?: ParsedACPError |
   return direct.includes(withCauses) ? direct : `${direct}\n${withCauses}`;
 };
 
+const matchesAuthenticationText = (text: string): boolean =>
+  AUTHENTICATION_REQUIRED_PATTERNS.some((pattern) => pattern.test(text));
+
 /**
  * Some provider runtimes still wrap expired OAuth credentials in an ACP
  * internal error instead of using ACP's dedicated auth-required code. Keep the
@@ -178,9 +181,17 @@ export const isAuthenticationRequiredACPError = (error: unknown): boolean => {
     if (isAcpAuthRequiredErrorShape(link)) {
       return true;
     }
+    // Matched per link, not once over the flattened chain: the SDK's
+    // `RequestError` is an `Error`, and `formatErrorWithCauses` prints only its
+    // message for a nested one — dropping the `data.details` that carries the
+    // provider's expired-credential text. `getACPDiagnosticText` reads `data`.
+    if (matchesAuthenticationText(getACPDiagnosticText(link))) {
+      return true;
+    }
   }
-  const diagnosticText = getACPAuthDiagnosticText(error, parseACPError(error));
-  return AUTHENTICATION_REQUIRED_PATTERNS.some((pattern) => pattern.test(diagnosticText));
+  // Covers a non-object error and anything the cause walk cannot reach, such as
+  // an AggregateError's `errors` entries.
+  return matchesAuthenticationText(getACPAuthDiagnosticText(error, parseACPError(error)));
 };
 
 export const mapACPErrorToFailureReason = (error: ParsedACPError): ChatFailedReason => {

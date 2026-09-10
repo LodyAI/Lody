@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { RequestError, type ContentBlock } from '@agentclientprotocol/sdk';
 import type { Logger } from '../src/utils/logger';
 import {
   SessionExecutionService,
@@ -4490,12 +4490,12 @@ describe('SessionExecutionService', () => {
     {
       name: 'reports authentication required when the resume failure wraps an auth error',
       errors: [
+        // The SDK's own rejection shape: an `Error` subclass whose `data` a
+        // flattened cause dump drops, so the wrapper must be walked per link.
         new Error('[ACP_RESUME_FAILED] loadSession: Internal error', {
-          cause: {
-            code: -32603,
-            message: 'Internal error',
-            data: { details: 'OAuth session expired' },
-          },
+          cause: new RequestError(-32603, 'Internal error', {
+            details: 'OAuth session expired',
+          }),
         }),
       ],
       expectedReason: 'acp_auth_required',

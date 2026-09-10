@@ -37,7 +37,14 @@ The four defects compose; fixing any one alone still loses context.
    path saw the wrapped `[ACP_RESUME_FAILED] …` rather than the auth cause
    underneath. It now walks the `cause` chain and accepts expired-credential text
    that names an auth noun; unrelated expiries (certificates, trials, caches)
-   stay out, which the tests pin from both sides.
+   stay out, which the tests pin from both sides. The diagnostic match runs per
+   chain link rather than once over a flattened dump: the SDK rejects with
+   `RequestError`, an `Error` subclass, and `formatErrorWithCauses` prints only
+   the message of a nested `Error` — dropping the `data.details` that carries the
+   provider's text. A first version of this fix matched the flattened dump and
+   was caught in review; its tests passed only because they used a plain-object
+   `cause`, which `JSON.stringify` renders with `data` intact. Fixtures now use
+   the SDK type.
 3. The restore fallback ran on any resume failure. An expired credential is
    recoverable — the transcript is still on disk and `loadSession` works once the
    user signs back in — so falling back replaced a session that only needed a
