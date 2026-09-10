@@ -70,6 +70,28 @@ The UI now reads `goalActions` from the ACP capability cache instead of testing
 `agentType === 'codex'`, and its pending state expires after a minute so a slow
 action cannot leave the banner dead.
 
+## Host simplification after the correction
+
+The follow-up removes duplicate work without changing the goal contract. The
+original 117 host tests passed after the production-code ablations; removing two
+subsumed tests leaves 115 passing tests. The remaining fences are not speculative:
+removing the pre-submission fence delivers an old Resume after Pause. Its test
+now races explicit submission/release signals and reports `submitted` instead of
+waiting for a timeout. No new queue abstraction or authentication mechanism is added.
+
+| Ablation                                               | Evidence and decision                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Metadata-read stale-request guard                      | Removed; the existing claim fence still rejects it, including both Pause/Clear tests.                      |
+| Queue `has` followed by `get`                          | Replaced with one lookup per iteration; all ownership tests pass.                                          |
+| Local `turn_started` acceptance case                   | Removed: this handler returns only applied/queued/unsupported/error; the wire response union is unchanged. |
+| Goal method alias and single-use fallback-text export  | Removed; use the Core method constant and inline the unchanged fallback at its sole consumer.              |
+| One-turn queue test and status-transport selector test | Removed; multi-turn queue and actual AgentClient wire tests cover their assertions.                        |
+| Pre-submission fence                                   | Kept: removal fails the observable submission/release test; restoring it passes.                           |
+
+This is a bounded simplification of the host correction, not evidence that the
+whole protocol has been exhaustively minimized. Claim tracking, pending-action
+supersession, and startup failure reporting retain their existing responsibilities.
+
 ## Alternatives
 
 **Let the adapter start the resumed goal's turn itself.** The adapter already has

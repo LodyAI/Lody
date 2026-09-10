@@ -7017,29 +7017,6 @@ describe('SessionExecutionService goal control', () => {
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);
   });
 
-  it('waits for the running turn to release instead of dropping the resume', async () => {
-    const { service, submitted, completion, delivered } = createGoalService({
-      transport: 'promptMeta',
-    });
-    const internals = service as unknown as {
-      currentTurnBySession: Map<SessionId, string>;
-      clearCurrentTurn: (sessionId: SessionId, turnId?: string) => void;
-    };
-    internals.currentTurnBySession.set(goalSessionId, 'draining-turn');
-
-    const response = await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
-
-    expect(response).toMatchObject({ accepted: true, disposition: 'queued' });
-    expect(delivered).toEqual([]);
-
-    internals.clearCurrentTurn(goalSessionId, 'draining-turn');
-    await submitted.promise;
-    expect(delivered).toEqual([expect.objectContaining({ goalControl: { action: 'resume' } })]);
-    const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
-    completion.resolve();
-    await released;
-  });
-
   it('retains an accepted goal across more than three competing turns', async () => {
     const { service, submitted, completion, delivered } = createGoalService({
       transport: 'promptMeta',
@@ -7056,7 +7033,10 @@ describe('SessionExecutionService goal control', () => {
       return result;
     });
     internals.currentTurnBySession.set(goalSessionId, 'busy-0');
-    await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
+    expect(await service.controlSessionGoal({ ...goalArgs, action: 'resume' })).toMatchObject({
+      accepted: true,
+      disposition: 'queued',
+    });
     for (let index = 0; index < 4; index += 1) {
       await waiting.promise;
       waiting = createDeferred<void>();
@@ -7147,9 +7127,10 @@ describe('SessionExecutionService goal control', () => {
   );
 
   it('fences a superseded resume after turn ownership but before provider submission', async () => {
-    const { service, deps, agentClient, delivered, goalStatus } = createGoalService({
-      transport: 'promptMeta',
-    });
+    const { service, deps, agentClient, delivered, goalStatus, submitted, completion } =
+      createGoalService({
+        transport: 'promptMeta',
+      });
     const preparing = createDeferred<void>();
     const ready = createDeferred<void>();
     deps.applyAcpModeAndModel = async (_session, config) => {
@@ -7164,8 +7145,15 @@ describe('SessionExecutionService goal control', () => {
     agentClient.resolveGoalActionTransport = () => 'request';
     await service.controlSessionGoal({ ...goalArgs, action: 'pause' });
     const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
+    const outcome = Promise.race([
+      submitted.promise.then(() => 'submitted'),
+      released.then(() => 'released'),
+    ]);
     ready.resolve();
+    const first = await outcome;
+    completion.resolve();
     await released;
+    expect(first).toBe('released');
     expect(goalStatus()).toBe('pause');
     expect(delivered).toEqual([]);
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);

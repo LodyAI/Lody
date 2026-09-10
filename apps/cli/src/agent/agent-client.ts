@@ -87,7 +87,6 @@ import {
   buildGoalPromptMeta,
   buildGoalSlashCommandText,
   resolveGoalActionTransport,
-  GOAL_CONTROL_METHOD,
   type GoalActionTransport,
   type GoalPromptControl,
 } from './goal-control';
@@ -1401,7 +1400,7 @@ export class AgentClient implements acp.Client {
       throw new Error('[ACP_GOAL_UNAVAILABLE] ACP session is not connected');
     }
     const response = await connection.request<unknown, { sessionId: string; action: string }>(
-      GOAL_CONTROL_METHOD,
+      LODY_EXTENSION_METHODS.sessionGoal,
       { sessionId, action }
     );
     const parsed = z

@@ -13,18 +13,6 @@ const capability = (overrides: Partial<LodyGoalCapability> = {}): LodyGoalCapabi
 });
 
 describe('resolveGoalActionTransport', () => {
-  it('sends status-only actions out-of-band when the agent advertises them', () => {
-    const advertised = capability({
-      controlActions: ['pause', 'clear'],
-      promptActions: ['set', 'pause', 'resume', 'clear'],
-    });
-
-    expect(resolveGoalActionTransport(advertised, 'pause')).toBe('request');
-    expect(resolveGoalActionTransport(advertised, 'clear')).toBe('request');
-    expect(resolveGoalActionTransport(advertised, 'pause', 'prompt')).toBe('promptMeta');
-    expect(resolveGoalActionTransport(advertised, 'clear', 'prompt')).toBe('promptMeta');
-  });
-
   it('keeps work-starting actions inside a prompt even when the request lists them', () => {
     // An agent that starts the goal's work from a bare request would produce
     // turns Lody never prompted for and cannot attribute to a conversation.

@@ -1,14 +1,6 @@
 import type * as acp from '@agentclientprotocol/sdk';
-import { LODY_EXTENSION_METHODS, type LodyGoalCapability } from 'acp-extension-core';
+import type { LodyGoalCapability } from 'acp-extension-core';
 import type { SessionGoalAction } from '@lody/shared';
-
-export const GOAL_CONTROL_METHOD = LODY_EXTENSION_METHODS.sessionGoal;
-
-/**
- * Fallback blocks for a prompt whose goal action started no native turn. The
- * agent replaces them when it schedules the continuation itself.
- */
-export const GOAL_CONTINUATION_PROMPT_TEXT = 'Continue working toward the active goal.';
 
 /**
  * How a goal action can reach the agent.

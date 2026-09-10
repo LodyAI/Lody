@@ -91,7 +91,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
-import { GOAL_CONTINUATION_PROMPT_TEXT, type GoalPromptControl } from '@/agent/goal-control';
+import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -1233,8 +1233,7 @@ export class SessionExecutionService {
       type: 'session/goal_response',
       sessionId,
       action,
-      accepted:
-        disposition === 'applied' || disposition === 'turn_started' || disposition === 'queued',
+      accepted: disposition === 'applied' || disposition === 'queued',
       disposition,
       ...(error ? { error } : {}),
     });
@@ -1293,14 +1292,14 @@ export class SessionExecutionService {
     }
     this.goalTurnWaiterSessions.add(sessionId);
     void (async () => {
-      while (this.pendingGoalTurnBySession.has(sessionId)) {
+      for (;;) {
+        const pending = this.pendingGoalTurnBySession.get(sessionId);
+        if (!pending) return;
         const snapshot = this.getExecutionSnapshot(sessionId);
         if (snapshot.hasActiveTurn && snapshot.activeTurnId) {
           await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
           continue;
         }
-        const pending = this.pendingGoalTurnBySession.get(sessionId);
-        if (!pending) return;
         try {
           const claimed = await this.startGoalTurn(pending);
           if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
@@ -1339,7 +1338,6 @@ export class SessionExecutionService {
     const { sessionId, control } = request;
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
-    if (this.pendingGoalTurnBySession.get(sessionId) !== request) return false;
     if (!meta) {
       throw new Error(`Session ${sessionId} has no metadata`);
     }
@@ -1362,7 +1360,7 @@ export class SessionExecutionService {
           // Fallback blocks only: the agent replaces them when the action
           // schedules its own continuation. The run configuration is
           // deliberately absent so a goal turn cannot change model or mode.
-          prompt: GOAL_CONTINUATION_PROMPT_TEXT,
+          prompt: 'Continue working toward the active goal.',
           cliType: meta.cliType,
           agentType: meta.agentType,
           ...(resumeAcpSessionId ? { resume: resumeAcpSessionId } : {}),
