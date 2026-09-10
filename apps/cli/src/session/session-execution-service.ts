@@ -67,7 +67,7 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-project-meta';
-import { readTimeoutEnv } from '@/lib/loro/timeout-utils';
+import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
   checkoutLocalProjectBranchAtRootPath,
@@ -1927,6 +1927,33 @@ export class SessionExecutionService {
         'Failed to clear cancel request',
         self.tryPromise(() => self.clearCancelRequest(options.sessionId))
       );
+
+      const sessionToDrain = options.session;
+      const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
+      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+        // Keep the execution owner until ACP has actually finished. Otherwise
+        // the next queued turn can reach the still-busy adapter after local abort.
+        yield* self
+          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
+          .pipe(
+            Effect.catchAll(() =>
+              self.tryPromise(async () => {
+                self.deps.logger.warn(
+                  `[${options.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+                );
+                try {
+                  await sessionToDrain.terminate(true);
+                } catch (error) {
+                  self.deps.logger.warn(
+                    `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+                  );
+                  // Failed termination is not permission to reuse a busy agent.
+                  await pendingPrompt;
+                }
+              })
+            )
+          );
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {

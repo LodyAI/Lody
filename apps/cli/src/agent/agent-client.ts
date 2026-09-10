@@ -648,6 +648,7 @@ export class AgentClient implements acp.Client {
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
+  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -2386,6 +2387,13 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  /** Includes raw ACP requests whose local caller has already been cancelled. */
+  get pendingPromptCompletion(): Promise<void> | null {
+    return this.pendingPrompts.size > 0
+      ? Promise.allSettled([...this.pendingPrompts]).then(() => undefined)
+      : null;
+  }
+
   async prompt(
     sessionId: ACPSessionId,
     prompt: acp.ContentBlock[],
@@ -2420,6 +2428,14 @@ export class AgentClient implements acp.Client {
         span.end({ outcome: 'undefined-promise' });
         return undefined;
       }
+
+      // A local abort does not finish the remote request. Track every raw
+      // request, including overlapping prompts used by acknowledged handoff.
+      this.pendingPrompts.add(promptPromise);
+      const releasePrompt = () => {
+        this.pendingPrompts.delete(promptPromise);
+      };
+      void promptPromise.then(releasePrompt, releasePrompt);
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;
