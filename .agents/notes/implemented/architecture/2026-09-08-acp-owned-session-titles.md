@@ -17,9 +17,11 @@ required splitting the single `usesAcpProvidedSessionTitle()` predicate into
 ownership and trust, because Codex tags its titles and emits a prompt-preview
 `fallback` first while Claude and Grok push one bare authoritative title, and
 conflating the two would have promoted Codex's preview to the session title. The
-cost is that title wording now belongs to the adapters. Branch naming, the last
-caller that could still start an isolated session, now derives its name locally,
-so session titles no longer start an extra ACP agent anywhere.
+cost is that title wording now belongs to the adapters. Branch naming was the last
+caller able to start an isolated session, and it is removed outright rather than
+reimplemented locally: deriving a git ref from prompt text publishes the prompt, and
+no prompt-based filter can prove a secret absent. Worktree sessions keep their
+`session/<id>` branch.
 
 ## The audit
 
@@ -137,8 +139,7 @@ and Grok, as it already was for Claude.
 naming resolved the persisted `titleGeneration` for whatever agent it was naming
 a branch for, so a value stored before this change would have kept steering
 Claude, Codex and Grok runs after their config disappeared from the UI. That
-lookup is gone outright: branch naming no longer reads the agent config for any
-provider (see the branch-naming change below).
+lookup is gone with the branch-naming path itself (below).
 
 ## Trade-offs and limits
 
@@ -156,65 +157,52 @@ keeps refining its title over the first few turns before freezing it, so a Grok
 session title can change after it first appears.
 
 Branch naming had to change too, or the isolated session would simply have moved
-from the title path to the branch path. `maybeRenameSessionBranchFromPrompt` runs
-at session-ready, before any turn, so an ACP title can never have arrived by then;
-with the title path skipped it would have started its own agent, leaving worktree
-sessions at exactly the same one isolated session as before.
+from the title path to the branch path. `maybeRenameSessionBranchFromPrompt` ran at
+session-ready, before any turn, so an ACP title can never have arrived by then; with
+the title path skipped it would have started its own agent, leaving worktree sessions
+at exactly the same one isolated session as before. It took three attempts to land,
+and the first two are recorded because each looks reasonable until you see why it
+fails.
 
-Two options were considered and rejected. Deferring the rename until the pushed
-title arrives moves a "once, at session creation" operation into the middle of a
-running conversation, where a turn may already have pushed the branch or opened a
-PR — `renameBranchWithAvailableSuffix` is a bare `git branch -m` with no upstream
-check. Dropping branch naming entirely and relying on the injected instruction
-("Name branches based on the task content", `session-execution-helpers.ts`) fails
-because `buildPrompt` runs only in `startSession`, and the instruction is stripped
-before storage, so it is absent from turn two onward and from every resumed
-session — trading a deterministic behaviour for one whose odds fall as the session
-grows. It is also injected only for `project.kind === 'github'`, while worktrees
-are also created for local projects with `useWorktree`.
+Deferring the rename until the pushed title arrives was rejected first: it moves a
+"once, at session creation" operation into the middle of a running conversation,
+where a turn may already have pushed the branch or opened a PR, and
+`renameBranchWithAvailableSuffix` was a bare `git branch -m` with no upstream check.
 
-What actually landed is simpler: `titleToBranchName` was always a pure transform,
-so the isolated agent only ever compressed the prompt into a shorter title first.
-Branch naming now prefers a title that is already stored or in flight, and
-otherwise converts the prompt directly. `deriveWorktreeBranchName` no longer
-takes a provider, env, launch spec or title config, and the branch path no longer
-reads the agent config at all.
+Deriving the name locally from the prompt landed next, and review found it publishes
+secrets. A branch name is a ref: it reaches the remote as soon as the session opens a
+PR, and asking an agent to "rotate the password before Friday" is ordinary. This was
+reachable before this branch too — the old `generateTitleIsolated` returned
+`sanitizeGeneratedTitle(taskPrompt)` on every failure path — but skipping title
+generation for the three ACP-owned agents turned a rare fallback into the common path.
 
-One deliberate behaviour change: a prompt that yields no valid name now leaves the
-managed `session/<id>` branch alone instead of renaming it to `task/<timestamp>`.
-Kebab conversion strips every non-ASCII character, so this is the normal outcome
-for a Chinese prompt — and it was the outcome before this change too, since the
-generator was asked for a title in the prompt's own language. The isolated session
-those sessions paid for could never have produced a usable branch name. A timeout
-now also falls back to the prompt instead of abandoning the rename.
+Two filters were then tried, and both failed for the same reason. The first stripped
+credential-shaped tokens and named the branch from what was left; a secret has no
+reliable shape, since `hunter2` is a password and an ordinary word, so a shape-based
+denylist removes what looks secret and keeps everything else — `Fix DB_PASSWORD=hunter2`
+and `Fix https://alice:hunter2@example.com` both survived it verbatim. The second
+failed closed on credential *syntax* (an assignment to a sensitive name, URL userinfo,
+known prefixes, PEM blocks, high-entropy runs) and caught those two, but any
+prompt-based check fails *open* on every miss, so plain prose like "the password is
+hunter2" still published. A boundary that fails open is not a boundary.
 
-Two issues found in review after the first implementation landed, both fixed here.
+So the path was removed rather than filtered a third time.
+`maybeRenameSessionBranchFromPrompt`, `deriveWorktreeBranchName`,
+`branch-name-generator.ts` and the now-unreachable `renameBranchWithAvailableSuffix` /
+`isManagedWorktreeBranchName` are deleted. A worktree session keeps the `session/<id>`
+branch `worktree-manager.ts` gave it. Nothing is silently lost: `syncSessionBranchName`
+still records the session's real branch after every turn, so an agent that renames it
+is picked up, and GitHub-project prompts already carry an instruction asking the agent
+to name branches after the task (`GITHUB_WORKTREE_SYSTEM_COMMANDS`). That instruction
+is not a replacement — `buildPrompt` runs only in `startSession` and the instruction is
+stripped before storage, so it is absent from turn two onward and from resumed
+sessions, and it is injected only for `project.kind === 'github'` while worktrees are
+also created for local projects with `useWorktree`.
 
-Naming a branch after the prompt publishes the prompt. A ref reaches the remote as
-soon as the session opens a PR, and asking an agent to "rotate sk_live_… before
-Friday" is ordinary. This was reachable before this branch too — the old
-`generateTitleIsolated` returned `sanitizeGeneratedTitle(taskPrompt)` on every
-failure path — but it went from a rare fallback to the common path for the three
-ACP-owned agents, so the exposure changed in kind.
-
-The first attempt stripped credential-shaped tokens and kept naming the branch from
-what was left. Review rejected it, correctly: a secret has no reliable shape —
-`hunter2` is a password and an ordinary word — so a shape-based denylist removes
-what looks secret and leaves everything that does not. `Fix DB_PASSWORD=hunter2`
-and `Fix https://alice:hunter2@example.com` both survived it verbatim.
-
-`tryBranchName` now fails closed instead. It matches the *syntax* that carries
-secrets rather than the secrets themselves — a value assigned to a sensitive name,
-URL userinfo, known key prefixes, PEM blocks, and 20+ alphanumeric runs mixing
-letters and digits — and returns null on any hit, leaving the session on its
-`session/<id>` branch. Failing closed is affordable only because it rarely fires on
-real work, which the tests pin in both directions: nine credential syntaxes refused,
-and six prompts that merely mention `auth`, `token`, `secret` or `credential`
-still named. It remains best-effort, and the note is explicit about that: prose
-like "the password is hunter2" carries no syntax to match. The sound alternative —
-never deriving a ref from prompt text at all — would cost branch naming entirely
-for the three ACP-owned agents, since no generated title exists when the branch is
-named.
+Restoring automatic naming needs a source provably isolated from the prompt. None
+exists at session-ready: the ACP title has not arrived yet, and the isolated
+generator's own fallback is the raw prompt. A title known to be model-generated rather
+than prompt-derived would qualify, but the current code cannot distinguish the two.
 
 Ownership also had to account for `BuiltinRuntimeOverrides`. The table describes the
 managed runtime each agent normally launches, but an override can aim the same

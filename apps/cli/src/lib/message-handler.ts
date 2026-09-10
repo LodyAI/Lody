@@ -254,7 +254,6 @@ import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/a
 import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
-import { tryBranchName } from '@/agent/branch-name-generator';
 import {
   SessionActivePresenceController,
   type SessionActivePresencePhase,
@@ -265,7 +264,6 @@ import {
 } from './session-activity-status';
 import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
-import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
   AgentClient,
   type AcpWriteTextFileEvidence,
@@ -274,10 +272,6 @@ import {
 } from 'src/agent/agent-client';
 import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from '@/session/worktree/worktree-manager';
-import {
-  isManagedWorktreeBranchName,
-  renameBranchWithAvailableSuffix,
-} from '@/session/worktree/branch-name-allocation';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -3155,8 +3149,6 @@ export class MessageHandler {
           customAcp,
           runtimeOverrides
         ),
-      maybeRenameSessionBranchFromPrompt: async (sessionId, session, prompt) =>
-        await this.maybeRenameSessionBranchFromPrompt(sessionId, session, prompt),
       processMessageQueue: async (sessionId) => await this.processMessageQueue(sessionId),
       syncLiveActivitySummary: async (userId) => {
         await this.syncLiveActivitySummary(userId);
@@ -9674,113 +9666,6 @@ export class MessageHandler {
     await this.codeCollabV2DiffStore.close();
     await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup');
     await this.sessionManager.cleanUp();
-  }
-
-  private async maybeRenameSessionBranchFromPrompt(
-    sessionId: SessionId,
-    session: ISession,
-    taskPrompt: string
-  ): Promise<void> {
-    const trimmedPrompt = taskPrompt.trim();
-    if (!trimmedPrompt) {
-      return;
-    }
-
-    let metaBranchName: string | null = null;
-    let reusableTitlePromise: Promise<string | null> | undefined;
-    try {
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
-      metaBranchName = meta?.branchName?.trim() || null;
-      const generatedMetaTitle = meta?.titleSource === 'generated' ? meta.title?.trim() : '';
-      reusableTitlePromise = generatedMetaTitle
-        ? Promise.resolve(generatedMetaTitle)
-        : this.titleGenerationInFlight.get(sessionId);
-      if (metaBranchName && !isManagedWorktreeBranchName(metaBranchName)) {
-        return;
-      }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to read session meta before branch rename: ${formatErrorMessage(error)}`
-      );
-    }
-
-    const branchName = await this.deriveWorktreeBranchName(
-      trimmedPrompt,
-      20_000,
-      reusableTitlePromise
-    );
-    if (!branchName) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: the prompt yields no usable branch name`
-      );
-      return;
-    }
-
-    const workdir = session.getWorkdir();
-    const currentBranch = await resolveGitBranchName(session.exec.bind(session), workdir);
-    if (!currentBranch || currentBranch === branchName) {
-      return;
-    }
-    if (!isManagedWorktreeBranchName(currentBranch)) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: not on a managed worktree branch (currentBranch=${currentBranch})`
-      );
-      return;
-    }
-    if (metaBranchName && metaBranchName !== currentBranch) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: branch changed before rename (metaBranchName=${metaBranchName} currentBranch=${currentBranch})`
-      );
-      return;
-    }
-
-    try {
-      const renamedBranch = await renameBranchWithAvailableSuffix({
-        exec: session.exec.bind(session),
-        workdir,
-        currentBranch,
-        desiredBranchName: branchName,
-        maxLength: 50,
-      });
-      if (!renamedBranch) {
-        this.logger.debug(
-          `[${sessionId}] Skipping branch rename: branch changed or git rejected the rename`
-        );
-        return;
-      }
-      await this.turnPostProcessingService.syncSessionBranchName(sessionId, session);
-    } catch (error) {
-      this.logger.debug(`[${sessionId}] Failed to rename branch: ${formatErrorMessage(error)}`);
-    }
-  }
-
-  /**
-   * Derives a worktree branch name without ever starting an ACP agent.
-   *
-   * `titleToBranchName` is a pure transform, so the only thing an isolated agent
-   * ever added here was compressing the prompt into a shorter title first. A title
-   * is still preferred when one is already stored or in flight for this session
-   * (agents that keep the local generator produce one anyway); otherwise the prompt
-   * names the branch directly. A slow or failed title never blocks or cancels the
-   * rename, because the prompt is always an acceptable naming input.
-   */
-  private async deriveWorktreeBranchName(
-    taskPrompt: string,
-    timeoutMs: number,
-    reusableTitlePromise?: Promise<string | null>
-  ): Promise<string | null> {
-    let title: string | null | undefined;
-    if (reusableTitlePromise) {
-      try {
-        title = await withTimeoutOrUndefined(reusableTitlePromise, timeoutMs);
-      } catch (error) {
-        this.logger.debug(
-          `[branch-name] Falling back to the prompt after title generation failed: ${formatErrorMessage(error)}`
-        );
-      }
-    }
-    return tryBranchName(title?.trim() || taskPrompt);
   }
 
   private async notifySessionCompleted(

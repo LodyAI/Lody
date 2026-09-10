@@ -105,11 +105,11 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Builtin Claude, Codex and Grok own session titles via `session_info_update`
-  (`acpOwnsSessionTitleGeneration()`) unless a runtime override is set: store them only after
-  `sanitizeLodyInternalInstructions`, never via `title-generator.ts`. Claude and Grok push
-  untagged and are trusted (`trustsUntaggedAcpSessionTitle()`); Codex is not — take only its
-  `explicit` `_meta.lody.titleSource` with `messagePhase === 'final_answer'`, not its
-  first-prompt `fallback`. Untyped chunks, error/warning payloads and instruction tails never
-  qualify. Each isolated run owns and removes a temp dir; branch naming starts none and skips
-  prompts carrying credential syntax.
+- Builtin Claude, Codex and Grok own session titles
+  (`acpOwnsSessionTitleGeneration()`) unless a runtime override is set; store only after
+  `sanitizeLodyInternalInstructions`. Claude and Grok push untagged and are trusted
+  (`trustsUntaggedAcpSessionTitle()`); Codex is not — only `explicit` `titleSource` with
+  `messagePhase === 'final_answer'` qualifies, never its first-prompt `fallback`. Untyped chunks,
+  error/warning payloads and instruction tails never qualify.
+- NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
+  prompt secret-free. Worktree sessions keep `session/<id>` unless the agent renames it.

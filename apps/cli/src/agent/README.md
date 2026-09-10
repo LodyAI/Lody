@@ -206,28 +206,22 @@ A runtime override revokes ownership. `BuiltinRuntimeOverrides` can aim the same
 get no title at all — generator skipped, nothing pushed, and the setting that would fix it
 hidden — so an overridden runtime keeps the local generator.
 
-Branch naming never starts an isolated session. `titleToBranchName` is a pure transform, so
-the only thing an agent ever added was compressing the prompt into a shorter title first.
-`deriveWorktreeBranchName` prefers a title already stored or in flight for the session and
-otherwise converts the prompt directly, falling back to the prompt if a pending title misses
-its budget. When no valid name can be derived — kebab conversion drops every non-ASCII
-character, so this is the normal outcome for a Chinese prompt — the managed `session/<id>`
-branch is left alone rather than renamed to a timestamp.
+The daemon does not name branches. A worktree session stays on the `session/<id>` branch
+`worktree-manager.ts` created for it, and `syncSessionBranchName` records whatever branch the
+session is actually on after every turn, so an agent that renames the branch itself is picked
+up. For GitHub projects the agent is asked to do exactly that — see
+`GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
 
-Naming a branch after a prompt publishes the prompt: a ref reaches the remote as soon as the
-session opens a PR, and "rotate the key before Friday" is an ordinary request. `tryBranchName`
-therefore **fails closed** — on any credential signal it returns null and the session keeps its
-`session/<id>` branch. Stripping the offending token was tried first and abandoned: a secret has
-no reliable shape (`hunter2` is both a password and an ordinary word), so removing what looks
-secret-shaped leaves everything that does not. The signals are the *syntax* that carries
-secrets — a value assigned to a sensitive name, URL userinfo, known key prefixes, PEM blocks,
-and 20+ alphanumeric runs mixing letters and digits.
-
-This is best-effort, not a guarantee: prose like "the password is hunter2" carries no syntax to
-match. It leans wide on purpose, because a false positive costs one branch name while a false
-negative publishes a secret. The `it.each` tables in `tests/branch-name-generator.test.ts` pin
-both directions — nine credential syntaxes refused, and six prompts that merely mention `auth`,
-`token`, `secret` or `credential` still named.
+This used to be an automatic prompt-to-branch rename, removed because it could not be made
+safe. A branch name is a ref: it reaches the remote as soon as the session opens a PR, so
+deriving one from prompt text publishes prompt text, and "rotate the password before Friday"
+is an ordinary request. Two filters were tried and both failed for the same reason — a secret
+has no reliable shape, since `hunter2` is a password and an ordinary word. Stripping
+credential-shaped tokens left everything that did not look like one; failing closed on
+credential *syntax* still let plain prose through, so it fails open on every miss and cannot
+be a security boundary. Naming refs after user text needs a source provably isolated from the
+prompt, and no such source exists at session-ready: the ACP title has not arrived yet, and the
+isolated generator's own fallback is the raw prompt.
 
 ### Local project identity
 

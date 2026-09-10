@@ -545,11 +545,6 @@ export type SessionExecutionServiceDeps = {
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides
   ) => Promise<void>;
-  maybeRenameSessionBranchFromPrompt: (
-    sessionId: SessionId,
-    session: ISession,
-    prompt: string
-  ) => Promise<void>;
   processMessageQueue: (sessionId: SessionId) => Promise<void>;
   syncLiveActivitySummary?: (userId: string) => Promise<void>;
   collectMachineResources: () => Promise<MachineResourceInfo>;
@@ -4875,14 +4870,6 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          if (shouldPrepareWorktree) {
-            void self.deps.maybeRenameSessionBranchFromPrompt(
-              sessionId,
-              session,
-              agentConfig.prompt ?? ''
-            );
-          }
-
           yield* self.tryPromise(() =>
             traceAsync(
               self.deps.logger,

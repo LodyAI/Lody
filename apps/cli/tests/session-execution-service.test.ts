@@ -180,7 +180,6 @@ const createBaseDeps = (
     },
     recordChatFailure: vi.fn(async () => {}),
     maybeGenerateAndStoreSessionTitle: vi.fn(async () => {}),
-    maybeRenameSessionBranchFromPrompt: vi.fn(async () => {}),
     processMessageQueue: vi.fn(async () => {}),
     collectMachineResources: vi.fn(async () => ({
       totalMemoryGB: 1,
