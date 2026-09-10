@@ -51,11 +51,16 @@ substitutes for tokens rather than joining them. A deployment that reports no
 per-model cost simply has no split block on a cost card, the same as any range
 without recorded usage.
 
-Money keeps its digits and loses its cents. Choosing cost as the measure is
+The measure travels with the numbers rather than beside them, so a headline can
+never be labelled in one unit and computed in another.
+
+Money in the headline keeps its digits and loses its cents. Choosing cost as the measure is
 usually about the size of the figure, so the whole number survives; on a four-figure
 sum the cents are noise, while below a thousand they carry the meaning and come
 back. Only past a billion does the figure compact, because by then the digits are a
-wall and a fixed layout budgets a fixed width for its headline. The card names the workspace and, by default, no one else. The
+wall and a fixed layout budgets a fixed width for its headline. A stat cell or a
+legend row has a quarter of that width or less, so those always compact: a figure
+clipped to fit states a different number than the one measured. The card names the workspace and, by default, no one else. The
 member mode is an explicit choice, is offered only when the range has more than
 one contributor, and identifies members by display name and avatar; an email is
 never drawn onto the image.

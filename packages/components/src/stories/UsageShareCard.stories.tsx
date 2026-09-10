@@ -22,7 +22,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const START_MS = Date.UTC(2025, 8, 7); // Sunday
 
 /** Deterministic year of usage: a ramping habit with weekends off and a burst. */
-function buildCalendar(): UsageCalendarData {
+function buildCalendar(scale = 1): UsageCalendarData {
   return {
     startMs: START_MS,
     endMs: START_MS + (USAGE_CALENDAR_CELLS - 1) * DAY_MS,
@@ -33,7 +33,7 @@ function buildCalendar(): UsageCalendarData {
       const ramp = 0.3 + (0.7 * index) / USAGE_CALENDAR_CELLS;
       const burst = index > 300 && index < 330 ? 2.1 : 1;
       const tokens =
-        weekend && index % 13 !== 0 ? 0 : Math.round(wave * ramp * burst * 9_400_000);
+        weekend && index % 13 !== 0 ? 0 : Math.round(wave * ramp * burst * 9_400_000 * scale);
       return {
         dayStartMs,
         date: new Date(dayStartMs).toISOString().slice(0, 10),
@@ -108,15 +108,23 @@ function buildTimeline(
 }
 
 const MONTH = buildTimeline('month', buildBuckets(30, DAY_MS, 41_000_000), DAY_MS);
+/** A spend large enough that spelling it out in a stat cell would not fit. */
+const HUGE_SCALE = 1000;
+const HUGE = buildTimeline('month', buildBuckets(30, DAY_MS, 41_000_000 * HUGE_SCALE), DAY_MS);
+const HUGE_CALENDAR = buildCalendar(HUGE_SCALE);
 const DAY = buildTimeline('day', buildBuckets(24, HOUR_MS, 3_100_000), HOUR_MS);
 const WEEK = buildTimeline('week', buildBuckets(7 * 24, HOUR_MS, 1_900_000), HOUR_MS);
 
 function cardPropsFor(
   timeline: SettingsUsageTimelineData,
   rangeLabel: string,
-  metric: UsageCalendarMetric
+  metric: UsageCalendarMetric,
+  // The calendar and the timeline describe the same workspace in production, so a
+  // fixture that scales one without the other renders a card that cannot exist:
+  // the headline comes from the timeline and the peak from the calendar window.
+  calendarData: UsageCalendarData = CALENDAR
 ) {
-  const calendar = createUsageCalendarModel(CALENDAR, metric);
+  const calendar = createUsageCalendarModel(calendarData, metric);
   return {
     calendar,
     stats: computeUsageShareStats(calendar, timeline, timeline.range, metric),
@@ -139,6 +147,9 @@ const meta = {
     aspect: { control: 'inline-radio', options: ['portrait', 'wide'] },
     subject: { control: 'inline-radio', options: ['personal', 'team'] },
     backdrop: { control: 'select', options: ['none', 'lody', 'aurora', 'ocean', 'sunset'] },
+    // Metric is not a control: it belongs to `stats`, and a story that set it
+    // independently would format one metric's numbers in the other's unit.
+    stats: { control: false },
     theme: { control: 'inline-radio', options: [undefined, 'light', 'dark'] },
   },
   tags: ['autodocs'],
@@ -200,7 +211,16 @@ export const CostMetric: Story = {
   args: {
     ...cardPropsFor(MONTH, 'Last 30 days', 'costUSD'),
     aspect: 'portrait',
-    metric: 'costUSD',
+    backdrop: 'sunset',
+    theme: 'light',
+  },
+};
+
+/** Nine-figure spend: the headline keeps its digits, the narrow slots compact. */
+export const CostMetricLarge: Story = {
+  args: {
+    ...cardPropsFor(HUGE, 'Last 30 days', 'costUSD', HUGE_CALENDAR),
+    aspect: 'portrait',
     backdrop: 'sunset',
     theme: 'light',
   },

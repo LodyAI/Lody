@@ -33,8 +33,11 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`: its two
   aspects are exact pixel sizes, its period is the page's selected range, and its
   headline is that range's timeline total, so page and image cannot disagree. Derive
-  every number through `usage-share-stats.ts`, threading the metric so the headline,
-  cells, graphic shading and both splits always read one unit. Tokens and member
+  every number through `usage-share-stats.ts`, which stamps the metric onto the stats
+  it derives — never pass a metric beside them — so the headline, cells, graphic
+  shading and both splits always read one unit. Money is formatted per slot:
+  `formatUsdCompact` for the headline, `formatUsdTight` for cells and legend rows;
+  never let `truncate` decide, because an ellipsis on a number is a wrong number. Tokens and member
   anonymity are the defaults; cost substitutes for tokens rather than joining them,
   and member slices carry display name and avatar only — never an email. Both share cards use the one capture pipeline in `lib/share-image-export.ts`
   and the one theme pinning in `components/share-theme-scope.ts`; do not fork either.

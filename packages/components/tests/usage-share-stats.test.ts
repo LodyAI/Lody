@@ -291,8 +291,14 @@ describe('usage share stats', () => {
       )
     ).toEqual([6, 3]);
 
+    // The unit travels with the numbers, so a caller cannot pair one metric's
+    // figures with the other's label.
+    expect(stats.metric).toBe('costUSD');
+
     // The same fixtures in tokens produce the token figures, not the dollar ones.
-    expect(computeUsageShareStats(calendar, timeline, 'day', 'tokens').total).toBe(9000);
+    const inTokens = computeUsageShareStats(calendar, timeline, 'day', 'tokens');
+    expect(inTokens.total).toBe(9000);
+    expect(inTokens.metric).toBe('tokens');
   });
 
   it('returns no slices when the range recorded no usage', () => {

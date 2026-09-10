@@ -27,6 +27,12 @@ export type UsageShareSlice = {
 export type UsageShareStats = {
   trio: UsageShareTrio;
   /**
+   * The unit every number here is in. It travels with the numbers rather than
+   * beside them: a caller that passed stats derived in one metric and a label in
+   * another would render a token count with a dollar sign in front of it.
+   */
+  metric: UsageCalendarMetric;
+  /**
    * The range's total in the chosen metric. The card is denominated end to end —
    * headline, cells, graphic and split all read the same unit — so carrying both
    * would invite a card that mixes them.
@@ -89,6 +95,7 @@ export function computeUsageShareStats(
     const total = pick(timeline.totals);
     return {
       trio: 'interval',
+      metric,
       total,
       activeCount: active,
       longestStreak: longest,
@@ -116,6 +123,7 @@ export function computeUsageShareStats(
 
   return {
     trio: 'daily',
+    metric,
     total,
     activeCount: active,
     longestStreak: longest,

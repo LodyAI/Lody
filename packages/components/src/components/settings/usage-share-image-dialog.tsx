@@ -384,7 +384,6 @@ export function UsageShareImageDialog({
                   subject={subject}
                   backdrop={backdrop}
                   footer={footer}
-                  metric={metric}
                   showQr={showQr}
                   theme={theme === 'app' ? undefined : theme}
                   onAssetsReadyChange={setAssetsReady}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatUsdCompact } from '../src/lib/format-compact-number';
+import { formatUsdCompact, formatUsdTight } from '../src/lib/format-compact-number';
 
 describe('formatUsdCompact', () => {
   it('keeps small amounts exact, where the cents are the point', () => {
@@ -37,5 +37,17 @@ describe('formatUsdCompact', () => {
 
   it('treats a non-finite amount as zero rather than printing NaN', () => {
     expect(formatUsdCompact(Number.NaN, 'en')).toBe('$0.00');
+  });
+
+  it('gives narrow slots a form that cannot outgrow them', () => {
+    // A stat cell gets a quarter of the headline's width; spelling the figure out
+    // there produced "$42,040…", and an ellipsis on a number is a wrong number.
+    expect(formatUsdTight(176_568, 'en')).toBe('$176.6K');
+    expect(formatUsdTight(5_297_047, 'en')).toBe('$5.3M');
+    // Small amounts still say exactly what they are.
+    expect(formatUsdTight(36.88, 'en')).toBe('$36.88');
+    for (const value of [1e3, 1e6, 1e9, 1e12]) {
+      expect(formatUsdTight(value, 'en').length).toBeLessThanOrEqual(8);
+    }
   });
 });

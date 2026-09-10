@@ -63,3 +63,20 @@ export function formatUsdCompact(value: number, locale: string | null | undefine
       : { notation: 'compact' as const, maximumFractionDigits: 1 }),
   }).format(safeValue);
 }
+
+/**
+ * Money for a slot too narrow to spell a figure out — a stat cell or a legend row,
+ * which get a quarter of a headline's width or less. Always compact above a
+ * thousand, so the string cannot outgrow its box; the alternative is `truncate`,
+ * and an ellipsis on a number renders a different number than the one measured.
+ */
+export function formatUsdTight(value: number, locale: string | null | undefined): string {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  if (Math.abs(safeValue) < USD_CENTS_BELOW) return formatUsdAmount(safeValue, locale);
+  return new Intl.NumberFormat(locale ?? 'en', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(safeValue);
+}

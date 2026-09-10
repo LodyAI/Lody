@@ -2,17 +2,17 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { cn } from '@/lib/utils';
-import { formatCompactNumber, formatUsdCompact } from '@/lib/format-compact-number';
+import {
+  formatCompactNumber,
+  formatUsdCompact,
+  formatUsdTight,
+} from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import lodyLogo from '@/assets/lody-icon.png';
-import {
-  createUsageHeatScale,
-  type UsageCalendarMetric,
-  type UsageCalendarModel,
-} from './usage-calendar-model';
+import { createUsageHeatScale, type UsageCalendarModel } from './usage-calendar-model';
 import type { UsageShareGraphic, UsageShareSlice, UsageShareStats } from './usage-share-stats';
 
 /**
@@ -81,11 +81,6 @@ export interface UsageShareCardProps {
   aspect?: UsageShareCardAspect;
   subject?: UsageShareCardSubject;
   backdrop?: UsageShareCardBackdrop;
-  /**
-   * What the whole card counts. Tokens by default: a workspace's spend is nobody
-   * else's business unless the person sharing chooses to make it the subject.
-   */
-  metric?: UsageCalendarMetric;
   shareUrl?: string;
   showQr?: boolean;
   /** Sign-off placement; `canvas` needs a backdrop and falls back to `card` without one. */
@@ -476,7 +471,6 @@ export function UsageShareCard({
   aspect = 'portrait',
   subject = 'personal',
   backdrop = 'lody',
-  metric = 'tokens',
   shareUrl = DEFAULT_SHARE_URL,
   showQr = true,
   footer: footerPlacement = 'card',
@@ -526,11 +520,26 @@ export function UsageShareCard({
   const framed = backdrop !== 'none';
   // Without a backdrop there is nothing to print the sign-off on.
   const onCanvas = footerPlacement === 'canvas' && framed;
+  // The unit comes with the numbers, so the card cannot be told one thing and
+  // handed another.
+  const { metric } = stats;
   const slices = subject === 'team' ? memberSlices : modelSlices;
   // Every number on the card goes through this, so a cost card can never print a
   // token count beside a dollar figure.
-  const formatValue = (value: number) =>
+  /**
+   * The headline is the subject and gets the metric's own language: compact for
+   * tokens, digits-to-a-billion for money.
+   */
+  const formatHeadline = (value: number) =>
     metric === 'tokens' ? formatCompactNumber(value, locale) : formatUsdCompact(value, locale);
+  /**
+   * A stat cell has a quarter of the headline's width and a legend row less than
+   * that, so those always compact. Letting the fuller form through and relying on
+   * `truncate` produced `$42,040…` — an ellipsis on a number is a wrong number,
+   * which is worse than a rounded one.
+   */
+  const formatTight = (value: number) =>
+    metric === 'tokens' ? formatCompactNumber(value, locale) : formatUsdTight(value, locale);
 
   // Same four facts at every range, only the unit changes: how often, how
   // consistently, how much on a typical unit, how much at the best one.
@@ -541,15 +550,15 @@ export function UsageShareCard({
           { label: t('workspace.usage.skyline.longestStreak'), value: String(stats.longestStreak) },
           {
             label: t('workspace.usage.skyline.averagePerInterval'),
-            value: formatValue(stats.average),
+            value: formatTight(stats.average),
           },
-          { label: t('workspace.usage.skyline.peakInterval'), value: formatValue(stats.peak) },
+          { label: t('workspace.usage.skyline.peakInterval'), value: formatTight(stats.peak) },
         ]
       : [
           { label: t('workspace.usage.skyline.activeDays'), value: String(stats.activeCount) },
           { label: t('workspace.usage.skyline.longestStreak'), value: String(stats.longestStreak) },
-          { label: t('workspace.usage.skyline.dailyAverage'), value: formatValue(stats.average) },
-          { label: t('workspace.usage.skyline.peakDay'), value: formatValue(stats.peak) },
+          { label: t('workspace.usage.skyline.dailyAverage'), value: formatTight(stats.average) },
+          { label: t('workspace.usage.skyline.peakDay'), value: formatTight(stats.peak) },
         ];
   // 16:9 puts the cells on the hero's baseline, where a fourth would not fit.
   const trioCells = wide ? allCells.slice(0, 3) : allCells;
@@ -561,7 +570,7 @@ export function UsageShareCard({
         wide ? TEXT.heroWide : TEXT.hero
       )}
     >
-      {formatValue(stats.total)}
+      {formatHeadline(stats.total)}
     </span>
   );
   const dayFormat = new Intl.DateTimeFormat(locale, {
@@ -748,7 +757,7 @@ export function UsageShareCard({
             subject={subject}
             compact
             locale={locale}
-            formatValue={formatValue}
+            formatValue={formatTight}
             split={rhythm.split}
             rows={rhythm.rows}
           />
@@ -770,7 +779,7 @@ export function UsageShareCard({
             subject={subject}
             compact={false}
             locale={locale}
-            formatValue={formatValue}
+            formatValue={formatTight}
             split={rhythm.split}
             rows={rhythm.rows}
           />

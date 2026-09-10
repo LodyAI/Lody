@@ -77,7 +77,20 @@ bounded the width but threw away the thing a cost card is usually chosen to show
 stages — cents go above a thousand, the figure itself only past a billion — so
 `$5,297` and `$1,234,568` survive whole. Measured again on the 16:9 card, the worst
 surviving case (`$999,999,999`) leaves a 59px gap where the old formatting
-overlapped by 18px. Member identification is a second opt-in, is offered only when the range
+overlapped by 18px.
+
+Width is per slot, not per card. Preserving digits in the headline pushed the
+problem into the stat cells, which have a quarter of its width and rendered
+`$42,040…` — an ellipsis on a number is a wrong number, worse than a rounded one,
+and `truncate` had been quietly producing it. `formatUsdTight` always compacts
+above a thousand and serves the cells and the legend, while the headline keeps
+`formatUsdCompact`.
+
+The same screenshot exposed an API trap: `metric` was a card prop separate from
+the `stats` it described, so a caller could pair one metric's figures with the
+other's unit — which is exactly what a Storybook control did, rendering 1.26
+billion tokens as `$1.3B`. The metric now lives inside `UsageShareStats`, stamped
+by the function that derives it, and the card reads it from there. Member identification is a second opt-in, is offered only when the range
 has more than one contributor, and carries display name and avatar only — the
 timeline also holds emails, and `computeUsageShareMemberSlices` never reads them.
 A test asserts no email reaches the slices.
