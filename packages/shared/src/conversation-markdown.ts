@@ -9,18 +9,25 @@
  *
  * ## Budget
  *
- * The copied text targets ~20k tokens / 50k characters so it can be pasted into
+ * The copied text targets ~60k tokens / 150k characters so it can be pasted into
  * another chat without blowing its context. Character count alone is not enough:
- * CJK text is roughly one token per character, so 50k CJK characters is ~50k
- * tokens, not 20k. `estimateTokenCount` approximates both scripts and the output
+ * CJK text is roughly one token per character, so 150k CJK characters is ~150k
+ * tokens, not 60k. `estimateTokenCount` approximates both scripts and the output
  * must satisfy BOTH bounds.
  *
  * ## What gets trimmed — and what never does
  *
- * **Message text is never trimmed.** User text, assistant text, and proposed
- * plans are reproduced verbatim at every level; if they alone exceed the budget
- * the result goes over and reports `overBudget`. Everything the agent produced
- * *around* the prose degrades instead, in this order:
+ * The point of this export is to move a conversation's CONTEXT to another agent,
+ * so prose-shaped content outranks everything the agent produced around it.
+ *
+ * **Message text is never trimmed and thinking is never dropped.** User text,
+ * assistant text and proposed plans are reproduced verbatim at every level; if
+ * they alone exceed the budget the result goes over and reports `overBudget`.
+ * Thinking is what lets the receiving conversation inherit the reasoning, so it
+ * degrades by CAPPING (head + tail, middle elided), never by disappearing.
+ * Only heading levels inside prose are rewritten — see `demoteMarkdownHeadings`.
+ *
+ * Everything else degrades first, in this order:
  *
  * | Level | Effect |
  * | ----- | ------ |
@@ -28,12 +35,19 @@
  * | 1 | Tool results capped at 4000 chars, terminal tail 2048 |
  * | 2 | Tool results capped at 1000 chars, terminal tail 512 |
  * | 3 | Terminal output dropped (command kept), tool results capped at 300 |
- * | 4 | Thinking dropped |
- * | 5 | Tool calls collapsed to one-line summaries |
+ * | 4 | Tool calls collapsed to ONE per-turn summary with counts |
+ * | 5 | Thinking capped at 2000 chars |
+ * | 6 | Thinking capped at 500 chars |
+ *
+ * Collapsing tool calls before touching thinking is deliberate. A per-turn
+ * summary costs a few dozen characters where one bold line per call cost up to
+ * 120 each, so level 4 frees far more budget than dropping thinking ever did —
+ * which is why most conversations never reach levels 5 and 6 at all.
  *
  * Degradation is recency-weighted: levels are raised on OLD turns first and the
  * last `recentEntryCount` turns keep their detail as long as possible, because
- * the tail of a conversation is what people actually paste elsewhere.
+ * the tail of a conversation is what people actually paste elsewhere. Combined
+ * with the capping above, the reasoning that is still live survives longest.
  */
 
 import type { MessageContent, ToolCallContent } from './ai';
@@ -45,11 +59,13 @@ import type { SessionHistoryInput } from './schema';
 import { redactSensitiveTokens } from './replay-prompt-builder';
 
 /** Character ceiling for the copied Markdown. */
-export const CONVERSATION_MARKDOWN_MAX_CHARS = 50_000;
+export const CONVERSATION_MARKDOWN_MAX_CHARS = 150_000;
 /** Estimated-token ceiling for the copied Markdown. */
-export const CONVERSATION_MARKDOWN_MAX_TOKENS = 20_000;
+export const CONVERSATION_MARKDOWN_MAX_TOKENS = 60_000;
 /** Trailing turns that keep full detail while older ones degrade first. */
 export const CONVERSATION_MARKDOWN_RECENT_ENTRIES = 4;
+
+type ToolCallItem = Extract<MessageContent, { type: 'tool_call' }>;
 
 /**
  * A prose-only display message with an optional estimate for its full persisted
@@ -64,6 +80,18 @@ export interface ConversationMessage {
   estimatedTokens?: number;
   /** Model recorded on this turn; never the composer's current selection. */
   modelName?: string;
+}
+
+/**
+ * Model recorded on a turn. `modelInfo` is what actually ran; `inputConfig` is
+ * only what was requested, so it is the last resort and never overrides.
+ */
+export function resolveTurnModelName(
+  entry: Pick<SessionHistoryInput, 'modelInfo' | 'inputConfig'>
+): string | undefined {
+  return (
+    entry.modelInfo?.name || entry.modelInfo?.modelId || entry.inputConfig?.modelId || undefined
+  );
 }
 
 /**
@@ -89,7 +117,7 @@ export function collectConversationMessages(history: SessionHistoryInput[]): Con
         role: entry.role,
         text: texts.join('\n\n'),
         estimatedTokens: estimateStoredMessageTokens((entry.items ?? []) as MessageContent[]),
-        modelName: entry.modelInfo?.name || entry.modelInfo?.modelId || entry.inputConfig?.modelId,
+        modelName: resolveTurnModelName(entry),
       });
     }
   }
@@ -154,15 +182,15 @@ export interface ConversationMarkdownStats {
   estimatedTokens: number;
   /** History entries rendered. */
   entryCount: number;
-  /** Terminal output was dropped from at least one tool call. */
+  /** Terminal output was dropped from at least one rendered tool call. */
   terminalOutputOmitted: boolean;
   /** Terminal output was tail-truncated in at least one tool call. */
   terminalOutputTruncated: boolean;
-  /** Thinking blocks were dropped from at least one turn. */
-  thinkingOmitted: boolean;
+  /** Thinking was capped in at least one turn. Thinking is never dropped whole. */
+  thinkingTruncated: boolean;
   /** Tool result bodies that were truncated. */
   toolResultsTruncated: number;
-  /** Tool calls were collapsed to one-line summaries. */
+  /** Tool calls were collapsed to per-turn summaries, dropping their bodies. */
   toolCallsCollapsed: boolean;
   /** Unique file paths listed in the trailing reference section. */
   pathsCount: number;
@@ -179,6 +207,22 @@ export interface BuildConversationMarkdownOptions {
   history: SessionHistoryInput[];
   /** Rendered as the document's `#` heading when present. */
   title?: string;
+  /** Provenance line for the header, e.g. `owner/repo · branch`. */
+  source?: string;
+  /**
+   * Display names for user turns, keyed by `userId`. Names reach the per-turn
+   * headings only when the conversation actually has more than one human in it;
+   * repeating one name on every turn of a solo session is pure noise.
+   */
+  participants?: Record<string, string>;
+  /**
+   * Caller-localized line stating that the final assistant turn had not finished
+   * when the copy was taken. It belongs in the header next to the trim notice
+   * for the same reason that one does: the reader — often another agent — has to
+   * know the transcript is incomplete BEFORE reading it, not after. Callers must
+   * not append their own trailing note instead.
+   */
+  incompleteFinalResponse?: string;
   maxChars?: number;
   maxTokens?: number;
   recentEntryCount?: number;
@@ -224,7 +268,11 @@ function isWideScriptCodePoint(codePoint: number): boolean {
 }
 
 interface LevelConfig {
-  includeThinking: boolean;
+  /**
+   * `Infinity` = uncapped. Never 0: thinking degrades by capping so the
+   * receiving conversation always inherits some of the reasoning.
+   */
+  thinkingCap: number;
   includeTerminalOutput: boolean;
   terminalTailChars: number;
   /** `Infinity` = uncapped, `0` = drop the body entirely. */
@@ -234,42 +282,49 @@ interface LevelConfig {
 
 const LEVELS: readonly LevelConfig[] = [
   {
-    includeThinking: true,
+    thinkingCap: Infinity,
     includeTerminalOutput: true,
     terminalTailChars: Infinity,
     toolTextCap: Infinity,
     collapseToolCalls: false,
   },
   {
-    includeThinking: true,
+    thinkingCap: Infinity,
     includeTerminalOutput: true,
     terminalTailChars: 2048,
     toolTextCap: 4000,
     collapseToolCalls: false,
   },
   {
-    includeThinking: true,
+    thinkingCap: Infinity,
     includeTerminalOutput: true,
     terminalTailChars: 512,
     toolTextCap: 1000,
     collapseToolCalls: false,
   },
   {
-    includeThinking: true,
+    thinkingCap: Infinity,
     includeTerminalOutput: false,
     terminalTailChars: 0,
     toolTextCap: 300,
     collapseToolCalls: false,
   },
   {
-    includeThinking: false,
+    thinkingCap: Infinity,
     includeTerminalOutput: false,
     terminalTailChars: 0,
-    toolTextCap: 300,
-    collapseToolCalls: false,
+    toolTextCap: 0,
+    collapseToolCalls: true,
   },
   {
-    includeThinking: false,
+    thinkingCap: 2000,
+    includeTerminalOutput: false,
+    terminalTailChars: 0,
+    toolTextCap: 0,
+    collapseToolCalls: true,
+  },
+  {
+    thinkingCap: 500,
     includeTerminalOutput: false,
     terminalTailChars: 0,
     toolTextCap: 0,
@@ -297,7 +352,7 @@ function buildPassSequence(): Array<{ oldLevel: number; recentLevel: number }> {
 interface RenderTally {
   terminalOutputOmitted: boolean;
   terminalOutputTruncated: boolean;
-  thinkingOmitted: boolean;
+  thinkingTruncated: boolean;
   toolResultsTruncated: number;
   toolCallsCollapsed: boolean;
 }
@@ -315,6 +370,53 @@ function escapeInlineHtml(text: string): string {
 function toSummaryLine(text: string, maxChars = 120): string {
   const flattened = text.replace(/\s+/g, ' ').trim();
   return flattened.length > maxChars ? `${flattened.slice(0, maxChars - 1)}…` : flattened;
+}
+
+/** Turn headings are `##`, so prose headings have to start at `###`. */
+const HEADING_SHIFT = 2;
+const MAX_HEADING_LEVEL = 6;
+
+/**
+ * Push ATX headings inside a message body below the turn heading.
+ *
+ * Message text is reproduced verbatim, and agents emit `#` / `##` headings all
+ * the time. Left alone they outrank the `## User` / `## Assistant` headings and
+ * the document loses its turn structure entirely. Shifting the level is the one
+ * edit allowed on prose: no characters are removed, only `#` markers added.
+ *
+ * Fenced blocks are skipped so a `# comment` inside a shell snippet survives.
+ */
+function demoteMarkdownHeadings(text: string): string {
+  if (!text.includes('#')) {
+    return text;
+  }
+  const lines = text.split('\n');
+  let fence: string | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence !== null) {
+      if (
+        fenceMatch?.[1] &&
+        fenceMatch[1][0] === fence[0] &&
+        fenceMatch[1].length >= fence.length
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fenceMatch?.[1]) {
+      fence = fenceMatch[1];
+      continue;
+    }
+    const heading = /^( {0,3})(#{1,6})(?=\s|$)/.exec(line);
+    if (!heading?.[2]) {
+      continue;
+    }
+    const level = Math.min(MAX_HEADING_LEVEL, heading[2].length + HEADING_SHIFT);
+    lines[index] = `${heading[1] ?? ''}${'#'.repeat(level)}${line.slice(heading[0].length)}`;
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -428,7 +530,7 @@ function renderToolCallContent(
   }
 }
 
-function toolCallLabel(item: Extract<MessageContent, { type: 'tool_call' }>): string {
+function toolCallLabel(item: ToolCallItem): string {
   const base = item.title?.trim() || item.kind || 'Tool';
   const paths = (item.locations ?? []).map((location) => location.path).filter(Boolean);
   return paths.length > 0 && !paths.some((path) => base.includes(path))
@@ -436,17 +538,13 @@ function toolCallLabel(item: Extract<MessageContent, { type: 'tool_call' }>): st
     : base;
 }
 
-function renderToolCall(
-  item: Extract<MessageContent, { type: 'tool_call' }>,
-  level: LevelConfig,
-  tally: RenderTally
-): string | null {
-  const label = toSummaryLine(toolCallLabel(item));
+/** The agent's own name for the tool, falling back to the ACP kind. */
+function toolCallName(item: ToolCallItem): string {
+  return item.toolName?.trim() || item.kind?.trim() || 'tool';
+}
 
-  if (level.collapseToolCalls) {
-    tally.toolCallsCollapsed = true;
-    return `- **${label}**`;
-  }
+function renderToolCall(item: ToolCallItem, level: LevelConfig, tally: RenderTally): string | null {
+  const label = toSummaryLine(toolCallLabel(item));
 
   const blocks: string[] = [];
   for (const block of item.content ?? []) {
@@ -462,11 +560,37 @@ function renderToolCall(
   return detailsBlock(label, blocks.join('\n\n'));
 }
 
+/**
+ * Replace a turn's tool calls with a single counted summary.
+ *
+ * One line per call was the old floor and it was the worst trade in the ladder:
+ * hundreds of bold, mid-word-truncated command strings that nobody can act on,
+ * costing up to 120 characters each while every result was already gone. Counts
+ * by tool name say the same thing in a fraction of the budget.
+ */
+function summarizeToolCalls(items: readonly ToolCallItem[], tally: RenderTally): string | null {
+  if (items.length === 0) {
+    return null;
+  }
+  tally.toolCallsCollapsed = true;
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const name = toolCallName(item);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const breakdown = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([name, count]) => `\`${name}\` ×${count}`)
+    .join(' · ');
+  const label = `${items.length} tool call${items.length === 1 ? '' : 's'} (details omitted)`;
+  return detailsBlock(label, breakdown);
+}
+
 function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally): string | null {
   switch (item.type) {
     case 'text':
-      // Message text is never trimmed.
-      return item.text?.trim() ? item.text : null;
+      // Message text is never trimmed; only heading levels move.
+      return item.text?.trim() ? demoteMarkdownHeadings(item.text) : null;
 
     case 'file':
       return `- **Attachment:** ${toSummaryLine(item.fileName)} (${item.sizeBytes} bytes). _File contents not included._`;
@@ -489,17 +613,19 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
       if (item.status === 'cleared' || !item.markdown?.trim()) {
         return null;
       }
-      return item.markdown;
+      return demoteMarkdownHeadings(item.markdown);
 
     case 'thought': {
       if (!item.text?.trim()) {
         return null;
       }
-      if (!level.includeThinking) {
-        tally.thinkingOmitted = true;
-        return null;
+      const { text, truncated } = clampMiddle(demoteMarkdownHeadings(item.text), level.thinkingCap);
+      if (truncated) {
+        tally.thinkingTruncated = true;
       }
-      return detailsBlock('Thinking', item.text);
+      // Named for the reader on the other side: this is prior reasoning carried
+      // in from another session, not something the receiving agent produced.
+      return detailsBlock('Thinking (from the original session)', text);
     }
 
     case 'plan':
@@ -522,9 +648,7 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
   }
 }
 
-function collectPathsFromToolCall(
-  item: Extract<MessageContent, { type: 'tool_call' }>
-): CollectedPath[] {
+function collectPathsFromToolCall(item: ToolCallItem): CollectedPath[] {
   const kind: CollectedPath['kind'] =
     item.kind === 'read' ? 'read' : item.kind === 'edit' ? 'edit' : 'other';
   const paths: CollectedPath[] = (item.locations ?? []).map((location) => ({
@@ -553,7 +677,10 @@ function renderPathsSection(paths: CollectedPath[]): { markdown: string; count: 
   const byKind = (kind: CollectedPath['kind']) =>
     [...strongest.entries()].filter(([, value]) => value === kind).map(([path]) => path);
 
-  const lines: string[] = ['## Files referenced', ''];
+  // Qualified on purpose: this list only sees paths an adapter attached to a
+  // tool call. A session that worked through a shell reports almost nothing, and
+  // an unqualified "Files referenced" would read as the complete set.
+  const lines: string[] = ['## Files referenced (from tool call locations)', ''];
   const groups: Array<[string, string[]]> = [
     ['Edited', byKind('edit')],
     ['Read', byKind('read')],
@@ -570,10 +697,13 @@ function renderPathsSection(paths: CollectedPath[]): { markdown: string; count: 
 function describeTrim(tally: RenderTally): string[] {
   const notes: string[] = [];
   if (tally.toolCallsCollapsed) {
-    notes.push('tool call details collapsed');
+    // Says "results and terminal output" explicitly: a collapsed call never
+    // reaches the block renderer, so those tallies stay at zero and would
+    // otherwise understate what the reader is missing.
+    notes.push('tool calls collapsed to per-turn summaries (results and terminal output omitted)');
   }
-  if (tally.thinkingOmitted) {
-    notes.push('thinking omitted');
+  if (tally.thinkingTruncated) {
+    notes.push('thinking truncated');
   }
   if (tally.terminalOutputOmitted) {
     notes.push('terminal output omitted');
@@ -584,6 +714,64 @@ function describeTrim(tally: RenderTally): string[] {
     notes.push(`${tally.toolResultsTruncated} tool result(s) truncated`);
   }
   return notes;
+}
+
+/** History timestamps are ISO strings on the wire but numeric in some fixtures. */
+function toEpochMs(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string' && value !== '') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/**
+ * `MM-DD HH:mm` in the reader's local zone. The header carries the full range,
+ * so per-turn stamps only have to separate turns, not date them absolutely.
+ */
+function formatTurnTime(ms: number): string {
+  const date = new Date(ms);
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function formatFullTime(ms: number): string {
+  return `${new Date(ms).getFullYear()}-${formatTurnTime(ms)}`;
+}
+
+/** Compact working time. Sub-second turns get no stamp; the noise outweighs it. */
+function formatDuration(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 1_000) {
+    return null;
+  }
+  const totalSeconds = Math.round(ms / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h${pad2(minutes)}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m${pad2(seconds)}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Effective agent working time for an assistant turn, per the `permissionWaitMs`
+ * contract on `sessionHistorySchema`: elapsed time minus approval waiting.
+ */
+function turnDuration(entry: SessionHistoryInput, startedMs: number | null): string | null {
+  if (startedMs === null || typeof entry.endedAt !== 'number') {
+    return null;
+  }
+  return formatDuration(entry.endedAt - startedMs - (entry.permissionWaitMs ?? 0));
 }
 
 interface RenderResult {
@@ -597,6 +785,9 @@ function renderConversation(
   history: SessionHistoryInput[],
   options: {
     title?: string;
+    source?: string;
+    participants?: Record<string, string>;
+    incompleteFinalResponse?: string;
     oldLevel: number;
     recentLevel: number;
     recentEntryCount: number;
@@ -606,7 +797,7 @@ function renderConversation(
   const tally: RenderTally = {
     terminalOutputOmitted: false,
     terminalOutputTruncated: false,
-    thinkingOmitted: false,
+    thinkingTruncated: false,
     toolResultsTruncated: 0,
     toolCallsCollapsed: false,
   };
@@ -614,13 +805,26 @@ function renderConversation(
   const renderable = history.filter((entry) => entry.role === 'user' || entry.role === 'assistant');
   const recentFrom = Math.max(0, renderable.length - options.recentEntryCount);
 
-  const sections: string[] = [];
-  if (options.title?.trim()) {
-    sections.push(`# ${options.title.trim()}`);
+  // A human name on every turn of a solo session is noise, so per-turn names are
+  // gated on the conversation actually having more than one participant.
+  const speakerIds = new Set<string>();
+  for (const entry of renderable) {
+    if (entry.role === 'user' && entry.userId) {
+      speakerIds.add(entry.userId);
+    }
   }
+  const showSpeakerNames = speakerIds.size > 1;
+  const participantNames = [...speakerIds]
+    .map((userId) => options.participants?.[userId])
+    .filter((name): name is string => Boolean(name));
 
+  const bodySections: string[] = [];
   const allPaths: CollectedPath[] = [];
+  const models = new Set<string>();
   let entryCount = 0;
+  let turnNumber = 0;
+  let firstMs: number | null = null;
+  let lastMs: number | null = null;
 
   renderable.forEach((entry, index) => {
     const level = LEVELS[index >= recentFrom ? options.recentLevel : options.oldLevel];
@@ -628,10 +832,33 @@ function renderConversation(
       return;
     }
 
+    // Turn numbers follow the conversation, not the rendered output, so a turn
+    // that renders nothing does not shift the numbering of everything after it.
+    if (entry.role === 'user' || turnNumber === 0) {
+      turnNumber += 1;
+    }
+
+    const toolCalls = (entry.items ?? []).filter(
+      (item): item is ToolCallItem => (item as MessageContent).type === 'tool_call'
+    );
+
     const parts: string[] = [];
+    let emittedToolSummary = false;
     for (const item of (entry.items ?? []) as MessageContent[]) {
       if (item.type === 'tool_call') {
         allPaths.push(...collectPathsFromToolCall(item));
+        if (level.collapseToolCalls) {
+          // One aggregate block, placed where the turn's first call was, so the
+          // prose around it keeps its original order.
+          if (!emittedToolSummary) {
+            emittedToolSummary = true;
+            const summary = summarizeToolCalls(toolCalls, tally);
+            if (summary) {
+              parts.push(summary);
+            }
+          }
+          continue;
+        }
       }
       const rendered = renderItem(item, level, tally);
       if (rendered) {
@@ -642,22 +869,92 @@ function renderConversation(
     if (parts.length === 0) {
       return;
     }
-    sections.push(`## ${entry.role === 'user' ? 'User' : 'Assistant'}`);
-    sections.push(parts.join('\n\n'));
+
+    const startedMs = toEpochMs(entry.timestamp);
+    if (startedMs !== null) {
+      firstMs = firstMs === null ? startedMs : Math.min(firstMs, startedMs);
+      lastMs = lastMs === null ? startedMs : Math.max(lastMs, startedMs);
+    }
+
+    const heading: string[] = [`${turnNumber} · ${entry.role === 'user' ? 'User' : 'Assistant'}`];
+    if (showSpeakerNames && entry.role === 'user') {
+      const name = entry.userId ? options.participants?.[entry.userId] : undefined;
+      if (name) {
+        heading.push(name);
+      }
+    }
+    if (startedMs !== null) {
+      heading.push(formatTurnTime(startedMs));
+    }
+    if (entry.role === 'assistant') {
+      const model = resolveTurnModelName(entry);
+      if (model) {
+        models.add(model);
+        heading.push(model);
+      }
+      const duration = turnDuration(entry, startedMs);
+      if (duration) {
+        heading.push(duration);
+      }
+    }
+
+    // A rule before each new user turn chunks the transcript into rounds; two
+    // sibling `##` headings alone read as one undifferentiated stream.
+    if (bodySections.length > 0 && entry.role === 'user') {
+      bodySections.push('---');
+    }
+    bodySections.push(`## ${heading.join(' · ')}`);
+    bodySections.push(parts.join('\n\n'));
     entryCount += 1;
   });
 
   const paths = renderPathsSection(allPaths);
   if (paths.markdown) {
-    sections.push(paths.markdown);
+    bodySections.push('---');
+    bodySections.push(paths.markdown);
   }
 
+  const sections: string[] = [];
+  if (options.title?.trim()) {
+    sections.push(`# ${options.title.trim()}`);
+  }
+
+  // Header, not footer: whoever reads this next — a person or another agent —
+  // needs to know the transcript is incomplete before reading it, not after.
+  const headerLines: string[] = [];
+  const summary = ['Lody session'];
+  if (firstMs !== null && lastMs !== null) {
+    summary.push(
+      firstMs === lastMs
+        ? formatFullTime(firstMs)
+        : `${formatFullTime(firstMs)} → ${formatFullTime(lastMs)}`
+    );
+  }
+  summary.push(`${entryCount} message${entryCount === 1 ? '' : 's'}`);
+  headerLines.push(summary.join(' · '));
+  if (options.source?.trim()) {
+    headerLines.push(options.source.trim());
+  }
+  if (participantNames.length > 1) {
+    headerLines.push(`Participants: ${participantNames.join(', ')}`);
+  }
+  if (models.size > 0) {
+    headerLines.push(`Models: ${[...models].join(', ')}`);
+  }
+  if (options.incompleteFinalResponse?.trim()) {
+    headerLines.push(`**${options.incompleteFinalResponse.trim()}**`);
+  }
   if (options.includeTrimNotice) {
     const notes = describeTrim(tally);
     if (notes.length > 0) {
-      sections.push(`---\n\n_Trimmed to fit the copy budget: ${notes.join('; ')}._`);
+      headerLines.push(`**Trimmed to fit the copy budget:** ${notes.join('; ')}.`);
     }
   }
+  if (bodySections.length > 0) {
+    sections.push(headerLines.map((line) => `> ${line}`).join('\n>\n'));
+    sections.push('---');
+  }
+  sections.push(...bodySections);
 
   return {
     markdown: `${sections.join('\n\n')}\n`,
@@ -678,6 +975,9 @@ export function buildConversationMarkdown(
   const {
     history,
     title,
+    source,
+    participants,
+    incompleteFinalResponse,
     maxChars = CONVERSATION_MARKDOWN_MAX_CHARS,
     maxTokens = CONVERSATION_MARKDOWN_MAX_TOKENS,
     recentEntryCount = CONVERSATION_MARKDOWN_RECENT_ENTRIES,
@@ -690,6 +990,9 @@ export function buildConversationMarkdown(
   for (const pass of buildPassSequence()) {
     const result = renderConversation(history, {
       title,
+      source,
+      participants,
+      incompleteFinalResponse,
       oldLevel: pass.oldLevel,
       recentLevel: pass.recentLevel,
       recentEntryCount,
@@ -713,7 +1016,7 @@ export function buildConversationMarkdown(
     tally: {
       terminalOutputOmitted: false,
       terminalOutputTruncated: false,
-      thinkingOmitted: false,
+      thinkingTruncated: false,
       toolResultsTruncated: 0,
       toolCallsCollapsed: false,
     },
@@ -736,7 +1039,7 @@ function toResult(
       entryCount: result.entryCount,
       terminalOutputOmitted: result.tally.terminalOutputOmitted,
       terminalOutputTruncated: result.tally.terminalOutputTruncated,
-      thinkingOmitted: result.tally.thinkingOmitted,
+      thinkingTruncated: result.tally.thinkingTruncated,
       toolResultsTruncated: result.tally.toolResultsTruncated,
       toolCallsCollapsed: result.tally.toolCallsCollapsed,
       pathsCount: result.pathsCount,

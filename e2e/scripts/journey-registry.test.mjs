@@ -167,6 +167,32 @@ void describe('journey registry', () => {
     ]);
   });
 
+  void it('keeps blocked reasons aligned with executable state', () => {
+    const active = journey({
+      state: 'active',
+      feature: 'src/features/test.feature',
+      blockedReason: 'Waiting for a selector.',
+    });
+    const blankBacklog = journey({
+      id: 'LODY-TEST-002',
+      actions: [{ id: 'blank.open' }],
+      blockedReason: '   ',
+    });
+    const quarantined = journey({
+      id: 'LODY-TEST-003',
+      state: 'quarantined',
+      actions: [{ id: 'quarantined.open' }],
+    });
+    const failures = validateRegistry({
+      schemaVersion: 1,
+      scoring,
+      journeys: [active, blankBacklog, quarantined],
+    });
+    assert.ok(failures.some((failure) => failure.includes('must be null while')));
+    assert.ok(failures.some((failure) => failure.includes('null or a non-empty string')));
+    assert.ok(failures.some((failure) => failure.includes('why the journey is quarantined')));
+  });
+
   void it('renders active and backlog rows in deterministic id order', () => {
     const active = journey({
       id: 'LODY-ACTIVE-002',

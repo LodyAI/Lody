@@ -105,7 +105,9 @@ export class SessionForkPage {
 
     await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
     await expect(this.assistantResponse()).toBeVisible();
-    await expect(this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u)).toBeVisible();
+    await expect(
+      this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u)
+    ).toBeVisible();
 
     await this.page.getByRole('button', { name: /^(Show terminal panel|显示终端面板)$/u }).click();
     await expect(this.page.locator('.lody-terminal-panel')).toBeVisible({ timeout: 30_000 });
@@ -149,39 +151,53 @@ export class SessionForkPage {
       .toEqual({ terminals: [], worktreeExists: false, targetAgentAlive: false });
     expect(isProcessAlive(resources.sourceAgentPid)).toBe(true);
 
-    await this.navigateToSession(resources.targetSessionId);
-    await expect(
-      this.page.getByRole('heading', { name: /^(Session Not Found|未找到会话)$/u })
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(this.sessionRow(resources.targetSessionId)).toHaveCount(0);
+    await expect(this.archivedRow(resources.targetSessionId)).toHaveCount(0);
     await this.navigateToSession(resources.sourceSessionId);
     await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
     await expect(this.assistantResponse()).toBeVisible();
     await this.archiveAndDeleteCurrentSession(resources.sourceSessionId);
-    await expect.poll(() => isProcessAlive(resources.sourceAgentPid), { timeout: 30_000 }).toBe(false);
+    await expect
+      .poll(() => isProcessAlive(resources.sourceAgentPid), { timeout: 30_000 })
+      .toBe(false);
   }
 
   private async archiveAndDeleteCurrentSession(sessionId: string): Promise<void> {
     expect(this.currentSessionId()).toBe(sessionId);
-    await this.page.getByRole('button', { name: /^(More actions|更多操作)$/u }).last().click();
+    await this.page
+      .getByRole('button', { name: /^(More actions|更多操作)$/u })
+      .last()
+      .click();
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
-    await this.navigateToSession(sessionId);
-    await this.page.getByRole('button', { name: /^(More actions|更多操作)$/u }).last().click();
-    await this.page.getByRole('menuitem', { name: /^(Delete permanently|永久删除)$/u }).click();
+    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
+    const archivedRow = this.archivedRow(sessionId);
+    await expect(archivedRow).toBeVisible({ timeout: 30_000 });
+    await archivedRow.hover();
+    await this.page.getByRole('button', { name: /^(Delete permanently|永久删除)$/u }).click();
     const dialog = this.page.getByRole('dialog', {
       name: /^(Delete permanently\?|确认永久删除？)$/u,
     });
-    await dialog.getByRole('button', { name: /^(Delete permanently|永久删除)$/u }).click();
-    await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
+    await dialog.getByRole('button', { name: /^(Delete|删除)$/u }).click();
+    await expect(archivedRow).toHaveCount(0);
   }
 
   private async navigateToSession(sessionId: string): Promise<void> {
-    await this.page.evaluate((id) => {
-      window.location.hash = `/local/sessions/${encodeURIComponent(id)}`;
-    }, sessionId);
+    const row = this.sessionRow(sessionId);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
     await expect(this.page).toHaveURL(
       new RegExp(`#\\/local\\/sessions\\/${sessionId}(?:\\?.*)?$`, 'u')
     );
+  }
+
+  private sessionRow(sessionId: string) {
+    return this.page.locator(`[data-sidebar-session-id="${sessionId}"]`);
+  }
+
+  private archivedRow(sessionId: string) {
+    return this.page.locator(`[data-id="archive-session:${sessionId}"]`);
   }
 
   private currentSessionId(): string {

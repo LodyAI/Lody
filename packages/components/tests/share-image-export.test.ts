@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyChatShareImage, exportChatShareImage } from '../src/lib/chat-share-image-export';
+import { copyShareImage, exportShareImage } from '../src/lib/share-image-export';
 
 const mocks = vi.hoisted(() => ({ toBlob: vi.fn(), bridge: vi.fn() }));
 vi.mock('@zumer/snapdom', () => ({ snapdom: { toBlob: mocks.toBlob } }));
@@ -23,7 +23,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('chat share image export', () => {
+describe('share image export', () => {
   it('pins ordinary, nested, and explicitly restarted list numbers during capture', async () => {
     const card = document.createElement('div');
     card.innerHTML =
@@ -34,7 +34,7 @@ describe('chat share image export', () => {
       captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
       return new Blob([]);
     });
-    await expect(exportChatShareImage(card)).rejects.toThrow('PNG encoding failed');
+    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow('PNG encoding failed');
     expect(captured).toEqual([1, 3, 4, 2, 7, 8]);
     expect(card.innerHTML).toBe(original);
   });
@@ -49,7 +49,7 @@ describe('chat share image export', () => {
       captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
       throw new Error('Capture failed');
     });
-    await expect(exportChatShareImage(card)).rejects.toThrow('Capture failed');
+    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow('Capture failed');
     expect(captured).toEqual([3, 2, 1, 9, 0, -1]);
     expect(card.innerHTML).toBe(original);
   });
@@ -64,7 +64,7 @@ describe('chat share image export', () => {
       createObjectURL: () => 'blob:share-image',
       revokeObjectURL: (url: string) => revoked.push(url),
     });
-    await exportChatShareImage(document.createElement('div'), 'Review / rendering');
+    await exportShareImage(document.createElement('div'), 'Review / rendering', 'lody-conversation');
     expect(downloads).toEqual([{ name: 'Review - rendering.png', url: 'blob:share-image' }]);
     expect(document.querySelector('a[download]')).toBeNull();
     expect(revoked).toEqual([]);
@@ -86,7 +86,7 @@ describe('chat share image export', () => {
         return { saved: false, canceled: true };
       },
     });
-    await exportChatShareImage(document.createElement('div'));
+    await exportShareImage(document.createElement('div'), undefined, 'lody-conversation');
     expect(saved).toEqual({ fileName: 'lody-conversation.png', bytes });
   });
 
@@ -97,7 +97,7 @@ describe('chat share image export', () => {
       arrayBuffer: async () => new ArrayBuffer(1),
     });
     mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: false, error: 'Disk full' }) });
-    await expect(exportChatShareImage(document.createElement('div'))).rejects.toThrow('Disk full');
+    await expect(exportShareImage(document.createElement('div'), undefined, 'lody-conversation')).rejects.toThrow('Disk full');
   });
 
   it('hands PNG bytes to Electron clipboard and propagates copy failure', async () => {
@@ -110,13 +110,13 @@ describe('chat share image export', () => {
     });
     mocks.bridge.mockReturnValue({ copyToClipboard });
 
-    await copyChatShareImage(document.createElement('div'));
+    await copyShareImage(document.createElement('div'));
     expect(copyToClipboard).toHaveBeenCalledWith({ pngBytes: bytes });
 
     mocks.bridge.mockReturnValue({
       copyToClipboard: async () => ({ copied: false, error: 'Clipboard busy' }),
     });
-    await expect(copyChatShareImage(document.createElement('div'))).rejects.toThrow(
+    await expect(copyShareImage(document.createElement('div'))).rejects.toThrow(
       'Clipboard busy'
     );
   });
@@ -129,7 +129,7 @@ describe('chat share image export', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
     vi.stubGlobal('ClipboardItem', TestClipboardItem);
 
-    await copyChatShareImage(document.createElement('div'));
+    await copyShareImage(document.createElement('div'));
 
     expect(write).toHaveBeenCalledTimes(1);
     const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
@@ -153,7 +153,7 @@ describe('chat share image export', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
     vi.stubGlobal('ClipboardItem', TestClipboardItem);
 
-    const copy = copyChatShareImage(document.createElement('div'));
+    const copy = copyShareImage(document.createElement('div'));
 
     expect(write).toHaveBeenCalledTimes(1);
     const item = write.mock.calls[0]![0]![0] as TestClipboardItem;
@@ -170,7 +170,7 @@ describe('chat share image export', () => {
       new Blob(['svg'], { type: 'image/svg+xml' }),
     ]) {
       mocks.toBlob.mockResolvedValue(blob);
-      await expect(exportChatShareImage(document.createElement('div'))).rejects.toThrow(
+      await expect(exportShareImage(document.createElement('div'), undefined, 'lody-conversation')).rejects.toThrow(
         'PNG encoding failed'
       );
     }

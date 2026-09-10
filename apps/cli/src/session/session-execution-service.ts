@@ -185,7 +185,11 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
+  finalizeACPState: (
+    sessionId: SessionId,
+    turnId?: string,
+    options?: { settleContextCompactionAsFailed?: boolean }
+  ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -564,14 +568,6 @@ export type SessionExecutionServiceDeps = {
     env?: Record<string, string>,
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides
-  ) => Promise<void>;
-  maybeRenameSessionBranchFromPrompt: (
-    sessionId: SessionId,
-    session: ISession,
-    cliType: AgentConfigCliType,
-    agentType: string,
-    prompt: string,
-    env?: Record<string, string>
   ) => Promise<void>;
   processMessageQueue: (sessionId: SessionId) => Promise<void>;
   syncLiveActivitySummary?: (userId: string) => Promise<void>;
@@ -2184,6 +2180,19 @@ export class SessionExecutionService {
             )
           );
       }
+
+      if (runtime?.promptStarted) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to settle context compaction after cancelled ACP prompt stopped',
+          self.tryPromise(async () => {
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
+              settleContextCompactionAsFailed: true,
+            });
+            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
+          })
+        );
+      }
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -2401,7 +2410,9 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
+      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
+    });
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2504,9 +2515,19 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown
+    error?: unknown,
+    options?: { providerPromptSettled?: boolean }
   ): Promise<void> {
-    await this.deps.turnFinalization.finalizeACPState(sessionId);
+    const acpError = error ? parseACPError(error) : null;
+    const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
+    await this.deps.turnFinalization.finalizeACPState(
+      sessionId,
+      this.currentTurnBySession.get(sessionId),
+      {
+        settleContextCompactionAsFailed:
+          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
+      }
+    );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
       this.currentTurnBySession.get(sessionId)
@@ -2514,8 +2535,6 @@ export class SessionExecutionService {
     await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
-      const acpError = parseACPError(error);
-
       if (acpError) {
         const failureReason = mapACPErrorToFailureReason(acpError);
         const userMessage = getACPErrorUserMessage(acpError);
@@ -2556,7 +2575,7 @@ export class SessionExecutionService {
             );
           }
         }
-      } else if (isAgentDisconnectedError(error)) {
+      } else if (providerDisconnected) {
         this.deps.logger.warn(
           `[${sessionId}] Agent disconnected during chat, terminating session for clean restart`
         );
@@ -5095,17 +5114,6 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          if (shouldPrepareWorktree) {
-            void self.deps.maybeRenameSessionBranchFromPrompt(
-              sessionId,
-              session,
-              sessionConfig.agentCliType,
-              sessionConfig.agentType,
-              agentConfig.prompt ?? '',
-              env
-            );
-          }
-
           yield* self.tryPromise(() =>
             traceAsync(
               self.deps.logger,

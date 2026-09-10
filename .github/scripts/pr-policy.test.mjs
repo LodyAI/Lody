@@ -56,7 +56,7 @@ Run policy tests.
 ### Original user prompt
 
 \`\`\`text
-Simplify PR policy while preserving bypass and expiry behavior.
+Simplify the pull request contribution policy.
 \`\`\`
 
 <!-- context-handoff:end -->

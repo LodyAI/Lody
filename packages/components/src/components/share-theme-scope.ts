@@ -15,7 +15,7 @@ const scopeRule = (selector: string, scheme: 'light' | 'dark', variables: Record
 
 /**
  * Injects `.light-scope` / `.dark-scope` rules carrying the bundled Lody
- * light/dark theme variables, so a `ChatShareCard` can pin the exported
+ * light/dark theme variables, so a share card can pin the exported
  * image's palette instead of following whatever theme the app currently has
  * applied. One-time and idempotent; if a bundled theme fails to resolve the
  * scope simply inherits the app's variables (graceful degradation).
@@ -24,7 +24,7 @@ const scopeRule = (selector: string, scheme: 'light' | 'dark', variables: Record
  * `.dark-scope` as a dark root and lets `.light-scope` opt out of an ancestor
  * `.dark`.
  */
-export function ensureChatShareThemeScopes(): void {
+export function ensureShareThemeScopes(): void {
   if (injected || typeof document === 'undefined') return;
   injected = true;
 
@@ -42,7 +42,7 @@ export function ensureChatShareThemeScopes(): void {
   if (sections.length === 0) return;
 
   const style = document.createElement('style');
-  style.dataset.lodyChatShareThemeScopes = 'true';
+  style.dataset.lodyShareThemeScopes = 'true';
   style.textContent = sections.join('\n');
   document.head.appendChild(style);
 }

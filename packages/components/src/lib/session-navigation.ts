@@ -15,18 +15,26 @@ export const getSessionNavigationLocation = (
   tab: formatSessionTabSearch(target.tabSessionId ?? target.sessionId, target.sessionId),
 });
 
-/**
- * Resolve an opened Session's reverse link. New metadata carries the root
- * explicitly; the opener's `parentSessionId` keeps pre-existing data working.
- */
+/** Resolve reverse navigation only after both the exact opener and route root exist. */
 export const resolveOpenedByNavigationTarget = (
   session: Pick<SessionMeta, 'openedBySessionId' | 'openedByRootSessionId'>,
-  openerSession?: Pick<SessionMeta, 'parentSessionId'> | null
+  context: {
+    metadataReady: boolean;
+    openerSession?: Pick<SessionMeta, 'id' | 'parentSessionId'> | null;
+    rootSession?: Pick<SessionMeta, 'id'> | null;
+  }
 ): SessionNavigationTarget | null => {
   const tabSessionId = session.openedBySessionId;
-  if (!tabSessionId) return null;
+  if (
+    !tabSessionId ||
+    !context.metadataReady ||
+    context.openerSession?.id !== tabSessionId
+  ) {
+    return null;
+  }
 
   const sessionId =
-    session.openedByRootSessionId ?? openerSession?.parentSessionId ?? tabSessionId;
+    session.openedByRootSessionId ?? context.openerSession.parentSessionId ?? tabSessionId;
+  if (context.rootSession?.id !== sessionId) return null;
   return sessionId === tabSessionId ? { sessionId } : { sessionId, tabSessionId };
 };

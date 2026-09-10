@@ -42,11 +42,72 @@ export type BuiltinAgentType = BuiltinAgent['agentType'];
 export type AgentConfigCliType = 'builtin' | 'registry' | 'custom';
 export type AgentType = string;
 
-/** Builtin ACP adapters that publish their own session titles. */
-export const usesAcpProvidedSessionTitle = (
+/**
+ * How each builtin agent's ACP adapter handles the session title.
+ *
+ * - `none` — no usable title over ACP, so Lody runs its isolated title agent and
+ *   keeps the title-generation config for it. Kimi's pushed title is only the
+ *   first prompt truncated to 200 chars; the Harness never mounts its upstream
+ *   title plugin.
+ * - `untagged` — pushes one authoritative `session_info_update` carrying no
+ *   `_meta`, so it can only be trusted on identity. Claude asks the Agent SDK via
+ *   its `generate_session_title` control request; Grok's official runtime
+ *   generates one in its own ACP session impl and the proxy forwards it untouched.
+ * - `tagged` — labels every title with `_meta.lody.titleSource`, so only an
+ *   `explicit` one may be stored. Codex (>= 1.8.0) emits a first-prompt `fallback`
+ *   preview before its generated title, and storing that would make the raw prompt
+ *   the session title.
+ *
+ * Exhaustive on purpose: adding a builtin agent must not silently default it.
+ */
+const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
+  claude: 'untagged',
+  codex: 'tagged',
+  grok: 'untagged',
+  kimi: 'none',
+  deepseek: 'none',
+};
+
+const builtinAcpTitleOwnership = (
   cliType: AgentConfigCliType | null | undefined,
   agentType: AgentType | null | undefined
-): boolean => cliType === 'builtin' && agentType === 'claude';
+): 'none' | 'untagged' | 'tagged' =>
+  cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
+    ? BUILTIN_ACP_TITLE_OWNERSHIP[agentType]
+    : 'none';
+
+/**
+ * Builtin ACP adapters that generate their own session titles, so Lody never
+ * starts its isolated title agent for them and hides the title-generation config
+ * from their agent settings.
+ *
+ * A runtime override revokes this. The table describes the managed runtime each
+ * agent normally launches, but `BuiltinRuntimeOverrides` can point the same
+ * `agentType` at any executable — including one predating the title behaviour.
+ * Such a session would otherwise get no title at all: the isolated generator is
+ * skipped, no title arrives over ACP, and the settings that would fix it are
+ * hidden. Keeping the local generator for overridden runtimes is the conservative
+ * side to be wrong on, and it costs only the duplicate work this change removed
+ * for the managed case.
+ */
+export const acpOwnsSessionTitleGeneration = (
+  cliType: AgentConfigCliType | null | undefined,
+  agentType: AgentType | null | undefined,
+  runtimeOverrides?: BuiltinRuntimeOverrides
+): boolean =>
+  !hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+  builtinAcpTitleOwnership(cliType, agentType) !== 'none';
+
+/**
+ * Adapters whose pushed titles are authoritative without a `titleSource` tag.
+ *
+ * Deliberately narrower than {@link acpOwnsSessionTitleGeneration}, and narrower
+ * by construction rather than by a second list kept in sync by hand.
+ */
+export const trustsUntaggedAcpSessionTitle = (
+  cliType: AgentConfigCliType | null | undefined,
+  agentType: AgentType | null | undefined
+): boolean => builtinAcpTitleOwnership(cliType, agentType) === 'untagged';
 
 /**
  * User-defined ACP launch spec for `cliType: 'custom'` providers: the exact

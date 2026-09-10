@@ -29,7 +29,7 @@ import {
   type SessionGoalContent,
   type SessionTurnInputConfig,
   sanitizeGoalObjective,
-  usesAcpProvidedSessionTitle,
+  trustsUntaggedAcpSessionTitle,
   parseSessionNotification,
   SessionContextWindowUsage,
   SessionId,
@@ -1631,7 +1631,7 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    const ownsTitleGeneration = usesAcpProvidedSessionTitle(
+    const trustsUntaggedTitle = trustsUntaggedAcpSessionTitle(
       this.options.agentConfig?.cliType,
       this.options.agentConfig?.agentType
     );
@@ -1645,7 +1645,7 @@ export class AgentClient implements acp.Client {
       (lodyTitleMeta.success && lodyTitleMeta.data.titleSource === 'explicit') ||
       (legacyCodexTitleMeta?.success === true &&
         legacyCodexTitleMeta.data.titleSource === 'explicit');
-    if (!ownsTitleGeneration && !isExplicitProviderTitle) {
+    if (!trustsUntaggedTitle && !isExplicitProviderTitle) {
       return;
     }
 

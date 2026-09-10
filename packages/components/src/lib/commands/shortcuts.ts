@@ -46,28 +46,28 @@ const whileComposerFocused = (key: string): KeyBinding => ({
 });
 
 export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = {
-  'palette.toggle': ['$mod+k', '$mod+Shift+p'],
+  'palette.toggle': ['Mod+k', 'Mod+Shift+p'],
   // Browser-style history nav. Desktop only — on web ⌘[ / ⌘] are the browser's own
   // back/forward and can't be intercepted.
-  'nav.back': [electron('$mod+[')],
-  'nav.forward': [electron('$mod+]')],
+  'nav.back': [electron('Mod+[')],
+  'nav.forward': [electron('Mod+]')],
   'app.cycleTheme': [],
-  'layout.toggleZenMode': ['$mod+.'],
+  'layout.toggleZenMode': ['Mod+.'],
   // Settings: ⌘, follows OS convention, on web + desktop. On desktop the native app menu
   // still SHOWS ⌘, next to "Settings" but does NOT register the accelerator
   // (`registerAccelerator: false` in apps/electron menu.ts), so the key reaches this
   // registry binding — a single source that also shows + is rebindable on the
   // keyboard-shortcuts settings page (instead of an invisible native-menu accelerator).
-  'workspace.openSettings': ['$mod+,'],
-  'session.new': [electron('$mod+n'), web('$mod+Alt+n')],
-  'session.archiveCurrent': ['$mod+Alt+a'],
-  'sidebar.toggle': ['$mod+b'],
-  'session.toggleCurrentPinned': ['$mod+Alt+p'],
-  'session.searchCurrent': [electron('$mod+f'), web('$mod+Alt+f')],
+  'workspace.openSettings': ['Mod+,'],
+  'session.new': [electron('Mod+n'), web('Mod+Alt+n')],
+  'session.archiveCurrent': ['Mod+Alt+a'],
+  'sidebar.toggle': ['Mod+b'],
+  'session.toggleCurrentPinned': ['Mod+Alt+p'],
+  'session.searchCurrent': [electron('Mod+f'), web('Mod+Alt+f')],
   // Desktop ⌘L focuses the composer. On web the browser owns ⌘L (Open Location),
   // so leave it unbound — the hint chip follows the resolved binding.
-  'session.focusInput': [electron('$mod+l')],
-  'session.toggleExplorerSidebar': ['$mod+Alt+b'],
+  'session.focusInput': [electron('Mod+l')],
+  'session.toggleExplorerSidebar': ['Mod+Alt+b'],
   'session.copyCurrentBranch': ['Alt+Shift+b'],
   'session.copyUrl': ['Alt+Shift+c'],
   'session.renameCurrent': ['F2'],
@@ -75,16 +75,16 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // ⌘T is intentionally avoided — the browser claims it on web.
   'session.newTabOrTerminal': ['Alt+n'],
   // Open/close the terminal panel (desktop, local sessions only).
-  'session.toggleTerminal': [electron('Ctrl+`'), electron('$mod+j')],
-  'session.saveCurrentFile': ['$mod+s'],
+  'session.toggleTerminal': [electron('Ctrl+`'), electron('Mod+j')],
+  'session.saveCurrentFile': ['Mod+s'],
   // Tab + conversation switching use the Mac-browser convention: ⌘⇧[ / ⌘⇧] step
   // between conversations and ⌘⇧, / ⌘⇧. (i.e. ⌘⇧< / ⌘⇧>) between tabs. The bracket
-  // / comma / period keys are matched by physical position (event.code) so the
-  // shifted glyph ({ } < >) the OS reports doesn't matter — see physicalKeyFromEvent.
-  'session.nextTab': [electron('$mod+Shift+.')],
-  'session.previousTab': [electron('$mod+Shift+,')],
-  'session.previousVisible': [electron('$mod+Shift+[')],
-  'session.nextVisible': [electron('$mod+Shift+]')],
+  // / comma / period keys use the engine's event.code fallback so the shifted glyph
+  // ({ } < >) reported by the OS does not change the shortcut.
+  'session.nextTab': [electron('Mod+Shift+.')],
+  'session.previousTab': [electron('Mod+Shift+,')],
+  'session.previousVisible': [electron('Mod+Shift+[')],
+  'session.nextVisible': [electron('Mod+Shift+]')],
   // ⇧Tab cycles the agent mode while the composer is focused. The other cyclers ship
   // WITHOUT a default binding — they're rebindable from the keyboard settings page.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],
@@ -92,7 +92,7 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.cycleModel': [],
   'session.cycleThinkEffort': [],
   'mention.toggleSessionProjectScope': [],
-  'tasks.quickAdd': ['$mod+Alt+t'],
+  'tasks.quickAdd': ['Mod+Alt+t'],
   'tasks.open': [],
 };
 
@@ -152,12 +152,12 @@ function cloneKeybinding(binding: string | KeyBinding): string | KeyBinding {
  * useless, so the registry warns in dev.
  */
 export const UNINTERCEPTABLE_WEB_KEYS = new Set<string>([
-  '$mod+n',
-  '$mod+shift+n',
-  '$mod+t',
-  '$mod+shift+t',
-  '$mod+w',
-  '$mod+shift+w',
-  '$mod+q',
-  '$mod+shift+q',
+  'mod+n',
+  'mod+shift+n',
+  'mod+t',
+  'mod+shift+t',
+  'mod+w',
+  'mod+shift+w',
+  'mod+q',
+  'mod+shift+q',
 ]);

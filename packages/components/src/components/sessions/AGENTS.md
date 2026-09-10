@@ -57,9 +57,9 @@ changing those files.
 
 - Read receipts are gated on VISIBILITY, not on being mounted: keep the
   explicit per-surface `isVisible` prop.
-- Markdown copy uses `buildConversationMarkdown`, never `buildReplayPromptFromHistory`;
-  preserve prose and toast omissions. Fork-menu copy includes the selected message,
-  independent of ACP fork support.
+- Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
+  keep prose whole, cap thinking rather than drop it, toast every omission, and
+  include the selected message regardless of ACP fork support.
 - Read ACP capabilities via `useResolvedMachineMeta()` and selectors via
   `useSessionAcpSelectorContext()`; the controlled composer must not recompute
   selector options.

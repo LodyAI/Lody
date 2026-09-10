@@ -53,8 +53,7 @@ import {
 import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { isMac } from '@/lib/commands/platform';
-import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
+import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
 import { isSessionContextCompacting } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
@@ -166,7 +165,8 @@ import SessionChatStream, {
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { getAppShareUrl } from '@/lib/app-location';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
@@ -323,9 +323,10 @@ function getErrorMessage(err: unknown): string {
 }
 
 /**
- * Copy-as-Markdown never trims message text, so it can trim tool output, thinking,
- * or nothing at all — and it can still land over budget. Silent truncation reads as
- * "I copied everything", so the toast always names what happened.
+ * Copy-as-Markdown never trims message text and never drops thinking, so it can
+ * still trim tool output, cap thinking, or nothing at all — and it can land over
+ * budget. Silent truncation reads as "I copied everything", so the toast always
+ * names what happened.
  */
 function describeCopiedConversation(
   stats: ConversationMarkdownStats,
@@ -343,7 +344,7 @@ function describeCopiedConversation(
   if (stats.toolCallsCollapsed) {
     trimmed.push(t('sessions.copyConversationHistoryTrimToolCalls', 'tool call details'));
   }
-  if (stats.thinkingOmitted) {
+  if (stats.thinkingTruncated) {
     trimmed.push(t('sessions.copyConversationHistoryTrimThinking', 'thinking'));
   }
   if (stats.terminalOutputOmitted || stats.terminalOutputTruncated) {
@@ -439,7 +440,7 @@ const DISPATCHING_TIMEOUT_MS = 15_000;
 const TITLE_SYNCING_INDICATOR_DELAY_MS = 400;
 
 /** Exact ⌘F / Ctrl+F — no Alt/Shift/secondary primary mod. See find keydown handler. */
-const FIND_IN_CHAT_BINDING = parseBinding('$mod+f');
+const FIND_IN_CHAT_BINDING = 'Mod+F';
 
 const summarizeInputBlocksForAnalytics = (inputBlocks: readonly SessionInputBlock[]) => {
   let textBlockCount = 0;
@@ -998,8 +999,12 @@ export type SessionOwnerMenuState = {
  * conversation — not only from the sidebar tree.
  */
 export type SessionOpenedByMenuState = {
-  /** The Session that created this one, when it is still resolvable. */
-  openedBy?: { sessionId: SessionId; title: string; target: SessionNavigationTarget } | null;
+  /** The Session that created this one; navigation exists only while it resolves. */
+  openedBy?: {
+    sessionId: SessionId;
+    title: string;
+    target: SessionNavigationTarget | null;
+  } | null;
   /** Independent Sessions this Session opened, oldest first. */
   opened?: Array<{ sessionId: SessionId; title: string; target: SessionNavigationTarget }>;
   onOpenSession: (target: SessionNavigationTarget) => void;
@@ -1096,8 +1101,11 @@ export function SessionHeaderMenu({
       <>
         {openedBySession ? (
           <DropdownMenuItem
+            disabled={!openedBySession.target}
             onClick={() => {
-              openedByRelations.onOpenSession(openedBySession.target);
+              if (openedBySession.target) {
+                openedByRelations.onOpenSession(openedBySession.target);
+              }
             }}
             title={openedBySession.title}
           >
@@ -3273,8 +3281,8 @@ export const SessionChatInterface = memo(
         // Exact chord only: ⌘F (macOS) / Ctrl+F (Windows/Linux). Refuse any extra
         // modifier (Shift/Alt/the other primary mod) so chords like ⌘⌥F, ⌘⇧F, or
         // ⌘⌃F keep their other meanings and are not stolen via preventDefault.
-        // Matches the command registry's `$mod+f` matcher (primary-mod exclusive).
-        if (!matchesKeyboardEvent(FIND_IN_CHAT_BINDING, event, isMac())) {
+        // Matches the command registry's Mod+F matcher (primary-mod exclusive).
+        if (!matchesKeyboardEvent(event, FIND_IN_CHAT_BINDING)) {
           return;
         }
         event.preventDefault();
@@ -3347,6 +3355,23 @@ export const SessionChatInterface = memo(
       };
     }, [activeSearchResult, isSearchOpen]);
 
+    // Pasting a transcript elsewhere loses the session it came from, so the export
+    // header carries the repo and branch. Names only reach turn headings when the
+    // conversation has more than one human in it; the builder makes that call.
+    const conversationCopySource = useMemo(() => {
+      const repo = (resolveProjectGitHubRepo(session.project) ?? session.repoFullName)?.trim();
+      const branch = session.branchName?.trim();
+      return [repo, branch].filter(Boolean).join(' \u00b7 ') || undefined;
+    }, [session.branchName, session.project, session.repoFullName]);
+
+    const conversationCopyParticipants = useMemo(() => {
+      const names: Record<string, string> = {};
+      for (const member of workspaceMembers) {
+        names[member.userId] = member.name;
+      }
+      return names;
+    }, [workspaceMembers]);
+
     const handleCopyConversationHistory = useCallback(
       async (throughMessageId?: string) => {
         if (!sessionDoc?.history?.length) {
@@ -3362,22 +3387,29 @@ export const SessionChatInterface = memo(
 
         try {
           const history = conversationCopyRange(sessionDoc.history, throughMessageId);
+          const last = history.at(-1);
           const { markdown, stats } = buildConversationMarkdown({
             history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
             title: session.title ?? undefined,
+            source: conversationCopySource,
+            participants: conversationCopyParticipants,
+            // Header, not a trailing line: whoever reads this next has to know the
+            // last turn is cut short before reading it. See the builder's option.
+            incompleteFinalResponse:
+              last?.role === 'assistant' && !last.finished
+                ? t(
+                    'sessions.copyContextIncomplete',
+                    'The last response was still generating when copied.'
+                  )
+                : undefined,
           });
-          const last = history.at(-1);
-          const suffix =
-            last?.role === 'assistant' && !last.finished
-              ? `\n_${t('sessions.copyContextIncomplete', 'The last response was still generating when copied.')}_\n`
-              : '';
-          await navigator.clipboard.writeText(markdown + suffix);
+          await navigator.clipboard.writeText(markdown);
           captureSessionEvent('session/history_copy_succeeded', {
             history_count: sessionDoc.history.length,
             prompt_length: stats.chars,
             estimated_tokens: stats.estimatedTokens,
             over_budget: stats.overBudget,
-            thinking_omitted: stats.thinkingOmitted,
+            thinking_truncated: stats.thinkingTruncated,
             terminal_omitted: stats.terminalOutputOmitted,
             tool_calls_collapsed: stats.toolCallsCollapsed,
             tool_results_truncated: stats.toolResultsTruncated,
@@ -3396,7 +3428,14 @@ export const SessionChatInterface = memo(
           );
         }
       },
-      [captureSessionEvent, session.title, sessionDoc?.history, t]
+      [
+        captureSessionEvent,
+        conversationCopyParticipants,
+        conversationCopySource,
+        session.title,
+        sessionDoc?.history,
+        t,
+      ]
     );
 
     // Inactive tabs and collapsed side chats stay mounted for fast switching, so
@@ -4570,10 +4609,21 @@ export const SessionChatInterface = memo(
     const openerSessionMeta = useAtomValue(
       sessionMetaAtomFamily(openerSessionId ? getSessionRoomId(openerSessionId) : '')
     );
+    const openerRootSessionId = openerSessionId
+      ? (session.openedByRootSessionId ?? openerSessionMeta?.parentSessionId ?? openerSessionId)
+      : null;
+    const openerRootSessionMeta = useAtomValue(
+      sessionMetaAtomFamily(openerRootSessionId ? getSessionRoomId(openerRootSessionId) : '')
+    );
     const openedSessions = useAtomValue(openedSessionsAtomFamily(session.id));
     const openerNavigationTarget = useMemo(
-      () => resolveOpenedByNavigationTarget(session, openerSessionMeta),
-      [openerSessionMeta, session]
+      () =>
+        resolveOpenedByNavigationTarget(session, {
+          metadataReady: docMetaCacheReady,
+          openerSession: openerSessionMeta,
+          rootSession: openerRootSessionMeta,
+        }),
+      [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
     );
     const handleOpenRelatedSession = useCallback(
       (target: SessionNavigationTarget) => {
@@ -4587,15 +4637,15 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      // An opener that is archived or not synced to this client still has a
-      // usable id, so navigation stays available; only the label falls back.
       const openedBy =
-        openerSessionId && openerNavigationTarget
+        openerSessionId
           ? {
               sessionId: openerSessionId,
               title:
                 (openerSessionMeta?.title ?? '').trim() ||
-                t('sessions.untitled', 'Untitled session'),
+                (docMetaCacheReady
+                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                  : t('sessions.untitled', 'Untitled session')),
               target: openerNavigationTarget,
             }
           : null;
@@ -4603,6 +4653,7 @@ export const SessionChatInterface = memo(
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
       handleOpenRelatedSession,
+      docMetaCacheReady,
       openedSessions,
       openerNavigationTarget,
       openerSessionId,
@@ -4612,6 +4663,7 @@ export const SessionChatInterface = memo(
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
+      const target = openedBy.target;
       return (
         <ConversationColumn className="py-2 sm:py-3">
           <SessionRelationCard
@@ -4623,7 +4675,7 @@ export const SessionChatInterface = memo(
             sessionTitle={openedBy.title}
             actionLabel={t('sessions.openedBy.backToOpener', 'Back to session')}
             actionIcon={CornerLeftUp}
-            onAction={() => openedByRelations.onOpenSession(openedBy.target)}
+            onAction={target ? () => openedByRelations.onOpenSession(target) : undefined}
           />
         </ConversationColumn>
       );

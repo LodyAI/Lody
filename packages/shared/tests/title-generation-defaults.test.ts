@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   computeTitleGenerationDefaults,
   getBuiltinTitleGenerationDefaults,
-  usesAcpProvidedSessionTitle,
+  acpOwnsSessionTitleGeneration,
+  trustsUntaggedAcpSessionTitle,
   type AcpConfigOptionSummary,
 } from '../src/ai';
 
@@ -118,15 +119,74 @@ describe('getBuiltinTitleGenerationDefaults', () => {
   });
 });
 
-describe('usesAcpProvidedSessionTitle', () => {
-  it('uses the builtin Claude ACP title', () => {
-    expect(usesAcpProvidedSessionTitle('builtin', 'claude')).toBe(true);
+describe('acpOwnsSessionTitleGeneration', () => {
+  it('lets the builtin Claude, Codex and Grok adapters generate their own titles', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'claude')).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'grok')).toBe(true);
   });
 
-  it('keeps isolated title generation for other providers', () => {
-    expect(usesAcpProvidedSessionTitle('builtin', 'codex')).toBe(false);
-    expect(usesAcpProvidedSessionTitle('builtin', 'kimi')).toBe(false);
-    expect(usesAcpProvidedSessionTitle('registry', 'codex')).toBe(false);
-    expect(usesAcpProvidedSessionTitle('custom', 'claude')).toBe(false);
+  it('keeps isolated title generation for adapters without ACP title support', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'kimi')).toBe(false);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'deepseek')).toBe(false);
+  });
+
+  // The table describes each agent's managed runtime. An override can aim the
+  // same agentType at an older executable with no title behaviour, and such a
+  // session would otherwise get no title at all -- generator skipped, nothing
+  // pushed, and the setting that would fix it hidden.
+  it('gives ownership back to the local generator when a runtime is overridden', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '/opt/old-codex' })).toBe(
+      false
+    );
+    expect(acpOwnsSessionTitleGeneration('builtin', 'grok', { grokPath: '/opt/old-grok' })).toBe(
+      false
+    );
+    expect(
+      acpOwnsSessionTitleGeneration('builtin', 'claude', { claudeCodeExecutable: '/opt/old' })
+    ).toBe(false);
+  });
+
+  it('ignores an override object with no usable value', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', {})).toBe(true);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '  ' })).toBe(true);
+  });
+
+  it('never applies to registry, custom, or unknown agents', () => {
+    expect(acpOwnsSessionTitleGeneration('registry', 'codex')).toBe(false);
+    expect(acpOwnsSessionTitleGeneration('custom', 'claude')).toBe(false);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'not-an-agent')).toBe(false);
+  });
+});
+
+describe('trustsUntaggedAcpSessionTitle', () => {
+  // Claude and Grok both publish a bare session_info_update with no _meta.
+  it('trusts the builtin adapters that publish titles without a titleSource tag', () => {
+    expect(trustsUntaggedAcpSessionTitle('builtin', 'claude')).toBe(true);
+    expect(trustsUntaggedAcpSessionTitle('builtin', 'grok')).toBe(true);
+  });
+
+  // Codex tags every title and emits a first-prompt `fallback` preview before its
+  // generated `explicit` one. Trusting untagged titles here would promote that
+  // preview to the session title, so it must stay outside this set even though it
+  // does own its title generation.
+  it('does not trust Codex titles that lack an explicit titleSource', () => {
+    expect(acpOwnsSessionTitleGeneration('builtin', 'codex')).toBe(true);
+    expect(trustsUntaggedAcpSessionTitle('builtin', 'codex')).toBe(false);
+  });
+
+  // The trusted set is a subset of the owning set by construction, not by two
+  // lists kept in sync; assert the relation rather than restating the members.
+  it('never trusts an agent that does not own its title generation', () => {
+    for (const agentType of ['claude', 'codex', 'grok', 'kimi', 'deepseek', 'nope']) {
+      if (trustsUntaggedAcpSessionTitle('builtin', agentType)) {
+        expect(acpOwnsSessionTitleGeneration('builtin', agentType)).toBe(true);
+      }
+    }
+  });
+
+  it('never applies to registry or custom providers', () => {
+    expect(trustsUntaggedAcpSessionTitle('registry', 'claude')).toBe(false);
+    expect(trustsUntaggedAcpSessionTitle('custom', 'claude')).toBe(false);
   });
 });
