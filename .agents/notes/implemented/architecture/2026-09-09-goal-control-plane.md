@@ -141,3 +141,13 @@ Full workspace typecheck and lint also pass; `pnpm check` reaches tests but is
 terminated at the five-minute limit, so the full suite is not a passing signal.
 Formatting, docs check, and the public-boundary check pass; unrelated formatter
 churn is excluded from the merge.
+
+Release integration (2026-09-10): Core PR #7 is merged and 0.1.4 (`4c8ffe9`)
+contains both contracts; the earlier 0.1.3 package did not include goal prompt
+controls. Codex now pins 0.1.4 in its manifest and npm lock, including the registry
+integrity. In a separate clone without the workspace override,
+`npm ci --include=dev --ignore-scripts` installs the published package and both
+Codex typechecks plus 52 goal/fork/worktree tests pass. Workspace frozen-lockfile
+installation, Core build, and Codex typecheck also pass. The existing root pnpm
+lock needs no change because Core remains a workspace link. This closes the
+registry dependency gap above; it does not resolve the host-side P1 findings.
