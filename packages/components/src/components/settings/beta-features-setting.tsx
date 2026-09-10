@@ -4,6 +4,7 @@ import { Switch } from '@/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
+  promptShortcutsBetaEnabledAtom,
   tasksBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
@@ -23,6 +24,10 @@ export function BetaFeaturesSection() {
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
+
+  const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
+    promptShortcutsBetaEnabledAtom
+  );
 
   if (!developerModeEnabled) return null;
 
@@ -52,6 +57,19 @@ export function BetaFeaturesSection() {
           checked={inboxBetaEnabled}
           onCheckedChange={setInboxBetaEnabled}
           aria-label={t('settings.beta.inbox', 'Inbox')}
+        />
+      </CompactRow>
+      <CompactRow
+        label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
+        helper={t(
+          'settings.beta.promptShortcutsHelper',
+          'Create reusable prompts and insert them with /. In development — expect rough edges.'
+        )}
+      >
+        <Switch
+          checked={promptShortcutsBetaEnabled}
+          onCheckedChange={setPromptShortcutsBetaEnabled}
+          aria-label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
         />
       </CompactRow>
     </CompactSection>

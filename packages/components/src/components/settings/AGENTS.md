@@ -19,6 +19,11 @@ to read as one drift apart a padding value at a time.
 
 ## Prompt Shortcuts
 
+- `promptShortcutsFeatureEnabledAtom` requires Developer mode plus the default-off
+  opt-in in About → Beta features. It gates shared settings navigation, direct
+  panel access, mention discovery and runtime initialization; disabling never
+  deletes saved Shortcuts.
+
 - `prompt-shortcuts-setting.tsx` owns the list and editor container. Key its local
   dialog state by account/workspace so old drafts and late reads cannot appear
   under a new identity. Storage and publication belong to the workspace provider

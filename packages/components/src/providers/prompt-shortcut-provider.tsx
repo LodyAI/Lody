@@ -24,6 +24,7 @@ import {
   usePlatform,
   usePlatformSession,
 } from '@lody/platform/react';
+import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { cloudOperations as api } from '@/lib/cloud-api-operations';
 import { promptShortcutDatabaseName } from '@/lib/prompt-shortcut-storage';
@@ -70,7 +71,8 @@ export function PromptShortcutProvider({
   const platform = usePlatform();
   const session = usePlatformSession();
   const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const scope = useResolvedWorkspaceScope({ enabled });
+  const featureEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
+  const scope = useResolvedWorkspaceScope({ enabled: enabled && featureEnabled });
   const userId = session.status === 'authenticated' ? session.user.id : null;
   const workspaceId =
     scope.enabled && scope.workspaceId === workspaceRuntime?.workspaceId ? scope.workspaceId : null;

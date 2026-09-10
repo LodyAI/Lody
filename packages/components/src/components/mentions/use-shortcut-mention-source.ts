@@ -1,3 +1,5 @@
+import { useAtomValue } from 'jotai';
+import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PromptShortcutError, type PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
@@ -15,18 +17,19 @@ export function useShortcutMentionSource(
   scope: PromptShortcutScope | null,
   draftKey?: string
 ): MentionCategorySources['promptShortcut'] {
+  const featureEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const { t } = useTranslation();
   const { runtime, entries, loading } = usePromptShortcuts();
   const context = useMemo<ShortcutMentionContext | null>(
     () =>
-      runtime && scope
+      featureEnabled && runtime && scope
         ? {
             workspaceId: runtime.workspaceId,
             userId: runtime.userId,
             scope,
           }
         : null,
-    [runtime, scope]
+    [featureEnabled, runtime, scope]
   );
   const scopeKey = JSON.stringify([context, draftKey]);
   const current = useRef({ runtime, scopeKey });

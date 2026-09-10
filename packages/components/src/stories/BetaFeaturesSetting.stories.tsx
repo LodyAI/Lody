@@ -6,6 +6,8 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   inboxFeatureEnabledAtom,
+  promptShortcutsBetaEnabledAtom,
+  promptShortcutsFeatureEnabledAtom,
   tasksBetaEnabledAtom,
   tasksFeatureEnabledAtom,
 } from '@/atoms/settings';
@@ -17,6 +19,7 @@ import { settingContainerClass } from '@/components/settings';
  * their product surfaces.
  */
 function GateReadout() {
+  const shortcutsEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const inboxEnabled = useAtomValue(inboxFeatureEnabledAtom);
   return (
@@ -29,6 +32,7 @@ function GateReadout() {
         <span className="font-mono">inboxFeatureEnabledAtom</span> ={' '}
         <span className="font-mono font-semibold">{String(inboxEnabled)}</span>
       </p>
+      <p>Prompt Shortcuts = {String(shortcutsEnabled)}</p>
     </div>
   );
 }
@@ -37,10 +41,12 @@ function Harness({
   developerMode,
   tasksBeta,
   inboxBeta,
+  promptShortcutsBeta = false,
 }: {
   developerMode: boolean;
   tasksBeta: boolean;
   inboxBeta: boolean;
+  promptShortcutsBeta?: boolean;
 }) {
   // Seeded once per story: a store rebuilt on every render would throw away the
   // switch the viewer just clicked.
@@ -49,6 +55,7 @@ function Harness({
     next.set(developerModeEnabledAtom, developerMode);
     next.set(tasksBetaEnabledAtom, tasksBeta);
     next.set(inboxBetaEnabledAtom, inboxBeta);
+    next.set(promptShortcutsBetaEnabledAtom, promptShortcutsBeta);
     return next;
   });
 
@@ -97,4 +104,12 @@ export const InboxBetaEnabled: Story = {
  */
 export const OptInRetainedWhileHidden: Story = {
   args: { developerMode: false, tasksBeta: true, inboxBeta: true },
+};
+
+export const PromptShortcutsEnabled: Story = {
+  args: { developerMode: true, tasksBeta: false, inboxBeta: false, promptShortcutsBeta: true },
+};
+export const PromptShortcutsMobile: Story = {
+  ...PromptShortcutsEnabled,
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
 };

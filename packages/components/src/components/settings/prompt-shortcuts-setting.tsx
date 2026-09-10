@@ -11,6 +11,7 @@ import {
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
 import { Loader2, Plus, SquareSlash, Trash2 } from 'lucide-react';
+import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { cn } from '@/lib/utils';
@@ -47,6 +48,21 @@ import {
 import { ScopePills } from './prompt-shortcut-scope';
 
 export function PromptShortcutsSetting() {
+  const enabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
+  const { t } = useTranslation();
+  if (!enabled)
+    return (
+      <p className={settingContainerClass} role="status">
+        {t(
+          'settings.promptShortcuts.disabled',
+          'Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.'
+        )}
+      </p>
+    );
+  return <EnabledPromptShortcutsSetting />;
+}
+
+function EnabledPromptShortcutsSetting() {
   const state = usePromptShortcuts();
   return (
     <PromptShortcutsSettingContent

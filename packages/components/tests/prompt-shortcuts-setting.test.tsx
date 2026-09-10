@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { Provider, createStore } from 'jotai';
+import { developerModeEnabledAtom, promptShortcutsBetaEnabledAtom } from '../src/atoms/settings';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +19,10 @@ vi.mock('@lody/platform/react', () => ({
   useCloudQuery: () => [],
   usePlatformCapability: () => false,
 }));
-vi.mock('jotai', async (original) => ({ ...(await original<object>()), useAtomValue: () => [] }));
+vi.mock('../src/atoms/agents', async () => {
+  const { atom } = await import('jotai');
+  return { getAllAgentConfigAtom: atom([]) };
+});
 vi.mock('../src/hooks/use-visible-machine-metas', () => ({
   useVisibleMachineMetas: () => ({ machines: new Map() }),
 }));
@@ -59,6 +64,7 @@ const sharedByOther: PromptShortcut = {
 };
 let state: ReturnType<typeof usePromptShortcuts>;
 let root: Root, container: HTMLDivElement;
+let store: ReturnType<typeof createStore>;
 function runtime(workspaceId: string, userId: string, read = async () => shortcut) {
   return { workspaceId, userId, canShare: true, read } as unknown as PromptShortcutRuntime;
 }
@@ -82,6 +88,10 @@ beforeEach(async () => {
     removeListener: () => {},
     dispatchEvent: () => false,
   }));
+  localStorage.clear();
+  store = createStore();
+  store.set(developerModeEnabledAtom, true);
+  store.set(promptShortcutsBetaEnabledAtom, true);
   await initI18n('en');
   state = {
     runtime: runtime('ws', 'alice'),
@@ -103,9 +113,11 @@ afterEach(async () => {
 async function render() {
   await act(async () =>
     root.render(
-      <TooltipProvider>
-        <PromptShortcutsSetting />
-      </TooltipProvider>
+      <Provider store={store}>
+        <TooltipProvider>
+          <PromptShortcutsSetting />
+        </TooltipProvider>
+      </Provider>
     )
   );
 }
@@ -195,4 +207,16 @@ describe('Prompt Shortcut settings identity fencing', () => {
     expect(document.querySelector('#shortcut-name')).toBeNull();
     expect(document.body.textContent).not.toContain('Private review');
   });
+});
+
+it('hides an already-open editor when the beta is disabled and guards direct access', async () => {
+  await render();
+  await open('Private review');
+  expect(document.querySelector('button[type="submit"]')).not.toBeNull();
+  await act(async () => store.set(promptShortcutsBetaEnabledAtom, false));
+  expect(document.querySelector('button[type="submit"]')).toBeNull();
+  expect(container.textContent).toContain('Enable Prompt Shortcuts under Developer mode');
+  expect(container.textContent).not.toContain('Private review');
+  await render();
+  expect(container.querySelector('button')).toBeNull();
 });

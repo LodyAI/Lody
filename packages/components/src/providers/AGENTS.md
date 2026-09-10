@@ -34,7 +34,8 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
 ## Prompt Shortcuts
 
 - `prompt-shortcut-provider.tsx` is mounted once by `MainLayout`, behind its scoped
-  readiness gate. It uses the platform identity and public cloud operation descriptors;
+  readiness gate and `promptShortcutsFeatureEnabledAtom`. Disabling closes the
+  runtime and skips directory queries without deleting local data. It uses the platform identity and public cloud operation descriptors;
   local mode never requests cloud grants. Account, route and doc-meta must agree.
 - One `PromptShortcutRuntime` owns the working catalog/outbox and protected index/body
   sync. Do not create services or Streams rooms in settings/composers. The service's

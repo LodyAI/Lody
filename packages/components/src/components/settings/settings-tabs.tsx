@@ -1,3 +1,5 @@
+import { useAtomValue } from 'jotai';
+import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import type { LucideIcon } from 'lucide-react';
 import type { PlatformCapability } from '@lody/platform';
 import { useAppCapabilityCheck } from '../../lib/app-platform';
@@ -206,10 +208,12 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
 export function useVisibleSettingsTabs(options?: {
   includeMultiMemberOnly?: boolean;
 }): SettingsTabConfig[] {
+  const promptShortcutsEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const hasCapability = useAppCapabilityCheck();
   const includeMultiMemberOnly = options?.includeMultiMemberOnly ?? true;
   return SETTINGS_TAB_CONFIGS.filter(
     (tab) =>
+      (tab.id !== 'prompt-shortcuts' || promptShortcutsEnabled) &&
       (tab.capability === undefined || hasCapability(tab.capability)) &&
       (!tab.multiMemberOnly || includeMultiMemberOnly)
   );
