@@ -28,6 +28,7 @@ import {
   LocalProjectHistorySyncService,
   materializeReplay,
   selectLatestCatalogItems,
+  storedBaselineHashes,
 } from '../src/lib/local-project-history-sync-service';
 
 const machineId = 'machine-1' as MachineId;
@@ -595,6 +596,88 @@ describe('canonical hash versions', () => {
         materialized: second,
       })
     ).toEqual({ status: 'skipped', reason: 'digest_match' });
+  });
+});
+
+describe('stored baseline hash-version binding', () => {
+  const sourceHashes = ['source-1', 'source-2'];
+  const storedHashes = ['stored-1', 'stored-2'];
+  const baseline = (hashVersion?: number) =>
+    JSON.stringify({
+      version: 1,
+      ...(hashVersion === undefined ? {} : { hashVersion }),
+      sourceDigest: hashText(sourceHashes.join('\n')),
+      turnHashes: storedHashes,
+    });
+
+  it('accepts a genuine unversioned baseline as v1', () => {
+    expect(
+      storedBaselineHashes(
+        { importedTurnHashes: [...sourceHashes], storedHistoryBaseline: baseline() },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+  });
+
+  it('accepts a baseline whose version matches the cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V1,
+          storedHistoryBaseline: baseline(HASH_VERSION_V1),
+        },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V2,
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+  });
+
+  it('rejects a v1 baseline against a v2 cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V2,
+          storedHistoryBaseline: baseline(HASH_VERSION_V1),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
+  });
+
+  it('rejects a v2 baseline against a v1 cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V1,
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
+  });
+
+  it('rejects a versioned baseline against an unversioned (v1) cursor when versions differ', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
   });
 });
 

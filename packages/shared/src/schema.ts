@@ -204,19 +204,41 @@ const isWorktreeScriptHistoryStep = (value: unknown): boolean =>
   typeof value.output === 'string';
 
 /**
- * Insertion hints for the nested payloads that stream. Each block keeps its
- * current on-disk shape (strings as `LoroText`) without making the nested shape
- * a validation constraint, so a malformed legacy value cannot reject an
- * unrelated write. `history-materializer.ts` reads `storageSchema`; the hints are
- * inert for every reader.
+ * Insertion hints for the nested payloads of tool content and worktree steps.
+ *
+ * Nested metadata is ordinary data, so the catchall defaults to *primitive* and only
+ * the fields that genuinely stream are declared as `LoroText`. A blanket
+ * `defaultLoroText: true` here built Text for `terminal_command.command`, `args[]`,
+ * diff `path`, `steps[].command` and every other string — the container growth this
+ * change exists to remove. The catchall stays permissive so an anomalous legacy shape
+ * is never a validation failure or a rewrite trigger; `history-materializer.ts` reads
+ * `storageSchema`, and the hints are inert for every reader.
  */
-const historyStreamingChildren = schema.Any({ defaultLoroText: true });
+const historyNestedPayloadSchema = schema.Any({ defaultLoroText: false });
 const historyToolContentSchema = schema
-  .LoroMap({ type: schema.String({ required: false }) })
-  .catchall(historyStreamingChildren);
+  .LoroMap({
+    type: schema.String({ required: false }),
+    // Only streaming payload fields; everything else inherits the primitive catchall.
+    text: schema.LoroText({ required: false }),
+    output: schema.LoroText({ required: false }),
+    // The ACP `content` block nests its own text payload.
+    content: schema
+      .LoroMap(
+        {
+          type: schema.String({ required: false }),
+          text: schema.LoroText({ required: false }),
+        },
+        { required: false }
+      )
+      .catchall(historyNestedPayloadSchema),
+  })
+  .catchall(historyNestedPayloadSchema);
 const historyScriptStepSchema = schema
-  .LoroMap({ output: schema.LoroText({ required: false }) })
-  .catchall(historyStreamingChildren);
+  .LoroMap({
+    // Only the step output streams; `command`/`status`/timestamps are metadata.
+    output: schema.LoroText({ required: false }),
+  })
+  .catchall(historyNestedPayloadSchema);
 
 const historyMessageItemSchema = schema
   .LoroMap(

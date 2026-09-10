@@ -40,10 +40,16 @@ stored as a primitive. Streaming fields are declared explicitly in `schema.ts` a
 - tool-call `content` via a `storageSchema` hint;
 - worktree-script `steps` via a `storageSchema` hint.
 
-Nested tool content keeps its current shape with a `defaultLoroText: true` child catchall, so
-`content[].output`/`command`/`text` and `locations[].path` remain Text exactly as before. This is
-the smallest change that removes the metadata containers without also changing the nested
-container count that existing docs and the full-Mirror reader already depend on.
+The nested tool/worktree payload follows the same rule: its catchall is
+`defaultLoroText: false` and only the payload fields that stream are declared — tool `text`,
+tool `output`, the ACP `content` block's nested `content.text`, and the worktree step
+`output`. Everything else at that level (`terminal_command.command`, `args`, `cwd`, diff
+`path`/`newText`, `terminalId`, `input` values, `steps[].command`/`status`) is metadata and
+is stored primitive. A first version of this change defaulted the whole nested subtree to
+`defaultLoroText: true`, which still built Text for every one of those metadata strings and
+made the storage goal unfulfilled; the audit caught it. New values are primitive while a
+legacy stored `LoroText` keeps its container id on a same-type edit, because the writer
+diffs against the stored kind rather than the new schema.
 
 The policy is insertion-only, and the writer enforces that independently of the schema:
 
@@ -81,7 +87,12 @@ version mismatch occurs and no replay history is available to recompute, the dec
 rather than guessing.
 
 The stored-content baseline records the hash version it was computed with, so an old baseline
-cannot be read as v2, and existing v1 canonicalization is unchanged.
+cannot be read as v2, and existing v1 canonicalization is unchanged. A baseline written before
+the field existed has no `hashVersion`: it is v1 when compared with its cursor
+(`(baseline.hashVersion ?? 1) === cursorVersion`). Comparing the raw optional value rejected
+every genuine old baseline (`undefined !== 1`), which discarded the projected stored history and
+reported a normal append as `local_history_has_untracked_suffix`. The version binding still
+rejects a real v1/v2 mismatch in either direction (covered directly in the service suite).
 
 ## Alternatives and limits
 
@@ -89,9 +100,10 @@ cannot be read as v2, and existing v1 canonicalization is unchanged.
   rejected: it hides malformed new input instead of versioning hashes.
 - Dropping the stored version or reinterpreting a v1 cursor as v2 was rejected: it trades a
   false conflict for silent hash corruption.
-- Making every nested tool-content field an explicit primitive was rejected for this change: it
-  would alter storage for existing docs without a migration and is not needed to remove the
-  metadata containers. It remains a candidate for a separate, measured change.
+- Keeping the nested tool/worktree catchall at `defaultLoroText: true` (the first attempt) was
+  rejected: it moved the container growth one level down and left `command`/`path`/`args` as
+  Text, so the storage goal was unmet. Nested metadata defaults primitive; only declared
+  streaming payloads are Text.
 - The sealed-skeleton contract — a reader-side `ref` payload fetch, a `useToolCallPayload`
   hook, and the UI that consumes it — is **not** implemented here. The v2 canonical form is
   forward-compatible with it but is verified only against synthetic fixtures.

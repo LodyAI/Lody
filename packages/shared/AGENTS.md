@@ -17,9 +17,11 @@
 - New inputs use the shared message parsers. Known protocol extension dictionaries
   retain JSON data, not arbitrary JS objects. Storage layout stays separate and is an
   insertion policy, never a migration or a validation constraint: new writes store
-  ordinary metadata strings as primitives and create `LoroText` only for streaming
-  fields declared in `schema.ts`; stored values keep their representation, and opening a
-  document never rewraps them. Rationale:
+  ordinary metadata strings as primitives and create `LoroText` only for fields that
+  stream. That holds at every nesting level — a tool content or worktree-step `command`,
+  `path`, `args` or terminal id is metadata, so only payloads like tool `text`/`output`
+  and nested `content.text` are declared Text in `schema.ts`. Stored values keep their
+  representation, and opening a document never rewraps them. Rationale:
   [single writer](../../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md).
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the

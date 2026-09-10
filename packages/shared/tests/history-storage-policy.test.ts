@@ -71,9 +71,21 @@ const storedContainerKinds = (doc: Loro) => {
     'tool.locations[0].path': kindOf(
       ((tool.get('locations') as LoroList).get(0) as LoroMap).get('path')
     ),
+    // Tool-content metadata stays primitive; only genuinely streamed payloads are Text.
     'content[0].command': kindOf((content.get(0) as LoroMap).get('command')),
+    'content[0].args[0]': kindOf(((content.get(0) as LoroMap).get('args') as LoroList).get(0)),
+    'content[0].cwd': kindOf((content.get(0) as LoroMap).get('cwd')),
     'content[1].output': kindOf((content.get(1) as LoroMap).get('output')),
     'content[1].type': kindOf((content.get(1) as LoroMap).get('type')),
+    'content[2].content.text': kindOf(
+      ((content.get(2) as LoroMap).get('content') as LoroMap).get('text')
+    ),
+    'content[3].path': kindOf((content.get(3) as LoroMap).get('path')),
+    'content[3].newText': kindOf((content.get(3) as LoroMap).get('newText')),
+    'content[4].text': kindOf((content.get(4) as LoroMap).get('text')),
+    'content[5].input.nested': kindOf(
+      ((content.get(5) as LoroMap).get('input') as LoroMap).get('nested')
+    ),
     'steps[0].command': kindOf((steps.get(0) as LoroMap).get('command')),
     'steps[0].output': kindOf((steps.get(0) as LoroMap).get('output')),
   };
@@ -92,15 +104,31 @@ const richItems = (output = 'streaming output'): SessionHistory['items'] =>
     },
     toolCallItem({
       content: [
-        { type: 'terminal_command', command: 'pnpm test' },
+        {
+          type: 'terminal_command',
+          command: 'pnpm test',
+          args: ['run', 'test'],
+          cwd: '/repo',
+        },
         { type: 'terminal_output', output },
+        { type: 'content', content: { type: 'text', text: 'nested streamed text' } },
+        { type: 'diff', path: 'src/a.ts', newText: 'const a = 1;' },
+        { type: 'text', text: 'block text' },
+        { type: 'input', input: { nested: 'metadata value' } },
       ],
     }),
     {
       type: 'worktree_script',
       phase: 'setup',
       status: 'completed',
-      steps: [{ command: 'pnpm install', status: 'completed', output: 'ok' }],
+      steps: [
+        {
+          command: 'pnpm install',
+          status: 'completed',
+          output: 'ok',
+          exitStatus: { exitCode: 0 },
+        },
+      ],
     },
   ] as unknown as SessionHistory['items'];
 
@@ -124,10 +152,17 @@ describe('new history storage policy', () => {
         'tool.title': 'string',
         'tool.kind': 'string',
         'tool.locations[0].path': 'string',
-        'content[0].command': 'Text',
+        'content[0].command': 'string',
+        'content[0].args[0]': 'string',
+        'content[0].cwd': 'string',
         'content[1].output': 'Text',
         'content[1].type': 'string',
-        'steps[0].command': 'Text',
+        'content[2].content.text': 'Text',
+        'content[3].path': 'string',
+        'content[3].newText': 'string',
+        'content[4].text': 'Text',
+        'content[5].input.nested': 'string',
+        'steps[0].command': 'string',
         'steps[0].output': 'Text',
       });
     } finally {

@@ -330,7 +330,7 @@ const StoredHistoryBaselineSchema = z.object({
   turnHashes: z.array(z.string()),
 });
 
-function storedBaselineHashes(
+export function storedBaselineHashes(
   cursor: SessionExternalHistoryCursorDocState | undefined,
   sourceHashes: readonly string[]
 ): readonly string[] {
@@ -343,7 +343,13 @@ function storedBaselineHashes(
       );
       if (
         parsed.success &&
-        parsed.data.hashVersion === resolveStoredHashVersion(cursor) &&
+        // A baseline written before hash versions existed has no `hashVersion` field
+        // and is v1. Comparing it directly against the cursor version rejected every
+        // genuine old baseline (`undefined !== 1`), which discarded the projected
+        // stored history and turned a normal append into a conflict. The baseline is
+        // still bound to its own version, so a v1 baseline against a v2 cursor (or
+        // vice versa) is correctly ignored.
+        (parsed.data.hashVersion ?? HASH_VERSION_V1) === resolveStoredHashVersion(cursor) &&
         areStringArraysEqual(cursor.importedTurnHashes, sourceHashes) &&
         parsed.data.sourceDigest === hashText(sourceHashes.join('\n')) &&
         parsed.data.turnHashes.length === sourceHashes.length
