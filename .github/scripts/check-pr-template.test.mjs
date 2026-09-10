@@ -71,6 +71,27 @@ void test('the original prompt may itself contain a triple-backtick code fence',
   assert.equal(result.ok, true, result.findings.join('\n'));
 });
 
+void test('headings inside the original prompt fence do not affect PR section parsing', () => {
+  const promptWithHeadings = [
+    'Preserve these lines exactly:',
+    '## Related issue',
+    '## Problem / pressure',
+    '## Summary',
+    '## Visual explanation',
+    '## Test plan',
+    '## Context handoff',
+    '### Instructions for reviewing agents',
+    '### Authoring context',
+    '### Original user prompt',
+  ].join('\n');
+  const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
+    originalPrompt,
+    promptWithHeadings
+  );
+  const result = checkPullRequestBody(body);
+  assert.equal(result.ok, true, result.findings.join('\n'));
+});
+
 void test('a large change requires a structural visual', () => {
   const body = completedTemplate('Simple change: one documentation sentence changed.');
   const boundary = checkPullRequestBody(body, { changedLines: 200 });
