@@ -762,6 +762,10 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     <ContextMenu onOpenChange={setRowMenuOpen}>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[180px]">
+        <SessionRowOpenedByMenuItems
+          opener={openedByOpener}
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
         {canTogglePinned ? (
           <ContextMenuItem
             icon={isPinned ? <PinOff /> : <Pin />}
@@ -787,7 +791,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             {contextMenuLabels.rename}
           </ContextMenuItem>
         ) : null}
-        {(canTogglePinned || canMarkUnread || canRename) && (canCopyUrl || shareMenuState) ? (
+        {(openedByOpener || canTogglePinned || canMarkUnread || canRename) &&
+        (canCopyUrl || shareMenuState) ? (
           <ContextMenuSeparator />
         ) : null}
         {canCopyUrl ? (
@@ -826,13 +831,17 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
-        {(canTogglePinned || canMarkUnread || canRename || canCopyUrl || shareMenuState) &&
-        (openerSessionId || openedByOpener || isElectronRenderer()) ? (
+        {(openedByOpener ||
+          canTogglePinned ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          shareMenuState) &&
+        (openerSessionId || isElectronRenderer()) ? (
           <ContextMenuSeparator />
         ) : null}
 
         <SessionRowOpenedByMenuItems
-          opener={openedByOpener}
           goToOpener={
             openerSessionId
               ? () => onNavigate(openerRootSessionId ?? openerSessionId, openerSessionId)
@@ -841,13 +850,13 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
         <SessionWindowMenuItem sessionId={session.id} />
-        {(canTogglePinned ||
+        {(openedByOpener ||
+          canTogglePinned ||
           canMarkUnread ||
           canRename ||
           canCopyUrl ||
           shareMenuState ||
           openerSessionId ||
-          openedByOpener ||
           isElectronRenderer()) &&
         true ? (
           <ContextMenuSeparator />

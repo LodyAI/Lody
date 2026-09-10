@@ -1045,6 +1045,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
               <ContextMenu key={session.sessionId}>
                 <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                 <ContextMenuContent className="min-w-[180px]">
+                  <SessionRowOpenedByMenuItems
+                    opener={openedByOpener}
+                    goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+                  />
                   {onTogglePinSession ? (
                     <ContextMenuItem
                       onSelect={() => {
@@ -1075,7 +1079,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       {contextMenuLabels.rename}
                     </ContextMenuItem>
                   ) : null}
-                  {(onTogglePinSession || canMarkUnread || onRenameSession) &&
+                  {(openedByOpener || onTogglePinSession || canMarkUnread || onRenameSession) &&
                   (onCopySessionUrl || session.branchName || shareMenuState) ? (
                     <ContextMenuSeparator />
                   ) : null}
@@ -1122,7 +1126,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
                             : contextMenuLabels.loadingSharing}
                     </ContextMenuItem>
                   ) : null}
-                  {(onTogglePinSession ||
+                  {(openedByOpener ||
+                    onTogglePinSession ||
                     canMarkUnread ||
                     onRenameSession ||
                     onCopySessionUrl ||
@@ -1130,7 +1135,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     shareMenuState) &&
                   ((onOpenPullRequest && prUrl) ||
                     (canGoToOpener && openerSessionId) ||
-                    openedByOpener ||
                     isElectronRenderer()) ? (
                     <ContextMenuSeparator />
                   ) : null}
@@ -1150,7 +1154,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     </ContextMenuItem>
                   ) : null}
                   <SessionRowOpenedByMenuItems
-                    opener={openedByOpener}
                     goToOpener={
                       canGoToOpener && openerSessionId
                         ? () => {
@@ -1165,7 +1168,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     goToOpenerLabel={contextMenuLabels.goToOpenerSession}
                   />
                   <SessionWindowMenuItem sessionId={session.sessionId} />
-                  {(onTogglePinSession ||
+                  {(openedByOpener ||
+                    onTogglePinSession ||
                     canMarkUnread ||
                     onRenameSession ||
                     onCopySessionUrl ||
@@ -1173,7 +1177,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     shareMenuState ||
                     (onOpenPullRequest && prUrl) ||
                     (canGoToOpener && openerSessionId) ||
-                    openedByOpener ||
                     isElectronRenderer()) &&
                   onArchiveSession ? (
                     <ContextMenuSeparator />
