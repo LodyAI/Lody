@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agentConfigContainsCodexCredential,
+  assertAgentConfigDoesNotContainCodexCredential,
   buildLodyCodexCustomProviderEnv,
   CODEX_API_KEY_ENV,
   CODEX_CONFIG_ENV,
@@ -12,6 +14,15 @@ import {
 } from '../src/codex-provider-config';
 
 describe('Lody Codex custom provider config', () => {
+  it('reserves the machine-local credential key even when its value is empty', () => {
+    const config = { env: { [LODY_CODEX_API_KEY_ENV]: '' } };
+
+    expect(agentConfigContainsCodexCredential(config)).toBe(true);
+    expect(() => assertAgentConfigDoesNotContainCodexCredential(config)).toThrow(
+      /reserved for machine-local credential injection/
+    );
+  });
+
   it('keeps the credential out of durable env and routes Codex through Responses', () => {
     const env = buildLodyCodexCustomProviderEnv(
       { HTTPS_PROXY: 'http://127.0.0.1:7890' },

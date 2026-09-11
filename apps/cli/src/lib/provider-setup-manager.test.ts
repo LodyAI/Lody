@@ -27,6 +27,7 @@ import type { LoroRepo } from 'loro-repo';
 import type { Logger } from '@/utils/logger';
 import {
   hydrateCodexProviderCredential,
+  listCodexProviderCredentialConfigIds,
   reconcileCodexProviderCredential,
   stageCodexProviderCredential,
 } from '@/agent/provider-credential-store';
@@ -96,7 +97,10 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
   flock: TFlock,
   overrides: Partial<ProviderSetupManagerOptions['execution']> = {},
   managerOverrides: Partial<
-    Pick<ProviderSetupManagerOptions, 'stageCredential' | 'reconcileCredential'>
+    Pick<
+      ProviderSetupManagerOptions,
+      'listCredentialConfigIds' | 'stageCredential' | 'reconcileCredential'
+    >
   > = {}
 ) {
   const flush = vi.fn(async () => undefined);
@@ -118,16 +122,18 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
       agentType: 'codex',
       success: true,
     })),
-    refreshMachineAcpCapabilities: vi.fn(async () => ({
-      type: 'machine/acp-capabilities-refresh_response' as const,
-      machineId,
-      configId: setupId,
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      success: true,
-      modes: [],
-      models: [],
-    })),
+    probeMachineAcpCapabilitiesForProviderSetup: vi.fn(async () =>
+      deferredProbe({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        success: true,
+        modes: [],
+        models: [],
+      })
+    ),
     ...overrides,
   } as ProviderSetupManagerOptions['execution'];
   const markMachineFlockDocDirty = vi.fn();
@@ -145,6 +151,7 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
     execution,
     sync: { markMachineFlockDocDirty },
     logger: createSilentLogger(),
+    listCredentialConfigIds: vi.fn(async () => []),
     stageCredential,
     reconcileCredential,
     ...managerOverrides,
@@ -190,6 +197,10 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+function deferredProbe<T>(response: T) {
+  return { response, publishCapabilities: vi.fn(async () => undefined) };
+}
+
 async function seedCredential(config: ProviderSetupTask['config'], apiKey: string): Promise<void> {
   const staged = await stageCodexProviderCredential(workspaceId, config, apiKey);
   await staged.finalize();
@@ -207,33 +218,37 @@ describe('ProviderSetupManager', () => {
     const finalSnapshot = harness.flock.commitSnapshots.at(-1) ?? [];
     expect(finalSnapshot).toContain(JSON.stringify(machineFlockKeys.agentConfig(setupId)));
     expect(finalSnapshot).not.toContain(JSON.stringify(machineFlockKeys.providerSetup(setupId)));
-    expect(harness.execution.refreshMachineAcpCapabilities).toHaveBeenCalledTimes(1);
+    expect(harness.execution.probeMachineAcpCapabilitiesForProviderSetup).toHaveBeenCalledTimes(1);
     harness.manager.stop();
   });
 
   it('waits for UI authentication and resumes from the durable row', async () => {
     const refresh = vi
       .fn()
-      .mockResolvedValueOnce({
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId,
-        configId: setupId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        success: false,
-        authRequired: true,
-      })
-      .mockResolvedValueOnce({
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId,
-        configId: setupId,
-        cliType: 'builtin',
-        agentType: 'codex',
-        success: true,
-        modes: [],
-        models: [],
-      });
-    const harness = createHarness({ refreshMachineAcpCapabilities: refresh });
+      .mockResolvedValueOnce(
+        deferredProbe({
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId,
+          configId: setupId,
+          cliType: 'builtin',
+          agentType: 'codex',
+          success: false,
+          authRequired: true,
+        })
+      )
+      .mockResolvedValueOnce(
+        deferredProbe({
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId,
+          configId: setupId,
+          cliType: 'builtin',
+          agentType: 'codex',
+          success: true,
+          modes: [],
+          models: [],
+        })
+      );
+    const harness = createHarness({ probeMachineAcpCapabilitiesForProviderSetup: refresh });
     seedSetup(harness.flock);
 
     await harness.manager.kick();
@@ -259,15 +274,17 @@ describe('ProviderSetupManager', () => {
   });
 
   it('does not retry a failed task until the UI changes its state', async () => {
-    const refresh = vi.fn(async () => ({
-      type: 'machine/acp-capabilities-refresh_response' as const,
-      machineId,
-      configId: setupId,
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      success: false,
-    }));
-    const harness = createHarness({ refreshMachineAcpCapabilities: refresh });
+    const refresh = vi.fn(async () =>
+      deferredProbe({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        success: false,
+      })
+    );
+    const harness = createHarness({ probeMachineAcpCapabilitiesForProviderSetup: refresh });
     seedSetup(harness.flock);
 
     await harness.manager.kick();
@@ -298,7 +315,7 @@ describe('ProviderSetupManager', () => {
 
     expect(readState(harness.flock).setup?.status).toBe('failed');
     expect(readState(harness.flock).setup?.failureCode).toBe('runtime-install-failed');
-    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    expect(harness.execution.probeMachineAcpCapabilitiesForProviderSetup).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -343,7 +360,7 @@ describe('ProviderSetupManager', () => {
       config: undefined,
       cancellation: undefined,
     });
-    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    expect(harness.execution.probeMachineAcpCapabilitiesForProviderSetup).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -365,9 +382,9 @@ describe('ProviderSetupManager', () => {
       models: never[];
     }>();
     const harness = createHarnessForFlock(machineFlock, {
-      refreshMachineAcpCapabilities: vi.fn(async () => {
+      probeMachineAcpCapabilitiesForProviderSetup: vi.fn(async () => {
         refreshStarted.resolve();
-        return refreshFinished.promise;
+        return deferredProbe(await refreshFinished.promise);
       }),
     });
 
@@ -431,11 +448,19 @@ describe('ProviderSetupManager', () => {
     };
     seedSetup(harness.flock, replacement);
 
-    await harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key');
+    const publishCapabilities = vi.fn(async () => undefined);
+    await harness.manager.commitCredentialSetup(
+      setupId,
+      'revision-new',
+      'new-key',
+      undefined,
+      undefined,
+      publishCapabilities
+    );
 
     expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
     expect(readState(harness.flock).setup).toBeUndefined();
-    expect(harness.execution.refreshMachineAcpCapabilities).not.toHaveBeenCalled();
+    expect(harness.execution.probeMachineAcpCapabilitiesForProviderSetup).not.toHaveBeenCalled();
     expect(harness.stageCredential).toHaveBeenCalledWith(
       workspaceId,
       replacement.config,
@@ -444,6 +469,7 @@ describe('ProviderSetupManager', () => {
     );
     expect(harness.finalizeCredential).toHaveBeenCalledTimes(1);
     expect(harness.rollbackCredential).not.toHaveBeenCalled();
+    expect(publishCapabilities).toHaveBeenCalledTimes(1);
     harness.manager.stop();
   });
 
@@ -465,13 +491,22 @@ describe('ProviderSetupManager', () => {
     };
     seedSetup(harness.flock, replacement);
 
+    const publishCapabilities = vi.fn(async () => undefined);
     await expect(
-      harness.manager.commitCredentialSetup(setupId, 'revision-old', 'old-candidate-key')
+      harness.manager.commitCredentialSetup(
+        setupId,
+        'revision-old',
+        'old-candidate-key',
+        undefined,
+        undefined,
+        publishCapabilities
+      )
     ).rejects.toThrow(/cancelled or replaced/);
 
     expect(readState(harness.flock).config).toEqual(oldConfig);
     expect(readState(harness.flock).setup).toEqual(replacement);
     expect(harness.stageCredential).not.toHaveBeenCalled();
+    expect(publishCapabilities).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -595,8 +630,16 @@ describe('ProviderSetupManager', () => {
     seedSetup(harness.flock, replacement);
     harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
 
+    const publishCapabilities = vi.fn(async () => undefined);
     await expect(
-      harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
+      harness.manager.commitCredentialSetup(
+        setupId,
+        'revision-new',
+        'new-key',
+        undefined,
+        undefined,
+        publishCapabilities
+      )
     ).resolves.toBe('uncertain');
 
     expect(harness.stageCredential).toHaveBeenCalledWith(
@@ -607,6 +650,7 @@ describe('ProviderSetupManager', () => {
     );
     expect(harness.finalizeCredential).not.toHaveBeenCalled();
     expect(harness.rollbackCredential).not.toHaveBeenCalled();
+    expect(publishCapabilities).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -690,6 +734,41 @@ describe('ProviderSetupManager', () => {
       } finally {
         recoveredHarness.manager.stop();
       }
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes a locally enumerated credential after a legacy direct config delete', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-orphan-recovery-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const orphanConfig = {
+      ...createSetup().config,
+      id: 'deleted-config' as AgentConfigId,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://orphan.example.com/v1' }),
+    };
+    const harness = createHarnessForFlock(
+      new FakeMachineFlock(),
+      {},
+      {
+        listCredentialConfigIds: listCodexProviderCredentialConfigIds,
+        reconcileCredential: reconcileCodexProviderCredential,
+      }
+    );
+
+    try {
+      await seedCredential(orphanConfig, 'orphan-key');
+      expect((await hydrateCodexProviderCredential(workspaceId, orphanConfig)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'orphan-key',
+      });
+
+      await harness.manager.kick({ recoverCredentials: true });
+
+      expect(await hydrateCodexProviderCredential(workspaceId, orphanConfig)).toEqual(orphanConfig);
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;

@@ -6604,12 +6604,13 @@ describe('SessionExecutionService', () => {
       throw new Error('publish flush failed');
     });
     const fetchAcpCapabilities = vi.fn(async () => ({ modes: [], models: [] }));
+    const updateAcpCapabilities = vi.fn(async () => ({}));
     const service = new SessionExecutionService(
       createBaseDeps({
         fetchAcpCapabilities,
         workspaceDocument: {
           waitForProviderSetupConfig: vi.fn(async () => config),
-          updateAcpCapabilities: vi.fn(async () => {}),
+          updateAcpCapabilities,
         } as unknown as LoroDocumentManager,
       })
     );
@@ -6641,6 +6642,8 @@ describe('SessionExecutionService', () => {
         setupRevision: 'revision-new',
         apiKey: 'new-key',
         signal: expect.any(AbortSignal),
+        markCommitted: undefined,
+        publishCapabilities: expect.any(Function),
       });
       expect(fetchAcpCapabilities.mock.calls[0]?.[2]).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'new-key',
@@ -6648,6 +6651,71 @@ describe('SessionExecutionService', () => {
       expect(fetchAcpCapabilities.mock.invocationCallOrder[0]).toBeLessThan(
         commitCodexProviderCredential.mock.invocationCallOrder[0]!
       );
+      expect(updateAcpCapabilities).not.toHaveBeenCalled();
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('publishes probed capabilities only after credential publication accepts the setup', async () => {
+    const config = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      runtimeOverrides: { codexPath: '/bin/echo' },
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+    });
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockImplementation(async (options) => {
+        const signal = new AbortController().signal;
+        await options.prepare?.(signal);
+        const publication = await options.storeCodexApiKey?.('new-key', signal, () => {});
+        return { success: true, disposition: 'authenticated', ...publication };
+      });
+    const updateAcpCapabilities = vi.fn(async () => ({}));
+    const commitCodexProviderCredential = vi.fn(async (input) => {
+      expect(updateAcpCapabilities).not.toHaveBeenCalled();
+      await input.publishCapabilities();
+      return { publicationDurability: 'durable' as const };
+    });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        fetchAcpCapabilities: vi.fn(async () => ({
+          modes: [],
+          models: [{ modelId: 'published-model' }],
+          sessionFork: false,
+          acknowledgedSteer: false,
+        })),
+        workspaceDocument: {
+          waitForProviderSetupConfig: vi.fn(async () => config),
+          updateAcpCapabilities,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      await expect(
+        service.authenticateMachineAcp(
+          {
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'provision-publish-capabilities',
+            action: 'start',
+            configId: capabilityConfigId,
+            purpose: 'provision-provider-credential',
+            setupRevision: 'revision-new',
+          },
+          { commitCodexProviderCredential }
+        )
+      ).resolves.toEqual(
+        expect.objectContaining({
+          success: true,
+          disposition: 'authenticated',
+          capabilitiesRefreshed: true,
+        })
+      );
+      expect(updateAcpCapabilities).toHaveBeenCalledOnce();
     } finally {
       authenticate.mockRestore();
     }

@@ -28,6 +28,10 @@ setup. Ordinary queue drains never reconcile from live Flock state because a pos
 failure leaves that state ahead of the last proven durable snapshot. Startup recovery snapshots
 only config IDs; it reads each ID's current references inside that config's credential mutation
 sequence so a concurrent publication cannot be reconciled against stale bindings.
+Every shared Machine Flock AgentConfig writer rejects the reserved credential key, including an
+empty value, and AgentConfig readers discard legacy or externally authored rows that contain it.
+Generic `agent-config create`, `update`, and `show` therefore cannot persist or reveal the key by
+bypassing the provider setup flow.
 The credential is injected under the generated provider's `env_key` only when the current launch
 configuration hashes to the record's SHA-256 digest of the canonical launch binding. The raw
 binding is not persisted. A changed endpoint, proxy, runtime, agent type, custom launch command,
@@ -46,7 +50,11 @@ boundary wins and publishes nothing; cancellation or timeout after it is too lat
 uncertain publication durability, retains both credential bindings, and forces the renderer to
 resync authoritative config before presenting the result; it is not handled as an ordinary failed
 save or automatic retry. A superseded RPC returns a conflict instead of publishing or reporting
-success. Each submit attempt has a fresh setup revision, and automatic failure compensation may
+success. A provisioning probe is side-effect-free with respect to the shared capability cache.
+Its result is published to that cache only after the exact setup revision wins a durable config
+publication, inside the same per-config mutation sequence. Cancellation, supersession, probe
+failure, and uncertain publication leave the cache unchanged. Each submit attempt has a fresh
+setup revision, and automatic failure compensation may
 cancel only that exact revision. During an edit, the previous published launch config remains live
 until publication. Display metadata, prompt, title-generation, and other non-binding edits update
 the published config directly and do not request the API key or run a probe. A replacement
@@ -70,6 +78,11 @@ family. Existing
 `CODEX_API_KEY`, unrelated providers, and other environment values remain unchanged. A malformed
 `CODEX_CONFIG`, reserved provider-id collision, or marker collision is rejected instead of
 overwritten. Arbitrary hand-written Codex configuration remains an advanced environment override.
+The generic CLI `agent-config delete` applies the same wildcard cancellation and config removal in
+one Flock commit when deleting a custom Codex endpoint. Credential records include non-secret
+workspace/config identity so startup
+recovery can enumerate and reconcile a credential even when an older client deleted the only
+workspace row without writing the cancellation marker.
 
 The custom endpoint changes authentication and request routing, not runtime ownership. Lody
 continues to install and manage the same Codex runtime unless the user separately supplies a

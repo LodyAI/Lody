@@ -19,6 +19,8 @@ one active binding. The post-probe commit window may hold exactly two bindings, 
 published config and the desired config, until Flock publication selects the survivor. It has no
 candidate generations or migration layer for this unreleased feature. The file stores a SHA-256
 digest of the canonical launch binding rather than the raw binding and its environment values.
+Its versioned envelope also stores non-secret workspace/config identity so startup recovery can
+enumerate an orphan after a legacy client deletes the only workspace row.
 POSIX directories/files are hardened to `0700`/`0600`. Windows inherits the ACL of Lody's
 per-user data directory. Every session spawn, including cold fork and edit-and-resend recovery,
 injects the key at the shared `SessionManager` process-launch boundary only on an exact binding
@@ -28,6 +30,9 @@ The provider uses a Lody-owned environment key and a separate ownership marker. 
 the previous `model_provider` selector so switching back to ChatGPT is reversible without
 copying an existing `CODEX_API_KEY` or reserved provider into Lody state. Invalid JSON and
 namespace collisions fail rather than being normalized or overwritten.
+The reserved one-shot credential key is rejected at shared AgentConfig write boundaries, not only
+by ProviderSetup parsing. Read normalization also drops credential-bearing AgentConfig rows, so
+generic create/update/show paths cannot persist or disclose the secret.
 
 The feature requires a negotiated `codexCustomEndpointCredentials` capability. A setup row names
 an expected non-secret setup revision and starts in `awaiting-auth`. The explicit
@@ -39,6 +44,10 @@ record. The existing authentication slot and abort signal remain live through se
 secret input, probe, credential staging, and config publication. The slot becomes committed in the
 synchronous boundary immediately before the Flock commit: cancellation wins before that point and
 is too late afterward. Remote HTTP endpoints are rejected; HTTPS and loopback HTTP are accepted.
+The verification probe itself does not mutate the shared capability cache. Its result is handed to
+the setup manager as a deferred publication and is cached only after the exact setup revision wins
+durable AgentConfig publication inside the per-config credential mutation sequence. Cancelled,
+superseded, failed, and durability-uncertain attempts publish no capabilities.
 
 ## Failure and cleanup
 
@@ -68,18 +77,22 @@ carries the previously captured config rather than looking it up in that cache. 
 for the target machine. Its daemon reconciles the affected config ID after the cancellation is
 durably applied and removes the local credential only after no published custom config or custom
 setup references it. This also covers a daemon that observes only `custom → deleted` and never sees
-an intermediate non-custom config, without a second cleanup row family.
+an intermediate non-custom config, without a second cleanup row family. Generic CLI deletion of a
+custom Codex endpoint now uses that same atomic wildcard-cancellation protocol. Startup recovery also unions locally
+enumerated credential IDs with workspace row IDs, allowing it to collect credentials orphaned by
+older direct-delete clients.
 
 ## Evidence
 
 The [draft specification](../../../../specs/codex-custom-endpoint-authentication.md) owns the
 behavior. Shared tests cover endpoint policy, reversible overlays, collision rejection, malformed
 configuration, setup revision parsing, wildcard cancellation, publication durability, and rejection
-of the protocol-owned one-shot secret at the setup-row boundary. CLI tests cover delayed setup
+of the protocol-owned one-shot secret at both setup and AgentConfig boundaries. CLI tests cover delayed setup
 visibility, forced key rotation, cancellation during a deferred live probe, the commit boundary,
 same-binding rotation with uncertain flush, real-store publication uncertainty, dual-binding crash
 recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
-replay, binding mismatch, digest-only binding persistence, and credential injection at the common
+replay, legacy direct-delete orphan enumeration, binding mismatch, digest-only binding persistence,
+deferred capability publication, and credential injection at the common
 session launch boundary. CLI coverage also holds an R1 credential stage across the atomic R2 merge,
 rejects R1 publication, and then publishes R2. Component tests cover metadata-only edits,
 per-attempt revisions, exact failure cancellation, the one-shot payload, and cancellation-first

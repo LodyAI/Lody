@@ -8420,6 +8420,7 @@ export class MessageHandler {
               apiKey,
               signal,
               markCommitted,
+              publishCapabilities,
             }) => ({
               publicationDurability: await this.providerSetupManager.commitCredentialSetup(
                 configId,
@@ -8431,7 +8432,8 @@ export class MessageHandler {
                   this.logger.debug(
                     `[provider-setup] Commit boundary requestId=${message.requestId} configId=${configId} setupRevision=${setupRevision}`
                   );
-                }
+                },
+                publishCapabilities
               ),
             }),
           }

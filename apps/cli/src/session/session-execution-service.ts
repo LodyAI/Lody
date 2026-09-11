@@ -659,10 +659,19 @@ type AcpBinaryProgressOptions = {
   signal?: AbortSignal;
 };
 
+type AcpCapabilityProbe = Awaited<
+  ReturnType<SessionExecutionServiceDeps['fetchAcpCapabilities']>
+> & {
+  sourceVersion: string;
+  signal?: AbortSignal;
+  publication?: Promise<NonNullable<MachineAcpCapabilitiesRefreshResponse['capability']>>;
+  publishedResponse?: MachineAcpCapabilitiesRefreshResponse;
+};
+
 type InFlightAcpRefreshEntry = {
   consumers: Map<object, AcpBinaryProgressSink | undefined>;
   controller: AbortController;
-  promise: Promise<MachineAcpCapabilitiesRefreshResponse>;
+  promise: Promise<AcpCapabilityProbe>;
   settled: boolean;
 };
 
@@ -683,11 +692,17 @@ type AcpAuthenticationOptions = {
     apiKey: string;
     signal: AbortSignal;
     markCommitted: () => void;
+    publishCapabilities: () => Promise<void>;
   }) => Promise<{ publicationDurability: 'durable' | 'uncertain' }>;
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
   Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'>;
+
+export type DeferredMachineAcpCapabilitiesRefresh = {
+  response: MachineAcpCapabilitiesRefreshResponse;
+  publishCapabilities: () => Promise<void>;
+};
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
   const record =
@@ -5586,6 +5601,10 @@ export class SessionExecutionService {
     const authenticationCliType = provisioning ? 'builtin' : (config?.cliType ?? 'builtin');
     const authenticationAgentType = provisioning ? 'codex' : (config?.agentType ?? 'unknown');
     const resolvedBase = { ...base, agentType: authenticationAgentType };
+    let provisioningProbe:
+      | { request: ResolvedMachineAcpCapabilitiesRefreshRequest; result: AcpCapabilityProbe }
+      | undefined;
+    let provisioningCapabilitiesPublished = false;
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
       if (event.status === 'auth-methods') {
@@ -5626,20 +5645,28 @@ export class SessionExecutionService {
       const refreshTimeout = setTimeout(() => refreshController.abort(), refreshTimeoutMs);
       refreshTimeout.unref?.();
       try {
-        const refresh = await this.refreshMachineAcpCapabilitiesForConfig(
-          {
-            type: 'machine/acp-capabilities-refresh',
-            machineId: message.machineId,
-            workspaceId: message.workspaceId,
-            configId: message.configId,
-            cliType: verifiedConfig.cliType,
-            agentType: verifiedConfig.agentType,
-            customAcp: verifiedConfig.customAcp,
-            runtimeOverrides: verifiedConfig.runtimeOverrides,
-            env: verifiedConfig.env,
-          },
-          { signal: refreshController.signal }
-        );
+        const request: ResolvedMachineAcpCapabilitiesRefreshRequest = {
+          type: 'machine/acp-capabilities-refresh',
+          machineId: message.machineId,
+          workspaceId: message.workspaceId,
+          configId: message.configId,
+          cliType: verifiedConfig.cliType,
+          agentType: verifiedConfig.agentType,
+          customAcp: verifiedConfig.customAcp,
+          runtimeOverrides: verifiedConfig.runtimeOverrides,
+          env: verifiedConfig.env,
+        };
+        const refresh = provisioning
+          ? await (async () => {
+              const result = await this.probeMachineAcpCapabilitiesForConfig(request, {
+                signal: refreshController.signal,
+              });
+              provisioningProbe = { request, result };
+              return this.buildAcpCapabilitiesRefreshSuccess(request, result);
+            })()
+          : await this.refreshMachineAcpCapabilitiesForConfig(request, {
+              signal: refreshController.signal,
+            });
         signal?.throwIfAborted();
         return refresh;
       } catch (error) {
@@ -5721,6 +5748,16 @@ export class SessionExecutionService {
               apiKey: candidateApiKey,
               signal,
               markCommitted,
+              publishCapabilities: async () => {
+                if (!provisioningProbe) {
+                  throw new Error('Codex capability probe result is unavailable');
+                }
+                await this.publishAcpCapabilityProbe(
+                  provisioningProbe.request,
+                  provisioningProbe.result
+                );
+                provisioningCapabilitiesPublished = true;
+              },
             });
           }
         : undefined,
@@ -5728,7 +5765,11 @@ export class SessionExecutionService {
     });
     if (result.success && result.disposition === 'authenticated') {
       if (provisioning) {
-        return { ...resolvedBase, ...result, capabilitiesRefreshed: true };
+        return {
+          ...resolvedBase,
+          ...result,
+          capabilitiesRefreshed: provisioningCapabilitiesPublished,
+        };
       }
       if (!config) {
         return {
@@ -5815,10 +5856,55 @@ export class SessionExecutionService {
     );
   }
 
+  async probeMachineAcpCapabilitiesForProviderSetup(
+    config: AgentConfigMeta,
+    options: AcpBinaryProgressOptions = {}
+  ): Promise<DeferredMachineAcpCapabilitiesRefresh> {
+    const request: ResolvedMachineAcpCapabilitiesRefreshRequest = {
+      type: 'machine/acp-capabilities-refresh',
+      machineId: this.deps.machineId,
+      workspaceId: this.deps.workspaceId,
+      configId: config.id,
+      cliType: config.cliType,
+      agentType: config.agentType,
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
+    };
+    try {
+      const probe = await this.probeMachineAcpCapabilitiesForConfig(request, options);
+      return {
+        response: this.buildAcpCapabilitiesRefreshSuccess(request, probe),
+        publishCapabilities: async () => {
+          await this.publishAcpCapabilityProbe(request, probe);
+        },
+      };
+    } catch (error) {
+      return {
+        response: this.buildAcpCapabilitiesRefreshFailure(request, error),
+        publishCapabilities: async () => {},
+      };
+    }
+  }
+
   private async refreshMachineAcpCapabilitiesForConfig(
     message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     options: AcpBinaryProgressOptions = {}
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
+    try {
+      const probe = await this.probeMachineAcpCapabilitiesForConfig(message, options);
+      const capability = await this.publishAcpCapabilityProbe(message, probe);
+      return this.buildAcpCapabilitiesRefreshSuccess(message, probe, capability, true);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      return this.buildAcpCapabilitiesRefreshFailure(message, error);
+    }
+  }
+
+  private async probeMachineAcpCapabilitiesForConfig(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    options: AcpBinaryProgressOptions = {}
+  ): Promise<AcpCapabilityProbe> {
     // Config identity is part of the key because the response and cache row are
     // both config-scoped even when two configs share identical launch inputs.
     const dedupeKey = computeAcpRefreshDedupeKey(
@@ -5848,7 +5934,7 @@ export class SessionExecutionService {
       const controller = new AbortController();
       const consumers = new Map<object, AcpBinaryProgressSink | undefined>();
       let nextEntry!: InFlightAcpRefreshEntry;
-      const promise = this.executeAcpRefresh(message, {
+      const promise = this.executeAcpProbe(message, {
         signal: controller.signal,
         onAcpBinaryProgress: (progress) => {
           for (const sink of consumers.values()) {
@@ -5873,7 +5959,7 @@ export class SessionExecutionService {
 
     const consumer = {};
     entry.consumers.set(consumer, options.onAcpBinaryProgress);
-    return await new Promise<MachineAcpCapabilitiesRefreshResponse>((resolve, reject) => {
+    return await new Promise<AcpCapabilityProbe>((resolve, reject) => {
       let finished = false;
       const release = (): void => {
         options.signal?.removeEventListener('abort', handleAbort);
@@ -5896,111 +5982,129 @@ export class SessionExecutionService {
         return;
       }
       void entry.promise.then(
-        (response) => finish(() => resolve(response)),
+        (probe) => finish(() => resolve(probe)),
         (error: unknown) => finish(() => reject(error))
       );
     });
   }
 
-  private async executeAcpRefresh(
+  private async executeAcpProbe(
     message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     options: AcpBinaryProgressOptions = {}
-  ): Promise<MachineAcpCapabilitiesRefreshResponse> {
-    try {
-      options.signal?.throwIfAborted();
-      await this.emitBuiltinRuntimeStatusForRefresh(message, options.onAcpBinaryProgress);
-      options.signal?.throwIfAborted();
-      const {
-        modes,
-        models,
-        configOptions,
-        availableCommands,
-        sessionFork,
-        acknowledgedSteer,
-        goalActions,
-        modelReasoningEfforts,
-        capabilitySourceVersion,
-      } = await this.deps.fetchAcpCapabilities(
-        message.cliType,
-        message.agentType,
-        message.env,
-        message.customAcp,
-        message.runtimeOverrides,
-        {
-          signal: options.signal,
-          onManagedRuntimeProgress: (event) => {
-            if (options.signal?.aborted) return;
-            options.onAcpBinaryProgress?.(
-              toManagedRuntimeProgressMessage(this.deps.machineId, event)
-            );
-          },
-        }
-      );
+  ): Promise<AcpCapabilityProbe> {
+    options.signal?.throwIfAborted();
+    await this.emitBuiltinRuntimeStatusForRefresh(message, options.onAcpBinaryProgress);
+    options.signal?.throwIfAborted();
+    const result = await this.deps.fetchAcpCapabilities(
+      message.cliType,
+      message.agentType,
+      message.env,
+      message.customAcp,
+      message.runtimeOverrides,
+      {
+        signal: options.signal,
+        onManagedRuntimeProgress: (event) => {
+          if (options.signal?.aborted) return;
+          options.onAcpBinaryProgress?.(
+            toManagedRuntimeProgressMessage(this.deps.machineId, event)
+          );
+        },
+      }
+    );
+    options.signal?.throwIfAborted();
+    return {
+      ...result,
+      signal: options.signal,
+      sourceVersion:
+        result.capabilitySourceVersion ??
+        getAcpCapabilitySourceVersion({
+          cliType: message.cliType,
+          agentType: message.agentType,
+          customAcp: message.customAcp,
+          runtimeOverrides: message.runtimeOverrides,
+          env: message.env,
+        }),
+    };
+  }
 
-      options.signal?.throwIfAborted();
-      const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
-        this.deps.machineId,
-        message.configId,
-        message.cliType,
-        message.agentType,
-        modes,
-        models,
-        configOptions,
-        availableCommands,
-        sessionFork,
-        capabilitySourceVersion ??
-          getAcpCapabilitySourceVersion({
-            cliType: message.cliType,
-            agentType: message.agentType,
-            customAcp: message.customAcp,
-            runtimeOverrides: message.runtimeOverrides,
-            env: message.env,
-          }),
-        modelReasoningEfforts,
-        acknowledgedSteer,
-        goalActions,
-        { signal: options.signal }
-      );
+  private async publishAcpCapabilityProbe(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    probe: AcpCapabilityProbe,
+    signal?: AbortSignal
+  ): Promise<NonNullable<MachineAcpCapabilitiesRefreshResponse['capability']>> {
+    const publicationSignal = signal ?? probe.signal;
+    publicationSignal?.throwIfAborted();
+    probe.publication ??= this.deps.workspaceDocument.updateAcpCapabilities(
+      this.deps.machineId,
+      message.configId,
+      message.cliType,
+      message.agentType,
+      probe.modes,
+      probe.models,
+      probe.configOptions,
+      probe.availableCommands,
+      probe.sessionFork,
+      probe.sourceVersion,
+      probe.modelReasoningEfforts,
+      probe.acknowledgedSteer,
+      probe.goalActions,
+      { signal: publicationSignal }
+    );
+    return await probe.publication;
+  }
 
-      return {
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId: this.deps.machineId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        success: true,
-        modes,
-        models,
-        configOptions: configOptions?.map((opt) => ({
-          id: opt.id,
-          name: opt.name,
-          category: opt.category,
-          optionCount: opt.options.length,
-        })),
-        capability,
-        availableCommands,
-      };
-    } catch (error) {
-      const errorMessage = formatErrorMessage(error);
-      this.deps.logger.debug(
-        `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
-      );
-      return {
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId: this.deps.machineId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        success: false,
-        ...(error instanceof AcpAuthenticationRequiredError
-          ? {
-              authRequired: true,
-              authMethods: error.authMethods.map(summarizeAcpAuthMethod),
-            }
-          : {}),
-        error: errorMessage,
-      };
-    }
+  private buildAcpCapabilitiesRefreshSuccess(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    probe: AcpCapabilityProbe,
+    capability?: NonNullable<MachineAcpCapabilitiesRefreshResponse['capability']>,
+    published = false
+  ): MachineAcpCapabilitiesRefreshResponse {
+    if (published && probe.publishedResponse) return probe.publishedResponse;
+    const response: MachineAcpCapabilitiesRefreshResponse = {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: this.deps.machineId,
+      configId: message.configId,
+      cliType: message.cliType,
+      agentType: message.agentType,
+      success: true,
+      modes: probe.modes,
+      models: probe.models,
+      configOptions: probe.configOptions?.map((option) => ({
+        id: option.id,
+        name: option.name,
+        category: option.category,
+        optionCount: option.options.length,
+      })),
+      ...(capability ? { capability } : {}),
+      availableCommands: probe.availableCommands,
+    };
+    if (published) probe.publishedResponse = response;
+    return response;
+  }
+
+  private buildAcpCapabilitiesRefreshFailure(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    error: unknown
+  ): MachineAcpCapabilitiesRefreshResponse {
+    const errorMessage = formatErrorMessage(error);
+    this.deps.logger.debug(
+      `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
+    );
+    return {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: this.deps.machineId,
+      configId: message.configId,
+      cliType: message.cliType,
+      agentType: message.agentType,
+      success: false,
+      ...(error instanceof AcpAuthenticationRequiredError
+        ? {
+            authRequired: true,
+            authMethods: error.authMethods.map(summarizeAcpAuthMethod),
+          }
+        : {}),
+      error: errorMessage,
+    };
   }
 
   private async emitBuiltinRuntimeStatusForRefresh(

@@ -13,6 +13,24 @@ export type CodexCredentialBoundConfig = {
   runtimeOverrides?: unknown;
   env: Record<string, string>;
 };
+
+type AgentConfigEnvironment = {
+  env: Record<string, string | undefined> | undefined;
+};
+
+export function agentConfigContainsCodexCredential(config: AgentConfigEnvironment): boolean {
+  return Boolean(
+    config.env && Object.prototype.hasOwnProperty.call(config.env, LODY_CODEX_API_KEY_ENV)
+  );
+}
+
+export function assertAgentConfigDoesNotContainCodexCredential(
+  config: AgentConfigEnvironment
+): void {
+  if (agentConfigContainsCodexCredential(config)) {
+    throw new Error(`${LODY_CODEX_API_KEY_ENV} is reserved for machine-local credential injection`);
+  }
+}
 type ProviderState = {
   v: 1;
   previousModelProvider: { present: false } | { present: true; value: unknown };

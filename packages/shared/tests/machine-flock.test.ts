@@ -34,7 +34,10 @@ import {
   type MachineFlockKey,
   type MachineFlockWritableFlock,
 } from '../src/machine-flock';
-import { buildLodyCodexCustomProviderEnv } from '../src/codex-provider-config';
+import {
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
+} from '../src/codex-provider-config';
 import {
   getRateLimitEntryKey,
   getAcpCapabilityCacheKey,
@@ -472,6 +475,25 @@ describe('machine Flock helpers', () => {
       env: {},
     });
 
+    expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
+  });
+
+  it('rejects the machine-local Codex credential at agent config read and write boundaries', () => {
+    const agentConfigId = 'credential-bearing-config' as AgentConfigId;
+    const config = {
+      id: agentConfigId,
+      machineId: 'machine-1' as MachineId,
+      name: 'Codex',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      env: { [LODY_CODEX_API_KEY_ENV]: 'must-not-sync' },
+    } as AgentConfigMeta;
+    const flock = new FakeMachineFlock();
+
+    expect(() => writeAgentConfigToFlock(flock, config)).toThrow(/machine-local credential/);
+    expect(flock.commits).toBe(0);
+
+    flock.set(machineFlockKeys.agentConfig(agentConfigId), config);
     expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
   });
 

@@ -10,6 +10,7 @@ import {
 } from '@lody/shared';
 import {
   hydrateCodexProviderCredential,
+  listCodexProviderCredentialConfigIds,
   reconcileCodexProviderCredential,
   stageCodexProviderCredential,
 } from './provider-credential-store';
@@ -87,11 +88,29 @@ describe('provider credential store', () => {
     const [credentialFile] = await readdir(credentialDirectory);
     if (!credentialFile) throw new Error('Expected a persisted credential file');
     const persisted = await readFile(path.join(credentialDirectory, credentialFile), 'utf8');
-    const record = JSON.parse(persisted) as { current: { binding: string } };
+    const record = JSON.parse(persisted) as {
+      v: number;
+      workspaceId: string;
+      configId: string;
+      current: { binding: string };
+    };
 
+    expect(record).toMatchObject({ v: 2, workspaceId, configId: original.id });
     expect(record.current.binding).toMatch(/^[a-f0-9]{64}$/);
     expect(persisted).not.toContain('do-not-copy-this-secret');
     expect(persisted).not.toContain('OTHER_SECRET');
+  });
+
+  it('enumerates credential config ids for startup orphan recovery', async () => {
+    await seedCredential(config(), 'sk-local');
+    await seedCredential({ ...config(), id: 'codex-other' }, 'sk-other');
+
+    await expect(listCodexProviderCredentialConfigIds(workspaceId)).resolves.toEqual(
+      expect.arrayContaining(['codex-test', 'codex-other'])
+    );
+    await expect(
+      listCodexProviderCredentialConfigIds('different-workspace' as WorkspaceId)
+    ).resolves.toEqual([]);
   });
 
   it('keeps both published and desired bindings usable through the commit window', async () => {

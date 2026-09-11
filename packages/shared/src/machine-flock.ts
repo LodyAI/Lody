@@ -32,7 +32,11 @@ import type {
   SessionLaunchConfig,
   SessionMeta,
 } from './schema';
-import { getLodyCodexCustomProvider, LODY_CODEX_API_KEY_ENV } from './codex-provider-config';
+import {
+  agentConfigContainsCodexCredential,
+  assertAgentConfigDoesNotContainCodexCredential,
+  getLodyCodexCustomProvider,
+} from './codex-provider-config';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
 
@@ -210,7 +214,7 @@ export type ProviderSetupTask = {
 
 /** Guard the one-shot secret owned by this protocol at its workspace-state boundary. */
 export function providerSetupContainsCodexCredential(config: AgentConfigMeta): boolean {
-  return Boolean(config.env[LODY_CODEX_API_KEY_ENV]?.trim());
+  return agentConfigContainsCodexCredential(config);
 }
 
 /**
@@ -792,7 +796,8 @@ export function getMachineFlockProviderSetupCancellations(
 export function applyProviderSetupCancellationToFlock(
   flock: MachineFlockWritableFlock,
   cancellation: ProviderSetupCancellation,
-  nowMs: number = cancellation.cancelledAt
+  nowMs: number = cancellation.cancelledAt,
+  capturedConfig?: AgentConfigMeta
 ): boolean {
   const rows = readMachineFlockRowsFromFlock(flock, {
     prefixes: [
@@ -804,6 +809,7 @@ export function applyProviderSetupCancellationToFlock(
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
+  const configForRemoval = config ?? capturedConfig;
   if (
     cancellation.setupRevision &&
     (!setup?.setupRevision || setup.setupRevision !== cancellation.setupRevision)
@@ -819,10 +825,10 @@ export function applyProviderSetupCancellationToFlock(
   if (setup) {
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
-  if (config && !cancellation.preservePublishedConfig) {
-    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+  if (configForRemoval && !cancellation.preservePublishedConfig) {
+    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, configForRemoval, nowMs);
     if (optOut) flock.set(optOut.key, optOut.value, nowMs);
-    flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
+    if (config) flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
   }
   flock.commit();
   return true;
@@ -921,6 +927,7 @@ export function writeAgentConfigToFlock(
   config: AgentConfigMeta,
   nowMs?: number
 ): boolean {
+  assertAgentConfigDoesNotContainCodexCredential(config);
   const rows = readMachineFlockRowsFromFlock(flock, {
     prefixes: [
       machineFlockKeys.agentConfig(config.id),
@@ -1043,6 +1050,9 @@ export function writeMachineFlockRowToFlock(
   row: MachineFlockRow,
   nowMs?: number
 ): boolean {
+  if (row.key[0] === 'agentConfig') {
+    assertAgentConfigDoesNotContainCodexCredential(row.value as AgentConfigMeta);
+  }
   const normalized = parseMachineFlockRow(row.key, row.value);
   if (!normalized) {
     return false;
@@ -1490,6 +1500,9 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
     !isNonEmptyString(value.agentType) ||
     !isStringRecord(value.env)
   ) {
+    return undefined;
+  }
+  if (agentConfigContainsCodexCredential({ env: value.env })) {
     return undefined;
   }
 

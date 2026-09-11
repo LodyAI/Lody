@@ -1,6 +1,8 @@
 import { atom } from 'jotai';
 import {
   AGENT_CONFIG_DOC_PREFIX,
+  agentConfigContainsCodexCredential,
+  assertAgentConfigDoesNotContainCodexCredential,
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
   getLodyCodexCustomProvider,
@@ -47,6 +49,7 @@ export async function writeAgentConfigToMachineFlock(
   runtime: WorkspaceRuntime,
   config: AgentConfigMeta
 ): Promise<MachineFlockRowMap> {
+  assertAgentConfigDoesNotContainCodexCredential(config);
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
   await runtime.writer.flockRowPut(flockDocId, key, config);
@@ -179,6 +182,8 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
   const runtimeOverrides = isBuiltinRuntimeOverrides(raw.runtimeOverrides)
     ? raw.runtimeOverrides
     : undefined;
+  const env = isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {};
+  if (agentConfigContainsCodexCredential({ env })) return null;
 
   let titleGeneration: TitleGenerationConfig | undefined;
   if (isPlainObject(raw.titleGeneration)) {
@@ -206,7 +211,7 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
     agentType,
     customAcp,
     runtimeOverrides,
-    env: isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {},
+    env,
     prompt: typeof raw.prompt === 'string' ? raw.prompt : '',
     titleGeneration,
     machineId,

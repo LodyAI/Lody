@@ -1,5 +1,6 @@
 import {
   applyProviderSetupCancellationToFlock,
+  assertAgentConfigDoesNotContainCodexCredential,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
@@ -26,13 +27,16 @@ import type { SessionExecutionService } from '@/session/session-execution-servic
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import {
+  listCodexProviderCredentialConfigIds,
   reconcileCodexProviderCredential,
   stageCodexProviderCredential,
 } from '@/agent/provider-credential-store';
 
 type ProviderSetupExecution = Pick<
   SessionExecutionService,
-  'getMachineAcpBinaryStatus' | 'installMachineAcpBinary' | 'refreshMachineAcpCapabilities'
+  | 'getMachineAcpBinaryStatus'
+  | 'installMachineAcpBinary'
+  | 'probeMachineAcpCapabilitiesForProviderSetup'
 >;
 
 type ProviderSetupSyncScheduler = {
@@ -46,6 +50,7 @@ export type ProviderSetupManagerOptions = {
   execution: ProviderSetupExecution;
   sync: ProviderSetupSyncScheduler;
   logger: Logger;
+  listCredentialConfigIds?: typeof listCodexProviderCredentialConfigIds;
   reconcileCredential?: typeof reconcileCodexProviderCredential;
   stageCredential?: typeof stageCodexProviderCredential;
 };
@@ -75,6 +80,7 @@ export class ProviderSetupManager {
   private readonly execution: ProviderSetupExecution;
   private readonly sync: ProviderSetupSyncScheduler;
   private readonly logger: Logger;
+  private readonly listCredentialConfigIds: typeof listCodexProviderCredentialConfigIds;
   private readonly reconcileCredential: typeof reconcileCodexProviderCredential;
   private readonly stageCredential: typeof stageCodexProviderCredential;
   private readonly credentialMutationChains = new Map<AgentConfigId, Promise<void>>();
@@ -91,6 +97,8 @@ export class ProviderSetupManager {
     this.execution = options.execution;
     this.sync = options.sync;
     this.logger = options.logger;
+    this.listCredentialConfigIds =
+      options.listCredentialConfigIds ?? listCodexProviderCredentialConfigIds;
     this.reconcileCredential = options.reconcileCredential ?? reconcileCodexProviderCredential;
     this.stageCredential = options.stageCredential ?? stageCodexProviderCredential;
   }
@@ -140,7 +148,8 @@ export class ProviderSetupManager {
     setupRevision: string,
     apiKey: string,
     signal?: AbortSignal,
-    markCommitted?: () => void
+    markCommitted?: () => void,
+    publishCapabilities?: () => Promise<void>
   ): Promise<ProviderSetupPublicationDurability> {
     return await this.runCredentialMutation(setupId, async () => {
       if (this.stopped) throw new Error('Provider setup manager is stopped');
@@ -184,6 +193,11 @@ export class ProviderSetupManager {
             `[provider-setup] Published ${setup.id}, but old credential binding cleanup is deferred to startup recovery: ${formatErrorMessage(error)}`
           );
         });
+        await publishCapabilities?.().catch((error) => {
+          this.logger.debug(
+            `[provider-setup] Published ${setup.id}, but capability cache publication is deferred to a later refresh: ${formatErrorMessage(error)}`
+          );
+        });
       }
       return published.durability;
     });
@@ -207,6 +221,22 @@ export class ProviderSetupManager {
         this.credentialMutationChains.delete(configId);
       }
     }
+  }
+
+  private async commitVerifiedSetup(
+    setupId: AgentConfigId,
+    attempt: number,
+    publishCapabilities: () => Promise<void>
+  ): Promise<void> {
+    await this.runCredentialMutation(setupId, async () => {
+      const published = await this.publishVerifiedConfig(setupId, attempt);
+      if (!published.published || published.durability !== 'durable') return;
+      await publishCapabilities().catch((error) => {
+        this.logger.debug(
+          `[provider-setup] Published ${setupId}, but capability cache publication is deferred to a later refresh: ${formatErrorMessage(error)}`
+        );
+      });
+    });
   }
 
   private async waitUntilIdle(): Promise<void> {
@@ -290,14 +320,12 @@ export class ProviderSetupManager {
       unexpectedFailureCode = 'verification-failed';
       const verifying = await this.updateStatus(setup.id, attempt, 'verifying');
       if (!verifying || this.stopped) return;
-      const response = await this.execution.refreshMachineAcpCapabilities({
-        type: 'machine/acp-capabilities-refresh',
-        machineId: this.machineId,
-        workspaceId: this.workspaceId,
-        configId: verifying.config.id,
-      });
+      const probe = await this.execution.probeMachineAcpCapabilitiesForProviderSetup(
+        verifying.config
+      );
+      const response = probe.response;
       if (response.success) {
-        await this.publishVerifiedConfig(verifying.id, attempt);
+        await this.commitVerifiedSetup(verifying.id, attempt, probe.publishCapabilities);
         return;
       }
       if (response.authRequired) {
@@ -370,10 +398,12 @@ export class ProviderSetupManager {
     const configs = getMachineFlockAgentConfigs(rows);
     const setups = getMachineFlockProviderSetups(rows);
     const cancellations = getMachineFlockProviderSetupCancellations(rows);
+    const credentialConfigIds = await this.listCredentialConfigIds(this.workspaceId);
     const ids = new Set<AgentConfigId>([
       ...(Object.keys(configs) as AgentConfigId[]),
       ...(Object.keys(setups) as AgentConfigId[]),
       ...(Object.keys(cancellations) as AgentConfigId[]),
+      ...(credentialConfigIds as AgentConfigId[]),
     ]);
     for (const id of ids) {
       await this.reconcileCredentialBinding(id);
@@ -570,6 +600,7 @@ export class ProviderSetupManager {
     const rotatesSameBinding = Boolean(
       expectedSetupRevision && currentBinding && desiredBinding && currentBinding === desiredBinding
     );
+    assertAgentConfigDoesNotContainCodexCredential(publishedConfig);
     if (!rotatesSameBinding) {
       flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
     }
