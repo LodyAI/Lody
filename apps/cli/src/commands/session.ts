@@ -2828,7 +2828,16 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
             args.agentConfig
           )
         : undefined;
+  // Builtin Role/MCP creates often have no modeId. Read capabilities before
+  // accepting so withBuiltinDefaultTurnMode cannot freeze an unoffered mode.
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(args.agentConfig.cliType, args.agentConfig.agentType)) &&
+    dispatchConfig.modeId === undefined &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
   const needsCapability =
+    mayApplyBuiltinDefault ||
     dispatchConfig.modeId !== undefined ||
     dispatchConfig.modelId !== undefined ||
     dispatchConfig.configOptionValues !== undefined ||
