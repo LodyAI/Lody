@@ -42,3 +42,7 @@ scoped TypeScript formatting, and `git diff --check` passed. Root
 because workspace dependencies and other adapter submodules are missing.
 `pnpm run docs check` reports existing links into uninitialized Core/Codex
 submodules; it reports no errors for this note.
+
+## Integration
+
+- [Lody PR #599](https://github.com/LodyAI/Lody/pull/599)
