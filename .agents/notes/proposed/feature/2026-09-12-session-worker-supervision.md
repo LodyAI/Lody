@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: pending
+PR: https://github.com/LodyAI/Lody/pull/623
 
 Contract: [Supervised agent-opened Sessions](../../../../specs/session-worker-supervision.md)
 
