@@ -6,7 +6,7 @@ import {
   type PermissionOutcome,
   type SessionHistory,
 } from '@lody/shared';
-import { LoroDoc } from 'loro-crdt';
+import { LoroDoc, LoroText, type LoroList, type LoroMap } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/conversation-view';
 import {
@@ -36,14 +36,6 @@ const shapeOf = (doc: LoroDoc): unknown => {
   return strip((doc as unknown as { getDeepValueWithID(): unknown }).getDeepValueWithID());
 };
 
-/** The op stream, ignoring commit timestamps. */
-const opsOf = (doc: LoroDoc): unknown =>
-  JSON.parse(
-    JSON.stringify(doc.exportJsonUpdates(), (key, value) =>
-      key === 'timestamp' ? undefined : value
-    )
-  );
-
 const openWriterDoc = (history: readonly SessionHistory[] = []) => {
   const doc = buildSessionDoc(history, PEER);
   const idle = createManualIdle();
@@ -65,33 +57,46 @@ const mirrorOver = (doc: LoroDoc) =>
   });
 
 describe('createHistoryWriter', () => {
-  it('appends turns with the exact ops and container shape Mirror.setState produces', () => {
+  it('appends readable history with editable streaming text across snapshot reload', async () => {
     const history = buildFixtureHistory(8).map((entry) =>
       parseHistoryWrite(HistoryEntryWriteSchema, entry)
     ) as SessionHistory[];
-    // Reference: today's path, one Mirror write per turn on a fresh doc.
-    const reference = new LoroDoc();
-    reference.setPeerId(PEER);
-    const mirror = mirrorOver(reference);
-    for (const entry of history) {
-      mirror.setState((prev) => ({
-        ...prev,
-        history: [...(prev.history as never[]), entry] as never,
-      }));
-    }
-    // Candidate: the writer over an empty doc.
     const { doc, view, writer } = openWriterDoc();
     for (const entry of history) writer.append(entry);
 
-    expect(shapeOf(doc)).toEqual(shapeOf(reference));
-    expect(opsOf(doc)).toEqual(opsOf(reference));
-    expect(doc.export({ mode: 'snapshot' })).toEqual(reference.export({ mode: 'snapshot' }));
-    // The OLD full-Mirror read path sees exactly the input.
-    expect(mirrorHistoryOf(reimport(doc))).toEqual(mirrorHistoryOf(reimport(reference)));
-    expect(mirrorHistoryOf(reimport(doc))).toEqual(history);
-    // And the view observed its own writes.
+    // Raw Mirror writes are not the storage oracle: schema storage hints can
+    // intentionally give new writes a different layout. Check values against
+    // authored input, and the streaming contract against real containers.
+    const restored = reimport(doc);
+    expect(mirrorHistoryOf(restored)).toEqual(history);
+    const restoredView = createConversationViewFromDoc(restored, {
+      sessionId: FIXTURE_SESSION_ID,
+      scheduleIdle: createManualIdle().scheduleIdle,
+    });
+    const range = restoredView.acquireRange(0, history.length);
+    await range.ready;
+    expect(history.map((_, index) => restoredView.turn(index))).toEqual(history);
+    const row = restored.getList('history').get(0) as LoroMap;
+    expect(row.get('id')).toBe(history[0]!.id);
+    const item = (row.get('items') as LoroList).get(0) as LoroMap;
+    const text = item.get('text') as LoroText;
+    expect(text).toBeInstanceOf(LoroText);
+    const cid = text.id;
+    text.insert(text.length, ' continued');
+    restored.commit();
+    expect((item.get('text') as LoroText).id).toBe(cid);
+    expect(restoredView.turn(0)?.items?.[0]).toEqual({
+      type: 'text',
+      text: 'Round 0: please inspect module-0. continued',
+    });
+    expect(mirrorHistoryOf(reimport(restored))[0]?.items?.[0]).toEqual(
+      restoredView.turn(0)?.items?.[0]
+    );
     expect(view.turnCount).toBe(history.length);
     expect(view.turn(history.length - 1)).toEqual(history[history.length - 1]);
+    range.release();
+    restoredView.dispose();
+    view.dispose();
   });
 
   it('rejects an entry that fails the session history schema', () => {

@@ -1,5 +1,5 @@
 import { Immer } from 'immer';
-import { isContainer, LoroMap, type LoroDoc } from 'loro-crdt';
+import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
 import { z } from 'zod';
 import type { SessionHistory, SessionHistoryInput } from './schema';
 import { sessionHistorySchema } from './schema';
@@ -23,6 +23,18 @@ import { diffHistoryContainer, populateContainer } from './history-materializer'
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Inspect stored metadata without materializing sibling payloads; accept legacy JSON too. */
+const storedField = (value: unknown, key: string): unknown =>
+  isContainer(value)
+    ? value.kind() === 'Map'
+      ? (value as LoroMap).get(key)
+      : undefined
+    : record(value)
+      ? value[key]
+      : undefined;
+const storedScalar = (value: unknown): unknown =>
+  isContainer(value) && value.kind() === 'Text' ? value.toJSON() : value;
 
 declare const storedHistoryBrand: unique symbol;
 /** Provenance, not a way to bless caller-supplied JSON. history is a detached copy. */
@@ -565,20 +577,33 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     },
     respondPermission(requestId, outcome, options) {
       parseHistoryWrite(PermissionOutcomeSchema, outcome);
-      const history = readAll();
-      for (let i = history.length - 1; i >= 0; i--) {
-        const turn = history[i];
-        if (!turn || (options?.turnId && turn.id !== options.turnId) || !Array.isArray(turn.items))
-          continue;
-        const at = turn.items.findIndex(
-          (item) => item?.type === 'tool_call' && item.permissionRequest?.requestId === requestId
-        );
-        if (at < 0) continue;
-        const item = turn.items[at];
-        if (item?.type !== 'tool_call' || !item.permissionRequest) continue;
-        const items = [...turn.items];
-        items[at] = { ...item, permissionRequest: { ...item.permissionRequest, outcome } };
-        return writer.replace(turn.id, { ...turn, items });
+      const target = options?.turnId ? locate(options.turnId) : undefined;
+      if (options?.turnId && !target) return false;
+      for (let i = target?.index ?? list.length - 1; i >= (target?.index ?? 0); i--) {
+        const row = list.get(i);
+        const id = storedScalar(storedField(row, 'id'));
+        if (typeof id !== 'string') continue;
+        const storedItems = storedField(row, 'items');
+        const items =
+          isContainer(storedItems) && storedItems.kind() === 'List'
+            ? (storedItems as LoroList)
+            : Array.isArray(storedItems)
+              ? storedItems
+              : undefined;
+        if (!items) continue;
+        for (let at = 0; at < items.length; at++) {
+          const item = Array.isArray(items) ? items[at] : items.get(at);
+          if (storedScalar(storedField(item, 'type')) !== 'tool_call') continue;
+          const request = storedField(item, 'permissionRequest');
+          if (storedScalar(storedField(request, 'requestId')) !== requestId) continue;
+          // Only the matching turn enters the validated local-update path.
+          return writer.updateEntry(id, (turn) => {
+            const tool = turn.items?.[at];
+            if (tool?.type === 'tool_call' && tool.permissionRequest)
+              tool.permissionRequest.outcome = outcome;
+            return turn;
+          });
+        }
       }
       return false;
     },

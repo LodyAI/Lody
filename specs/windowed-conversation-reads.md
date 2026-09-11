@@ -24,6 +24,9 @@ cover subsequently synchronized history; search navigation follows current posit
 The shared HistoryWriter is the only history writer in both windowed and full-reader modes.
 Changing the reader flag must not change authored-input validation or stored-copy semantics.
 Read projections must never be treated as complete write baselines.
+Permission responses and task-proposal decisions must not materialize all history.
+Known turn ids restrict updates to that turn; permission lookup without a turn id may
+scan request metadata, but only the matching turn body is materialized.
 
 Explicit export/search operations may read more history; they must release acquired ranges.
 Pinned ranges and the streaming tail are exempt from the LRU target. One giant turn can

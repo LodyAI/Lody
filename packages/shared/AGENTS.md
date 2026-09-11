@@ -48,6 +48,9 @@
 - Target-local streaming uses `updateEntry`; it must not produce/plan the entire history.
   Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
   Generic history updates remain for operations with cross-turn ownership or structural edits.
+- Permission responses inspect request metadata and materialize only the matching turn;
+  a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
+  `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
 - The pinned Mirror text-event patch copies only an existing single text leaf's path.
   Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
   paths retain the general reader. Future Mirror patches must compose with this patch,
