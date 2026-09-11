@@ -1,6 +1,3 @@
-import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
-import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
-import { captureShortcutDraft, shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
 import {
   useState,
   useCallback,
@@ -150,9 +147,6 @@ import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
 const sessionDraftsCache = new Map<SessionId, string>();
-// Only Shortcut-bearing text needs this sidecar ownership tag. The existing
-// cache remains the sole handoff used by a promoted tab.
-const sessionShortcutDraftOwners = new Map<SessionId, string>();
 
 type PendingImage = {
   localId: string;
@@ -305,7 +299,6 @@ export const setSessionChatInputTextDraft = (sessionId: SessionId, text: string)
     sessionDraftsCache.set(sessionId, text);
   } else {
     sessionDraftsCache.delete(sessionId);
-    sessionShortcutDraftOwners.delete(sessionId);
   }
 };
 
@@ -313,7 +306,6 @@ export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
   const images = getSessionImageDrafts(sessionId);
   const files = getSessionFileDrafts(sessionId);
   sessionDraftsCache.delete(sessionId);
-  sessionShortcutDraftOwners.delete(sessionId);
   sessionImageDraftsCache.delete(sessionId);
   sessionFileDraftsCache.delete(sessionId);
   sessionPastedTextDraftsCache.delete(sessionId);
@@ -785,21 +777,14 @@ export const SessionChatInputArea = memo(
     const sessionLocalProjectId =
       session.project?.kind === 'local' ? session.project.localProjectId : null;
 
-    const draftOwnerKey = JSON.stringify([currentUser?.id ?? null, workspaceId]);
-    const foreignShortcutCache =
-      sessionShortcutDraftOwners.has(session.id) &&
-      sessionShortcutDraftOwners.get(session.id) !== draftOwnerKey;
     // Use local state with cache sync for draft persistence
-    const [userInput, setUserInputState] = useState(() =>
-      foreignShortcutCache ? '' : (sessionDraftsCache.get(session.id) ?? initialInputText ?? '')
+    const [userInput, setUserInputState] = useState(
+      () => sessionDraftsCache.get(session.id) ?? initialInputText ?? ''
     );
     // The visible draft can move into an in-flight submission immediately while
     // its actual state stays intact until the durable writer accepts it. A
     // rejected send simply reveals the preserved draft again.
-    const { submissionPending, beginSubmission } = useComposerSubmission(
-      JSON.stringify([session.id, draftOwnerKey]),
-      textareaRef
-    );
+    const { submissionPending, beginSubmission } = useComposerSubmission(session.id, textareaRef);
     const expandPromptMentionsRef = useRef<
       (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt
     >(({ text }) => ({ text }));
@@ -819,7 +804,6 @@ export const SessionChatInputArea = memo(
      * `expandPromptMentionsRef` beside it.
      */
     const mentionRangesRef = useRef<MentionRange[]>([]);
-    const [shortcutUnavailable, setShortcutUnavailable] = useState(false);
     // Handle into the composer's mention machinery, for mentions that originate
     // outside it (a sidebar session dropped on the conversation).
     const mentionActionsRef = useRef<CombinedMentionTextareaHandle | null>(null);
@@ -828,22 +812,17 @@ export const SessionChatInputArea = memo(
     );
     const handleMentionRangesChange = useCallback(
       (ranges: MentionRange[]) => {
-        if (ranges.some(isShortcutMention))
-          sessionShortcutDraftOwners.set(session.id, draftOwnerKey);
         mentionRangesRef.current = ranges;
         setSessionMentionRanges(session.id, toPersistedMentionRanges(ranges));
       },
-      [session.id, draftOwnerKey]
+      [session.id]
     );
 
     // Load new session's draft when session changes (during-render state adjustment)
-    const composerIdentity = JSON.stringify([session.id, draftOwnerKey]);
-    const [prevSessionId, setPrevSessionId] = useState(composerIdentity);
-    if (prevSessionId !== composerIdentity) {
-      setPrevSessionId(composerIdentity);
-      const cached = foreignShortcutCache
-        ? ''
-        : (sessionDraftsCache.get(session.id) ?? initialInputText ?? '');
+    const [prevSessionId, setPrevSessionId] = useState(session.id);
+    if (prevSessionId !== session.id) {
+      setPrevSessionId(session.id);
+      const cached = sessionDraftsCache.get(session.id) ?? initialInputText ?? '';
       setUserInputState(cached);
       setPendingImages(getSessionImageDrafts(session.id));
       setPendingFiles(getSessionFileDrafts(session.id));
@@ -873,11 +852,8 @@ export const SessionChatInputArea = memo(
         setUserInputState(value);
         onInputValueChange?.(value);
         setSessionChatInputTextDraft(session.id, value);
-        if (sessionShortcutDraftOwners.has(session.id)) {
-          sessionShortcutDraftOwners.set(session.id, draftOwnerKey);
-        }
       },
-      [draftOwnerKey, onInputValueChange, session.id]
+      [onInputValueChange, session.id]
     );
 
     const clearInput = useCallback(() => {
@@ -1821,17 +1797,11 @@ export const SessionChatInputArea = memo(
       // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
       // that need no rewrite all resolve against the same original text, and
       // the spans record where each landed.
-      let expandedPrompt;
-      try {
-        expandedPrompt = expandPromptMentionsRef.current({
-          text: currentValue,
-          mentions: mentionRangesRef.current,
-          pastedTextDrafts,
-        });
-      } catch (error) {
-        toast.error(shortcutCompilationErrorMessage(error, t));
-        return;
-      }
+      const expandedPrompt = expandPromptMentionsRef.current({
+        text: currentValue,
+        mentions: mentionRangesRef.current,
+        pastedTextDrafts,
+      });
       const trimmedPrompt = expandedPrompt.text.trim();
       // The trim moves every character left; re-anchor before the offsets ship.
       const trimmedSpans = reanchorMessageTextSpansForTrim(
@@ -1917,28 +1887,12 @@ export const SessionChatInputArea = memo(
         files: sessionFileDraftsCache.get(session.id),
         pastedText: sessionPastedTextDraftsCache.get(session.id),
       };
-      const shortcutIdentity =
-        currentUser?.id && workspaceId
-          ? { userId: currentUser.id, workspaceId, composerId: session.id }
-          : null;
-      const submittedShortcut = captureShortcutDraft(currentValue, mentionRangesRef.current);
-      const shortcutVersion =
-        shortcutIdentity && submittedShortcut
-          ? shortcutDraftRepository.captureVersion(shortcutIdentity, submittedShortcut)
-          : null;
       const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
       if (!submission) return;
       try {
         const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
         if (accepted) {
           if (submission.isCurrent()) {
-            if (currentUser?.id && workspaceId) {
-              void shortcutDraftRepository
-                .write({ userId: currentUser.id, workspaceId, composerId: session.id }, null)
-                .catch((error: unknown) =>
-                  console.error('Failed to clear accepted Shortcut draft', error)
-                );
-            }
             clearInput();
             clearPendingImages();
             clearPendingFiles();
@@ -1954,14 +1908,7 @@ export const SessionChatInputArea = memo(
             // Acceptance retires the original cached draft even after unmount.
             // A later edit owns a different snapshot and must survive. Never
             // write component state from a retired submission.
-            const clearedShortcut =
-              shortcutIdentity && shortcutVersion
-                ? shortcutDraftRepository.clearIfUnchanged(shortcutIdentity, shortcutVersion)
-                : null;
-            if (!submittedShortcut || clearedShortcut) clearSessionChatInputDrafts(session.id);
-            void clearedShortcut?.catch((error: unknown) =>
-              console.error('Failed to clear accepted Shortcut draft', error)
-            );
+            clearSessionChatInputDrafts(session.id);
           }
           if (submittedVisualAnnotationReferences.length > 0) {
             void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
@@ -1971,8 +1918,6 @@ export const SessionChatInputArea = memo(
         submission.finish();
       }
     }, [
-      t,
-      currentUser?.id,
       beginSubmission,
       clearInput,
       clearPendingImages,
@@ -2474,7 +2419,7 @@ export const SessionChatInputArea = memo(
         size="icon"
         variant="ghost"
         onClick={() => void sendMessage()}
-        disabled={!hasSendableContent || isSendActionDisabled || shortcutUnavailable}
+        disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel
@@ -2522,7 +2467,6 @@ export const SessionChatInputArea = memo(
         imageDropDisabled={submissionPending || isArchived || isMachineRemoved}
         promptPlaceholder={promptPlaceholder}
         promptDisabled={submissionPending || isArchived}
-        draftSuspended={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
         commentReferenceItems={submissionPending ? [] : commentReferences}
@@ -2538,7 +2482,6 @@ export const SessionChatInputArea = memo(
         pastedTextDrafts={submissionPending ? [] : pastedTextDrafts}
         onPastedTextDraftsChange={submissionPending ? undefined : handlePastedTextDraftsChange}
         onMentionRangesChange={handleMentionRangesChange}
-        onShortcutAvailabilityChange={setShortcutUnavailable}
         mentionActionsRef={mentionActionsRef}
         persistedMentions={persistedMentionRanges}
         // This composer switches sessions in place, so the draft's identity has

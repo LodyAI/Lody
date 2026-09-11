@@ -26,12 +26,13 @@ export type MentionSplice = {
   /** Payload recorded on the range. Ignored when `commitRange` is false. */
   value: string;
   kind?: MentionKind;
-  data?: unknown;
   /**
    * Whether the edit records a range at all. A navigation step rewrites the
    * trigger span without committing a mention.
    */
   commitRange: boolean;
+  /** Ranges relative to text, inserted without an enclosing mention. */
+  mentions?: Mention[];
 };
 
 /**
@@ -95,10 +96,16 @@ export function applyMentionSplice(
             start: rangeStart,
             end: rangeStart + splice.text.length,
             kind: splice.kind ?? 'mention',
-            ...(splice.data === undefined ? {} : { data: splice.data }),
           },
         ].sort((a, b) => a.start - b.start)
-      : shifted,
+      : [
+          ...shifted,
+          ...(splice.mentions ?? []).map((mention) => ({
+            ...mention,
+            start: rangeStart + mention.start,
+            end: rangeStart + mention.end,
+          })),
+        ].sort((a, b) => a.start - b.start),
     caret: replaceStart + inserted.length,
   };
 }
@@ -168,8 +175,7 @@ export function areMentionsEqual(current: Mention[], next: Mention[]) {
       currentMention.start !== nextMention.start ||
       currentMention.end !== nextMention.end ||
       currentMention.value !== nextMention.value ||
-      currentMention.kind !== nextMention.kind ||
-      currentMention.data !== nextMention.data
+      currentMention.kind !== nextMention.kind
     ) {
       return false;
     }

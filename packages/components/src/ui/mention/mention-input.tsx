@@ -571,15 +571,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         return;
       }
 
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        (event.key.toLowerCase() === 'z' || (!event.metaKey && event.key.toLowerCase() === 'y')) &&
-        context.onHistoryRestore(event.shiftKey || event.key.toLowerCase() === 'y')
-      ) {
-        event.preventDefault();
-        return;
-      }
       const input = event.currentTarget;
       const cursorPosition = input.selectionStart ?? 0;
       const selectionEnd = input.selectionEnd ?? cursorPosition;
@@ -832,13 +823,6 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const cursorPosition = input.selectionStart ?? 0;
 
       const inputType = event.inputType ?? (event.nativeEvent as InputEvent).inputType;
-      if (
-        (inputType === 'historyUndo' || inputType === 'historyRedo') &&
-        context.onHistoryRestore(inputType === 'historyRedo')
-      ) {
-        event.preventDefault();
-        return;
-      }
       if (inputType === 'deleteContentBackward') {
         const mentionAtCursor = context.mentions.find(
           (mention) => cursorPosition > mention.start && cursorPosition <= mention.end

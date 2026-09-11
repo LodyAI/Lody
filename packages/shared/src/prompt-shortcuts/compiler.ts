@@ -5,9 +5,7 @@ import {
   getShortcutMentionScopeIssues,
   shortcutByteLength,
   type PromptShortcut,
-  type PromptShortcutMention,
 } from './model';
-import { z } from 'zod';
 
 export function validateShortcutRanges(
   text: string,
@@ -85,71 +83,4 @@ export function parsePromptShortcut(value: unknown): PromptShortcut {
       );
   }
   return shortcut;
-}
-
-export type ShortcutInvocation = {
-  id: string;
-  snapshot: PromptShortcut;
-};
-
-// Not strict: a draft stored before variables were removed still carries a
-// `values` key, and dropping that key must not discard the whole draft.
-const invocationSchema = z.object({
-  id: z.string().min(1).max(200),
-  snapshot: z.unknown(),
-});
-
-export function parseShortcutInvocation(value: unknown): ShortcutInvocation {
-  const parsed = invocationSchema.safeParse(value);
-  if (!parsed.success)
-    throw new PromptShortcutError('invalid_template', 'Invalid shortcut invocation');
-  return { id: parsed.data.id, snapshot: parsePromptShortcut(parsed.data.snapshot) };
-}
-
-export function createShortcutInvocation(id: string, value: unknown): ShortcutInvocation {
-  return { id, snapshot: parsePromptShortcut(value) };
-}
-
-export type ExpandedShortcut = {
-  text: string;
-  mentions: PromptShortcutMention[];
-};
-
-/** Generate text and offsets together, from the frozen snapshot alone. */
-export function expandShortcut(
-  invocation: ShortcutInvocation,
-  maxBytes = PROMPT_SHORTCUT_LIMITS.documentBytes,
-  renderMention?: (mention: PromptShortcutMention) => string
-): ExpandedShortcut {
-  invocation = parseShortcutInvocation(invocation);
-  const snapshot = invocation.snapshot;
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
-    throw new PromptShortcutError('size_limit', 'Invalid expansion byte budget');
-  const semanticText = snapshot.mentions.map(
-    (mention) => renderMention?.(mention) ?? mention.label
-  );
-  let expandedBytes = shortcutByteLength(snapshot.prompt);
-  snapshot.mentions.forEach((mention, index) => {
-    expandedBytes += shortcutByteLength(semanticText[index]!) - shortcutByteLength(mention.label);
-  });
-  // Measure first: reject before building an oversized string or allocating
-  // its UTF-8 copy.
-  if (expandedBytes > maxBytes)
-    throw new PromptShortcutError('size_limit', 'Expanded Shortcut exceeds the byte limit');
-  const result: ExpandedShortcut = { text: '', mentions: [] };
-  let cursor = 0;
-  snapshot.mentions.forEach((mention, index) => {
-    result.text += snapshot.prompt.slice(cursor, mention.start);
-    const start = result.text.length;
-    result.text += semanticText[index]!;
-    result.mentions.push({
-      start,
-      end: result.text.length,
-      label: mention.label,
-      target: mention.target,
-    });
-    cursor = mention.end;
-  });
-  result.text += snapshot.prompt.slice(cursor);
-  return result;
 }

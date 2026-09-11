@@ -1,22 +1,6 @@
-import {
-  resolveShortcutAvailability,
-  type ShortcutAvailability,
-} from '@lody/shared/prompt-shortcuts';
-import {
-  unverifiedShortcutDependency,
-  type ShortcutMentionContext,
-  type ShortcutDependencyResolver,
-} from './mention-prompt-shortcut-source';
-import type { PromptShortcutScope, ShortcutInvocation } from '@lody/shared/prompt-shortcuts';
-import type { Mention } from '@/ui/mention/index';
+import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
 import type { MentionProjectSource } from './mention-project-file-source';
 import type { SkillMentionAgent } from './mention-skill-source';
-
-/** Values and the immutable selection snapshot travel with the range through edits. */
-export type ShortcutMention = Mention & { kind: 'prompt_shortcut'; data: ShortcutInvocation };
-export function isShortcutMention(mention: Mention): mention is ShortcutMention {
-  return mention.kind === 'prompt_shortcut' && !!mention.data;
-}
 
 export function shortcutComposerScope(
   source?: MentionProjectSource,
@@ -40,19 +24,4 @@ export function shortcutComposerScope(
     ...(agent?.machineId ? { machineId: agent.machineId } : {}),
     ...(agent ? { providerKey: `${agent.cliType}:${agent.agentType}` } : {}),
   };
-}
-
-export function shortcutInvocationAvailability(
-  invocation: ShortcutInvocation,
-  context: ShortcutMentionContext | null,
-  resolveDependency: ShortcutDependencyResolver = unverifiedShortcutDependency
-): ShortcutAvailability {
-  if (!context) return { kind: 'unknown', reason: 'dependencies_loading' };
-  return resolveShortcutAvailability({
-    shortcut: invocation.snapshot,
-    dependencies: invocation.snapshot.mentions.map((mention) => mention.target),
-    context,
-    canRead: true,
-    resolveDependency,
-  });
 }

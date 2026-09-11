@@ -62,21 +62,13 @@ export const sanitizeMentionRanges = (text: string, ranges: unknown): PersistedM
  *
  * `pasted_text` is excluded: those ranges are derived from the pasted-text
  * drafts, which are persisted separately and are the source of truth for them.
- * Storing both would let the two disagree after an edit. Shortcut ranges are
- * excluded too: their full payload belongs to the separate recovery checkpoint;
- * restoring only the slug range would create an incomplete invocation.
+ * Storing both would let the two disagree after an edit.
  */
 export const toPersistedMentionRanges = (
   ranges: readonly { start: number; end: number; value: string; kind?: MentionKind }[]
 ): PersistedMentionRange[] =>
   ranges
-    .filter(
-      (range) =>
-        range.kind &&
-        range.kind !== 'pasted_text' &&
-        range.kind !== 'prompt_shortcut' &&
-        range.value
-    )
+    .filter((range) => range.kind && range.kind !== 'pasted_text' && range.value)
     .map(({ start, end, value, kind }) => ({ start, end, value, kind: kind as MentionKind }));
 
 /**

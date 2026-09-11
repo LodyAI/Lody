@@ -1,7 +1,3 @@
-import { isShortcutMention } from '@/components/mentions/shortcut-composer-state';
-import { captureShortcutDraft, shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
-import { useLandingSubmissionOwner } from './use-landing-submission-owner';
-import { shortcutCompilationErrorMessage } from '@/components/mentions/shortcut-prompt-compilation';
 import {
   useCallback,
   useEffect,
@@ -970,16 +966,11 @@ function WorkspaceChatLanding({
    * addressable only inside the workspace it was uploaded to.
    */
   const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateKey, workspaceSlug);
-  const foreignShortcutDraft =
-    !!sessionState.shortcutWorkspaceId && sessionState.shortcutWorkspaceId !== workspaceId;
-  const prompt = foreignShortcutDraft ? '' : sessionState.prompt;
+  const prompt = sessionState.prompt;
   const [draftActivityRevision, setDraftActivityRevision] = useState(0);
-  const captureSubmissionOwner = useLandingSubmissionOwner(
-    JSON.stringify([userId, workspaceId, resetDraftKey, draftActivityRevision])
-  );
   const pastedTextDrafts = useMemo(
-    () => sanitizePastedTextDrafts(foreignShortcutDraft ? [] : sessionState.pastedTextDrafts),
-    [foreignShortcutDraft, sessionState.pastedTextDrafts]
+    () => sanitizePastedTextDrafts(sessionState.pastedTextDrafts),
+    [sessionState.pastedTextDrafts]
   );
   /**
    * Committed mention ranges, kept for the before-send rewrite. `@path` and
@@ -993,31 +984,20 @@ function WorkspaceChatLanding({
    * beside it would be two states updated from one callback that must not
    * drift, which is the bug `session-chat-input-area.tsx` documents.
    */
-  const persistedMentionRanges = foreignShortcutDraft ? undefined : sessionState.mentionRanges;
-  const shortcutRangesRef = useRef<MentionRange[]>([]);
-  const [shortcutUnavailable, setShortcutUnavailable] = useState(false);
+  const persistedMentionRanges = sessionState.mentionRanges;
   const handleMentionRangesChange = useCallback(
     (ranges: MentionRange[]) => {
-      shortcutRangesRef.current = ranges.filter(isShortcutMention);
       // Stored with the prompt so a returning draft does not have to have its
       // mentions recognised again from the text — which only works once each
       // source has loaded, and not at all for one that never does.
       const persisted = toPersistedMentionRanges(ranges);
-      setSessionState((previous) => {
-        const prev =
-          previous.shortcutWorkspaceId && previous.shortcutWorkspaceId !== workspaceId
-            ? { prompt: '', pastedTextDrafts: [], mentionRanges: [] }
-            : previous;
-        const shortcutWorkspaceId = ranges.some(isShortcutMention)
-          ? (workspaceId ?? undefined)
-          : prev.shortcutWorkspaceId;
-        return arePersistedMentionRangesEqual(prev.mentionRanges ?? [], persisted) &&
-          prev.shortcutWorkspaceId === shortcutWorkspaceId
+      setSessionState((prev) =>
+        arePersistedMentionRangesEqual(prev.mentionRanges ?? [], persisted)
           ? prev
-          : { ...prev, mentionRanges: persisted, shortcutWorkspaceId };
-      });
+          : { ...prev, mentionRanges: persisted }
+      );
     },
-    [setSessionState, workspaceId]
+    [setSessionState]
   );
   const [composerStatus, setComposerStatus] = useState<{
     message: ReactNode;
@@ -1025,16 +1005,11 @@ function WorkspaceChatLanding({
   } | null>(null);
   const setPrompt = useCallback(
     (value: string) => {
-      setSessionState((prev) => ({
-        ...(prev.shortcutWorkspaceId && prev.shortcutWorkspaceId !== workspaceId
-          ? { pastedTextDrafts: [], mentionRanges: [] }
-          : prev),
-        prompt: value,
-      }));
+      setSessionState((prev) => ({ ...prev, prompt: value }));
       setDraftActivityRevision((revision) => revision + 1);
       setComposerStatus(null);
     },
-    [setSessionState, workspaceId]
+    [setSessionState]
   );
   const setComposerError = useCallback((message: string) => {
     setComposerStatus({ message, tone: 'error' });
@@ -2946,7 +2921,6 @@ function WorkspaceChatLanding({
   // ── Submit ──
   const handleSubmit = async () => {
     if (submitting) return;
-    const ownsSubmittedDraft = captureSubmissionOwner();
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
       captureSessionInputBlocked('image_upload_in_progress');
@@ -2957,17 +2931,11 @@ function WorkspaceChatLanding({
     // that need no rewrite all resolve against the same original text, and the
     // spans record where each landed. `normalizeSessionInputBlocks` re-anchors
     // them across its trim.
-    let expandedPrompt;
-    try {
-      expandedPrompt = expandSkillMentionsForPrompt({
-        text: prompt,
-        mentions: [...(persistedMentionRanges ?? []), ...shortcutRangesRef.current],
-        pastedTextDrafts,
-      });
-    } catch (error) {
-      setComposerError(shortcutCompilationErrorMessage(error, t));
-      return;
-    }
+    const expandedPrompt = expandSkillMentionsForPrompt({
+      text: prompt,
+      mentions: persistedMentionRanges ?? [],
+      pastedTextDrafts,
+    });
     const inputBlocks = normalizeSessionInputBlocks(
       buildInputBlocks(expandedPrompt.text, buildFileInputBlocks(), expandedPrompt.spans),
       ''
@@ -3042,14 +3010,6 @@ function WorkspaceChatLanding({
       configOptionSelectors,
     });
     const sessionIdForStart = draftSessionId ?? ensureDraftSessionId();
-    const shortcutIdentity = { userId, workspaceId, composerId: 'landing' };
-    const submittedShortcut = captureShortcutDraft(prompt, [
-      ...(persistedMentionRanges ?? []),
-      ...shortcutRangesRef.current,
-    ]);
-    const shortcutVersion = submittedShortcut
-      ? shortcutDraftRepository.captureVersion(shortcutIdentity, submittedShortcut)
-      : null;
     try {
       setSubmitting(true);
       setComposerStatus(null);
@@ -3309,21 +3269,6 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      if (!ownsSubmittedDraft()) {
-        if (shortcutVersion) {
-          void shortcutDraftRepository
-            .clearIfUnchanged(shortcutIdentity, shortcutVersion)
-            ?.catch((error: unknown) =>
-              console.error('Failed to clear accepted Shortcut draft', error)
-            );
-        }
-        return;
-      }
-      // The suspended composer cannot clear its checkpoint before navigation
-      // unmounts it. Publish the accepted clear before another landing can restore.
-      void shortcutDraftRepository
-        .write({ userId, workspaceId, composerId: 'landing' }, null)
-        .catch((error: unknown) => console.error('Failed to clear accepted Shortcut draft', error));
       setPrompt('');
       clearPastedTextDrafts();
       clearPendingImages();
@@ -3358,7 +3303,6 @@ function WorkspaceChatLanding({
         error_message: error instanceof Error ? error.message : String(error),
       });
       console.error('Failed to start session', error);
-      if (!ownsSubmittedDraft()) return;
       if (error instanceof SessionCreateBillingError) {
         if (error.code === 'workspace_payment_required') {
           toast.error(
@@ -4381,20 +4325,18 @@ function WorkspaceChatLanding({
   );
 
   const hasSendableContent = prompt.trim().length > 0 || hasUploadedImages || hasUploadedFiles;
-  const submitDisabled =
-    shortcutUnavailable ||
-    getChatLandingSubmitDisabled({
-      submitting,
-      hasBlockingImages,
-      hasBlockingFiles,
-      hasSendableContent,
-      contextType,
-      workdirMode: selectedWorkdirMode,
-      hasSelectedLocalProject: Boolean(selectedLocalProject),
-      isRuntimeInitializing: runtimeInitializing,
-      isLoadingLocalGitState: loadingLocalGitState,
-      hasLocalGitStateError: Boolean(localGitStateError),
-    });
+  const submitDisabled = getChatLandingSubmitDisabled({
+    submitting,
+    hasBlockingImages,
+    hasBlockingFiles,
+    hasSendableContent,
+    contextType,
+    workdirMode: selectedWorkdirMode,
+    hasSelectedLocalProject: Boolean(selectedLocalProject),
+    isRuntimeInitializing: runtimeInitializing,
+    isLoadingLocalGitState: loadingLocalGitState,
+    hasLocalGitStateError: Boolean(localGitStateError),
+  });
   const selectedMachineHasVisibleLocalProject = useMemo(
     () =>
       selectedMachineId ? getFirstVisibleLocalProjectForMachine(selectedMachineId) !== null : false,
@@ -6155,13 +6097,11 @@ function WorkspaceChatLanding({
             imageDropDisabled={submitting}
             promptPlaceholder={promptPlaceholder}
             promptDisabled={submitting}
-            draftSuspended={submitting}
             promptRows={4}
             promptEnterKeyHint={promptEnterKeyHint}
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
             onMentionRangesChange={handleMentionRangesChange}
-            onShortcutAvailabilityChange={setShortcutUnavailable}
             persistedMentions={persistedMentionRanges}
             imageItems={submitting ? [] : imageItems}
             attachmentAddDisabled={submitting || (!canAddMoreImages && !canAddMoreFiles)}
@@ -6604,7 +6544,6 @@ function WorkspaceChatLanding({
         pastedTextDrafts={pastedTextDrafts}
         onPastedTextDraftsChange={setPastedTextDrafts}
         onMentionRangesChange={handleMentionRangesChange}
-        onShortcutAvailabilityChange={setShortcutUnavailable}
         persistedMentions={persistedMentionRanges}
         imageItems={imageItems}
         attachmentAddDisabled={submitting || (!canAddMoreImages && !canAddMoreFiles)}

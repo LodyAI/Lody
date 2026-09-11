@@ -65,7 +65,6 @@ export interface ChatLandingViewProps {
   /** Callback when pasted text draft ranges change */
   onPastedTextDraftsChange?: (drafts: PastedTextDraft[]) => void;
   onMentionRangesChange?: (ranges: MentionRange[]) => void;
-  onShortcutAvailabilityChange?: (blocked: boolean) => void;
   persistedMentions?: readonly PersistedMentionRange[];
   /** Pending image drafts shown above the textarea */
   imageItems?: ChatComposerImageItem[];
@@ -202,7 +201,6 @@ export function ChatLandingView({
   pastedTextDrafts = [],
   onPastedTextDraftsChange,
   onMentionRangesChange,
-  onShortcutAvailabilityChange,
   persistedMentions,
   imageItems = [],
   attachmentAddDisabled = false,
@@ -450,13 +448,11 @@ export function ChatLandingView({
         imageDropDisabled={submissionPending}
         promptPlaceholder={promptPlaceholder}
         promptDisabled={submissionPending}
-        draftSuspended={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
         pastedTextDrafts={submissionPending ? [] : pastedTextDrafts}
         onPastedTextDraftsChange={submissionPending ? undefined : onPastedTextDraftsChange}
         onMentionRangesChange={onMentionRangesChange}
-        onShortcutAvailabilityChange={onShortcutAvailabilityChange}
         mentionActionsRef={mentionActionsRef}
         persistedMentions={persistedMentions}
         imageItems={submissionPending ? [] : imageItems}

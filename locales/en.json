@@ -4051,9 +4051,6 @@
   "promptShortcut.versionChanged": "Shortcut changed. Select it again to retry.",
   "promptShortcut.bodyOffline": "Body is not available offline. Reconnect and select again.",
   "promptShortcut.loadFailed": "Could not load Shortcut. Select it again to retry.",
-  "promptShortcut.draftSaveFailed": "Could not save this Shortcut draft locally. Keep this composer open and retry your edit.",
-  "promptShortcut.promptTooLarge": "Expanded prompt exceeds the size limit.",
-  "promptShortcut.invalidDraft": "This Shortcut draft is incomplete. Remove the affected chip and insert it again.",
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
   "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature."
 }

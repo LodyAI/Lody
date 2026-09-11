@@ -1,5 +1,4 @@
 import {
-  createShortcutInvocation,
   PromptShortcutError,
   resolveShortcutAvailability,
   type PromptShortcutIndexEntry,
@@ -30,7 +29,6 @@ export async function prepareShortcutSelection(input: {
   context: ShortcutMentionContext;
   request: Parameters<MentionPrepare>[0];
   isCurrent: () => boolean;
-  createId: () => string;
   resolveDependency?: ShortcutDependencyResolver;
 }): Promise<PreparedMention | null> {
   const { runtime, entry, request, context } = input;
@@ -56,19 +54,33 @@ export async function prepareShortcutSelection(input: {
     snapshot.visibility !== entry.visibility
   )
     throw new PromptShortcutError('revision_pending', 'Index and body do not agree');
-  const invocation = createShortcutInvocation(input.createId(), snapshot);
   const availability = resolveShortcutAvailability({
-    shortcut: invocation.snapshot,
-    dependencies: invocation.snapshot.mentions.map((mention) => mention.target),
+    shortcut: snapshot,
+    dependencies: snapshot.mentions.map((mention) => mention.target),
     context,
     canRead: true,
     resolveDependency: input.resolveDependency ?? unverifiedShortcutDependency,
   });
   if (availability.kind !== 'available') throw new ShortcutSelectionUnavailable(availability);
   return {
-    value: invocation.id,
-    text: `/${invocation.snapshot.slug}`,
-    kind: 'prompt_shortcut',
-    data: invocation,
+    text: snapshot.prompt,
+    mentions: snapshot.mentions.map(({ start, end, label, target }) => ({
+      start,
+      end,
+      kind:
+        target.kind === 'pull_request'
+          ? 'pr'
+          : target.kind === 'file' && target.directory
+            ? 'dir'
+            : target.kind,
+      value:
+        target.kind === 'agent_role'
+          ? target.agentRoleId
+          : target.kind === 'file'
+            ? target.path
+            : target.kind === 'skill'
+              ? label.replace(/^\$/, '')
+              : `#${target.number}`,
+    })),
   };
 }

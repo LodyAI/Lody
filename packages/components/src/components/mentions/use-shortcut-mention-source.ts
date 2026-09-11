@@ -78,7 +78,6 @@ export function useShortcutMentionSource(
                     context,
                     request,
                     isCurrent,
-                    createId: () => crypto.randomUUID(),
                   });
                   clear();
                   return result;

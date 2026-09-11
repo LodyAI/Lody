@@ -1,8 +1,5 @@
-import { useShortcutComposerDraft } from './use-shortcut-composer-draft';
-import { shortcutDraftMentions } from '@/lib/shortcut-composer-draft';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
-import { ShortcutInvocationStatus } from './shortcut-invocation-status';
-import { isShortcutMention, shortcutComposerScope } from './shortcut-composer-state';
+import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -633,8 +630,6 @@ export interface CombinedMentionTextareaProps extends Omit<
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
   enablePromptShortcuts?: boolean;
-  /** Empty presentation while awaiting local send acceptance is not a draft edit. */
-  draftSuspended?: boolean;
   mentionSource?: MentionProjectSource;
   availableCommands?: AcpCommandSummary[];
   /** The selected ACP provider. When set, the `$` skill menu only offers
@@ -685,7 +680,6 @@ export interface CombinedMentionTextareaProps extends Omit<
    * only record that the region was ever a mention is the range itself.
    */
   onMentionRangesChange?: (ranges: MentionRange[]) => void;
-  onShortcutAvailabilityChange?: (blocked: boolean) => void;
   /**
    * Lets a surface outside the composer write a mention into it — the drop
    * target of a dragged sidebar session, today.
@@ -706,7 +700,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       templateScope,
       promptShortcutSource: promptShortcutSourceProp,
       enablePromptShortcuts = false,
-      draftSuspended = false,
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
@@ -724,7 +717,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       onMentionClick,
       getMentionChip,
       onMentionRangesChange,
-      onShortcutAvailabilityChange,
       persistedMentions,
       draftKey,
       mentionActionsRef,
@@ -733,7 +725,6 @@ export const CombinedMentionTextarea = React.forwardRef<
     },
     ref
   ) => {
-    const { t } = useTranslation();
     const liveShortcutSource = useShortcutMentionSource(
       enablePromptShortcuts && !templateScope
         ? shortcutComposerScope(mentionSource, skillAgent)
@@ -741,7 +732,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey
     );
     const promptShortcutSource = promptShortcutSourceProp ?? liveShortcutSource;
-    const shortcutHistory = enablePromptShortcuts || !!promptShortcutSourceProp;
     const githubRepoFullName =
       mentionSource?.kind === 'github'
         ? mentionSource.repoFullName
@@ -877,6 +867,21 @@ export const CombinedMentionTextarea = React.forwardRef<
       },
       [mentionValuesProp, onMentionValuesChange]
     );
+    const handleMentionsChange = React.useCallback(
+      (nextMentions: MentionRange[]) => {
+        onMentionRangesChange?.(nextMentions);
+        const nextInternalMentions = nextMentions.filter(
+          (mention) => mention.kind !== 'pasted_text'
+        );
+        const nextExternalMentions = nextMentions.filter(
+          (mention) => mention.kind === 'pasted_text'
+        );
+
+        setInternalMentions(nextInternalMentions);
+        onExternalMentionsChange?.(nextExternalMentions);
+      },
+      [onExternalMentionsChange, onMentionRangesChange]
+    );
     const mergedMentions = React.useMemo(() => {
       const seen = new Set<string>();
       return [...internalMentions, ...externalMentions]
@@ -889,47 +894,6 @@ export const CombinedMentionTextarea = React.forwardRef<
         });
     }, [externalMentions, internalMentions]);
 
-    const suspendShortcutDraft = draftSuspended && internalMentions.some(isShortcutMention);
-    const shortcutDraft = useShortcutComposerDraft({
-      suspended: suspendShortcutDraft,
-      enabled: enablePromptShortcuts && !templateScope,
-      composerId: draftKey ?? 'landing',
-      text: value,
-      mentions: mergedMentions,
-      restore: (record) => {
-        const restored = shortcutDraftMentions(record);
-        setInternalMentions(restored);
-        onValueChange(record.text);
-        onMentionRangesChange?.([...restored, ...externalMentions]);
-      },
-    });
-    const markDraftEdited = shortcutDraft.markEdited;
-    const handleMentionsChange = React.useCallback(
-      (nextMentions: MentionRange[]) => {
-        if (
-          nextMentions.some(
-            (range) =>
-              isShortcutMention(range) &&
-              !internalMentions.some(
-                (previous) => previous.value === range.value && previous.data === range.data
-              )
-          )
-        ) {
-          markDraftEdited();
-        }
-        onMentionRangesChange?.(nextMentions);
-        const nextInternalMentions = nextMentions.filter(
-          (mention) => mention.kind !== 'pasted_text'
-        );
-        const nextExternalMentions = nextMentions.filter(
-          (mention) => mention.kind === 'pasted_text'
-        );
-
-        setInternalMentions(nextInternalMentions);
-        onExternalMentionsChange?.(nextExternalMentions);
-      },
-      [onExternalMentionsChange, onMentionRangesChange, internalMentions, markDraftEdited]
-    );
     const prevValueRef = React.useRef(value);
     const [hydrationKey, setHydrationKey] = React.useState(0);
     const [menuOpen, setMenuOpen] = React.useState(false);
@@ -938,10 +902,9 @@ export const CombinedMentionTextarea = React.forwardRef<
     // never painted over the incoming text — not even for one frame. Remounting
     // the tree is what re-arms the hydrators, which otherwise fire once per
     // mount and would leave the incoming draft's mentions undecorated forever.
-    const effectiveDraftKey = JSON.stringify([draftKey, shortcutDraft.identityKey]);
-    const [renderedDraftKey, setRenderedDraftKey] = React.useState(effectiveDraftKey);
-    if (renderedDraftKey !== effectiveDraftKey) {
-      setRenderedDraftKey(effectiveDraftKey);
+    const [renderedDraftKey, setRenderedDraftKey] = React.useState(draftKey);
+    if (renderedDraftKey !== draftKey) {
+      setRenderedDraftKey(draftKey);
       setInternalMentions([]);
       setMenuOpen(false);
       // The swap is not an edit, so it must not read as one: an incoming empty
@@ -954,7 +917,6 @@ export const CombinedMentionTextarea = React.forwardRef<
     // Replacing the textarea here loses browser focus and breaks submission's
     // disabled → enabled handoff. Only a different draft replaces the tree.
     React.useEffect(() => {
-      if (suspendShortcutDraft) return;
       const prevValue = prevValueRef.current;
       prevValueRef.current = value;
       if (!resetOnEmpty) return;
@@ -971,7 +933,6 @@ export const CombinedMentionTextarea = React.forwardRef<
       onExternalMentionsChange,
       onMentionRangesChange,
       resetOnEmpty,
-      suspendShortcutDraft,
       value,
     ]);
 
@@ -1029,7 +990,6 @@ export const CombinedMentionTextarea = React.forwardRef<
           data-lody-composer-input=""
           value={value}
           onChange={(event) => {
-            shortcutDraft.markEdited();
             onValueChange(event.target.value);
           }}
           className={cn('resize-none', className)}
@@ -1043,8 +1003,7 @@ export const CombinedMentionTextarea = React.forwardRef<
 
     return (
       <Mention
-        key={effectiveDraftKey}
-        editHistory={shortcutHistory}
+        key={draftKey}
         disabled={props.disabled}
         readonly={props.readOnly}
         open={value !== '' && menuOpen}
@@ -1053,7 +1012,6 @@ export const CombinedMentionTextarea = React.forwardRef<
         trigger={triggers[0] ?? '@'}
         inputValue={value}
         onInputValueChange={(next) => {
-          shortcutDraft.markEdited();
           onValueChange(next);
         }}
         mentions={mergedMentions}
@@ -1123,17 +1081,6 @@ export const CombinedMentionTextarea = React.forwardRef<
           className={cn('resize-none', className)}
           {...props}
         />
-        {shortcutDraft.error ? (
-          <p role="status" className="mt-2 text-xs text-destructive">
-            {t('promptShortcut.draftSaveFailed')}
-          </p>
-        ) : null}
-        {shortcutHistory && !templateScope && !draftSuspended ? (
-          <ShortcutInvocationStatus
-            scope={shortcutComposerScope(mentionSource, skillAgent)}
-            onAvailabilityChange={onShortcutAvailabilityChange}
-          />
-        ) : null}
         <TwoLevelMentionMenu
           templateScope={templateScope}
           promptShortcutSource={promptShortcutSource}

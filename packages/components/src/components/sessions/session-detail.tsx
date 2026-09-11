@@ -1,4 +1,3 @@
-import { shortcutDraftRepository } from '@/lib/shortcut-composer-draft';
 import { isAuxiliaryWindow } from '@/lib/desktop-window';
 import {
   Archive,
@@ -2085,16 +2084,6 @@ const SessionDetail = ({
         // waiting for the old draft input to clear lets the newly mounted child input hydrate
         // from stale text/image drafts. Preserved text is handed over through the
         // same cache the promoted composer hydrates from on mount.
-        if (user?.id && runtime?.workspaceId) {
-          void shortcutDraftRepository
-            .write(
-              { userId: user.id, workspaceId: runtime.workspaceId, composerId: childSessionId },
-              null
-            )
-            .catch((error: unknown) =>
-              console.error('Failed to clear accepted Shortcut draft', error)
-            );
-        }
         clearSessionChatInputDrafts(childSessionId);
         if (payload.preservedInputText?.trim()) {
           setSessionChatInputTextDraft(childSessionId, payload.preservedInputText);
@@ -2210,7 +2199,6 @@ const SessionDetail = ({
     },
     [
       activeSession,
-      runtime?.workspaceId,
       captureSessionDetailEvent,
       deleteSessions,
       hidesBillingUi,

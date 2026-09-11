@@ -175,8 +175,6 @@ export type TextRewrite = {
   end: number;
   /** Replaces `[start, end)` in the output. Defaults to the source slice. */
   replacement?: string;
-  /** Already-compiled segment annotations, relative to replacement (never source offsets). */
-  spans?: readonly MessageTextSpan[];
   /** Marks the replaced region as a mention in the output. */
   span?: { kind: MessageTextSpanKind; label: string; target?: string; mark?: string };
 };
@@ -221,11 +219,6 @@ export const applyTextRewrites = (
     out += replacement;
     copiedTo = rewrite.end;
 
-    if (rewrite.spans) {
-      for (const span of sanitizeMessageTextSpans(replacement, rewrite.spans) ?? []) {
-        spans.push({ ...span, start: spanStart + span.start, end: spanStart + span.end });
-      }
-    }
     if (rewrite.span && replacement.length > 0) {
       spans.push({ start: spanStart, end: spanStart + replacement.length, ...rewrite.span });
     }

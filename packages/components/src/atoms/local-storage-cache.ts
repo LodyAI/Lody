@@ -38,8 +38,6 @@ export const setWorkspaceReposCacheAtom = atom(
 
 export interface ChatLandingSessionState {
   prompt: string;
-  /** Ownership only for Shortcut checkpoints; ordinary drafts retain their existing behavior. */
-  shortcutWorkspaceId?: string;
   pastedTextDrafts?: PastedTextDraft[];
   /**
    * Mention ranges for `prompt`. Stored so a returning draft shows its mentions

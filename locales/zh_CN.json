@@ -4051,9 +4051,6 @@
   "promptShortcut.versionChanged": "快捷方式版本已变化，请重新选择以重试。",
   "promptShortcut.bodyOffline": "离线时无法读取正文，请联网后重新选择。",
   "promptShortcut.loadFailed": "无法加载快捷方式，请重新选择以重试。",
-  "promptShortcut.draftSaveFailed": "无法在本地保存此 Shortcut 草稿。请保持输入框打开并重试编辑。",
-  "promptShortcut.promptTooLarge": "展开后的 Prompt 超过大小限制。",
-  "promptShortcut.invalidDraft": "此 Shortcut 草稿不完整。请删除有问题的 chip 后重新插入。",
   "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
   "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。"
 }

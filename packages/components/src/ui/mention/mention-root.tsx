@@ -1,4 +1,3 @@
-import { MentionHistory, type MentionDraft } from './mention-history';
 import { MentionPreparation } from './mention-preparation';
 import {
   type CollectionItem,
@@ -84,11 +83,13 @@ interface Mention extends Omit<ItemData, 'label' | 'disabled'> {
   start: number;
   end: number;
   kind?: MentionKind;
-  /** Opaque committed data owned by the product, never interpreted by this primitive. */
-  data?: unknown;
 }
 
-export type PreparedMention = { value: string; text: string; kind?: MentionKind; data?: unknown };
+export type PreparedMention = {
+  text: string;
+  /** Ordinary ranges relative to the inserted text; no range wraps the whole result. */
+  mentions: Mention[];
+};
 export type MentionPrepare = (request: {
   signal: AbortSignal;
   generation: number;
@@ -185,7 +186,6 @@ interface MentionContextValue {
   inputValue: string;
   onInputValueChange: (value: string) => void;
   cancelMentionPreparation: () => void;
-  onHistoryRestore: (redo: boolean) => boolean;
   virtualAnchor: VirtualElement | null;
   onVirtualAnchorChange: (element: VirtualElement | null) => void;
   triggers: string[];
@@ -269,9 +269,6 @@ interface MentionRootProps extends Omit<
 
   /** Event handler called when the open state changes. */
   onOpenChange?: (open: boolean) => void;
-
-  /** Opt in to text + opaque range undo/redo; native text history cannot restore payloads. */
-  editHistory?: boolean;
 
   /** The current input value. */
   inputValue?: string;
@@ -400,7 +397,6 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     defaultOpen = false,
     onOpenChange: onOpenChangeProp,
     inputValue: inputValueProp,
-    editHistory = false,
     onInputValueChange,
     mentions: mentionsProp,
     defaultMentions = [],
@@ -478,15 +474,12 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     defaultProp: '',
     onChange: onInputValueChange,
   });
-  const history = React.useRef(new MentionHistory()).current;
-  const renderedDraft = React.useRef<MentionDraft>({ text: inputValue, mentions: [] });
   const setInputValue = React.useCallback(
     (next: string) => {
       preparation.cancel();
-      if (editHistory) history.record(renderedDraft.current);
       setInputValueState(next);
     },
-    [editHistory, history, preparation, setInputValueState]
+    [preparation, setInputValueState]
   );
   const triggers = React.useMemo(() => {
     const provided = triggersProp ?? [triggerProp];
@@ -523,40 +516,8 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
   });
   const mentions = mentionsState ?? EMPTY_MENTIONS;
   const setMentions = useFlushConsistentState(mentions, setMentionsState);
-  renderedDraft.current = { text: inputValue, mentions };
   const [pendingSelection, setPendingSelection] = React.useState<MentionSelectionRange | null>(
     null
-  );
-
-  const onHistoryRestore = React.useCallback(
-    (redo: boolean) => {
-      if (!editHistory || disabled || readonly) return false;
-      preparation.cancel();
-      const draft = history.restore(renderedDraft.current, redo);
-      // Own exhausted history too: native history has no range payloads.
-      if (!draft) return true;
-      setMentions(draft.mentions);
-      setValue(draft.mentions.map((mention) => mention.value));
-      setInputValueState(draft.text);
-      setOpen(false);
-      setPendingSelection({
-        start: draft.text.length,
-        end: draft.text.length,
-        expectedValue: draft.text,
-      });
-      return true;
-    },
-    [
-      disabled,
-      editHistory,
-      history,
-      preparation,
-      readonly,
-      setInputValueState,
-      setMentions,
-      setOpen,
-      setValue,
-    ]
   );
 
   const { filterStore, onItemsFilter, getIsItemVisible } = useFilterStore({
@@ -637,16 +598,16 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       const sourceValue = input?.value ?? inputValue;
       const insertionPoint = input?.selectionStart ?? triggerIndex;
       const commit = (prepared: PreparedMention | null = null) => {
-        const committedValue = prepared?.value ?? payloadValue;
+        const committedValue = payloadValue;
         const splice: MentionSplice = {
           replaceStart: triggerIndex,
           replaceEnd: insertionPoint,
           text: prepared?.text ?? mentionText,
-          data: prepared?.data,
           suffix: isNavigating || prepared ? '' : ' ',
           value: committedValue,
-          kind: prepared?.kind ?? selectedItem?.kind,
-          commitRange: !isNavigating,
+          kind: selectedItem?.kind,
+          commitRange: !isNavigating && !prepared,
+          mentions: prepared?.mentions,
         };
 
         // The text and caret do not depend on the existing ranges, so they are
@@ -670,7 +631,11 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
           selectedItem?.onMentionSelect?.();
           setValue((prev) => {
             const next = [...(prev ?? [])];
-            if (!next.includes(committedValue)) next.push(committedValue);
+            for (const insertedValue of prepared
+              ? prepared.mentions.map((mention) => mention.value)
+              : [committedValue]) {
+              if (!next.includes(insertedValue)) next.push(insertedValue);
+            }
             return next;
           });
         }
@@ -859,7 +824,6 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       inputValue={inputValue}
       onInputValueChange={setInputValue}
       cancelMentionPreparation={preparation.cancel}
-      onHistoryRestore={onHistoryRestore}
       value={value}
       onValueChange={setValue}
       virtualAnchor={virtualAnchor}
