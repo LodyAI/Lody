@@ -16,6 +16,10 @@
       "types": "./src/prompt-shortcuts/*.ts",
       "import": "./src/prompt-shortcuts/*.ts"
     },
+    "./session-sharing": {
+      "types": "./src/session-sharing.ts",
+      "import": "./src/session-sharing.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"

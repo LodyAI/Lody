@@ -86,6 +86,9 @@ function knownWorkspaceDatabaseNames(): string[] {
  * added cache key that is missing here merely survives one clear (safe),
  * whereas a preference key missing from an allowlist would be wiped (unsafe).
  * When adding a `lody:*` localStorage cache, add its key or prefix here.
+ * `lody:session-share-secret:v1:*` is deliberately excluded: these are device-local
+ * credentials that cannot be recovered from the server. Only a hard reset clears
+ * them; an ordinary cache repair must not force every share link to be reset.
  */
 const LOCAL_STORAGE_CACHE_KEYS = [
   // slug → workspaceId/name map (`local-storage-cache.ts`). Read by

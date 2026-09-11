@@ -1,4 +1,11 @@
 import { anyApi, type FunctionReference } from 'convex/server';
+import type { SessionShareVersions } from '@lody/shared/session-sharing';
+import type { SessionShareManagement, SessionShareView } from './session-sharing';
+export type {
+  SessionShareView,
+  SessionShareManagementEntry,
+  SessionShareManagement,
+} from './session-sharing';
 import type { ModelUsage } from 'acp-extension-core';
 import type {
   MachinePairingView,
@@ -336,6 +343,34 @@ export type CloudApi = {
       },
       { token: string; expiresIn: number; gatewayBaseUrl: string; streamId: string }
     >;
+  };
+  sessionSharing: {
+    requestVerification: Mutation<
+      { workspaceId: string; sessionIds: string[] },
+      { retryAt: number }
+    >;
+    getManagement: Query<
+      { workspaceId: string; sessionId: string; candidateSessionIds: string[] },
+      SessionShareManagement
+    >;
+    create: Mutation<
+      { workspaceId: string; rootSessionId: string; sessionIds: string[]; credentialHash: string },
+      SessionShareView
+    >;
+    updateTargets: Mutation<
+      { shareId: string; expected: SessionShareVersions; sessionIds: string[] },
+      SessionShareView
+    >;
+    reset: Mutation<
+      {
+        shareId: string;
+        expected: SessionShareVersions;
+        sessionIds: string[];
+        credentialHash: string;
+      },
+      SessionShareView
+    >;
+    revoke: Mutation<{ shareId: string; expected: SessionShareVersions }, SessionShareView>;
   };
   activity: {
     recordMyWorkspaceDailyActiveUser: Mutation<

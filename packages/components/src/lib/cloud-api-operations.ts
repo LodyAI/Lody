@@ -102,7 +102,7 @@ function capabilityForOperation(name: string): PlatformCapability {
   }
   if (name === 'machines:setMachineSharedWithTeam') return 'teamSharing';
   if (name.startsWith('machines:')) return 'remoteMachines';
-  if (name.startsWith('localProjects:')) return 'teamSharing';
+  if (name.startsWith('localProjects:') || name.startsWith('sessionSharing:')) return 'teamSharing';
   throw new Error(`Cloud operation ${JSON.stringify(name)} has no capability assignment`);
 }
 
@@ -155,6 +155,20 @@ export const cloudOperations = {
     getStreamToken: action<ConvexApi['promptShortcuts']['getStreamToken']>(
       'promptShortcuts:getStreamToken'
     ),
+  },
+  sessionSharing: {
+    requestVerification: mutation<ConvexApi['sessionSharing']['requestVerification']>(
+      'sessionSharing:requestVerification'
+    ),
+    getManagement: query<ConvexApi['sessionSharing']['getManagement']>(
+      'sessionSharing:getManagement'
+    ),
+    create: mutation<ConvexApi['sessionSharing']['create']>('sessionSharing:create'),
+    updateTargets: mutation<ConvexApi['sessionSharing']['updateTargets']>(
+      'sessionSharing:updateTargets'
+    ),
+    reset: mutation<ConvexApi['sessionSharing']['reset']>('sessionSharing:reset'),
+    revoke: mutation<ConvexApi['sessionSharing']['revoke']>('sessionSharing:revoke'),
   },
   activity: {
     recordMyWorkspaceDailyActiveUser: mutation<
