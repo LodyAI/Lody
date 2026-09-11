@@ -206,11 +206,7 @@ interface MentionContextValue {
   onHighlightMove: (direction: HighlightingDirection) => void;
   mentions: Mention[];
   onMentionsChange: React.Dispatch<React.SetStateAction<Mention[]>>;
-  onMentionAdd: (
-    value: string,
-    triggerIndex: number,
-    options?: { commit?: boolean }
-  ) => void | Promise<void>;
+  onMentionAdd: (value: string, triggerIndex: number, options?: { commit?: boolean }) => void;
   /**
    * Write one or a batch of mentions outside the menu, and take focus.
    * Batch insertion indices refer to the text after preceding entries.
@@ -582,7 +578,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
 
       const selectedItem = getItems().find((item) => item.value === payloadValue);
       // A disabled registered item must not fall through to free-form insertion.
-      if (selectedItem?.disabled) return undefined;
+      if (selectedItem?.disabled) return;
       // A navigation item rewrites the trigger span and keeps the menu open
       // instead of committing. `commit` overrides it, so pressing Enter on a
       // candidate the user already typed out inserts it for real.
@@ -665,9 +661,9 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
         }
       };
       if (!isNavigating && selectedItem?.onMentionPrepare) {
-        if (disabled || readonly) return undefined;
+        if (disabled || readonly) return;
         const ticket = preparation.begin();
-        return selectedItem
+        void selectedItem
           .onMentionPrepare({
             signal: ticket.signal,
             generation: ticket.generation,
@@ -681,9 +677,10 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
           .catch(() => {
             // The source owns error/retry presentation. Failure never inserts a range.
           });
+        return;
       }
       commit();
-      return undefined;
+      return;
     },
     [
       trigger,
