@@ -36,7 +36,7 @@ import {
   type TaskBoardColumns,
   type TaskBoardMove,
 } from './task-board-move';
-import { resolveBoardWheelScroll } from './task-board-wheel';
+import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { cn } from '@/lib/utils';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { formatShortMonthYear } from '@/lib/format-relative-time';
@@ -663,37 +663,6 @@ function isInsideBoardColumn(target: EventTarget | null, boundary: HTMLElement):
   return false;
 }
 
-/**
- * Lets a plain mouse wheel move the board sideways (see `task-board-wheel.ts`
- * for when the delta is ours to take).
- *
- * Deliberately a native listener rather than an `onWheel` prop: React registers
- * `wheel` at the root as a *passive* listener, so `preventDefault()` from a
- * synthetic handler is ignored and only logs a console error. Without it the
- * browser would still run its own default for the same event.
- */
-function useBoardWheelScroll(enabled: boolean) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const board = ref.current;
-    if (!enabled || !board) return undefined;
-    const handleWheel = (event: WheelEvent) => {
-      const delta = resolveBoardWheelScroll({
-        deltaX: event.deltaX,
-        deltaY: event.deltaY,
-        insideColumn: isInsideBoardColumn(event.target, board),
-        board,
-      });
-      if (delta === null) return;
-      event.preventDefault();
-      board.scrollLeft += delta;
-    };
-    board.addEventListener('wheel', handleWheel, { passive: false });
-    return () => board.removeEventListener('wheel', handleWheel);
-  }, [enabled]);
-  return ref;
-}
-
 export function TasksBoardView({
   tasks,
   onOpenTask,
@@ -710,7 +679,10 @@ export function TasksBoardView({
   const canDrag = layout === 'board' && Boolean(onMove);
   // After a real drag, the browser may still fire click — swallow that open.
   const suppressOpenRef = useRef(false);
-  const boardRef = useBoardWheelScroll(layout === 'board');
+  const boardRef = useHorizontalWheelScroll({
+    enabled: layout === 'board',
+    shouldHandle: (event, board) => !isInsideBoardColumn(event.target, board),
+  });
   const listScopeId = useId();
   useListKeyboardNavigation({ enabled: layout === 'list', scopeId: listScopeId });
 
