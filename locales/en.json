@@ -3970,7 +3970,6 @@
   "settings.promptShortcuts.readOnly": "Read-only",
   "settings.promptShortcuts.workspaceScope": "Workspace",
   "settings.promptShortcuts.needsAttention": "A reference is outside this scope",
-  "settings.promptShortcuts.retryHelp": "Some changes could not be loaded or published. Your local saves are kept, and you can keep editing.",
   "settings.promptShortcuts.delete": "Delete shortcut",
   "settings.promptShortcuts.deleteTitle": "Delete Prompt Shortcut",
   "settings.promptShortcuts.deleteHelp": "Delete “{{name}}”? Prompts already inserted into drafts or sent messages are unchanged.",

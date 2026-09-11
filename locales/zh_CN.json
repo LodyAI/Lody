@@ -3970,7 +3970,6 @@
   "settings.promptShortcuts.readOnly": "只读",
   "settings.promptShortcuts.workspaceScope": "整个工作区",
   "settings.promptShortcuts.needsAttention": "有引用超出适用范围",
-  "settings.promptShortcuts.retryHelp": "部分内容未能加载或发布。本地保存的内容仍然保留，你可以继续编辑。",
   "settings.promptShortcuts.delete": "删除 Shortcut",
   "settings.promptShortcuts.deleteTitle": "删除 Prompt Shortcut",
   "settings.promptShortcuts.deleteHelp": "确定删除“{{name}}”吗？已经插入草稿或已发送消息中的内容不会改变。",

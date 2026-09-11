@@ -39,7 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { settingContainerClass } from '.';
-import { FormMessage, Section } from './form-primitives';
+import { Section } from './form-primitives';
 import {
   PromptShortcutForm,
   type ShortcutPromptEditorProps,
@@ -150,13 +150,7 @@ function PromptShortcutsSettingContent({
       />
 
       {(error || Object.keys(errors).length > 0) && (
-        <FormMessage tone="warning">
-          <span className="block">
-            {t(
-              'settings.promptShortcuts.retryHelp',
-              'Some changes could not be loaded or published. Your local saves are kept, and you can keep editing.'
-            )}
-          </span>
+        <div>
           <Button
             variant="outline"
             size="sm"
@@ -168,7 +162,7 @@ function PromptShortcutsSettingContent({
           >
             {t('common.retry', 'Retry')}
           </Button>
-        </FormMessage>
+        </div>
       )}
 
       <Dialog
