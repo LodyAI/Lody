@@ -1,7 +1,7 @@
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import React, { useEffect } from 'react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { languageAtom } from '../atoms/settings';
@@ -156,14 +156,23 @@ export const languageCodeToName = Object.fromEntries(
 
 void initI18n(readStoredLanguagePreference() ?? detectBrowserLanguage() ?? fallbackLanguage);
 
+// `Select.Value` reads the label of the current value from `items`, not from the
+// rows, so the list is stated once and drives both.
+const languageOptions = currentSupportedLanguages.map((lang) => ({
+  value: lang,
+  label: languageCodeToName[lang],
+}));
+
 export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: string }) => {
   const { i18n } = useTranslation();
   const [language, setLanguage] = useAtom(languageAtom);
   return (
-    <Select
+    <Select.Root
+      items={languageOptions}
       defaultValue={language}
       value={language}
-      onValueChange={(value: SupportedLanguage) => {
+      onValueChange={(value) => {
+        if (value == null) return;
         setLanguage(value);
         void i18n.changeLanguage(value);
         if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
@@ -176,17 +185,17 @@ export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: stri
         });
       }}
     >
-      <SelectTrigger className={triggerClassName}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {currentSupportedLanguages.map((lang) => (
-          <SelectItem key={lang} value={lang}>
-            {languageCodeToName[lang]}
-          </SelectItem>
+      <Select.Trigger className={triggerClassName}>
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        {languageOptions.map((option) => (
+          <Select.Item key={option.value} value={option.value}>
+            {option.label}
+          </Select.Item>
         ))}
-      </SelectContent>
-    </Select>
+      </Select.Content>
+    </Select.Root>
   );
 };
 

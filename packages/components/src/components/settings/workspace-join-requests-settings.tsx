@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, Copy, Link2, Loader2, RotateCw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -6,7 +6,7 @@ import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 
 export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
@@ -18,6 +18,16 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
   const reviewRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.reviewRequest);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [expiresInDays, setExpiresInDays] = useState('30');
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const expirationOptions = useMemo(
+    () =>
+      [7, 30, 90].map((days) => ({
+        value: String(days),
+        label: t('joinRequest.admin.days', '{{count}} days', { count: days }),
+      })),
+    [t]
+  );
   const activeLink = state?.activeLink ?? null;
   const joinUrl = activeLink ? getAppShareUrl(`/join/${activeLink.token}`) : null;
   const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -50,21 +60,28 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-            <SelectTrigger
-              className="h-8 w-[5.5rem] text-xs"
+          <Select.Root
+            items={expirationOptions}
+            value={expiresInDays}
+            onValueChange={(value) => {
+              if (value != null) setExpiresInDays(value);
+            }}
+          >
+            <Select.Trigger
+              size="small"
+              className="w-[5.5rem]"
               aria-label={t('joinRequest.admin.expiration', 'Link expiration')}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[7, 30, 90].map((days) => (
-                <SelectItem key={days} value={String(days)}>
-                  {t('joinRequest.admin.days', '{{count}} days', { count: days })}
-                </SelectItem>
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              {expirationOptions.map((option) => (
+                <Select.Item key={option.value} value={option.value}>
+                  {option.label}
+                </Select.Item>
               ))}
-            </SelectContent>
-          </Select>
+            </Select.Content>
+          </Select.Root>
           <Button
             variant={activeLink ? 'ghost' : 'primary'}
             size="small"

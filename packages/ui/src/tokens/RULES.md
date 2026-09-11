@@ -44,8 +44,9 @@ One rung per component. The rung fixes background and shadow together.
 
 A control is the well rung: `wellBackground` plus `shadow.inset`, never a
 border. One component token group, `field`, serves the whole family — input,
-textarea, checkbox, radio, switch, and the selects that follow — so a state has
-one colour in one place instead of one per component.
+textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
+state has one colour in one place instead of one per component. The lists those
+triggers open are on the floating rung and read `popup` instead; see below.
 
 | state       | what it is                                                                     |
 | ----------- | ------------------------------------------------------------------------------ |
@@ -56,7 +57,7 @@ one colour in one place instead of one per component.
 | disabled    | 45% opacity on the control; the label and help dim with it                     |
 | checked, on | ink: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
 | mixed       | the checked appearance with the dash, and it announces `mixed`                 |
-| selected    | `selectedFill` on the row that is current, not on the control                  |
+| selected    | the tick, and a quiet fill on the row that is current, not on the control      |
 
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
@@ -86,6 +87,45 @@ control, so the attribute is the state rather than a copy of it. What a screen
 reader announces and what a sighted person sees cannot disagree, and a surface
 that owns its own validation marks one control without a field around it. Every
 ARIA value except `false` is invalid, `grammar` and `spelling` included.
+
+### Popups and lists
+
+A control on the well rung opens a list on the floating rung, and the two do not
+share a token group. `field` covers the trigger — the size ladder, the ring, the
+invalid ring, the disabled opacity — and `popup` covers the list, because that
+list has more in common with a menu than with an input. A menu reaching for
+`field.background` would be naming the wrong thing to get the right colour.
+
+A popup is `popup.background` with `popup.shadow` at `popup.radius`, inset by
+`popup.inset`, so its rows take `popup.itemRadius` — outer minus inset, 14 less
+4, rather than a token of their own. A row is a `popup.itemHeight` control that
+happens to live in a list, so it follows the control type rule.
+
+A row states two facts at once. `highlighted` is where the keyboard or the
+pointer is right now; `selected` is the row that holds the value, and carries
+the tick. The highlight wins the fill, because it is the one that moves; the
+tick keeps saying which row is current when it lands there.
+
+Both fills are derived from the rung rather than taken from `hoverFill` and
+`selectedFill`, which this table names for a row but which were tuned against
+the page and card rungs at 100% lightness. Measured on the floating rung,
+`hoverFill` lands 2/255 from `raisedBackground` in the light palette and
+`selectedFill` resolves to exactly `raisedBackground` in the dark one, so one
+state is invisible in each. Mixing `raisedBackground` toward `label` steps away
+from the surface in both directions at once, which is the derivation `Button`
+already uses for a secondary button's hover.
+
+A popup opens anchored 4px under its control and rises into place, rather than
+overlapping it to line the current row up with the value. That is the motion
+rule applied: a popup rises from 4px below at `duration.regular`.
+
+A row has no edge of its own, and says so. A popup moves keyboard focus onto the
+highlighted row, and a host that rings any focused element would draw a border
+around it; the fill is how this system marks where the keyboard is, so the row
+declares `box-shadow: none` rather than leaving the property unclaimed. The
+"nothing matches" line collapses to nothing while it holds nothing, because it
+stays mounted for a screen reader to announce into and would otherwise open
+every popup with a blank row.
 
 ## Corners
 

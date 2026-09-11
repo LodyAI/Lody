@@ -1,14 +1,19 @@
 import * as stylex from '@stylexjs/stylex';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject } from 'react';
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Checkbox } from '../field/checkbox';
+import { Combobox } from '../field/combobox';
 import { Field } from '../field/field';
 import { field } from '../field/field.tokens.stylex';
+import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
 import { Input } from '../field/input';
 import { Radio, RadioGroup } from '../field/radio';
+import { Select } from '../field/select';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { popup } from '../popup/popup.tokens.stylex';
+import { surface } from '../popup/surface';
 import { colors, shadow } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
@@ -211,6 +216,34 @@ const styles = stylex.create({
     color: colors.tertiaryLabel,
     overflowWrap: 'anywhere',
   },
+  // A board cannot show an open popup without covering the samples under it, so
+  // the list is drawn once on a non-interactive stand-in. It composes the very
+  // rules Select and Combobox apply — `popup/surface.ts` — rather than copying
+  // them, so the board cannot report a list this package no longer draws.
+  popupReplica: {
+    position: 'static',
+    width: '260px',
+    maxHeight: 'none',
+    minWidth: 0,
+    zIndex: 'auto',
+  },
+  popupList: { overflowY: 'visible' },
+  // The far end of the rise is invisible by definition, so it is a probe rather
+  // than a sample: it carries the real class and reports its transform into the
+  // metrics list instead of leaving a blank gap on the board.
+  riseProbe: { position: 'absolute', width: '1px', height: '1px', minWidth: 0, padding: 0 },
+  replicaCaption: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '220px',
+  },
+  scrollArrowGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
+  // A row is picked, not pressed, so the board shows the two fills side by side
+  // rather than asking the reader to hover one.
+  replicaRow: { cursor: 'default' },
   // A board cannot hold focus while it is read, so each focus ring is drawn once
   // on a non-interactive stand-in built from the same tokens the control uses.
   buttonFocusReplica: {
@@ -420,10 +453,36 @@ const FIELD_COLORS = [
   { name: 'field.label', value: field.label, note: 'the field label' },
   { name: 'field.placeholder', value: field.placeholder, note: 'the empty prompt' },
   { name: 'field.hint', value: field.hint, note: 'help under the control' },
+  { name: 'field.icon', value: field.icon, note: 'the chevron on a trigger' },
   { name: 'field.error', value: field.error, note: 'the error message' },
   { name: 'field.ring', value: field.ring, note: 'focus' },
   { name: 'field.invalidRing', value: field.invalidRing, note: 'invalid' },
 ];
+
+const POPUP_COLORS = [
+  { name: 'popup.background', value: popup.background, note: 'the floating rung' },
+  { name: 'popup.label', value: popup.label, note: 'a row' },
+  { name: 'popup.indicator', value: popup.indicator, note: 'the tick on the current row' },
+  { name: 'popup.highlight', value: popup.highlight, note: 'where the keyboard or pointer is' },
+  { name: 'popup.selected', value: popup.selected, note: 'the row that holds the value' },
+  { name: 'popup.groupLabel', value: popup.groupLabel, note: 'a group heading' },
+  { name: 'popup.separator', value: popup.separator, note: 'between groups' },
+  { name: 'popup.hint', value: popup.hint, note: 'no matches, scroll arrows' },
+];
+
+const SELECT_SIZES = [
+  { name: 'small · 28', size: 'small' as const },
+  { name: 'medium · 32', size: 'medium' as const },
+  { name: 'large · 36', size: 'large' as const },
+];
+
+const FRUIT = [
+  { value: 'gala', label: 'Gala' },
+  { value: 'fuji', label: 'Fuji' },
+  { value: 'pink', label: 'Pink Lady' },
+];
+
+const LANGUAGES = ['TypeScript', 'Rust', 'Python', 'Ruby'];
 
 const CHOICE_COLORS = [
   { name: 'field.checkedFill', value: field.checkedFill, note: 'a control that holds a value' },
@@ -654,6 +713,215 @@ function SwitchTrackRow() {
         Auto review
       </Field.Label>
     </ChoiceRow>
+  );
+}
+
+/**
+ * A Select, the way a surface writes one. Every state below is the real
+ * control; only the open list is a stand-in, because a board cannot show a
+ * popup without covering what is under it.
+ */
+function FruitSelect({
+  size = 'medium',
+  triggerRef,
+  ...rest
+}: {
+  size?: 'small' | 'medium' | 'large';
+  triggerRef?: Ref<HTMLButtonElement>;
+} & ComponentProps<typeof Select.Root<string>>) {
+  return (
+    <Select.Root items={FRUIT} {...rest}>
+      <Select.Trigger ref={triggerRef} size={size}>
+        <Select.Value placeholder="Pick a fruit" />
+      </Select.Trigger>
+      <Select.Content>
+        {FRUIT.map((item) => (
+          <Select.Item key={item.value} value={item.value}>
+            {item.label}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
+  );
+}
+
+function SelectSizeRow({ name, size }: { name: string; size: 'small' | 'medium' | 'large' }) {
+  const { ref, value } = useMeasured<HTMLButtonElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Fruit</Field.Label>
+        <FruitSelect triggerRef={ref} size={size} />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/** One row of the stand-in list, in whichever state the board is showing. */
+function ReplicaRow({
+  label,
+  selected,
+  highlighted,
+  disabled,
+  ticked,
+  rowRef,
+  tickRef,
+}: {
+  label: string;
+  selected?: boolean;
+  highlighted?: boolean;
+  disabled?: boolean;
+  ticked?: boolean;
+  rowRef?: Ref<HTMLDivElement>;
+  tickRef?: RefObject<HTMLSpanElement | null>;
+}) {
+  return (
+    <div
+      ref={rowRef}
+      {...stylex.props(
+        surface.item,
+        styles.replicaRow,
+        selected && surface.itemSelected,
+        highlighted && surface.itemHighlighted,
+        disabled && surface.itemDisabled
+      )}
+    >
+      <span {...stylex.props(surface.itemText)}>{label}</span>
+      <span ref={tickRef} {...stylex.props(surface.indicator)}>
+        {ticked ? (
+          <span {...stylex.props(surface.indicatorGlyph)}>
+            <TickGlyph />
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The list every Select and Combobox opens, drawn from `popup/surface.ts` on a
+ * stand-in so all four row states can be read at once, with the metrics that
+ * shape it taken off the rendered parts rather than written down beside them.
+ */
+function PopupReplica() {
+  const surfaceShadow = useMeasured<HTMLDivElement>('box-shadow');
+  const surfaceRadius = useMeasured<HTMLDivElement>('border-radius');
+  const surfaceInset = useMeasured<HTMLDivElement>('padding-top');
+  const surfaceText = useMeasured<HTMLDivElement>('font-size');
+  const rowHeight = useMeasured<HTMLDivElement>('min-height');
+  const rowRadius = useMeasured<HTMLDivElement>('border-radius');
+  const rowPadding = useMeasured<HTMLDivElement>('padding-left');
+  const rowGap = useMeasured<HTMLDivElement>('column-gap');
+  const tickSize = useMeasured<HTMLSpanElement>('width');
+  const headingSize = useMeasured<HTMLDivElement>('font-size');
+  const headingLeading = useMeasured<HTMLDivElement>('line-height');
+  const arrowHeight = useMeasured<HTMLDivElement>('height');
+  const rise = useMeasured<HTMLDivElement>('transform');
+
+  const metrics = [
+    { name: 'popup.shadow', value: surfaceShadow.value },
+    { name: 'popup.radius', value: surfaceRadius.value },
+    { name: 'popup.inset', value: surfaceInset.value },
+    { name: 'popup.text', value: surfaceText.value },
+    { name: 'popup.itemHeight', value: rowHeight.value },
+    { name: 'popup.itemRadius', value: rowRadius.value },
+    { name: 'popup.itemPaddingX', value: rowPadding.value },
+    { name: 'popup.itemGap', value: rowGap.value },
+    { name: 'popup.indicatorSize', value: tickSize.value },
+    { name: 'popup.groupLabelSize', value: headingSize.value },
+    { name: 'popup.groupLabelLeading', value: headingLeading.value },
+    { name: 'popup.scrollArrowHeight', value: arrowHeight.value },
+    { name: 'popup.rise', value: rise.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'list \u00b7 stand-in'}</LegendKey>
+      <div
+        ref={(node) => {
+          surfaceShadow.ref.current = node;
+          surfaceRadius.ref.current = node;
+          surfaceInset.ref.current = node;
+          surfaceText.ref.current = node;
+        }}
+        {...stylex.props(surface.popup, styles.popupReplica)}
+      >
+        <div
+          ref={(node) => {
+            headingSize.ref.current = node;
+            headingLeading.ref.current = node;
+          }}
+          {...stylex.props(surface.groupLabel)}
+        >
+          Apples
+        </div>
+        <div {...stylex.props(surface.list, styles.popupList)}>
+          <ReplicaRow
+            label="Gala"
+            selected
+            ticked
+            rowRef={(node) => {
+              rowHeight.ref.current = node;
+              rowRadius.ref.current = node;
+              rowPadding.ref.current = node;
+              rowGap.ref.current = node;
+            }}
+            tickRef={tickSize.ref}
+          />
+          <ReplicaRow label="Fuji" highlighted />
+          <ReplicaRow label="Pink Lady" />
+          <ReplicaRow label="Sold out" disabled />
+        </div>
+        <div {...stylex.props(surface.separator)} />
+        <div {...stylex.props(surface.empty)}>No fruit matches.</div>
+        <div ref={arrowHeight.ref} {...stylex.props(surface.scrollArrow)}>
+          <span {...stylex.props(styles.scrollArrowGlyph)}>
+            <ChevronDownGlyph />
+          </span>
+        </div>
+      </div>
+      {/*
+        A popup starts and ends 4px below at opacity 0. StyleX cannot express
+        `[data-starting-style]`, so the primitives read Base UI's transition
+        status in JS and apply this class; the board applies the same class here
+        and reports what it resolves to as `popup.rise`.
+      */}
+      <div
+        ref={rise.ref}
+        aria-hidden="true"
+        {...stylex.props(surface.popup, styles.popupReplica, styles.riseProbe, surface.popupHidden)}
+      />
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          Every row state at once, from the rules the real list applies. Open a trigger above and
+          the list that appears is this one, in this palette.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A Combobox with the chevron beside its input, the shape a picker takes. */
+function LanguageCombobox({ children, ...rest }: ComponentProps<typeof Combobox.Root<string>>) {
+  return (
+    <Combobox.Root items={LANGUAGES} {...rest}>
+      {children}
+      <Combobox.Content empty={<Combobox.Empty>No language matches.</Combobox.Empty>}>
+        {(item: string) => (
+          <Combobox.Item key={item} value={item}>
+            {item}
+          </Combobox.Item>
+        )}
+      </Combobox.Content>
+    </Combobox.Root>
   );
 }
 
@@ -1148,6 +1416,113 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               note="the thumb is raised on both tracks"
             />
           </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Select · trigger and list"
+        rule="A trigger is a control on the well rung, so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {SELECT_SIZES.map((entry) => (
+              <SelectSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend="filled">
+              <Field.Root>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect defaultValue="fuji" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="invalid">
+              <Field.Root invalid>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect />
+                <Field.Error match>Pick a fruit before continuing.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect defaultValue="gala" />
+              </Field.Root>
+            </FieldRow>
+            <PopupReplica />
+          </Rows>
+          <Grid>
+            {POPUP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="popup.shadow"
+              box={popup.shadow}
+              fill={popup.background}
+              ink={false}
+              note="the floating rung, above the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Combobox · filter and list"
+        rule="The same well and the same list, with a query in front of them. On its own the input is the whole control; inside an input group the group is the well and the input is bare, so a chevron beside it lands inside one control rather than beside a second one. The ring follows focus inside the group, and disabled dims it from state because :disabled cannot reach a div."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <FieldRow legend="input">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.Input placeholder="Search a language" />
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="input group">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.InputGroup>
+                    <Combobox.Input placeholder="Search a language" />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="filled">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox defaultValue="Rust">
+                  <Combobox.InputGroup>
+                    <Combobox.Input />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="invalid">
+              <Field.Root invalid>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.InputGroup>
+                    <Combobox.Input placeholder="Search a language" />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+                <Field.Error match>Pick a language before continuing.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox defaultValue="Rust">
+                  <Combobox.InputGroup>
+                    <Combobox.Input />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+          </Rows>
         </PaletteSplit>
       </Section>
     </Board>

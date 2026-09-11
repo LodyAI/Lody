@@ -10,7 +10,8 @@ behavior.
 | `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens |
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
 | `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
-| `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, help, and error |
+| `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
+| `src/popup`         | The floating list a Select or Combobox opens, and its tokens        |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -44,6 +45,46 @@ beside it, so a `<label>` points at it and the family's `:disabled` and
   Notify me when the session finishes
 </Field.Label>
 ```
+
+A `Select` is a well-rung trigger plus a floating list. `Select.Content`
+assembles Base UI's portal, positioner, popup, list and scroll arrows, so a
+caller writes rows. `Select.Value` resolves the text it shows from `items` on
+the root rather than from the rows, so a list whose row text differs from its
+value is stated there too:
+
+```tsx
+const themes = [
+  { value: 'system', label: 'Follow the system' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
+<Field.Root name="theme">
+  <Field.Label>Theme</Field.Label>
+  <Select.Root items={themes} value={theme} onValueChange={(next) => next && setTheme(next)}>
+    <Select.Trigger>
+      <Select.Value placeholder="Pick a theme" />
+    </Select.Trigger>
+    <Select.Content>
+      {themes.map((item) => (
+        <Select.Item key={item.value} value={item.value}>
+          {item.label}
+        </Select.Item>
+      ))}
+    </Select.Content>
+  </Select.Root>
+</Field.Root>
+```
+
+`Combobox` is the same list with a query in front of it. On its own the input is
+the whole control; inside a `Combobox.InputGroup` the group is the well and the
+input is bare, so a chevron beside it lands inside one control rather than beside
+a second one.
+
+A popup mounts on the document by default. A surface that owns a focus scope and
+a scroll lock — a modal — states its panel once with `PopupContainerProvider`,
+and every Select and Combobox under it mounts inside the panel instead of being
+treated as outside it. `@lody/components`' `DialogContent` already does this.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in

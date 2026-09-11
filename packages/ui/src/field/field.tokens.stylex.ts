@@ -38,6 +38,10 @@ export const field = stylex.defineVars({
   switchHeight: '16px',
   switchThumbSize: '12px',
   switchInset: '2px',
+  // A Select or Combobox trigger holds a glyph beside its value. The rules put
+  // a chevron in the hint colour, and the gap keeps the value off it.
+  iconSize: '16px',
+  triggerGap: space[2],
   // The rules put disabled at 45% opacity on the control. It is one value for
   // the whole family, so the control and its label cannot drift apart.
   disabledOpacity: '0.45',
@@ -47,6 +51,8 @@ export const field = stylex.defineVars({
   label: colors.label,
   placeholder: colors.tertiaryLabel,
   hint: colors.tertiaryLabel,
+  // The chevron on a trigger and any icon at rest: a hint, not a label.
+  icon: colors.tertiaryLabel,
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,
@@ -75,6 +81,7 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   label: colors.label,
   placeholder: colors.tertiaryLabel,
   hint: colors.tertiaryLabel,
+  icon: colors.tertiaryLabel,
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,

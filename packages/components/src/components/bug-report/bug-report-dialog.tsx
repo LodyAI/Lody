@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CircleCheck, Loader2 } from 'lucide-react';
 import type { MachineId } from '@lody/shared';
@@ -14,7 +14,7 @@ import { Button } from '@lody/ui/button';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
 import { CopyButton } from '@/ui/copy-button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 
 export type BugReportMachineOption = {
   id: MachineId;
@@ -67,6 +67,35 @@ export function BugReportDialog({
     selectedMachineId != null && machines.some((machine) => machine.id === selectedMachineId)
       ? selectedMachineId
       : null;
+  // `Select.Value` reads the label of the current value from `items` rather than
+  // from the rows, so the online dot travels with the name to the trigger only
+  // because both come from here.
+  const machineOptions = useMemo(
+    () => [
+      {
+        value: NO_MACHINE_VALUE,
+        label: (
+          <span className="flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full border border-muted-foreground/50" />
+            <span className="truncate">
+              {t('bugReport.noMachineOption', 'No machine (description only)')}
+            </span>
+          </span>
+        ),
+      },
+      ...machines.map((machine) => ({
+        value: machine.id as string,
+        label: (
+          <span className="flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" />
+            <span className="truncate">{machine.name}</span>
+          </span>
+        ),
+      })),
+    ],
+    [machines, t]
+  );
+
   const submitting = state.status === 'submitting';
   const canSubmit = !submitting && description.trim().length > 0;
 
@@ -149,7 +178,8 @@ export function BugReportDialog({
                   </p>
                 ) : (
                   <>
-                    <Select
+                    <Select.Root
+                      items={machineOptions}
                       value={machineId ?? NO_MACHINE_VALUE}
                       disabled={submitting}
                       onValueChange={(value) =>
@@ -158,30 +188,19 @@ export function BugReportDialog({
                         )
                       }
                     >
-                      <SelectTrigger id="bug-report-machine">
-                        <SelectValue
+                      <Select.Trigger id="bug-report-machine">
+                        <Select.Value
                           placeholder={t('bugReport.machinePlaceholder', 'Select a machine')}
                         />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_MACHINE_VALUE}>
-                          <span className="flex items-center gap-2">
-                            <span className="h-2 w-2 shrink-0 rounded-full border border-muted-foreground/50" />
-                            <span className="truncate">
-                              {t('bugReport.noMachineOption', 'No machine (description only)')}
-                            </span>
-                          </span>
-                        </SelectItem>
-                        {machines.map((machine) => (
-                          <SelectItem key={machine.id} value={machine.id}>
-                            <span className="flex items-center gap-2">
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" />
-                              <span className="truncate">{machine.name}</span>
-                            </span>
-                          </SelectItem>
+                      </Select.Trigger>
+                      <Select.Content>
+                        {machineOptions.map((option) => (
+                          <Select.Item key={option.value} value={option.value}>
+                            {option.label}
+                          </Select.Item>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </Select.Content>
+                    </Select.Root>
                     {machineId == null ? (
                       <p className="text-sm text-muted-foreground">
                         {t(

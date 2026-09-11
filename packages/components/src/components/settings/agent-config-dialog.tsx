@@ -71,7 +71,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collap
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -2913,6 +2913,12 @@ function PresetPanel({
   const credentialModes = preset.credentialModes ?? [];
   const baseUrlOption = getBaseUrlOption(credentialMode, baseUrlOptionId);
   const selectedBaseUrlOptionId = baseUrlOption?.id;
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const baseUrlItems = (credentialMode?.baseUrlOptions ?? []).map((option) => ({
+    value: option.id,
+    label: t(option.labelKey, option.labelDefault),
+  }));
   const showCustomBaseUrl =
     !!credentialMode?.baseUrlEnvKey && baseUrlOption?.id === credentialMode.customBaseUrlOptionId;
   const tokenEnvKey = getPresetTokenEnvKey(preset, credentialMode);
@@ -3020,18 +3026,26 @@ function PresetPanel({
           )}
         >
           <div className="space-y-2">
-            <Select value={selectedBaseUrlOptionId} onValueChange={onBaseUrlOptionChange}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {credentialMode.baseUrlOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id} className="text-xs">
-                    {t(option.labelKey, option.labelDefault)}
-                  </SelectItem>
+            <Select.Root
+              items={baseUrlItems}
+              value={selectedBaseUrlOptionId}
+              onValueChange={(value) => {
+                // Only a null-valued row clears a Base UI select, and this list
+                // has none; the guard is what states that rather than a cast.
+                if (value != null) onBaseUrlOptionChange(value);
+              }}
+            >
+              <Select.Trigger>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {baseUrlItems.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
                 ))}
-              </SelectContent>
-            </Select>
+              </Select.Content>
+            </Select.Root>
             {showCustomBaseUrl ? (
               <Input
                 id="preset-base-url"
@@ -3233,21 +3247,24 @@ function TitleGenerationFields({
             className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
           >
             <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
-            <Select
+            <Select.Root
+              items={sel.options}
               value={(stored as string | undefined) ?? sel.currentValue}
-              onValueChange={(value) => onChange(sel.configId, value)}
+              onValueChange={(value) => {
+                if (value != null) onChange(sel.configId, value);
+              }}
             >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
+              <Select.Trigger size="small">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
                 {sel.options.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  <Select.Item key={opt.value} value={opt.value}>
                     {opt.label}
-                  </SelectItem>
+                  </Select.Item>
                 ))}
-              </SelectContent>
-            </Select>
+              </Select.Content>
+            </Select.Root>
           </div>
         );
       })}

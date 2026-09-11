@@ -17,12 +17,8 @@ import {
   DialogTitle,
   DialogTrigger,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from '@/ui';
+import { Select } from '@lody/ui/select';
 
 const allEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries;
 const bundledEntries = allEntries.filter((entry) => entry.kind === 'vendored');
@@ -38,6 +34,12 @@ const dependencyLicenseOptions = Object.entries(dependencyEntriesByLicense)
       left.license.localeCompare(right.license, undefined, { sensitivity: 'base' })
   );
 const defaultDependencyLicense = dependencyLicenseOptions[0]?.license ?? '';
+// `Select.Value` reads the label of the current value from `items`, not from
+// the rows, so the list is stated once and drives both.
+const dependencyLicenseItems = dependencyLicenseOptions.map((option) => ({
+  value: option.license,
+  label: `${option.license} (${option.count})`,
+}));
 
 function formatGeneratedAt(value: string): string {
   try {
@@ -261,21 +263,24 @@ export function OpenSourceAttributionsDialog({
                           )}
                         </p>
                       </div>
-                      <Select
+                      <Select.Root
+                        items={dependencyLicenseItems}
                         value={selectedDependencyLicense}
-                        onValueChange={setSelectedDependencyLicense}
+                        onValueChange={(value) => {
+                          if (value != null) setSelectedDependencyLicense(value);
+                        }}
                       >
-                        <SelectTrigger className="w-full sm:w-[320px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {dependencyLicenseOptions.map((option) => (
-                            <SelectItem key={option.license} value={option.license}>
-                              {option.license} ({option.count})
-                            </SelectItem>
+                        <Select.Trigger className="sm:w-[320px]">
+                          <Select.Value />
+                        </Select.Trigger>
+                        <Select.Content>
+                          {dependencyLicenseItems.map((option) => (
+                            <Select.Item key={option.value} value={option.value}>
+                              {option.label}
+                            </Select.Item>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </Select.Content>
+                      </Select.Root>
                     </div>
                     {selectedDependencyEntries.map((entry) => (
                       <AttributionItem key={entry.id} entry={entry} />

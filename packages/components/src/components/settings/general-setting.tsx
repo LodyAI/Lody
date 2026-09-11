@@ -8,7 +8,7 @@ import { Trash2 } from 'lucide-react';
 import { Loading } from '@/ui';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { toast } from 'sonner';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
@@ -128,6 +128,15 @@ export function GeneralSettingsComponent() {
   const selectedMobileKeyboardAction = isMobileKeyboardAction(mobileKeyboardAction)
     ? mobileKeyboardAction
     : 'send';
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const mobileKeyboardActionOptions = useMemo(
+    () => [
+      { value: 'send', label: t('settings.input.mobileKeyboardAction.send') },
+      { value: 'newline', label: t('settings.input.mobileKeyboardAction.newline') },
+    ],
+    [t]
+  );
   const electronPlatform = useMemo(() => {
     if (!isElectron || typeof window === 'undefined') {
       return 'unknown';
@@ -617,7 +626,8 @@ export function GeneralSettingsComponent() {
               label={t('settings.input.mobileKeyboardAction.label')}
               helper={t('settings.input.mobileKeyboardAction.helper')}
             >
-              <Select
+              <Select.Root
+                items={mobileKeyboardActionOptions}
                 value={selectedMobileKeyboardAction}
                 onValueChange={(value) => {
                   if (isMobileKeyboardAction(value)) {
@@ -625,18 +635,17 @@ export function GeneralSettingsComponent() {
                   }
                 }}
               >
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="send">
-                    {t('settings.input.mobileKeyboardAction.send')}
-                  </SelectItem>
-                  <SelectItem value="newline">
-                    {t('settings.input.mobileKeyboardAction.newline')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                <Select.Trigger className="sm:w-[220px]">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {mobileKeyboardActionOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </CompactRow>
           </CompactSection>
         ) : null}
