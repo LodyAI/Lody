@@ -105,10 +105,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/60 px-4 py-2.5 text-xs sm:px-5"
         >
           <p className="min-w-0 leading-5">
-            {t(
-              'sharing.manager.conflict',
-              'Sharing changed on another device. Reload before making changes.'
-            )}
+            {t('sharing.manager.conflict', 'Sharing changed on another device.')}
           </p>
           <Button size="sm" variant="outline" disabled={busy} onClick={props.onReload}>
             {t('sharing.manager.reload', 'Reload selection')}
@@ -160,14 +157,14 @@ export function SessionShareManager(props: SessionShareManagerProps) {
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
                 {t(
                   'sharing.manager.disclosure',
-                  'Anyone with the link can read the shared conversations in full — original documents, history, attachments and later updates. Links can be forwarded and are not end-to-end encrypted.'
+                  'Anyone with the link reads the full conversation and its later updates. Links can be forwarded.'
                 )}
               </p>
               {root?.status === 'active' && root.canManage && !hasSecret && (
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   {t(
                     'sharing.manager.missingSecret',
-                    'This device does not have the link secret. Reset the link to copy it again; the old link stops working.'
+                    'No link secret on this device. Reset to copy a new link.'
                   )}
                 </p>
               )}
@@ -191,13 +188,10 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                 </label>
                 <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
                   {shareableChildren.length === 0
-                    ? t(
-                        'sharing.manager.childrenNotReady',
-                        'None of the sub-conversations are ready to share yet. They need to finish syncing to the cloud.'
-                      )
+                    ? t('sharing.manager.childrenNotReady', 'None are synced to the cloud yet.')
                     : t(
                         'sharing.manager.childrenReady',
-                        'Shares the {{count}} sub-conversations that are ready now. Later ones are not added automatically.',
+                        '{{count}} ready now · new ones are not added automatically',
                         { count: shareableChildren.length }
                       )}
                 </p>
@@ -205,7 +199,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                   <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
                     {t(
                       'sharing.manager.childrenLimit',
-                      'One link covers at most {{max}} conversations, so only the first {{count}} are included.',
+                      'Limited to {{count}} (max {{max}} per link).',
                       { max: SESSION_SHARE_MAX_TARGETS, count: shareableChildren.length }
                     )}
                   </p>
@@ -223,7 +217,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             <p className="text-xs leading-5 text-muted-foreground">
               {t(
                 'sharing.manager.rootNotReady',
-                'This conversation is not ready to share yet. It needs to finish syncing to the cloud.'
+                'Not synced to the cloud yet, so it cannot be shared.'
               )}
             </p>
           )}
@@ -288,11 +282,11 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                 {confirmation.kind === 'reset'
                   ? t(
                       'sharing.manager.confirmReset',
-                      'The old link stops working and you get a new one. Readers may finish an in-progress download before access ends.'
+                      'The old link stops working and a new one replaces it.'
                     )
                   : t(
                       'sharing.manager.confirmRevoke',
-                      'This link and every conversation in it stop being readable. Other links and already downloaded content are unaffected.'
+                      'The link stops working. Already downloaded content is unaffected.'
                     )}
               </AlertDialogDescription>
             </AlertDialogHeader>

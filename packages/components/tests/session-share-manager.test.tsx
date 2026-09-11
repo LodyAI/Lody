@@ -126,7 +126,7 @@ describe('session share management surface', () => {
     };
     await render();
     expect(button('Create share link')?.disabled).toBe(true);
-    expect(container.textContent).toContain('This conversation is not ready to share yet');
+    expect(container.textContent).toContain('Not synced to the cloud yet');
   });
 
   it('requires reset on a device without the secret and invalidates an open reset confirmation after a concurrent change', async () => {
