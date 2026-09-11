@@ -10,6 +10,14 @@ reference: `context/acp-protocol.md`; per-agent payload quirks:
 
 ## Ownership is bound at enqueue time
 
+Validated `_meta.lody.task` snapshots survive history filtering while running and
+merge by taskId. They are lifecycle facts, not repeated terminal output; never
+drop them under the generic intermediate-tool snapshot compaction rule.
+
+Machine RPC `session/cancel` with `subagentTaskId` forwards only to the native
+AgentClient for the exact active parent turn. It never marks the parent cancelled
+or falls back to whole-turn Stop. The machine advertises subagentCancellation v1.
+
 ACP updates must be bound to assistant-entry ownership when they are enqueued, never
 by asking for "the current turn" during flush. `../session-transient-store.ts` stores
 `assistantEntryId` / `userTurnId` / `turnEpoch` on each buffered update, and

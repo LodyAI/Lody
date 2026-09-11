@@ -90,6 +90,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 
 ## Content Contracts
 
+- Native child cancel requires subagentCancellation v1 and an exact parent turn;
+  never use durable whole-turn Stop or invent a terminal state in the panel.
+
 - Conversation font size is a bounded integer pixel value. Scale body, headings,
   dense monospace, terminal output, and collapsed height through
   `conversation-font-size-classes.ts`; settings own legacy preset migration.

@@ -3371,13 +3371,14 @@ export class MessageHandler {
             machineUserId: this.userId,
           });
         },
-        cancelSession: async ({ sessionId, turnId }) => {
+        cancelSession: async ({ sessionId, turnId, subagentTaskId }) => {
           const result = await this.executionService.cancelSession({
             type: 'session/cancel',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
             sessionId,
             turnId,
+            subagentTaskId,
           });
           return {
             type: 'session/cancel_response' as const,
@@ -6661,6 +6662,7 @@ export class MessageHandler {
           workspaceId: request.workspaceId as WorkspaceId,
           sessionId: request.params.sessionId,
           turnId: request.params.turnId,
+          subagentTaskId: request.params.subagentTaskId,
         });
         return {
           type: 'session/cancel_response' as const,

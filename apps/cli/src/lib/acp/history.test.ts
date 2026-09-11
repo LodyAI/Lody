@@ -33,6 +33,46 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
 }
 
 describe('handleACPUpdateMessage', () => {
+  it('retains native task progress before completion and merges it into one task', async () => {
+    const { doc, readHistory } = createDoc();
+    for (const [index, status] of ['in_progress', 'in_progress', 'completed'].entries()) {
+      await handleACPUpdateMessage(
+        doc,
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: index === 0 ? 'tool_call' : 'tool_call_update',
+            toolCallId: 'child-1',
+            title: 'Inspect files',
+            status,
+            _meta: {
+              lody: {
+                task: {
+                  version: 1,
+                  taskId: 'child-1',
+                  kind: 'subagent',
+                  status,
+                  description: 'Inspect files',
+                  ...(index > 0 ? { lastToolName: 'read' } : {}),
+                },
+              },
+            },
+          },
+        }),
+        { getCurrentSessionTurnId: () => 'turn-1' }
+      );
+      const tasks = readHistory()
+        .flatMap((entry) => entry.items ?? [])
+        .filter((item) => item.type === 'subagent_task');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        taskId: 'child-1',
+        status,
+        taskKind: 'subagent',
+        ...(index > 0 ? { lastToolName: 'read' } : {}),
+      });
+    }
+  });
   it('keeps running terminal output out of history and writes its tail once on completion', async () => {
     const { doc, readHistory } = createDoc();
     const callbacks = { getCurrentSessionTurnId: () => 'turn-1' };
