@@ -56,7 +56,8 @@ That tolerance must not authorize creating new malformed items locally.
   synced Session document, hold the rewrite barrier only across the final live-state
   check and local mutation, wake both ordinary and Goal turn dispatch after release,
   and report `reconciled` only after the write is confirmed. Non-terminal results
-  remain retryable across later history, connectivity, or daemon-generation evidence.
+  remain retryable across later history, connectivity, daemon-generation, or stable
+  Session activity-transition evidence; presence heartbeats must not become polling.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned

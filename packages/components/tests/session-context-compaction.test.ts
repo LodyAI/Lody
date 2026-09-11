@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import type { SessionHistory } from '@lody/shared';
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { describe, expect, it, vi } from 'vitest';
+import type {
+  MachineId,
+  SessionContextCompactionReconcileResponse,
+  SessionHistory,
+  SessionId,
+} from '@lody/shared';
 
 import {
   canStopAgentEnabled,
@@ -8,6 +17,7 @@ import {
   isDurableContextCompactionReconciliation,
   isSessionContextCompacting,
 } from '../src/lib/session-context-compaction';
+import { useSessionContextCompactionReconciliation } from '../src/components/sessions/use-session-context-compaction-reconciliation';
 
 const historyWithStatus = (
   status: 'pending' | 'in_progress' | 'completed' | 'failed',
@@ -62,9 +72,30 @@ describe('isSessionContextCompacting', () => {
       toolCallId: 'context-compaction-1',
     };
     expect(
-      getContextCompactionReconciliationAttemptKey({ ...base, ownerInstanceId: 'daemon-1' })
+      getContextCompactionReconciliationAttemptKey({
+        ...base,
+        ownerInstanceId: 'daemon-1',
+        isSessionActive: true,
+      })
     ).not.toBe(
-      getContextCompactionReconciliationAttemptKey({ ...base, ownerInstanceId: 'daemon-2' })
+      getContextCompactionReconciliationAttemptKey({
+        ...base,
+        ownerInstanceId: 'daemon-2',
+        isSessionActive: true,
+      })
+    );
+    expect(
+      getContextCompactionReconciliationAttemptKey({
+        ...base,
+        ownerInstanceId: 'daemon-1',
+        isSessionActive: true,
+      })
+    ).not.toBe(
+      getContextCompactionReconciliationAttemptKey({
+        ...base,
+        ownerInstanceId: 'daemon-1',
+        isSessionActive: false,
+      })
     );
     for (const outcome of ['active', 'unknown', 'unchanged'] as const) {
       expect(
@@ -82,6 +113,54 @@ describe('isSessionContextCompacting', () => {
         outcome: 'reconciled',
       })
     ).toBe(true);
+  });
+});
+
+describe('context compaction reconciliation activity transitions', () => {
+  it('retries after the same daemon releases active Session presence', async () => {
+    const sessionId = 'session-1' as SessionId;
+    const machineId = 'machine-1' as MachineId;
+    const activeCompaction = findActiveSessionContextCompaction(
+      historyWithStatus('in_progress', true)
+    );
+    const request = vi.fn().mockResolvedValue({
+      type: 'session/reconcile-context-compaction_response',
+      sessionId,
+      turnId: 'assistant:turn-1',
+      toolCallId: 'context-compaction-1',
+      outcome: 'active',
+    } satisfies SessionContextCompactionReconcileResponse);
+    const runtime = { requestSessionContextCompactionReconciliation: request };
+
+    const Probe = ({ isSessionActive }: { isSessionActive: boolean }) => {
+      useSessionContextCompactionReconciliation({
+        activeCompaction,
+        canReconcile: true,
+        isSessionActive,
+        machineId,
+        ownerInstanceId: 'daemon-1',
+        runtime,
+        sessionId,
+      });
+      return null;
+    };
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const root = createRoot(document.createElement('div'));
+    try {
+      await act(async () => root.render(createElement(Probe, { isSessionActive: true })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isSessionActive: true })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isSessionActive: false })));
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
+    } finally {
+      act(() => root.unmount());
+      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    }
   });
 });
 

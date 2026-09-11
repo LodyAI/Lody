@@ -23,8 +23,8 @@ termination. When the latest compaction is unresolved and its assistant turn is
 finished, the renderer makes a capability-gated reconciliation request. Only a
 `reconciled` result whose write was confirmed is permanently deduplicated. `active`,
 `unknown`, and `unchanged` may be retried after later history activity, an
-offline-to-online transition, or a new daemon presence instance. Unsupported or
-unreachable daemons do not create a write fallback.
+offline-to-online transition, a stable Session activity transition, or a new daemon
+presence instance. Unsupported or unreachable daemons do not create a write fallback.
 
 The request names `sessionId`, `turnId`, and `toolCallId`. The target daemon first
 verifies that current Session metadata assigns ownership to its own machine and waits
@@ -34,10 +34,12 @@ ownership/liveness check and the local history mutation. Releasing that barrier
 explicitly enqueues an ordinary dispatch recheck and resolves the execution service's
 barrier waiters. Goal actions retain their process-local pending request while waiting,
 so neither a user turn nor a Goal turn accepted during repair can remain stranded or be
-misreported as a startup failure. Remote write confirmation happens after the barrier
-is released, and a failed or unavailable confirmation returns `unknown`, never durable
-success. The reconciliation RPC uses the ordinary request lane because document sync
-and history writes are not fast control-plane work.
+misreported as a startup failure. A same-daemon Session activity transition from active
+to inactive starts a new bounded reconciliation attempt; heartbeat-only presence updates
+do not. Remote write confirmation happens after the barrier is released, and a failed or
+unavailable confirmation returns `unknown`, never durable success. The reconciliation
+RPC uses the ordinary request lane because document sync and history writes are not fast
+control-plane work.
 
 The addressed turn remains unchanged when it is active or when unassigned work makes
 the result indeterminate. Once the daemon can prove the turn is not its live owner,
@@ -68,7 +70,7 @@ more than the exact activity requested by the current view.
 
 Behavioral coverage exercises exact-item mutation, active and indeterminate ownership
 outcomes, cold/unsynced documents, write-confirmation failure, ordinary and Goal turn
-dispatch after a rewrite barrier, owner-daemon generations, control-lane isolation,
-local capability gating, and Loro Streams RPC dispatch. Shared schemas validate the
-request and response shapes. No startup scan, storage migration, or end-to-end provider
-fixture was added.
+dispatch after a rewrite barrier, owner-daemon generations, same-daemon activity release,
+control-lane isolation, local capability gating, and Loro Streams RPC dispatch. Shared
+schemas validate the request and response shapes. No startup scan, storage migration, or
+end-to-end provider fixture was added.
