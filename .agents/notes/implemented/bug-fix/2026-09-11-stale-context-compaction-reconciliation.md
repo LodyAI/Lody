@@ -31,9 +31,11 @@ verifies that current Session metadata assigns ownership to its own machine and 
 for the Session document's initial remote state before drawing a conclusion from its
 history. It acquires the existing Session history rewrite barrier only for a second
 ownership/liveness check and the local history mutation. Releasing that barrier
-explicitly enqueues a dispatch recheck, so a turn accepted while repair was running
-cannot remain stranded. Remote write confirmation happens after the barrier is
-released, and a failed or unavailable confirmation returns `unknown`, never durable
+explicitly enqueues an ordinary dispatch recheck and resolves the execution service's
+barrier waiters. Goal actions retain their process-local pending request while waiting,
+so neither a user turn nor a Goal turn accepted during repair can remain stranded or be
+misreported as a startup failure. Remote write confirmation happens after the barrier
+is released, and a failed or unavailable confirmation returns `unknown`, never durable
 success. The reconciliation RPC uses the ordinary request lane because document sync
 and history writes are not fast control-plane work.
 
@@ -65,8 +67,8 @@ more than the exact activity requested by the current view.
 ## Verification
 
 Behavioral coverage exercises exact-item mutation, active and indeterminate ownership
-outcomes, cold/unsynced documents, write-confirmation failure, dispatch wakeup after a
-rewrite barrier, owner-daemon generations, control-lane isolation, local capability
-gating, and Loro Streams RPC dispatch. Shared schemas validate the request and
-response shapes. No startup scan, storage migration, or end-to-end provider fixture
-was added.
+outcomes, cold/unsynced documents, write-confirmation failure, ordinary and Goal turn
+dispatch after a rewrite barrier, owner-daemon generations, control-lane isolation,
+local capability gating, and Loro Streams RPC dispatch. Shared schemas validate the
+request and response shapes. No startup scan, storage migration, or end-to-end provider
+fixture was added.

@@ -251,6 +251,8 @@ type SessionGoalTurnRequest = {
   userEmail: string;
 };
 
+type GoalTurnStartResult = 'claimed' | 'rewrite-barrier' | 'not-claimed';
+
 type TurnInvocation = {
   /** Causal input Turn for authorization and durable provenance. */
   sourceTurnId: string;
@@ -739,6 +741,7 @@ export class SessionExecutionService {
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
+  private readonly rewriteBarrierReleaseWaiters = new Map<SessionId, Set<() => void>>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
   /** At most one goal action waits per session; a newer action replaces it. */
   private readonly pendingGoalTurnBySession = new Map<SessionId, SessionGoalTurnRequest>();
@@ -1147,7 +1150,36 @@ export class SessionExecutionService {
       }
       released = true;
       this.rewriteBarrierSessions.delete(sessionId);
+      this.resolveRewriteBarrierReleaseWaiters(sessionId);
     };
+  }
+
+  private async waitForSessionRewriteBarrierRelease(sessionId: SessionId): Promise<void> {
+    if (!this.rewriteBarrierSessions.has(sessionId)) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let waiters = this.rewriteBarrierReleaseWaiters.get(sessionId);
+      if (!waiters) {
+        waiters = new Set();
+        this.rewriteBarrierReleaseWaiters.set(sessionId, waiters);
+      }
+      waiters.add(resolve);
+      if (!this.rewriteBarrierSessions.has(sessionId)) {
+        this.resolveRewriteBarrierReleaseWaiters(sessionId);
+      }
+    });
+  }
+
+  private resolveRewriteBarrierReleaseWaiters(sessionId: SessionId): void {
+    const waiters = this.rewriteBarrierReleaseWaiters.get(sessionId);
+    if (!waiters) {
+      return;
+    }
+    this.rewriteBarrierReleaseWaiters.delete(sessionId);
+    for (const resolve of waiters) {
+      resolve();
+    }
   }
 
   /**
@@ -1297,12 +1329,18 @@ export class SessionExecutionService {
           continue;
         }
         try {
-          const claimed = await this.startGoalTurn(pending);
+          const result = await this.startGoalTurn(pending);
           if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
+          if (result === 'rewrite-barrier') {
+            await this.waitForSessionRewriteBarrierRelease(sessionId);
+            continue;
+          }
           // Another dispatch may win while metadata is loading. Retain the
           // accepted request and wait for its owner instead of reporting success.
-          if (!claimed && this.getExecutionSnapshot(sessionId).hasActiveTurn) continue;
-          if (!claimed) throw new Error('Goal turn could not acquire session ownership');
+          if (result === 'not-claimed' && this.getExecutionSnapshot(sessionId).hasActiveTurn)
+            continue;
+          if (result === 'not-claimed')
+            throw new Error('Goal turn could not acquire session ownership');
           this.pendingGoalTurnBySession.delete(sessionId);
           // A claimed turn that never submitted its prompt already records its
           // startup/cancellation outcome through the ordinary turn lifecycle.
@@ -1330,7 +1368,7 @@ export class SessionExecutionService {
       });
   }
 
-  private async startGoalTurn(request: SessionGoalTurnRequest): Promise<boolean> {
+  private async startGoalTurn(request: SessionGoalTurnRequest): Promise<GoalTurnStartResult> {
     const { sessionId, control } = request;
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
@@ -1345,7 +1383,7 @@ export class SessionExecutionService {
     }
     const resumeAcpSessionId = resolveDispatchAcpSessionId(meta);
     let claimed = false;
-    await this.continueSession(
+    const outcome = await this.continueSessionWithOutcome(
       {
         type: 'session/chat',
         sessionId,
@@ -1385,7 +1423,10 @@ export class SessionExecutionService {
         },
       }
     );
-    return claimed;
+    if (claimed) {
+      return 'claimed';
+    }
+    return outcome === 'rewrite-barrier' ? 'rewrite-barrier' : 'not-claimed';
   }
 
   async steerSession(options: {
@@ -3825,6 +3866,13 @@ export class SessionExecutionService {
     message: SessionChatRequestValidated,
     dispatchOptions?: SessionDispatchOptions
   ): Promise<void> {
+    await this.continueSessionWithOutcome(message, dispatchOptions);
+  }
+
+  private async continueSessionWithOutcome(
+    message: SessionChatRequestValidated,
+    dispatchOptions?: SessionDispatchOptions
+  ): Promise<string> {
     const turn = await this.prepareContinueSessionTurn(message, dispatchOptions);
     if (
       dispatchOptions?.dispatchSource !== 'delivery' &&
@@ -3834,7 +3882,7 @@ export class SessionExecutionService {
         userTurnId: message.userTurnId,
       }))
     ) {
-      return;
+      return 'cancelled-before-owner';
     }
     const body = dispatchOptions?.onTurnClaimed
       ? (ctx: VisibleSessionTurnContext) =>
@@ -3851,7 +3899,7 @@ export class SessionExecutionService {
             )
           )
       : turn.body;
-    await this.runVisibleSessionTurn(turn.options, body);
+    return await this.runVisibleSessionTurn(turn.options, body);
   }
 
   private async prepareContinueSessionTurn(
