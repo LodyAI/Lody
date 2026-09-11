@@ -87,6 +87,23 @@ ANTHROPIC_API_KEY=sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxx  # Generated API key
 
 [Reference docs](https://www.kimi.com/code/docs/en/more/third-party-agents.html)
 
+## Bub
+
+Lody includes **Bub** as a built-in ACP provider. Unlike the managed runtimes above, Bub is
+installed by you, so Lody ships the integration without provisioning the command. Install Bub and
+its ACP server plugin into the environment that provides `bub`:
+
+```bash
+bub install bub-acp-server@main
+bub acp serve --help
+```
+
+Then create an Agent Config and choose **Bub**. Lody launches `bub acp serve` and talks to it over
+ACP. If the command cannot be found or fails to start, the provider setup shows an install hint that
+links to the tutorial below.
+
+[Install guide](https://bub.build/docs/tutorials/acp-server/)
+
 ## GLM
 
 The fastest setup is the **GLM over Claude Code** preset in **Settings** -> **Agent Config**. Pick

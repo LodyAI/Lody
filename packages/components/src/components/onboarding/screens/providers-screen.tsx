@@ -15,6 +15,7 @@ import {
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  getBuiltinAgentInstallDocsUrl,
   isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
@@ -85,6 +86,7 @@ import {
 } from '../provider-status';
 import { collectErrorBoundaryEnvironment } from '@/lib/error-boundary-report';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/native-browser';
 import { buildProviderWaitReport } from '../provider-wait-report';
 import {
   agentRuntimeReadinessFromActivity,
@@ -434,6 +436,7 @@ export function ProvidersScreenView({
                             status={status}
                             activity={activity}
                             failureReason={failureReasons[config.id]}
+                            installDocsUrl={getBuiltinAgentInstallDocsUrl(config.agentType)}
                           />
                         </div>
                       </button>
@@ -1481,10 +1484,13 @@ function ProviderStatusBadge({
   status,
   activity,
   failureReason,
+  installDocsUrl,
 }: {
   status: ProviderTestStatus;
   activity?: ProviderTestActivity;
   failureReason?: string;
+  /** Present for builtins whose command the user installs, e.g. Bub. */
+  installDocsUrl?: string;
 }) {
   const { t } = useTranslation();
   const { escalation } = useProviderWaitEscalation(activity);
@@ -1592,7 +1598,7 @@ function ProviderStatusBadge({
         {t('onboarding.providers.statusFailed', 'Failed')}
       </Badge>
     );
-    if (!failureReason) return badge;
+    if (!failureReason && !installDocsUrl) return badge;
     return (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
@@ -1601,7 +1607,20 @@ function ProviderStatusBadge({
             <div className="font-medium">
               {t('onboarding.providers.failureReasonTitle', 'Why it failed')}
             </div>
-            <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
+            {failureReason ? (
+              <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
+            ) : null}
+            {installDocsUrl ? (
+              <button
+                type="button"
+                className="mt-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => {
+                  void openExternalUrl(installDocsUrl);
+                }}
+              >
+                {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+              </button>
+            ) : null}
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

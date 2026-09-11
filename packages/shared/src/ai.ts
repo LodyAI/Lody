@@ -35,12 +35,25 @@ export type CliType = BuiltinCliType;
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
+  { agentType: 'bub', displayName: 'Bub' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
 export type BuiltinAgentType = BuiltinAgent['agentType'];
 export type AgentConfigCliType = 'builtin' | 'registry' | 'custom';
 export type AgentType = string;
+
+/**
+ * Install guide for a builtin agent whose executable Lody does not manage. Bub
+ * is user-installed (`bub install bub-acp-server`), so a failed launch is the
+ * user's cue to install it instead of a runtime download. The setup UI links
+ * here rather than pretending to provision it.
+ */
+export const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/';
+
+const BUILTIN_AGENT_INSTALL_DOCS_URLS: Partial<Record<BuiltinAgentType, string>> = {
+  bub: BUB_ACP_INSTALL_DOCS_URL,
+};
 
 /**
  * How each builtin agent's ACP adapter handles the session title.
@@ -66,6 +79,9 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
   grok: 'untagged',
   kimi: 'none',
   deepseek: 'none',
+  // Bub's ACP server does not push an authoritative session title, so Lody
+  // keeps running its isolated title agent.
+  bub: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -483,6 +499,18 @@ export const getAcpCapabilityCacheStaleReason = (
 export const isBuiltinAgentType = (agentType: string): agentType is BuiltinAgentType =>
   BUILTIN_AGENTS.some((agent) => agent.agentType === agentType);
 
+/**
+ * Install/launch documentation to surface when a builtin provider's command
+ * fails because the user has not installed it. Returns `undefined` for managed
+ * builtins, whose runtimes Lody downloads itself.
+ */
+export const getBuiltinAgentInstallDocsUrl = (
+  agentType: AgentType | null | undefined
+): string | undefined =>
+  agentType && isBuiltinAgentType(agentType)
+    ? BUILTIN_AGENT_INSTALL_DOCS_URLS[agentType]
+    : undefined;
+
 export const getBuiltinAgentByAgentType = (agentType: string): BuiltinAgent | undefined =>
   BUILTIN_AGENTS.find((agent) => agent.agentType === agentType);
 
@@ -518,6 +546,10 @@ const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
+  // Bub advertises its own modes over ACP; this is only a fallback label for
+  // the first render before a probe. Unknown adapters fall back to the
+  // capability's currentValue, so a mismatch here is harmless.
+  bub: 'default',
 };
 
 /**
@@ -1003,6 +1035,14 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
     models: [],
     configOptions: DEEPSEEK_HARNESS_CONFIG_OPTIONS,
+  },
+  // Bub publishes modes/models through its own ACP config options, so Lody has
+  // nothing authoritative to show before the live probe. Deliberately empty:
+  // the dialog then requires a real probe instead of offering invented options.
+  bub: {
+    modes: [],
+    models: [],
+    configOptions: [],
   },
 };
 

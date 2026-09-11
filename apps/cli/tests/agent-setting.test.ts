@@ -11,6 +11,7 @@ import {
 import { REGISTRY_ACP_AGENTS } from '@lody/shared';
 
 import {
+  BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
   getAcpCapabilitySourceVersion,
   mergeLoginShellEnv,
   resolveACPSetting,
@@ -49,6 +50,7 @@ describe('resolveBuiltinACPSetting', () => {
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('kimi')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('grok')).toThrow(/resolveACPProcessLaunchAsync/);
+    expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
   it('keys builtin capability versions on the bundled adapter and managed runtime', () => {
@@ -162,6 +164,35 @@ describe('resolveBuiltinACPSetting', () => {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
     }
+  });
+
+  it('launches Bub through the user-installed `bub acp serve` command', async () => {
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp', 'serve'],
+      capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
+    });
+
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+        extraArgs: ['--verbose'],
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp', 'serve', '--verbose'],
+      capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
+    });
+
+    expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'bub' })).toBe(
+      BUILTIN_BUB_CAPABILITY_SOURCE_VERSION
+    );
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {

@@ -11,6 +11,7 @@ import {
   getAcpCapabilityCacheKey,
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
+  getBuiltinAgentInstallDocsUrl,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
   isManagedBuiltinAgentType,
@@ -61,6 +62,7 @@ import {
   X,
 } from 'lucide-react';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
@@ -500,6 +502,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     agentType: 'deepseek',
     experimental: true,
     searchKeys: 'deepseek harness dsh acp',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:bub',
+    label: 'Bub',
+    descriptionKey: 'settings.agent.dialog.option.bub.description',
+    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
+    cliType: 'builtin',
+    agentType: 'bub',
+    searchKeys: 'bub bubbuild acp',
   },
 ];
 
@@ -1031,12 +1043,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const isCustom = formData.cliType === 'custom';
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
+  // Bub is builtin but user-installed, so there is no managed runtime to
+  // prepare. It still must pass a live probe on create: that is how a missing
+  // `bub acp serve` becomes an actionable "install Bub" prompt instead of a
+  // provider that fails later on its first turn.
+  const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
+  const bubInstallDocsUrl = isBubBuiltin
+    ? getBuiltinAgentInstallDocsUrl(formData.agentType)
+    : undefined;
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin);
+    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -2204,7 +2224,28 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
           {probeError && !isPreset && (
             <div className="rounded-lg border border-status-warning/30 bg-status-warning/[0.08] px-3 py-2 text-xs text-status-warning">
-              {probeError}
+              <div>{probeError}</div>
+              {bubInstallDocsUrl && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span>
+                    {t(
+                      'settings.agent.dialog.bubInstallHint',
+                      'Bub is not installed on this machine, or `bub acp serve` failed to start. Install the Bub ACP server plugin, then retry.'
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    onClick={() => {
+                      void openExternalUrl(bubInstallDocsUrl);
+                    }}
+                  >
+                    {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 

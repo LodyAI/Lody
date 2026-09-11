@@ -248,6 +248,44 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
   });
 
+  it('offers Bub as a builtin and links its probe failure to the install guide', async () => {
+    const mode: AgentConfigDialogMode = { kind: 'create' };
+    const onSubmit = vi.fn(async () => {});
+    const onRefreshCapabilities: RefreshCapabilities = async (args) => ({
+      type: 'machine/acp-capabilities-refresh_response' as const,
+      machineId: args.machineId,
+      configId: args.configId,
+      cliType: 'builtin',
+      agentType: 'bub',
+      success: false,
+      error: 'spawn bub ENOENT',
+    });
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation'),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      onRefreshCapabilities
+    );
+
+    await act(async () => {
+      getOptionByText('Bub').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(getSelectedOption()?.textContent).toContain('Bub');
+
+    await act(async () => {
+      getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Install the Bub ACP server plugin');
+    });
+    const installGuide = Array.from(document.body.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Open install guide')
+    );
+    expect(installGuide).toBeDefined();
+  });
+
   it('reports the selected managed runtime so onboarding can prioritize it', async () => {
     const onManagedRuntimeSelected = vi.fn();
     await renderDialog(
