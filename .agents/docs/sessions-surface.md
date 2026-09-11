@@ -41,11 +41,14 @@ this page is the full text of the rules summarised there.
   names appear only when the conversation has more than one human in it.
   The trim notice lives in the header blockquote, not the footer, so a reader
   learns the transcript is incomplete before reading it rather than after.
-  Message fork menus copy the inclusive history prefix independently of ACP fork
-  capability. Missing boundaries fail. A reply that was still generating is marked
-  through the builder's `incompleteFinalResponse` option, so the warning lands in
-  the header blockquote with the trim notice rather than as a trailing line —
-  callers must not append their own note after the transcript.
+  Message actions copy the inclusive history prefix independently of ACP fork
+  capability. A streaming assistant reply uses a direct Copy action so the Fork
+  affordance and its loading state remain completion-gated; finished replies and
+  user messages keep context copy in the fork menu. Missing boundaries fail. A
+  reply that was still generating is marked through the builder's
+  `incompleteFinalResponse` option, so the warning lands in the header blockquote
+  with the trim notice rather than as a trailing line — callers must not append
+  their own note after the transcript.
   Attachment bytes are not exported. The session header copies all history.
   Header "Open in" / "Copy Path" launchers live here; shared launcher/path
   helpers are `../../lib/session-path-launchers.ts`,

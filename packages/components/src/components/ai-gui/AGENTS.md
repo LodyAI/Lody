@@ -52,6 +52,8 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` so actions clear the edge-back strip.
+- Streaming replies use direct context copy; Fork controls and loading require
+  a finished assistant turn.
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
   them right, and the chevron carries the hierarchy. Hover pills bleed instead

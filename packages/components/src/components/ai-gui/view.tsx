@@ -3675,6 +3675,7 @@ export const AssistantTurnFooter = ({
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
   const showFinishedMetadata = message.finished === true;
+  const showStreamingContextCopy = !showFinishedMetadata && !!copyContext;
   /* Mobile: no completion timestamp — model meta + Worked-for already carry
      enough chrome; the stamp only adds a second clock under the answer. */
   const completionTimestampLabel = isMobile
@@ -3737,7 +3738,7 @@ export const AssistantTurnFooter = ({
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && (isTurnHovered || isForking) && 'opacity-100'
+            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
           )}
           data-assistant-turn-actions
         >
@@ -3768,7 +3769,27 @@ export const AssistantTurnFooter = ({
              label, not to the answer text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
-              {hasCopyableText ? (
+              {showStreamingContextCopy ? (
+                <TooltipProvider>
+                  <Tooltip delayDuration={500}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                        onClick={() => copyContext?.(message.id)}
+                        aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
@@ -3805,7 +3826,7 @@ export const AssistantTurnFooter = ({
                   className="h-7 w-7"
                 />
               ) : null}
-              {(showFinishedMetadata && onFork) || copyContext ? (
+              {showFinishedMetadata && (onFork || copyContext) ? (
                 <AssistantForkButton
                   turnId={message.id}
                   className="mr-2"

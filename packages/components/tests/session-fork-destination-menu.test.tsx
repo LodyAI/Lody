@@ -134,56 +134,58 @@ describe('SessionForkDestinationPopover', () => {
     await act(async () => shared?.click());
     expect(onSelect).toHaveBeenCalledWith('shared');
   });
-  it.each([false, true])(
-    'exposes context copying for a streaming turn (finished=%s)',
-    async (finished) => {
-      await initI18n('en');
-      const sessionId = 'copy-stream' as SessionId;
-      const { items } = buildChatStreamItems(
-        [
-          {
-            id: 'partial',
-            role: 'assistant',
-            timestamp: '2026-09-10T00:00:00Z',
-            items: [{ type: 'text', text: 'Partial answer' }],
-            fileDiff: [],
-            finished,
-          } as never,
-        ],
-        sessionId
-      );
-      let copied: string | undefined;
-      await act(async () =>
-        root.render(
-          createElement(SessionChatStreamView, {
-            items,
-            sessionId,
-            renderMessageRow: () => null,
-            onCopyContext: (id) => {
-              copied = id;
-            },
-            onForkLastAssistant: () => undefined,
-            lastAssistantMessageId: 'partial',
-            lastCompletedAssistantMessageId: finished ? 'partial' : null,
-          })
-        )
-      );
-      const fork = container.querySelector<HTMLButtonElement>('[aria-label="Fork session"]');
+  it.each([false, true])('exposes context copying for a turn (finished=%s)', async (finished) => {
+    await initI18n('en');
+    const sessionId = 'copy-stream' as SessionId;
+    const { items } = buildChatStreamItems(
+      [
+        {
+          id: 'partial',
+          role: 'assistant',
+          timestamp: '2026-09-10T00:00:00Z',
+          items: [{ type: 'text', text: 'Partial answer' }],
+          fileDiff: [],
+          finished,
+        } as never,
+      ],
+      sessionId
+    );
+    let copied: string | undefined;
+    await act(async () =>
+      root.render(
+        createElement(SessionChatStreamView, {
+          items,
+          sessionId,
+          renderMessageRow: () => null,
+          onCopyContext: (id) => {
+            copied = id;
+          },
+          onForkLastAssistant: () => undefined,
+          lastAssistantMessageId: 'partial',
+          lastCompletedAssistantMessageId: finished ? 'partial' : null,
+          forkingAssistantMessageId: finished ? null : 'partial',
+        })
+      )
+    );
+
+    const fork = container.querySelector<HTMLButtonElement>('[aria-label="Fork session"]');
+    if (finished) {
       expect(fork).toBeTruthy();
       await act(async () => fork!.click());
-      const copy = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
-        item.textContent?.includes('Copy context as Markdown')
-      );
-      expect(copy).toBeTruthy();
-      if (!finished) {
-        expect(
-          [...document.querySelectorAll('[role="menuitem"]')].some((item) =>
-            item.textContent?.includes('Current workspace')
-          )
-        ).toBe(false);
-      }
-      await act(async () => copy!.click());
-      expect(copied).toBe('partial');
+    } else {
+      expect(fork).toBeNull();
+      expect(container.querySelector('[aria-label="Copy response"]')).toBeNull();
+      expect(
+        container.querySelector('[data-assistant-turn-actions]')?.classList.contains('opacity-100')
+      ).toBe(false);
     }
-  );
+    const copy = finished
+      ? [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
+          item.textContent?.includes('Copy context as Markdown')
+        )
+      : container.querySelector<HTMLButtonElement>('[aria-label="Copy context as Markdown"]');
+    expect(copy).toBeTruthy();
+    await act(async () => copy!.click());
+    expect(copied).toBe('partial');
+  });
 });
