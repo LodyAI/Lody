@@ -30,8 +30,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 ## Turn Folding And Layout
 
 - Finished turns keep the answer/result tail visible and fold earlier work;
-  streaming turns stay expanded. Details remain sibling rows, and search opens
-  both the worked region and the activity group.
+  streaming turns stay expanded.
 - The final answer is the final contiguous run of text before trailing
   never-collapsed items, not necessarily the last item: walk backward through
   adjacent text blocks until a non-text boundary.
@@ -55,6 +54,8 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` so actions clear the edge-back strip.
+- Streaming replies use a direct Copy action; Fork controls and loading need a
+  finished turn.
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
   them right, and the chevron carries the hierarchy. Hover pills bleed instead
