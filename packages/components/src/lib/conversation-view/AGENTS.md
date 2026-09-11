@@ -14,8 +14,10 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   edits; release also cancels remaining hydration chunks. Positional readers
   reacquire on `structure`, including same-length replacements. The
   LRU (`maxHydrated`) never evicts pinned turns or the last `tailKeep`
-  turns, which are hydrated eagerly for streaming. Summaries and the shallow
-  user config fill in idle chunks and resolve `ready`. Hydrated objects equal
+  turns, which are hydrated eagerly for streaming. User Role-selection config
+  is read shallowly during indexing and refreshed synchronously on config edits;
+  sending must not depend on idle progress to resolve the sticky Role, including
+  explicit None. Summaries and counts fill in idle chunks and resolve `ready`. Hydrated objects equal
   Mirror's output (`tests/conversation-view-from-doc.test.ts`) and are patched
   copy-on-write from doc events (`apply-turn-event.ts`), falling back to a
   full re-read when a path does not resolve. Every full read also replaces

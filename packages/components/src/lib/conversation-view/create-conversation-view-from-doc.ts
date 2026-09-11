@@ -165,7 +165,8 @@ export function createConversationViewFromDoc(
   };
 
   /**
-   * One shallow read per turn — the whole eager open cost.
+   * One shallow read per turn, plus user input-config metadata needed to send
+   * with the correct sticky Role before the idle pass runs.
    *
    * `itemCount` / `planCount` are deliberately NOT resolved here: each costs a
    * `getContainerById` plus a `length` crossing, which on a 2,400-turn doc adds
@@ -175,7 +176,11 @@ export function createConversationViewFromDoc(
    * `isEmptyAssistantIndexRow` treats unknown as "not empty" so a real turn is
    * never dropped from the stream.
    */
-  const readIndexRow = (map: LoroMap): TurnIndexRow => pickIndexScalars(map.getShallowValue());
+  const readIndexRow = (map: LoroMap): TurnIndexRow => {
+    const row = pickIndexScalars(map.getShallowValue());
+    if (row.role === 'user') row.inputConfig = readIndexInputConfig(map);
+    return row;
+  };
 
   /** Exact counts for a turn we are already reading in full. */
   const countsOfTurn = (turn: SessionHistory) => ({
@@ -185,8 +190,13 @@ export function createConversationViewFromDoc(
 
   const readIndexInputConfig = (map: LoroMap) => {
     const config = map.get('inputConfig');
-    if (!isContainer(config) || config.kind() !== 'Map') return undefined;
-    return pickIndexInputConfig((config as LoroMap).getShallowValue());
+    return pickIndexInputConfig(
+      isContainer(config)
+        ? config.kind() === 'Map'
+          ? (config as LoroMap).getShallowValue()
+          : undefined
+        : config
+    );
   };
 
   const withHydratedFacts = (row: TurnIndexRow, turn: SessionHistory): TurnIndexRow => {
@@ -362,8 +372,7 @@ export function createConversationViewFromDoc(
       if (!row || !cid) continue;
       const needsSummary = row.summary === undefined;
       const needsCounts = row.itemCount === undefined;
-      const needsConfig = row.role === 'user' && !('inputConfig' in row);
-      if (!needsSummary && !needsCounts && !needsConfig) continue;
+      if (!needsSummary && !needsCounts) continue;
       if (
         processed >= IDLE_CHUNK_TURNS ||
         items >= IDLE_CHUNK_ITEMS ||
@@ -386,7 +395,6 @@ export function createConversationViewFromDoc(
       if (!map) continue;
       const next: TurnIndexRow = { ...(needsCounts ? (fillRowCounts(i) ?? row) : row) };
       if (needsSummary) next.summary = summarizeTurnShallow(map);
-      if (needsConfig) next.inputConfig = readIndexInputConfig(map);
       rows[i] = next;
       processed += 1;
       items += itemWeight(i);
@@ -595,6 +603,22 @@ export function createConversationViewFromDoc(
           };
           indexChanged = true;
         }
+      }
+
+      // Input config is send-critical even on an old, unhydrated user turn.
+      // Read the final metadata after root replacement/deletion or child edits.
+      if (
+        relPath[0] === 'inputConfig' ||
+        (relPath.length === 0 &&
+          event.diff.type === 'map' &&
+          ('inputConfig' in event.diff.updated || 'role' in event.diff.updated))
+      ) {
+        const map = turnMapOf(cid);
+        rows[index] = {
+          ...rows[index]!,
+          inputConfig: map && rows[index]!.role === 'user' ? readIndexInputConfig(map) : undefined,
+        };
+        indexChanged = true;
       }
 
       const turn = hydrated.get(cid);

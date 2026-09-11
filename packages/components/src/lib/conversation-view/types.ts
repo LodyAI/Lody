@@ -111,7 +111,7 @@ export interface ConversationView {
   readonly turnCount: number;
   /** Bumps on any structural, index, or hydrated-content change. */
   readonly version: number;
-  /** Resolves once the background index pass (summaries, shallow config) is done. */
+  /** Resolves once background summaries/counts finish; user Role config is eager. */
   readonly ready: Promise<void>;
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */

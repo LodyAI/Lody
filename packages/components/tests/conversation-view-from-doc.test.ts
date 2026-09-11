@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  createHistoryWriter,
+  resolveSessionConversationConfig,
+  type SessionHistory,
+} from '@lody/shared';
 import { LoroMap, LoroText, type ContainerID, type LoroList } from 'loro-crdt';
-import { createConversationViewFromDoc } from '../src/lib/conversation-view';
+import {
+  collectConversationConfigSources,
+  createConversationViewFromDoc,
+} from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -53,6 +61,102 @@ const turnMapAt = (
 };
 
 describe('createConversationViewFromDoc', () => {
+  it.each([
+    ['map', 'sticky-role'],
+    ['map', null],
+    ['legacy JSON', 'sticky-role'],
+    ['legacy JSON', null],
+  ] as const)('preserves sticky Role on a send before idle: %s / %s', async (storage, roleId) => {
+    const history = buildFixtureHistory(50).map((turn) => ({
+      ...turn,
+      inputConfig: turn.role === 'user' ? { modeId: 'default' } : undefined,
+    })) as SessionHistory[];
+    history[0]!.inputConfig = { agentRoleId: 'older-role', agentRoleRevision: 1 } as never;
+    history[2]!.inputConfig = {
+      agentRoleId: roleId,
+      ...(roleId ? { agentRoleRevision: 2 } : {}),
+    } as never;
+    const doc = reimport(buildSessionDoc(history));
+    const target = doc.getList('history').get(2) as LoroMap;
+    if (storage === 'legacy JSON') {
+      target.set('inputConfig', history[2]!.inputConfig as never);
+      doc.commit();
+    }
+    const expected = resolveSessionConversationConfig(mirrorHistoryOf(reimport(doc)));
+    const before = doc.version().toJSON();
+    const idle = createManualIdle();
+    const toJSON = LoroMap.prototype.toJSON;
+    const guard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+      if (this.id === target.id) throw new Error('Role lookup materialized an old turn body');
+      return toJSON.call(this);
+    });
+    const view = createConversationViewFromDoc(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 2,
+      maxHydrated: 2,
+      scheduleIdle: idle.scheduleIdle,
+    });
+    const resolve = () =>
+      resolveSessionConversationConfig(collectConversationConfigSources(view, view.turnCount - 2));
+    try {
+      expect(resolve().agentRoleId).toBe(expected.agentRoleId);
+      expect(resolve().agentRoleRevision).toBe(expected.agentRoleRevision);
+      expect(view.isHydrated(2)).toBe(false);
+      expect(doc.version().toJSON()).toEqual(before);
+      const selection = resolve();
+      createHistoryWriter(doc).append({
+        id: 'early-send',
+        role: 'user',
+        timestamp: 'synthetic',
+        items: [{ type: 'text', text: 'synthetic' }],
+        inputConfig: {
+          agentRoleId: selection.agentRoleId ?? null,
+          agentRoleRevision: selection.agentRoleRevision,
+        },
+      });
+      idle.runAll();
+      await view.ready;
+      expect(resolve().agentRoleId).toBe(roleId);
+    } finally {
+      guard.mockRestore();
+      view.dispose();
+    }
+    expect(resolveSessionConversationConfig(mirrorHistoryOf(reimport(doc))).agentRoleId).toBe(
+      roleId
+    );
+  });
+
+  it('refreshes old user Role metadata on peer edits and insertion before idle', () => {
+    const { doc, view } = openView(12, { tailKeep: 0, maxHydrated: 0 });
+    const peer = reimport(doc);
+    const row = peer.getList('history').get(2) as LoroMap;
+    const config = row.get('inputConfig') as LoroMap;
+    const sync = () => {
+      peer.commit();
+      doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    };
+    config.set('agentRoleId', null);
+    config.delete('agentRoleRevision');
+    sync();
+    expect(view.index(2)?.inputConfig?.agentRoleId).toBeNull();
+    expect(view.index(2)?.inputConfig?.agentRoleRevision).toBeUndefined();
+    row.set('inputConfig', { agentRoleId: 'replacement-role', agentRoleRevision: 3 });
+    sync();
+    expect(view.index(2)?.inputConfig?.agentRoleId).toBe('replacement-role');
+    row.delete('inputConfig');
+    sync();
+    expect(view.index(2)?.inputConfig).toBeUndefined();
+    const inserted = peer.getList('history').insertContainer(0, new LoroMap());
+    inserted.set('id', 'remote-role');
+    inserted.set('role', 'user');
+    inserted.set('inputConfig', { agentRoleId: 'inserted-role', agentRoleRevision: 4 });
+    sync();
+    expect(view.index(0)?.inputConfig?.agentRoleId).toBe('inserted-role');
+    expect(view.isHydrated(0)).toBe(false);
+    expect(view.isHydrated(3)).toBe(false);
+    view.dispose();
+  });
+
   it('releases only its own containers after an insertion shifts overlapping leases', async () => {
     const { doc, view } = openView(6, { tailKeep: 0, maxHydrated: 1 });
     const first = view.acquireRange(2, 3);

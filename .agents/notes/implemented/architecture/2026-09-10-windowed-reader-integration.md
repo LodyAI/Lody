@@ -66,6 +66,18 @@ invalidate replaced facts, and open search acquires current membership. Search c
 entries also include the current position so a surviving turn cannot retain an old
 jump target. These changes preserve the shared writer and existing persisted history.
 
+Role readiness review found a separate durable failure: the composer could send after
+store load but before the idle pass reached an older explicit Role. It then froze a
+fallback Role/None into the next turn, which later index completion could not correct.
+User index rows now read the shallow Role-selection config synchronously, including
+legacy JSON config and explicit None. Config replacement/deletion, nested peer edits
+and inserted user rows update that metadata before notifying consumers. Summaries and
+body counts remain deferred; old turn bodies are not hydrated for Role lookup. This
+adds one small config read per user row to initial indexing instead of blocking the
+composer on the entire idle pass. Reads neither migrate storage nor change the shared
+writer. Regression tests control idle scheduling and assert the Role written by an
+immediate send survives snapshot reload, with an old-body materialization guard.
+
 ## Verification
 
 The control-plane suite runs both modes with opaque stored history and the shared writer.
@@ -82,19 +94,20 @@ separate from these correctness checks.
 
 Target-local write regressions reject whole-history body reads while asserting the final
 permission/proposal state, missing-target and invalid-command no-ops, legacy JSON support,
-opaque-field preservation and concurrent peer edits. The follow-up passed 31 shared writer
-tests, the 3428-test component suite, and both package typechecks. Full root validation
-remains blocked by uninitialized ACP submodules (CLI manifest imports and documentation
-links); this is not a claim of full repository or end-to-end acceptance.
-An isolated combination with #584 (`33177fda`) and #586 (`10cc1333`) passed all
-3459 component tests, 92 shared writer/storage/ACP tests and both package typechecks.
-The only integration conflict was in shared `AGENTS.md`; both contracts were retained.
+opaque-field preservation and concurrent peer edits. Role-readiness coverage adds an
+immediate pre-idle send with explicit Role/None, Map/legacy JSON config, snapshot reload,
+and synchronous peer config replacement/deletion/insertion without old-body hydration.
 
-The fix passed the components suite (457 files / 3428 tests), history-import's
-39 tests, both package typechecks, type-aware lint, i18n, Code Collab imports
-and the platform guard. The repair checkout's uninitialized ACP submodules
-prevent the public-boundary and documentation-link checks from completing;
-the root check also encountered missing documentation-site dependencies.
+The Role fix passed the component suite (457 files / 3433 tests), history-import's
+39 tests, both package typechecks, type-aware lint, i18n, Code Collab imports and the
+platform guard. Its isolated combination with #584 (`33177fda`) and #586 (`10cc1333`)
+passed all 3464 component tests and both package typechecks. The earlier combination
+also passed 92 shared writer/storage/ACP tests; those unchanged suites were not rerun
+for this reader-only fix. The only integration conflict was the earlier shared
+`AGENTS.md` wording; both contracts were retained.
+Full root validation remains blocked by uninitialized ACP submodules (CLI manifest
+imports, public-boundary resolution and documentation links). This is not a claim of
+full repository or end-to-end acceptance.
 
 Related: [shared writer](2026-09-07-single-history-writer.md),
 [PR #376](https://github.com/LodyAI/Lody/pull/376).

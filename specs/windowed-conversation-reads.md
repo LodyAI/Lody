@@ -21,6 +21,11 @@ messages, even if history positions change. Positional readers reacquire after
 insertion, deletion or replacement. Whole-history facts and an open search must
 cover subsequently synchronized history; search navigation follows current positions.
 
+User Role-selection metadata must be available before sending is enabled, including
+an explicit None on an older turn. Index construction and subsequent config edits
+read this small subset synchronously without hydrating old turn bodies. Idle summary
+completion must not determine which Role gets frozen into the next turn.
+
 The shared HistoryWriter is the only history writer in both windowed and full-reader modes.
 Changing the reader flag must not change authored-input validation or stored-copy semantics.
 Read projections must never be treated as complete write baselines.
