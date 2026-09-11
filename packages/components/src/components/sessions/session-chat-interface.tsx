@@ -184,6 +184,7 @@ import {
   writeStoredPathLauncherPreference,
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
+import { shouldHideThinkingUnderFinishedAssistant } from '@/lib/agent-activity-visibility';
 import { cn } from '@/lib/utils';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
@@ -3615,13 +3616,17 @@ export const SessionChatInterface = memo(
       sessionProject,
       workspaceId,
     ]);
+    const hideThinkingUnderFinishedAssistant =
+      shouldHideThinkingUnderFinishedAssistant(sessionHistory);
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+            : hideThinkingUnderFinishedAssistant
+              ? null
+              : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
