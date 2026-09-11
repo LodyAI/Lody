@@ -1,3 +1,6 @@
+import { assertProductWindowSender } from '../assert-sender'
+import { productWindows } from '../../window-state'
+import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
@@ -92,6 +95,22 @@ export function installNativeThemeWatch(): void {
 
 export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
+
+  @IpcMethod()
+  async openWindow(raw: WindowTarget) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    openSessionWindow(parseWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async prepareCacheClear() {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    for (const window of productWindows) {
+      if (window.webContents !== event.sender) window.destroy()
+    }
+  }
 
   @IpcMethod()
   async getDevbarConfig() {

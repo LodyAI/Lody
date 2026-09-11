@@ -17,6 +17,7 @@ import type {
   SessionFilePayload,
   SessionTurnInputConfig,
   AcpCapabilityCacheEntry,
+  SessionGoalAction,
 } from '.';
 import type {
   PreviewCandidateReportRequest,
@@ -160,6 +161,24 @@ export interface SessionSteerResponse {
   /** True only after adapter activation and CLI turn-ownership commit. */
   applied: boolean;
   disposition: 'applied' | 'unsupported' | 'no-active-turn' | 'stale-turn' | 'busy' | 'error';
+  error?: string;
+}
+
+/**
+ * Answer to a goal control request.
+ *
+ * `accepted` means the machine took responsibility for the action, including
+ * when it is queued. `disposition` says how it reached the agent, which the
+ * caller cannot otherwise see: `applied` completed out of band, `turn_started`
+ * runs inside a prompt Lody just opened, and `queued` waits for the turn that
+ * currently owns the session's prompt slot.
+ */
+export interface SessionGoalResponse {
+  type: 'session/goal_response';
+  sessionId: SessionId;
+  action: SessionGoalAction;
+  accepted: boolean;
+  disposition: 'applied' | 'turn_started' | 'queued' | 'unsupported' | 'error';
   error?: string;
 }
 
@@ -737,6 +756,7 @@ export type LocalSessionControlResponse =
   | SessionChatResponse
   | SessionCancelResponse
   | SessionSteerResponse
+  | SessionGoalResponse
   | MachineStatusResponse
   | MachinePingResponse
   | MachineRestartResponse

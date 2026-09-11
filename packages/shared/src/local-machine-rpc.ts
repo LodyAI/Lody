@@ -1,5 +1,6 @@
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { z } from 'zod';
+import { SESSION_GOAL_ACTIONS } from './goal';
 import {
   CodeCollabV2ErrorSchema,
   CodeCollabV2FileIndexRequestSchema,
@@ -37,6 +38,7 @@ import {
   SessionPreviewEndpointReleaseResponseSchema,
   PreviewTargetSchema,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
 } from './message-schemas';
 
@@ -204,6 +206,17 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/goal'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        action: z.enum(SESSION_GOAL_ACTIONS),
+        objective: z.string().trim().min(1).optional(),
+        userId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-endpoint-acquire'),
     params: z
       .object({
@@ -258,6 +271,7 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
 ]);
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;

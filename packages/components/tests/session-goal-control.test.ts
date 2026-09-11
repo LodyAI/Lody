@@ -1,25 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canPauseGoalThroughPromptBridge,
-  getPromptBridgeGoalCommands,
-  GOAL_PROMPT_DISPATCH_OPTIONS,
+  getSessionGoalCommands,
   isSessionPromptBusy,
 } from '../src/components/sessions/session-goal-control';
 
-describe('session goal prompt bridge', () => {
-  it('keeps provider-neutral Claude goals read-only', () => {
-    expect(getPromptBridgeGoalCommands('claude')).toEqual([]);
-    expect(canPauseGoalThroughPromptBridge('claude')).toBe(false);
+describe('session goal control availability', () => {
+  it('keeps goals read-only for a runtime that advertises no goal actions', () => {
+    expect(getSessionGoalCommands(undefined)).toEqual([]);
+    expect(getSessionGoalCommands({ goalActions: [] })).toEqual([]);
   });
 
-  it('keeps the existing Codex pause, resume, and clear controls', () => {
-    expect(getPromptBridgeGoalCommands('codex')).toEqual(['pause', 'resume', 'clear']);
-    expect(canPauseGoalThroughPromptBridge('codex')).toBe(true);
+  it('offers the commands the runtime advertised, whatever the agent is', () => {
+    expect(getSessionGoalCommands({ goalActions: ['set', 'pause', 'resume', 'clear'] })).toEqual([
+      'pause',
+      'resume',
+      'clear',
+    ]);
   });
 
-  it('defaults unknown ACP providers to read-only goals', () => {
-    expect(getPromptBridgeGoalCommands('custom-agent')).toEqual([]);
-    expect(canPauseGoalThroughPromptBridge(undefined)).toBe(false);
+  it('offers only the subset a partial runtime advertised', () => {
+    // `set` has no button of its own, and an unadvertised action must never get
+    // one: pressing it would fail at the agent.
+    expect(getSessionGoalCommands({ goalActions: ['set', 'clear'] })).toEqual(['clear']);
   });
 
   it('keeps a quiescent session direct-dispatchable while its goal remains active', () => {
@@ -47,9 +49,5 @@ describe('session goal prompt bridge', () => {
         isGoalActive: false,
       })
     ).toBe(true);
-  });
-
-  it('forces direct dispatch for slash goal commands so steer cannot reject them', () => {
-    expect(GOAL_PROMPT_DISPATCH_OPTIONS).toEqual({ forceDirect: true });
   });
 });

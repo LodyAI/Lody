@@ -58,6 +58,11 @@ per-turn MCP selection, or Role-based session creation and dispatch.
 
 ## Machine protocol negotiation
 
+- Independent Plan configuration uses Core's boolean `plan_mode`, including static
+  capabilities, semantic dispatch, and UI toggles. Preserve `collaboration_mode`
+  default/plan only for agents that advertise the legacy option; planning must not
+  change permission policy.
+
 - Daemon-backed workflows negotiate versions through
   `MachineMeta.protocolCapabilities`; never infer from the CLI release. Missing
   capabilities mean unsupported. Set and version checks share one binding in
@@ -67,6 +72,18 @@ per-turn MCP selection, or Role-based session creation and dispatch.
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
   matching remains a separate applicability gate.
+
+## Session goal control
+
+- A goal action's transport follows what it does, not what the agent is. Status-only
+  actions (`pause`, `clear`) use the `_lody/session/goal` request and must reach a
+  goal whose prompt is still open; actions that start work (`set`, `resume`) run
+  inside a Lody-owned prompt carrying `_meta.lody.goalControl`, because every unit of
+  agent work needs a conversation entry to be attributed to. Never start goal work
+  from the request path.
+- Offer only the actions the runtime advertised in its ACP capability, never a
+  provider name check. A goal turn carries no run configuration, so resuming cannot
+  change model or mode. Behavior: [goal control Spec](../../specs/session-goal-control.md).
 
 ## Workspace MCP and Agent Roles
 

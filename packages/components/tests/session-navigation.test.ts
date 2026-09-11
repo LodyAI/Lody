@@ -10,16 +10,33 @@ const sessionId = (value: string) => value as SessionId;
 describe('resolveOpenedByNavigationTarget', () => {
   it('returns the root Session when the opener is already a root', () => {
     expect(
-      resolveOpenedByNavigationTarget({ openedBySessionId: sessionId('root-session') })
+      resolveOpenedByNavigationTarget(
+        { openedBySessionId: sessionId('root-session') },
+        {
+          metadataReady: true,
+          openerSession: { id: sessionId('root-session') },
+          rootSession: { id: sessionId('root-session') },
+        }
+      )
     ).toEqual({ sessionId: 'root-session' });
   });
 
   it('restores the exact opener Tab from persisted relationship metadata', () => {
     expect(
-      resolveOpenedByNavigationTarget({
-        openedBySessionId: sessionId('child-tab'),
-        openedByRootSessionId: sessionId('root-session'),
-      })
+      resolveOpenedByNavigationTarget(
+        {
+          openedBySessionId: sessionId('child-tab'),
+          openedByRootSessionId: sessionId('root-session'),
+        },
+        {
+          metadataReady: true,
+          openerSession: {
+            id: sessionId('child-tab'),
+            parentSessionId: sessionId('root-session'),
+          },
+          rootSession: { id: sessionId('root-session') },
+        }
+      )
     ).toEqual({ sessionId: 'root-session', tabSessionId: 'child-tab' });
   });
 
@@ -27,9 +44,60 @@ describe('resolveOpenedByNavigationTarget', () => {
     expect(
       resolveOpenedByNavigationTarget(
         { openedBySessionId: sessionId('child-tab') },
-        { parentSessionId: sessionId('root-session') }
+        {
+          metadataReady: true,
+          openerSession: {
+            id: sessionId('child-tab'),
+            parentSessionId: sessionId('root-session'),
+          },
+          rootSession: { id: sessionId('root-session') },
+        }
       )
     ).toEqual({ sessionId: 'root-session', tabSessionId: 'child-tab' });
+  });
+
+  it('withholds navigation until metadata hydration can prove the target exists', () => {
+    expect(
+      resolveOpenedByNavigationTarget(
+        { openedBySessionId: sessionId('root-session') },
+        {
+          metadataReady: false,
+          openerSession: { id: sessionId('root-session') },
+          rootSession: { id: sessionId('root-session') },
+        }
+      )
+    ).toBeNull();
+  });
+
+  it('keeps dangling provenance non-navigable when the opener was deleted', () => {
+    expect(
+      resolveOpenedByNavigationTarget(
+        {
+          openedBySessionId: sessionId('child-tab'),
+          openedByRootSessionId: sessionId('root-session'),
+        },
+        { metadataReady: true, openerSession: null, rootSession: null }
+      )
+    ).toBeNull();
+  });
+
+  it('withholds child-Tab navigation when its route root no longer exists', () => {
+    expect(
+      resolveOpenedByNavigationTarget(
+        {
+          openedBySessionId: sessionId('child-tab'),
+          openedByRootSessionId: sessionId('root-session'),
+        },
+        {
+          metadataReady: true,
+          openerSession: {
+            id: sessionId('child-tab'),
+            parentSessionId: sessionId('root-session'),
+          },
+          rootSession: null,
+        }
+      )
+    ).toBeNull();
   });
 });
 

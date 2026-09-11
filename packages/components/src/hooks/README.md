@@ -47,6 +47,12 @@ whose session is fine.
 
 ## Workspace catalog hooks
 
+`use-agent-role-schema-reconciliation.ts` runs from the ready workspace shell's
+window owner. It silently reconciles owned Roles after fresh, matching runtime
+probes, without requiring the Role editor. Repeated startup is idempotent; offline
+targets and failed probes remain retryable. See the
+[reconciliation Spec](../../../../specs/agent-role-schema-reconciliation.md).
+
 The workspace catalog is ONE small document, but a consumer mounts for every visible
 session plus every hidden child tab and side chat, so per-mount leases multiply room
 joins and duplicate row maps for a single list — the same problem

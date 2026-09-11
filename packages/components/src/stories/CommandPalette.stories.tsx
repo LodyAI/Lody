@@ -19,13 +19,13 @@ const LABELS: CommandPaletteLabels = {
 const noop = () => {};
 
 const COMMAND_RESULTS: PaletteResult[] = [
-  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: '$mod+n', run: noop },
+  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: 'Mod+n', run: noop },
   {
     kind: 'command',
     key: 'c2',
     title: 'Toggle Sidebar',
     subtitle: null,
-    shortcut: '$mod+b',
+    shortcut: 'Mod+b',
     run: noop,
   },
   {
@@ -33,7 +33,7 @@ const COMMAND_RESULTS: PaletteResult[] = [
     key: 'c3',
     title: 'Open Command Palette',
     subtitle: null,
-    shortcut: '$mod+k',
+    shortcut: 'Mod+k',
     run: noop,
   },
   {
@@ -41,7 +41,7 @@ const COMMAND_RESULTS: PaletteResult[] = [
     key: 'c4',
     title: 'Switch to Next Tab',
     subtitle: null,
-    shortcut: '$mod+ArrowRight',
+    shortcut: 'Mod+ArrowRight',
     run: noop,
   },
   {
@@ -55,7 +55,7 @@ const COMMAND_RESULTS: PaletteResult[] = [
 ];
 
 const MIXED_RESULTS: PaletteResult[] = [
-  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: '$mod+n', run: noop },
+  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: 'Mod+n', run: noop },
   {
     kind: 'session',
     key: 's1',

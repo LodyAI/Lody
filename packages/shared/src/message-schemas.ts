@@ -10,6 +10,7 @@ import {
   type ACPSessionId,
   type SessionTurnInputConfig,
 } from './ai';
+import { SESSION_GOAL_ACTIONS } from './goal';
 import type { AgentRoleId, SessionId } from './ids';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
@@ -679,6 +680,17 @@ export const SessionSteerResponseSchema = z
   })
   .strict();
 
+export const SessionGoalResponseSchema = z
+  .object({
+    type: z.literal('session/goal_response'),
+    sessionId: SessionIdSchema,
+    action: z.enum(SESSION_GOAL_ACTIONS),
+    accepted: z.boolean(),
+    disposition: z.enum(['applied', 'turn_started', 'queued', 'unsupported', 'error']),
+    error: z.string().optional(),
+  })
+  .strict();
+
 export const SessionTerminateResponseSchema = z
   .object({
     type: z.literal('session/terminate_response'),
@@ -1222,6 +1234,7 @@ const AcpCapabilityCacheEntrySchema = z
       .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
+    goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
   })
@@ -2021,6 +2034,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionChatResponseSchema,
   SessionCancelResponseSchema,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
   MachineStatusResponseSchema,
   MachinePingResponseSchema,
   MachineRestartResponseSchema,

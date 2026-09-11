@@ -2,6 +2,7 @@ import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
+  type SessionGoalAction,
 } from '@lody/shared';
 import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
@@ -14,6 +15,7 @@ export type AcpCapabilitiesResult = {
   availableCommands?: AcpCommandSummary[];
   sessionFork: boolean;
   acknowledgedSteer: boolean;
+  goalActions?: SessionGoalAction[];
   modelReasoningEfforts?: Record<string, string[]>;
 };
 
@@ -190,6 +192,7 @@ export function normalizeAcpSessionCapabilities(
   lifecycleCapabilities: {
     sessionFork?: boolean;
     acknowledgedSteer?: boolean;
+    goalActions?: SessionGoalAction[];
     /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
     agent?: { cliType: string; agentType: string };
   } = {}
@@ -227,6 +230,9 @@ export function normalizeAcpSessionCapabilities(
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
+    ...(lifecycleCapabilities.goalActions?.length
+      ? { goalActions: lifecycleCapabilities.goalActions }
+      : {}),
     ...(Object.keys(modelReasoningEfforts).length > 0 ? { modelReasoningEfforts } : {}),
   };
 }

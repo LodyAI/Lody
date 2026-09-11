@@ -5,6 +5,8 @@ import { checkPullRequestBody } from './check-pr-body.mjs';
 
 const templateUrl = new URL('../PULL_REQUEST_TEMPLATE.md', import.meta.url);
 const template = readFileSync(templateUrl, 'utf8');
+const originalPromptPlaceholder = '<!-- Paste the triggering user\'s original prompt here, verbatim. -->';
+const originalPrompt = 'Keep the original user prompt in the PR body so reviewers can verify intent.';
 
 function completedTemplate(visualExplanation) {
   return template
@@ -19,7 +21,8 @@ function completedTemplate(visualExplanation) {
     .replace(
       /(- \*\*[^\n]+?:\*\*)\s*<!--[^\n]*-->/g,
       '$1 Reviewed local routing only; no runtime behavior changes.'
-    );
+    )
+    .replace(originalPromptPlaceholder, originalPrompt);
 }
 
 void test('the unedited template is not a valid PR body', () => {
@@ -43,8 +46,48 @@ void test('every repository path the template names resolves', () => {
   }
 });
 
-void test('an author who fills every required field passes', () => {
+void test('an external author who fills every required field passes', () => {
   const body = completedTemplate('Simple change: one documentation sentence changed.');
+  const result = checkPullRequestBody(body);
+  assert.equal(result.ok, true, result.findings.join('\n'));
+});
+
+void test('the original user prompt cannot be left as the template placeholder', () => {
+  const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
+    originalPrompt,
+    originalPromptPlaceholder
+  );
+  const result = checkPullRequestBody(body);
+  assert.equal(result.ok, false);
+  assert.ok(result.findings.some((finding) => finding.startsWith('Original user prompt must')));
+});
+
+void test('the original prompt may itself contain a triple-backtick code fence', () => {
+  const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
+    originalPrompt,
+    'Please preserve this snippet exactly:\n```ts\nconst answer = 42;\n```'
+  );
+  const result = checkPullRequestBody(body);
+  assert.equal(result.ok, true, result.findings.join('\n'));
+});
+
+void test('headings inside the original prompt fence do not affect PR section parsing', () => {
+  const promptWithHeadings = [
+    'Preserve these lines exactly:',
+    '## Related issue',
+    '## Problem / pressure',
+    '## Summary',
+    '## Visual explanation',
+    '## Test plan',
+    '## Context handoff',
+    '### Instructions for reviewing agents',
+    '### Authoring context',
+    '### Original user prompt',
+  ].join('\n');
+  const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
+    originalPrompt,
+    promptWithHeadings
+  );
   const result = checkPullRequestBody(body);
   assert.equal(result.ok, true, result.findings.join('\n'));
 });

@@ -45,6 +45,8 @@ import type {
   MachineStatusResponse,
   MachineUpgradeResponse,
   SessionCancelResponse,
+  SessionGoalAction,
+  SessionGoalResponse,
   SessionPreparationCancelSpec,
   SessionPreparationSpec,
   SessionPrepareCancelResponse,
@@ -106,6 +108,8 @@ import {
   sessionEditAndResendFailure,
   sessionForkFailure,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
+  SESSION_GOAL_ACTIONS,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
 } from '@lody/shared';
@@ -189,6 +193,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/cancel',
   'session/live-status',
   'session/steer',
+  'session/goal',
   'session/terminate',
   'session/fork',
   'session/edit-and-resend',
@@ -442,6 +447,18 @@ export const LoroSessionLiveStatusRpcRequestSchema = BaseRpcRequestSchema.extend
     .strict(),
 }).strict();
 
+export const LoroSessionGoalRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/goal'),
+  params: z
+    .object({
+      sessionId: z.string().trim().min(1),
+      action: z.enum(SESSION_GOAL_ACTIONS),
+      objective: z.string().trim().min(1).optional(),
+      userId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const LoroSessionSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/steer'),
   params: z
@@ -584,6 +601,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
+  LoroSessionGoalRpcRequestSchema,
   LoroSessionTerminateRpcRequestSchema,
   LoroSessionForkRpcRequestSchema,
   LoroSessionEditAndResendRpcRequestSchema,
@@ -1426,6 +1444,7 @@ export type LoroMachineRpcResult =
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
   | SessionSteerResponse
+  | SessionGoalResponse
   | SessionTerminateResponse
   | SessionForkResponse
   | SessionEditAndResendResponse
@@ -1453,6 +1472,7 @@ const toLegacyRpcErrorResponse = (
   forkContext?: { sourceSessionId: string; targetSessionId: string },
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string },
   steerContext?: { sessionId: string; userTurnId: string },
+  goalContext?: { sessionId: string; action: SessionGoalAction },
   previewContext?: { sessionId: string },
   localProjectContext?: {
     workspaceId?: string;
@@ -1603,6 +1623,17 @@ const toLegacyRpcErrorResponse = (
       'INTERNAL_ERROR',
       `${error.code}: ${error.message}`
     );
+  }
+
+  if (method === 'session/goal') {
+    return {
+      type: 'session/goal_response',
+      sessionId: (goalContext?.sessionId ?? '') as SessionGoalResponse['sessionId'],
+      action: goalContext?.action ?? 'pause',
+      accepted: false,
+      disposition: 'error',
+      error: `${error.code}: ${error.message}`,
+    };
   }
 
   if (method === 'session/steer') {
@@ -1790,6 +1821,10 @@ const parseRpcSuccessResult = async (
     const parsed = SessionSteerResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionSteerResponse) : null;
   }
+  if (response.method === 'session/goal') {
+    const parsed = SessionGoalResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as SessionGoalResponse) : null;
+  }
   if (response.method === 'session/terminate') {
     const parsed = SessionTerminateResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionTerminateResponse) : null;
@@ -1863,6 +1898,7 @@ export type LoroStreamsRpcPendingRegistration = {
   forkContext?: { sourceSessionId: string; targetSessionId: string };
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string };
   steerContext?: { sessionId: string; userTurnId: string };
+  goalContext?: { sessionId: string; action: SessionGoalAction };
   previewContext?: { sessionId: string };
   localProjectContext?: {
     workspaceId?: string;
@@ -2246,6 +2282,7 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.forkContext,
           finalPending.editAndResendContext,
           finalPending.steerContext,
+          finalPending.goalContext,
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
@@ -2278,6 +2315,7 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.forkContext,
           finalPending.editAndResendContext,
           finalPending.steerContext,
+          finalPending.goalContext,
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
@@ -2660,6 +2698,25 @@ export class LoroStreamsMachineRpcClient {
         inputConfig: options.inputConfig,
       },
     })) as SessionSteerResponse | null;
+  }
+
+  async requestSessionGoal(options: {
+    sessionId: string;
+    action: SessionGoalAction;
+    objective?: string;
+    userId: string;
+    timeoutMs?: number;
+  }): Promise<SessionGoalResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/goal',
+      timeoutMs: options.timeoutMs ?? 10_000,
+      params: {
+        sessionId: options.sessionId,
+        action: options.action,
+        ...(options.objective ? { objective: options.objective } : {}),
+        userId: options.userId,
+      },
+    })) as SessionGoalResponse | null;
   }
 
   async requestSessionTerminate(options: {
@@ -3138,6 +3195,16 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'session/goal';
+          timeoutMs: number;
+          params: {
+            sessionId: string;
+            action: SessionGoalAction;
+            objective?: string;
+            userId: string;
+          };
+        }
+      | {
           method: 'session/terminate';
           timeoutMs: number;
           params: {
@@ -3349,6 +3416,10 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/steer'
           ? { sessionId: args.params.sessionId, userTurnId: args.params.userTurnId }
           : undefined,
+      goalContext:
+        args.method === 'session/goal'
+          ? { sessionId: args.params.sessionId, action: args.params.action }
+          : undefined,
       dispatchContext:
         args.method === 'session/dispatch-turn'
           ? { sessionId: args.params.sessionId, userTurnId: args.params.userTurnId }
@@ -3455,6 +3526,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/steer':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/goal':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/terminate':
@@ -3645,6 +3719,7 @@ export class LoroStreamsMachineRpcClient {
         pending.forkContext,
         pending.editAndResendContext,
         pending.steerContext,
+        pending.goalContext,
         pending.previewContext,
         pending.localProjectContext,
         pending.dispatchContext,

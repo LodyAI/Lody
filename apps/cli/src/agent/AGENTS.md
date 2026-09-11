@@ -78,9 +78,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `acp-authentication.ts`
 
-- The per-agent slot covers setup wait, launch prep, credential probe/commit, and the child;
-  timeout/cancel wins until credential publication commits, then is too late. Stop children before
-  success.
+- The per-agent slot spans setup wait, launch prep, credential probe/commit, and child.
+  Cancel/timeout wins until publication commits, then is too late. Stop it before success.
 - Authorization data never enters logs, chat, Flock, or config. Custom-endpoint provisioning uses
   [machine-local auth](README.md#authentication), waits for the exact setup revision, and injects
   only on its binding.
@@ -106,10 +105,11 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Builtin Claude owns session titles through ACP `session_info_update`; store them only after
-  `sanitizeLodyInternalInstructions`, and never start `title-generator.ts`'s isolated session
-  for Claude. For Codex accept only `explicit` `_meta.lody.titleSource` names, ignore its
-  first-prompt `fallback`, and require `_meta.lody.messagePhase === 'final_answer'`; untyped
-  chunks, error/warning payloads, and internal-instruction tails are never candidates.
-  Each isolated run owns and removes a unique temp directory; concurrent session-title and
-  branch-name work reuses one in-flight result.
+- Builtin Claude, Codex and Grok own session titles
+  (`acpOwnsSessionTitleGeneration()`) unless a runtime override is set; store only after
+  `sanitizeLodyInternalInstructions`. Claude and Grok push untagged and are trusted
+  (`trustsUntaggedAcpSessionTitle()`); Codex is not — only `explicit` `titleSource` with
+  `messagePhase === 'final_answer'` qualifies, never its first-prompt `fallback`. Untyped chunks,
+  error/warning payloads and instruction tails never qualify.
+- NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
+  prompt secret-free. Worktree sessions keep `session/<id>` unless the agent renames it.
