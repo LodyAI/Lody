@@ -115,6 +115,19 @@ before touching gestures.
   than assembling its three parts separately. Desktop landing keyboard nav:
   [chat-landing-keyboard-nav.md](chat-landing-keyboard-nav.md).
 
+- Mobile New Chat uses one native header picker for Chat (no project) and
+  Local/GitHub projects; switching context preserves the draft and run config.
+  A selected Role prevents crossing machines. There is no separate Work/Chat
+  switch or implicit project fallback.
+- New Chat is a full-height writing sheet using ChatComposer's opt-in `fillSheet`
+  and the sheet composer render slot. Run config, machine, branch, and Worktree
+  form the bottom scrolling rail; attachment and send stay outside it. Unchecked
+  Worktree means direct local files. The textarea scrolls internally and keyboard
+  height reduces the sheet height while lifting its bottom by the same amount.
+- Target pickers use `mobile-native-select.tsx` with a transparent native select
+  covering the hit target; disable it and hide the indicator when no enabled
+  alternative exists. Rich run-config rows retain coordinated inline pickers.
+
 ## Settings
 
 - In-card row dividers on `bg-card` surfaces must use full-strength

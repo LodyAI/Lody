@@ -355,6 +355,8 @@ export type MobileHomeScreenLabels = {
   emptySearch?: string;
   /** ARIA label for the standalone new-conversation chip in the dock. */
   newChatAriaLabel?: string;
+  /** ARIA label for a project heading's compose action. */
+  newChatInProjectAriaLabel?: (projectLabel: string) => string;
   conversationCount?: (count: number) => string;
 };
 
@@ -458,6 +460,8 @@ export type MobileHomeScreenProps = {
   /** Restore (un-archive) a chat from the swipe-to-reveal drawer shown
      on rows of the *archived* Chat list. */
   onChatRestore?: (chatId: string) => void;
+  /** Starts a new chat with the selected project preconfigured. */
+  onNewChatInProject?: (project: { kind: 'local' | 'github'; projectKey: string }) => void;
   /** Hands a batch of chat ids to the parent for *permanent* deletion.
      Only invoked from the multi-select toolbar shown in the archive
      view's selection mode. The list itself owns the selection +
@@ -706,6 +710,7 @@ function HeaderSearchInput({
   placeholder,
   ariaLabel,
   clearAriaLabel,
+  trailing,
   className,
 }: {
   value: string;
@@ -713,10 +718,11 @@ function HeaderSearchInput({
   placeholder: string;
   ariaLabel: string;
   clearAriaLabel: string;
+  trailing?: ReactNode;
   className?: string;
 }) {
   return (
-    <label
+    <div
       className={cn(
         'mobile-home-header-search flex h-9 w-full min-w-0 items-center gap-1.5 rounded-full border border-border/50 bg-muted px-3 text-foreground',
         'dark:border-white/12 dark:bg-white/10',
@@ -750,13 +756,14 @@ function HeaderSearchInput({
           <X className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
         </button>
       ) : null}
-    </label>
+      {trailing}
+    </div>
   );
 }
 
-/* Chat-list filter toggle — lives on the first group heading's trailing
-   edge (not next to search). Active tint when the pill bar is open; a
-   small primary dot marks applied filters while the bar is collapsed. */
+/* Chat-list filter toggle — lives inside the header search field because
+   search and filters both narrow the visible conversations. A small primary
+   dot marks applied filters while the pill bar is collapsed. */
 function ChatListFilterToggle({
   open,
   hasActiveFilters,
@@ -775,13 +782,11 @@ function ChatListFilterToggle({
       aria-label={ariaLabel}
       aria-pressed={open}
       className={cn(
-        'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-        'border-border/50 bg-muted text-muted-foreground',
-        'dark:border-white/12 dark:bg-white/10',
+        'relative -mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground',
         'transition-colors active:scale-[0.97]',
-        'hover:bg-muted/80 hover:text-foreground dark:hover:bg-white/14',
+        'hover:bg-background/60 hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30',
-        open && 'border-primary/40 bg-primary/15 text-primary'
+        open && 'bg-primary/15 text-primary'
       )}
     >
       <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
@@ -1275,6 +1280,7 @@ export function MobileHomeScreen({
   onChatArchive,
   onChatRestore,
   onChatPermanentDelete,
+  onNewChatInProject,
   onSettingsOpen,
   onNewChat,
   onDownloadClient,
@@ -1495,6 +1501,16 @@ export function MobileHomeScreen({
                   placeholder={searchPlaceholder}
                   ariaLabel={searchAriaLabel}
                   clearAriaLabel={clearSearchAriaLabel}
+                  trailing={
+                    selectedTab === 'chat' && chatFilterPills && chatFilterPills.length > 0 ? (
+                      <ChatListFilterToggle
+                        open={chatFiltersOpen}
+                        hasActiveFilters={hasActiveChatFilters}
+                        ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
+                        onToggle={() => setChatFiltersOpen((open) => !open)}
+                      />
+                    ) : undefined
+                  }
                 />
               ) : null}
             </div>
@@ -1680,16 +1696,7 @@ export function MobileHomeScreen({
                     onPermanentDelete={showArchived ? onChatPermanentDelete : undefined}
                     hasActiveFilters={hasActiveChatFilters}
                     onClearFilters={onClearChatFilters}
-                    firstGroupTrailing={
-                      chatFilterPills && chatFilterPills.length > 0 ? (
-                        <ChatListFilterToggle
-                          open={chatFiltersOpen}
-                          hasActiveFilters={hasActiveChatFilters}
-                          ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
-                          onToggle={() => setChatFiltersOpen((open) => !open)}
-                        />
-                      ) : undefined
-                    }
+                    onNewChatInProject={onNewChatInProject}
                     onPrivateHelp={() => setPrivateHelpOpen(true)}
                   />
                 )
@@ -2208,7 +2215,7 @@ function ChatsFlatView({
   onPermanentDelete,
   hasActiveFilters = false,
   onClearFilters,
-  firstGroupTrailing,
+  onNewChatInProject,
   onPrivateHelp,
 }: {
   chats: MobileConversationItem[];
@@ -2225,9 +2232,7 @@ function ChatsFlatView({
      state to the "filters hid everything" copy + Clear filters button. */
   hasActiveFilters?: boolean;
   onClearFilters?: () => void;
-  /** Filter chip mounted on the first group heading (or a trailing-only
-     row when the list is empty / flat with no heading). */
-  firstGroupTrailing?: ReactNode;
+  onNewChatInProject?: (project: { kind: 'local' | 'github'; projectKey: string }) => void;
   onPrivateHelp: () => void;
 }) {
   const visible = useMemo(() => {
@@ -2248,22 +2253,12 @@ function ChatsFlatView({
       </TabEmptyStateButton>
     ) : undefined;
 
-  /* Empty states still need the filter chip so the user can open the
-     bar / clear filters without a group heading to host it. */
-  const emptyTrailing =
-    firstGroupTrailing != null ? (
-      <div className="flex w-full items-center justify-end px-4 pb-1.5 pt-2">
-        {firstGroupTrailing}
-      </div>
-    ) : null;
-
   if (chats.length === 0) {
     /* `chats` is already filtered by the caller, so an empty list with
        active filters means the filters hid everything (vs. a workspace
        with no conversations at all). */
     return (
       <section aria-label={labels.chatTab ?? 'Chat'} className="flex flex-col">
-        {emptyTrailing}
         <TabEmptyState
           label={
             hasActiveFilters
@@ -2278,7 +2273,6 @@ function ChatsFlatView({
   if (query && visible.length === 0) {
     return (
       <section aria-label={labels.chatTab ?? 'Chat'} className="flex flex-col">
-        {emptyTrailing}
         <TabEmptyState label={labels.emptySearch ?? '没有匹配的结果'} action={clearFiltersAction} />
       </section>
     );
@@ -2302,7 +2296,6 @@ function ChatsFlatView({
         /* Active list is flat — no "全部对话" section label. Only the
            archived surface keeps a heading so the mode is obvious. */
         flatHeading={archived ? (labels.archivedChatsHeading ?? '归档对话') : undefined}
-        firstGroupTrailing={firstGroupTrailing}
         onSelect={onSelect}
         rowActions={{ onTogglePin, onArchive, onRestore }}
         archived={archived}
@@ -2311,6 +2304,8 @@ function ChatsFlatView({
         privateLabel={labels.privateLabel}
         privateHelpAriaLabel={labels.privateHelpAriaLabel}
         onPrivateHelp={onPrivateHelp}
+        onNewChatInProject={onNewChatInProject}
+        newChatInProjectAriaLabel={labels.newChatInProjectAriaLabel}
       />
     </section>
   );

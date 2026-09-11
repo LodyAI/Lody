@@ -44,6 +44,11 @@ Index and rationale: [README.md](README.md).
   `onAttachmentAddClick`; selected files are split by MIME into the image and file
   draft hooks, exactly like paste and drop.
 
+- Mobile New Chat shares the Local/GitHub selection model through a native header
+  picker with no project (Chat) first. Switching context preserves draft/run
+  config; selected Roles prevent machine changes. Machine, branch, and Worktree
+  join run config in the bottom rail; see `../mobile/AGENTS.md`.
+
 ## Invariants
 
 - The chat-route URL declares selection, never one-shot event nonces. Once it names

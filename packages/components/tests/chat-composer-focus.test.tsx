@@ -53,6 +53,22 @@ describe('ChatComposer focusOnContainerClick', () => {
     vi.unstubAllGlobals();
   });
 
+  it('focuses the prompt when promptAutoFocus is enabled', async () => {
+    const promptRef = createRef<HTMLTextAreaElement>();
+    await act(async () => {
+      root.render(
+        createElement(ChatComposer, {
+          promptRef,
+          promptAutoFocus: true,
+          promptValue: '',
+          onPromptChange: () => undefined,
+        })
+      );
+    });
+
+    expect(document.activeElement).toBe(promptRef.current);
+  });
+
   it('focuses textarea when clicking container background with focusOnContainerClick=true', async () => {
     const promptRef = createRef<HTMLTextAreaElement>();
     await act(async () => {

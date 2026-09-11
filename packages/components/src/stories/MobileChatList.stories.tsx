@@ -362,6 +362,8 @@ function StoryShell({
             setSelectedId(id);
             fn()(id);
           }}
+          onNewChatInProject={fn()}
+          newChatInProjectAriaLabel={(projectLabel) => `在 ${projectLabel} 中新建对话`}
           rowActions={actions}
           /* In archived mode, swipe delete + multi-select both route
              through this; remove the confirmed ids from the mock list. */

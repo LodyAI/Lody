@@ -26,6 +26,10 @@ interface ContextSwitchProps {
   /** When set, the github tab is disabled */
   githubDisabled?: DisabledTabOverlay;
   className?: string;
+  /** Optional sizing override for the segmented-control track. */
+  tabsListClassName?: string;
+  /** Optional sizing override for each segmented-control item. */
+  tabsTriggerClassName?: string;
   /** Override the per-trigger justify class. Defaults to `justify-center`
      so icon+label sit as a tight centered group inside each equal-width pill. */
   triggerJustifyClassName?: string;
@@ -53,6 +57,8 @@ export function ContextSwitch({
   localDisabled,
   githubDisabled,
   className,
+  tabsListClassName,
+  tabsTriggerClassName,
   triggerJustifyClassName = 'justify-center',
 }: ContextSwitchProps) {
   const isDark = tone === 'dark';
@@ -63,7 +69,8 @@ export function ContextSwitch({
     triggerJustifyClassName,
     isDark
       ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'
-      : 'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground'
+      : 'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground',
+    tabsTriggerClassName
   );
 
   return (
@@ -75,7 +82,8 @@ export function ContextSwitch({
       <TabsList
         className={cn(
           'flex h-10 w-full rounded-lg p-1',
-          isDark ? 'bg-card/70 border border-border/70' : 'bg-muted border border-border/40'
+          isDark ? 'bg-card/70 border border-border/70' : 'bg-muted border border-border/40',
+          tabsListClassName
         )}
       >
         {localDisabled ? (

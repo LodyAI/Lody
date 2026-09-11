@@ -14,6 +14,7 @@ import {
   FolderOpen,
   LockKeyhole,
   MessageCircle,
+  SquarePen,
 } from 'lucide-react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -376,6 +377,23 @@ function NoProjectBucketLeading() {
       strokeWidth={1.75}
       aria-hidden="true"
     />
+  );
+}
+
+function ProjectNewChatButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={cn(
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+        'text-muted-foreground transition-colors active:scale-[0.97] active:bg-muted',
+        'hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30'
+      )}
+    >
+      <SquarePen className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -955,6 +973,8 @@ export function MobileChatList({
   privateLabel,
   privateHelpAriaLabel,
   onPrivateHelp,
+  onNewChatInProject,
+  newChatInProjectAriaLabel,
 }: {
   chats: MobileConversationItem[];
   groupBy?: MobileChatGroupBy;
@@ -1011,6 +1031,10 @@ export function MobileChatList({
   privateLabel?: string;
   privateHelpAriaLabel?: string;
   onPrivateHelp?: () => void;
+  /** Adds a compose action to each local/GitHub project heading while
+      grouping by project. Chat-only, pinned, and date headings omit it. */
+  onNewChatInProject?: (project: { kind: 'local' | 'github'; projectKey: string }) => void;
+  newChatInProjectAriaLabel?: (projectLabel: string) => string;
   /** @deprecated Conversation rows are single-line; branch/project meta
      is no longer shown. Kept for call-site compatibility. */
   rowSecondaryField?: 'branch' | 'project';
@@ -1268,6 +1292,25 @@ export function MobileChatList({
           labeledItem != null &&
           (labeledItem.kind === 'local' ||
             (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
+        const projectKind = labeledItem?.kind;
+        const projectKey = labeledItem?.projectKey;
+        const projectNewChat =
+          !selectionToolbarActive &&
+          onNewChatInProject &&
+          (projectKind === 'local' || projectKind === 'github') &&
+          projectKey ? (
+            <ProjectNewChatButton
+              label={newChatInProjectAriaLabel?.(heading) ?? `New chat in ${heading}`}
+              onClick={() => onNewChatInProject({ kind: projectKind, projectKey })}
+            />
+          ) : null;
+        const projectTrailing =
+          trailing || projectNewChat ? (
+            <div className="flex items-center gap-0.5">
+              {trailing}
+              {projectNewChat}
+            </div>
+          ) : undefined;
 
         let groupedHeadingNode: ReactNode;
         if (id === PINNED_BUCKET_ID || groupBy === 'date' || groupBy === 'none') {
@@ -1302,7 +1345,7 @@ export function MobileChatList({
               expanded={expanded}
               onToggle={onToggle}
               compactTop={compactTop}
-              trailing={trailing}
+              trailing={projectTrailing}
               isPrivate={labeledItem.isPrivateProject}
               privateLabel={privateLabel}
               privateHelpAriaLabel={privateHelpAriaLabel}

@@ -100,9 +100,9 @@ export function useChatLandingDefaults({
   if (workspaceId && restoredContextTypeWorkspaceId !== workspaceId) {
     setRestoredContextTypeWorkspaceId(workspaceId);
     if (shouldRestoreContextType) {
-      const storedContextType = readChatLandingDefaults(workspaceId)?.contextType;
-      if (storedContextType && storedContextType !== contextType) {
-        setContextType(storedContextType);
+      const preferredContextType = readChatLandingDefaults(workspaceId)?.contextType ?? 'local';
+      if (preferredContextType !== contextType) {
+        setContextType(preferredContextType);
       }
     }
   }
