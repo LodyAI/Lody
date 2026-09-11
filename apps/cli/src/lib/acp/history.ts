@@ -1294,8 +1294,10 @@ export const ensurePermissionRequestOnToolCall = async (
       let entryUpdated = false;
       const nextContents = parsed.map((content) => {
         if (content.type === 'tool_call' && content.toolCallId === toolCallId) {
-          entryUpdated = true;
           updated = true;
+          // A delayed request still belongs to this tool, never the next turn.
+          if (entry.finished === true || typeof entry.endedAt === 'number') return content;
+          entryUpdated = true;
           return mergeToolCallWithPermission(content, requestId, request);
         }
         return content;

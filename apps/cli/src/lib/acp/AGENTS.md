@@ -52,6 +52,13 @@ one-release compatibility path; new provider output must use the Core contract.
 
 ## Flush, evidence, and shutdown
 
+Turn finalization cancels unanswered permission/question requests in the owning
+assistant entry through the existing history write. Preserve answered outcomes
+and other turns; the history subscription releases the waiter and the renderer
+withdraws the card. Do not add a parallel cancellation registry or Pi-only path.
+Permission writes targeting a finished entry are refused, never attached to a
+newer turn; the existing failed-persistence path returns cancellation to ACP.
+
 Parse tool content before enrichment inspects known fields. Unknown protocol blocks
 remain JSON, while malformed known blocks are rejected. Deterministic HistoryWriteError
 notifications are isolated and reported, never requeued as transient failures; the
