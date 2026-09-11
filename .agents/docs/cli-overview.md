@@ -97,3 +97,7 @@ after a submodule update, which is why `prepare:acp-adapters` runs before both
 `scripts/dev-build.mjs` in the CLI `dev` script and Vite in the CLI `build` chain. The
 `src/claude-acp-entry.ts` and `src/codex-acp-entry.ts` entries import the adapters' package roots,
 whose runtime exports point at adapter `dist/`.
+
+`packages/acp-extension-core` is the exception: it builds its own `dist/` through its `prepare`
+script on every install, because `packages/shared` (and every other workspace consumer) imports
+its runtime export directly. `prepare:acp-adapters` therefore only compiles the four adapters.
