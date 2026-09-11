@@ -1457,7 +1457,7 @@ const activityComparisonCases: [string, ActivityCounts][] = [
   ['Unread + active', [0, 1, 1]],
   ['Unread 3 + active 2', [0, 3, 2]],
   ['Unread 1 + active 3', [0, 1, 3]],
-  ['Permission 1 + mixed', [1, 3, 2]],
+  ['Permission 1 + mixed (explicit 1)', [1, 3, 2]],
   ['Permission 2 + mixed', [2, 3, 2]],
   ['All three single', [1, 1, 1]],
   ['Larger counts', [12, 20, 30]],

@@ -26,7 +26,7 @@ import { initI18n } from '../src/i18n';
 
 const machineId = 'machine-test' as MachineId;
 const projectId = 'project-test' as LocalProjectId;
-// Counts are permission / unread / active; expected items retain the hidden single count.
+// Counts are permission / unread / active; expected items retain the raw single count.
 const cases: [string, [number, number, number], string][] = [
   ['idle', [0, 0, 0], ''],
   ['permission', [1, 0, 0], 'permission:1'],
@@ -199,9 +199,13 @@ describe('collapsed project activity', () => {
       expect(
         marks.map((mark) => [mark.getAttribute('data-project-activity-status'), mark.textContent])
       ).toEqual(
-        items.map(([status, count]) => [
+        items.map(([status, count], index) => [
           status,
-          status === 'more' ? `+${count}` : count > 1 ? String(count) : '',
+          status === 'more'
+            ? `+${count}`
+            : count > 1 || (index === 0 && items[1]?.[0] === 'more')
+              ? String(count)
+              : '',
         ])
       );
       const labelled = kind === 'repo' ? indicator : indicator!.closest('[aria-label]');

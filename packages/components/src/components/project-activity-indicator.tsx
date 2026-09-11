@@ -14,16 +14,17 @@ export function getProjectActivityLabel(counts: ProjectActivityCounts, t: TFunct
 }
 
 export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCounts }) {
+  const items = getProjectActivityItems(counts);
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1.5 text-[10px] font-medium tabular-nums"
+      className="inline-flex h-5 shrink-0 items-center gap-1.5 text-[10px] font-medium leading-none tabular-nums"
       aria-hidden="true"
     >
-      {getProjectActivityItems(counts).map(({ status, count }) => (
+      {items.map(({ status, count }, index) => (
         <span
           key={status}
           data-project-activity-status={status}
-          className="inline-flex items-center gap-0.5"
+          className="inline-flex h-3.5 items-center gap-0.5"
         >
           {status === 'more' ? (
             `+${count}`
@@ -34,7 +35,7 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
                 hasUnreadMessages={status === 'unread'}
                 isWorking={status === 'active'}
               />
-              {count > 1 ? count : null}
+              {count > 1 || (index === 0 && items[1]?.status === 'more') ? count : null}
             </>
           )}
         </span>

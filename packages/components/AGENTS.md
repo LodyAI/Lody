@@ -20,7 +20,7 @@ mobile surfaces. Background for the rules below:
 - Collapsed local-project and GitHub-repository rows count fresh Session/child-Tab
   activity (including pinned Sessions) at the row end, before actions. Show at most
   two items: permission > unread > active; combine mixed remaining states as `+N`.
-  Omit single counts; initializing uses running. Expanded/removing groups hide the
+  Omit single counts unless the second item is mixed `+N`; initializing uses running. Expanded/removing groups hide the
   aggregate. Preserve disclosure and Session end-slot status. See the
   [draft contract](../../specs/collapsed-project-activity.zh.md).
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use

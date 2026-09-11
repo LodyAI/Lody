@@ -13,7 +13,7 @@ GitHub 行保留子 Tab 的分项计数，并从包含置顶 Session 的集合�
 ## 决策与证据
 
 沿用[侧边栏行尾布局](../../../docs/components-sidebar-session-tree.md)，替换旧旋转图标内嵌未读点的方案。
-未读仍可与实时状态共存；初始化并入 active。完整行为见[Spec 草案](../../../../specs/collapsed-project-activity.zh.md)。
+未读仍可与实时状态共存；初始化并入 active。混合 `+N` 前保留首项的单个计数，避免两个数字的归属产生歧义。完整行为见[Spec 草案](../../../../specs/collapsed-project-activity.zh.md)。
 既有 LoroSidebar stories 覆盖本地/GitHub 单项、多项、混合计数及展开态。
 components 全量 443 个文件、3337 个测试通过；相关 6 个文件、132 个测试通过。
 浏览器验证 32 个 Storybook 场景，以及 tooltip、展开/折叠和行尾空间。

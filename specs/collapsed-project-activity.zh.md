@@ -7,9 +7,9 @@ Translation: pending
 保留项目展开按钮、opened-by 树和 Session 行尾状态；展开项目时隐藏摘要。
 本地项目等待移除或正在移除时，行尾显示移除进度。
 
-- 按 permission、unread、active 的顺序显示首项及数量；数量为 1 时省略数字。
+- 按 permission、unread、active 的顺序显示首项及数量；数量为 1 时通常省略，第二项为混合 `+N` 时保留首项的 `1`，明确两个数字的归属。
 - 剩余类型只有一种时，第二项显示该类型及数量；剩余类型有两种时显示合计 `+N`。
-  例如 `✋ 2 +5`、`● 3 ↻ 2`、`↻`，不添加第三个图标。
+  例如 `✋ 1 +5`、`● 3 ↻ 2`、`↻`，不添加第三个图标。
 - permission 和 active 取自新鲜的 Session presence；running、initializing 均计入 active，
   使用现有 running 图标。等待 permission 不重复计入 active。
 - 包含置顶 Session 及未归档子 Tab，每个 Session 在每种状态中只计一次。
