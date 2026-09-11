@@ -54,7 +54,6 @@ export type PromptShortcutSourceInput = {
   context: ShortcutMentionContext | null;
   loading?: boolean;
   resolveDependency?: ShortcutDependencyResolver;
-  ownerLabel?: (userId: string) => string;
 };
 
 /** Index-only discovery. This boundary deliberately has no body loader or runtime. */
@@ -98,9 +97,6 @@ export function selectPromptShortcutCandidates(
         entry.visibility === 'private'
           ? t('promptShortcut.private', 'Private')
           : t('promptShortcut.shared', 'Shared');
-      const owner =
-        input.ownerLabel?.(entry.ownerUserId) ??
-        t('promptShortcut.unknownAuthor', 'Unknown author');
       return [
         {
           value: `prompt-shortcut:${entry.id}`,
@@ -113,7 +109,7 @@ export function selectPromptShortcutCandidates(
           iconEmoji: getShortcutEmoji(entry),
           title: `/${entry.slug}`,
           subtitle: entry.description,
-          trailing: `${visibility} · ${owner}`,
+          trailing: visibility,
           disabled: availability.kind !== 'available',
           disabledReason: shortcutAvailabilityMessage(availability, t) || undefined,
         },

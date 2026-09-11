@@ -4017,7 +4017,6 @@
   "promptShortcut.dependencyMissing": "A required reference is unavailable.",
   "promptShortcut.private": "Private",
   "promptShortcut.shared": "Shared",
-  "promptShortcut.unknownAuthor": "Unknown author",
   "promptShortcut.loadingBody": "Loading Shortcut…",
   "promptShortcut.versionChanged": "Shortcut changed. Select it again to retry.",
   "promptShortcut.bodyOffline": "Body is not available offline. Reconnect and select again.",

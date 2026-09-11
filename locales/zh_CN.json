@@ -4017,7 +4017,6 @@
   "promptShortcut.dependencyMissing": "所需引用不可用。",
   "promptShortcut.private": "私有",
   "promptShortcut.shared": "共享",
-  "promptShortcut.unknownAuthor": "未知作者",
   "promptShortcut.loadingBody": "正在加载快捷方式…",
   "promptShortcut.versionChanged": "快捷方式版本已变化，请重新选择以重试。",
   "promptShortcut.bodyOffline": "离线时无法读取正文，请联网后重新选择。",
