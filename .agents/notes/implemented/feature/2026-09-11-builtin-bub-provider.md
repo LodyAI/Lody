@@ -55,17 +55,21 @@ config was rejected by the local control validator.
 
 ## Verification
 
-- `packages/shared`: typecheck plus `ai-bub`, `ai-deepseek`,
-  `title-generation-defaults`, `local-session-control`, and `acp-skills` tests.
-- `apps/cli`: typecheck plus the `agent-setting` suite, including the new
-  `bub acp serve` launch and extra-arg cases.
-- `@lody/components`: typecheck plus the `agent-config-dialog` suite.
-- `pnpm lint:i18n`, Prettier checks on every touched file, and
-  `scripts/docs/main.mjs status` / `check`.
+- `packages/shared`: typecheck plus the full suite (1125 tests), including the
+  new `ai-bub` contract tests and the updated title/validator coverage.
+- `apps/cli`: typecheck plus the `agent-setting`, `provider-setup-manager`, and
+  `acp-capabilities` suites, including the new `bub acp serve` launch and
+  extra-arg cases.
+- `@lody/components`: typecheck plus the `agent-config-dialog`,
+  `onboarding-flow`, `acp-selector-options`, `provider-row-reauthentication`,
+  and `onboarding-summary-agent` suites. The dialog test drives the probe
+  failure and asserts the install hint and guide button.
+- `pnpm lint:fast`, `pnpm format:check`, `pnpm lint:i18n`, docs `status` /
+  `check`, and the code-collab, platform, and public-boundary guards.
 - Not verified: a real end-to-end ACP session against a machine with Bub
-  installed. The probe-failure prompt was reviewed in code, not driven by a
-  browser or live runtime.
+  installed. The install prompt is exercised through the dialog test rather
+  than a live runtime.
 
 ## Integration
 
-PR link to be added when opened.
+- [PR #591](https://github.com/LodyAI/Lody/pull/591)
