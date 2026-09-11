@@ -14,12 +14,13 @@ type ProviderStatusInput = Pick<
 
 export function resolveInitialOnboardingProviderStatus(
   config: ProviderStatusInput,
-  acpCapabilities: MachineViewMeta['acpCapabilities'] | undefined
+  machine: Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'> | undefined
 ): Extract<OnboardingProviderStatus, 'untested' | 'passed'> {
   const cacheKey = getAcpCapabilityCacheKey(config.id);
   return getAcpCapabilityCacheEntryAuthority(
-    acpCapabilities?.[cacheKey],
-    config.runtimeOverrides
+    machine?.acpCapabilities?.[cacheKey],
+    config.runtimeOverrides,
+    machine
   ) === 'authoritative'
     ? 'passed'
     : 'untested';

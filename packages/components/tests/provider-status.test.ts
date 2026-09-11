@@ -28,11 +28,11 @@ const runtimeEntry: AcpCapabilityCacheEntry = {
   fetchedAt: 1,
 };
 
-function capabilities(
+function machineWithCapabilities(
   entry: AcpCapabilityCacheEntry,
   targetConfig: typeof config = config
-): MachineViewMeta['acpCapabilities'] {
-  return { [getAcpCapabilityCacheKey(targetConfig.id)]: entry };
+): Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'> {
+  return { acpCapabilities: { [getAcpCapabilityCacheKey(targetConfig.id)]: entry } };
 }
 
 describe('resolveInitialOnboardingProviderStatus', () => {
@@ -41,19 +41,19 @@ describe('resolveInitialOnboardingProviderStatus', () => {
     expect(
       resolveInitialOnboardingProviderStatus(
         config,
-        capabilities({ ...runtimeEntry, provenance: undefined })
+        machineWithCapabilities({ ...runtimeEntry, provenance: undefined })
       )
     ).toBe('untested');
   });
 
   it('treats parsed runtime probes as verified across cache versions', () => {
-    expect(resolveInitialOnboardingProviderStatus(config, capabilities(runtimeEntry))).toBe(
-      'passed'
-    );
+    expect(
+      resolveInitialOnboardingProviderStatus(config, machineWithCapabilities(runtimeEntry))
+    ).toBe('passed');
     expect(
       resolveInitialOnboardingProviderStatus(
         config,
-        capabilities({ ...runtimeEntry, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 })
+        machineWithCapabilities({ ...runtimeEntry, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 })
       )
     ).toBe('passed');
   });
@@ -73,13 +73,13 @@ describe('resolveInitialOnboardingProviderStatus', () => {
     expect(
       resolveInitialOnboardingProviderStatus(
         claudeConfig,
-        capabilities({ ...claudeRuntimeEntry, provenance: undefined }, claudeConfig)
+        machineWithCapabilities({ ...claudeRuntimeEntry, provenance: undefined }, claudeConfig)
       )
     ).toBe('untested');
     expect(
       resolveInitialOnboardingProviderStatus(
         claudeConfig,
-        capabilities(claudeRuntimeEntry, claudeConfig)
+        machineWithCapabilities(claudeRuntimeEntry, claudeConfig)
       )
     ).toBe('passed');
   });

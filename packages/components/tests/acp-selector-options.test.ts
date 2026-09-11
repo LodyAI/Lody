@@ -18,7 +18,7 @@ import {
 const agentConfigId = 'config-1' as AgentConfigId;
 
 const machineWithCapabilities = (acpCapabilities: MachineViewMeta['acpCapabilities']) =>
-  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities'>;
+  ({ acpCapabilities }) as Pick<MachineViewMeta, 'acpCapabilities' | 'protocolCapabilities'>;
 
 const codexMachineWithConfigOptions = (configOptions: AcpConfigOptionSummary[]) =>
   machineWithCapabilities({
@@ -112,6 +112,93 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it.each(['registry', 'custom', 'builtin'] as const)(
+    'reads the selected model catalog through the %s model selection channel',
+    (cliType) => {
+      const effort: AcpConfigOptionSummary = {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'high',
+        options: [{ value: 'high', name: 'High' }],
+      };
+      const fast: AcpConfigOptionSummary = {
+        id: 'fast',
+        name: 'Fast',
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      };
+      const reasoning: AcpConfigOptionSummary = {
+        ...effort,
+        id: 'reasoning',
+        currentValue: 'low',
+        options: [{ value: 'low', name: 'Low' }],
+      };
+      const target = {
+        configId: agentConfigId,
+        cliType,
+        agentType: 'cursor',
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType,
+            agentType: 'cursor',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            sourceVersion: 'cursor@test+parameterized-model-picker',
+            fetchedAt: 1,
+            modes: [],
+            models: [],
+            configOptions: [
+              {
+                id: 'model',
+                name: 'Model',
+                category: 'model',
+                type: 'select',
+                currentValue: 'a',
+                options: ['a', 'b', 'empty'].map((value) => ({ value, name: value })),
+              },
+              effort,
+              fast,
+            ],
+            configOptionsByModel: { a: [effort, fast], b: [reasoning], empty: [] },
+          },
+        }),
+      };
+      for (const selectedModelId of ['a', 'b', 'empty']) {
+        const selected =
+          cliType === 'builtin'
+            ? { ...target, selectedModelId, configOptionValues: { model: 'a' } }
+            : { ...target, selectedModelId: 'a', configOptionValues: { model: selectedModelId } };
+        const expectedIds =
+          selectedModelId === 'a'
+            ? ['model', 'effort', 'fast']
+            : selectedModelId === 'b'
+              ? ['model', 'reasoning']
+              : ['model'];
+        const composer = buildAcpSelectorOptions(selected).configOptionSelectors;
+        const settings = buildAllConfigOptionSelectors(selected);
+        expect(composer.map((option) => option.configId)).toEqual(
+          cliType === 'builtin' ? expectedIds.filter((id) => id !== 'model') : expectedIds
+        );
+        expect(settings.map((option) => option.configId)).toEqual(expectedIds);
+        expect(
+          settings
+            .find((option) => option.configId === 'model')
+            ?.options.map((option) => option.value)
+        ).toEqual(['a', 'b', 'empty']);
+      }
+      // No explicit selection keeps the whole snapshot, including transient values.
+      // The catalog entry must not replace a snapshot merely because currentValue names a model.
+      target.machine.acpCapabilities![agentConfigId]!.configOptionsByModel!.a = [];
+      expect(buildAllConfigOptionSelectors(target).map((option) => option.configId)).toEqual([
+        'model',
+        'effort',
+        'fast',
+      ]);
+    }
+  );
+
   it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,

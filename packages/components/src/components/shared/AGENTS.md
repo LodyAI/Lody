@@ -3,6 +3,12 @@
 Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only.
 
+- ACP per-model catalogs follow the composer's input channel: registry/custom agents
+  prefer the model config option over `selectedModelId` (which can still describe the
+  live session); builtins use the dedicated model picker. With no selected model, keep
+  the probe snapshot instead of composing a catalog from its `currentValue`. Preserve
+  the owning Machine's protocol checks and legacy per-model reasoning ladders.
+
 - `AgentActivityIndicator` animations stay CSS-only and compositor-friendly
   (`transform`/`opacity`). Do not restore canvas frame loops, React animation state, or
   timers; keep the Storybook Playwright render budgets passing.

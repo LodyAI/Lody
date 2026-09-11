@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   getMachineFlockDocId,
+  getMachineRoomId,
+  isRegistryCursorAgent,
+  machineSupportsCursorParameterizedModelPicker,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
@@ -11,6 +14,7 @@ import {
   type MachineFlockRowFamily,
   type MachineFlockRowMap,
   type MachineId,
+  type MachineProtocolCapabilityCarrier,
   type ReadMachineFlockRowsOptions,
 } from '@lody/shared';
 import {
@@ -544,6 +548,25 @@ function readMachineFlockRowsSnapshot(
   );
 }
 
+async function requiresCompleteCursorCapabilityFromFlock(
+  runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'>,
+  machineId: MachineId,
+  capability: AcpCapabilityCacheEntry
+): Promise<boolean> {
+  if (!isRegistryCursorAgent(capability)) return false;
+  try {
+    const entry = await runtime.repo.getDocMeta(getMachineRoomId(machineId));
+    if (!entry?.meta) return true;
+    return machineSupportsCursorParameterizedModelPicker(
+      entry.meta as MachineProtocolCapabilityCarrier
+    );
+  } catch {
+    // Unknown ownership metadata cannot prove that the catalog-stripped RPC
+    // response is complete. Preserve the Flock row without failing refresh.
+    return true;
+  }
+}
+
 /**
  * Force a fresh remote sync of a single machine's flock doc and push the result
  * into any mounted `useMachineFlockRowsByMachineIds` consumers.
@@ -581,7 +604,18 @@ export async function resyncMachineFlockRows(
     syncedRemote: syncResult.syncedRemote,
     version,
   });
-  if (options.refreshedCapability) {
+  // Picker-aware Cursor RPC responses omit the per-model catalog for older
+  // clients. Only their complete Flock row can distinguish an observation from
+  // a confirmed clear. Legacy Cursor responses remain complete and keep the
+  // immediate overlay path used when Flock publication is still behind.
+  const suppressRefreshedCapabilityOverlay = options.refreshedCapability
+    ? await requiresCompleteCursorCapabilityFromFlock(
+        runtime,
+        normalizedMachineId,
+        options.refreshedCapability.value
+      )
+    : false;
+  if (options.refreshedCapability && !suppressRefreshedCapabilityOverlay) {
     const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
     notifyMachineFlockRowsCache(cacheKey, {
       rows: {

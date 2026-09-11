@@ -71,7 +71,9 @@ per-turn MCP selection, or Role-based session creation and dispatch.
 - ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
-  matching remains a separate applicability gate.
+  matching remains a separate applicability gate. Registry Cursor rows without the picker
+  source marker are incompatible only when their owning Machine advertises the picker
+  protocol; readers and freshness checks share that applicability rule.
 
 ## Workspace MCP and Agent Roles
 

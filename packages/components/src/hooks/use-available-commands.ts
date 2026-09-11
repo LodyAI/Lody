@@ -21,7 +21,8 @@ export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSumm
     const key = getAcpCapabilityCacheKey(configId);
     const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
       machine?.acpCapabilities?.[key],
-      runtimeOverrides
+      runtimeOverrides,
+      machine
     );
     return capability?.availableCommands ?? [];
   }, [configId, cliType, agentType, runtimeOverrides, machine]);
