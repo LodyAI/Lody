@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize, X, ZoomIn, ZoomOut } from 'lucide-react';
@@ -29,6 +30,13 @@ import { cn } from '@/lib/utils';
  *    off the diagram, and Escape.
  * 3. The stacking order comes from the app's z-index scale, so the viewer
  *    lands above dialogs and popovers rather than under them.
+ *
+ * The viewer is also the only place a diagram behaves like a canvas. A diagram
+ * sitting in a message never takes the wheel (see `markdown-renderer.tsx`);
+ * here, where the user asked for the diagram and nothing else is on screen, a
+ * trackpad pinch zooms around the pointer and a held button drags the diagram.
+ * Plain wheel and touch panning stay with the browser's own scrolling, so
+ * momentum and overscroll containment are the platform's, not a reimplementation.
  */
 
 export const MERMAID_DIAGRAM_MIN_ZOOM = 0.25;
@@ -39,6 +47,18 @@ export const MERMAID_DIAGRAM_MAX_ZOOM = 4;
  */
 const MERMAID_DIAGRAM_MAX_INITIAL_ZOOM = 3;
 const MERMAID_DIAGRAM_ZOOM_STEP = 1.25;
+
+/**
+ * A trackpad pinch reaches the page as a ctrl-modified wheel event carrying a
+ * few pixels per frame, while one notch of a mouse wheel carries around a
+ * hundred. Bounding the delta keeps a single step of either device to a
+ * comparable jump instead of throwing the diagram to a zoom limit.
+ */
+const MERMAID_DIAGRAM_PINCH_MAX_DELTA = 25;
+const MERMAID_DIAGRAM_PINCH_SENSITIVITY = 0.01;
+
+/** A drag this short is a click that wobbled, not a pan. */
+const MERMAID_DIAGRAM_PAN_SLOP_PX = 3;
 
 /**
  * `size="icon"` is 36px square. The viewer's controls sit at the top edge of a
@@ -71,6 +91,58 @@ export type MermaidDiagramSelection = {
 
 const clampZoom = (zoom: number): number =>
   Math.min(MERMAID_DIAGRAM_MAX_ZOOM, Math.max(MERMAID_DIAGRAM_MIN_ZOOM, zoom));
+
+const clampRatio = (ratio: number): number => Math.min(1, Math.max(0, ratio));
+
+/**
+ * The zoom multiplier for one pinch (or ctrl-wheel) step. Exponential rather
+ * than additive so the gesture feels the same at every zoom level and so
+ * pinching apart exactly undoes pinching together by the same amount.
+ */
+export function computePinchZoomFactor(deltaY: number): number {
+  const bounded = Math.max(
+    -MERMAID_DIAGRAM_PINCH_MAX_DELTA,
+    Math.min(MERMAID_DIAGRAM_PINCH_MAX_DELTA, deltaY)
+  );
+  return Math.exp(-bounded * MERMAID_DIAGRAM_PINCH_SENSITIVITY);
+}
+
+/**
+ * The point of the diagram the pointer sat over when a zoom started, kept as a
+ * fraction of the diagram's box plus the viewport coordinate it has to return
+ * to once the new size is laid out.
+ */
+export type MermaidDiagramZoomAnchor = {
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly ratioX: number;
+  readonly ratioY: number;
+};
+
+/**
+ * How far the scroll surface has to move for the anchored point of the resized
+ * diagram to sit back under the pointer. Measured from the diagram's own box
+ * rather than from scroll offsets, because the surface centres a diagram that
+ * fits and that offset is not proportional to the zoom.
+ */
+export function computeAnchoredScrollCorrection({
+  anchor,
+  diagramLeft,
+  diagramTop,
+  diagramWidth,
+  diagramHeight,
+}: {
+  anchor: MermaidDiagramZoomAnchor;
+  diagramLeft: number;
+  diagramTop: number;
+  diagramWidth: number;
+  diagramHeight: number;
+}): { left: number; top: number } {
+  return {
+    left: diagramLeft + anchor.ratioX * diagramWidth - anchor.clientX,
+    top: diagramTop + anchor.ratioY * diagramHeight - anchor.clientY,
+  };
+}
 
 /** Falls back to the window while the scroll surface is still unmeasured. */
 const measureViewport = (surface: HTMLElement | null) => ({
@@ -146,6 +218,23 @@ function OpenMermaidDiagramViewer({
   const hostRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [zoom, setZoom] = useState<number | null>(null);
+  // Set by a pinch and consumed by the layout effect that applies the new size,
+  // which is the first moment the resized diagram can be measured.
+  const zoomAnchorRef = useRef<MermaidDiagramZoomAnchor | null>(null);
+  const panRef = useRef<{
+    pointerId: number;
+    originX: number;
+    originY: number;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
+  // A pan that ends off the diagram would otherwise read as a click on the
+  // backdrop, which closes the viewer.
+  const pannedRef = useRef(false);
+  // Pointer capture retargets the following `click` to the capturing element,
+  // so a press on the diagram arrives at the surface with the surface as its
+  // target. Where the press STARTED is the only reliable question to ask.
+  const pressedOnDiagramRef = useRef(false);
 
   // The diagram is a live node, not markup: hand it to the DOM directly rather
   // than re-serializing it through `dangerouslySetInnerHTML`.
@@ -184,6 +273,27 @@ function OpenMermaidDiagramViewer({
       svg.style.width = `${selection.naturalWidth * zoom}px`;
       svg.style.height = `${selection.naturalHeight * zoom}px`;
     }
+
+    // A pinch has to keep the point it started on under the fingers, so the
+    // surface is scrolled by whatever the resize moved that point. Reading the
+    // box here flushes the layout the assignments above just invalidated.
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    const surface = scrollRef.current;
+    const host = hostRef.current;
+    if (!anchor || !surface || !host) {
+      return;
+    }
+    const rect = host.getBoundingClientRect();
+    const correction = computeAnchoredScrollCorrection({
+      anchor,
+      diagramLeft: rect.left,
+      diagramTop: rect.top,
+      diagramWidth: rect.width,
+      diagramHeight: rect.height,
+    });
+    surface.scrollLeft += correction.left;
+    surface.scrollTop += correction.top;
   }, [selection, zoom]);
 
   useEffect(() => {
@@ -223,8 +333,20 @@ function OpenMermaidDiagramViewer({
   // diagram live, which on a wide phone is most of the screen.
   const handleSurfaceClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
+      const panned = pannedRef.current;
+      const pressedOnDiagram = pressedOnDiagramRef.current;
+      pannedRef.current = false;
+      pressedOnDiagramRef.current = false;
+      // A press that began on the diagram is never a click on the backdrop,
+      // however the click was retargeted and however far it travelled.
+      if (pressedOnDiagram) {
+        return;
+      }
       const target = event.target;
       if (target instanceof Node && hostRef.current?.contains(target)) {
+        return;
+      }
+      if (panned) {
         return;
       }
       onClose();
@@ -232,11 +354,104 @@ function OpenMermaidDiagramViewer({
     [onClose]
   );
 
+  const zoomAtPoint = useCallback((clientX: number, clientY: number, factor: number) => {
+    const host = hostRef.current;
+    const rect = host?.getBoundingClientRect();
+    zoomAnchorRef.current =
+      rect && rect.width > 0 && rect.height > 0
+        ? {
+            clientX,
+            clientY,
+            ratioX: clampRatio((clientX - rect.left) / rect.width),
+            ratioY: clampRatio((clientY - rect.top) / rect.height),
+          }
+        : null;
+    setZoom((current) => clampZoom((current ?? 1) * factor));
+  }, []);
+
+  // A trackpad pinch arrives as a ctrl-modified wheel event, and Chromium zooms
+  // the whole window with it unless the default is taken. An unmodified wheel is
+  // left alone: it is the surface's own scrolling, which is how the diagram pans.
+  useEffect(() => {
+    const surface = scrollRef.current;
+    if (!surface) {
+      return undefined;
+    }
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      event.preventDefault();
+      zoomAtPoint(event.clientX, event.clientY, computePinchZoomFactor(event.deltaY));
+    };
+    surface.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      surface.removeEventListener('wheel', handleWheel);
+    };
+  }, [zoomAtPoint]);
+
+  // Dragging the diagram itself pans it. Touch keeps the browser's own panning,
+  // whose momentum and rubber-banding a scroll driven from pointer deltas cannot
+  // reproduce, so only a held mouse or pen button pans by hand.
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    // Whatever the last gesture left behind, this one starts as a click.
+    pannedRef.current = false;
+    const surface = scrollRef.current;
+    const target = event.target;
+    const onDiagram = target instanceof Node && Boolean(hostRef.current?.contains(target));
+    // Recorded for every pointer type, including the touch that never pans.
+    pressedOnDiagramRef.current = onDiagram;
+    if (!surface || event.pointerType === 'touch' || event.button !== 0 || !onDiagram) {
+      return;
+    }
+    // Otherwise the drag paints a text selection across the diagram's labels.
+    event.preventDefault();
+    panRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+    };
+    surface.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    const surface = scrollRef.current;
+    if (!pan || !surface || pan.pointerId !== event.pointerId) {
+      return;
+    }
+    // Measured from where the drag started, so a slow pan of many small moves
+    // still counts as one.
+    if (
+      Math.abs(event.clientX - pan.originX) >= MERMAID_DIAGRAM_PAN_SLOP_PX ||
+      Math.abs(event.clientY - pan.originY) >= MERMAID_DIAGRAM_PAN_SLOP_PX
+    ) {
+      pannedRef.current = true;
+    }
+    surface.scrollLeft -= event.clientX - pan.lastX;
+    surface.scrollTop -= event.clientY - pan.lastY;
+    pan.lastX = event.clientX;
+    pan.lastY = event.clientY;
+  }, []);
+
+  const handlePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) {
+      return;
+    }
+    panRef.current = null;
+    scrollRef.current?.releasePointerCapture?.(event.pointerId);
+  }, []);
+
   const zoomBy = useCallback((factor: number) => {
+    zoomAnchorRef.current = null;
     setZoom((current) => clampZoom((current ?? 1) * factor));
   }, []);
 
   const resetZoom = useCallback(() => {
+    zoomAnchorRef.current = null;
     setZoom(
       computeInitialDiagramZoom({
         ...measureViewport(scrollRef.current),
@@ -330,9 +545,13 @@ function OpenMermaidDiagramViewer({
           paddingRight: SAFE_AREA_RIGHT,
         }}
         onClick={handleSurfaceClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
       >
         <div className="flex min-h-full min-w-full items-center justify-center p-4">
-          <div ref={hostRef} className="shrink-0" />
+          <div ref={hostRef} className="shrink-0 cursor-grab active:cursor-grabbing" />
         </div>
       </div>
     </div>

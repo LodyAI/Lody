@@ -4,7 +4,7 @@ import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionMeta } from '@lody/shared';
+import type { SessionId, SessionMeta } from '@lody/shared';
 
 import {
   experimentalFeaturesEnabledAtom,
@@ -35,7 +35,7 @@ const session = {
 
 const translate = (_key: string, fallback: string) => fallback;
 
-describe('SessionHeaderMenu fork action', () => {
+describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
@@ -156,6 +156,37 @@ describe('SessionHeaderMenu fork action', () => {
     expect(document.body.textContent).not.toContain('Current workspace');
     await act(async () => menuItem('Copy context as Markdown').click());
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+  });
+
+  it('shows dangling opened-by provenance without a navigation action', async () => {
+    const onOpenSession = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={vi.fn()}
+          openedByRelations={{
+            openedBy: {
+              sessionId: 'deleted-opener' as SessionId,
+              title: 'Deleted session',
+              target: null,
+            },
+            opened: [],
+            onOpenSession,
+          }}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+
+    const openedByItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.includes('Opened by: Deleted session')
+    );
+    expect(openedByItem?.getAttribute('data-disabled')).not.toBeNull();
+
+    await act(async () => openedByItem?.click());
+    expect(onOpenSession).not.toHaveBeenCalled();
   });
 
   it('keeps the reviewer setup dialog mounted after the actions menu closes', async () => {

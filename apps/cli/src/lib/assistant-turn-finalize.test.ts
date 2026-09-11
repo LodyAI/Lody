@@ -67,6 +67,57 @@ describe('markAssistantTurnFinished', () => {
     expect(history[0]?.permissionWaitMs).toBe(4_000);
   });
 
+  it('settles an incomplete compaction only with provider failure evidence', () => {
+    const history = [
+      assistantEntry({
+        id: 'assistant:u1',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-1',
+            title: 'Context compacting',
+            status: 'in_progress',
+            activityKind: 'context_compaction',
+          },
+        ],
+      }),
+    ];
+
+    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
+    expect(history[0]?.items?.[0]).toMatchObject({ status: 'in_progress' });
+
+    markAssistantTurnFinished(history, {
+      endedAt: APP_CLOSED_AT,
+      settleContextCompactionAsFailed: true,
+    });
+    expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
+    expect(history[0]?.items?.[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('preserves a provider terminal compaction during failure finalization', () => {
+    const history = [
+      assistantEntry({
+        id: 'assistant:u1',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'compact-1',
+            title: 'Context compacting',
+            status: 'completed',
+            activityKind: 'context_compaction',
+          },
+        ],
+      }),
+    ];
+
+    markAssistantTurnFinished(history, {
+      endedAt: TURN_ENDED_AT,
+      settleContextCompactionAsFailed: true,
+    });
+
+    expect(history[0]?.items?.[0]).toMatchObject({ status: 'completed' });
+  });
+
   it('never stamps a user or system entry standing after the turn', () => {
     const history: SessionHistoryInput[] = [
       assistantEntry({ id: 'assistant:u1' }),

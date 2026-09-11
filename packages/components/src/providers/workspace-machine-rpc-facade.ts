@@ -51,6 +51,8 @@ import {
   type PreviewTarget,
   type PreviewTargetApproval,
   type SessionSteerResponse,
+  type SessionGoalAction,
+  type SessionGoalResponse,
   type SessionTerminateResponse,
   type SessionForkResponse,
   type SessionForkSpec,
@@ -754,6 +756,49 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestSessionGoal = async (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    options?: { timeoutMs?: number }
+  ): Promise<SessionGoalResponse | null> => {
+    const failure = (error: string): SessionGoalResponse => ({
+      type: 'session/goal_response',
+      sessionId: args.sessionId,
+      action: args.action,
+      accepted: false,
+      disposition: 'error',
+      error,
+    });
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/goal',
+          params: args,
+          timeoutMs: options?.timeoutMs ?? 10_000,
+        });
+        if (response && !response.ok) {
+          return failure(response.error);
+        }
+        if (response?.ok) return response.result as SessionGoalResponse;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionGoal({
+        ...args,
+        timeoutMs: options?.timeoutMs ?? 10_000,
+      });
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const requestSessionFork = async (
     machineId: MachineId,
     args: SessionForkSpec,
@@ -1119,6 +1164,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   return {
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     requestSessionTerminate,
     requestSessionFork,
     requestSessionEditAndResend,

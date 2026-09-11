@@ -45,6 +45,8 @@ import type {
   SessionForkResponse,
   SessionForkSpec,
   SessionSteerResponse,
+  SessionGoalAction,
+  SessionGoalResponse,
   SessionId,
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
@@ -117,6 +119,7 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'session/cancel',
   'session/live-status',
   'session/steer',
+  'session/goal',
   'session/terminate',
   'session/dispatch-turn',
   'session/prepare',
@@ -354,6 +357,12 @@ type RpcServerDeps = {
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
   }) => Promise<SessionSteerResponse>;
+  controlSessionGoal?: (args: {
+    sessionId: SessionId;
+    action: SessionGoalAction;
+    objective?: string;
+    userId: string;
+  }) => Promise<SessionGoalResponse>;
   terminateSession?: (args: { sessionId: SessionId }) => Promise<SessionTerminateResponse>;
   forkSession?: (args: SessionForkSpec) => Promise<SessionForkResponse>;
   editAndResendSession?: (
@@ -1096,6 +1105,23 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'session/goal': {
+          if (!this.deps.controlSessionGoal) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Session goal control is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.controlSessionGoal({
+            sessionId: request.params.sessionId as SessionId,
+            action: request.params.action,
+            ...(request.params.objective ? { objective: request.params.objective } : {}),
+            userId: request.params.userId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'session/terminate': {
           if (!this.deps.terminateSession) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1588,6 +1614,7 @@ export class LoroStreamsMachineRpcServer {
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
       | SessionSteerResponse
+      | SessionGoalResponse
       | SessionTerminateResponse
       | SessionForkResponse
       | SessionEditAndResendResponse

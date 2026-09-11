@@ -12,6 +12,11 @@ export const SESSION_GOAL_COMMANDS = ['pause', 'resume', 'clear'] as const;
 
 export type SessionGoalCommand = (typeof SESSION_GOAL_COMMANDS)[number];
 
+/** Every goal action Lody can ask an agent to perform, including `set`. */
+export const SESSION_GOAL_ACTIONS = ['set', 'pause', 'resume', 'clear'] as const;
+
+export type SessionGoalAction = (typeof SESSION_GOAL_ACTIONS)[number];
+
 export const sanitizeLodyInternalInstructions = (text: string): string => {
   const markerIndex = LODY_INTERNAL_PROMPT_MARKERS.reduce<number | null>((earliest, marker) => {
     const index = text.indexOf(marker);

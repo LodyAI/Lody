@@ -159,6 +159,7 @@ describe('MachineDocument ACP capabilities', () => {
       'builtin:codex:test',
       undefined,
       false,
+      undefined,
       { signal: controller.signal }
     );
     await openStarted;

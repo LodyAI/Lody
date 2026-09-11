@@ -3629,7 +3629,7 @@ const AssistantForkButton = ({
   );
 };
 
-const AssistantTurnFooter = ({
+export const AssistantTurnFooter = ({
   message,
   sessionId,
   fileDiffOverride,
@@ -3737,7 +3737,7 @@ const AssistantTurnFooter = ({
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && isTurnHovered && 'opacity-100'
+            !isMobile && (isTurnHovered || isForking) && 'opacity-100'
           )}
           data-assistant-turn-actions
         >

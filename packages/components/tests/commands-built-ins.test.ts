@@ -19,8 +19,8 @@ describe('built-in commands', () => {
     registerBuiltInCommands();
 
     expect(commands.get('session.archiveCurrent')?.title).toBe('Archive Current Chat');
-    expect(commands.getDefaultKeybindingsFor('session.archiveCurrent')).toEqual(['$mod+Alt+a']);
-    expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+Alt+f']);
+    expect(commands.getDefaultKeybindingsFor('session.archiveCurrent')).toEqual(['Mod+Alt+a']);
+    expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['Mod+Alt+f']);
     expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual([]);
@@ -30,8 +30,8 @@ describe('built-in commands', () => {
     expect(commands.getDefaultKeybindingsFor('session.newTabOrTerminal')).toEqual(['Alt+n']);
     expect(commands.getDefaultKeybindingsFor('nav.back')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('session.toggleTerminal')).toEqual([]);
-    expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
-    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['$mod+.']);
+    expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['Mod+,']);
+    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['Mod+.']);
     // Cyclers with no default binding stay rebindable from the settings page.
     expect(commands.getDefaultKeybindingsFor('session.cycleProvider')).toEqual([]);
     expect(commands.getDefaultKeybindingsFor('mention.toggleSessionProjectScope')).toEqual([]);
@@ -51,22 +51,22 @@ describe('built-in commands', () => {
 
     registerBuiltInCommands();
 
-    expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['$mod+f']);
-    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['$mod+l']);
-    expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual(['$mod+Shift+.']);
-    expect(commands.getDefaultKeybindingsFor('session.previousTab')).toEqual(['$mod+Shift+,']);
-    expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual(['$mod+Shift+[']);
-    expect(commands.getDefaultKeybindingsFor('session.nextVisible')).toEqual(['$mod+Shift+]']);
-    expect(commands.getDefaultKeybindingsFor('nav.back')).toEqual(['$mod+[']);
-    expect(commands.getDefaultKeybindingsFor('nav.forward')).toEqual(['$mod+]']);
+    expect(commands.getDefaultKeybindingsFor('session.searchCurrent')).toEqual(['Mod+f']);
+    expect(commands.getDefaultKeybindingsFor('session.focusInput')).toEqual(['Mod+l']);
+    expect(commands.getDefaultKeybindingsFor('session.nextTab')).toEqual(['Mod+Shift+.']);
+    expect(commands.getDefaultKeybindingsFor('session.previousTab')).toEqual(['Mod+Shift+,']);
+    expect(commands.getDefaultKeybindingsFor('session.previousVisible')).toEqual(['Mod+Shift+[']);
+    expect(commands.getDefaultKeybindingsFor('session.nextVisible')).toEqual(['Mod+Shift+]']);
+    expect(commands.getDefaultKeybindingsFor('nav.back')).toEqual(['Mod+[']);
+    expect(commands.getDefaultKeybindingsFor('nav.forward')).toEqual(['Mod+]']);
     expect(commands.getDefaultKeybindingsFor('session.toggleTerminal')).toEqual([
       'Ctrl+`',
-      '$mod+j',
+      'Mod+j',
     ]);
     expect(commands.getDefaultKeybindingsFor('session.cycleMode')).toEqual(['Shift+Tab']);
     // ⌘, settings is now a cross-platform registry binding (the desktop native menu shows
     // ⌘, but registerAccelerator:false leaves the key to the registry), so it shows here too.
-    expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['$mod+,']);
-    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['$mod+.']);
+    expect(commands.getDefaultKeybindingsFor('workspace.openSettings')).toEqual(['Mod+,']);
+    expect(commands.getDefaultKeybindingsFor('layout.toggleZenMode')).toEqual(['Mod+.']);
   });
 });

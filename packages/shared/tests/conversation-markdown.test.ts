@@ -29,11 +29,17 @@ function textItem(text: string): MessageContent {
   return { type: 'text', text };
 }
 
-function toolCall(title: string, output: string, terminal = false): MessageContent {
+function toolCall(
+  title: string,
+  output: string,
+  terminal = false,
+  toolName?: string
+): MessageContent {
   return {
     type: 'tool_call',
     toolCallId: `tool-${(nextId += 1)}`,
     title,
+    toolName,
     status: 'completed',
     kind: 'other',
     content: terminal
@@ -53,8 +59,8 @@ function heavyHistory(turns: number, outputChars: number): SessionHistoryInput[]
     history.push(
       entry('assistant', [
         { type: 'thought', text: `deliberating ${i} `.repeat(200) },
-        toolCall(`Read src/file-${i}.ts`, `line ${i} `.repeat(outputChars / 8)),
-        toolCall(`Bash ${i}`, `stdout ${i} `.repeat(outputChars / 8), true),
+        toolCall(`Read src/file-${i}.ts`, `line ${i} `.repeat(outputChars / 8), false, 'Read'),
+        toolCall(`Bash ${i}`, `stdout ${i} `.repeat(outputChars / 8), true, 'Bash'),
         textItem(`Answer ${i}`),
       ])
     );
@@ -158,8 +164,8 @@ describe('buildConversationMarkdown', () => {
     });
 
     expect(result.markdown).toContain('# My session');
-    expect(result.markdown).toContain('## User');
-    expect(result.markdown).toContain('## Assistant');
+    expect(result.markdown).toMatch(/^## 1 · User · /m);
+    expect(result.markdown).toMatch(/^## 1 · Assistant · /m);
     expect(result.markdown).toContain('hello');
     expect(result.markdown).toContain('hi there');
     expect(result.stats.entryCount).toBe(2);
@@ -180,7 +186,7 @@ describe('buildConversationMarkdown', () => {
 
     expect(result.markdown).toContain('thinking about it');
     expect(result.markdown).toContain('all tests passed');
-    expect(result.stats.thinkingOmitted).toBe(false);
+    expect(result.stats.thinkingTruncated).toBe(false);
     expect(result.stats.terminalOutputOmitted).toBe(false);
     expect(result.stats.toolCallsCollapsed).toBe(false);
     expect(result.markdown).not.toContain('Trimmed to fit');
@@ -236,8 +242,8 @@ describe('buildConversationMarkdown', () => {
   });
 
   it('applies the same budget to CJK prose using the token estimate', () => {
-    // 30k CJK characters is under the character ceiling but ~30k tokens.
-    const prose = '这是一段中文对话内容。'.repeat(3_000);
+    // 66k CJK characters is under the character ceiling but ~66k tokens.
+    const prose = '这是一段中文对话内容。'.repeat(6_000);
     const result = buildConversationMarkdown({
       history: [entry('user', [textItem(prose)])],
     });
@@ -277,6 +283,171 @@ describe('buildConversationMarkdown', () => {
     expect(result.stats.entryCount).toBe(1);
   });
 
+  it('pushes prose headings below the turn heading without touching fenced content', () => {
+    const body = [
+      '# Summary',
+      '',
+      '```bash',
+      '# not a heading',
+      '```',
+      '',
+      '###### already deepest',
+    ].join('\n');
+
+    const result = buildConversationMarkdown({ history: [entry('assistant', [textItem(body)])] });
+
+    // `# Summary` would otherwise outrank `## Assistant` and destroy the outline.
+    expect(result.markdown).toMatch(/^### Summary$/m);
+    expect(result.markdown).not.toMatch(/^# Summary$/m);
+    expect(result.markdown).toMatch(/^# not a heading$/m);
+    expect(result.markdown).toMatch(/^###### already deepest$/m);
+  });
+
+  it('separates rounds and stamps assistant turns with model and working time', () => {
+    const firstUser = entry('user', [textItem('first ask')]);
+    firstUser.timestamp = '2026-09-08T14:32:00.000Z';
+    const reply = entry('assistant', [textItem('first answer')]);
+    reply.timestamp = '2026-09-08T14:32:10.000Z';
+    reply.endedAt = Date.parse('2026-09-08T14:37:22.000Z');
+    reply.permissionWaitMs = 60_000;
+    reply.modelInfo = { modelId: 'opus-5', name: 'Opus 5' };
+    const secondUser = entry('user', [textItem('second ask')]);
+    secondUser.timestamp = '2026-09-08T15:00:00.000Z';
+
+    const result = buildConversationMarkdown({
+      history: [firstUser, reply, secondUser],
+      source: 'LodyAI/Lody · feat/markdown',
+    });
+
+    expect(result.markdown).toMatch(/^## 1 · User · /m);
+    // endedAt - timestamp - permissionWaitMs = 312s - 60s
+    expect(result.markdown).toMatch(/^## 1 · Assistant · [^\n]*Opus 5 · 4m12s$/m);
+    expect(result.markdown).toMatch(/^## 2 · User · /m);
+    // One rule closes the header, one opens the second round — and no more.
+    expect(result.markdown.match(/^---$/gm)).toHaveLength(2);
+    expect(result.markdown).toMatch(/## 1 · Assistant[\s\S]*\n---\n\n## 2 · User/);
+    expect(result.markdown).toContain('> LodyAI/Lody · feat/markdown');
+    expect(result.markdown).toContain('> Models: Opus 5');
+  });
+
+  it('names speakers only when more than one human is in the conversation', () => {
+    const solo = entry('user', [textItem('solo ask')]);
+    solo.userId = 'user-ada';
+    const participants = { 'user-ada': 'Ada', 'user-bo': 'Bo' };
+
+    const soloResult = buildConversationMarkdown({ history: [solo], participants });
+    expect(soloResult.markdown).not.toContain('Ada');
+    expect(soloResult.markdown).not.toContain('Participants:');
+
+    const ada = entry('user', [textItem('ada ask')]);
+    ada.userId = 'user-ada';
+    const bo = entry('user', [textItem('bo ask')]);
+    bo.userId = 'user-bo';
+    const sharedResult = buildConversationMarkdown({ history: [ada, bo], participants });
+
+    expect(sharedResult.markdown).toMatch(/^## 1 · User · Ada · /m);
+    expect(sharedResult.markdown).toMatch(/^## 2 · User · Bo · /m);
+    expect(sharedResult.markdown).toContain('> Participants: Ada, Bo');
+  });
+
+  it('collapses tool calls into one counted per-turn summary before capping thinking', () => {
+    const history: SessionHistoryInput[] = [];
+    for (let i = 0; i < 20; i += 1) {
+      history.push(entry('user', [textItem(`Question ${i}`)]));
+      history.push(
+        entry('assistant', [
+          { type: 'thought', text: `reasoning ${i} `.repeat(12) },
+          toolCall(`Read src/file-${i}.ts`, 'x'.repeat(20_000), false, 'Read'),
+          toolCall(`Bash ${i}`, 'y'.repeat(20_000), true, 'Bash'),
+          textItem(`Answer ${i}`),
+        ])
+      );
+    }
+
+    // Squeezed budget: enough for prose + thinking + a summary, not for tool bodies.
+    const result = buildConversationMarkdown({ history, maxChars: 11_000, maxTokens: 100_000 });
+
+    expect(result.stats.toolCallsCollapsed).toBe(true);
+    expect(result.stats.thinkingTruncated).toBe(false);
+    expect(result.markdown).toContain('2 tool calls (details omitted)');
+    expect(result.markdown).toContain('`Bash` ×1 · `Read` ×1');
+    // Every turn's reasoning survives the collapse untouched.
+    for (let i = 0; i < 20; i += 1) {
+      expect(result.markdown).toContain(`reasoning ${i} reasoning ${i}`);
+    }
+    // The old floor wrote one bold line per call; nothing should reintroduce it.
+    expect(result.markdown).not.toContain('- **Read src/file-0.ts**');
+  });
+
+  it('caps thinking instead of dropping it when collapsed tool calls still do not fit', () => {
+    const history: SessionHistoryInput[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      history.push(entry('user', [textItem(`Q${i}`)]));
+      history.push(
+        entry('assistant', [
+          { type: 'thought', text: `deliberating ${i} `.repeat(600) },
+          toolCall(`Read ${i}`, 'x'.repeat(5_000), false, 'Read'),
+          textItem(`A${i}`),
+        ])
+      );
+    }
+
+    const result = buildConversationMarkdown({ history, maxChars: 30_000, maxTokens: 100_000 });
+
+    expect(result.stats.thinkingTruncated).toBe(true);
+    // Capped, never gone: the receiving conversation still inherits the reasoning.
+    expect(result.markdown).toContain('Thinking (from the original session)');
+    expect(result.markdown).toContain('characters elided');
+    expect(result.markdown).toContain('deliberating 0 deliberating');
+    expect(result.markdown).toContain('deliberating 11 deliberating');
+  });
+
+  it('puts an unfinished final turn in the header, not after the transcript', () => {
+    const result = buildConversationMarkdown({
+      history: [entry('user', [textItem('ask')]), entry('assistant', [textItem('partial')])],
+      incompleteFinalResponse: 'The last response was still generating when copied.',
+    });
+
+    const notice = result.markdown.indexOf('still generating when copied');
+    const firstTurn = result.markdown.indexOf('## 1 · User');
+    expect(notice).toBeGreaterThan(-1);
+    // A trailing line is read after the transcript it qualifies, which is too late
+    // for the agent this export is pasted into.
+    expect(notice).toBeLessThan(firstTurn);
+    expect(result.markdown).toContain('> **The last response was still generating');
+    expect(result.markdown.trimEnd().endsWith('partial')).toBe(true);
+  });
+
+  it('omits the unfinished-turn notice when the caller does not pass one', () => {
+    const result = buildConversationMarkdown({
+      history: [entry('user', [textItem('ask')])],
+    });
+
+    expect(result.markdown).not.toContain('still generating');
+  });
+
+  it('puts the trim notice in the header, before anything it describes', () => {
+    const result = buildConversationMarkdown({ history: heavyHistory(30, 8_000) });
+
+    const notice = result.markdown.indexOf('Trimmed to fit the copy budget');
+    const firstTurn = result.markdown.indexOf('## 1 · User');
+    expect(notice).toBeGreaterThan(-1);
+    expect(notice).toBeLessThan(firstTurn);
+  });
+
+  it('says results are gone when tool calls collapse, not just that they collapsed', () => {
+    const result = buildConversationMarkdown({
+      history: heavyHistory(20, 8_000),
+      maxChars: 9_000,
+      maxTokens: 100_000,
+    });
+
+    expect(result.stats.toolCallsCollapsed).toBe(true);
+    // A collapsed call never reaches the block renderer, so the per-block tallies
+    // stay at zero; the notice has to state the loss itself.
+    expect(result.markdown).toContain('results and terminal output omitted');
+  });
+
   it('lists referenced files', () => {
     const call = {
       type: 'tool_call',
@@ -289,7 +460,7 @@ describe('buildConversationMarkdown', () => {
 
     const result = buildConversationMarkdown({ history: [entry('assistant', [call])] });
 
-    expect(result.markdown).toContain('## Files referenced');
+    expect(result.markdown).toContain('## Files referenced (from tool call locations)');
     expect(result.markdown).toContain('`src/a.ts`');
     expect(result.stats.pathsCount).toBe(1);
   });
