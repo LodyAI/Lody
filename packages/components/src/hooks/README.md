@@ -4,6 +4,15 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Horizontal wheel scrolling
+
+`use-horizontal-wheel-scroll.ts` is the one owner for converting a plain vertical
+mouse wheel into horizontal movement. It uses a non-passive native listener because
+React delegates wheel events passively, and releases native horizontal gestures,
+browser zoom, nested content selected by the caller, and movement at either edge.
+Both the task board and compact tab strips use this behavior so their delta-mode
+normalization and edge handling cannot drift.
+
 ## Workspace membership refresh
 
 The cross-domain Better Auth `updateSession()` action returns `void`: it notifies
