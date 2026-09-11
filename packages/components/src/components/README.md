@@ -16,6 +16,8 @@ navigation must still return to the precise creating Tab.
 
 ## Entry points and layout
 
+- Sidebar Search, immediately below New Chat, opens the shared command palette
+  through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).
 - Chat landing: `chat/chat-landing.tsx`.
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in

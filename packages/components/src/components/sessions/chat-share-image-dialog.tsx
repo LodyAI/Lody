@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/ui/label';
 import { Input } from '@/ui/input';
 import { Button } from '@/ui/button';
-import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
+import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import {
@@ -162,7 +162,7 @@ export function ChatShareImageDialog({
     setOperation('export');
     setExportError(false);
     try {
-      await exportChatShareImage(exportRef.current, session?.title);
+      await exportShareImage(exportRef.current, session?.title, 'lody-conversation');
     } catch {
       setExportError(true);
     } finally {
@@ -180,7 +180,7 @@ export function ChatShareImageDialog({
     setExportError(false);
     setCopied(false);
     try {
-      await copyChatShareImage(exportRef.current);
+      await copyShareImage(exportRef.current);
       setCopied(true);
     } catch {
       setExportError(true);

@@ -132,6 +132,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "immer": "^10.2.0",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@loro-dev/streams-crdt": "catalog:",
     "acp-extension-dsh": "workspace:*",

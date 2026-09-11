@@ -94,15 +94,11 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   dense monospace, terminal output, and collapsed height through
   `conversation-font-size-classes.ts`; settings own legacy preset migration.
   Keep Streamdown in streaming mode, but never enable word-level `animated`.
-- A Mermaid diagram opens in `mermaid-diagram-viewer.tsx`, never Streamdown's own
-  full-screen overlay (`controls.mermaid.fullscreen` stays off). Keep three
-  properties: controls padded by the `--safe-area-*` variables rather than a fixed
-  viewport offset and at least 44px; never a single exit (close button, click off
-  the diagram, Escape); and `--z-image-viewer` stacking, so a diagram opened
-  inside a dialog lands above that dialog. Open the diagram at NATURAL size when
-  it does not fit and pan, instead of scaling it down. `markdown-renderer.tsx`
-  applies the click target and its `role`/`tabindex` by observer; the block's own
-  copy/download controls must stay reachable without hover.
+- A Mermaid diagram in a message is a still preview until a pointer click
+  activates it, and an unmodified wheel is NEVER taken — activated or not.
+  `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
+  the block's action bar. Invariants:
+  [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - `chat_failed` raw errors use a modal; extraction/copy live in
   `chat-failed-error-report.ts`.
 - Capacity retry targets only the latest notice: the first click consents, and

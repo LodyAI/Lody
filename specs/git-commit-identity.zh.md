@@ -5,9 +5,8 @@ Translation: current
 
 [English](git-commit-identity.md)
 
-每一轮 Agent 执行 Git 命令前，Lody 都会选择 Git commit 身份。选择条件依据机器所有权，
-而不是 workspace 成员数或机器共享状态，因此共享状态变化不会让其他请求者继承机器
-owner 的身份。
+Lody 每轮依据机器所有权选择 host Session 的 Git identity，而不是 workspace 成员数或共享状态。
+下述规则约束身份解析；已运行 ACP 的身份更新存在下面说明的限制。
 
 当前轮次由机器 owner 发起时，Lody 优先使用 session worktree 中生效的 Git identity；
 如果机器没有可用的 Git email，则使用 owner 经 Lody/GitHub 解析出的身份。当前轮次由
@@ -19,10 +18,9 @@ owner 的身份。
 与 committer 环境变量。GitHub 鉴权仍是独立的、绑定请求者的决策，不会改变 commit 对象
 中的 author 或 committer。
 
-ACP 进程会在启动时快照环境。如果复用 session 时有效 Git identity 发生变化，Lody 必须在提交
-下一个 prompt 前在内部终止旧进程，并使用新环境恢复同一个 ACP session；这个替换不得发布
-session termination 生命周期，也不得把该 prompt 提交给旧进程。identity 未变化时无需重启。
-这个规则同样适用于 identity 快照已过期、但已经 adopt 的 speculative preparation。
+切换请求者或 Git identity 不得触发 ACP 进程或 sandbox 重启，包括已 adopt 的预启动 session。
+新身份会更新 host Session 配置，供此后经该配置启动的命令使用。已运行 ACP 仍持有启动时的
+环境，其自行启动的 Git 命令可能继续使用旧身份。无重启的身份传播尚未实现。
 
 ## 证据
 

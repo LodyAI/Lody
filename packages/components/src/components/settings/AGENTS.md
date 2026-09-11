@@ -30,6 +30,31 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   use the default interface font so they remain readable.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
+- The usage share card is a fixed-format report, not a second `ChatShareCard`: its two
+  aspects are exact pixel sizes, its period is the page's selected range, and its
+  headline is that range's timeline total, so page and image cannot disagree. Derive
+  every number through `usage-share-stats.ts`, which stamps the metric onto the stats
+  it derives — never pass a metric beside them — so the headline, cells, graphic
+  shading and both splits always read one unit. Money is formatted per slot:
+  `formatUsdCompact` for the headline, `formatUsdTight` for cells and legend rows;
+  never let `truncate` decide, because an ellipsis on a number is a wrong number. Tokens and member
+  anonymity are the defaults; cost substitutes for tokens rather than joining them,
+  and member slices carry display name and avatar only — never an email. Both share cards use the one capture pipeline in `lib/share-image-export.ts`
+  and the one theme pinning in `components/share-theme-scope.ts`; do not fork either.
+  `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
+  dialog, because the public landing reuses that view. Typography and spacing come
+  from the card's own `TEXT`, `PAD_X`, and `RHYTHM` constants — never a fresh
+  `text-[…]` or an off-grid padding. `PAD_X` binds the footer too, so every band
+  shares one left edge. `ASPECT_SIZE` is the whole exported image including the
+  backdrop, so a framed card is 48px shorter — size the layout against the framed
+  case, and keep every band but the headline `shrink-0` so a card that does not fit
+  overflows visibly instead of eating its own padding. The graphic follows the range —
+  hour skyline, day-by-hour grid, or the 53-week calendar, matching the Usage
+  screen — and every kind must fit the one `GRAPHIC_H` box so card height never
+  depends on range. The space beside the
+  headline number is empty by choice: six attempts to fill it (five brand-mark
+  treatments, one range chart) each either repeated a band below or read as
+  decoration. Leave it alone.
 
 ## Agent Roles
 

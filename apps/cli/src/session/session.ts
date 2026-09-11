@@ -112,12 +112,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private agentProcess: SessionProcessHandle | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
-  private agentGitIdentitySnapshot: {
-    authorName: string;
-    authorEmail: string;
-    committerName: string;
-    committerEmail: string;
-  } | null = null;
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
@@ -244,19 +238,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async terminate(force: boolean = false): Promise<void> {
-    await this.terminateInternal(force, true);
-  }
-
-  async terminateForRestart(force: boolean = true): Promise<void> {
-    await this.terminateInternal(force, false);
-  }
-
-  private async terminateInternal(force: boolean, publishLifecycle: boolean): Promise<void> {
-    this.logger.debug(
-      `[${this.sessionId}] Terminating session${force ? ' (force)' : ''}${
-        publishLifecycle ? '' : ' for internal restart'
-      }`
-    );
+    this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
 
     if (this.acpSessionId && this.terminalManager.disposeAll) {
@@ -313,20 +295,17 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
     this.activeProcess = null;
     this.agentProcess = null;
-    this.agentGitIdentitySnapshot = null;
     this.agentClient = null;
     this.acpSessionId = null;
     this.acpCapabilities = null;
 
     this.status = 'terminated';
 
-    if (publishLifecycle) {
-      const event: SessionExitEvent = {
-        sessionId: this.sessionId,
-        exitCode: activeProcess?.child.exitCode ?? 0,
-      };
-      this.emit('terminated', event);
-    }
+    const event: SessionExitEvent = {
+      sessionId: this.sessionId,
+      exitCode: activeProcess?.child.exitCode ?? 0,
+    };
+    this.emit('terminated', event);
   }
 
   /**
@@ -395,7 +374,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userEmail: string,
     userId: string | undefined,
     options: { preferMachineIdentity: boolean }
-  ): boolean {
+  ): void {
     const configEnv = this.config.env ?? {};
     // Set git identity using Git's recognized environment variables directly
     const { name, email } = resolveSessionGitIdentity(
@@ -416,13 +395,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       email,
     };
     this.logger.debug(`[${this.sessionId}] Git identity updated: ${name} <${email}>`);
-    return (
-      this.agentGitIdentitySnapshot !== null &&
-      (this.agentGitIdentitySnapshot.authorName !== name ||
-        this.agentGitIdentitySnapshot.authorEmail !== email ||
-        this.agentGitIdentitySnapshot.committerName !== name ||
-        this.agentGitIdentitySnapshot.committerEmail !== email)
-    );
   }
 
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
@@ -520,12 +492,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       callbacks.command,
       this.buildShellEnv(callbacks.env, loginShellEnv)
     );
-    this.agentGitIdentitySnapshot = {
-      authorName: env.GIT_AUTHOR_NAME ?? '',
-      authorEmail: env.GIT_AUTHOR_EMAIL ?? '',
-      committerName: env.GIT_COMMITTER_NAME ?? '',
-      committerEmail: env.GIT_COMMITTER_EMAIL ?? '',
-    };
     const launcher: AcpLauncher = resolveAcpLauncher(callbacks.command);
     const spawnAnalyticsProps = {
       cliType: callbacks.cliType,
@@ -659,6 +625,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         const started = await createAcpClient({
           stream,
           workdir: this.getWorkdir(),
+          resolveWorktreeProject: callbacks.resolveWorktreeProject,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {
@@ -699,6 +666,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
+          goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {

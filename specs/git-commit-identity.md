@@ -5,9 +5,9 @@ Translation: current
 
 [中文](git-commit-identity.zh.md)
 
-Lody chooses a Git commit identity for every turn before the Agent executes Git commands. The
-choice follows machine ownership rather than workspace size or machine-sharing state, so a
-sharing change cannot expose the machine owner's identity to another requester.
+Lody resolves the host Session Git identity for every turn based on machine ownership,
+rather than workspace size or sharing state. The rules below govern identity resolution;
+live ACP propagation has the limitation described below.
 
 For a turn requested by the machine owner, Lody first uses the Git identity effective in the
 session worktree. If the machine has no usable Git email, Lody uses the owner's resolved
@@ -21,12 +21,11 @@ The selected name and email are exported as both Git author and committer enviro
 GitHub authentication remains a separate requester-bound decision and does not change the commit
 object's author or committer.
 
-An ACP process snapshots its environment at launch. If the effective Git identity changes while
-reusing a session, Lody must internally terminate the stale process and resume the same ACP
-session with the new environment before submitting the next prompt. This replacement must not
-publish the session termination lifecycle or submit that prompt to the stale process. An
-unchanged identity does not require a restart. This also applies when an adopted speculative
-preparation has a stale identity snapshot.
+Changing requester or Git identity must not restart the ACP process or sandbox, including
+adopted speculative preparations. The new identity updates the host Session configuration for
+subsequent commands launched through it. An existing ACP retains its launch environment, so
+Git commands launched directly by that process may retain the previous identity. Live identity
+propagation without restarting remains unimplemented.
 
 ## Evidence
 

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
-import { ensureChatShareThemeScopes } from '@/components/chat-share-theme-scope';
+import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface ChatShareCardMessage {
@@ -42,7 +42,7 @@ export interface ChatShareCardProps {
    * Pins the card to one of the bundled Lody palettes (lody-light / vesper)
    * instead of following the app theme — the exported image should look the
    * way the user picked, not the way the app happens to be themed right now.
-   * Scoped variables come from `ensureChatShareThemeScopes`; `.light-scope`
+   * Scoped variables come from `ensureShareThemeScopes`; `.light-scope`
    * also opts out of any ancestor `.dark`.
    */
   theme?: 'light' | 'dark';
@@ -237,7 +237,7 @@ export function ChatShareCard({
 
   const framed = backdrop !== 'none';
   // Injects the scoped theme rules before first paint; idempotent no-op after.
-  ensureChatShareThemeScopes();
+  ensureShareThemeScopes();
   const themeScopeClass =
     theme === 'light' ? 'light-scope' : theme === 'dark' ? 'dark-scope' : undefined;
 

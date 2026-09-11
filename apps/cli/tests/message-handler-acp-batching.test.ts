@@ -18,6 +18,7 @@ import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
+import { isSessionContextCompacting } from '../../../packages/components/src/lib/session-context-compaction';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -143,6 +144,63 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
 };
 
 describe('MessageHandler ACP batching', () => {
+  it('isolates a malformed tool notification and continues flushing valid output', async () => {
+    const sessionId = 'poison-session' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing synthetic doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+    };
+    try {
+      host.beginConversationTurn(sessionId);
+      const text = (value: string): AcpSessionNotification => ({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } },
+      });
+      host.enqueueACPUpdate(sessionId, text('before'));
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-tool',
+          title: 'Synthetic',
+          kind: 'execute',
+          status: 'in_progress',
+          content: [{ type: 'content', content: { type: 'text', text: 42 } }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-location',
+          title: 'Synthetic',
+          kind: 'other',
+          status: 'in_progress',
+          locations: [{ path: 'synthetic.ts', line: 'invalid' }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, text('after'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+      expect(readItems((await doc.getHistory())[0])).toEqual([
+        { type: 'text', text: 'beforeafter' },
+      ]);
+      host.enqueueACPUpdate(sessionId, text('later'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(readItems((await doc.getHistory())[0])).toEqual([
+        { type: 'text', text: 'beforeafterlater' },
+      ]);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';
@@ -301,6 +359,108 @@ describe('MessageHandler ACP batching', () => {
 
       const historyAfterTimerDrain = await doc.getHistory();
       expect(readItems(historyAfterTimerDrain[0])).toEqual([{ type: 'text', text: 'pending' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('settles only a failed compaction across finalization, reload, and later activity', async () => {
+    vi.useRealTimers();
+    const sessionId = 'compaction-lifecycle' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+    const host = handler as unknown as {
+      beginConversationTurn(sessionId: SessionId): string;
+      enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
+      finalizeACPState(
+        sessionId: SessionId,
+        turnId?: string,
+        options?: { settleContextCompactionAsFailed?: boolean }
+      ): Promise<void>;
+    };
+    const findCompaction = (history: SessionHistoryInput[], toolCallId: string) =>
+      history
+        .flatMap((entry) => readItems(entry))
+        .find(
+          (item) =>
+            item.type === 'tool_call' &&
+            item.activityKind === 'context_compaction' &&
+            item.toolCallId === toolCallId
+        );
+
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'compact-1',
+          title: 'Context compacting',
+          status: 'in_progress',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      expect(isSessionContextCompacting(await doc.getHistory())).toBe(true);
+
+      await host.finalizeACPState(sessionId, turnId);
+      await host.finalizeACPState(sessionId, turnId);
+
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const reloadedHistory = await reopened.getHistory();
+      const reloadedTurn = reloadedHistory.find((entry) => entry.id === turnId);
+      const staleCompaction = findCompaction(reloadedHistory, 'compact-1');
+      expect(reloadedTurn?.finished).toBe(true);
+      expect(staleCompaction).toMatchObject({ status: 'in_progress' });
+      expect(isSessionContextCompacting(reloadedHistory)).toBe(true);
+
+      await host.finalizeACPState(sessionId, turnId, {
+        settleContextCompactionAsFailed: true,
+      });
+      await host.finalizeACPState(sessionId, turnId, {
+        settleContextCompactionAsFailed: true,
+      });
+      const failedHistory = await reopened.getHistory();
+      expect(findCompaction(failedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
+      expect(isSessionContextCompacting(failedHistory)).toBe(false);
+
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'compact-1',
+          status: 'completed',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      const completedHistory = await doc.getHistory();
+      const completedCompaction = findCompaction(completedHistory, 'compact-1');
+      expect(completedCompaction).toMatchObject({ status: 'completed' });
+      if (!completedCompaction || completedCompaction.type !== 'tool_call') {
+        throw new Error('Missing completed context compaction');
+      }
+      expect(isSessionContextCompacting(completedHistory)).toBe(false);
+
+      const nextTurnId = host.beginConversationTurn(sessionId);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'compact-2',
+          title: 'Context compacting',
+          status: 'in_progress',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      const nextHistory = await doc.getHistory();
+      expect(nextTurnId).not.toBe(turnId);
+      expect(findCompaction(nextHistory, 'compact-2')).toMatchObject({ status: 'in_progress' });
+      expect(isSessionContextCompacting(nextHistory)).toBe(true);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

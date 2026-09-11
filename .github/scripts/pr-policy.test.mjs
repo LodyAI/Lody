@@ -53,6 +53,12 @@ Run policy tests.
 - **Deliberately not done or tested:** No live API writes.
 - **Unknowns / confidence:** Policy behavior is deterministic.
 
+### Original user prompt
+
+\`\`\`text
+Simplify the pull request contribution policy.
+\`\`\`
+
 <!-- context-handoff:end -->
 `;
 

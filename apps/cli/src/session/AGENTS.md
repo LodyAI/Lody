@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Rules only; responsibilities and reasoning: [README.md](README.md). Worktrees and git
+Rules only; rationale: [README.md](README.md). Worktrees and git
 credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
 Contract: specs/session-orchestration.md.
 
@@ -19,13 +19,13 @@ Contract: specs/session-orchestration.md.
   exists; retries and recovery never reread mutable history.
 - Machine and Provider credentials stay execution-host scoped; attribution, authorization,
   GitHub, and Git identity use the frozen identity, never the Session owner.
-- Git identity: owner prefers machine then requester; others never read machine identity. Restart
-  stale ACP pre-prompt without lifecycle events. Resolve via `CloudPort`; reject placeholders.
+- Git identity: owner prefers machine then requester; others never read machine config.
+  Never restart ACP/sandbox for identity, even in preparations.
+  Use `CloudPort`; reject placeholders.
 
 ## Dispatch
 
-- Queue-to-history promotion preserves every frozen Turn field, `agentRoleId` and
-  `agentRoleRevision` included.
+- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -46,10 +46,10 @@ Contract: specs/session-orchestration.md.
 
 - Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
   never gate status or meta writes.
-- An `active` session goal must not suppress turn completion or its notification.
-- Never mint a second visible turn while a `TurnRuntimeState` is registered; derive assistant
-  entry ids from `userTurnId`. `invocation` atomically owns source Turn, requester, and input
-  config; steer replaces it before tool execution.
+- Goals obey [this contract](../../../../specs/session-goal-control.md).
+- Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
+  second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
+  owns source Turn, requester and config; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.

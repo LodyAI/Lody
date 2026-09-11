@@ -12,7 +12,8 @@ import {
   type MachineId,
 } from '@lody/shared';
 
-let agentRoleItems: Array<{ slug: string; role: AgentRole }> = [];
+let agentRoleItems: Array<{ slug: string; role: AgentRole; availability: { kind: 'available' } }> =
+  [];
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -105,13 +106,15 @@ describe('agent role chip in the composer', () => {
   };
 
   it('paints the role own emoji over the committed token', async () => {
-    agentRoleItems = [{ slug: 'Code-Reviewer', role: role('🔍') }];
+    agentRoleItems = [
+      { slug: 'Code-Reviewer', availability: { kind: 'available' }, role: role('🔍') },
+    ];
     const view = await renderComposer();
     expect(view.textContent).toContain('🔍');
   });
 
   it('falls back to the shared default glyph for a role with no emoji', async () => {
-    agentRoleItems = [{ slug: 'Code-Reviewer', role: role() }];
+    agentRoleItems = [{ slug: 'Code-Reviewer', availability: { kind: 'available' }, role: role() }];
     const view = await renderComposer();
     expect(view.textContent).toContain(DEFAULT_AGENT_ROLE_EMOJI);
   });

@@ -37,6 +37,6 @@ or change the saved image behavior.
 
 Evidence: [selection tests](../packages/components/tests/message-selection.test.tsx),
 [metadata tests](../packages/shared/tests/conversation-markdown.test.ts), and
-[export tests](../packages/components/tests/chat-share-image-export.test.ts), and
+[export tests](../packages/components/tests/share-image-export.test.ts), and
 [interactive story](../packages/components/src/stories/SessionConversationPage.stories.tsx).
 Automated screenshots were deliberately not run; this draft does not claim visual acceptance.

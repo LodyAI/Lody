@@ -28,7 +28,8 @@ also applies.
 - Backlog scoring is deterministic. A candidate's semantic fingerprint covers
   its runtime, fixture, ordered actions, checkpoints, and cleanup. Keep blocked
   gaps in the registry with an actionable `blockedReason`; selection skips them
-  instead of blocking the rest of the queue.
+  instead of blocking the rest of the queue. Active journeys always use a null
+  `blockedReason`; quarantined journeys always record a non-empty reason.
 - Local authoring claims at most one backlog row per run. Codex works in an
   ephemeral detached worktree and cannot edit product code, harness policy, the
   registry, or generated coverage. It packages a candidate without executing

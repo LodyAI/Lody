@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Loro } from 'loro-crdt';
-import { Mirror } from 'loro-mirror';
-import { sessionDocSchema, type SessionForkOperation, type SessionId } from '@lody/shared';
+import { createSessionMirror, type SessionForkOperation, type SessionId } from '@lody/shared';
 import type { LoroRepo, RepoDocHandle } from 'loro-repo';
 import type { Logger } from '@/utils/logger';
 import { SessionDocument } from './doc';
@@ -15,9 +14,8 @@ const createDocument = () => {
   } as unknown as Logger);
   const loro = new Loro();
   doc.handle = { doc: loro } as RepoDocHandle;
-  doc.mirror = new Mirror({
+  doc.mirror = createSessionMirror({
     doc: loro,
-    schema: sessionDocSchema,
     initialState: {
       session: { id: doc.sessionId },
       history: [],

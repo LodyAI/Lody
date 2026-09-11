@@ -81,6 +81,22 @@ describe('Session relation cards', () => {
     expect(onOpen).toHaveBeenCalledWith(openerSessionId);
   });
 
+  it('shows dangling provenance without a navigation action', async () => {
+    await act(async () => {
+      root.render(
+        <SessionRelationCard
+          relation="opened-by"
+          label="This session was automatically created by"
+          sessionTitle="Deleted session"
+          actionLabel="Back to session"
+        />
+      );
+    });
+
+    expect(container.textContent).toContain('Deleted session');
+    expect(container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true);
+  });
+
   it('turns a successful session_create completion into a live Session card', async () => {
     const store = createStore();
     store.set(setDocMetaByRoomIdAtom, getSessionRoomId(createdSessionId), {

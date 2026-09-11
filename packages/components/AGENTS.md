@@ -27,6 +27,17 @@ mobile surfaces. Background for the rules below:
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use
   `vite-top-level-await-fixed.ts`. Do not bypass its audited-version assertion.
+- Keep accidental weight out of the test module graph: Vitest re-evaluates a
+  file's whole import graph per test file. Do not re-export a heavy leaf from
+  `src/ui/index.ts`, deep-import `date-fns/locale/<tag>` rather than the barrel,
+  and keep the icon-asset `new URL` glob alone in
+  `src/components/icons/file-icons/asset-url.ts` so the test alias can replace
+  it. Rationale and measurements:
+  [module graph note](../../.agents/notes/implemented/testing/2026-09-10-components-test-module-graph.md).
+- `vitest.config.ts` deliberately omits `vite-plugin-top-level-await` and
+  `vite-tsconfig-paths`; `vite.config.ts` keeps both because the product bundle
+  needs them. Run the suite with `NODE_ENV=test` — a `production` value resolves
+  React to a build without `act`.
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.

@@ -17,6 +17,8 @@ import type {
   SessionPrepareCancelResponse,
   SessionPrepareResponse,
   SessionSteerResponse,
+  SessionGoalAction,
+  SessionGoalResponse,
   SessionDocMeta,
   SessionTurnInputConfig,
   SessionId,
@@ -86,6 +88,7 @@ export type SessionDocUpdater =
   | ((state: Readonly<SessionDocInput>) => SessionDocInput);
 
 export type SessionDocStore = {
+  readonly historyWriter: import('@lody/shared').HistoryWriter;
   readonly sessionId: SessionId;
   readonly roomId: string;
   readonly doc: LoroDoc;
@@ -299,6 +302,16 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionSteerResponse | null>;
+  requestSessionGoal: (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    options?: { timeoutMs?: number }
+  ) => Promise<SessionGoalResponse | null>;
   requestSessionTerminate: (
     machineId: MachineId,
     sessionId: SessionId,

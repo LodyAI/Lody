@@ -1,3 +1,6 @@
+import { jotaiStore } from '@/lib/utils';
+import { desktopWindowId } from '@/lib/desktop-window';
+import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import { getMachineRoomId, type MachineMeta } from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
@@ -36,7 +39,7 @@ import {
   SESSION_DOC_PREFIX,
   type SessionStatus,
   LORO_STREAMS_BUCKET_ID,
-  sessionDocSchema,
+  createSessionMirror,
   ClientToServerSchema,
   ServerToClientSchema,
   type ClientToServer,
@@ -393,7 +396,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repo = await LoroRepo.create({
     storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: 'lody-loro-repo-db-' + deps.workspaceId,
+      dbName:
+        'lody-loro-repo-db-' +
+        deps.workspaceId +
+        (desktopWindowId() ? ':' + desktopWindowId() : ''),
     }),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
@@ -1657,6 +1663,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const {
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     requestSessionTerminate,
     requestSessionFork,
     requestSessionEditAndResend,
@@ -3659,17 +3666,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
-    const mirror = new Mirror({
+    const mirror = createSessionMirror({
       doc: persistedDoc.doc as LoroDoc,
-      schema: sessionDocSchema,
-      // Temporary availability hotfix: old history must not reject unrelated writes.
-      // Remove only with a reviewed changed-input validation boundary (PR #460).
-      validateUpdates: false,
-      // Tolerate root keys written by peers running a newer schema version.
-      ignoreUnknownProperties: true,
       // Plan is now stored per-turn on history entries, not at root level
       initialState: { session: { id: sessionId }, history: [] },
-      debug: false,
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
@@ -3801,6 +3801,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
         }),
       getState: () => mirror.getState(),
+      historyWriter: mirror.historyWriter,
       setState: (updater) => {
         mirror.setState(updater as never);
       },
@@ -4280,10 +4281,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         env: {
           isOnline: () => isBrowserOnline(),
           isAppVisible: () =>
-            typeof document === 'undefined' || document.visibilityState === 'visible',
+            !jotaiStore.get(navigationSidebarHiddenAtom) &&
+            (typeof document === 'undefined' || document.visibilityState === 'visible'),
           subscribe: (onChange) => {
             backgroundSyncEnvListeners.add(onChange);
+            const unsubscribeSidebar = jotaiStore.sub(navigationSidebarHiddenAtom, onChange);
             return () => {
+              unsubscribeSidebar();
               backgroundSyncEnvListeners.delete(onChange);
             };
           },
@@ -4625,6 +4629,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     getMachineAcpBinaryProgress,
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     requestSessionTerminate,
     requestSessionFork,
     requestSessionEditAndResend,

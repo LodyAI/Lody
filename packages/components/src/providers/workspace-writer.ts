@@ -1,4 +1,10 @@
-import type { PreviewVisualCommentMutation, SessionId } from '@lody/shared';
+import type {
+  PreviewVisualCommentMutation,
+  SessionId,
+  SessionHistory,
+  PermissionOutcome,
+  TaskProposalMeta,
+} from '@lody/shared';
 
 // # WorkspaceWriter — the renderer's authored-write seam
 //
@@ -21,7 +27,7 @@ export interface WorkspaceWriter {
   startSession(
     sessionId: string,
     meta: Record<string, unknown>,
-    entry: Record<string, unknown>,
+    entry: SessionHistory,
     dispatch: {
       userTurnId: string;
       userId: string;
@@ -35,6 +41,15 @@ export interface WorkspaceWriter {
 
   /** Flock-doc row put (agent config, machine command queue, external history). */
   flockRowPut(flockDocId: string, key: readonly string[], value: unknown): Promise<void>;
+
+  /** Compute a replacement against the current row in one local transaction.
+   * Return undefined to leave the row untouched (including an absent row).
+   */
+  flockRowUpdate(
+    flockDocId: string,
+    key: readonly string[],
+    update: (current: unknown) => unknown | undefined
+  ): Promise<boolean>;
 
   /** Insert a Flock-doc row only when its key is absent in the same transaction. */
   flockRowPutIfAbsent(
@@ -54,7 +69,7 @@ export interface WorkspaceWriter {
    */
   appendSessionTurn(
     sessionId: string,
-    entry: Record<string, unknown>,
+    entry: SessionHistory,
     dispatch?: {
       userTurnId: string;
       userId: string;
@@ -64,17 +79,23 @@ export interface WorkspaceWriter {
   ): Promise<void>;
 
   /** Append a history entry without coupling it to dispatch. */
-  appendSessionHistory(sessionId: string, entry: Record<string, unknown>): Promise<void>;
+  appendSessionHistory(sessionId: string, entry: SessionHistory): Promise<void>;
 
   /**
    * Replace an existing history entry in place (resend resets a turn to
    * pending). Callers with a functional updater resolve it to the concrete
    * replacement entry before calling this.
    */
-  updateSessionHistory(
+  updateSessionHistory(sessionId: string, entryId: string, entry: SessionHistory): Promise<void>;
+
+  /** Resolve against the latest proposal; never write back a rendered history snapshot. */
+  resolveSessionTaskProposal(
     sessionId: string,
     entryId: string,
-    entry: Record<string, unknown>
+    proposalId: string,
+    resolution: Pick<TaskProposalMeta, 'taskId'> & {
+      outcome: NonNullable<TaskProposalMeta['outcome']>;
+    }
   ): Promise<void>;
 
   /**
@@ -85,7 +106,7 @@ export interface WorkspaceWriter {
   respondSessionPermission(
     sessionId: string,
     requestId: string,
-    outcome: Record<string, unknown>
+    outcome: PermissionOutcome
   ): Promise<void>;
 
   /** Message-queue mutations (durable CRDT on the session doc). */

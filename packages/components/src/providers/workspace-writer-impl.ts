@@ -77,9 +77,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
         withSessionStore(sessionId, (store) => {
-          store.setState((draft: SessionDocMeta) => {
-            draft.history.push(entry as SessionDocMeta['history'][number]);
-          });
+          store.historyWriter.append(entry);
         }),
       ]);
       void dispatch;
@@ -93,6 +91,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       const handle = await deps.repo.openFlockDoc(flockDocId);
       handle.flock.set([...key], value as Parameters<typeof handle.flock.set>[1]);
       handle.flock.commit();
+    },
+
+    async flockRowUpdate(flockDocId, key, update) {
+      const handle = await deps.repo.openFlockDoc(flockDocId);
+      return handle.flock.txn(() => {
+        const next = update(handle.flock.get([...key]));
+        if (next === undefined) return false;
+        handle.flock.set([...key], next as Parameters<typeof handle.flock.set>[1]);
+        return true;
+      });
     },
 
     async flockRowPutIfAbsent(
@@ -120,9 +128,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionTurn(sessionId, entry, dispatch) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        store.historyWriter.append(entry);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -131,39 +137,38 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionHistory(sessionId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+        store.historyWriter.append(entry);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          const history = draft.history as SessionDocMeta['history'];
-          const idx = history.findIndex((h) => (h as { id?: string }).id === entryId);
-          if (idx < 0) return;
-          history[idx] = entry as SessionDocMeta['history'][number];
+        store.historyWriter.replace(entryId, entry);
+      });
+    },
+
+    async resolveSessionTaskProposal(sessionId, entryId, proposalId, resolution) {
+      await withSessionStore(sessionId, (store) => {
+        store.historyWriter.update((history) => {
+          const entry = history.find((item) => item.id === entryId);
+          const target = entry?.items?.find(
+            (item) =>
+              item?.type === 'system_notice' &&
+              item.name === 'task_proposal' &&
+              item.meta?.proposalId === proposalId
+          );
+          if (target?.type === 'system_notice' && target.name === 'task_proposal' && target.meta) {
+            target.meta.outcome = resolution.outcome;
+            if (resolution.taskId !== undefined) target.meta.taskId = resolution.taskId;
+          }
+          return history;
         });
       });
     },
 
     async respondSessionPermission(sessionId, requestId, outcome) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          for (const entry of draft.history as SessionDocMeta['history']) {
-            const items = (entry as { items?: unknown[] }).items;
-            if (!Array.isArray(items)) continue;
-            for (const item of items) {
-              const pr = (item as { permissionRequest?: { requestId?: string; outcome?: unknown } })
-                .permissionRequest;
-              if (pr && pr.requestId === requestId) {
-                pr.outcome = outcome;
-                return;
-              }
-            }
-          }
-        });
+        store.historyWriter.respondPermission(requestId, outcome);
       });
     },
 

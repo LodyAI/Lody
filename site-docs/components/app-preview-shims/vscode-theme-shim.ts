@@ -1,9 +1,9 @@
 // Preview shim for `@/lib/vscode-theme`.
 // The real barrel pulls bundled VS Code theme JSON via Vite `?raw` imports and shiki,
 // which the public-site preview does not need. Only terminal-component and
-// theme-provider consume it, and the preview renders no code/terminal blocks, so no-op
-// theme helpers suffice. theme-provider's relative import is redirected to this `@/` path
-// so the alias can intercept it.
+// theme-provider and share-theme-scope consume it, and the preview renders no
+// code/terminal/share-image blocks, so no-op theme helpers suffice. theme-provider's
+// relative import is redirected to this `@/` path so the alias can intercept it.
 export type VSCodeTerminalTheme = Record<string, unknown>;
 export type LodyResolvedVSCodeTheme = Record<string, unknown>;
 export type VSCodeThemeMode = 'light' | 'dark';
@@ -26,6 +26,7 @@ export const DEFAULT_VSCODE_DIFF_THEME_FALLBACK = {
 } as const;
 
 export const createVSCodeTerminalTheme = (..._args: unknown[]): VSCodeTerminalTheme => ({});
+export const createThemeCssVariables = (..._args: unknown[]): Record<string, string> => ({});
 export const resolveAnsiColorToCss = (..._args: unknown[]): string => '';
 export const applyVSCodeThemeCssVariables = (..._args: unknown[]): void => {};
 export const compactThemeSelection = (selection: unknown): unknown => selection;
