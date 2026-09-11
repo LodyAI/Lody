@@ -102,6 +102,10 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 
 ## ACP dispatch
 
+- Automatic Role cleanup requires a fresh matching runtime schema and owner access.
+  Persist through a conditional writer transaction; never overwrite intervening edits
+  or clear model/permission pins. See [intent](../../../../specs/agent-role-schema-reconciliation.md).
+
 - Display every provider-supplied rate-limit window name with localized duration via
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.
 - Before creating top-level or child sessions, call `filterAcpSessionConfigOptionValues()`

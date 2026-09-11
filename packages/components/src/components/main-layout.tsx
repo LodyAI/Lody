@@ -1,4 +1,5 @@
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
+import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
 import { type ReactNode } from 'react';
@@ -41,6 +42,11 @@ function WorkspaceBadge() {
   return null;
 }
 
+function AgentRoleSchemaReconciliation() {
+  useAgentRoleSchemaReconciliation();
+  return null;
+}
+
 /** Keeps the workspace task index live for the sidebar count and the Tasks page. */
 function TaskIndexSync() {
   useTaskIndexSync();
@@ -69,6 +75,7 @@ export function MainLayout({
       <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
         {children}
         {owner && workspaceReady ? <WorkspaceBadge /> : null}
+        {owner && workspaceReady ? <AgentRoleSchemaReconciliation /> : null}
         {tasksEnabled && workspaceReady ? (
           <>
             <TaskIndexSync />
