@@ -2886,7 +2886,13 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         delegatedRequester: toDelegatedSessionRequester(invoking.identity),
       });
     } catch (error) {
-      if (error instanceof WorkspaceSyncUnavailableError) {
+      // ensureTargetMachineOnline reaches classifyLocalDaemonIpcError for a target on
+      // this machine, so chat prevalidation raises the daemon error as well as the sync
+      // one; session_create already passes the daemon error through.
+      if (
+        error instanceof WorkspaceSyncUnavailableError ||
+        error instanceof LocalDaemonAvailabilityError
+      ) {
         throw error;
       }
       const machineAccessError = toMachineAccessMcpError(error);
@@ -3482,6 +3488,9 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
             throw error;
+          }
+          if (error instanceof LocalDaemonAvailabilityError) {
+            return batchFailure(error.code, error.message, error.retryable, item.label);
           }
           const machineAccessError = toMachineAccessMcpError(error);
           if (machineAccessError) {
