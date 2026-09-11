@@ -5304,55 +5304,70 @@ export class SessionExecutionService {
     const currentTurnId = activeTurnId ?? executionTurnId ?? runtimeTurnId;
     // Cancel is exact-match only: a stale stop request must not interrupt a newer assistant turn.
     if (!isPrompting && !isCurrentExecutionTurn) {
-      // Only inspect and repair durable history when no live turn owns the session.
-      // A stale request that races with a newer turn must not touch that turn's
-      // session-wide presence or require history methods on lightweight test/docs.
+      // Stale repair mutates session-wide presence and history, so it must not
+      // overlap a newer turn or another durable rewrite. Hold the conflict lease
+      // across the awaited history read and recheck live ownership before
+      // cleaning up: a turn that starts while getHistory() is awaited must keep
+      // its presence and dispatch metadata.
       if (currentTurnId == null) {
-        const history = await sessionDoc.getHistory();
-        const hasUnfinishedRequestedTurn = history.some(
-          (entry) =>
-            entry.id === turnId &&
-            entry.role === 'assistant' &&
-            entry.finished !== true &&
-            typeof entry.endedAt !== 'number' &&
-            entry.items?.some(
-              (item) =>
-                item.type === 'tool_call' &&
-                item.activityKind === 'context_compaction' &&
-                (item.status === 'pending' || item.status === 'in_progress')
-            ) === true
-        );
-        if (hasUnfinishedRequestedTurn) {
-          this.deps.logger.debug(
-            `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
-          );
-          this.deps.clearSessionActivePresence(sessionId);
-          await sessionDoc.updateHistory((nextHistory) => {
-            for (const entry of nextHistory) {
-              if (entry.id !== turnId) continue;
-              entry.finished = true;
-              entry.endedAt = getServerNow();
-              if (!entry.items) continue;
-              for (const item of entry.items) {
-                if (
-                  item.type === 'tool_call' &&
-                  item.activityKind === 'context_compaction' &&
-                  (item.status === 'pending' || item.status === 'in_progress')
-                ) {
-                  item.status = 'failed';
-                }
+        const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
+        if (releaseConflict) {
+          try {
+            const liveTurnId =
+              this.deps.getActiveTurnId(sessionId) ??
+              this.currentTurnBySession.get(sessionId) ??
+              this.turnRuntimeBySession.get(sessionId)?.turnId;
+            if (liveTurnId == null) {
+              const history = await sessionDoc.getHistory();
+              const hasUnfinishedRequestedTurn = history.some(
+                (entry) =>
+                  entry.id === turnId &&
+                  entry.role === 'assistant' &&
+                  entry.finished !== true &&
+                  typeof entry.endedAt !== 'number' &&
+                  entry.items?.some(
+                    (item) =>
+                      item.type === 'tool_call' &&
+                      item.activityKind === 'context_compaction' &&
+                      (item.status === 'pending' || item.status === 'in_progress')
+                  ) === true
+              );
+              if (hasUnfinishedRequestedTurn) {
+                this.deps.logger.debug(
+                  `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
+                );
+                this.deps.clearSessionActivePresence(sessionId);
+                await sessionDoc.updateHistory((nextHistory) => {
+                  for (const entry of nextHistory) {
+                    if (entry.id !== turnId) continue;
+                    entry.finished = true;
+                    entry.endedAt = getServerNow();
+                    if (!entry.items) continue;
+                    for (const item of entry.items) {
+                      if (
+                        item.type === 'tool_call' &&
+                        item.activityKind === 'context_compaction' &&
+                        (item.status === 'pending' || item.status === 'in_progress')
+                      ) {
+                        item.status = 'failed';
+                      }
+                    }
+                  }
+                  return nextHistory;
+                });
+
+                await this.finalizeCancelledTurn({
+                  sessionId,
+                  sessionDoc,
+                  turnId,
+                  reportTurnError: false,
+                });
+                return { success: true };
               }
             }
-            return nextHistory;
-          });
-
-          await this.finalizeCancelledTurn({
-            sessionId,
-            sessionDoc,
-            turnId,
-            reportTurnError: false,
-          });
-          return { success: true };
+          } finally {
+            releaseConflict();
+          }
         }
       }
       this.deps.logger.debug(
