@@ -3962,6 +3962,7 @@
   "sharing.closePreview": "关闭预览",
   "sharing.permissionPending": "等待作者处理",
   "sharing.manager.disclosure": "持链接者可完整阅读此对话及后续更新，链接可被转发。",
+  "sharing.manager.publicPreview": "链接预览会公开显示对话标题。",
   "sharing.manager.loading": "正在加载分享设置…",
   "sharing.manager.active": "链接生效中",
   "sharing.manager.revoked": "链接已撤销",

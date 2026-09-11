@@ -41,6 +41,17 @@ ordinary cache clearing preserves it, while a full local reset removes it.
 
 ## Reader behavior
 
+Link previews publicly display the main shared conversation title by default.
+The management dialog states this next to the link disclosure without another
+confirmation. The host may serve that title, the Lody mark and fixed explanatory
+copy without the access fragment; no body, summary, workspace name or attachment
+content belongs in the preview. Title updates are eventually consistent.
+Preview HTML and image routes must enforce the active grant lifecycle. Reset
+invalidates old image versions; because the persistent share ID stays the same,
+the fragment-free page can show the current preview after reset even to a holder
+of an old link. The old fragment still cannot read content. Revocation stops new
+preview delivery; copies already cached by external services cannot be recalled.
+
 The authorized manifest supplies titles and the only navigable target set.
 Selecting a target opens its original Loro stream in memory, including existing
 history and live updates. Transient connection failures pause updates and allow

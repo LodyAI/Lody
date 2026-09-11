@@ -160,6 +160,12 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                   'Anyone with the link reads the full conversation and its later updates. Links can be forwarded.'
                 )}
               </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {t(
+                  'sharing.manager.publicPreview',
+                  'Link previews publicly display the conversation title.'
+                )}
+              </p>
               {root?.status === 'active' && root.canManage && !hasSecret && (
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   {t(

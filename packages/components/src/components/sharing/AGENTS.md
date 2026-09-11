@@ -15,8 +15,9 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   It is a fixed header over ONE scrolling body: the keyboard hook observes that body,
   and the manager's action row stays pinned to the body's bottom.
   Sub-conversations are ONE switch, not a checklist, and there is no separate consent
-  checkbox: the disclosure on the link card is the notice. The switch resolves to an
-  explicit id set of the descendants that are eligible RIGHT NOW, capped at
+  checkbox: the disclosure on the link card is the notice. The preview notice states that the root title is public
+  without the access fragment; it must not imply public body/attachment access.
+  The switch resolves to an explicit id set of the descendants that are eligible RIGHT NOW, capped at
   `SESSION_SHARE_MAX_TARGETS`; never let it imply that later ones join by themselves,
   and never let it pull in an ineligible target. State each meaning once, next to what
   it describes. Explain a blocked action rather than only disabling it — an unshareable

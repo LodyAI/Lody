@@ -3962,6 +3962,7 @@
   "sharing.closePreview": "Close preview",
   "sharing.permissionPending": "Waiting for the author",
   "sharing.manager.disclosure": "Anyone with the link reads the full conversation and its later updates. Links can be forwarded.",
+  "sharing.manager.publicPreview": "Link previews publicly display the conversation title.",
   "sharing.manager.loading": "Loading sharing settings…",
   "sharing.manager.active": "Link active",
   "sharing.manager.revoked": "Link revoked",
