@@ -87,9 +87,8 @@ export function useConversationStreamItems(
     (turnIndex: number) => {
       if (!view) return;
       // Hydrating fills the row's summary; the turn may then be evicted again.
-      void view.ensureRange(turnIndex, turnIndex + 1).then(() => {
-        view.release(turnIndex, turnIndex + 1);
-      });
+      const range = view.acquireRange(turnIndex, turnIndex + 1);
+      void range.ready.finally(() => range.release());
     },
     [view]
   );

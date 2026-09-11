@@ -50,6 +50,7 @@ export function createConversationDerivation<F>(
   let passRunning = false;
   let passRequested = false;
   let lastTurnCount = view.turnCount;
+  let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
 
   const notify = () => {
     version += 1;
@@ -100,7 +101,11 @@ export function createConversationDerivation<F>(
   const unsubscribe = view.subscribe((change) => {
     if (disposed) return;
     let changed = false;
-    if (change.kind === 'index') {
+    if (change.kind === 'structure') {
+      changed = pruneRemoved();
+      changed = deriveRange(change.from ?? 0, change.to ?? view.turnCount, true) || changed;
+      requestPass();
+    } else if (change.kind === 'index') {
       if (view.turnCount < lastTurnCount) changed = pruneRemoved() || changed;
       lastTurnCount = view.turnCount;
       // Appended turns land in the hydrated tail; derive whatever is there.
@@ -127,16 +132,19 @@ export function createConversationDerivation<F>(
       if (pending.length === 0) continue;
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;
-      // `ensureRange` pins before its first await, so the release has to run
+      // `acquireRange` pins before its first await, so the release has to run
       // even when this derivation is disposed mid-hydration: the view outlives
       // it in the warm store cache, and a leaked pin makes those turns
       // permanently un-evictable.
-      await view.ensureRange(lo, hi);
+      const range = view.acquireRange(lo, hi);
+      activeRange = range;
       try {
+        await range.ready;
         if (disposed) return;
         if (deriveRange(lo, hi)) notify();
       } finally {
-        view.release(lo, hi);
+        range.release();
+        activeRange = undefined;
       }
       await yieldToEventLoop();
     }
@@ -193,6 +201,7 @@ export function createConversationDerivation<F>(
     },
     dispose: () => {
       disposed = true;
+      activeRange?.release();
       unsubscribe();
       listeners.clear();
       facts.clear();

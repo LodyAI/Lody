@@ -20,7 +20,7 @@ export type CreateConversationViewFromHistoryOptions = {
  * A fully hydrated `ConversationView` over a materialized history array — the
  * rollback path (feature flag off) where loro-mirror still builds the whole
  * list — and the shape stories and tests use. Every turn is always hydrated,
- * so `ensureRange` resolves immediately and `release` is a no-op.
+ * so `acquireRange` resolves immediately and `release` is a no-op.
  */
 export function createConversationViewFromHistory(
   options: CreateConversationViewFromHistoryOptions
@@ -47,11 +47,15 @@ export function createConversationViewFromHistory(
     if (next === history) return;
     const previous = history;
     history = next;
-    if (previous.length !== next.length || previous.some((entry, i) => entry?.id !== next[i]?.id)) {
+    const structural =
+      previous.length !== next.length || previous.some((entry, i) => entry?.id !== next[i]?.id);
+    if (structural) {
       indexById = buildIndexById(next);
     }
     version += 1;
     const tailFrom = conversationTailStart(next.length, tailKeep);
+    if (structural)
+      for (const listener of listeners) listener({ kind: 'structure', from: 0, to: next.length });
     for (const listener of listeners) listener({ kind: 'index' });
     for (const listener of listeners) listener({ kind: 'tail', from: tailFrom, to: next.length });
     let lo = Number.POSITIVE_INFINITY;
@@ -81,8 +85,7 @@ export function createConversationViewFromHistory(
     indexOf: (turnId) => indexById.get(turnId) ?? -1,
     turn: (i) => history[i],
     isHydrated: (i) => i >= 0 && i < history.length,
-    ensureRange: () => Promise.resolve(),
-    release: () => {},
+    acquireRange: () => ({ ready: Promise.resolve(), release: () => {} }),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {

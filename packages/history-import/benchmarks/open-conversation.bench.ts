@@ -16,7 +16,7 @@
  *   open        import + createConversationViewFromDoc + the rows the first
  *               paint reads (every index row, the hydrated tail) — what a client pays now
  *   open+idle   open, plus the background summary pass driven to completion
- *   scroll      one ensureRange of 30 turns at a rotating offset on an open view
+ *   scroll      one acquireRange of 30 turns at a rotating offset on an open view
  *               (20+ iterations; read the p99 column)
  *   stream      one text delta appended to the tail turn with the view subscribed
  *   append      append one user turn through HistoryWriter with the view subscribed
@@ -304,9 +304,10 @@ async function main(): Promise<void> {
       .add('scroll', async () => {
         const from = scrollOffset;
         const to = Math.min(scrollView.turnCount, from + SCROLL_WINDOW);
-        await scrollView.ensureRange(from, to);
+        const range = scrollView.acquireRange(from, to);
+        await range.ready;
         for (let i = from; i < to; i += 1) scrollView.turn(i);
-        scrollView.release(from, to);
+        range.release();
         scrollOffset = (scrollOffset + SCROLL_WINDOW * 7) % Math.max(1, scrollView.turnCount);
       })
       .add('stream', () => {

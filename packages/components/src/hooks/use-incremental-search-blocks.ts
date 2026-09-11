@@ -5,9 +5,6 @@ import { extractSearchBlocksForMessage, type SessionSearchBlock } from '@/lib/se
 
 const EMPTY_BLOCKS: SessionSearchBlock[] = [];
 
-/** Turns hydrated per step while filling the search index. */
-const HYDRATE_CHUNK = 48;
-
 /**
  * Builds the in-conversation search index lazily, only while search is open.
  *
@@ -23,7 +20,9 @@ export function useIncrementalSearchBlocks(
   isSearchOpen: boolean
 ): SessionSearchBlock[] {
   const [blocks, setBlocks] = useState<SessionSearchBlock[]>(EMPTY_BLOCKS);
-  const cacheRef = useRef(new WeakMap<SessionHistory, SessionSearchBlock[]>());
+  const cacheRef = useRef(
+    new WeakMap<SessionHistory, { index: number; blocks: SessionSearchBlock[] }>()
+  );
 
   useEffect(() => {
     if (!isSearchOpen || !view) {
@@ -31,7 +30,7 @@ export function useIncrementalSearchBlocks(
       return undefined;
     }
     let cancelled = false;
-    const pinned: [number, number][] = [];
+    let range: ReturnType<ConversationView['acquireRange']> | undefined;
 
     const rebuild = () => {
       if (cancelled) return;
@@ -40,32 +39,39 @@ export function useIncrementalSearchBlocks(
       for (let i = 0; i < view.turnCount; i += 1) {
         const turn = view.turn(i);
         if (!turn) continue;
-        let turnBlocks = cache.get(turn);
-        if (!turnBlocks) {
-          turnBlocks = extractSearchBlocksForMessage(turn, i);
-          cache.set(turn, turnBlocks);
+        let cached = cache.get(turn);
+        if (!cached || cached.index !== i) {
+          cached = { index: i, blocks: extractSearchBlocksForMessage(turn, i) };
+          cache.set(turn, cached);
         }
-        for (const block of turnBlocks) next.push(block);
+        for (const block of cached.blocks) next.push(block);
       }
       setBlocks(next);
     };
-    // Streaming changes coalesce to one rebuild per frame; the hydration loop
-    // below already yields between chunks, so it rebuilds directly.
+    // Hydration and streaming both rebuild at most once per frame.
     const unsubscribe = subscribeOnFrame((listener) => view.subscribe(listener), rebuild);
-    void (async () => {
-      for (let from = 0; from < view.turnCount; from += HYDRATE_CHUNK) {
-        if (cancelled) break;
-        const to = Math.min(view.turnCount, from + HYDRATE_CHUNK);
-        pinned.push([from, to]);
-        await view.ensureRange(from, to);
-        rebuild();
-      }
-    })();
+    const acquire = () => {
+      // Pin the new set before releasing the old one, keeping unchanged turns cached.
+      const next = view.acquireRange(0, view.turnCount);
+      range?.release();
+      range = next;
+      void next.ready.then(
+        () => {
+          if (range === next) rebuild();
+        },
+        (error) => console.error('Failed to load conversation search', error)
+      );
+    };
+    const unsubscribeStructure = view.subscribe((change) => {
+      if (change.kind === 'structure') acquire();
+    });
+    acquire();
 
     return () => {
       cancelled = true;
       unsubscribe();
-      for (const [from, to] of pinned) view.release(from, to);
+      unsubscribeStructure();
+      range?.release();
     };
   }, [isSearchOpen, view]);
 

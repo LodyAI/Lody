@@ -49,16 +49,27 @@ export function useTurnRange(
   const extend = options.extendToPrecedingUserTurn === true;
   useEffect(() => {
     if (!view || to <= from) return undefined;
-    let start = Math.max(0, from);
-    if (extend && start > 0) {
-      const scan = { turnCount: start, index: (i: number) => view.index(i) };
-      const user = findLastIndex(scan, (row) => row.role === 'user', { limit: 50 });
-      if (user >= 0) start = user;
-    }
-    const end = Math.min(view.turnCount, to);
-    if (end <= start) return undefined;
-    void view.ensureRange(start, end);
-    return () => view.release(start, end);
+    let range: ReturnType<ConversationView['acquireRange']> | undefined;
+    const acquire = () => {
+      let start = Math.max(0, from);
+      if (extend && start > 0) {
+        const scan = { turnCount: start, index: (i: number) => view.index(i) };
+        const user = findLastIndex(scan, (row) => row.role === 'user', { limit: 50 });
+        if (user >= 0) start = user;
+      }
+      const next = view.acquireRange(start, Math.min(view.turnCount, to));
+      range?.release();
+      range = next;
+      void next.ready.catch((error) => console.error('Failed to load conversation range', error));
+    };
+    const unsubscribe = view.subscribe((change) => {
+      if (change.kind === 'structure') acquire();
+    });
+    acquire();
+    return () => {
+      unsubscribe();
+      range?.release();
+    };
   }, [view, from, to, extend]);
 }
 

@@ -9,7 +9,7 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
 `SessionDocStore`:
 
 - **Read** `store.history` — a `ConversationView`: `index(i)` for the always-present
-  per-turn row, `turn(i)` for a hydrated turn, `ensureRange`/`release` to hold a
+  per-turn row, `turn(i)` for a hydrated turn, `acquireRange` and its release handle to hold a
   window. In React use `useSessionDoc().history`, `useConversationTail`,
   `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
 - **Write** `store.historyWriter` — `append`, `replace`, `respondPermission`,

@@ -17,7 +17,13 @@ const projection = (entry: SessionHistory, afterHistoryId?: string | null) => ({
 });
 
 const entry = (id: string): SessionHistory =>
-  ({ id, role: 'user', timestamp: '2026-01-01T00:00:00.000Z', fileDiff: [], items: [] }) as unknown as SessionHistory;
+  ({
+    id,
+    role: 'user',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    fileDiff: [],
+    items: [],
+  }) as unknown as SessionHistory;
 
 describe('createConversationViewFromHistory', () => {
   it('is fully hydrated and republishes on history changes', async () => {
@@ -37,7 +43,9 @@ describe('createConversationViewFromHistory', () => {
     expect(view.turn(0)).toBe(history[0]);
     expect(view.index(1)?.summary?.toolCalls).toBe(1);
     expect(view.indexOf('a-2')).toBe(5);
-    await view.ensureRange(0, 6);
+    const range = view.acquireRange(0, 6);
+    await range.ready;
+    range.release();
 
     const changes: string[] = [];
     view.subscribe((change) => changes.push(change.kind));
@@ -45,13 +53,17 @@ describe('createConversationViewFromHistory', () => {
     for (const listener of listeners) listener();
     expect(view.turnCount).toBe(7);
     expect(view.indexOf('u-new')).toBe(6);
-    expect(changes).toEqual(['index', 'tail']);
+    expect(changes).toEqual(['structure', 'index', 'tail']);
   });
 });
 
 describe('createProjectedConversationView', () => {
   const baseOf = (history: SessionHistory[]) =>
-    createConversationViewFromHistory({ sessionId, getHistory: () => history, subscribe: () => () => {} });
+    createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => history,
+      subscribe: () => () => {},
+    });
 
   it('returns the base view when there is nothing to project', () => {
     const base = baseOf([entry('a')]);

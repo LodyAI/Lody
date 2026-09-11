@@ -39,9 +39,9 @@ export type CreateConversationViewFromDocOptions = {
   tailKeep?: number;
   /** Background pass scheduler; defaults to `requestIdleCallback` (or a timer). */
   scheduleIdle?: IdleScheduler;
-  /** Yield between chunks of a large `ensureRange`; defaults to a macrotask. */
+  /** Yield between chunks of a large `acquireRange`; defaults to a macrotask. */
   yieldToEventLoop?: () => Promise<void>;
-  /** Turns hydrated synchronously per `ensureRange` before the call goes chunked. */
+  /** Turns hydrated synchronously per `acquireRange` before the call goes chunked. */
   hydrateChunkSize?: number;
   /**
    * Message items hydrated per synchronous chunk. Turn count alone is a poor
@@ -532,6 +532,7 @@ export function createConversationViewFromDoc(
     };
 
     let structural = false;
+    let structuralFrom = Number.POSITIVE_INFINITY;
     for (const event of events) {
       if (event.target !== listId || event.diff.type !== 'list') continue;
       structural = true;
@@ -540,8 +541,10 @@ export function createConversationViewFromDoc(
         if (delta.retain !== undefined) {
           cursor += delta.retain;
         } else if (delta.delete !== undefined) {
+          structuralFrom = Math.min(structuralFrom, cursor);
           if (delta.delete > 0) removeSlots(cursor, delta.delete);
         } else if (delta.insert !== undefined) {
+          structuralFrom = Math.min(structuralFrom, cursor);
           insertSlots(cursor, delta.insert);
           cursor += delta.insert.length;
         }
@@ -635,6 +638,7 @@ export function createConversationViewFromDoc(
     }
 
     bump();
+    if (structural) emit({ kind: 'structure', from: structuralFrom, to: cids.length });
     if (indexChanged) emit({ kind: 'index' });
     if (tailHi >= 0) emit({ kind: 'tail', from: tailLo, to: tailHi + 1 });
     if (rangeHi >= 0) emit({ kind: 'range', from: rangeLo, to: rangeHi + 1 });
@@ -664,10 +668,8 @@ export function createConversationViewFromDoc(
     handleBatch(batch);
   });
 
-  const pinRange = (from: number, to: number, delta: 1 | -1) => {
-    for (let i = from; i < to; i += 1) {
-      const cid = cids[i];
-      if (!cid) continue;
+  const pinContainers = (targets: readonly ContainerID[], delta: 1 | -1) => {
+    for (const cid of targets) {
       const next = (pins.get(cid) ?? 0) + delta;
       if (next <= 0) pins.delete(cid);
       else pins.set(cid, next);
@@ -696,10 +698,17 @@ export function createConversationViewFromDoc(
       const cid = cids[i];
       return cid !== null && cid !== undefined && hydrated.has(cid);
     },
-    ensureRange: async (from, to) => {
-      if (disposed) return;
+    acquireRange: (from, to) => {
+      if (disposed) return { ready: Promise.resolve(), release: () => {} };
       const [a, b] = clampRange(from, to);
-      pinRange(a, b, 1);
+      const targets = cids.slice(a, b).filter((cid): cid is ContainerID => cid !== null);
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        pinContainers(targets, -1);
+        evict();
+      };
       // Chunks are cut by turn count AND item count; the first chunk runs
       // synchronously so small ranges resolve without a tick.
       const chunks: ContainerID[][] = [];
@@ -721,19 +730,20 @@ export function createConversationViewFromDoc(
         weight += turnWeight;
       }
       if (chunk.length > 0) chunks.push(chunk);
-      if (chunks.length === 0) return;
-      hydrateMany(chunks[0]!);
-      for (let index = 1; index < chunks.length; index += 1) {
-        await yieldToEventLoop();
-        if (disposed) return;
-        hydrateMany(chunks[index]!);
-      }
-    },
-    release: (from, to) => {
-      if (disposed) return;
-      const [a, b] = clampRange(from, to);
-      pinRange(a, b, -1);
-      evict();
+      pinContainers(targets, 1);
+      const hydrationReady = (async () => {
+        try {
+          for (let index = 0; index < chunks.length; index += 1) {
+            if (index > 0) await yieldToEventLoop();
+            if (disposed || released) return;
+            hydrateMany(chunks[index]!.filter((cid) => indexByCid.has(cid)));
+          }
+        } catch (error) {
+          release();
+          throw error;
+        }
+      })();
+      return { ready: hydrationReady, release };
     },
     subscribe: (listener) => {
       listeners.add(listener);

@@ -114,13 +114,11 @@ export function createProjectedConversationView(
       if (!slot) return false;
       return 'base' in slot ? base.isHydrated(slot.base) : true;
     },
-    ensureRange: (from, to) => {
+    acquireRange: (from, to) => {
       const range = baseRangeOf(from, to);
-      return range ? base.ensureRange(range[0], range[1]) : Promise.resolve();
-    },
-    release: (from, to) => {
-      const range = baseRangeOf(from, to);
-      if (range) base.release(range[0], range[1]);
+      return range
+        ? base.acquireRange(range[0], range[1])
+        : { ready: Promise.resolve(), release: () => {} };
     },
     subscribe: (listener) => base.subscribe((change) => listener(translate(change))),
     dispose: () => {},

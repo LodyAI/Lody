@@ -53,6 +53,70 @@ const turnMapAt = (
 };
 
 describe('createConversationViewFromDoc', () => {
+  it('releases only its own containers after an insertion shifts overlapping leases', async () => {
+    const { doc, view } = openView(6, { tailKeep: 0, maxHydrated: 1 });
+    const first = view.acquireRange(2, 3);
+    const second = view.acquireRange(1, 3);
+    await Promise.all([first.ready, second.ready]);
+    const inserted = doc.getList('history').insertContainer(0, new LoroMap());
+    inserted.set('id', 'inserted');
+    inserted.set('role', 'system');
+    doc.commit();
+    first.release();
+    first.release(); // A repeated cleanup cannot remove the other owner's pin.
+    const unrelated = view.acquireRange(8, 9);
+    await unrelated.ready;
+    unrelated.release();
+    expect(view.isHydrated(view.indexOf('a-0'))).toBe(true);
+    expect(view.isHydrated(view.indexOf('u-1'))).toBe(true);
+    second.release();
+    expect(
+      Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean)
+    ).toHaveLength(1);
+    view.dispose();
+  });
+
+  it('stops chunked hydration when its lease is released', async () => {
+    const doc = reimport(buildSessionDoc(buildFixtureHistory(6)));
+    let resume!: () => void;
+    const view = createConversationViewFromDoc(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      maxHydrated: 0,
+      hydrateChunkSize: 1,
+      scheduleIdle: createManualIdle().scheduleIdle,
+      yieldToEventLoop: () =>
+        new Promise<void>((resolve) => {
+          resume = resolve;
+        }),
+    });
+    const range = view.acquireRange(0, 8);
+    expect(view.isHydrated(0)).toBe(true);
+    range.release();
+    resume();
+    await range.ready;
+    expect(Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).some(Boolean)).toBe(
+      false
+    );
+    view.dispose();
+  });
+
+  it('releases pins when chunked hydration fails', async () => {
+    const doc = reimport(buildSessionDoc(buildFixtureHistory(3)));
+    const view = createConversationViewFromDoc(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      maxHydrated: 0,
+      hydrateChunkSize: 1,
+      scheduleIdle: createManualIdle().scheduleIdle,
+      yieldToEventLoop: () => Promise.reject(new Error('synthetic hydration failure')),
+    });
+    const range = view.acquireRange(0, 4);
+    await expect(range.ready).rejects.toThrow('synthetic hydration failure');
+    expect(view.isHydrated(0)).toBe(false);
+    view.dispose();
+  });
+
   it('indexes every turn eagerly with the scalars Mirror exposes', () => {
     const { expected, view } = openView(12);
     expect(view.turnCount).toBe(expected.length);
@@ -91,7 +155,8 @@ describe('createConversationViewFromDoc', () => {
     expect(view.turn(n - 1)).toEqual(expected[n - 1]);
     expect(view.turn(0)).toBeUndefined();
 
-    await view.ensureRange(0, 5);
+    const range = view.acquireRange(0, 5);
+    await range.ready;
     for (let i = 0; i < 5; i += 1) expect(view.turn(i)).toEqual(expected[i]);
     // Hydration filled summaries and the user's shallow config on the index.
     expect(view.index(0)?.summary?.headText).toContain('Round 0');
@@ -104,13 +169,15 @@ describe('createConversationViewFromDoc', () => {
       cliType: 'builtin',
       agentType: 'claude',
     });
+    range.release();
   });
 
   it('evicts unpinned, non-tail turns once maxHydrated is exceeded', async () => {
     const { view } = openView(20, { tailKeep: 2, maxHydrated: 6 });
-    await view.ensureRange(0, 8); // pinned: 8 + tail 2 = 10 hydrated, over the cap but exempt
+    const range = view.acquireRange(0, 8); // pinned: 8 + tail 2 = 10 hydrated, over the cap but exempt
+    await range.ready;
     for (let i = 0; i < 8; i += 1) expect(view.isHydrated(i)).toBe(true);
-    view.release(0, 8);
+    range.release();
     let hydrated = 0;
     for (let i = 0; i < view.turnCount; i += 1) if (view.isHydrated(i)) hydrated += 1;
     expect(hydrated).toBe(6);
@@ -120,13 +187,15 @@ describe('createConversationViewFromDoc', () => {
     expect(view.isHydrated(0)).toBe(false);
   });
 
-  it('chunks a large ensureRange and emits range changes per chunk', async () => {
+  it('chunks a large acquireRange and emits range changes per chunk', async () => {
     const { expected, view } = openView(30, { tailKeep: 2, maxHydrated: 500 });
     const changes: string[] = [];
     view.subscribe((change) => changes.push(change.kind));
-    await view.ensureRange(0, expected.length);
+    const range = view.acquireRange(0, expected.length);
+    await range.ready;
     for (let i = 0; i < expected.length; i += 1) expect(view.turn(i)).toEqual(expected[i]);
     expect(changes.filter((kind) => kind === 'range').length).toBeGreaterThan(1);
+    range.release();
   });
 
   it('applies streamed text and scalar updates to the hydrated tail and the index', () => {
@@ -270,7 +339,7 @@ describe('createConversationViewFromDoc item budgets', () => {
     expect(view.turn(n - 6)).toEqual(mirrorHistoryOf(reimport(doc))[n - 6]);
   });
 
-  it('cuts ensureRange chunks by item budget and still hydrates everything', async () => {
+  it('cuts acquireRange chunks by item budget and still hydrates everything', async () => {
     const { expected, view } = openView(12, {
       tailKeep: 2,
       maxHydrated: 500,
@@ -280,8 +349,10 @@ describe('createConversationViewFromDoc item budgets', () => {
     view.subscribe((change) => {
       if (change.kind === 'range') rangeChanges += 1;
     });
-    await view.ensureRange(0, expected.length);
+    const range = view.acquireRange(0, expected.length);
+    await range.ready;
     for (let i = 0; i < expected.length; i += 1) expect(view.turn(i)).toEqual(expected[i]);
     expect(rangeChanges).toBeGreaterThan(1);
+    range.release();
   });
 });

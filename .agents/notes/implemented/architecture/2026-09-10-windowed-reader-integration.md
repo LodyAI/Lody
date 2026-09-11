@@ -41,6 +41,15 @@ finished. They are deliberately not claimed to have window-sized peak memory. Pi
 ranges and the tail may exceed the LRU target; a single giant turn is still indivisible.
 No persisted history is migrated or rewritten by reading.
 
+Range ownership was corrected after review reproduced positional cleanup releasing
+another reader's pins. `acquireRange` now returns an idempotent release handle over
+captured container ids; releasing it also stops pending hydration chunks. Explicit
+`structure` events distinguish list edits from token and summary updates. Mounted
+viewports reacquire their positional range, derivations restart missing coverage and
+invalidate replaced facts, and open search acquires current membership. Search cache
+entries also include the current position so a surviving turn cannot retain an old
+jump target. These changes preserve the shared writer and existing persisted history.
+
 ## Verification
 
 The control-plane suite runs both modes with opaque stored history and the shared writer.
@@ -48,6 +57,18 @@ Existing mixed-event and derivation tests cover invalidation and disposal; fixtu
 use the current authored-input schema. Timing assertions are kept out of unit tests.
 See the PR for the current executed commands and outcomes; browser layout, mobile memory,
 and 3000-user-round end-to-end acceptance are not established by these unit tests.
+
+Regression coverage uses real Loro documents, peer update imports and controlled
+React scheduling: 100-turn bulk appends, same-length replacements, overlapping
+range owners after insertion, cancellation/failure during hydration, and search
+positions after insertion/deletion. Timing and whole-device memory acceptance remain
+separate from these correctness checks.
+
+The fix passed the components suite (457 files / 3428 tests), history-import's
+39 tests, both package typechecks, type-aware lint, i18n, Code Collab imports
+and the platform guard. The repair checkout's uninitialized ACP submodules
+prevent the public-boundary and documentation-link checks from completing;
+the root check also encountered missing documentation-site dependencies.
 
 Related: [shared writer](2026-09-07-single-history-writer.md),
 [PR #376](https://github.com/LodyAI/Lody/pull/376).

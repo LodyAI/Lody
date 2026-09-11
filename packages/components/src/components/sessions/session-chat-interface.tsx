@@ -3350,8 +3350,9 @@ export const SessionChatInterface = memo(
         }
 
         const turnCount = conversationView.turnCount;
+        const range = conversationView.acquireRange(0, turnCount);
         try {
-          await conversationView.ensureRange(0, turnCount);
+          await range.ready;
           const history = conversationCopyRange(
             collectHydratedRange(conversationView, 0, turnCount),
             throughMessageId
@@ -3396,7 +3397,7 @@ export const SessionChatInterface = memo(
             t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
           );
         } finally {
-          conversationView.release(0, turnCount);
+          range.release();
         }
       },
       [
@@ -4836,8 +4837,9 @@ export const SessionChatInterface = memo(
         getShareImageData: async () => {
           if (!conversationView?.turnCount) return null;
           const count = conversationView.turnCount;
+          const range = conversationView.acquireRange(0, count);
           try {
-            await conversationView.ensureRange(0, count);
+            await range.ready;
             return {
               messages: collectConversationMessages(
                 collectHydratedRange(conversationView, 0, count)
@@ -4845,7 +4847,7 @@ export const SessionChatInterface = memo(
               agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
             };
           } finally {
-            conversationView.release(0, count);
+            range.release();
           }
         },
         startShareImageSelection: shareSelection.start,

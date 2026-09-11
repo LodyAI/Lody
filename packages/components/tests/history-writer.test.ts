@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { HistoryEntryWriteSchema, parseHistoryWrite, sessionDocSchema, type PermissionOutcome, type SessionHistory } from '@lody/shared';
+import {
+  HistoryEntryWriteSchema,
+  parseHistoryWrite,
+  sessionDocSchema,
+  type PermissionOutcome,
+  type SessionHistory,
+} from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/conversation-view';
@@ -33,7 +39,9 @@ const shapeOf = (doc: LoroDoc): unknown => {
 /** The op stream, ignoring commit timestamps. */
 const opsOf = (doc: LoroDoc): unknown =>
   JSON.parse(
-    JSON.stringify(doc.exportJsonUpdates(), (key, value) => (key === 'timestamp' ? undefined : value))
+    JSON.stringify(doc.exportJsonUpdates(), (key, value) =>
+      key === 'timestamp' ? undefined : value
+    )
   );
 
 const openWriterDoc = (history: readonly SessionHistory[] = []) => {
@@ -58,13 +66,18 @@ const mirrorOver = (doc: LoroDoc) =>
 
 describe('createHistoryWriter', () => {
   it('appends turns with the exact ops and container shape Mirror.setState produces', () => {
-    const history = buildFixtureHistory(8).map((entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry)) as SessionHistory[];
+    const history = buildFixtureHistory(8).map((entry) =>
+      parseHistoryWrite(HistoryEntryWriteSchema, entry)
+    ) as SessionHistory[];
     // Reference: today's path, one Mirror write per turn on a fresh doc.
     const reference = new LoroDoc();
     reference.setPeerId(PEER);
     const mirror = mirrorOver(reference);
     for (const entry of history) {
-      mirror.setState((prev) => ({ ...prev, history: [...(prev.history as never[]), entry] as never }));
+      mirror.setState((prev) => ({
+        ...prev,
+        history: [...(prev.history as never[]), entry] as never,
+      }));
     }
     // Candidate: the writer over an empty doc.
     const { doc, view, writer } = openWriterDoc();
@@ -84,7 +97,11 @@ describe('createHistoryWriter', () => {
   it('rejects an entry that fails the session history schema', () => {
     const { writer } = openWriterDoc();
     expect(() =>
-      writer.append({ id: 'bad', role: 'user', items: [{ type: 'text' }] } as unknown as SessionHistory)
+      writer.append({
+        id: 'bad',
+        role: 'user',
+        items: [{ type: 'text' }],
+      } as unknown as SessionHistory)
     ).toThrow(/Invalid history write/i);
   });
 
@@ -114,7 +131,11 @@ describe('createHistoryWriter', () => {
       (turn) => ({
         ...turn,
         fileDiff: [{ filePath: 'x.ts', add: 2, del: 0, cc: { v: 1, fileId: 'f' } }],
-        modelInfo: { modelId: 'test', name: 'opus', _meta: { provider: 'anthropic', effort: 'high' } },
+        modelInfo: {
+          modelId: 'test',
+          name: 'opus',
+          _meta: { provider: 'anthropic', effort: 'high' },
+        },
       }),
     ],
   ];
@@ -134,7 +155,7 @@ describe('createHistoryWriter', () => {
 
       const { doc, view, writer } = openWriterDoc(history);
       const targetIndex = view.indexOf(target.id);
-      void view.ensureRange(targetIndex, targetIndex + 1); // one turn: hydrates synchronously
+      const range = view.acquireRange(targetIndex, targetIndex + 1); // hydrates synchronously
       const current = view.turn(targetIndex)!;
       expect(writer.replace(target.id, mutate(current))).toBe(true);
 
@@ -143,6 +164,7 @@ describe('createHistoryWriter', () => {
       expect(view.turn(view.indexOf(target.id))).toEqual(
         mirrorHistoryOf(reimport(reference)).find((entry) => entry.id === target.id)
       );
+      range.release();
     });
   }
 
@@ -165,8 +187,9 @@ describe('createHistoryWriter', () => {
     mirror.setState((draft: { history: SessionHistory[] }) => {
       for (const entry of draft.history) {
         for (const item of entry.items ?? []) {
-          const request = (item as { permissionRequest?: { requestId?: string; outcome?: unknown } })
-            .permissionRequest;
+          const request = (
+            item as { permissionRequest?: { requestId?: string; outcome?: unknown } }
+          ).permissionRequest;
           if (request?.requestId === 'req-3') {
             request.outcome = outcome;
             return;

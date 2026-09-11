@@ -9,7 +9,10 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
 
 - **Read** through `ConversationView` (`createConversationViewFromDoc`):
   `index(i)` is always available from one shallow read per turn; `turn(i)`
-  only while hydrated. `ensureRange`/`release` are a ref-counted pair; the
+  only while hydrated. `acquireRange` returns a handle whose `release` is
+  idempotent and releases the captured container ids, even after positional
+  edits; release also cancels remaining hydration chunks. Positional readers
+  reacquire on `structure`, including same-length replacements. The
   LRU (`maxHydrated`) never evicts pinned turns or the last `tailKeep`
   turns, which are hydrated eagerly for streaming. Summaries and the shallow
   user config fill in idle chunks and resolve `ready`. Hydrated objects equal
@@ -34,6 +37,9 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   filled by a background hydrate-derive-release pass, updated from view
   events) or hydrate on demand and release. Never scan `turn(i)` over all
   turns synchronously.
+  Structural changes restart incomplete fact coverage and invalidate affected
+  cached facts. Open search acquires new membership and refreshes cached block
+  positions after insertions/deletions; content-only updates stay frame-coalesced.
 - **Rollback**: `isConversationViewEnabled()` (env `LODY_CONVERSATION_VIEW=0`
   or the developer setting) swaps in the old full Mirror behind a fully
   hydrated adapter (`createConversationViewFromHistory`) for one release.

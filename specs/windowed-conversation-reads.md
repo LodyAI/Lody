@@ -16,6 +16,11 @@ identity and status queries without requiring full bodies. Background derived fa
 own the complete turn objects used to calculate them. Their identity hints are weak, and
 closing their owner clears facts and cancels further work.
 
+Each acquired range has an independent release handle tied to the captured
+messages, even if history positions change. Positional readers reacquire after
+insertion, deletion or replacement. Whole-history facts and an open search must
+cover subsequently synchronized history; search navigation follows current positions.
+
 The shared HistoryWriter is the only history writer in both windowed and full-reader modes.
 Changing the reader flag must not change authored-input validation or stored-copy semantics.
 Read projections must never be treated as complete write baselines.

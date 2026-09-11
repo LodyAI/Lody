@@ -31,14 +31,15 @@ for (const windowed of [false, true]) {
   const view = session.history;
   const from = Math.max(0, view.turnCount - 30);
   const windowStart = performance.now();
-  await view.ensureRange(from, view.turnCount);
+  const range = view.acquireRange(from, view.turnCount);
+  await range.ready;
   const windowMs = performance.now() - windowStart;
   const target = view.index(view.turnCount - 1)!;
   const updateStart = performance.now();
   for (let i = 0; i < 100; i++) session.historyWriter.setField(target.id, 'endedAt', i);
   const updateMeanMs = (performance.now() - updateStart) / 100;
   if (session.historyWriter.read(target.id)?.endedAt !== 99) throw new Error('write mismatch');
-  view.release(from, view.turnCount);
+  range.release();
   const backgroundStart = performance.now();
   idle.runAll();
   const derivation = createConversationDerivation(view, (turn) => ({ id: turn.id }), {

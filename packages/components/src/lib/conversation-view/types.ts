@@ -74,29 +74,37 @@ export type ConversationViewChange = {
    * `index`: rows, ids, or `turnCount` changed (append, delete, scalar update,
    * summary arrival). `tail`: a hydrated turn inside the always-hydrated tail
    * window changed. `range`: a hydrated turn outside the tail changed or was
-   * hydrated on demand.
+   * hydrated on demand. `structure`: list membership or order changed; `from`
+   * is the first affected position and `to` is the new length. Rebind positional
+   * readers on this event, including same-length replacements.
    */
-  kind: 'index' | 'range' | 'tail';
+  kind: 'index' | 'range' | 'tail' | 'structure';
   from?: number;
   to?: number;
 };
 
 export type ConversationViewListener = (change: ConversationViewChange) => void;
 
+/** Owns the concrete turn containers captured at acquisition, even if they move. */
+export type ConversationRange = {
+  ready: Promise<void>;
+  /** Idempotent; may be called before hydration finishes. */
+  release(): void;
+};
+
 /**
  * Windowed, index-first access to a session's history.
  *
  * `index(i)` is O(1) and always answers; `turn(i)` answers synchronously only
  * while the turn is hydrated. Hydration is explicit and ref-counted:
- * `ensureRange` pins `[from, to)` and hydrates it, `release` unpins it, and the
+ * `acquireRange` captures and pins the containers in `[from, to)` and hydrates
+ * them. Its handle releases those same containers even after list edits. The
  * LRU (`maxHydrated`) only evicts turns that are neither pinned nor in the
  * always-hydrated tail (`tailKeep`). `version` bumps on every observable change
  * so React can subscribe with `useSyncExternalStore`.
  *
- * Mapping to loro-mirror's upcoming `LazyList`: `index` ↔ `LazyList.index`,
- * `turn` ↔ `LazyList.get`, `ensureRange` ↔ `LazyList.hydrate`, `subscribe` +
- * `ensureRange`/`release` ↔ `LazyList.subscribeRange`. Keep the surface this
- * narrow so the adapter over it stays thin.
+ * Positional consumers reacquire on `structure`; content updates keep their
+ * existing lease. The view does not own a reader's viewport coordinates.
  */
 export interface ConversationView {
   readonly sessionId: SessionId;
@@ -108,12 +116,11 @@ export interface ConversationView {
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */
   indexOf(turnId: string): number;
-  /** The hydrated turn, or `undefined` until `ensureRange` covers it. */
+  /** The hydrated turn, or `undefined` until an acquired range covers it. */
   turn(i: number): SessionHistory | undefined;
   isHydrated(i: number): boolean;
-  /** Pins and hydrates `[from, to)`. Pair every call with `release`. */
-  ensureRange(from: number, to: number): Promise<void>;
-  release(from: number, to: number): void;
+  /** Captures `[from, to)` now. Release the returned handle when done. */
+  acquireRange(from: number, to: number): ConversationRange;
   subscribe(listener: ConversationViewListener): () => void;
   dispose(): void;
 }

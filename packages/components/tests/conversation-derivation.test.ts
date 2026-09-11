@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LoroMap, type ContainerID, type LoroList } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
 import {
   createConversationDerivation,
   createConversationViewFromDoc,
@@ -55,6 +56,49 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 });
 
 describe('createConversationDerivation', () => {
+  it('fills all facts after a completed pass receives a bulk remote append', async () => {
+    const { doc, view, idle } = openView(1);
+    const derivation = createConversationDerivation(view, deriveDiffCount, {
+      yieldToEventLoop: immediate,
+    });
+    await drain(() => derivation.complete);
+    const peer = reimport(doc);
+    const writer = createHistoryWriter(peer);
+    for (const entry of buildFixtureHistory(51).slice(2)) writer.append(entry);
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    idle.runAll();
+    await drain(() => derivation.complete, 1000);
+    expect(derivation.complete).toBe(true);
+    expect(derivation.facts.size).toBe(102);
+    expect(derivation.facts.get('a-2')).toEqual({ diffs: 1 });
+    derivation.dispose();
+    view.dispose();
+  });
+
+  it('invalidates same-id replacements and prunes removed facts in a same-length rewrite', async () => {
+    const { doc, view } = openView(50);
+    const derivation = createConversationDerivation(view, deriveDiffCount, {
+      yieldToEventLoop: immediate,
+    });
+    await drain(() => derivation.complete, 1000);
+    expect(view.isHydrated(21)).toBe(false);
+    const list = doc.getList('history');
+    list.delete(20, 2);
+    for (const id of ['replacement-user', 'a-10']) {
+      const turn = list.insertContainer(id === 'a-10' ? 21 : 20, new LoroMap());
+      turn.set('id', id);
+      turn.set('role', 'assistant');
+      turn.set('fileDiff', []);
+    }
+    doc.commit();
+    await drain(() => derivation.complete, 1000);
+    expect(derivation.facts.has('u-10')).toBe(false);
+    expect(derivation.facts.get('a-10')).toEqual({ diffs: 0 });
+    expect(derivation.facts.size).toBe(view.turnCount);
+    derivation.dispose();
+    view.dispose();
+  });
+
   it('drops and re-derives a fact when an evicted turn changes', async () => {
     const { doc, view } = openView(12, { tailKeep: 2, maxHydrated: 4 });
     const derivation = createConversationDerivation(view, deriveDiffCount, {
@@ -97,7 +141,7 @@ describe('createConversationDerivation', () => {
 
   it('releases its hydration pin when disposed mid-chunk', async () => {
     // Every suspension of the view's chunked hydration, so the test can dispose
-    // while one is pending and then let `ensureRange` run to completion.
+    // while one is pending and then let `acquireRange` run to completion.
     const pendingYields: Array<() => void> = [];
     const doc = reimport(buildSessionDoc(buildFixtureHistory(12)));
     const idle = createManualIdle();
@@ -107,7 +151,7 @@ describe('createConversationDerivation', () => {
       sessionId: FIXTURE_SESSION_ID,
       tailKeep,
       maxHydrated,
-      // Forces `ensureRange` to chunk, so it suspends inside the derivation's await.
+      // Forces `acquireRange` to chunk, so it suspends inside the derivation's await.
       hydrateChunkSize: 2,
       hydrateItemBudget: 10_000,
       scheduleIdle: idle.scheduleIdle,
@@ -124,7 +168,7 @@ describe('createConversationDerivation', () => {
     // The session view stays warm in the store cache; only the consumer goes.
     derivation.dispose();
 
-    // Let the in-flight `ensureRange` finish its remaining chunks.
+    // Let the in-flight `acquireRange` finish its remaining chunks.
     for (let guard = 0; guard < 50 && pendingYields.length > 0; guard += 1) {
       pendingYields.shift()!();
       await drain(() => pendingYields.length > 0, 20);
@@ -133,8 +177,9 @@ describe('createConversationDerivation', () => {
     // An unrelated hydrate/release runs the LRU without touching the pass's
     // range: a pin the disposed derivation never released would keep its whole
     // chunk hydrated past the cap forever.
-    await view.ensureRange(0, 1);
-    view.release(0, 1);
+    const range = view.acquireRange(0, 1);
+    await range.ready;
+    range.release();
     expect(countHydrated(view)).toBeLessThanOrEqual(maxHydrated + tailKeep);
     view.dispose();
   });
