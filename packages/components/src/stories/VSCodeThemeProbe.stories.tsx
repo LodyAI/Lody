@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
@@ -72,6 +72,12 @@ const fileViewerFile: FileProps<undefined>['file'] = {
   ].join('\n'),
 };
 
+const SHELL_THEMES = [
+  { value: 'light', label: 'Light shell' },
+  { value: 'dark', label: 'Dark shell' },
+  { value: 'system', label: 'System shell' },
+];
+
 function VSCodeThemeProbe() {
   const { theme, setTheme } = useTheme();
   const resolvedTheme = useResolvedTheme();
@@ -89,16 +95,22 @@ function VSCodeThemeProbe() {
             </p>
           </div>
           <div>
-            <Select value={theme} onValueChange={(value) => setTheme(value as typeof theme)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="light">Light shell</SelectItem>
-                <SelectItem value="dark">Dark shell</SelectItem>
-                <SelectItem value="system">System shell</SelectItem>
-              </SelectContent>
-            </Select>
+            <Select.Root
+              items={SHELL_THEMES}
+              value={theme}
+              onValueChange={(value) => setTheme(value as typeof theme)}
+            >
+              <Select.Trigger className="w-[150px]">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {SHELL_THEMES.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
           </div>
         </div>
       </header>

@@ -1,6 +1,7 @@
 import React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
+import { PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -56,6 +57,28 @@ const dialogBaseClasses =
 const dialogAnimationClasses =
   'duration-100 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0';
 
+/**
+ * Mounts the `@lody/ui` popups inside a dialog rather than on the body.
+ *
+ * Radix's dialog traps focus in its content subtree and locks scrolling outside
+ * it, and it does that by DOM position: a Select or Combobox list portalled to
+ * the body is "outside" the dialog, so focus is dragged back to the panel the
+ * moment the list opens and the wheel never reaches the list. Naming the panel
+ * as the container puts the list back inside the subtree the dialog is guarding.
+ */
+function useDialogPopupContainer<T extends HTMLElement>(forwarded: React.Ref<T>) {
+  const contentRef = React.useRef<T | null>(null);
+  const ref = React.useCallback(
+    (node: T | null) => {
+      contentRef.current = node;
+      if (typeof forwarded === 'function') forwarded(node);
+      else if (forwarded) (forwarded as React.MutableRefObject<T | null>).current = node;
+    },
+    [forwarded]
+  );
+  return { ref, container: contentRef };
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
@@ -65,30 +88,33 @@ const DialogContent = React.forwardRef<
     /** Skip the enter/exit animation so the dialog appears instantly. */
     noAnimation?: boolean;
   }
->(({ className, overlayClassName, noAnimation, children, onEscapeKeyDown, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay className={overlayClassName} noAnimation={noAnimation} />
-    <DialogPrimitive.Content
-      ref={ref}
-      data-lody-dialog-content=""
-      className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
-      onEscapeKeyDown={(event) => {
-        if (isImeComposingNativeKeyboardEvent(event)) {
-          event.preventDefault();
-          return;
-        }
-        onEscapeKeyDown?.(event);
-      }}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-hover data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
+>(({ className, overlayClassName, noAnimation, children, onEscapeKeyDown, ...props }, ref) => {
+  const { ref: contentRef, container } = useDialogPopupContainer(ref);
+  return (
+    <DialogPortal>
+      <DialogOverlay className={overlayClassName} noAnimation={noAnimation} />
+      <DialogPrimitive.Content
+        ref={contentRef}
+        data-lody-dialog-content=""
+        className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
+        onEscapeKeyDown={(event) => {
+          if (isImeComposingNativeKeyboardEvent(event)) {
+            event.preventDefault();
+            return;
+          }
+          onEscapeKeyDown?.(event);
+        }}
+        {...props}
+      >
+        <PopupContainerProvider container={container}>{children}</PopupContainerProvider>
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-hover data-[state=open]:text-muted-foreground">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogContentWithoutClose = React.forwardRef<
@@ -99,26 +125,29 @@ const DialogContentWithoutClose = React.forwardRef<
     /** Skip the enter/exit animation so the dialog appears instantly. */
     noAnimation?: boolean;
   }
->(({ className, overlayClassName, noAnimation, children, onEscapeKeyDown, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay className={overlayClassName} noAnimation={noAnimation} />
-    <DialogPrimitive.Content
-      ref={ref}
-      data-lody-dialog-content=""
-      className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
-      onEscapeKeyDown={(event) => {
-        if (isImeComposingNativeKeyboardEvent(event)) {
-          event.preventDefault();
-          return;
-        }
-        onEscapeKeyDown?.(event);
-      }}
-      {...props}
-    >
-      {children}
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
+>(({ className, overlayClassName, noAnimation, children, onEscapeKeyDown, ...props }, ref) => {
+  const { ref: contentRef, container } = useDialogPopupContainer(ref);
+  return (
+    <DialogPortal>
+      <DialogOverlay className={overlayClassName} noAnimation={noAnimation} />
+      <DialogPrimitive.Content
+        ref={contentRef}
+        data-lody-dialog-content=""
+        className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
+        onEscapeKeyDown={(event) => {
+          if (isImeComposingNativeKeyboardEvent(event)) {
+            event.preventDefault();
+            return;
+          }
+          onEscapeKeyDown?.(event);
+        }}
+        {...props}
+      >
+        <PopupContainerProvider container={container}>{children}</PopupContainerProvider>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+});
 DialogContentWithoutClose.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

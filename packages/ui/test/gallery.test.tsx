@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { UiGallery } from '../src/gallery/gallery';
+import { popup } from '../src/popup/popup.tokens.stylex';
 import { forcedThemeClassNames } from '../src/theme/theme';
 import { colors, shadow } from '../src/tokens/colors.stylex';
 import { control, duration, radius, space, text, z } from '../src/tokens/scales.stylex';
@@ -102,6 +103,22 @@ describe('UiGallery', () => {
     ]) {
       expect(board, `${name} is missing from the board`).toContain(name);
     }
+  });
+
+  test('shows the trigger every state and names the popup tokens', () => {
+    // A trigger is a button that announces a listbox; a Combobox is an input
+    // that announces one. Their presence is the board holding the real
+    // controls rather than a picture of them.
+    expect(board).toContain('aria-haspopup="listbox"');
+    expect(board).toContain('data-placeholder=""');
+    expect(board).toContain('aria-autocomplete="list"');
+    for (const legend of ['small · 28', 'medium · 32', 'large · 36']) {
+      expect(board, `select size ${legend} is missing from the board`).toContain(legend);
+    }
+    for (const name of tokenNames(popup)) {
+      expect(board, `popup.${name} is missing from the board`).toContain(`popup.${name}`);
+    }
+    expect(board, 'field.icon is missing from the board').toContain('field.icon');
   });
 
   test('renders one palette when asked for one', () => {
