@@ -70,12 +70,21 @@ export class SessionForkPage {
     await dialog.getByRole('button', { name: /^(Add|添加)$/u }).click();
     await expect(dialog).toBeHidden();
 
-    await this.page.getByRole('button', { name: /^(Run configuration|运行设置)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u }).hover();
+    const runConfiguration = this.page.getByRole('button', {
+      name: /^(Run configuration|运行设置)$/u,
+    });
+    await runConfiguration.click();
+    const agentMenu = this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u });
+    if ((await agentMenu.textContent())?.includes(AGENT_NAME)) {
+      await this.page.keyboard.press('Escape');
+      return;
+    }
+    await agentMenu.focus();
+    await agentMenu.press('ArrowRight');
     const agent = this.page.getByRole('menuitemradio', { name: AGENT_NAME, exact: true });
-    await agent.click();
-    await expect(agent).toHaveAttribute('aria-checked', 'true');
-    await this.page.keyboard.press('Escape');
+    await expect(agent).toBeEnabled();
+    await agent.press('Enter');
+    await expect(runConfiguration).toContainText(AGENT_NAME);
   }
 
   async createCompletedSourceAndForkToWorktree(): Promise<SessionForkResources> {
@@ -193,7 +202,8 @@ export class SessionForkPage {
       .filter((entry) => entry.event === 'session-fork').length;
     const forkButton = this.page.getByRole('button', { name: /^(Fork session|分叉会话)$/u });
     await expect(forkButton.last()).toBeVisible({ timeout: 30_000 });
-    await forkButton.last().click();
+    await forkButton.last().focus();
+    await forkButton.last().press('Enter');
     const newWorktree = this.page.getByRole('menuitem', { name: /^(New worktree|新 worktree)/u });
     await expect(newWorktree).toBeEnabled({ timeout: 30_000 });
     await newWorktree.click();
@@ -210,11 +220,10 @@ export class SessionForkPage {
         () => this.fixture.readEvents().filter((entry) => entry.event === 'session-fork').length,
         { timeout: 30_000, intervals: [50, 100, 250, 500] }
       )
-      .toBeGreaterThan(previousForkCount);
-    const forkEvent = this.fixture
-      .readEvents()
-      .filter((entry) => entry.event === 'session-fork')
-      .at(-1)!;
+      .toBe(previousForkCount + 1);
+    const forkEvent = this.fixture.readEvents().filter((entry) => entry.event === 'session-fork')[
+      previousForkCount
+    ]!;
     expect(forkEvent.sourceSessionId).toBe(source.acpSessionId);
     expect(forkEvent.sourceTurnId).toBe(source.turnId);
     expect(forkEvent.sessionId).toEqual(expect.any(String));

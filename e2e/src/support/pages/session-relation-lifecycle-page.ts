@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
 import {
   COLD_ROOT_ID,
+  COLD_ROOT_TITLE,
   COLD_TAB_ID,
   COLD_TAB_TITLE,
   RELATION_TAB_ID,
@@ -172,6 +173,27 @@ export class SessionRelationLifecyclePage {
       await expect
         .poll(
           () =>
+            this.page.evaluate(() => {
+              const control = (
+                window as typeof window & {
+                  __LODY_E2E_META_SCAN_GATE__?: {
+                    blockedScans: number;
+                    completedScans: number;
+                  };
+                }
+              ).__LODY_E2E_META_SCAN_GATE__;
+              return Boolean(
+                control &&
+                control.blockedScans >= 2 &&
+                control.completedScans === control.blockedScans
+              );
+            }),
+          { timeout: 30_000, intervals: [50, 100, 250, 500] }
+        )
+        .toBe(true);
+      await expect
+        .poll(
+          () =>
             this.page.evaluate(async (tabId) => {
               const repo = window.repo;
               if (!repo) throw new Error('Renderer workspace repo is unavailable');
@@ -186,6 +208,15 @@ export class SessionRelationLifecyclePage {
           { timeout: 30_000, intervals: [50, 100, 250, 500] }
         )
         .toBe(false);
+      await expect(this.page).toHaveURL(
+        new RegExp(
+          `#\\/local\\/sessions\\/${COLD_ROOT_ID}\\?tab=${encodeURIComponent(`session:${COLD_ROOT_ID}`)}$`,
+          'u'
+        ),
+        { timeout: 30_000 }
+      );
+      await expect(this.page.getByText(COLD_ROOT_TITLE, { exact: true }).first()).toBeVisible();
+      await expect(this.activeRowById(COLD_ROOT_ID)).toHaveAttribute('aria-current', 'page');
     } finally {
       if (!released && !this.page.isClosed()) await this.releaseMetadataScanBarrier();
     }
@@ -308,6 +339,7 @@ export class SessionRelationLifecyclePage {
         });
         const control = {
           blockedScans: 0,
+          completedScans: 0,
           released: false,
           release: () => {
             control.released = true;
@@ -330,7 +362,11 @@ export class SessionRelationLifecyclePage {
                   (prefix[0] === 'm' || prefix[0] === 'e');
                 if (!isFullMetadataScan || control.released) return originalScan(...args);
                 control.blockedScans += 1;
-                return gate.then(() => originalScan(...args));
+                return gate
+                  .then(() => originalScan(...args))
+                  .finally(() => {
+                    control.completedScans += 1;
+                  });
               };
             }
             repoValue = repo;
