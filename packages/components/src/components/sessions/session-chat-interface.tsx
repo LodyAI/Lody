@@ -55,7 +55,7 @@ import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
-import { isSessionContextCompacting } from '@/lib/session-context-compaction';
+import { findActiveSessionContextCompaction } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
@@ -114,6 +114,7 @@ import {
   hasReportedPreviewTarget,
   isSessionGoalCleared,
   isSessionGoalActive,
+  machineSupportsContextCompactionReconciliationProtocol,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
@@ -2394,6 +2395,7 @@ export const SessionChatInterface = memo(
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
     const lastSearchAnalyticsKeyRef = useRef<string | null>(null);
+    const compactionReconciliationAttemptsRef = useRef(new Set<string>());
 
     const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
     const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
@@ -2699,10 +2701,39 @@ export const SessionChatInterface = memo(
     const canForkFromMenu = Boolean(
       onForkSessionExternal || (lastCompletedAssistantMessageId && onForkLastAssistant)
     );
-    const isContextCompacting = useMemo(
-      () => isSessionContextCompacting(sessionHistory),
+    const activeContextCompaction = useMemo(
+      () => findActiveSessionContextCompaction(sessionHistory),
       [sessionHistory]
     );
+    const isContextCompacting = activeContextCompaction !== null;
+    const canReconcileContextCompaction =
+      sessionMachineOnlineStatus === 'online' &&
+      machineSupportsContextCompactionReconciliationProtocol(sessionMachine);
+    useEffect(() => {
+      if (!runtime || !canReconcileContextCompaction || !activeContextCompaction?.turnFinished) {
+        return;
+      }
+      const attemptKey = `${session.id}:${activeContextCompaction.turnId}:${activeContextCompaction.toolCallId}`;
+      if (compactionReconciliationAttemptsRef.current.has(attemptKey)) return;
+      compactionReconciliationAttemptsRef.current.add(attemptKey);
+      void runtime
+        .requestSessionContextCompactionReconciliation(session.machineId, {
+          sessionId: session.id,
+          turnId: activeContextCompaction.turnId,
+          toolCallId: activeContextCompaction.toolCallId,
+        })
+        .then((result) => {
+          if (!result || result.outcome === 'unknown') {
+            compactionReconciliationAttemptsRef.current.delete(attemptKey);
+          }
+        });
+    }, [
+      activeContextCompaction,
+      canReconcileContextCompaction,
+      runtime,
+      session.id,
+      session.machineId,
+    ]);
     // Pending scheduled tasks (cron / wakeup) are derived on the fly from the
     // Cron*/ScheduleWakeup tool_call items already in history — nothing extra is
     // persisted. Serialize to a key so the input area only re-renders when the

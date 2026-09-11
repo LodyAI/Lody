@@ -208,6 +208,83 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
+  it('uses the local owner daemon to reconcile an exact context compaction activity', async () => {
+    const invoke = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        type: 'session/reconcile-context-compaction_response' as const,
+        sessionId,
+        turnId: 'assistant:turn-1',
+        toolCallId: 'compact-1',
+        outcome: 'reconciled' as const,
+      },
+    }));
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: { invoke },
+    });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local'),
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSessionContextCompactionReconciliation(localMachineId, {
+        sessionId,
+        turnId: 'assistant:turn-1',
+        toolCallId: 'compact-1',
+      })
+    ).resolves.toMatchObject({ outcome: 'reconciled' });
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
+      expect.objectContaining({
+        machineId: localMachineId,
+        workspaceId,
+        method: 'session/reconcile-context-compaction',
+        params: {
+          sessionId,
+          turnId: 'assistant:turn-1',
+          toolCallId: 'compact-1',
+        },
+      })
+    );
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('does not reconcile compaction through a daemon without the capability', async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: { invoke },
+    });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local'),
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSessionContextCompactionReconciliation(localMachineId, {
+        sessionId,
+        turnId: 'assistant:turn-1',
+        toolCallId: 'compact-1',
+      })
+    ).resolves.toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('uses the cloud Machine RPC client for a remote machine', async () => {
     const invoke = vi.fn();
     vi.stubGlobal('window', {

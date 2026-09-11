@@ -61,6 +61,7 @@ import {
   getCodeCollabFileIndexSignalFlockDocId,
   type SessionContextWindowUsage,
   type SessionHistoryInput,
+  type SessionContextCompactionReconcileResponse,
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
@@ -264,7 +265,10 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
-import { markAssistantTurnFinished } from './assistant-turn-finalize';
+import {
+  markAssistantTurnFinished,
+  settleContextCompactionItemAsFailed,
+} from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import {
   AgentClient,
@@ -3401,6 +3405,8 @@ export class MessageHandler {
             observedAtMs: getServerNow(),
           };
         },
+        reconcileSessionContextCompaction: async (args) =>
+          await this.reconcileSessionContextCompaction(args),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -6669,6 +6675,8 @@ export class MessageHandler {
           error: result.error,
         };
       }
+      case 'session/reconcile-context-compaction':
+        return await this.reconcileSessionContextCompaction(request.params);
       case 'session/dispatch-turn': {
         // Mirrors the Loro Streams Machine RPC path: normalize the opaque
         // transport-level input config, then offer the turn to the dispatch
@@ -6772,6 +6780,75 @@ export class MessageHandler {
         success: false,
         error: formatErrorMessage(error),
       };
+    }
+  }
+
+  private async reconcileSessionContextCompaction(args: {
+    sessionId: SessionId;
+    turnId: string;
+    toolCallId: string;
+  }): Promise<SessionContextCompactionReconcileResponse> {
+    const response = (
+      outcome: SessionContextCompactionReconcileResponse['outcome'],
+      options: { activeTurnId?: string; error?: string } = {}
+    ): SessionContextCompactionReconcileResponse => ({
+      type: 'session/reconcile-context-compaction_response',
+      ...args,
+      outcome,
+      ...options,
+    });
+
+    let releaseBarrier: (() => void) | undefined;
+    try {
+      const metaRecord = await this.workspaceDocument.repo.getDocMeta(
+        getSessionRoomId(args.sessionId)
+      );
+      const meta =
+        metaRecord?.meta && !isLoroRepoDocDeleted(metaRecord)
+          ? (metaRecord.meta as SessionMeta)
+          : undefined;
+      if (!meta || meta.machineId !== this.machineId) {
+        return response('unknown', { error: 'The target daemon does not own this Session.' });
+      }
+
+      releaseBarrier =
+        this.executionService.tryAcquireSessionRewriteBarrier(args.sessionId) ?? undefined;
+      if (!releaseBarrier) {
+        return response('unknown', { error: 'Session ownership is changing.' });
+      }
+
+      const execution = this.executionService.getExecutionSnapshot(args.sessionId);
+      if (execution.activeTurnId === args.turnId) {
+        return response('active', { activeTurnId: execution.activeTurnId });
+      }
+
+      if (
+        !execution.activeTurnId &&
+        (execution.hasActiveTurn ||
+          execution.hasBlockingPendingCreate ||
+          execution.hasActiveAutomation ||
+          this.sessionActivePresence.has(args.sessionId) ||
+          this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId))
+      ) {
+        return response('unknown', { error: 'The daemon still has unassigned Session work.' });
+      }
+
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      let reconciled = false;
+      await sessionDoc.updateHistory((history) => {
+        reconciled = settleContextCompactionItemAsFailed(history, args);
+        return history;
+      });
+      if (reconciled) {
+        await sessionDoc.waitUntilSynced();
+      }
+      return response(reconciled ? 'reconciled' : 'unchanged', {
+        ...(execution.activeTurnId ? { activeTurnId: execution.activeTurnId } : {}),
+      });
+    } catch (error) {
+      return response('unknown', { error: formatErrorMessage(error) });
+    } finally {
+      releaseBarrier?.();
     }
   }
 

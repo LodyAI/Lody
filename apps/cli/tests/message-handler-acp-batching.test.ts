@@ -96,6 +96,7 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
       watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       getDocMeta: vi.fn(async () => ({
         meta: {
+          machineId: 'm-1',
           needToArchiveSessions: {},
           needToDeleteSessions: {},
         },
@@ -461,6 +462,128 @@ describe('MessageHandler ACP batching', () => {
       expect(nextTurnId).not.toBe(turnId);
       expect(findCompaction(nextHistory, 'compact-2')).toMatchObject({ status: 'in_progress' });
       expect(isSessionContextCompacting(nextHistory)).toBe(true);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('reconciles stale compaction only after the owner daemon proves its turn is inactive', async () => {
+    vi.useRealTimers();
+    const sessionId = 'stale-compaction-reconciliation' as SessionId;
+    const { repo, docs, workspaceDocument, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+    const host = handler as unknown as {
+      beginConversationTurn(sessionId: SessionId): string;
+      enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
+      finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+      reconcileSessionContextCompaction(args: {
+        sessionId: SessionId;
+        turnId: string;
+        toolCallId: string;
+      }): Promise<{ outcome: string }>;
+      executionService: {
+        getExecutionSnapshot(sessionId: SessionId): {
+          activeTurnId?: string;
+          hasActiveTurn: boolean;
+          hasBlockingPendingCreate: boolean;
+          hasReusableSession: boolean;
+          hasRewriteBarrier: boolean;
+          hasActiveAutomation: boolean;
+        };
+      };
+      sessionActivePresence: { has(sessionId: SessionId): boolean };
+    };
+    const findCompaction = (history: SessionHistoryInput[]) =>
+      history
+        .flatMap((entry) => readItems(entry))
+        .find(
+          (item) =>
+            item.type === 'tool_call' &&
+            item.activityKind === 'context_compaction' &&
+            item.toolCallId === 'compact-stale'
+        );
+
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'compact-stale',
+          title: 'Context compacting',
+          status: 'in_progress',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      await host.finalizeACPState(sessionId, turnId);
+
+      workspaceDocument.repo.getDocMeta.mockResolvedValueOnce({
+        meta: {
+          machineId: 'm-other',
+          needToArchiveSessions: {},
+          needToDeleteSessions: {},
+        },
+      });
+      await expect(
+        host.reconcileSessionContextCompaction({
+          sessionId,
+          turnId,
+          toolCallId: 'compact-stale',
+        })
+      ).resolves.toMatchObject({ outcome: 'unknown' });
+      expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
+
+      const getExecutionSnapshot = vi.spyOn(host.executionService, 'getExecutionSnapshot');
+      getExecutionSnapshot.mockReturnValue({
+        activeTurnId: turnId,
+        hasActiveTurn: true,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: true,
+        hasRewriteBarrier: false,
+        hasActiveAutomation: false,
+      });
+      await expect(
+        host.reconcileSessionContextCompaction({
+          sessionId,
+          turnId,
+          toolCallId: 'compact-stale',
+        })
+      ).resolves.toMatchObject({ outcome: 'active' });
+      expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
+
+      getExecutionSnapshot.mockReturnValue({
+        hasActiveTurn: false,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: true,
+        hasRewriteBarrier: false,
+        hasActiveAutomation: false,
+      });
+      const hasActivePresence = vi
+        .spyOn(host.sessionActivePresence, 'has')
+        .mockReturnValueOnce(true)
+        .mockReturnValue(false);
+      await expect(
+        host.reconcileSessionContextCompaction({
+          sessionId,
+          turnId,
+          toolCallId: 'compact-stale',
+        })
+      ).resolves.toMatchObject({ outcome: 'unknown' });
+      expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
+
+      await expect(
+        host.reconcileSessionContextCompaction({
+          sessionId,
+          turnId,
+          toolCallId: 'compact-stale',
+        })
+      ).resolves.toMatchObject({ outcome: 'reconciled' });
+      expect(hasActivePresence).toHaveBeenCalled();
+      expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'failed' });
+      expect(isSessionContextCompacting(await doc.getHistory())).toBe(false);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }

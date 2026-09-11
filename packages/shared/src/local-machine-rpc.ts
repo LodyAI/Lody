@@ -24,6 +24,7 @@ import {
 import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
 import {
   SessionCancelResponseSchema,
+  SessionContextCompactionReconcileResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
   SessionEditAndResendSpecSchema,
@@ -162,6 +163,16 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/reconcile-context-compaction'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        turnId: z.string().trim().min(1),
+        toolCallId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/fork'),
     params: SessionForkSpecSchema,
   }).strict(),
@@ -263,6 +274,7 @@ export const LocalMachineRpcResultSchema = z.union([
   FilePreviewV3ResponseSchema,
   LocalFileResolutionSchema,
   SessionCancelResponseSchema,
+  SessionContextCompactionReconcileResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
   SessionForkResponseSchema,

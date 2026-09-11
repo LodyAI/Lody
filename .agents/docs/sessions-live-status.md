@@ -51,3 +51,11 @@ null`: browser offline, machine removed or offline) — the chip owns that story
   (Stop visibility, busy-send queue routing) shares the SAME time-bounded
   pre-start signal, so a stalled dispatch no longer holds the composer in a busy
   state either.
+- Context compaction is different from live working status: its spinner follows
+  the latest durable `context_compaction` tool-call status. When that item is still
+  `pending` or `in_progress` inside a finished assistant turn, opening the Session
+  asks a capability-compatible owner daemon to reconcile the exact turn/tool ids.
+  The renderer does not convert `finished` into a provider terminal signal. The
+  daemon writes `failed` only when its live execution state proves the addressed
+  turn no longer owns work; an unsupported, offline, non-owner, active, or
+  indeterminate daemon leaves the durable item unchanged.

@@ -643,6 +643,22 @@ export const SessionCancelResponseSchema = z
   })
   .strict();
 
+export const SessionContextCompactionReconcileResponseSchema = z
+  .object({
+    type: z.literal('session/reconcile-context-compaction_response'),
+    sessionId: SessionIdSchema,
+    turnId: z.string().trim().min(1),
+    toolCallId: z.string().trim().min(1),
+    outcome: z.enum(['reconciled', 'unchanged', 'active', 'unknown']),
+    activeTurnId: z.string().trim().min(1).optional(),
+    error: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export type SessionContextCompactionReconcileResponse = z.infer<
+  typeof SessionContextCompactionReconcileResponseSchema
+>;
+
 export const SessionSteerRequestSchema = z
   .object({
     type: z.literal('session/steer'),

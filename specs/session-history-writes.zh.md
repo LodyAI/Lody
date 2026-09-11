@@ -1,7 +1,7 @@
 # 会话历史写入
 
 Status: draft
-Translation: stale
+Translation: current
 
 [English](session-history-writes.md)
 
@@ -32,6 +32,11 @@ Translation: stale
 - 工具状态、权限请求与描述元数据（title/kind/locations）只解析本次变化的字段，
   不重验未修改的工具内容；只修改 outcome 时保留已有请求信息。
   修改工具身份或内容仍需完整 item 解析；新增元数据非法时，整条命令在写入前拒绝。
+- 已 finished 的 assistant turn 可能包含未持久化 provider 终态的旧 context-compaction
+  activity。打开该 Session 时可以请求修复，但只有 owner daemon 能修改指定 turn 和 tool
+  item，且必须先由实时执行所有权证明该 turn 已不活跃。Turn `finished`、持久化 Session
+  status、经过时间、daemon 重启或缺少 live evidence 均不充分。Daemon 离线、不支持该能力、
+  不持有 Session 或无法确定时，历史保持不变。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 
@@ -59,7 +64,10 @@ Translation: stale
 
 - `packages/shared/src/{history-writer,history-write-schema,session-mirror}.ts`
 - `packages/shared/tests/history-writer.test.ts` 与 `history-writer.contract.ts`
+- `apps/cli/src/lib/assistant-turn-finalize.ts` 与经过 capability gate 的
+  `session/reconcile-context-compaction` Machine RPC
 - [决策记录](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [旧 compaction 修复决策](../.agents/notes/implemented/bug-fix/2026-09-11-stale-context-compaction-reconciliation.zh.md)
 - [业务字段修复与待定 hash 决策](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 - [外部历史基线修复](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 

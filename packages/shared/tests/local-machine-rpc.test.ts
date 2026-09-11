@@ -11,6 +11,14 @@ describe('local Machine RPC', () => {
       params: { sessionId: 'session-1' },
     },
     {
+      method: 'session/reconcile-context-compaction',
+      params: {
+        sessionId: 'session-1',
+        turnId: 'assistant:turn-1',
+        toolCallId: 'context-compaction-1',
+      },
+    },
+    {
       method: 'session/fork',
       params: {
         sourceSessionId: 'session-1',

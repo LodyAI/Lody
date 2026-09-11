@@ -863,6 +863,73 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('dispatches context compaction reconciliation with the exact activity owner', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const sessionId = 'session-1' as SessionId;
+    const fake = createFakeStreamClient();
+    const reconcileSessionContextCompaction = vi.fn(
+      async (args: { sessionId: SessionId; turnId: string; toolCallId: string }) => ({
+        type: 'session/reconcile-context-compaction_response' as const,
+        ...args,
+        outcome: 'reconciled' as const,
+      })
+    );
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      reconcileSessionContextCompaction,
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'reconcile-1',
+          method: 'session/reconcile-context-compaction',
+          rpcVersion: '1',
+          machineId,
+          workspaceId,
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: {
+            sessionId,
+            turnId: 'assistant:turn-1',
+            toolCallId: 'compact-1',
+          },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    await server.start();
+    await fake.waitForAppendedCount(1);
+
+    expect(reconcileSessionContextCompaction).toHaveBeenCalledWith({
+      sessionId,
+      turnId: 'assistant:turn-1',
+      toolCallId: 'compact-1',
+    });
+    expect(fake.appended[0]?.value).toEqual(
+      expect.objectContaining({
+        id: 'reconcile-1',
+        result: expect.objectContaining({
+          outcome: 'reconciled',
+          turnId: 'assistant:turn-1',
+          toolCallId: 'compact-1',
+        }),
+      })
+    );
+
+    server.stop();
+  });
+
   it('appends responses to workspace-level replyTo streams for new clients', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
