@@ -1435,13 +1435,23 @@ export function resolveTurnDispatchConfig(args: {
 
 export function withBuiltinDefaultTurnMode(
   config: ResolvedTurnDispatchConfig,
-  target: Pick<SessionMeta, 'cliType' | 'agentType'>
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>,
+  capability?: AcpCapabilityCacheEntry
 ): ResolvedTurnDispatchConfig {
   if (config.modeId || typeof config.configOptionValues?.mode === 'string') {
     return config;
   }
   const modeId = getBuiltinDefaultModeId(target.cliType, target.agentType);
-  return modeId ? { ...config, modeId } : config;
+  if (!modeId) {
+    return config;
+  }
+  // Match the UI selector: only apply Lody's builtin default when the adapter
+  // actually offers that mode. Grok used to inherit Codex `agent` and Role/MCP
+  // creates then failed with "Unsupported ACP mode for the selected agent".
+  if (capability && !getSupportedTurnSelectorIds(capability, 'mode').has(modeId)) {
+    return config;
+  }
+  return { ...config, modeId };
 }
 
 function mergeTurnDispatchConfig(
@@ -1523,10 +1533,10 @@ export function filterCompatibleTurnConfigOptionValues(
   return Object.keys(compatible).length > 0 ? compatible : undefined;
 }
 
-const getSupportedTurnSelectorIds = (
+function getSupportedTurnSelectorIds(
   capability: AcpCapabilityCacheEntry | undefined,
   category: 'mode' | 'model'
-): Set<string> => {
+): Set<string> {
   const ids = new Set<string>(
     category === 'mode'
       ? (capability?.modes ?? []).map((mode) => mode.id)
@@ -1543,7 +1553,7 @@ const getSupportedTurnSelectorIds = (
     }
   }
   return ids;
-};
+}
 
 export function validateTurnModeAndModel(
   config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
@@ -2818,7 +2828,16 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
             args.agentConfig
           )
         : undefined;
+  // Builtin Role/MCP creates often have no modeId. Read capabilities before
+  // accepting so withBuiltinDefaultTurnMode cannot freeze an unoffered mode.
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(args.agentConfig.cliType, args.agentConfig.agentType)) &&
+    dispatchConfig.modeId === undefined &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
   const needsCapability =
+    mayApplyBuiltinDefault ||
     dispatchConfig.modeId !== undefined ||
     dispatchConfig.modelId !== undefined ||
     dispatchConfig.configOptionValues !== undefined ||
@@ -2847,7 +2866,8 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
         requested.config,
         filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
       ),
-      args.agentConfig
+      args.agentConfig,
+      capability
     ),
     inheritSessionDefaults: false,
   };
@@ -3232,17 +3252,27 @@ export async function sendSessionChatResult(
     sessionId,
     requester,
   });
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(session.cliType, session.agentType)) &&
+    !dispatchConfig.modeId &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string';
+  const capability =
+    dispatchConfig.modeId ||
+    dispatchConfig.modelId ||
+    dispatchConfig.configOptionValues ||
+    mayApplyBuiltinDefault
+      ? await readAgentAcpCapability({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          agentConfigId: session.agentConfigId,
+        })
+      : undefined;
   if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId: workspace.id as WorkspaceId,
-      machineId: session.machineId,
-      agentConfigId: session.agentConfigId,
-    });
     validateTurnModeAndModel(dispatchConfig, capability);
     validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
   }
-  const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
+  const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session, capability);
 
   await syncDocForRead(
     manager,

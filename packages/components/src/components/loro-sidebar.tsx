@@ -28,6 +28,7 @@ import { Button } from '@/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
+import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +54,7 @@ import {
   MessageSquareMore,
   PanelLeft,
   Plus,
+  Search,
   Settings,
   Users,
 } from 'lucide-react';
@@ -934,51 +936,62 @@ export const LoroSidebar = memo(function LoroSidebar({
                       value={currentWorkspaceId}
                       onValueChange={(value) => onWorkspaceSelected?.(value)}
                     >
-                      {workspaces.map((ws) => (
-                        <ContextMenu key={ws.id}>
-                          <ContextMenuTrigger asChild disabled={!isElectronRenderer() || !ws.slug}>
-                            <DropdownMenuRadioItem
-                              value={ws.id}
-                              className="gap-2"
-                              onClickCapture={(event) => {
-                                if (!ws.slug || !isNewWindowClick(event)) return;
-                                if (openDesktopWindow(undefined, ws.slug)) {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }
-                              }}
-                            >
-                              <WorkspaceAvatar
-                                workspace={{ name: ws.name, logo: ws.logo }}
-                                className="h-5 w-5 shrink-0 text-[10px]"
-                              />
-                              <span className="min-w-0 truncate">{ws.name}</span>
-                              {ws.planTier ? (
-                                <Badge
-                                  variant="secondary"
-                                  className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
-                                >
-                                  {ws.planTier === 'enterprise'
-                                    ? mergedLabels.planEnterprise
-                                    : mergedLabels.planPlus}
-                                </Badge>
-                              ) : null}
-                            </DropdownMenuRadioItem>
-                          </ContextMenuTrigger>
-                          {isElectronRenderer() && ws.slug ? (
+                      {workspaces.map((ws) => {
+                        const workspaceSlug = ws.slug;
+                        const row = (
+                          <DropdownMenuRadioItem
+                            key={ws.id}
+                            value={ws.id}
+                            className="gap-2"
+                            onClickCapture={(event) => {
+                              if (!workspaceSlug || !isNewWindowClick(event)) return;
+                              if (openDesktopWindow(undefined, workspaceSlug)) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }
+                            }}
+                          >
+                            <WorkspaceAvatar
+                              workspace={{ name: ws.name, logo: ws.logo }}
+                              className="h-5 w-5 shrink-0 text-[10px]"
+                            />
+                            <span className="min-w-0 truncate">{ws.name}</span>
+                            {ws.planTier ? (
+                              <Badge
+                                variant="secondary"
+                                className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                              >
+                                {ws.planTier === 'enterprise'
+                                  ? mergedLabels.planEnterprise
+                                  : mergedLabels.planPlus}
+                              </Badge>
+                            ) : null}
+                          </DropdownMenuRadioItem>
+                        );
+
+                        // Only wrap in a context menu where the window action
+                        // exists: a DISABLED ContextMenuTrigger stamps
+                        // `data-disabled` onto the row it wraps, and menu items
+                        // style that as `pointer-events-none`, which would make
+                        // every workspace unclickable in the browser.
+                        if (!isElectronRenderer() || !workspaceSlug) return row;
+
+                        return (
+                          <ContextMenu key={ws.id}>
+                            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                             <ContextMenuContent>
                               <ContextMenuItem
                                 onSelect={() => {
-                                  openDesktopWindow(undefined, ws.slug);
+                                  openDesktopWindow(undefined, workspaceSlug);
                                 }}
                               >
                                 <AppWindow />
                                 {t('workspace.openInNewWindow')}
                               </ContextMenuItem>
                             </ContextMenuContent>
-                          ) : null}
-                        </ContextMenu>
-                      ))}
+                          </ContextMenu>
+                        );
+                      })}
                     </DropdownMenuRadioGroup>
                     {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
                       <p className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -1045,7 +1058,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         <div
           className={cn(
-            // `gap-px` keeps New chat / Tasks from painting as one fused block
+            // `gap-px` keeps navigation rows from painting as one fused block
             // when both are selected-adjacent or hover-highlighted.
             'flex flex-col gap-px',
             isMobile
@@ -1058,6 +1071,12 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={mergedLabels.home}
             icon={<SquarePen className="h-4 w-4" />}
             onClick={onHomeClicked}
+          />
+          <NavButton
+            active={false}
+            label={t('common.search', 'Search')}
+            icon={<Search className="h-4 w-4" />}
+            onClick={() => setCommandPaletteOpen(true)}
           />
           {/* Tasks sits with New Chat rather than in the bottom icon rail: it is a
              primary destination, and the rail reads as utilities (docs, feedback,

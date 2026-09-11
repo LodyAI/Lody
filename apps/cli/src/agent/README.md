@@ -23,7 +23,9 @@ context/message-flow.md "Upstream".
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
 - `setting.ts` — launch resolution for every agent kind.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
-  and npx launch wrapper around the `packages/acp-extension-dsh` submodule.
+  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
+  the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
+  while preset and session directories remain filesystem paths.
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package
   `.tar.zst` artifacts, checksums, resumable downloads, the active installation profile's
   `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.

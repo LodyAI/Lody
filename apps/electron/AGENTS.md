@@ -83,13 +83,8 @@ contracts, and window/renderer integration rules live in
   `latest*.yml`. Tag contract is `v${version}`.
 - macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
   Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
-  `SPARKLE_ED_PUBLIC_KEY` before signing. The release workflow then runs
-  `Innei/electron-sparkle-updater/action` pinned to a reviewed full commit SHA against
-  this release's zips only
-  (`publish: false`); the Action fetches the two previous `v*` zip releases as
-  delta bases. Keep Apple signing credentials scoped to the packaging step and the
-  Sparkle private key scoped to validation plus the pinned signing Action; never expose
-  them as job-level environment variables. Previous zips stay out of the published asset list. Sparkle load
+  `SPARKLE_ED_PUBLIC_KEY` before signing. Tag releases contain changelogs only;
+  they do not build installers or generate Sparkle feeds/deltas. Sparkle load
   failure falls back to electron-updater. Sparkle UI stays silent; progress and
   ready-to-install go through `ElectronUpdaterState` for the renderer banner.
 - Linux `.deb` installs go through `app-updater-linux-install.ts`, never
@@ -108,8 +103,7 @@ contracts, and window/renderer integration rules live in
 - macOS releases must be signed and notarized. `generate_appcast` refuses archives
   that fail `codesign --verify --deep --strict`, and Gatekeeper needs a notarized
   first-install DMG. Windows and Linux do not have this constraint.
-- CI packages Linux as `AppImage deb` only; `snap` stays in the target list for local
-  builds because it needs snapcraft on the machine.
+- `snap` stays in the target list for local builds and needs snapcraft on the machine.
 
 ## Verification
 

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION,
@@ -134,7 +135,8 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   const presetRoot = join(dirname(options.adapterPath), 'deepseek-agent-presets');
   const sessionCompression = await resolveDeepSeekHarnessSessionCompression(sessionsRoot);
   const config = createDeepSeekHarnessCordisConfig(
-    options.adapterPath,
+    // Cordis imports this entry as ESM; Windows drive paths are not module URLs.
+    pathToFileURL(options.adapterPath).href,
     presetRoot,
     sessionCompression
   );

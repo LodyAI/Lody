@@ -214,7 +214,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     prAssociation: {
       associatePullRequest: async (input: CloudPrAssociationInput) => {
         const { ownerSessionId, ...association } = input;
-        const response = await fetch(new URL('/api/action', authBaseUrl), {
+        const response = await fetch(new URL('/api/action', authSiteUrl), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
