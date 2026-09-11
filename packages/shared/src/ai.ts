@@ -519,6 +519,14 @@ export const isManagedBuiltinAgentType = (
 ): agentType is ManagedBuiltinAgentType =>
   MANAGED_BUILTIN_RUNTIMES.some((runtime) => runtime.agentType === agentType);
 
+/**
+ * Builtins that may be created through the durable provider-setup queue.
+ * Managed runtimes use it for download + verification; Bub uses the same queue
+ * only to keep its user-installed command unpublished until a live probe passes.
+ */
+export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
 ): ManagedBuiltinRuntime | undefined =>

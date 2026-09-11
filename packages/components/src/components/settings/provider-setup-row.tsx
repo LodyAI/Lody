@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
+  getBuiltinAgentInstallDocsUrl,
   machineSupportsProviderSetupProtocol,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
@@ -12,6 +13,7 @@ import { Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
+import { openExternalUrl } from '@/lib/native-browser';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
@@ -38,6 +40,8 @@ export function ProviderSetupRow({
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
   const config = setup.config;
+  const installDocsUrl =
+    config.cliType === 'builtin' ? getBuiltinAgentInstallDocsUrl(config.agentType) : undefined;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeProgress = useMachineAcpBinaryProgress(runtime, setup.machineId, config.agentType);
   const machineOnline = useMachineOnlineStatus(setup.machineId) === 'online';
@@ -216,6 +220,21 @@ export function ProviderSetupRow({
       {/* Aligned to the name above it, not to the card edge: the sentence is
           about this agent, so it starts where the agent's text column starts. */}
       <p className="ml-[3.25rem] pb-3 pr-3 text-xs text-muted-foreground">{statusText}</p>
+      {setup.status === 'failed' && installDocsUrl ? (
+        <div className="ml-[3.25rem] pb-3 pr-3">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              void openExternalUrl(installDocsUrl);
+            }}
+          >
+            {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+          </Button>
+        </div>
+      ) : null}
       {setup.status === 'awaiting-auth' ? (
         <div className="ml-[3.25rem] pb-3 pr-3">
           <AcpAuthenticationPanel

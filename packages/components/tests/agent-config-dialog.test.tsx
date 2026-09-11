@@ -248,22 +248,21 @@ describe('AgentConfigDialog', () => {
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
   });
 
-  it('offers Bub as a builtin and links its probe failure to the install guide', async () => {
+  it('queues Bub for verification without publishing or probing it from the dialog', async () => {
     const mode: AgentConfigDialogMode = { kind: 'create' };
     const onSubmit = vi.fn(async () => {});
-    const onRefreshCapabilities: RefreshCapabilities = async (args) => ({
+    const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response' as const,
       machineId: args.machineId,
       configId: args.configId,
       cliType: 'builtin',
       agentType: 'bub',
-      success: false,
-      error: 'spawn bub ENOENT',
-    });
+      success: true,
+    }));
 
     await renderDialog(
       mode,
-      createMachine('Workstation'),
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
       onSubmit,
       vi.fn(async () => ({ status: 'installed' as const })),
       onRefreshCapabilities
@@ -273,17 +272,33 @@ describe('AgentConfigDialog', () => {
       getOptionByText('Bub').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(getSelectedOption()?.textContent).toContain('Bub');
+    expect(onSubmit).not.toHaveBeenCalled();
 
     await act(async () => {
       getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain('Install the Bub ACP server plugin');
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cliType: 'builtin',
+          agentType: 'bub',
+          backgroundSetup: true,
+        })
+      );
     });
-    const installGuide = Array.from(document.body.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Open install guide')
-    );
-    expect(installGuide).toBeDefined();
+    expect(onRefreshCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('does not create Bub against a daemon without deferred provider setup', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await renderDialog({ kind: 'create' }, createMachine('Legacy workstation'), onSubmit);
+
+    await act(async () => {
+      getOptionByText('Bub').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(getPrimaryAction('Create').disabled).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('reports the selected managed runtime so onboarding can prioritize it', async () => {

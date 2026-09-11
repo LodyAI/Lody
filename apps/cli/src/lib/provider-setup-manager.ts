@@ -7,8 +7,11 @@ import {
   findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
   getServerNow,
+  hasBuiltinRuntimeOverrideValues,
+  isManagedBuiltinAgentType,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  supportsBuiltinProviderSetup,
   writeMachineFlockRowToFlock,
   type AgentConfigId,
   type MachineId,
@@ -147,35 +150,49 @@ export class ProviderSetupManager {
     const attempt = setup.attempt;
     let unexpectedFailureCode: ProviderSetupFailureCode = 'runtime-unavailable';
     try {
-      const preparing = await this.updateStatus(setup.id, attempt, 'preparing-runtime');
-      if (!preparing || this.stopped) return;
-
-      const binaryStatus = await this.execution.getMachineAcpBinaryStatus({
-        type: 'machine/acp-binary-status',
-        machineId: this.machineId,
-        workspaceId: this.workspaceId,
-        agentType: preparing.config.agentType,
-      });
       if (
-        !binaryStatus.success ||
-        binaryStatus.status === 'unsupported-platform' ||
-        binaryStatus.status === 'incompatible-host' ||
-        binaryStatus.status === 'error'
+        setup.config.cliType !== 'builtin' ||
+        !supportsBuiltinProviderSetup(setup.config.agentType) ||
+        hasBuiltinRuntimeOverrideValues(setup.config.runtimeOverrides)
       ) {
         await this.fail(setup.id, attempt, 'runtime-unavailable');
         return;
       }
-      if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
-        unexpectedFailureCode = 'runtime-install-failed';
-        const install = await this.execution.installMachineAcpBinary({
-          type: 'machine/acp-binary-install',
+
+      // Bub is installed by the user, so its setup has no download phase. The
+      // durable row exists solely to keep the config unpublished until the
+      // real `bub` ACP process passes verification.
+      if (isManagedBuiltinAgentType(setup.config.agentType)) {
+        const preparing = await this.updateStatus(setup.id, attempt, 'preparing-runtime');
+        if (!preparing || this.stopped) return;
+
+        const binaryStatus = await this.execution.getMachineAcpBinaryStatus({
+          type: 'machine/acp-binary-status',
           machineId: this.machineId,
           workspaceId: this.workspaceId,
           agentType: preparing.config.agentType,
         });
-        if (!install.success) {
-          await this.fail(setup.id, attempt, 'runtime-install-failed');
+        if (
+          !binaryStatus.success ||
+          binaryStatus.status === 'unsupported-platform' ||
+          binaryStatus.status === 'incompatible-host' ||
+          binaryStatus.status === 'error'
+        ) {
+          await this.fail(setup.id, attempt, 'runtime-unavailable');
           return;
+        }
+        if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
+          unexpectedFailureCode = 'runtime-install-failed';
+          const install = await this.execution.installMachineAcpBinary({
+            type: 'machine/acp-binary-install',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+            agentType: preparing.config.agentType,
+          });
+          if (!install.success) {
+            await this.fail(setup.id, attempt, 'runtime-install-failed');
+            return;
+          }
         }
       }
 

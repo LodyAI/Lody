@@ -10,6 +10,7 @@ import {
   getStaticBuiltinAcpCapabilities,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
 } from '../src/ai';
 import { supportsBuiltinAuthentication } from '../src/agent-authentication';
 
@@ -17,11 +18,17 @@ describe('builtin Bub shared contract', () => {
   it('is builtin without being a managed-download runtime', () => {
     expect(isBuiltinAgentType('bub')).toBe(true);
     expect(isManagedBuiltinAgentType('bub')).toBe(false);
+    expect(supportsBuiltinProviderSetup('bub')).toBe(true);
     expect(getManagedBuiltinRuntimeByAgentType('bub')).toBeUndefined();
     expect(getBuiltinAgentByAgentType('bub')).toEqual({
       agentType: 'bub',
       displayName: 'Bub',
     });
+  });
+
+  it('stays outside startup auto-registration while using deferred verification', () => {
+    expect(isManagedBuiltinAgentType('bub')).toBe(false);
+    expect(supportsBuiltinProviderSetup('bub')).toBe(true);
   });
 
   it('points install failures at the ACP server tutorial', () => {

@@ -60,7 +60,10 @@ const setupId = 'setup-1' as AgentConfigId;
 const machineId = 'machine-1' as MachineId;
 const workspaceId = 'workspace-1' as WorkspaceId;
 
-function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask {
+function createSetup(
+  status: ProviderSetupStatus = 'queued',
+  configOverrides: Partial<ProviderSetupTask['config']> = {}
+): ProviderSetupTask {
   return {
     v: 1,
     id: setupId,
@@ -74,6 +77,7 @@ function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask 
       agentType: 'codex',
       env: {},
       prompt: '',
+      ...configOverrides,
     },
     status,
     attempt: 1,
@@ -170,6 +174,56 @@ describe('ProviderSetupManager', () => {
     expect(finalSnapshot).toContain(JSON.stringify(machineFlockKeys.agentConfig(setupId)));
     expect(finalSnapshot).not.toContain(JSON.stringify(machineFlockKeys.providerSetup(setupId)));
     expect(harness.execution.refreshMachineAcpCapabilities).toHaveBeenCalledTimes(1);
+    harness.manager.stop();
+  });
+
+  it('verifies user-installed Bub without treating it as a downloadable runtime', async () => {
+    const harness = createHarness({
+      refreshMachineAcpCapabilities: vi.fn(async () => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType: 'bub',
+        success: true,
+        modes: [],
+        models: [],
+      })),
+    });
+    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType: 'bub' }));
+
+    await harness.manager.kick();
+
+    expect(readState(harness.flock).config?.agentType).toBe('bub');
+    expect(readState(harness.flock).setup).toBeUndefined();
+    expect(harness.execution.getMachineAcpBinaryStatus).not.toHaveBeenCalled();
+    expect(harness.execution.installMachineAcpBinary).not.toHaveBeenCalled();
+    harness.manager.stop();
+  });
+
+  it('does not publish Bub when its live probe fails', async () => {
+    const harness = createHarness({
+      refreshMachineAcpCapabilities: vi.fn(async () => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType: 'bub',
+        success: false,
+        error: 'spawn bub ENOENT',
+      })),
+    });
+    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType: 'bub' }));
+
+    await harness.manager.kick();
+
+    expect(readState(harness.flock).config).toBeUndefined();
+    expect(readState(harness.flock).setup).toMatchObject({
+      status: 'failed',
+      failureCode: 'verification-failed',
+    });
+    expect(harness.execution.getMachineAcpBinaryStatus).not.toHaveBeenCalled();
+    expect(harness.execution.installMachineAcpBinary).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
