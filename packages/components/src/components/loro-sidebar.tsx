@@ -934,51 +934,62 @@ export const LoroSidebar = memo(function LoroSidebar({
                       value={currentWorkspaceId}
                       onValueChange={(value) => onWorkspaceSelected?.(value)}
                     >
-                      {workspaces.map((ws) => (
-                        <ContextMenu key={ws.id}>
-                          <ContextMenuTrigger asChild disabled={!isElectronRenderer() || !ws.slug}>
-                            <DropdownMenuRadioItem
-                              value={ws.id}
-                              className="gap-2"
-                              onClickCapture={(event) => {
-                                if (!ws.slug || !isNewWindowClick(event)) return;
-                                if (openDesktopWindow(undefined, ws.slug)) {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                }
-                              }}
-                            >
-                              <WorkspaceAvatar
-                                workspace={{ name: ws.name, logo: ws.logo }}
-                                className="h-5 w-5 shrink-0 text-[10px]"
-                              />
-                              <span className="min-w-0 truncate">{ws.name}</span>
-                              {ws.planTier ? (
-                                <Badge
-                                  variant="secondary"
-                                  className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
-                                >
-                                  {ws.planTier === 'enterprise'
-                                    ? mergedLabels.planEnterprise
-                                    : mergedLabels.planPlus}
-                                </Badge>
-                              ) : null}
-                            </DropdownMenuRadioItem>
-                          </ContextMenuTrigger>
-                          {isElectronRenderer() && ws.slug ? (
+                      {workspaces.map((ws) => {
+                        const workspaceSlug = ws.slug;
+                        const row = (
+                          <DropdownMenuRadioItem
+                            key={ws.id}
+                            value={ws.id}
+                            className="gap-2"
+                            onClickCapture={(event) => {
+                              if (!workspaceSlug || !isNewWindowClick(event)) return;
+                              if (openDesktopWindow(undefined, workspaceSlug)) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }
+                            }}
+                          >
+                            <WorkspaceAvatar
+                              workspace={{ name: ws.name, logo: ws.logo }}
+                              className="h-5 w-5 shrink-0 text-[10px]"
+                            />
+                            <span className="min-w-0 truncate">{ws.name}</span>
+                            {ws.planTier ? (
+                              <Badge
+                                variant="secondary"
+                                className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                              >
+                                {ws.planTier === 'enterprise'
+                                  ? mergedLabels.planEnterprise
+                                  : mergedLabels.planPlus}
+                              </Badge>
+                            ) : null}
+                          </DropdownMenuRadioItem>
+                        );
+
+                        // Only wrap in a context menu where the window action
+                        // exists: a DISABLED ContextMenuTrigger stamps
+                        // `data-disabled` onto the row it wraps, and menu items
+                        // style that as `pointer-events-none`, which would make
+                        // every workspace unclickable in the browser.
+                        if (!isElectronRenderer() || !workspaceSlug) return row;
+
+                        return (
+                          <ContextMenu key={ws.id}>
+                            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                             <ContextMenuContent>
                               <ContextMenuItem
                                 onSelect={() => {
-                                  openDesktopWindow(undefined, ws.slug);
+                                  openDesktopWindow(undefined, workspaceSlug);
                                 }}
                               >
                                 <AppWindow />
                                 {t('workspace.openInNewWindow')}
                               </ContextMenuItem>
                             </ContextMenuContent>
-                          ) : null}
-                        </ContextMenu>
-                      ))}
+                          </ContextMenu>
+                        );
+                      })}
                     </DropdownMenuRadioGroup>
                     {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
                       <p className="px-2 py-1.5 text-xs text-muted-foreground">
