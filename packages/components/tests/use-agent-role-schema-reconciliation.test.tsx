@@ -44,7 +44,20 @@ afterEach(async () => {
 });
 
 describe('role maintenance at workspace startup', () => {
-  it.each(['success', 'failed-probe', 'wrong-target', 'old-cache', 'missing-schema'])(
+  it.each([
+    'success',
+    'failed-probe',
+    'wrong-target',
+    'wrong-config',
+    'wrong-provider',
+    'wrong-agent',
+    'old-cache',
+    'newer-cache',
+    'provisional',
+    'missing-schema',
+    'sign-out',
+    'workspace-disposed',
+  ])(
     'waits for readiness and silently persists only a matching fresh schema: %s',
     async (scenario) => {
       const flock = new Flock('startup-role');
@@ -97,18 +110,26 @@ describe('role maintenance at workspace startup', () => {
       state.atoms.set('online', new Set(['machine']));
       await act(async () => root.render(<Startup />));
       expect(flock.get(key)).toEqual(role);
+      if (scenario === 'sign-out') state.atoms.set('user', null);
+      if (scenario === 'workspace-disposed') state.atoms.set('runtime', null);
+      if (scenario === 'sign-out' || scenario === 'workspace-disposed') {
+        await act(async () => root.render(<Startup />));
+      }
       await act(async () =>
         resolveProbe({
           success: scenario !== 'failed-probe',
           machineId: scenario === 'wrong-target' ? 'other' : 'machine',
-          configId: 'config',
+          configId: scenario === 'wrong-config' ? 'other' : 'config',
           cliType: 'builtin',
           agentType: 'codex',
           capability: {
-            cliType: 'builtin',
-            agentType: 'codex',
-            provenance: 'runtime',
-            cacheVersion: scenario === 'old-cache' ? 1 : ACP_CAPABILITY_CACHE_VERSION,
+            cliType: scenario === 'wrong-provider' ? 'custom' : 'builtin',
+            agentType: scenario === 'wrong-agent' ? 'claude' : 'codex',
+            provenance: scenario === 'provisional' ? undefined : 'runtime',
+            cacheVersion:
+              scenario === 'old-cache'
+                ? 1
+                : ACP_CAPABILITY_CACHE_VERSION + (scenario === 'newer-cache' ? 1 : 0),
             fetchedAt: 2,
             modes: [],
             models: [],

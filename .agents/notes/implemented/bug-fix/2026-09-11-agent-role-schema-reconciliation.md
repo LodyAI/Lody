@@ -43,13 +43,37 @@ deliberately did not rewrite stored state. Current intent is the
 Behavior tests cover startup readiness, failed/mismatched/incomplete probes, legacy
 Plan migration, preserved model/permission/value pins, idempotence and real Flock
 writes with delayed acquisition, edits, deletion, cancellation and write failure.
-All 56 tests across the Role form, startup hook, workspace writer, catalog room and
-catalog write suites pass. Scoped lint, formatting and `git diff --check` pass.
-`pnpm format` completed; its unrelated Electron formatting was excluded.
-`pnpm check` stops in `@loro-dev/ignore` because this nested checkout lacks its Node,
-Effect and test dependencies. Component typecheck also encounters missing Electron
-and hotkey dependencies. Public-boundary and docs checks remain blocked by other
-uninitialized ACP submodules; the documentation check reports no errors in the new
-documents. No running desktop or actual user catalog was exercised.
+All 63 tests across the Role form, startup hook, workspace writer, catalog room and
+catalog write suites pass, including sign-out/disposal during a pending probe and
+rejection of mismatched config/provider/agent, future cache versions and provisional
+capabilities. No running desktop or actual user catalog was exercised.
+
+### CI repair and ablation
+
+The complete Static checks job log for run `34554474320` showed formatting and all
+scoped typechecks passing, then type-aware lint failing with `consistent-return`.
+The readiness branch returned implicitly while the active effect returned cleanup.
+Explicit `return undefined` fixes the return contract without removing cancellation.
+The initial ordinary scoped lint missed this type-aware rule. Dependency limitations
+from the initial local validation were resolved with pinned submodules and an
+independent frozen-lockfile install; the checkout's install guard permits this layout.
+
+Sequential ablations used the five suites above (63 tests); the negative control
+used the startup suite (12 tests). Passing tests alone are not equivalence evidence.
+
+| Experiment | Evidence / outcome | Decision |
+| --- | --- | --- |
+| Explicit-undefined baseline | 63 pass; scoped type-aware lint has no errors | Keep CI fix |
+| Remove caller-side machine ID deduplication | Subscription owner already normalizes via `Set`; 63 pass | Keep deletion |
+| Remove separate machine ID from probe key | Exact-target config lookup guarantees the serialized config already contains that ID; 63 pass | Keep deletion |
+| Remove effect cleanup | 2 fail / 10 pass: sign-out and workspace disposal incorrectly mutate the stored Role | Restore protection |
+
+The retained simplifications do not change migration intent or weaken identity,
+schema freshness, ownership, model compatibility or transactional write guards.
+After restoring cleanup, all 63 focused tests pass again. Full `pnpm check`,
+`pnpm check:quick`, `pnpm format:check`, scoped test formatting, `pnpm run docs check`
+and `git diff --check` pass. `pnpm format` completed; its unrelated Electron test
+formatting was excluded. The full check includes 3,423 component tests and all
+workspace typechecks; existing skipped tests and lint/document-size warnings remain.
 
 PR: [#588](https://github.com/LodyAI/Lody/pull/588).

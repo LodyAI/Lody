@@ -24,7 +24,7 @@ export function useAgentRoleSchemaReconciliation(): void {
     () => roles.filter((role) => canManageAgentRole(role, userId)),
     [roles, userId]
   );
-  const machineIds = useMemo(() => [...new Set(owned.map((role) => role.machineId))], [owned]);
+  const machineIds = useMemo(() => owned.map((role) => role.machineId), [owned]);
   useMachineFlockAgentConfigsForMachineIds(machineIds);
   const configs = useAtomValue(getAllAgentConfigAtom);
   const online = useAtomValue(onlineMachineIdsAtom);
@@ -42,7 +42,7 @@ export function useAgentRoleSchemaReconciliation(): void {
   );
 
   useEffect(() => {
-    if (!runtime || !userId || !synced) return;
+    if (!runtime || !userId || !synced) return undefined;
     let cancelled = false;
     for (const role of owned) {
       const config = configs.find(
@@ -51,11 +51,7 @@ export function useAgentRoleSchemaReconciliation(): void {
       const machine = machines.get(role.machineId);
       if (!config || !machine || !Object.keys(role.runConfig.configOptionValues ?? {}).length)
         continue;
-      const key = JSON.stringify([
-        role.machineId,
-        config,
-        machine.acpCapabilities?.[config.id]?.sourceVersion,
-      ]);
+      const key = JSON.stringify([config, machine.acpCapabilities?.[config.id]?.sourceVersion]);
       if (!online.has(role.machineId)) {
         probes.entries.delete(key);
         continue;
