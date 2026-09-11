@@ -14,3 +14,4 @@
 | `session-read-state.steps.ts`  | Exercises unread marking, navigation-based clearing, and UI cleanup             |
 | `session-fork.steps.ts`        | Forks a completed Session to a worktree and verifies origin and cleanup         |
 | `settings-appearance.steps.ts` | Commits, previews, cancels, and reopens a desktop theme selection               |
+| `shortcuts.steps.ts`           | Verifies default shortcuts, cross-window rebinding, and renderer reload         |

@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Rules only; responsibilities and reasoning: [README.md](README.md). Worktrees and git
+Rules only; rationale: [README.md](README.md). Worktrees and git
 credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
 Contract: specs/session-orchestration.md.
 
@@ -46,7 +46,7 @@ Contract: specs/session-orchestration.md.
 
 - Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
   never gate status or meta writes.
-- An `active` session goal must not suppress turn completion or its notification.
+- Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
   second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
   owns source Turn, requester and config; steer replaces it before tools.

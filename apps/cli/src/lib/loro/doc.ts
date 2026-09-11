@@ -53,6 +53,7 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type SessionGoalAction,
   type AcpCapabilityCacheEntry,
   type SessionForkOperation,
   SessionForkOperationSchema,
@@ -1522,6 +1523,7 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    goalActions?: SessionGoalAction[],
     options: { signal?: AbortSignal } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
@@ -1542,6 +1544,7 @@ export class LoroDocumentManager {
       sourceVersion,
       modelReasoningEfforts,
       acknowledgedSteer,
+      goalActions,
       options
     );
   }
@@ -3108,6 +3111,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    goalActions?: SessionGoalAction[],
     options: { signal?: AbortSignal } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
@@ -3133,6 +3137,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       availableCommands: availableCommands?.length ? availableCommands : undefined,
       sessionFork,
       acknowledgedSteer,
+      goalActions: goalActions?.length ? goalActions : undefined,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0

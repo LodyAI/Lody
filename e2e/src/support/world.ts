@@ -21,6 +21,7 @@ import { ProjectReopenFixture } from './fixtures/project-reopen-fixture.js';
 import { ProjectReopenPage } from './pages/project-reopen-page.js';
 import { AgentRoleFixture } from './fixtures/agent-role-fixture.js';
 import { AgentRolePage, type AgentRoleResources } from './pages/agent-role-page.js';
+import { ShortcutPage } from './pages/shortcut-page.js';
 import { SettingsAppearancePage } from './pages/settings-appearance-page.js';
 import { createScenarioArtifacts, type ScenarioArtifacts } from './world-utils.js';
 
@@ -39,6 +40,7 @@ export class LodyWorld extends World {
   projectLifecyclePage: ProjectLifecyclePage | null = null;
   projectReopenPage: ProjectReopenPage | null = null;
   agentRolePage: AgentRolePage | null = null;
+  shortcutPage: ShortcutPage | null = null;
   appearancePage: SettingsAppearancePage | null = null;
   workFixture: WorkSessionFixture | null = null;
   projectReopenFixture: ProjectReopenFixture | null = null;
@@ -67,6 +69,7 @@ export class LodyWorld extends World {
     this.onboarding = new OnboardingPage(this.harness.page);
     this.reviewPage = new ReviewPage(this.harness.page);
     this.workPage = new WorkSessionPage(this.harness.page);
+    this.shortcutPage = new ShortcutPage(this.harness.page);
   }
 
   async configureSessionManagementJourney(): Promise<void> {

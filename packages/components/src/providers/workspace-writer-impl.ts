@@ -96,6 +96,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       handle.flock.commit();
     },
 
+    async flockRowUpdate(flockDocId, key, update) {
+      const handle = await deps.repo.openFlockDoc(flockDocId);
+      return handle.flock.txn(() => {
+        const next = update(handle.flock.get([...key]));
+        if (next === undefined) return false;
+        handle.flock.set([...key], next as Parameters<typeof handle.flock.set>[1]);
+        return true;
+      });
+    },
+
     async flockRowPutIfAbsent(
       flockDocId: string,
       key: readonly string[],

@@ -15,6 +15,8 @@ import type {
   SessionTurnInputConfig,
   MachineFlockKey,
   MachineFlockRow,
+  SessionGoalAction,
+  SessionGoalResponse,
 } from '@lody/shared';
 import {
   buildMachineArchiveSessionCommand,
@@ -46,6 +48,7 @@ import debug from 'debug';
 import { v4 as uuidv4 } from 'uuid';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import {
+  docMetaCacheReadyAtom,
   setDocMetaByRoomIdAtom,
   sessionMetaCacheAtom,
   sessionMetaCountAtom,
@@ -56,7 +59,6 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
-import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
@@ -225,6 +227,26 @@ export function isArchivedLocalProjectRestoreUnavailableError(
   return error instanceof ArchivedLocalProjectRestoreUnavailableError;
 }
 
+function getDirectChildSessions(
+  sessionId: SessionId,
+  sessions: readonly SessionMeta[]
+): SessionMeta[] {
+  return sessions.filter(
+    (session) => session.id !== sessionId && session.parentSessionId === sessionId
+  );
+}
+
+function getArchiveStateTargets(
+  sessionId: SessionId,
+  rootMeta: SessionMeta,
+  sessions: readonly SessionMeta[]
+): SessionMeta[] {
+  return [
+    { ...rootMeta, id: rootMeta.id ?? sessionId },
+    ...getDirectChildSessions(sessionId, sessions),
+  ];
+}
+
 async function assertArchivedLocalProjectCanRestore(
   runtime: WorkspaceRuntime,
   sessionMeta: SessionMeta
@@ -366,6 +388,17 @@ export type SessionActions = {
     userTurnId: string,
     options?: { machineId?: MachineId | null }
   ) => Promise<boolean>;
+  /**
+   * Run a goal action through the agent's control extension.
+   *
+   * Status-only actions reach a goal whose prompt is still open, which the chat
+   * path cannot do: that prompt is the session's only turn slot.
+   */
+  requestSessionGoal: (
+    sessionId: SessionId,
+    action: SessionGoalAction,
+    options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+  ) => Promise<SessionGoalResponse | null>;
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
@@ -373,6 +406,7 @@ export type SessionActions = {
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
+  /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
@@ -558,22 +592,6 @@ export function useSessionActions(): SessionActions {
       });
     },
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
-  );
-
-  const getSessionLifecycleMetas = useCallback(
-    (sessionId: SessionId, rootMeta: SessionMeta): SessionMeta[] => {
-      const cache = store.get(sessionMetaCacheAtom);
-      const sessionsById = new Map(
-        Object.values(cache).map((session) => [session.id, session] as const)
-      );
-      sessionsById.set(sessionId, { ...rootMeta, id: rootMeta.id ?? sessionId });
-      return collectSessionLifecycleIds(sessionId, [...sessionsById.values()]).map((id) => {
-        const session = sessionsById.get(id);
-        if (!session) throw new Error(`Session metadata missing for lifecycle child ${id}`);
-        return session;
-      });
-    },
-    [store]
   );
 
   const assertSessionCreateAllowed = useCallback(
@@ -903,6 +921,35 @@ export function useSessionActions(): SessionActions {
     [runtime]
   );
 
+  const requestSessionGoal = useCallback(
+    async (
+      sessionId: SessionId,
+      action: SessionGoalAction,
+      options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+    ): Promise<SessionGoalResponse | null> => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const meta = isLoroRepoDocDeleted(existing)
+        ? undefined
+        : (existing?.meta as SessionMeta | undefined);
+      const machineId = options?.machineId ?? meta?.machineId ?? null;
+      const userId = options?.userId?.trim() || meta?.userId;
+      if (!machineId || !userId) {
+        return null;
+      }
+      return await runtime.requestSessionGoal(machineId, {
+        sessionId,
+        action,
+        ...(options?.objective ? { objective: options.objective } : {}),
+        userId,
+      });
+    },
+    [runtime]
+  );
+
   const requestSessionSteer = useCallback(
     async (
       sessionId: SessionId,
@@ -1178,21 +1225,9 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const sessions = Object.values(store.get(sessionMetaCacheAtom));
-      const allIds = new Set(sessionIds);
-      for (const id of sessionIds) {
-        for (const lifecycleId of collectSessionLifecycleIds(id, sessions)) {
-          allIds.add(lifecycleId);
-        }
-      }
-      const uniqueIds = Array.from(allIds);
-      await Promise.all(
-        uniqueIds.map(async (id) => {
-          await deleteSessionDocuments(id);
-        })
-      );
+      await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
-    [runtime, store, deleteSessionDocuments]
+    [runtime, deleteSessionDocuments]
   );
 
   const archiveSession = useCallback(
@@ -1220,8 +1255,12 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-      for (const session of lifecycleSessions) {
+      const archiveTargets = getArchiveStateTargets(
+        sessionId,
+        sessionMeta,
+        Object.values(store.get(sessionMetaCacheAtom))
+      );
+      for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
         }
@@ -1255,12 +1294,12 @@ export function useSessionActions(): SessionActions {
           },
         } as unknown as RepoDocMetaPatch);
       }
-      log('[session-archive] lifecycle archived', {
+      log('[session-archive] archived', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store, getSessionLifecycleMetas]
+    [runtime, store]
   );
 
   const restoreSession = useCallback(
@@ -1278,9 +1317,13 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
+      const archiveTargets = getArchiveStateTargets(
+        sessionId,
+        sessionMeta,
+        Object.values(store.get(sessionMetaCacheAtom))
+      );
 
-      for (const session of lifecycleSessions) {
+      for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
         } as Partial<SessionMeta>);
@@ -1293,12 +1336,12 @@ export function useSessionActions(): SessionActions {
           );
         }
       }
-      log('[session-restore] lifecycle restored', {
+      log('[session-restore] restored', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -1388,19 +1431,31 @@ export function useSessionActions(): SessionActions {
     async (sessionId: SessionId) => {
       log('[session-delete] start', { sessionId });
       if (!runtime) throw new Error('Runtime not ready');
+      if (!store.get(docMetaCacheReadyAtom)) {
+        throw new Error('Session metadata is still loading');
+      }
       const loadedMeta = (await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as
         | SessionMeta
         | undefined;
       if (!loadedMeta) throw new Error(`Session metadata missing for ${sessionId}`);
       const rootMeta = { ...loadedMeta, id: loadedMeta.id ?? sessionId };
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, rootMeta);
+      const deleteTargets = [
+        rootMeta,
+        ...getDirectChildSessions(
+          sessionId,
+          Object.values(store.get(sessionMetaCacheAtom))
+        ),
+      ];
 
-      for (const session of lifecycleSessions.reverse()) {
+      for (const session of [...deleteTargets].reverse()) {
         await deleteArchivedSessionMeta(session);
       }
-      log('[session-delete] lifecycle deleted', { sessionId });
+      log('[session-delete] deleted', {
+        sessionId,
+        targetSessionIds: deleteTargets.map((session) => session.id),
+      });
     },
-    [runtime, getSessionLifecycleMetas, deleteArchivedSessionMeta]
+    [runtime, store, deleteArchivedSessionMeta]
   );
 
   const setSessionPinned = useCallback(
@@ -1425,6 +1480,7 @@ export function useSessionActions(): SessionActions {
     requestSessionDispatch,
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,

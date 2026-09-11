@@ -22,6 +22,7 @@
 | `pages/session-read-state-page.ts`        | Unread state, sidebar navigation, and two-Session cleanup           |
 | `pages/session-fork-page.ts`              | Native ACP fork, origin, worktree, and source isolation             |
 | `pages/settings-appearance-page.ts`       | Theme commit, live preview, cancellation, and persisted state       |
+| `pages/shortcut-page.ts`                  | Default shortcuts, cross-window rebinding, and renderer reload      |
 | `fixtures/work-session-fixture.ts`        | Synthetic Git workspace and scripted ACP evidence                   |
 | `fixtures/agent-role-fixture.ts`          | File-signaled scripted ACP and Role execution evidence              |
 | `fixtures/mcp-catalog-editing-fixture.ts` | Synthetic editable MCP catalog values                               |

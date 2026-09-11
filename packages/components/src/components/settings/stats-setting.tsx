@@ -100,6 +100,7 @@ function CloudStatsSettings() {
         onSelectedUsageDayChange={setSelectedUsageDayMs}
         workspaceId={workspaceId}
         loading={Boolean(workspaceId) && !usageTimeline}
+        shareCard
       />
     </div>
   );

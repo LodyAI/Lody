@@ -1,6 +1,6 @@
 # Feature index
 
-The active suite contains 14 scenarios: 3 `@P0` smoke journeys and 11 `@P1` deeper journeys.
+The active suite contains 15 scenarios: 4 `@P0` smoke journeys and 11 `@P1` deeper journeys.
 
 | Feature                       | Scope                                                                             |
 | ----------------------------- | --------------------------------------------------------------------------------- |
@@ -16,3 +16,4 @@ The active suite contains 14 scenarios: 3 `@P0` smoke journeys and 11 `@P1` deep
 | `session-read-state.feature`  | Session unread marking, navigation-based read clearing, and permanent deletion    |
 | `session-fork.feature`        | Completed Session fork, origin, independent worktree, and deletion isolation      |
 | `settings-appearance.feature` | Theme commit, preview isolation, cancellation, and settings-reopen persistence    |
+| `shortcuts.feature`           | Default bindings, cross-window rebinding, physical keys, and renderer reload      |

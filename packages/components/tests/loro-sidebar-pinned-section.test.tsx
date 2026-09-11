@@ -116,6 +116,34 @@ describe('LoroSidebar pinned section', () => {
     }
   });
 
+  it('keeps workspace rows selectable in browsers', () => {
+    let selected = 'workspace';
+    renderSidebar({
+      workspaces: [
+        { id: 'workspace', name: 'Lody', slug: 'lody' },
+        { id: 'second', name: 'Second workspace', slug: 'second' },
+      ],
+      onWorkspaceSelected: (value) => {
+        selected = value;
+      },
+    });
+    const trigger = container?.querySelector('[data-workspace-switcher-trigger]');
+    flushSync(() => {
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
+    ).find((item) => item.textContent?.includes('Second workspace'));
+    expect(target).toBeDefined();
+    // `data-disabled` is what the shared menu item styling turns into
+    // `pointer-events-none`, so a row carrying it cannot be clicked at all.
+    expect(target?.hasAttribute('data-disabled')).toBe(false);
+    flushSync(() => {
+      target?.click();
+    });
+    expect(selected).toBe('second');
+  });
+
   it('keeps the desktop collapse toggle hover-revealed in browsers', () => {
     renderSidebar({ onRequestCollapse: vi.fn() });
 

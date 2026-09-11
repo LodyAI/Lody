@@ -218,6 +218,40 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
 }: SessionSidePanelTabBarProps) {
   const windowDragClass = useWindowDragRegionClass();
   const activeTabRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+
+    const handleWheel = (event: WheelEvent) => {
+      // Keep native horizontal gestures and browser zoom intact.
+      if (event.defaultPrevented || event.ctrlKey || event.deltaX !== 0 || event.deltaY === 0)
+        return;
+
+      const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
+      if (maxScrollLeft <= 0) return;
+
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? viewport.clientWidth
+            : 1;
+      const nextScrollLeft = Math.max(
+        0,
+        Math.min(maxScrollLeft, viewport.scrollLeft + event.deltaY * unit)
+      );
+      if (nextScrollLeft === viewport.scrollLeft) return;
+
+      event.preventDefault();
+      viewport.scrollLeft = nextScrollLeft;
+    };
+
+    // React's delegated wheel listener is passive, so bind to the viewport.
+    viewport.addEventListener('wheel', handleWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', handleWheel);
+  }, []);
 
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -228,6 +262,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
       <ScrollArea
         scrollableX
         horizontalOnly
+        viewportRef={viewportRef}
         className="min-w-0 flex-1"
         // Compact overlay bar: default horizontal track is too tall in this h-11 strip.
         horizontalScrollbarClassName="h-1 border-0 p-0"

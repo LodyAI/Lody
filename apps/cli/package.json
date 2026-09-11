@@ -13,7 +13,7 @@
     "build": "pnpm run clean && pnpm run prepare:acp-adapters && pnpm run typecheck && pnpm run build:bundle && pnpm run copy:dsh-presets && pnpm run check:published-bundle-imports && pnpm run copy:wasm",
     "build:watch": "pnpm run prepare:review-assets && vite build --watch",
     "build:bundle": "pnpm run prepare:review-assets && vite build",
-    "prepare:acp-adapters": "corepack pnpm --dir ../.. --filter acp-extension-core build && corepack pnpm --dir ../.. --filter acp-extension-claude build && corepack pnpm --dir ../.. --filter acp-extension-codex build && corepack pnpm --dir ../.. --filter acp-extension-grok build && corepack pnpm --dir ../.. --filter acp-extension-dsh build",
+    "prepare:acp-adapters": "corepack pnpm --dir ../.. --filter acp-extension-claude build && corepack pnpm --dir ../.. --filter acp-extension-codex build && corepack pnpm --dir ../.. --filter acp-extension-grok build && corepack pnpm --dir ../.. --filter acp-extension-dsh build",
     "prepare:review-assets": "pnpm --dir ../.. --filter lody-code-review-viewer build",
     "check:published-bundle-imports": "node scripts/check-published-bundle-imports.js",
     "copy:dsh-presets": "node scripts/copy-deepseek-presets.js",

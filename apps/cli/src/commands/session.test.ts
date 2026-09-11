@@ -213,6 +213,41 @@ describe('session command helpers', () => {
     expect(withBuiltinDefaultTurnMode({}, createSessionMeta({ cliType: 'registry' }))).toEqual({});
   });
 
+  it('skips a builtin default mode the adapter does not offer', () => {
+    const grok = createSessionMeta({ agentType: 'grok' });
+    expect(withBuiltinDefaultTurnMode({}, grok)).toEqual({ modeId: 'default' });
+    expect(
+      withBuiltinDefaultTurnMode({}, grok, {
+        ...createAcpCapability(),
+        agentType: 'grok',
+        modes: [],
+        configOptions: [
+          {
+            id: 'permission_mode',
+            name: 'Permission Mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'ask',
+            options: [
+              { value: 'ask', name: 'Ask' },
+              { value: 'always-approve', name: 'Always Approve' },
+            ],
+          },
+        ],
+      })
+    ).toEqual({});
+    expect(
+      withBuiltinDefaultTurnMode({}, grok, {
+        ...createAcpCapability(),
+        agentType: 'grok',
+        modes: [
+          { id: 'default', name: 'Agent' },
+          { id: 'plan', name: 'Plan' },
+        ],
+      })
+    ).toEqual({ modeId: 'default' });
+  });
+
   it('picks prompt candidates by explicit precedence', () => {
     expect(
       resolvePromptCandidate({

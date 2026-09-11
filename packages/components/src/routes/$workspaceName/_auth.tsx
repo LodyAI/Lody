@@ -82,13 +82,7 @@ function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }
   return (
     <RouteSuspense>
       <LazyMainLayout>
-        <AuthedWorkspaceRouteTracker />
-        <Outlet />
-        <ElectronSessionCompletionNotifier />
-        <ElectronMenuHandler />
-        <AppCommands />
-        <CommandPalette />
-        <AutoArchivePrWatcher />
+        <AuthenticatedWorkspaceContent />
       </LazyMainLayout>
     </RouteSuspense>
   );
@@ -380,14 +374,7 @@ function AuthedLayoutContent({
     return (
       <RouteSuspense>
         <LazyMainLayout>
-          <AuthedWorkspaceRouteTracker />
-          <Outlet />
-          <ElectronSessionCompletionNotifier />
-          <ElectronMenuHandler />
-          <AppCommands />
-          <CommandPalette />
-          <AutoArchivePrWatcher />
-          <WorkspaceCheckoutPendingDialog />
+          <AuthenticatedWorkspaceContent showWorkspaceCheckout />
         </LazyMainLayout>
       </RouteSuspense>
     );
@@ -445,15 +432,28 @@ function AuthedLayoutContent({
   return (
     <RouteSuspense>
       <LazyMainLayout>
-        <AuthedWorkspaceRouteTracker />
-        <Outlet />
-        <ElectronSessionCompletionNotifier />
-        <ElectronMenuHandler />
-        <CommandPalette />
-        <AutoArchivePrWatcher />
-        <WorkspaceCheckoutPendingDialog />
+        <AuthenticatedWorkspaceContent showWorkspaceCheckout />
       </LazyMainLayout>
     </RouteSuspense>
+  );
+}
+
+function AuthenticatedWorkspaceContent({
+  showWorkspaceCheckout = false,
+}: {
+  showWorkspaceCheckout?: boolean;
+}) {
+  return (
+    <>
+      <AuthedWorkspaceRouteTracker />
+      <Outlet />
+      <ElectronSessionCompletionNotifier />
+      <ElectronMenuHandler />
+      <AppCommands />
+      <CommandPalette />
+      <AutoArchivePrWatcher />
+      {showWorkspaceCheckout && <WorkspaceCheckoutPendingDialog />}
+    </>
   );
 }
 
