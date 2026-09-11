@@ -37,7 +37,9 @@ flush failure reports uncertain durability and retains both bindings; the render
 resyncs Machine Flock and does not treat it as an ordinary failed save. Queue event
 drains never use their live snapshot to prune bindings. Credential reconciliation runs
 once from the authoritative startup state, and later only for a durably applied
-cancellation.
+cancellation. Startup recovery snapshots only IDs; the current config/setup references
+are read inside each ID's credential mutation sequence so provisioning cannot be
+followed by reconciliation from a stale global snapshot.
 
 ## When the queue may start
 

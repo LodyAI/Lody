@@ -376,34 +376,29 @@ export class ProviderSetupManager {
       ...(Object.keys(cancellations) as AgentConfigId[]),
     ]);
     for (const id of ids) {
-      const config = configs[id];
-      const setup = setups[id];
-      const referencedConfigs = [setup?.config, config].filter(
-        (entry): entry is NonNullable<typeof entry> =>
-          Boolean(entry && getLodyCodexCustomProvider(entry.env))
-      );
-      await this.runCredentialMutation(id, () =>
-        this.reconcileCredential(this.workspaceId, id, referencedConfigs)
-      );
+      await this.reconcileCredentialBinding(id);
     }
   }
 
   private async reconcileCredentialBinding(configId: AgentConfigId): Promise<void> {
-    const handle = await this.repo.openFlockDoc(
-      getMachineFlockDocId(this.workspaceId, this.machineId)
-    );
-    const rows = readMachineFlockRowsFromFlock(handle.flock, {
-      prefixes: [machineFlockKeys.providerSetup(configId), machineFlockKeys.agentConfig(configId)],
+    await this.runCredentialMutation(configId, async () => {
+      const handle = await this.repo.openFlockDoc(
+        getMachineFlockDocId(this.workspaceId, this.machineId)
+      );
+      const rows = readMachineFlockRowsFromFlock(handle.flock, {
+        prefixes: [
+          machineFlockKeys.providerSetup(configId),
+          machineFlockKeys.agentConfig(configId),
+        ],
+      });
+      const config = getMachineFlockAgentConfigs(rows)[configId];
+      const setup = getMachineFlockProviderSetups(rows)[configId];
+      const referencedConfigs = [setup?.config, config].filter(
+        (entry): entry is NonNullable<typeof entry> =>
+          Boolean(entry && getLodyCodexCustomProvider(entry.env))
+      );
+      await this.reconcileCredential(this.workspaceId, configId, referencedConfigs);
     });
-    const config = getMachineFlockAgentConfigs(rows)[configId];
-    const setup = getMachineFlockProviderSetups(rows)[configId];
-    const referencedConfigs = [setup?.config, config].filter(
-      (entry): entry is NonNullable<typeof entry> =>
-        Boolean(entry && getLodyCodexCustomProvider(entry.env))
-    );
-    await this.runCredentialMutation(configId, () =>
-      this.reconcileCredential(this.workspaceId, configId, referencedConfigs)
-    );
   }
 
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {

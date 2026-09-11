@@ -2,6 +2,7 @@ import { createStore } from 'jotai';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildLodyCodexCustomProviderEnv,
+  getAgentConfigRoomId,
   LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
   serializeMachineFlockKey,
@@ -16,6 +17,7 @@ import {
 import {
   cmdCreateProviderSetupAtom,
   cmdRetryProviderSetupAtom,
+  deleteAgentConfigAtom,
   deleteProviderSetupAtom,
   getAllAgentConfigAtom,
   getAllProviderSetupsAtom,
@@ -62,18 +64,24 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       joinRoom: vi.fn(),
     }));
 
-    const flockRowPut = vi.fn(async (_flockDocId: string, key: readonly string[]) => {
-      if (key[0] === 'providerSetupCancellation') {
-        await markerAccepted.promise;
+    const flockRowPut = vi.fn(
+      async (_flockDocId: string, key: readonly string[], value: unknown) => {
+        if (key[0] === 'providerSetupCancellation') {
+          await markerAccepted.promise;
+          mirrorRows.set(JSON.stringify(key), { key, value } as MachineFlockScanRow);
+        }
       }
+    );
+    const flockRowDelete = vi.fn(async (_flockDocId: string, key: readonly string[]) => {
+      mirrorRows.delete(JSON.stringify(key));
     });
-    const flockRowDelete = vi.fn(async () => undefined);
+    const deleteDoc = vi.fn(async () => undefined);
 
     store.set(runtimeAtom, {
       workspaceId,
       workspaceSlug,
       repo: { openFlockDoc, flush },
-      writer: { flockRowPut, flockRowDelete },
+      writer: { flockRowPut, flockRowDelete, deleteDoc },
     } as unknown as WorkspaceRuntime);
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, workspaceSlug);
@@ -85,10 +93,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       description: undefined,
       cliType: 'builtin',
       agentType: 'codex',
-      env: buildLodyCodexCustomProviderEnv(
-        {},
-        { baseUrl: 'https://relay.example.com/v1' }
-      ),
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
       prompt: '',
     };
 
@@ -143,6 +148,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
 
     const configKey = machineFlockKeys.agentConfig(setupId);
     const unrelatedKey = machineFlockKeys.dotlodyPath();
+    mirrorRows.set(serializeMachineFlockKey(configKey), { key: configKey, value: config });
     store.set(setMachineFlockRowsForMachineAtom, {
       workspaceId,
       machineId,
@@ -202,6 +208,30 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     });
     expect(store.get(getAllProviderSetupsAtom)).toEqual([]);
     expect(store.get(getAllAgentConfigAtom)).toEqual([]);
+
+    await store.set(deleteAgentConfigAtom, config);
+
+    expect(flockRowDelete.mock.calls.at(-1)).toEqual([flockDocId, configKey]);
+    expect(flockRowPut.mock.invocationCallOrder[2]).toBeLessThan(
+      flockRowDelete.mock.invocationCallOrder.at(-1) ?? 0
+    );
+    expect(deleteDoc).toHaveBeenCalledWith(getAgentConfigRoomId(setupId));
+
+    const reloadedStore = createStore();
+    reloadedStore.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc, flush },
+      writer: { flockRowPut, flockRowDelete, deleteDoc },
+    } as unknown as WorkspaceRuntime);
+    reloadedStore.set(currentWorkspaceIdAtom, workspaceId);
+    reloadedStore.set(currentWorkspaceSlugAtom, workspaceSlug);
+    reloadedStore.set(setMachineFlockRowsForMachineAtom, {
+      workspaceId,
+      machineId,
+      rows: Object.fromEntries(mirrorRows),
+    });
+    expect(reloadedStore.get(getAllAgentConfigAtom)).toEqual([]);
 
     expect(rendererSet).not.toHaveBeenCalled();
     expect(rendererDelete).not.toHaveBeenCalled();

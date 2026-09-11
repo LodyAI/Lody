@@ -1086,8 +1086,7 @@ export function ProvidersScreen({
                   machineId: config.machineId,
                   expectedSetupRevision: payload.setupRevision,
                 });
-              }
-              else await deleteConfig(config.id);
+              } else await deleteConfig(config);
               throw error;
             }
           }
@@ -1289,7 +1288,7 @@ export function ProvidersScreen({
           preservePublishedConfig: false,
         });
       }
-      await deleteConfig(pendingDelete.id);
+      await deleteConfig(pendingDelete);
       clearFailureReason(pendingDelete.id);
       setTestStatuses((prev) => {
         const { [pendingDelete.id]: _, ...rest } = prev;

@@ -25,7 +25,9 @@ publishes the desired config, and then prunes the old binding before acknowledgi
 Either binding can still launch after a daemon crash on either side of publication; an
 authoritative startup recovery retains only the binding referenced by the surviving config or
 setup. Ordinary queue drains never reconcile from live Flock state because a post-commit flush
-failure leaves that state ahead of the last proven durable snapshot.
+failure leaves that state ahead of the last proven durable snapshot. Startup recovery snapshots
+only config IDs; it reads each ID's current references inside that config's credential mutation
+sequence so a concurrent publication cannot be reconciled against stale bindings.
 The credential is injected under the generated provider's `env_key` only when the current launch
 configuration hashes to the record's SHA-256 digest of the canonical launch binding. The raw
 binding is not persisted. A changed endpoint, proxy, runtime, agent type, custom launch command,
@@ -55,11 +57,13 @@ Machines that do not advertise the credential protocol cannot submit credential-
 The dedicated form owns only the provider entry and ownership marker it generates. Returning to
 ChatGPT restores the prior `model_provider` selector and removes the generated provider and
 marker. Switching modes and deleting a provider writes a revision-independent setup cancellation
-before changing or deleting the config. That durable wildcard is both the barrier against any
-in-flight replacement and the cleanup intent; an explicitly new setup retracts it. Once the target
-daemon has durably applied the cancellation, it reconciles that config ID and removes the local
-credential only when no published custom config or custom setup still references it. Cleanup does
-not depend on observing an intermediate config revision or a second row family. Existing
+before changing or deleting the config. After projecting that cancellation optimistically, the
+renderer uses its captured `AgentConfig` to perform the durable config deletion instead of looking
+it up again in the projected cache. That durable wildcard is both the barrier against any in-flight
+replacement and the cleanup intent; an explicitly new setup retracts it. Once the target daemon
+has durably applied the cancellation, it reconciles that config ID and removes the local credential
+only when no published custom config or custom setup still references it. Cleanup does not depend
+on observing an intermediate config revision or a second row family. Existing
 `CODEX_API_KEY`, unrelated providers, and other environment values remain unchanged. A malformed
 `CODEX_CONFIG`, reserved provider-id collision, or marker collision is rejected instead of
 overwritten. Arbitrary hand-written Codex configuration remains an advanced environment override.

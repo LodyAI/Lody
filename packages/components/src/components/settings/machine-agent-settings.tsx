@@ -939,8 +939,7 @@ export function MachineAgentSettings({
                   machineId: config.machineId,
                   expectedSetupRevision: payload.setupRevision,
                 });
-              }
-              else await deleteConfig(config.id);
+              } else await deleteConfig(config);
               throw error;
             }
           }
@@ -1070,7 +1069,7 @@ export function MachineAgentSettings({
             preservePublishedConfig: false,
           });
         }
-        await deleteConfig(config.id);
+        await deleteConfig(config);
       } catch (error) {
         console.error('Failed to delete agent config:', error);
         toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'));

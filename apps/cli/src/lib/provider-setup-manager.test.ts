@@ -600,6 +600,93 @@ describe('ProviderSetupManager', () => {
     }
   });
 
+  it('re-reads each config under its mutation lock during startup credential recovery', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-recovery-race-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const configAId = 'setup-a' as AgentConfigId;
+    const configBId = 'setup-b' as AgentConfigId;
+    const recoveryReachedA = createDeferred<void>();
+    const releaseA = createDeferred<void>();
+    const flock = new FakeMachineFlock();
+    const reconcileCredential: typeof reconcileCodexProviderCredential = async (
+      currentWorkspaceId,
+      configId,
+      referencedConfigs
+    ) => {
+      if (configId === configAId) {
+        recoveryReachedA.resolve();
+        await releaseA.promise;
+      }
+      await reconcileCodexProviderCredential(currentWorkspaceId, configId, referencedConfigs);
+    };
+    const harness = createHarnessForFlock(
+      flock,
+      {},
+      {
+        stageCredential: stageCodexProviderCredential,
+        reconcileCredential,
+      }
+    );
+    const configA = {
+      ...createSetup().config,
+      id: configAId,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://a.example.com/v1' }),
+    };
+    const oldConfigB = {
+      ...createSetup().config,
+      id: configBId,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://b-old.example.com/v1' }),
+    };
+    const newConfigB = {
+      ...oldConfigB,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://b-new.example.com/v1' }),
+    };
+    const replacementB: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      id: configBId,
+      setupRevision: 'revision-b-new',
+      replacesPublishedConfig: true,
+      config: newConfigB,
+    };
+    let recovery: Promise<void> | undefined;
+
+    try {
+      await seedCredential(configA, 'a-old-key');
+      await seedCredential(oldConfigB, 'b-old-key');
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(configAId),
+        value: configA,
+      });
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(configBId),
+        value: oldConfigB,
+      });
+
+      recovery = harness.manager.kick({ recoverCredentials: true });
+      await recoveryReachedA.promise;
+
+      seedSetup(flock, replacementB);
+      await expect(
+        harness.manager.commitCredentialSetup(configBId, 'revision-b-new', 'b-new-key')
+      ).resolves.toBe('durable');
+
+      releaseA.resolve();
+      await recovery;
+
+      expect((await hydrateCodexProviderCredential(workspaceId, newConfigB)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'b-new-key',
+      });
+    } finally {
+      releaseA.resolve();
+      await recovery?.catch(() => undefined);
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('reports uncertain durability after a same-binding key rotation commits before flush fails', async () => {
     const previousDataDir = process.env.LODY_DATA_DIR;
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-rotation-'));

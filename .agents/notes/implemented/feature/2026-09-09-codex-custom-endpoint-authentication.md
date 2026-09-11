@@ -47,7 +47,9 @@ the desired config and in-memory key are probed. After the probe, the target dae
 two-binding commit record, publishes the desired config, and prunes the old binding before
 returning success. A crash before or after publication leaves the binding required by either
 surviving Flock state available. Reconciliation runs once from authoritative startup state, not on
-ordinary live queue drains, and removes the other binding. A post-commit flush failure reports
+ordinary live queue drains, and removes the other binding. Its initial snapshot selects only IDs;
+each ID's references are re-read inside the per-config credential mutation sequence so concurrent
+publication cannot be pruned by a stale startup snapshot. A post-commit flush failure reports
 uncertain durability, retains both bindings, and makes the renderer resync instead of reporting a
 normal failed save. A stale or superseded setup
 returns a conflict. Automatic failure cleanup names the request's exact revision, so an old request
@@ -59,11 +61,13 @@ the published config.
 Switching to ChatGPT or deleting a provider first writes a revision-independent setup cancellation
 before changing the config. The durable wildcard prevents an in-flight replacement from
 republishing the custom provider and also owns machine-local credential cleanup; explicitly adding
-a later setup retracts it. The UI never waits for the target machine. Its daemon reconciles the
-affected config ID after the cancellation is durably applied and removes the local credential only
-after no published custom config or custom setup references it. This also covers a daemon that
-observes only `custom → deleted` and never sees an intermediate non-custom config, without a second
-cleanup row family.
+a later setup retracts it. The cancellation's optimistic projection may hide the config locally, so
+the following durable delete carries the previously captured config rather than looking it up in
+that cache. The UI never waits for the target machine. Its daemon reconciles the affected config ID
+after the cancellation is durably applied and removes the local credential only after no published
+custom config or custom setup references it. This also covers a daemon that observes only
+`custom → deleted` and never sees an intermediate non-custom config, without a second cleanup row
+family.
 
 ## Evidence
 
@@ -73,10 +77,11 @@ configuration, setup revision parsing, wildcard cancellation, publication durabi
 of the protocol-owned one-shot secret at the setup-row boundary. CLI tests cover delayed setup
 visibility, forced key rotation, cancellation during a deferred live probe, the commit boundary,
 same-binding rotation with uncertain flush, real-store publication uncertainty, dual-binding crash
-recovery after another drain, wildcard cleanup replay, binding mismatch, digest-only binding
-persistence, and credential injection at the common
+recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
+replay, binding mismatch, digest-only binding persistence, and credential injection at the common
 session launch boundary. Component tests cover metadata-only edits, per-attempt revisions, exact
-failure cancellation, the one-shot payload, and setup/cancellation Flock writer boundaries. A controlled loopback relay run
+failure cancellation, the one-shot payload, and cancellation-first offline config deletion through
+reload. A controlled loopback relay run
 with bundled Codex 0.153.4 observed a streamed
 `POST /v1/responses` request with the configured model and matching bearer credential; the relay
 returned an intentional 401 after recording only the boolean credential match.

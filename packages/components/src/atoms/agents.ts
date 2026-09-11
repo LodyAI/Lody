@@ -446,52 +446,51 @@ export type CancelProviderSetupInput = {
   preservePublishedConfig?: boolean;
 };
 
-export const deleteProviderSetupAtom = atom(null, async (get, set, input: CancelProviderSetupInput) => {
-  const runtime = get(activeWorkspaceRuntimeAtom);
-  if (!runtime) throw new Error('Runtime not ready');
-  const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === input.id);
-  if (
-    input.expectedSetupRevision &&
-    (!setup || setup.setupRevision !== input.expectedSetupRevision)
-  ) {
-    return;
-  }
-  const optimisticRows =
-    get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[String(input.machineId)] ??
-    {};
-  const cancellation: ProviderSetupCancellation = {
-    v: 1,
-    id: input.id,
-    machineId: input.machineId,
-    cancelledAt: getServerNow(),
-    ...((input.preservePublishedConfig ?? setup?.replacesPublishedConfig)
-      ? { preservePublishedConfig: true }
-      : {}),
-    ...(input.expectedSetupRevision
-      ? { setupRevision: input.expectedSetupRevision }
-      : {}),
-  };
-  const rows = await cancelProviderSetupInMachineFlock(runtime, cancellation, optimisticRows);
-  set(setMachineFlockRowsForMachineAtom, {
-    workspaceId: runtime.workspaceId,
-    machineId: input.machineId,
-    rows,
-  });
-});
-
-export const deleteAgentConfigAtom = atom(null, async (get, _set, configId: AgentConfigId) => {
-  const runtime = get(activeWorkspaceRuntimeAtom);
-  if (!runtime) throw new Error('Runtime not ready');
-  const config = get(getAllAgentConfigAtom).find((entry) => entry.id === configId);
-  if (config) {
-    const rows = await deleteAgentConfigFromMachineFlock(runtime, config);
-    _set(setMachineFlockRowsForMachineAtom, {
+export const deleteProviderSetupAtom = atom(
+  null,
+  async (get, set, input: CancelProviderSetupInput) => {
+    const runtime = get(activeWorkspaceRuntimeAtom);
+    if (!runtime) throw new Error('Runtime not ready');
+    const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === input.id);
+    if (
+      input.expectedSetupRevision &&
+      (!setup || setup.setupRevision !== input.expectedSetupRevision)
+    ) {
+      return;
+    }
+    const optimisticRows =
+      get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[
+        String(input.machineId)
+      ] ?? {};
+    const cancellation: ProviderSetupCancellation = {
+      v: 1,
+      id: input.id,
+      machineId: input.machineId,
+      cancelledAt: getServerNow(),
+      ...((input.preservePublishedConfig ?? setup?.replacesPublishedConfig)
+        ? { preservePublishedConfig: true }
+        : {}),
+      ...(input.expectedSetupRevision ? { setupRevision: input.expectedSetupRevision } : {}),
+    };
+    const rows = await cancelProviderSetupInMachineFlock(runtime, cancellation, optimisticRows);
+    set(setMachineFlockRowsForMachineAtom, {
       workspaceId: runtime.workspaceId,
-      machineId: config.machineId,
+      machineId: input.machineId,
       rows,
     });
   }
-  await runtime.writer.deleteDoc(getAgentConfigRoomId(configId));
+);
+
+export const deleteAgentConfigAtom = atom(null, async (get, _set, config: AgentConfigMeta) => {
+  const runtime = get(activeWorkspaceRuntimeAtom);
+  if (!runtime) throw new Error('Runtime not ready');
+  const rows = await deleteAgentConfigFromMachineFlock(runtime, config);
+  _set(setMachineFlockRowsForMachineAtom, {
+    workspaceId: runtime.workspaceId,
+    machineId: config.machineId,
+    rows,
+  });
+  await runtime.writer.deleteDoc(getAgentConfigRoomId(config.id));
 });
 
 export const cmdUpdateAgentConfigAtom = atom(null, async (get, _set, config: AgentConfigMeta) => {
