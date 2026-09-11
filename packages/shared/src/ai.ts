@@ -514,7 +514,9 @@ export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
 const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
   kimi: 'auto',
-  grok: 'agent',
+  // Grok advertises `default` / `plan`, not Codex `agent`. Injecting `agent`
+  // makes Role/MCP session create fail with "Unsupported ACP mode".
+  grok: 'default',
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
