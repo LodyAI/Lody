@@ -33,9 +33,7 @@ function Probe() {
   const context = useMentionContext('Probe');
   latest.inputValue = context.inputValue;
   latest.mentions = context.mentions;
-  latest.onMentionAdd = (...args) => {
-    void context.onMentionAdd(...args);
-  };
+  latest.onMentionAdd = context.onMentionAdd;
   return null;
 }
 

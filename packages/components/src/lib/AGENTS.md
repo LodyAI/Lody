@@ -6,12 +6,6 @@ surfaces, or Electron IPC typing. Read the relevant sections before those change
 Rationale: [components](../../../../.agents/docs/components-package.md) and
 [file paths](../../../../.agents/docs/components-file-paths.md).
 
-## Shortcut draft recovery
-
-- `ShortcutDraftRepository` captures the submitted checkpoint version and compares
-  it synchronously before a retired accepted submission clears it. A same-text
-  replacement is a new version and must survive; ordered writes persist the clear.
-
 ## Electron IPC types
 
 - `electron-ipc-client.ts` may import `ElectronIpcServices` from main-process

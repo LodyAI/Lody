@@ -64,8 +64,10 @@ Shared mention primitive used by composer autocomplete surfaces.
   primitive branches on, and every other kind is an opaque tag the menu chooses.
   Adding a mention category must not edit this package.
 - `MentionItem` registers its stable ref object, never a `{ current: node }`
-  snapshot. The collection keys by that ref and sorts through `.current`;
-  a pre-mount null-node snapshot breaks ordering and highlight movement.
+  snapshot. The collection keys its map by that object and sorts by document
+  position through `.current`, so a snapshot taken before the node mounts leaves
+  a null-node entry behind — the sort collapses around it and highlight movement
+  matches the wrong row.
 - `onMentionsChange`/`onValueChange` updaters see the last value WRITTEN, not
   the last value rendered (`useFlushConsistentState` in `mention-root.tsx`).
   `useControllableState` resolves an updater against the controlled prop, and
@@ -86,23 +88,11 @@ Shared mention primitive used by composer autocomplete surfaces.
   input wrapper's top edge instead of the current caret line.
 - Menu callers should include `var(--mention-input-width)` in desktop `max-w`
   classes; viewport-only caps let wide menus escape the composer.
-- Portals stay inside the input’s nearest dialog/drawer for modal pointer and
-  scroll access. Collision bounds also respect that layer; body portals are
-  only the fallback. See `tests/mention-modal.test.tsx`.
 - Mobile mention content bypasses floating-ui and docks through
   `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
 
 ## Files
 
-- `mention-preparation.ts` fences asynchronous item preparation by generation.
-  `MentionItem.onMentionPrepare` resolves opaque text/value/data before insertion;
-  null/rejection leaves the query intact. Edits, composition, dismissal and root
-  disposal cancel preparation. Existing synchronous items stay synchronous.
-  Prepared items replace only the query span without an implicit space suffix.
-
-- `mention-history.ts` retains bounded immutable text/range snapshots for opt-in
-  semantic undo/redo. Capture happens before text commits, including same-text
-  prepared selections. Native text-only history cannot recover opaque payloads.
 - `mention-root.tsx` owns open state, active trigger, selected values, mention
   ranges, item registration, filtering, and insertion.
 - `mention-input-core.ts` holds the pure text/range algebra both insertion
@@ -113,7 +103,7 @@ Shared mention primitive used by composer autocomplete surfaces.
 - `mention-content.tsx` renders the desktop floating listbox and provides the
   input-width CSS variable; it delegates mobile rendering to `mention-mobile-content.tsx`.
 - `mention-mobile-content.tsx` docks the mobile panel above the composer and
-  handles dialog/drawer-safe portal placement.
+  handles drawer-safe portal placement.
 - `mention-item.tsx`, `mention-label.tsx`, `mention-highlighter.tsx`, and
   `mention-trigger.ts` provide row selection, accessibility label, inline
   highlighting, and trigger/drill-down-prefix parsing helpers.

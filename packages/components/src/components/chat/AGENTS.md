@@ -65,10 +65,6 @@ Index and rationale: [README.md](README.md).
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance
   may clear resources or reset the reserved id. The accepted history entry is
   direct-authored into the renderer's own session store.
-- `use-landing-submission-owner.ts` fences post-accept draft cleanup and navigation
-  by mount and draft identity. A late accepted session must not clear a replacement
-  landing's Shortcut checkpoint. Retired acceptance may only compare-and-clear its
-  captured checkpoint version; it must not clear current UI state or navigate.
 - Draft ACP preparation uses that same reserved id. It carries no prompt, env, or
   secret-shaped ACP option values; it may include the current sanitized
   mode/model/options. It is debounced/best-effort, replaced when routing or run

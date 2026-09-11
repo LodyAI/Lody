@@ -66,31 +66,3 @@ component details.
   name, then calls the cloud mutation through `account-setting.tsx`. Refresh session
   and active organization after success; cache refresh failure must not claim transfer
   failed. Card changes use the billing Portal separately; transfer keeps the current card.
-
-## Shared editors and Prompt Shortcuts
-
-- Reuse `emoji-field.tsx` and `form-primitives.tsx` across Role, MCP and Shortcut
-  editors. `AutoGrowTextarea` starts at one row and remeasures on width changes.
-- `promptShortcutsFeatureEnabledAtom` requires Developer mode and a default-off
-  Beta opt-in. Gate navigation, direct panels, discovery and runtime together;
-  disabling never deletes saved data.
-- `prompt-shortcuts-setting.tsx` owns list/editor state, keyed by account/workspace
-  to fence stale drafts and reads. Storage/publication belongs to the provider and
-  shared domain. Resolve scope labels once for the whole panel.
-- `prompt-shortcut-form.tsx` is presentational: scope starts empty, sharing private;
-  name follows through to slug only until a new Shortcut's slug is manually edited.
-  Templates contain no variables or invocation parameters; `!{name}` is literal.
-- `prompt-shortcut-scope.tsx` orders Project → Machine → Agent. Unset axes show
-  Workspace scope, never shared visibility. Emoji lives in the bounded shared
-  schema/index and falls back to `DEFAULT_PROMPT_SHORTCUT_EMOJI`.
-- Explicit scope changes remount the source-owning textarea with CURRENT semantic
-  ranges, never the saved revision's ranges. Template mode disables token-scanning
-  hydration, Sessions, recursive Shortcuts and ACP commands. Skills load on menu
-  activation.
-- Warnings compare indexed dependencies to saved scope; they do not claim live
-  availability. Publication is background work: local save/delete remain enabled
-  while pending or offline. Only local I/O disables duplicate actions; pending is
-  durable but not advertised or synced. Retry belongs to the runtime.
-- Other members' shared Shortcuts open read-only in the same shell; no copy-to-mine
-  action exists. This temporary feature has no dedicated Storybook or test suite;
-  retain general composer/mention coverage.
