@@ -17,11 +17,14 @@ Cancellation is a separate row, `['providerSetupCancellation', configId]`. A
 revision-bearing cancellation applies only to that setup attempt, so late failure
 compensation cannot cancel a newer revision. A cancellation without a revision is an
 explicit provider-removal barrier: it cancels any in-flight replacement, and a later
-explicit setup retracts it. After a merge the owning CLI causally applies the marker,
-so a cancellation that raced publication still wins. The same wildcard cancellation
-is the durable machine-local credential cleanup intent; after applying it durably, the
-CLI reconciles that config ID and removes the credential only when no custom config or
-setup remains. Restart resumes only non-interactive states.
+explicit setup retracts it in the same Flock transaction that writes the fresh setup
+revision. Peers therefore observe either the wildcard barrier or the new replacement
+intent, never a retraction-only state that could admit an older setup. After a merge the
+owning CLI causally applies the marker, so a cancellation that raced publication still
+wins. The same wildcard cancellation is the durable machine-local credential cleanup
+intent; after applying it durably, the CLI reconciles that config ID and removes the
+credential only when no custom config or setup remains. Restart resumes only
+non-interactive states.
 
 Credential-changing Codex replacements keep the old launch config published during
 the probe. The post-probe cross-store commit may retain the old and desired

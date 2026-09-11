@@ -100,11 +100,7 @@ async function writeProviderSetupToMachineFlock(
   }
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
   const key = machineFlockKeys.providerSetup(setup.id);
-  await runtime.writer.flockRowDelete(
-    flockDocId,
-    machineFlockKeys.providerSetupCancellation(setup.id)
-  );
-  await runtime.writer.flockRowPut(flockDocId, key, setup);
+  await runtime.writer.replaceProviderSetup(flockDocId, setup);
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   return {
     ...readMachineFlockRowsFromFlock(handle.flock),

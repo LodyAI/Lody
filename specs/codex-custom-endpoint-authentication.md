@@ -60,10 +60,13 @@ marker. Switching modes and deleting a provider writes a revision-independent se
 before changing or deleting the config. After projecting that cancellation optimistically, the
 renderer uses its captured `AgentConfig` to perform the durable config deletion instead of looking
 it up again in the projected cache. That durable wildcard is both the barrier against any in-flight
-replacement and the cleanup intent; an explicitly new setup retracts it. Once the target daemon
-has durably applied the cancellation, it reconciles that config ID and removes the local credential
-only when no published custom config or custom setup still references it. Cleanup does not depend
-on observing an intermediate config revision or a second row family. Existing
+replacement and the cleanup intent. An explicitly new setup retracts it only in the same atomic
+Flock mutation that writes the fresh setup revision: durable state therefore contains either the
+wildcard barrier or the new replacement intent, never an empty interval in which an older setup can
+publish. Once the target daemon has durably applied the cancellation, it reconciles that config ID
+and removes the local credential only when no published custom config or custom setup still
+references it. Cleanup does not depend on observing an intermediate config revision or a second row
+family. Existing
 `CODEX_API_KEY`, unrelated providers, and other environment values remain unchanged. A malformed
 `CODEX_CONFIG`, reserved provider-id collision, or marker collision is rejected instead of
 overwritten. Arbitrary hand-written Codex configuration remains an advanced environment override.

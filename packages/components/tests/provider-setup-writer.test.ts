@@ -72,6 +72,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
         }
       }
     );
+    const replaceProviderSetup = vi.fn(async (_flockDocId: string, _setup: unknown) => undefined);
     const flockRowDelete = vi.fn(async (_flockDocId: string, key: readonly string[]) => {
       mirrorRows.delete(JSON.stringify(key));
     });
@@ -81,7 +82,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       workspaceId,
       workspaceSlug,
       repo: { openFlockDoc, flush },
-      writer: { flockRowPut, flockRowDelete, deleteDoc },
+      writer: { flockRowPut, replaceProviderSetup, flockRowDelete, deleteDoc },
     } as unknown as WorkspaceRuntime);
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, workspaceSlug);
@@ -99,9 +100,8 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
 
     await store.set(cmdCreateProviderSetupAtom, { config, setupRevision: 'revision-1' });
 
-    expect(flockRowPut.mock.calls[0]).toEqual([
+    expect(replaceProviderSetup.mock.calls[0]).toEqual([
       flockDocId,
-      machineFlockKeys.providerSetup(setupId),
       expect.objectContaining({
         id: setupId,
         machineId,
@@ -113,7 +113,9 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     expect(store.get(getAllProviderSetupsAtom)).toEqual([
       expect.objectContaining({ id: setupId, status: 'awaiting-auth', attempt: 1 }),
     ]);
-    const writtenSetup = flockRowPut.mock.calls[0]?.[2] as { config: AgentConfigMeta };
+    const writtenSetup = replaceProviderSetup.mock.calls[0]?.[1] as {
+      config: AgentConfigMeta;
+    };
     expect(writtenSetup.config.env[LODY_CODEX_API_KEY_ENV]).toBeUndefined();
     expect(mirrorRows.size).toBe(0);
 
@@ -137,9 +139,8 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
 
     await store.set(cmdRetryProviderSetupAtom, setupId);
 
-    expect(flockRowPut.mock.calls[1]).toEqual([
+    expect(replaceProviderSetup.mock.calls[1]).toEqual([
       flockDocId,
-      setupKey,
       expect.not.objectContaining({ failureCode: expect.anything() }),
     ]);
     expect(store.get(getAllProviderSetupsAtom)).toEqual([
@@ -178,21 +179,18 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     });
     const cancellationKey = machineFlockKeys.providerSetupCancellation(setupId);
 
-    expect(flockRowPut).toHaveBeenCalledTimes(3);
-    expect(flockRowPut.mock.calls[2]).toEqual([
+    expect(flockRowPut).toHaveBeenCalledTimes(1);
+    expect(flockRowPut.mock.calls[0]).toEqual([
       flockDocId,
       cancellationKey,
       expect.objectContaining({ v: 1, id: setupId, machineId }),
     ]);
-    expect(flockRowDelete).toHaveBeenCalledTimes(2);
+    expect(replaceProviderSetup).toHaveBeenCalledTimes(2);
 
     markerAccepted.resolve();
     await cancelPromise;
 
-    expect(flockRowDelete.mock.calls).toEqual([
-      [flockDocId, cancellationKey],
-      [flockDocId, cancellationKey],
-    ]);
+    expect(flockRowDelete).not.toHaveBeenCalled();
     const finalRows = store.get(machineFlockRowsByWorkspaceAtom)[String(workspaceId)]?.[
       String(machineId)
     ] as MachineFlockRowMap;
@@ -212,7 +210,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     await store.set(deleteAgentConfigAtom, config);
 
     expect(flockRowDelete.mock.calls.at(-1)).toEqual([flockDocId, configKey]);
-    expect(flockRowPut.mock.invocationCallOrder[2]).toBeLessThan(
+    expect(flockRowPut.mock.invocationCallOrder[0]).toBeLessThan(
       flockRowDelete.mock.invocationCallOrder.at(-1) ?? 0
     );
     expect(deleteDoc).toHaveBeenCalledWith(getAgentConfigRoomId(setupId));
@@ -222,7 +220,7 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
       workspaceId,
       workspaceSlug,
       repo: { openFlockDoc, flush },
-      writer: { flockRowPut, flockRowDelete, deleteDoc },
+      writer: { flockRowPut, replaceProviderSetup, flockRowDelete, deleteDoc },
     } as unknown as WorkspaceRuntime);
     reloadedStore.set(currentWorkspaceIdAtom, workspaceId);
     reloadedStore.set(currentWorkspaceSlugAtom, workspaceSlug);

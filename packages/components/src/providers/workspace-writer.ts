@@ -3,6 +3,7 @@ import type {
   SessionId,
   SessionHistory,
   PermissionOutcome,
+  ProviderSetupTask,
   TaskProposalMeta,
 } from '@lody/shared';
 
@@ -57,6 +58,13 @@ export interface WorkspaceWriter {
     key: readonly string[],
     value: unknown
   ): Promise<{ inserted: boolean; value: unknown }>;
+
+  /**
+   * Publish a provider setup and retract its wildcard cancellation barrier in
+   * one Flock transaction. Peers must never observe the barrier removed while
+   * the replacement setup is still absent.
+   */
+  replaceProviderSetup(flockDocId: string, setup: ProviderSetupTask): Promise<void>;
 
   /** Flock-doc row delete. */
   flockRowDelete(flockDocId: string, key: readonly string[]): Promise<void>;

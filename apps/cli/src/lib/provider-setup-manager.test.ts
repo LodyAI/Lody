@@ -475,6 +475,104 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
+  it('rejects a staged stale RPC after an atomic cancellation-to-setup replacement arrives', async () => {
+    const rendererFlock = new Flock('provider-readd-renderer');
+    const machineFlock = new Flock('provider-readd-machine');
+    const staleStageStarted = createDeferred<void>();
+    const releaseStaleStage = createDeferred<void>();
+    const rollback = vi.fn(async () => undefined);
+    const finalize = vi.fn(async () => undefined);
+    let stageCount = 0;
+    const stageCredential = vi.fn(async () => {
+      stageCount += 1;
+      if (stageCount === 1) {
+        staleStageStarted.resolve();
+        await releaseStaleStage.promise;
+      }
+      return { rollback, finalize };
+    });
+    const publishedChatGptConfig = createSetup().config;
+    const staleSetup: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-1',
+      replacesPublishedConfig: true,
+      config: {
+        ...publishedChatGptConfig,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://stale.example.com/v1' }),
+      },
+    };
+    const nextSetup: ProviderSetupTask = {
+      ...staleSetup,
+      setupRevision: 'revision-2',
+      config: {
+        ...publishedChatGptConfig,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://next.example.com/v1' }),
+      },
+    };
+    writeMachineFlockRowToFlock(machineFlock, {
+      key: machineFlockKeys.agentConfig(setupId),
+      value: publishedChatGptConfig,
+    });
+    seedSetup(machineFlock, staleSetup);
+    rendererFlock.importJson(machineFlock.exportJson());
+    const harness = createHarnessForFlock(machineFlock, {}, { stageCredential });
+
+    const stalePublication = harness.manager.commitCredentialSetup(
+      setupId,
+      'revision-1',
+      'stale-key'
+    );
+    await staleStageStarted.promise;
+
+    rendererFlock.txn(() => {
+      rendererFlock.set(machineFlockKeys.providerSetupCancellation(setupId), {
+        v: 1,
+        id: setupId,
+        machineId,
+        cancelledAt: 20,
+        preservePublishedConfig: true,
+      });
+      rendererFlock.delete(machineFlockKeys.providerSetup(setupId));
+    });
+    expect(readState(rendererFlock)).toEqual({
+      setup: undefined,
+      config: publishedChatGptConfig,
+      cancellation: expect.objectContaining({ id: setupId }),
+    });
+
+    rendererFlock.txn(() => {
+      rendererFlock.set(machineFlockKeys.providerSetup(setupId), nextSetup);
+      rendererFlock.delete(machineFlockKeys.providerSetupCancellation(setupId));
+    });
+    expect(readState(rendererFlock)).toEqual({
+      setup: nextSetup,
+      config: publishedChatGptConfig,
+      cancellation: undefined,
+    });
+    expect(readState(machineFlock).config).toEqual(publishedChatGptConfig);
+
+    machineFlock.importJson(rendererFlock.exportJson());
+    releaseStaleStage.resolve();
+    await expect(stalePublication).rejects.toThrow(/cancelled or replaced/);
+    expect(readState(machineFlock)).toEqual({
+      setup: nextSetup,
+      config: publishedChatGptConfig,
+      cancellation: undefined,
+    });
+    expect(rollback).toHaveBeenCalledTimes(1);
+
+    await expect(
+      harness.manager.commitCredentialSetup(setupId, 'revision-2', 'next-key')
+    ).resolves.toBe('durable');
+    expect(readState(machineFlock)).toEqual({
+      setup: undefined,
+      config: nextSetup.config,
+      cancellation: undefined,
+    });
+    expect(finalize).toHaveBeenCalledTimes(1);
+    harness.manager.stop();
+  });
+
   it('keeps both credential bindings when publication durability is uncertain', async () => {
     const harness = createHarness();
     const oldConfig = {

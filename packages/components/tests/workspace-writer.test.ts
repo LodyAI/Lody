@@ -13,9 +13,12 @@ import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-i
 import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
 import {
   AGENT_ROLE_VERSION,
+  machineFlockKeys,
   workspaceFlockKeys,
+  type AgentConfigId,
   type AgentRole,
   type AcpCapabilityCacheEntry,
+  type ProviderSetupTask,
 } from '@lody/shared';
 
 const anchor: MinimalVisualAnnotationAnchor = {
@@ -281,6 +284,95 @@ describe('createDirectWorkspaceWriter', () => {
       { inserted: false, value: { name: 'first' } },
     ]);
     expect(flock.get(['localProject', 'project-1'])).toEqual({ name: 'first' });
+  });
+
+  it('replaces a provider cancellation barrier with the next setup as one replica-visible state', async () => {
+    const configId = 'provider-readd' as AgentConfigId;
+    const setupKey = machineFlockKeys.providerSetup(configId);
+    const cancellationKey = machineFlockKeys.providerSetupCancellation(configId);
+    const client = new Flock('provider-readd-client');
+    const stalePeer = new Flock('provider-readd-stale-peer');
+    const staleSetup = { setupRevision: 'revision-1', status: 'awaiting-auth' };
+    const cancellation = { v: 1, id: configId, preservePublishedConfig: false };
+    const nextSetup = {
+      id: configId,
+      setupRevision: 'revision-2',
+      status: 'awaiting-auth',
+    } as ProviderSetupTask;
+
+    stalePeer.set(setupKey, staleSetup);
+    stalePeer.commit();
+    client.set(cancellationKey, cancellation);
+    client.commit();
+    client.importJson(stalePeer.exportJson());
+    stalePeer.importJson(client.exportJson());
+
+    const observedStates: Array<{ cancellation: unknown; setup: unknown }> = [];
+    const eventBatches: Array<readonly (readonly unknown[])[]> = [];
+    client.subscribe((batch) => {
+      eventBatches.push(batch.events.map((event) => event.key));
+      observedStates.push({
+        cancellation: client.get(cancellationKey),
+        setup: client.get(setupKey),
+      });
+    });
+    const writer = createDirectWorkspaceWriter({
+      repo: {
+        openFlockDoc: vi.fn(async () => ({ flock: client })),
+      } as never,
+    } as never);
+
+    await writer.replaceProviderSetup('machine-flock', nextSetup);
+
+    expect(eventBatches).toEqual([[setupKey, cancellationKey]]);
+    expect(observedStates).toEqual([{ cancellation: undefined, setup: nextSetup }]);
+    expect(
+      observedStates.some(
+        (state) =>
+          state.cancellation === undefined &&
+          (state.setup as { setupRevision?: string } | undefined)?.setupRevision === 'revision-1'
+      )
+    ).toBe(false);
+
+    stalePeer.importJson(client.exportJson());
+    expect(stalePeer.get(cancellationKey)).toBeUndefined();
+    expect(stalePeer.get(setupKey)).toEqual(nextSetup);
+  });
+
+  it('retains the provider cancellation barrier when replacement setup authoring fails', async () => {
+    const configId = 'provider-readd-failure' as AgentConfigId;
+    const setupKey = machineFlockKeys.providerSetup(configId);
+    const cancellationKey = machineFlockKeys.providerSetupCancellation(configId);
+    const flock = new Flock('provider-readd-failure');
+    const staleSetup = { setupRevision: 'revision-1', status: 'awaiting-auth' };
+    const cancellation = { v: 1, id: configId, preservePublishedConfig: false };
+    flock.set(setupKey, staleSetup);
+    flock.set(cancellationKey, cancellation);
+    flock.commit();
+
+    const writer = createDirectWorkspaceWriter({
+      repo: {
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            txn: (callback: () => unknown) => callback(),
+            set: () => {
+              throw new Error('setup write failed');
+            },
+            delete: (key: string[]) => flock.delete(key),
+          },
+        })),
+      } as never,
+    } as never);
+
+    await expect(
+      writer.replaceProviderSetup('machine-flock', {
+        id: configId,
+        setupRevision: 'revision-2',
+        status: 'awaiting-auth',
+      } as ProviderSetupTask)
+    ).rejects.toThrow('setup write failed');
+    expect(flock.get(cancellationKey)).toEqual(cancellation);
+    expect(flock.get(setupKey)).toEqual(staleSetup);
   });
 
   it('applies the shared preview-comment mutation to the renderer store', async () => {

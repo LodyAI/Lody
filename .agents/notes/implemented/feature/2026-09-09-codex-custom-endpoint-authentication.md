@@ -61,13 +61,14 @@ the published config.
 Switching to ChatGPT or deleting a provider first writes a revision-independent setup cancellation
 before changing the config. The durable wildcard prevents an in-flight replacement from
 republishing the custom provider and also owns machine-local credential cleanup; explicitly adding
-a later setup retracts it. The cancellation's optimistic projection may hide the config locally, so
-the following durable delete carries the previously captured config rather than looking it up in
-that cache. The UI never waits for the target machine. Its daemon reconciles the affected config ID
-after the cancellation is durably applied and removes the local credential only after no published
-custom config or custom setup references it. This also covers a daemon that observes only
-`custom → deleted` and never sees an intermediate non-custom config, without a second cleanup row
-family.
+a later setup retracts it atomically with writing the fresh setup revision. A replica therefore
+cannot observe the wildcard removed while an older replacement remains the current setup. The
+cancellation's optimistic projection may hide the config locally, so the following durable delete
+carries the previously captured config rather than looking it up in that cache. The UI never waits
+for the target machine. Its daemon reconciles the affected config ID after the cancellation is
+durably applied and removes the local credential only after no published custom config or custom
+setup references it. This also covers a daemon that observes only `custom → deleted` and never sees
+an intermediate non-custom config, without a second cleanup row family.
 
 ## Evidence
 
@@ -79,9 +80,12 @@ visibility, forced key rotation, cancellation during a deferred live probe, the 
 same-binding rotation with uncertain flush, real-store publication uncertainty, dual-binding crash
 recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
 replay, binding mismatch, digest-only binding persistence, and credential injection at the common
-session launch boundary. Component tests cover metadata-only edits, per-attempt revisions, exact
-failure cancellation, the one-shot payload, and cancellation-first offline config deletion through
-reload. A controlled loopback relay run
+session launch boundary. CLI coverage also holds an R1 credential stage across the atomic R2 merge,
+rejects R1 publication, and then publishes R2. Component tests cover metadata-only edits,
+per-attempt revisions, exact failure cancellation, the one-shot payload, and cancellation-first
+offline config deletion through reload. A real two-replica Flock test covers atomic wildcard
+retraction and setup replacement, including a setup-authoring failure that retains the barrier. A
+controlled loopback relay run
 with bundled Codex 0.153.4 observed a streamed
 `POST /v1/responses` request with the configured model and matching bearer credential; the relay
 returned an intentional 401 after recording only the boolean credential match.

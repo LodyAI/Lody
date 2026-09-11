@@ -2,6 +2,7 @@ import {
   applyPreviewVisualCommentMutation,
   getServerNow,
   getSessionRoomId,
+  machineFlockKeys,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
   type SessionDocMeta,
@@ -117,6 +118,19 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
         handle.flock.put([...key], value as Parameters<typeof handle.flock.put>[1]);
         return { inserted: true, value };
+      });
+    },
+
+    async replaceProviderSetup(flockDocId, setup) {
+      const handle = await deps.repo.openFlockDoc(flockDocId);
+      handle.flock.txn(() => {
+        // Keep the barrier if authoring the replacement throws. Flock emits the
+        // successful setup put and barrier delete as one observable batch.
+        handle.flock.set(
+          machineFlockKeys.providerSetup(setup.id),
+          setup as Parameters<typeof handle.flock.set>[1]
+        );
+        handle.flock.delete(machineFlockKeys.providerSetupCancellation(setup.id));
       });
     },
 
