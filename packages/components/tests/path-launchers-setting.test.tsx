@@ -85,7 +85,9 @@ describe('PathLaunchersSettings', () => {
     const editButton = getButton('Edit');
     await act(async () => editButton.click());
 
-    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    // A Select keeps its list mounted once opened and hides the closed one, so
+    // "shut" is the trigger's own state rather than the row count.
+    expect(getSelectTrigger().getAttribute('aria-expanded')).toBe('false');
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Edit launcher');
     expect(getInput('path-launcher-name').value).toBe('PhpStorm');
     expect(getInput('path-launcher-command').value).toBe('open -a "PhpStorm" {path}');
@@ -144,16 +146,39 @@ describe('PathLaunchersSettings', () => {
     });
   }
 
-  async function openSelect(): Promise<void> {
+  /**
+   * Base UI defers part of opening a popup to an animation frame, and `act`
+   * flushes React's work but not the frame queue. Without draining it here the
+   * next interaction lands between the list being asked to open and its
+   * opening, and the deferred frame then undoes what that interaction did.
+   */
+  async function settle(): Promise<void> {
     await act(async () => {
-      getSelectTrigger().dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+      }
     });
+  }
+
+  /** The pointer arriving and pressing, which is what opens the list. */
+  async function pointerClick(element: HTMLElement): Promise<void> {
+    const init = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse', detail: 1 };
+    await act(async () => {
+      element.dispatchEvent(new TestPointerEvent('pointermove', init));
+      element.dispatchEvent(new TestPointerEvent('pointerdown', init));
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.focus();
+      element.dispatchEvent(new TestPointerEvent('pointerup', init));
+      element.dispatchEvent(new MouseEvent('mouseup', init));
+      element.click();
+    });
+    await settle();
+  }
+
+  async function openSelect(): Promise<void> {
+    await pointerClick(getSelectTrigger());
   }
 
   async function chooseOption(name: string): Promise<void> {
@@ -161,10 +186,7 @@ describe('PathLaunchersSettings', () => {
       (item) => item.textContent?.includes(name)
     );
     if (!option) throw new Error(`Could not find option: ${name}`);
-    await act(async () => {
-      option.focus();
-      option.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
-    });
+    await pointerClick(option);
   }
 
   function seedCustomLauncher(): void {

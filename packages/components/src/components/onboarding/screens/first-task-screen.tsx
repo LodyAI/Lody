@@ -22,7 +22,7 @@ import { buildAgentPrompt } from '@/lib';
 import { cn } from '@/lib/utils';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { Button } from '@lody/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { Textarea } from '@lody/ui/textarea';
 import { getFirstTaskPrimaryAction } from '../first-task-primary-action';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
@@ -282,7 +282,7 @@ export function FirstTaskScreen({
           >
             {t('onboarding.firstTask.agent', 'Agent')}
           </label>
-          <Select
+          <Select.Root
             value={config?.id}
             onValueChange={(value) => {
               const next = availableConfigs.find((candidate) => candidate.id === value);
@@ -291,12 +291,12 @@ export function FirstTaskScreen({
             }}
             disabled={availableConfigs.length === 0}
           >
-            <SelectTrigger
+            <Select.Trigger
               id="onboarding-first-task-agent"
               aria-label={t('onboarding.firstTask.agent', 'Agent')}
-              className="h-11"
+              size="large"
             >
-              <SelectValue placeholder={t('onboarding.firstTask.selectAgent', 'Select an Agent')}>
+              <Select.Value placeholder={t('onboarding.firstTask.selectAgent', 'Select an Agent')}>
                 {config ? (
                   <span className="flex min-w-0 items-center gap-2">
                     <AgentIcon
@@ -309,11 +309,11 @@ export function FirstTaskScreen({
                     <span className="truncate">{config.name}</span>
                   </span>
                 ) : undefined}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+              </Select.Value>
+            </Select.Trigger>
+            <Select.Content>
               {availableConfigs.map((candidate) => (
-                <SelectItem key={candidate.id} value={candidate.id}>
+                <Select.Item key={candidate.id} value={candidate.id}>
                   <span className="flex min-w-0 items-center gap-2">
                     <AgentIcon
                       cliType={candidate.cliType}
@@ -324,10 +324,10 @@ export function FirstTaskScreen({
                     />
                     <span className="truncate">{candidate.name}</span>
                   </span>
-                </SelectItem>
+                </Select.Item>
               ))}
-            </SelectContent>
-          </Select>
+            </Select.Content>
+          </Select.Root>
           {!config ? (
             <p className="text-xs text-muted-foreground">
               {t(

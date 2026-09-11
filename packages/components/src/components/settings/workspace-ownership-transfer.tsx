@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import type { AccountMember } from './account-setting-pure';
 
 const errorKeys: Record<string, string> = {
@@ -49,6 +49,18 @@ export function WorkspaceOwnershipTransfer({
       member.userId !== currentUserId && ['member', 'admin'].includes(member.role) && member.user
   );
   const target = candidates.find((member) => member.id === targetId);
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const memberOptions = useMemo(
+    () =>
+      candidates.map((member) => ({
+        value: member.id,
+        label:
+          `${member.user?.name || member.user?.email}` +
+          (member.user?.name && member.user?.email ? ` (${member.user.email})` : ''),
+      })),
+    [candidates]
+  );
   const canConfirm = Boolean(target) && confirmation === workspaceName && !busy;
   const changeOpen = (value: boolean) => {
     if (inFlight.current) return;
@@ -107,26 +119,27 @@ export function WorkspaceOwnershipTransfer({
               <UiField.Label htmlFor={`${id}-member`}>
                 {t('workspace.transfer.newOwner')}
               </UiField.Label>
-              <Select
+              <Select.Root
+                items={memberOptions}
                 value={targetId}
                 onValueChange={(value) => {
+                  if (value == null) return;
                   setTargetId(value);
                   setError(null);
                 }}
                 disabled={busy}
               >
-                <SelectTrigger id={`${id}-member`}>
-                  <SelectValue placeholder={t('workspace.transfer.selectMember')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {candidates.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.user?.name || member.user?.email}
-                      {member.user?.name && member.user?.email ? ` (${member.user.email})` : ''}
-                    </SelectItem>
+                <Select.Trigger id={`${id}-member`}>
+                  <Select.Value placeholder={t('workspace.transfer.selectMember')} />
+                </Select.Trigger>
+                <Select.Content>
+                  {memberOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </div>
             <div className="space-y-2">
               <UiField.Label htmlFor={`${id}-confirm`}>

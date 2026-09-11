@@ -90,6 +90,26 @@ export function AgentRoleForm({
   const fieldId = useId();
   const update = (patch: Partial<AgentRoleFormValue>) => onChange({ ...value, ...patch });
 
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so each list is stated once and drives both.
+  const machineOptions = machines.map((machine) => ({
+    value: machine.machineId as string,
+    label: (
+      <span className="flex items-center gap-1.5">
+        {machine.label}
+        {machine.online ? null : (
+          <span className="text-[10px] text-muted-foreground">
+            {t('settings.agentRoles.status.offline')}
+          </span>
+        )}
+      </span>
+    ),
+  }));
+  const agentConfigOptions = agentConfigs.map((config) => ({
+    value: config.agentConfigId as string,
+    label: config.label,
+  }));
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     onSubmit();
@@ -151,8 +171,9 @@ export function AgentRoleForm({
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t('settings.agentRoles.form.machine')}>
-              <Select
-                value={value.machineId ?? ''}
+              <Select.Root
+                items={machineOptions}
+                value={value.machineId ?? null}
                 onValueChange={(machineId) =>
                   // Changing machine clears the config: an agent config belongs
                   // to exactly one machine, and carrying the old id over is how
@@ -160,32 +181,25 @@ export function AgentRoleForm({
                   update({ machineId: machineId as MachineId, agentConfigId: null })
                 }
               >
-                <SelectTrigger
-                  className="h-9 text-xs"
+                <Select.Trigger
                   aria-label={t('settings.agentRoles.form.machine')}
                   aria-invalid={hasError('machine_required') || undefined}
                 >
-                  <SelectValue placeholder={t('settings.agentRoles.form.machinePlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {machines.map((machine) => (
-                    <SelectItem key={machine.machineId} value={machine.machineId}>
-                      <span className="flex items-center gap-1.5">
-                        {machine.label}
-                        {machine.online ? null : (
-                          <span className="text-[10px] text-muted-foreground">
-                            {t('settings.agentRoles.status.offline')}
-                          </span>
-                        )}
-                      </span>
-                    </SelectItem>
+                  <Select.Value placeholder={t('settings.agentRoles.form.machinePlaceholder')} />
+                </Select.Trigger>
+                <Select.Content>
+                  {machineOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </Field>
             <Field label={t('settings.agentRoles.form.agentConfig')}>
-              <Select
-                value={value.agentConfigId ?? ''}
+              <Select.Root
+                items={agentConfigOptions}
+                value={value.agentConfigId ?? null}
                 disabled={!value.machineId || agentConfigs.length === 0}
                 onValueChange={(agentConfigId) =>
                   update({
@@ -198,21 +212,20 @@ export function AgentRoleForm({
                   })
                 }
               >
-                <SelectTrigger
-                  className="h-9 text-xs"
+                <Select.Trigger
                   aria-label={t('settings.agentRoles.form.agentConfig')}
                   aria-invalid={hasError('agent_config_required') || undefined}
                 >
-                  <SelectValue placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {agentConfigs.map((config) => (
-                    <SelectItem key={config.agentConfigId} value={config.agentConfigId}>
-                      {config.label}
-                    </SelectItem>
+                  <Select.Value placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')} />
+                </Select.Trigger>
+                <Select.Content>
+                  {agentConfigOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </Field>
           </div>
           {value.machineId && agentConfigs.length === 0 ? (
@@ -386,18 +399,24 @@ function ValueSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select value={value ?? ''} onValueChange={onChange}>
-      <SelectTrigger className="h-9 text-xs" aria-label={label}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
+    <Select.Root
+      items={options}
+      value={value}
+      onValueChange={(next) => {
+        if (next != null) onChange(next);
+      }}
+    >
+      <Select.Trigger aria-label={label}>
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <Select.Item key={option.value} value={option.value}>
             {option.label}
-          </SelectItem>
+          </Select.Item>
         ))}
-      </SelectContent>
-    </Select>
+      </Select.Content>
+    </Select.Root>
   );
 }
 

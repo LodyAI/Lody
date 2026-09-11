@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Shield, User } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -78,6 +78,32 @@ export function InviteMemberDialog({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InviteMemberRole>('member');
 
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const roleOptions = useMemo(
+    () => [
+      {
+        value: 'member' as const,
+        label: (
+          <span className="flex items-center gap-2">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>{t('organization.role.member')}</span>
+          </span>
+        ),
+      },
+      {
+        value: 'admin' as const,
+        label: (
+          <span className="flex items-center gap-2">
+            <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>{t('organization.role.admin')}</span>
+          </span>
+        ),
+      },
+    ],
+    [t]
+  );
+
   // Reopening the dialog must not resurrect the previous draft.
   useEffect(() => {
     if (!open) return;
@@ -150,25 +176,22 @@ export function InviteMemberDialog({
               <UiField.Label htmlFor="invite-role" className="text-xs text-muted-foreground">
                 {t('workspace.invite.role')}
               </UiField.Label>
-              <Select value={role} onValueChange={(value) => setRole(value as InviteMemberRole)}>
-                <SelectTrigger id="invite-role" className="h-9 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">
-                    <div className="flex items-center gap-2">
-                      <User className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{t('organization.role.member')}</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="admin">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{t('organization.role.admin')}</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <Select.Root
+                items={roleOptions}
+                value={role}
+                onValueChange={(value) => setRole(value as InviteMemberRole)}
+              >
+                <Select.Trigger id="invite-role">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {roleOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {role === 'admin'
                   ? t('workspace.invite.roleHintAdmin')

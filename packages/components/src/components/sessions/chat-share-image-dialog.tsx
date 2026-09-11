@@ -396,6 +396,29 @@ export function ChatShareImageDialog({
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const appTheme = useResolvedTheme() === 'dark' ? 'dark' : 'light';
   const modelName = messages.findLast((message) => message.role === 'assistant')?.modelName;
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so each list is stated once and drives both.
+  const themeOptions = useMemo(
+    () => [
+      { value: 'app' as const, label: t('sessions.shareImage.themeApp', 'Follow app') },
+      { value: 'light' as const, label: t('sessions.shareImage.themeLight', 'Light') },
+      { value: 'dark' as const, label: t('sessions.shareImage.themeDark', 'Dark') },
+    ],
+    [t]
+  );
+  const paddingOptions = useMemo(
+    () => [
+      { value: 'compact' as const, label: t('sessions.shareImage.paddingCompact', 'Compact') },
+      { value: 'regular' as const, label: t('sessions.shareImage.paddingRegular', 'Regular') },
+      { value: 'spacious' as const, label: t('sessions.shareImage.paddingSpacious', 'Spacious') },
+    ],
+    [t]
+  );
+  const footerOptions = useMemo(
+    () => FOOTER_VARIANTS.map((value) => ({ value, label: value })),
+    []
+  );
+
   const selectedTokenCount = useMemo(
     () =>
       messages.reduce(
