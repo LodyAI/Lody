@@ -754,6 +754,13 @@ function SessionFileContentViewImpl({
 
   const handleExternalTextUpdateApplied = useCallback(
     (result: 'applied' | 'no-op') => {
+      // An acknowledged snapshot must not replay when preview or tab switching
+      // remounts the editor. Preserve a newer update awaiting its own acknowledgement.
+      if (externalTextUpdate) {
+        setExternalTextUpdate((current) =>
+          current?.seq === externalTextUpdate.seq ? undefined : current
+        );
+      }
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;

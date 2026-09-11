@@ -1537,3 +1537,65 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
   });
 });
+
+describe('independent preview remount investigation', () => {
+  it.each([false, true])(
+    'preserves the actual native editor draft across preview after refresh=%s',
+    async (refreshFirst) => {
+      const provider = createFakeSessionFileProvider({
+        files: [
+          {
+            path: 'README.md',
+            fileId: 't:readme',
+            kind: 'text',
+            sourceState: 'live-collaborative',
+          },
+        ],
+        snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
+      });
+      const states: SessionFileSaveViewState[] = [];
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'README.md',
+          fileId: 't:readme',
+          fileProvider: provider,
+          fileProviderPending: false,
+          fileProviderRole: 'write',
+          preferNativeMarkdownSelection: true,
+          onSaveStateChange: (state) => states.push(state),
+        })
+      );
+      const click = async (label: string) => {
+        const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+        expect(button).not.toBeNull();
+        expect(button?.disabled).toBe(false);
+        await act(async () => {
+          button?.click();
+        });
+      };
+      await click('Hide preview');
+      if (refreshFirst) await click('Refresh');
+      const textarea = () =>
+        view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+      expect(textarea()?.value).toBe('# Original');
+      expect(textarea()?.readOnly).toBe(false);
+      const draft = '# My unsaved work\n\nA whole paragraph written before preview.';
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+          textarea(),
+          draft
+        );
+        textarea()?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(textarea()?.value).toBe(draft);
+      expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+      await click('Preview');
+      expect(view.textContent).toContain('A whole paragraph written before preview.');
+      await click('Hide preview');
+      expect(textarea()?.value).toBe(draft);
+      expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+    }
+  );
+});
