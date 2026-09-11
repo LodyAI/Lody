@@ -1,6 +1,16 @@
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { execFile, spawnSync } from 'node:child_process';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -211,6 +221,160 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         rawBytes: Buffer.byteLength('new\n'),
       });
       expect(await readFile(filePath, 'utf8')).toBe('new\n');
+    });
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'keeps ordinary POSIX mode on an existing file after a successful save',
+    async () => {
+      const modeOf = async (filePath: string) => ((await stat(filePath)).mode & 0o777).toString(8);
+      const script = '#!/bin/sh\nprintf "saved\\n"\n';
+
+      await withWorkspace(async (workspaceRoot) => {
+        const previousMask = process.umask(0o022);
+        try {
+          const filePath = path.join(workspaceRoot, 'run.sh');
+          await writeFile(filePath, '#!/bin/sh\nprintf "old\\n"\n');
+          await chmod(filePath, 0o755);
+          const service = new CodeCollabV2Service({
+            resolveWorkspace: makeResolver(workspaceRoot),
+          });
+          const opened = await service.openText({ sessionId: SESSION_ID, path: 'run.sh' });
+          const saved = await service.saveText({
+            sessionId: SESSION_ID,
+            requestedByUserId: 'user-1',
+            path: 'run.sh',
+            baseDigest: opened.digest,
+            text: {
+              encoding: 'plain',
+              text: script,
+              rawBytes: Buffer.byteLength(script),
+            },
+          });
+          expect(saved.status).toBe('ok');
+          expect(await readFile(filePath, 'utf8')).toBe(script);
+          expect(await modeOf(filePath)).toBe('755');
+          const ran = spawnSync(filePath, [], { encoding: 'utf8' });
+          expect(ran.error).toBeUndefined();
+          expect(ran.status).toBe(0);
+          expect(ran.stdout).toBe('saved\n');
+        } finally {
+          process.umask(previousMask);
+        }
+      });
+
+      await withWorkspace(async (workspaceRoot) => {
+        const filePath = path.join(workspaceRoot, 'secret.txt');
+        await writeFile(filePath, 'old\n');
+        await chmod(filePath, 0o600);
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: makeResolver(workspaceRoot),
+        });
+        const opened = await service.openText({ sessionId: SESSION_ID, path: 'secret.txt' });
+        const saved = await service.saveText({
+          sessionId: SESSION_ID,
+          requestedByUserId: 'user-1',
+          path: 'secret.txt',
+          baseDigest: opened.digest,
+          text: {
+            encoding: 'plain',
+            text: 'new\n',
+            rawBytes: Buffer.byteLength('new\n'),
+          },
+        });
+        expect(saved.status).toBe('ok');
+        expect(await readFile(filePath, 'utf8')).toBe('new\n');
+        expect(await modeOf(filePath)).toBe('600');
+      });
+
+      await withWorkspace(async (workspaceRoot) => {
+        const previousMask = process.umask(0o022);
+        try {
+          const filePath = path.join(workspaceRoot, 'plain.txt');
+          await writeFile(filePath, 'old\n');
+          await chmod(filePath, 0o644);
+          const service = new CodeCollabV2Service({
+            resolveWorkspace: makeResolver(workspaceRoot),
+          });
+          const opened = await service.openText({ sessionId: SESSION_ID, path: 'plain.txt' });
+          const saved = await service.saveText({
+            sessionId: SESSION_ID,
+            requestedByUserId: 'user-1',
+            path: 'plain.txt',
+            baseDigest: opened.digest,
+            text: {
+              encoding: 'plain',
+              text: 'new\n',
+              rawBytes: Buffer.byteLength('new\n'),
+            },
+          });
+          expect(saved.status).toBe('ok');
+          expect(await modeOf(filePath)).toBe('644');
+        } finally {
+          process.umask(previousMask);
+        }
+      });
+    }
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'does not change POSIX mode when a digest conflict skips the write',
+    async () => {
+      await withWorkspace(async (workspaceRoot) => {
+        const filePath = path.join(workspaceRoot, 'run.sh');
+        await writeFile(filePath, 'old\n');
+        await chmod(filePath, 0o755);
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: makeResolver(workspaceRoot),
+        });
+        const opened = await service.openText({ sessionId: SESSION_ID, path: 'run.sh' });
+        await writeFile(filePath, 'external\n');
+        await chmod(filePath, 0o755);
+        const conflict = await service.saveText({
+          sessionId: SESSION_ID,
+          requestedByUserId: 'user-1',
+          path: 'run.sh',
+          baseDigest: opened.digest,
+          text: {
+            encoding: 'plain',
+            text: 'new\n',
+            rawBytes: Buffer.byteLength('new\n'),
+          },
+        });
+        expect(conflict.status).toBe('conflict');
+        expect(await readFile(filePath, 'utf8')).toBe('external\n');
+        expect(((await stat(filePath)).mode & 0o777).toString(8)).toBe('755');
+      });
+    }
+  );
+
+  it('does not recreate a deleted file when save reports file_deleted', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const filePath = path.join(workspaceRoot, 'gone.ts');
+      await writeFile(filePath, 'old\n');
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+      });
+      const opened = await service.openText({ sessionId: SESSION_ID, path: 'gone.ts' });
+      await rm(filePath);
+      const deleted = await service.saveText({
+        sessionId: SESSION_ID,
+        requestedByUserId: 'user-1',
+        path: 'gone.ts',
+        baseDigest: opened.digest,
+        text: {
+          encoding: 'plain',
+          text: 'new\n',
+          rawBytes: Buffer.byteLength('new\n'),
+        },
+      });
+      expect(deleted).toEqual({
+        status: 'conflict',
+        reason: 'file_deleted',
+        path: 'gone.ts',
+        baseDigest: opened.digest,
+      });
+      await expect(stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
     });
   });
 
