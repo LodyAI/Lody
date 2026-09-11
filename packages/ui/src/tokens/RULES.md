@@ -127,6 +127,44 @@ declares `box-shadow: none` rather than leaving the property unclaimed. The
 stays mounted for a screen reader to announce into and would otherwise open
 every popup with a blank row.
 
+### Menus
+
+A menu is that same surface with commands on it, so it reads `popup` too and its
+rows are the rows above: one height, one radius, one highlight. Exactly one
+declaration differs. A list takes `--anchor-width`, because the control it
+belongs to shows the value it holds and the two read as one control; a menu is
+opened by whatever the surface already had there — often a 28px icon button — so
+it takes `popup.menuWidth` and grows past it for its longest row. A menu scrolls
+in its own box rather than between scroll arrows, because its rows are the
+popup's own children.
+
+| part            | what it is                                                                  |
+| --------------- | --------------------------------------------------------------------------- |
+| leading box     | `popup.indicatorSize`, at `popup.hint`: a caller's icon, a tick, or a dot   |
+| label           | the row's text; it takes the width, so a long one truncates                 |
+| shortcut        | trailing metadata at `caption`, in `popup.hint`, never growing or shrinking |
+| submenu chevron | drawn by the part, so a caller cannot forget it                             |
+| destructive     | `popup.destructive` label, `popup.destructiveHighlight` under the keyboard  |
+| open            | the row owning an open submenu keeps the highlight fill                     |
+
+A row that holds no icon holds no box, so an icon-less menu is not indented for
+nothing; a row in a mixed list asks for the box with `inset` and lines up with
+its neighbours. A checkbox or radio row's leading box is its state and nothing
+else: the mark is unmounted while the row is unticked, so a caller's glyph
+sharing that box would slide sideways every time the row was toggled.
+
+Destructive is a tone of the row rather than a component: one class changes the
+label colour and one changes the fill under the keyboard, and everything else
+about the row is what every other command takes. The fill is mixed toward
+`destructive` for the reason `highlight` is mixed toward `label` — on this rung
+the named fills collapse into the surface.
+
+The rise applies to a menu too, but a menu flips to stay on screen and a submenu
+opens beside its row, so the 4px is measured against the anchor rather than the
+page: the popup starts one step further from what opened it, on whichever side
+it landed, and closes that step as it arrives. A context menu is anchored to the
+pointer instead of to a control, so it takes no gap at all.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
