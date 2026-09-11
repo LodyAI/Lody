@@ -28,6 +28,7 @@ import { Button } from '@/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
+import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +54,7 @@ import {
   MessageSquareMore,
   PanelLeft,
   Plus,
+  Search,
   Settings,
   Users,
 } from 'lucide-react';
@@ -1045,7 +1047,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         <div
           className={cn(
-            // `gap-px` keeps New chat / Tasks from painting as one fused block
+            // `gap-px` keeps navigation rows from painting as one fused block
             // when both are selected-adjacent or hover-highlighted.
             'flex flex-col gap-px',
             isMobile
@@ -1058,6 +1060,12 @@ export const LoroSidebar = memo(function LoroSidebar({
             label={mergedLabels.home}
             icon={<SquarePen className="h-4 w-4" />}
             onClick={onHomeClicked}
+          />
+          <NavButton
+            active={false}
+            label={t('common.search', 'Search')}
+            icon={<Search className="h-4 w-4" />}
+            onClick={() => setCommandPaletteOpen(true)}
           />
           {/* Tasks sits with New Chat rather than in the bottom icon rail: it is a
              primary destination, and the rail reads as utilities (docs, feedback,
