@@ -58,4 +58,6 @@ null`: browser offline, machine removed or offline) — the chip owns that story
   The renderer does not convert `finished` into a provider terminal signal. The
   daemon writes `failed` only when its live execution state proves the addressed
   turn no longer owns work; an unsupported, offline, non-owner, active, or
-  indeterminate daemon leaves the durable item unchanged.
+  indeterminate daemon leaves the durable item unchanged. Active, ambiguous,
+  unchanged, and unreachable attempts remain retryable after history activity,
+  reconnect, or daemon replacement; only a remotely confirmed repair is terminal.

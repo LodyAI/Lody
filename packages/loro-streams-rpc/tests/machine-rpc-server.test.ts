@@ -930,6 +930,87 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('keeps control requests responsive while four reconciliations are running', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    let releaseReconciliations!: () => void;
+    const reconciliationGate = new Promise<void>((resolve) => {
+      releaseReconciliations = resolve;
+    });
+    const reconcileSessionContextCompaction = vi.fn(
+      async (args: { sessionId: SessionId; turnId: string; toolCallId: string }) => {
+        await reconciliationGate;
+        return {
+          type: 'session/reconcile-context-compaction_response' as const,
+          ...args,
+          outcome: 'unchanged' as const,
+        };
+      }
+    );
+    const cancelSession = vi.fn(async (args: { sessionId: SessionId; turnId: string }) => ({
+      type: 'session/cancel_response' as const,
+      sessionId: args.sessionId,
+      success: true,
+    }));
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      reconcileSessionContextCompaction,
+      cancelSession,
+    });
+    const base = {
+      jsonrpc: '2.0' as const,
+      rpcVersion: '1',
+      machineId,
+      workspaceId,
+      replyTo: 'workspace-1:rpc:res:client-1',
+      sentAt: Date.now(),
+      expiresAt: Date.now() + 5_000,
+    };
+    fake.pushBatch({
+      messages: [
+        ...Array.from({ length: 4 }, (_, index) => ({
+          ...base,
+          id: `reconcile-${index}`,
+          method: 'session/reconcile-context-compaction',
+          params: {
+            sessionId: `session-${index}`,
+            turnId: `assistant:turn-${index}`,
+            toolCallId: `compact-${index}`,
+          },
+        })),
+        {
+          ...base,
+          id: 'cancel-after-reconciliations',
+          method: 'session/cancel',
+          params: { sessionId: 'session-cancel', turnId: 'assistant:turn-cancel' },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+
+    try {
+      await server.start();
+      await vi.waitFor(() => expect(reconcileSessionContextCompaction).toHaveBeenCalledTimes(4));
+      await vi.waitFor(() => expect(cancelSession).toHaveBeenCalledTimes(1));
+      expect(
+        fake.appended.some(
+          (entry) => (entry.value as { id?: string }).id === 'cancel-after-reconciliations'
+        )
+      ).toBe(true);
+    } finally {
+      releaseReconciliations();
+      server.stop();
+    }
+  });
+
   it('appends responses to workspace-level replyTo streams for new clients', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;

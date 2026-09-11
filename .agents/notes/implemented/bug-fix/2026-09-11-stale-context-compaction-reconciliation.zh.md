@@ -17,16 +17,21 @@ daemon 协调精确的 turn 与 tool-call id。只有实时执行所有权证明
 
 Renderer 仍只读取持久化的 compaction 状态。它不会把 `SessionHistory.finished`、超时、
 重启或 presence 缺失重新解释成 provider 已终止。最新 compaction 未完成且所属 assistant
-turn 已 finished 时，renderer 会在 Session 打开期间发起一次经过 capability gate 的协调请求。
-Transient `unknown` 可以在后续历史活动后重试；不支持该能力或不可访问的 daemon 不会触发
-其他写入 fallback。
+turn 已 finished 时，renderer 会发起经过 capability gate 的协调请求。只有写入已确认的
+`reconciled` 结果会被永久去重；`active`、`unknown` 和 `unchanged` 可以在后续历史活动、
+offline-to-online 转换或新的 daemon presence instance 出现后重试。不支持该能力或不可访问的
+daemon 不会触发其他写入 fallback。
 
 请求携带 `sessionId`、`turnId` 和 `toolCallId`。目标 daemon 先验证当前 Session metadata
-确实把所有权分配给本机，然后在现有 Session history rewrite barrier 内检查 execution-service
-turn ownership、阻塞中的 Session 创建、active presence 和 pending dispatch。目标 turn 仍
-active，或存在未归属工作导致结论不确定时，历史不变。当 daemon 能证明该 turn 已不是实时
-owner 时，它只把指定且未完成的 `context_compaction` item 改成 `failed`；已有终态、不匹配、
-未知和无关的持久化 item 均被保留。
+确实把所有权分配给本机，并等待 Session document 的初始远端状态完成后再根据 history 下结论。
+现有 Session history rewrite barrier 只覆盖第二次 ownership/liveness 检查和本地 history 修改。
+barrier 释放后会显式 enqueue 一次 dispatch recheck，确保 repair 期间已接受的 turn 不会被搁置。
+远端写入确认在 barrier 外进行；确认失败或不可用时返回 `unknown`，不能报告持久化成功。
+reconciliation RPC 使用普通 request lane，因为 document sync 和 history write 不是快速控制面工作。
+
+目标 turn 仍 active，或存在未归属工作导致结论不确定时，历史不变。当 daemon 能证明该 turn
+已不是实时 owner 时，它只把指定且未完成的 `context_compaction` item 改成 `failed`；已有终态、
+不匹配、未知和无关的持久化 item 均被保留。
 
 该修复针对打开的 Session 惰性执行，而不是启动时迁移。全局扫描会激活数量不受控的旧文档，
 却仍无法建立 provider 所有权。版本化的 Machine capability negotiation 也确保混合版本客户端
@@ -46,6 +51,7 @@ owner 能提供证据。本次变更不假定每一条历史未完成 compaction
 
 ## 验证
 
-行为测试覆盖精确 item 修改、active 与 indeterminate 所有权结果、owner-daemon 持久化、本地
-capability gating 和 Loro Streams RPC 分发。共享 schema 会校验请求与响应 shape。本次没有
-加入启动扫描、存储迁移或端到端 provider fixture。
+行为测试覆盖精确 item 修改、active 与 indeterminate 所有权结果、cold/unsynced document、
+写入确认失败、rewrite barrier 释放后的 dispatch 唤醒、owner-daemon generation、control lane
+隔离、本地 capability gating 和 Loro Streams RPC 分发。共享 schema 会校验请求与响应 shape。
+本次没有加入启动扫描、存储迁移或端到端 provider fixture。

@@ -6798,57 +6798,99 @@ export class MessageHandler {
       ...options,
     });
 
-    let releaseBarrier: (() => void) | undefined;
     try {
-      const metaRecord = await this.workspaceDocument.repo.getDocMeta(
-        getSessionRoomId(args.sessionId)
-      );
-      const meta =
-        metaRecord?.meta && !isLoroRepoDocDeleted(metaRecord)
-          ? (metaRecord.meta as SessionMeta)
-          : undefined;
-      if (!meta || meta.machineId !== this.machineId) {
+      const verifyOwnership = async (): Promise<boolean> => {
+        const metaRecord = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(args.sessionId)
+        );
+        const meta =
+          metaRecord?.meta && !isLoroRepoDocDeleted(metaRecord)
+            ? (metaRecord.meta as SessionMeta)
+            : undefined;
+        return meta?.machineId === this.machineId;
+      };
+      const inspectLiveWork = (): {
+        activeTurnId?: string;
+        outcome: SessionContextCompactionReconcileResponse | null;
+      } => {
+        const execution = this.executionService.getExecutionSnapshot(args.sessionId);
+        if (execution.activeTurnId === args.turnId) {
+          return {
+            activeTurnId: execution.activeTurnId,
+            outcome: response('active', { activeTurnId: execution.activeTurnId }),
+          };
+        }
+        if (
+          !execution.activeTurnId &&
+          (execution.hasActiveTurn ||
+            execution.hasBlockingPendingCreate ||
+            execution.hasActiveAutomation ||
+            this.sessionActivePresence.has(args.sessionId) ||
+            this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId))
+        ) {
+          return {
+            outcome: response('unknown', {
+              error: 'The daemon still has unassigned Session work.',
+            }),
+          };
+        }
+        return {
+          ...(execution.activeTurnId ? { activeTurnId: execution.activeTurnId } : {}),
+          outcome: null,
+        };
+      };
+
+      if (!(await verifyOwnership())) {
         return response('unknown', { error: 'The target daemon does not own this Session.' });
       }
+      const initialLiveWork = inspectLiveWork();
+      if (initialLiveWork.outcome) {
+        return initialLiveWork.outcome;
+      }
 
-      releaseBarrier =
-        this.executionService.tryAcquireSessionRewriteBarrier(args.sessionId) ?? undefined;
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      await sessionDoc.ensureDocRoomJoined();
+      if (!(await sessionDoc.waitUntilSynced())) {
+        return response('unknown', { error: 'Session history is not synced with its owner.' });
+      }
+
+      const releaseBarrier = this.executionService.tryAcquireSessionRewriteBarrier(args.sessionId);
       if (!releaseBarrier) {
         return response('unknown', { error: 'Session ownership is changing.' });
       }
 
-      const execution = this.executionService.getExecutionSnapshot(args.sessionId);
-      if (execution.activeTurnId === args.turnId) {
-        return response('active', { activeTurnId: execution.activeTurnId });
-      }
-
-      if (
-        !execution.activeTurnId &&
-        (execution.hasActiveTurn ||
-          execution.hasBlockingPendingCreate ||
-          execution.hasActiveAutomation ||
-          this.sessionActivePresence.has(args.sessionId) ||
-          this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId))
-      ) {
-        return response('unknown', { error: 'The daemon still has unassigned Session work.' });
-      }
-
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
       let reconciled = false;
-      await sessionDoc.updateHistory((history) => {
-        reconciled = settleContextCompactionItemAsFailed(history, args);
-        return history;
-      });
-      if (reconciled) {
-        await sessionDoc.waitUntilSynced();
+      let observedActiveTurnId: string | undefined;
+      try {
+        if (!(await verifyOwnership())) {
+          return response('unknown', { error: 'The target daemon no longer owns this Session.' });
+        }
+        const liveWork = inspectLiveWork();
+        if (liveWork.outcome) {
+          return liveWork.outcome;
+        }
+        observedActiveTurnId = liveWork.activeTurnId;
+        await sessionDoc.updateHistory((history) => {
+          reconciled = settleContextCompactionItemAsFailed(history, args);
+          return history;
+        });
+      } finally {
+        releaseBarrier();
+        // A turn offer or History update may have been checked while the barrier
+        // was held. Queue a follow-up after release so ACKed work cannot be stranded.
+        void this.sessionDispatchWatcher.enqueueSessionCheck(args.sessionId);
+      }
+
+      if (reconciled && !(await sessionDoc.waitUntilSynced())) {
+        return response('unknown', {
+          error: 'The reconciled Session history was not confirmed by its owner.',
+        });
       }
       return response(reconciled ? 'reconciled' : 'unchanged', {
-        ...(execution.activeTurnId ? { activeTurnId: execution.activeTurnId } : {}),
+        ...(observedActiveTurnId ? { activeTurnId: observedActiveTurnId } : {}),
       });
     } catch (error) {
       return response('unknown', { error: formatErrorMessage(error) });
-    } finally {
-      releaseBarrier?.();
     }
   }
 

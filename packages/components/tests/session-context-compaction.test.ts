@@ -4,6 +4,8 @@ import type { SessionHistory } from '@lody/shared';
 import {
   canStopAgentEnabled,
   findActiveSessionContextCompaction,
+  getContextCompactionReconciliationAttemptKey,
+  isDurableContextCompactionReconciliation,
   isSessionContextCompacting,
 } from '../src/lib/session-context-compaction';
 
@@ -51,6 +53,35 @@ describe('isSessionContextCompacting', () => {
   it('does not treat host turn finalization as provider termination', () => {
     expect(isSessionContextCompacting(historyWithStatus('pending', true))).toBe(true);
     expect(isSessionContextCompacting(historyWithStatus('in_progress', true))).toBe(true);
+  });
+
+  it('retries non-durable outcomes and isolates attempts by daemon generation', () => {
+    const base = {
+      sessionId: 'session-1',
+      turnId: 'assistant:turn-1',
+      toolCallId: 'context-compaction-1',
+    };
+    expect(
+      getContextCompactionReconciliationAttemptKey({ ...base, ownerInstanceId: 'daemon-1' })
+    ).not.toBe(
+      getContextCompactionReconciliationAttemptKey({ ...base, ownerInstanceId: 'daemon-2' })
+    );
+    for (const outcome of ['active', 'unknown', 'unchanged'] as const) {
+      expect(
+        isDurableContextCompactionReconciliation({
+          type: 'session/reconcile-context-compaction_response',
+          ...base,
+          outcome,
+        })
+      ).toBe(false);
+    }
+    expect(
+      isDurableContextCompactionReconciliation({
+        type: 'session/reconcile-context-compaction_response',
+        ...base,
+        outcome: 'reconciled',
+      })
+    ).toBe(true);
   });
 });
 

@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import {
   collectOnlineMachineIdsFromPresence,
+  findFreshMachinePresenceState,
   findFreshSessionPresenceState,
   getServerNow,
   type LodyPresenceStateMap,
@@ -34,6 +35,18 @@ export const sessionLivePresenceAtomFamily = atomFamily((sessionId: SessionId) =
 
 export const sessionLiveStatusAtomFamily = atomFamily((sessionId: SessionId) =>
   atom((get) => get(sessionLivePresenceAtomFamily(sessionId))?.status ?? null)
+);
+
+export const machineLivePresenceAtomFamily = atomFamily((machineId?: MachineId) =>
+  atom((get) =>
+    machineId
+      ? (findFreshMachinePresenceState(
+          get(lodyPresenceStatesAtom),
+          machineId,
+          get(lodyPresenceNowMsAtom)
+        ) ?? null)
+      : null
+  )
 );
 
 const setsEqual = (a: ReadonlySet<MachineId>, b: ReadonlySet<MachineId>): boolean => {

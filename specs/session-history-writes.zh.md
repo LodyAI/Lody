@@ -36,7 +36,10 @@ Translation: current
   activity。打开该 Session 时可以请求修复，但只有 owner daemon 能修改指定 turn 和 tool
   item，且必须先由实时执行所有权证明该 turn 已不活跃。Turn `finished`、持久化 Session
   status、经过时间、daemon 重启或缺少 live evidence 均不充分。Daemon 离线、不支持该能力、
-  不持有 Session 或无法确定时，历史保持不变。
+  不持有 Session 或无法确定时，历史保持不变。Repair 必须读取已完成远端同步的 Session
+  document；rewrite barrier 仅覆盖最终 live-state 检查和本地修改，释放后必须唤醒 dispatch；
+  只有写入确认后才能返回 `reconciled`。非终态结果可在后续 history、连接或 daemon generation
+  证据变化时重试。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 

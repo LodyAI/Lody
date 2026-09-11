@@ -20,14 +20,23 @@ unchanged.
 The renderer remains a reader of durable compaction status. It does not reinterpret
 `SessionHistory.finished`, a timeout, a restart, or missing presence as provider
 termination. When the latest compaction is unresolved and its assistant turn is
-finished, the renderer makes one capability-gated reconciliation request while the
-Session is open. A transient `unknown` outcome may be retried after later history
-activity; unsupported or unreachable daemons do not create a write fallback.
+finished, the renderer makes a capability-gated reconciliation request. Only a
+`reconciled` result whose write was confirmed is permanently deduplicated. `active`,
+`unknown`, and `unchanged` may be retried after later history activity, an
+offline-to-online transition, or a new daemon presence instance. Unsupported or
+unreachable daemons do not create a write fallback.
 
 The request names `sessionId`, `turnId`, and `toolCallId`. The target daemon first
-verifies that current Session metadata assigns ownership to its own machine. It then
-holds the existing Session history rewrite barrier while checking execution-service
-turn ownership, blocking Session creation, active presence, and pending dispatch.
+verifies that current Session metadata assigns ownership to its own machine and waits
+for the Session document's initial remote state before drawing a conclusion from its
+history. It acquires the existing Session history rewrite barrier only for a second
+ownership/liveness check and the local history mutation. Releasing that barrier
+explicitly enqueues a dispatch recheck, so a turn accepted while repair was running
+cannot remain stranded. Remote write confirmation happens after the barrier is
+released, and a failed or unavailable confirmation returns `unknown`, never durable
+success. The reconciliation RPC uses the ordinary request lane because document sync
+and history writes are not fast control-plane work.
+
 The addressed turn remains unchanged when it is active or when unassigned work makes
 the result indeterminate. Once the daemon can prove the turn is not its live owner,
 it changes only the named unresolved `context_compaction` item to `failed`; terminal,
@@ -56,6 +65,8 @@ more than the exact activity requested by the current view.
 ## Verification
 
 Behavioral coverage exercises exact-item mutation, active and indeterminate ownership
-outcomes, owner-daemon persistence, local capability gating, and Loro Streams RPC
-dispatch. Shared schemas validate the request and response shapes. No startup scan,
-storage migration, or end-to-end provider fixture was added.
+outcomes, cold/unsynced documents, write-confirmation failure, dispatch wakeup after a
+rewrite barrier, owner-daemon generations, control-lane isolation, local capability
+gating, and Loro Streams RPC dispatch. Shared schemas validate the request and
+response shapes. No startup scan, storage migration, or end-to-end provider fixture
+was added.

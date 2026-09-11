@@ -58,6 +58,8 @@ import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
 import {
   canStopAgentEnabled,
   findActiveSessionContextCompaction,
+  getContextCompactionReconciliationAttemptKey,
+  isDurableContextCompactionReconciliation,
 } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
@@ -149,7 +151,10 @@ import {
   openedSessionsAtomFamily,
   sessionMetaAtomFamily,
 } from '@/atoms/doc-meta';
-import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
+import {
+  useMachineOnlineStatus,
+  useMachinePresenceInstanceId,
+} from '@/hooks/use-machine-online-status';
 import { useDelayedFlag } from '@/hooks/use-delayed-flag';
 import { resolveSessionStatusStripState } from './session-status-strip';
 import { isSyncingRoomSyncState } from '@/lib/room-sync-state';
@@ -2250,6 +2255,7 @@ export const SessionChatInterface = memo(
     const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
     const isMachineRemoved = !sessionMachine && docMetaCacheReady;
     const sessionMachineOnlineStatus = useMachineOnlineStatus(session.machineId);
+    const sessionMachinePresenceInstanceId = useMachinePresenceInstanceId(session.machineId);
     const browserOnline = useAtomValue(browserOnlineAtom);
     const externalHistorySyncLabel = isExternalHistoryRefreshing
       ? t('sessions.externalHistorySyncing', {
@@ -2716,7 +2722,12 @@ export const SessionChatInterface = memo(
       if (!runtime || !canReconcileContextCompaction || !activeContextCompaction?.turnFinished) {
         return;
       }
-      const attemptKey = `${session.id}:${activeContextCompaction.turnId}:${activeContextCompaction.toolCallId}`;
+      const attemptKey = getContextCompactionReconciliationAttemptKey({
+        sessionId: session.id,
+        turnId: activeContextCompaction.turnId,
+        toolCallId: activeContextCompaction.toolCallId,
+        ownerInstanceId: sessionMachinePresenceInstanceId,
+      });
       if (compactionReconciliationAttemptsRef.current.has(attemptKey)) return;
       compactionReconciliationAttemptsRef.current.add(attemptKey);
       void runtime
@@ -2726,9 +2737,12 @@ export const SessionChatInterface = memo(
           toolCallId: activeContextCompaction.toolCallId,
         })
         .then((result) => {
-          if (!result || result.outcome === 'unknown') {
+          if (!isDurableContextCompactionReconciliation(result)) {
             compactionReconciliationAttemptsRef.current.delete(attemptKey);
           }
+        })
+        .catch(() => {
+          compactionReconciliationAttemptsRef.current.delete(attemptKey);
         });
     }, [
       activeContextCompaction,
@@ -2736,6 +2750,7 @@ export const SessionChatInterface = memo(
       runtime,
       session.id,
       session.machineId,
+      sessionMachinePresenceInstanceId,
     ]);
     // Pending scheduled tasks (cron / wakeup) are derived on the fly from the
     // Cron*/ScheduleWakeup tool_call items already in history — nothing extra is

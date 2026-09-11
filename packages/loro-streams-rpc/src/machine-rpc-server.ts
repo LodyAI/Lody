@@ -119,7 +119,6 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/acp-capabilities-refresh-cancel',
   'session/cancel',
   'session/live-status',
-  'session/reconcile-context-compaction',
   'session/steer',
   'session/goal',
   'session/terminate',
