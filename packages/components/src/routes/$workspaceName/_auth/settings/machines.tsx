@@ -1,7 +1,12 @@
-import { useCallback } from 'react';
+import { lazy, useCallback } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import type { MachineId } from '@lody/shared';
-import { MachineAgentSettings } from '@/components/settings/machine-agent-settings';
+import { RouteSuspense } from '@/components/route-suspense';
+
+const LazyMachineAgentSettings = lazy(async () => {
+  const module = await import('@/components/settings/machine-agent-settings');
+  return { default: module.MachineAgentSettings };
+});
 
 type MachinesSearch = { machine?: string };
 
@@ -30,10 +35,12 @@ function MachinesSettingsRoute() {
   );
 
   return (
-    <MachineAgentSettings
-      mode="machines"
-      selectedMachineId={selectedMachineId}
-      onSelectedMachineChange={onSelectedMachineChange}
-    />
+    <RouteSuspense>
+      <LazyMachineAgentSettings
+        mode="machines"
+        selectedMachineId={selectedMachineId}
+        onSelectedMachineChange={onSelectedMachineChange}
+      />
+    </RouteSuspense>
   );
 }

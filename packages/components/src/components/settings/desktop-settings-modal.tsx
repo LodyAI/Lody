@@ -1,7 +1,8 @@
-import { useCallback, useId } from 'react';
+import { lazy, Suspense, useCallback, useId } from 'react';
 import { Bug } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
+import type { MachineId } from '@lody/shared';
 import {
   bugReportDialogOpenAtom,
   settingsActiveTabAtom,
@@ -24,19 +25,56 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
-import { GeneralSettingsComponent } from './general-setting';
-import { AppearanceSettingsComponent } from './appearance-setting';
-import { AccountSettingsComponent } from './account-setting';
-import { BillingSettingsComponent } from './billing-setting';
-import { StatsSettingsComponent } from './stats-setting';
-import { ProjectSettingsComponent } from './project-settings';
-import { MachineAgentSettings } from './machine-agent-settings';
-import { IntegrationsSettingsComponent } from './integrations-setting';
-import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
-import { AboutSettingsComponent } from './about-setting';
-import { AgentRolesSetting } from './agent-roles-setting';
-import { McpSetting } from './mcp-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+
+const GeneralSettingsComponent = lazy(async () => {
+  const module = await import('./general-setting');
+  return { default: module.GeneralSettingsComponent };
+});
+const AppearanceSettingsComponent = lazy(async () => {
+  const module = await import('./appearance-setting');
+  return { default: module.AppearanceSettingsComponent };
+});
+const AccountSettingsComponent = lazy(async () => {
+  const module = await import('./account-setting');
+  return { default: module.AccountSettingsComponent };
+});
+const BillingSettingsComponent = lazy(async () => {
+  const module = await import('./billing-setting');
+  return { default: module.BillingSettingsComponent };
+});
+const StatsSettingsComponent = lazy(async () => {
+  const module = await import('./stats-setting');
+  return { default: module.StatsSettingsComponent };
+});
+const ProjectSettingsComponent = lazy(async () => {
+  const module = await import('./project-settings');
+  return { default: module.ProjectSettingsComponent };
+});
+const MachineAgentSettings = lazy(async () => {
+  const module = await import('./machine-agent-settings');
+  return { default: module.MachineAgentSettings };
+});
+const IntegrationsSettingsComponent = lazy(async () => {
+  const module = await import('./integrations-setting');
+  return { default: module.IntegrationsSettingsComponent };
+});
+const KeyboardShortcutsSetting = lazy(async () => {
+  const module = await import('./keyboard-shortcuts-setting');
+  return { default: module.KeyboardShortcutsSetting };
+});
+const AboutSettingsComponent = lazy(async () => {
+  const module = await import('./about-setting');
+  return { default: module.AboutSettingsComponent };
+});
+const AgentRolesSetting = lazy(async () => {
+  const module = await import('./agent-roles-setting');
+  return { default: module.AgentRolesSetting };
+});
+const McpSetting = lazy(async () => {
+  const module = await import('./mcp-setting');
+  return { default: module.McpSetting };
+});
 
 /**
  * Desktop-only settings overlay. Mounted once at the app level (like the bug-report
@@ -257,6 +295,26 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
   // so Account shortcuts can select a machine before switching tabs.
   const [selectedMachineId, setSelectedMachineId] = useAtom(settingsSelectedMachineIdAtom);
 
+  return (
+    <Suspense fallback={null}>
+      <SettingsTabBody
+        tabId={tabId}
+        selectedMachineId={selectedMachineId}
+        onSelectedMachineChange={setSelectedMachineId}
+      />
+    </Suspense>
+  );
+}
+
+function SettingsTabBody({
+  tabId,
+  selectedMachineId,
+  onSelectedMachineChange,
+}: {
+  tabId: SettingsTabId;
+  selectedMachineId: MachineId | null;
+  onSelectedMachineChange: (machineId: MachineId | null) => void;
+}) {
   switch (tabId) {
     case 'preferences':
       return <GeneralSettingsComponent />;
@@ -279,7 +337,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         <MachineAgentSettings
           mode="agents"
           selectedMachineId={selectedMachineId}
-          onSelectedMachineChange={setSelectedMachineId}
+          onSelectedMachineChange={onSelectedMachineChange}
         />
       );
     case 'agent-roles':
@@ -291,7 +349,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
         <MachineAgentSettings
           mode="machines"
           selectedMachineId={selectedMachineId}
-          onSelectedMachineChange={setSelectedMachineId}
+          onSelectedMachineChange={onSelectedMachineChange}
         />
       );
     case 'github':
