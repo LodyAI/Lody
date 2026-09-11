@@ -1888,8 +1888,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionIds: string[]) => {
       void (async () => {
         for (const sessionId of sessionIds) {
-          // Sequential: archiveSession read-modify-writes the machine doc's
-          // needToArchiveSessions map, so concurrent calls drop entries.
           await archiveSession(sessionId as SessionId);
         }
       })();

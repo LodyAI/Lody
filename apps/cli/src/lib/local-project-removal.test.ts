@@ -74,6 +74,7 @@ describe('local project worktree removal', () => {
     expect(removeWorktree).toHaveBeenCalledOnce();
     expect(removeWorktree).toHaveBeenCalledWith(cleanSessionId, false, undefined, {
       baseBranchName: undefined,
+      preserveBranch: true,
     });
     expect(result.deleted).toHaveLength(1);
     expect(result.skippedDirty).toEqual([

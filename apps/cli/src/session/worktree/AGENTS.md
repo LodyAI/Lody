@@ -52,3 +52,8 @@ and file responsibilities: [../README.md](../README.md).
   not on disk.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
+- Archive and delete never delete a Session branch; only the worktree directory goes
+  away, after a backup commit. Worktree removal for archived or deleted Sessions is
+  reconciled from Session state by `worktree-gc.ts` (no command, no acknowledgement);
+  it acts only on `archived` or `deleted` owners, never on `unknown`, and only once
+  workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.

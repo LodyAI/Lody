@@ -104,6 +104,7 @@ export async function cleanupLocalProjectWorktrees(
     try {
       await manager.removeWorktree(session.id, false, session.branchName, {
         baseBranchName: session.baseBranch,
+        preserveBranch: true,
       });
       result.deleted.push(item);
     } catch (error) {
