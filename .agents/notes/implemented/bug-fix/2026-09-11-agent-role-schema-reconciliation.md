@@ -51,3 +51,5 @@ Effect and test dependencies. Component typecheck also encounters missing Electr
 and hotkey dependencies. Public-boundary and docs checks remain blocked by other
 uninitialized ACP submodules; the documentation check reports no errors in the new
 documents. No running desktop or actual user catalog was exercised.
+
+PR: [#588](https://github.com/LodyAI/Lody/pull/588).
