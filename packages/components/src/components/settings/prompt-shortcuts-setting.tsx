@@ -84,7 +84,7 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const { runtime, entries, loading, errors, retry } = state;
+  const { runtime, entries, loading } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
     value: PromptShortcut;
@@ -92,15 +92,13 @@ function PromptShortcutsSettingContent({
   } | null>(null);
   const [removal, setRemoval] = useState<PromptShortcutIndexEntry | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
   const edit = async (entry: PromptShortcutIndexEntry) => {
     if (!runtime) return;
     setBusy(true);
-    setError(false);
     try {
       setEditor({ value: await runtime.read(entry), base: entry });
-    } catch {
-      setError(true);
+    } catch (error) {
+      console.warn('Failed to read Prompt Shortcut', error);
     } finally {
       setBusy(false);
     }
@@ -148,22 +146,6 @@ function PromptShortcutsSettingContent({
         onOpen={(entry) => void edit(entry)}
         onDelete={setRemoval}
       />
-
-      {(error || Object.keys(errors).length > 0) && (
-        <div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2 h-7 text-xs"
-            onClick={() => {
-              setError(false);
-              retry();
-            }}
-          >
-            {t('common.retry', 'Retry')}
-          </Button>
-        </div>
-      )}
 
       <Dialog
         open={!!editor && !!runtime}
@@ -273,7 +255,7 @@ function PromptShortcutsSettingContent({
                 void runtime
                   .remove(removal)
                   .then(() => setRemoval(null))
-                  .catch(() => setError(true))
+                  .catch((error) => console.warn('Failed to delete Prompt Shortcut', error))
                   .finally(() => setBusy(false));
               }}
             >
