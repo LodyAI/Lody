@@ -302,8 +302,8 @@ describe('getEffectiveProjectActivitySummary', () => {
     const children = buildChildSessionsByParent([parent, child, archived]);
     expect(
       getEffectiveProjectActivitySummary([parent, parent, child, stale, archived], children, live)
-    ).toEqual({ permission: 1, unread: 1, active: 1 });
-    expect(getEffectiveProjectActivitySummary([stale])).toEqual({
+    ).toMatchObject({ permission: 1, unread: 1, active: 1 });
+    expect(getEffectiveProjectActivitySummary([stale])).toMatchObject({
       permission: 0,
       unread: 0,
       active: 0,

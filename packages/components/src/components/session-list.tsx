@@ -147,7 +147,7 @@ export type SessionListRow = {
   addedLines: number;
   deletedLines: number;
   isWorking: boolean;
-  /** Exact parent + child-Tab counts, before row status takes precedence. */
+  /** Exact parent + child-Tab activity, including Session ids used for aggregate deduplication. */
   projectActivityCounts?: ProjectActivityCounts;
   hasUnreadMessages: boolean;
   isOffline: boolean;

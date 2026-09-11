@@ -242,7 +242,7 @@ export function getEffectiveSessionActivitySummary(
   };
 }
 
-/** Count each Session/child Tab once per status; unread can coexist with live work. */
+/** Preserve Session identity so overlapping unread/live states can be deduplicated for display. */
 export function getEffectiveProjectActivitySummary(
   sessions: SessionMeta[],
   childSessionsByParent?: Map<string, SessionMeta[]>,
@@ -258,6 +258,7 @@ export function getEffectiveProjectActivitySummary(
     [...candidates.values()].map((session) => {
       const status = liveSessionStatuses?.get(session.id)?.type;
       return {
+        sessionId: session.id,
         isWaitingPermission: status === 'requestPermission',
         isWorking: status === 'running' || status === 'initializing',
         hasUnreadMessages: sessionHasUnreadMessages(session),

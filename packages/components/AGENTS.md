@@ -19,7 +19,8 @@ mobile surfaces. Background for the rules below:
   (`disabled:bg-muted`). Primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
 - Collapsed local-project and GitHub-repository rows count fresh Session/child-Tab
   activity (including pinned Sessions) at the row end, before actions. Show at most
-  two items: permission > unread > active; combine mixed remaining states as `+N`.
+  two items: permission > unread > active; combine mixed remaining states as `+N`
+  unique Sessions after excluding Sessions represented by the first item.
   Omit single counts unless the second item is mixed `+N`; initializing uses running. Expanded/removing groups hide the
   aggregate. Preserve disclosure and Session end-slot status. See the
   [draft contract](../../specs/collapsed-project-activity.zh.md).

@@ -6,7 +6,7 @@ export function getProjectActivityLabel(counts: ProjectActivityCounts, t: TFunct
   return [
     [counts.permission, t('sessions.status.requestPermission', 'Request Permission')],
     [counts.unread, t('sessions.unreadMessages', 'Unread messages')],
-    [counts.active, t('sessions.status.running', 'Running')],
+    [counts.active, t('sessions.status.active', 'Active')],
   ]
     .filter(([count]) => Number(count) > 0)
     .map(([count, label]) => `${count} ${label}`)

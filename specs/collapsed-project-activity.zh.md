@@ -11,9 +11,9 @@ Translation: pending
 - 剩余类型只有一种时，第二项显示该类型及数量；剩余类型有两种时显示合计 `+N`。
   例如 `✋ 1 +5`、`● 3 ↻ 2`、`↻`，不添加第三个图标。
 - permission 和 active 取自新鲜的 Session presence；running、initializing 均计入 active，
-  使用现有 running 图标。等待 permission 不重复计入 active。
-- 包含置顶 Session 及未归档子 Tab，每个 Session 在每种状态中只计一次。
-  未读结果独立计数，可与该 Session 的实时状态共存；数量表示状态数，不是去重后的会话总数。
+  使用现有 running 图标，聚合标签统一为「Active」。等待 permission 不重复计入 active。
+- 包含置顶 Session 及未归档子 Tab。每个状态内按 Session 去重；未读结果可与实时状态共存。
+  第二项排除首项已经表示的 Session；混合 `+N` 对剩余 Session 取并集，不重复计算同时 unread 和 active 的 Session。
 - 无活动时不显示摘要。可访问性标签和 tooltip 保留全部分项计数，包括被 `+N` 合并的类型。
 
 ## 实现与验证依据

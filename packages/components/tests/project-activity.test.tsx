@@ -83,12 +83,14 @@ describe('collapsed project activity', () => {
       collapsed?: boolean;
       childTabs?: boolean;
       pinned?: boolean;
+      overlapUnreadActive?: boolean;
       removalState?: 'removing' | 'waiting_for_device';
     } = {}
   ) {
     const sessions: SessionMeta[] = [];
     const liveSessionStatuses = new Map<string, SessionStatus>();
-    for (const [status, count] of Object.entries(counts)) {
+    for (const status of ['permission', 'unread', 'active'] as const) {
+      const count = counts[status];
       for (let i = 0; i < count; i++) {
         const id = `${status}-${i}` as SessionId;
         sessions.push({
@@ -108,7 +110,7 @@ describe('collapsed project activity', () => {
           isPinned: options.pinned && i === 0,
           parentSessionId: options.childTabs && sessions.length ? sessions[0]!.id : undefined,
         });
-        if (status !== 'unread')
+        if (status !== 'unread' || options.overlapUnreadActive)
           liveSessionStatuses.set(id, {
             type:
               status === 'permission' ? 'requestPermission' : i % 2 ? 'initializing' : 'running',
@@ -185,7 +187,7 @@ describe('collapsed project activity', () => {
       const items = expectedItems(expected);
       const label = counts
         .map((count, index) =>
-          count ? `${count} ${['Request Permission', 'Unread messages', 'Running'][index]}` : ''
+          count ? `${count} ${['Request Permission', 'Unread messages', 'Active'][index]}` : ''
         )
         .filter(Boolean)
         .join(' · ');
@@ -236,6 +238,16 @@ describe('collapsed project activity', () => {
         { childTabs: true }
       );
       expect(indicator?.textContent).toBe('2+5');
+    });
+
+    it('counts a Session with unread and active states once in the mixed remainder', () => {
+      const indicator = renderProject(
+        kind,
+        { permission: 1, unread: 1, active: 0 },
+        { overlapUnreadActive: true }
+      );
+      expect(indicator?.textContent).toBe('1+1');
+      expect(indicator?.closest('[aria-label]')?.getAttribute('aria-label')).toContain('1 Active');
     });
 
     it('includes pinned activity without adding pinned Sessions to the expanded group', () => {

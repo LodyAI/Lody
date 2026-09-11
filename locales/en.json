@@ -2088,6 +2088,7 @@
   "sessions.sidebar.team": "All Tasks",
   "sessions.sideSession.closeFailed": "Unable to close side chat",
   "sessions.status.acp": "ACP",
+  "sessions.status.active": "Active",
   "sessions.status.askUserQuestion": "Question",
   "sessions.status.archived": "Archived",
   "sessions.status.cancelled": "Cancelled",
