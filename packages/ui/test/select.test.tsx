@@ -265,14 +265,12 @@ describe('Select list', () => {
     await press('ArrowDown');
     const selectedOnly = classesOf(options()[0]);
     const highlightedOnly = classesOf(options()[1]);
-    const selectedFill = selectedOnly.filter((name) => !highlightedOnly.includes(name));
-    const highlightFill = highlightedOnly.filter((name) => !selectedOnly.includes(name));
-    expect(selectedFill).toHaveLength(1);
-    expect(highlightFill).toHaveLength(1);
-    // Both fills are the same CSS property, so StyleX resolves them to one
-    // class: a row that is both wears the highlight and not the selected fill.
-    expect(both).toContain(highlightFill[0]);
-    expect(both).not.toContain(selectedFill[0]);
+    expect(selectedOnly).not.toEqual(highlightedOnly);
+    // The highlight owns both the fill and its contrast-checked inset ring.
+    // StyleX resolves the competing background declarations, so a row that is
+    // both selected and highlighted has exactly the highlighted row's classes;
+    // its separately rendered tick continues to communicate selection.
+    expect(both).toEqual(highlightedOnly);
   });
 
   test('a caller className lands on the popup after the compiled classes', async () => {

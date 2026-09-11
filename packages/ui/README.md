@@ -5,15 +5,15 @@ tokens. Product surfaces compose these primitives through
 `@lody/components`; the package does not contain product workflows or platform
 behavior.
 
-| Area                | Responsibility                                                      |
-| ------------------- | ------------------------------------------------------------------- |
-| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens |
-| `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
-| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
+| Area                | Responsibility                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                           |
+| `src/theme`         | Applies light or dark StyleX themes to a subtree                                                              |
+| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                           |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
-| `src/popup`         | The floating list a Select or Combobox opens, and its tokens        |
-| `src/gallery`       | The token board: every token and primitive state, in both palettes  |
-| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
+| `src/popup`         | The floating list a Select or Combobox opens, and its tokens                                                  |
+| `src/gallery`       | The token board: every token and primitive state, in both palettes                                            |
+| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts                                                      |
 
 Consumers compile this package's source with `@stylexjs/unplugin` and its exported
 StyleX options. Visual choices use component props. `className` is available for
@@ -73,7 +73,7 @@ const themes = [
       ))}
     </Select.Content>
   </Select.Root>
-</Field.Root>
+</Field.Root>;
 ```
 
 `Combobox` is the same list with a query in front of it. On its own the input is
@@ -88,13 +88,19 @@ treated as outside it. `@lody/components`' `DialogContent` already does this.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in
-[token rules](src/tokens/RULES.md#fields).
+[token rules](src/tokens/RULES.md#fields). Semantic colours are referenced
+directly from component styles; component token groups hold dimensions rather
+than relaying colour variables through a second theme layer. Normal text is
+checked at 4.5:1 and required non-text indicators at 3:1 across both palettes.
 
 The intended behavior is specified in [Shared UI primitives](../../specs/ui-primitives.md).
 The integration decision is recorded in the
 [UI Button migration takeover note](../../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md);
 the field family and the Tailwind field concepts it replaces are recorded in the
 [UI field primitives note](../../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
+The semantic colour contrast guarantees and removal of component colour relays
+are recorded in the
+[UI semantic colour contracts note](../../.agents/notes/implemented/architecture/2026-09-11-ui-semantic-color-contracts.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

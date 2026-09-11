@@ -13,9 +13,11 @@ into one component at a time. Source-consumed; consumers compile it through
   reconstruct the deleted component's visual design.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only. Never on
   `@lody/components`, `@lody/platform`, or any cloud package.
-- No border token exists. Edges are wells, raised shadows, elevation shadows
-  and the focus ring. See `src/tokens/RULES.md` before adding a token or a
-  component style.
+- There is no generic border token. An interactive well or thumb that needs an
+  identifiable boundary takes `colors.controlEdge` through an inset or outer
+  shadow; separators remain row dividers only. See `src/tokens/RULES.md` before
+  adding a token or a component style, and the
+  [colour-contract decision](../../.agents/notes/implemented/architecture/2026-09-11-ui-semantic-color-contracts.md).
 - A focus or invalid ring is a 2px `box-shadow` composed with the control's own
   shadow, never an `outline`: the product shell resets every outline with
   `!important`, which no layer order overrides. A control that changes its edge
@@ -57,15 +59,14 @@ into one component at a time. Source-consumed; consumers compile it through
   evaluate helpers. Vars are imported from that file by a specifier ending in
   `.stylex` (`@lody/ui/tokens/colors.stylex`), never through a barrel.
 - Component tokens live beside the component as
-  `<name>/<name>.tokens.stylex.ts` and reference semantic tokens or literal px.
-  A component token that points at a semantic colour also belongs in that file's
-  `createTheme` palette theme, listed in `componentPaletteThemes` in
-  `src/theme/theme.tsx` so `ThemeRoot` applies it with every forced palette; a
-  custom property declared only at the document root keeps the root palette
-  inside a themed subtree. A family shares one group (`field` covers the label,
-  Input, Textarea, Checkbox, Radio, Switch, the Select and Combobox triggers,
-  help and error; `popup` covers the lists they open) rather than one group per
-  component.
+  `<name>/<name>.tokens.stylex.ts` and hold component-specific dimensions or
+  other values without a semantic equivalent. Component styles reference
+  semantic colours and shadows directly: do not relay them through a second
+  `defineVars` group, because inherited custom-property aliases resolve where
+  they are declared and force every subtree theme to redeclare the relay. A
+  family shares one dimensional group (`field` covers Input, Textarea,
+  Checkbox, Radio, Switch and the Select and Combobox triggers; `popup` covers
+  the lists they open) rather than one group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a

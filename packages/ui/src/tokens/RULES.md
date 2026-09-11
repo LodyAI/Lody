@@ -1,7 +1,8 @@
 # Token usage rules
 
-Construction: depth without lines. No border token exists. Surfaces separate by
-luminance step and shadow; controls are wells (sunken) or raised.
+Construction: depth without generic borders. Surfaces separate by luminance step
+and shadow; controls are wells (sunken) or raised. An interactive part that needs
+its boundary to be understood carries the semantic `controlEdge` in its shadow.
 
 ## Elevation ladder
 
@@ -20,7 +21,8 @@ One rung per component. The rung fixes background and shadow together.
 
 - `separator`: next row. Dividers between list and table rows only. Never
   around a surface, never under a header.
-- well: you can put something here. `wellBackground` + `shadow.inset`.
+- well: you can put something here. `wellBackground` + `shadow.inset`; the
+  shadow includes a 1px `controlEdge` so the boundary reaches 3:1.
 - raised: you can press this. `raisedBackground` + `shadow.raised`. Primary and
   destructive buttons are raised with `shadow.inkEdge` as their top highlight.
 - shadow: above the page. Strength by rung.
@@ -30,8 +32,9 @@ One rung per component. The rung fixes background and shadow together.
 
 ## Color
 
-- `label` is the thing, `secondaryLabel` is about the thing, `tertiaryLabel`
-  is a hint: placeholder, help text, chevron, icon at rest.
+- `label` is the thing and `secondaryLabel` is about the thing. `hintLabel` is
+  readable prompt or help text. `tertiaryLabel` is non-text icon ink; do not use
+  it for normal text.
 - Ink for stored state: primary button, checked, on. `label` fill,
   `background` text.
 - `accent` for live state only: focus ring, link, live switch, running
@@ -39,44 +42,49 @@ One rung per component. The rung fixes background and shadow together.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
   scrollbar, tracks, kbd, skeleton.
+- Normal-text colours reach 4.5:1 on every surface rung. `tertiaryLabel`,
+  `controlEdge`, focus and invalid indicators reach 3:1. These are contracts,
+  not descriptions; `test/color-contrast.test.ts` enforces the palette values.
 
 ## Fields
 
-A control is the well rung: `wellBackground` plus `shadow.inset`, never a
-border. One component token group, `field`, serves the whole family — input,
-textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
-state has one colour in one place instead of one per component. The lists those
-triggers open are on the floating rung and read `popup` instead; see below.
+A control is the well rung: `wellBackground` plus `shadow.inset`; the inset
+`controlEdge` is its identifiable boundary rather than a generic border. The
+`field` variable group holds the dimensions shared by input, textarea, checkbox,
+radio, switch and the Select and Combobox triggers. Their colours reference the
+semantic group directly, so a forced subtree palette does not need a component
+theme to relay it. The lists those triggers open are on the floating rung and
+share the `popup` dimensions instead; see below.
 
-| state       | what it is                                                                     |
-| ----------- | ------------------------------------------------------------------------------ |
-| rest        | `field.background` and `field.well`; the value in `field.value`                |
-| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label              |
-| focus       | 2px `field.ring` (accent), tight to the control, no offset                     |
-| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused               |
-| disabled    | 45% opacity on the control; the label and help dim with it                     |
-| checked, on | ink: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
-| mixed       | the checked appearance with the dash, and it announces `mixed`                 |
-| selected    | the tick, and a quiet fill on the row that is current, not on the control      |
+| state       | what it is                                                                |
+| ----------- | ------------------------------------------------------------------------- |
+| rest        | `wellBackground` and `shadow.inset`; the value is in `label`              |
+| placeholder | `hintLabel`, a readable prompt rather than non-text tertiary ink          |
+| focus       | 2px `accent`, tight to the control, no offset                             |
+| invalid     | 2px `destructive`, at rest and while focused                              |
+| disabled    | 45% opacity on the control; the label and help dim with it                |
+| checked, on | ink: `label` under the `background` mark, with `shadow.inkEdge` on top    |
+| mixed       | the checked appearance with the dash, and it announces `mixed`            |
+| selected    | the tick, and a quiet fill on the row that is current, not on the control |
 
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
-`field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
-so a settings row carrying both lines up. Off is the well; on is the ink, which
-is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
-append to a box-shadow list, a control that changes its edge restates the ring
-with it, the way each Button variant does.
+`raisedBackground` thumb with `shadow.raised` and a `controlEdge`, the same height
+as the box so a settings row carrying both lines up. Off is the well; on is the
+ink, which is where the well's shadow gives way to `shadow.inkEdge`. Because CSS
+cannot append to a box-shadow list, a control that changes its edge restates the
+ring with it, the way each Button variant does.
 
 These three render a real `<button>` with Base UI's hidden input beside it, so
 `:disabled` and `:focus-visible` reach them the way they reach an `<input>` and
 a `<label>` can point at them.
 
 The control's own text follows the control rule at every size on the ladder: 13
-at weight 500 with `text.controlTracking`. Label at 12 weight 500 in
-`field.label`, help at 12 weight 400 in `field.hint`, error at 12 weight 400 in
-`field.error`, stacked at `field.gap`. Disabled reads `field.disabledOpacity`
-rather than a literal, so the control and its label cannot drift apart.
+at weight 500 with `text.controlTracking`. Label at 12 weight 500 in `label`,
+help at 12 weight 400 in `hintLabel`, error at 12 weight 400 in `destructive`,
+stacked at `field.gap`. Disabled reads `field.disabledOpacity` rather than a
+literal, so the control and its label cannot drift apart.
 
 `Field.Root` owns the name, the disabled flag and validity. A control reads that
 state and picks its own classes from it; it does not take a second `invalid` or
@@ -90,21 +98,21 @@ ARIA value except `false` is invalid, `grammar` and `spelling` included.
 
 ### Popups and lists
 
-A control on the well rung opens a list on the floating rung, and the two do not
-share a token group. `field` covers the trigger — the size ladder, the ring, the
-invalid ring, the disabled opacity — and `popup` covers the list, because that
-list has more in common with a menu than with an input. A menu reaching for
-`field.background` would be naming the wrong thing to get the right colour.
+A control on the well rung opens a list on the floating rung. `field` covers the
+trigger dimensions and `popup` covers the list dimensions, because that list has
+more in common with a menu than with an input. Both reference semantic colours
+directly; neither duplicates the palette in a component variable group.
 
-A popup is `popup.background` with `popup.shadow` at `popup.radius`, inset by
+A popup is `raisedBackground` with `shadow.popover` at `popup.radius`, inset by
 `popup.inset`, so its rows take `popup.itemRadius` — outer minus inset, 14 less
 4, rather than a token of their own. A row is a `popup.itemHeight` control that
 happens to live in a list, so it follows the control type rule.
 
 A row states two facts at once. `highlighted` is where the keyboard or the
-pointer is right now; `selected` is the row that holds the value, and carries
-the tick. The highlight wins the fill, because it is the one that moves; the
-tick keeps saying which row is current when it lands there.
+pointer is right now and carries a 2px accent inset ring; `selected` is the row
+that holds the value, and carries the tick. The highlight wins the quiet fill,
+because it is the one that moves; the tick keeps saying which row is current
+when it lands there.
 
 Both fills are derived from the rung rather than taken from `hoverFill` and
 `selectedFill`, which this table names for a row but which were tuned against
@@ -119,13 +127,11 @@ A popup opens anchored 4px under its control and rises into place, rather than
 overlapping it to line the current row up with the value. That is the motion
 rule applied: a popup rises from 4px below at `duration.regular`.
 
-A row has no edge of its own, and says so. A popup moves keyboard focus onto the
-highlighted row, and a host that rings any focused element would draw a border
-around it; the fill is how this system marks where the keyboard is, so the row
-declares `box-shadow: none` rather than leaving the property unclaimed. The
-"nothing matches" line collapses to nothing while it holds nothing, because it
-stays mounted for a screen reader to announce into and would otherwise open
-every popup with a blank row.
+A row suppresses the host's generic focus edge and supplies its own accent inset
+ring while highlighted. The fill may remain subtle because it is no longer the
+only focus signal. The "nothing matches" line collapses to nothing while it holds
+nothing, because it stays mounted for a screen reader to announce into and would
+otherwise open every popup with a blank row.
 
 ## Corners
 

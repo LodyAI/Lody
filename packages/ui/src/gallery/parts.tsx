@@ -105,7 +105,7 @@ const styles = stylex.create({
     fontWeight: 500,
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
-    color: colors.tertiaryLabel,
+    color: colors.hintLabel,
   },
   grid: {
     display: 'grid',
@@ -132,7 +132,7 @@ const styles = stylex.create({
     fontFamily: MONO,
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
-    color: colors.tertiaryLabel,
+    color: colors.hintLabel,
     overflowWrap: 'anywhere',
   },
   legendKey: {

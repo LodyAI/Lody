@@ -2,6 +2,7 @@ import { Switch as BaseSwitch } from '@base-ui/react/switch';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps } from 'react';
 import { appendClassName } from '../internal/class-name';
+import { colors, shadow } from '../tokens/colors.stylex';
 import { corner, duration, ease, radius } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
@@ -34,8 +35,8 @@ const styles = stylex.create({
     width: field.switchThumbSize,
     height: field.switchThumbSize,
     borderRadius: radius.full,
-    backgroundColor: field.thumb,
-    boxShadow: field.thumbShadow,
+    backgroundColor: colors.raisedBackground,
+    boxShadow: `0 0 0 1px ${colors.controlEdge}, ${shadow.raised}`,
     transform: 'translateX(0)',
     transitionProperty: 'transform',
     transitionDuration: duration.fast,

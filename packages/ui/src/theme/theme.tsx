@@ -1,18 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { buttonPaletteTheme } from '../button/button.tokens.stylex';
-import { fieldPaletteTheme } from '../field/field.tokens.stylex';
-import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { darkShadowTheme, darkTheme, lightShadowTheme, lightTheme } from '../tokens/colors.stylex';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
-
-/**
- * Every component token group that points at a semantic colour. These are
- * re-declared on the element carrying a forced palette so they resolve against
- * it; a group declared only at the document root keeps the root palette.
- */
-const componentPaletteThemes = [buttonPaletteTheme, fieldPaletteTheme, popupPaletteTheme];
 
 const styles = stylex.create({
   system: { colorScheme: 'light dark' },
@@ -23,9 +13,7 @@ const styles = stylex.create({
 export function forcedThemeClassNames(mode: ThemeMode): string[] {
   if (mode === 'system') return [];
   const palette = mode === 'dark' ? [darkTheme, darkShadowTheme] : [lightTheme, lightShadowTheme];
-  return (stylex.props(...palette, ...componentPaletteThemes).className ?? '')
-    .split(' ')
-    .filter(Boolean);
+  return (stylex.props(...palette).className ?? '').split(' ').filter(Boolean);
 }
 
 /**
@@ -35,9 +23,8 @@ export function forcedThemeClassNames(mode: ThemeMode): string[] {
  * element and everything under it inherits. A popup breaks that, because it is
  * portalled out to the document and inherits the root palette instead — so a
  * light panel on a dark page opens a dark list. The subtree publishes which
- * palette it is under, and the parts that portal re-declare it on the element
- * they mount, which is the same fix the component token groups already make for
- * a custom property declared only at the root.
+ * palette it is under, and the parts that portal re-declare the same semantic
+ * colour and shadow themes on the element they mount.
  */
 const ForcedTheme = createContext<ThemeMode>('system');
 
@@ -68,7 +55,6 @@ export function ThemeRoot({ mode, children }: { mode: ThemeMode; children: React
           mode === 'dark' && darkShadowTheme,
           mode === 'light' && lightTheme,
           mode === 'light' && lightShadowTheme,
-          mode !== 'system' && componentPaletteThemes,
           styles[mode]
         )}
       >

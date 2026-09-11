@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { colors, shadow } from '../tokens/colors.stylex';
 import { corner, duration, ease, text } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 
@@ -15,8 +16,8 @@ import { field } from './field.tokens.stylex';
  * a checked box swaps the well for the ink highlight — restates the ring with
  * it, the way each Button variant does.
  */
-const RING = `0 0 0 ${field.ringWidth} ${field.ring}`;
-const INVALID_RING = `0 0 0 ${field.ringWidth} ${field.invalidRing}`;
+const RING = `0 0 0 ${field.ringWidth} ${colors.accent}`;
+const INVALID_RING = `0 0 0 ${field.ringWidth} ${colors.destructive}`;
 
 export const well = stylex.create({
   base: {
@@ -26,10 +27,10 @@ export const well = stylex.create({
     margin: 0,
     borderWidth: 0,
     borderStyle: 'none',
-    backgroundColor: field.background,
+    backgroundColor: colors.wellBackground,
     // A text control is always focus-visible, so this covers pointer focus too.
-    boxShadow: { default: field.well, ':focus-visible': `${field.well}, ${RING}` },
-    color: field.value,
+    boxShadow: { default: shadow.inset, ':focus-visible': `${shadow.inset}, ${RING}` },
+    color: colors.label,
     fontFamily: 'inherit',
     // Controls are 13 at weight 500 with controlTracking; the size step sets
     // the size, this sets the weight and tracking for every control here.
@@ -42,15 +43,15 @@ export const well = stylex.create({
     transitionProperty: 'box-shadow, opacity',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
-    '::placeholder': { color: field.placeholder, opacity: 1 },
+    '::placeholder': { color: colors.hintLabel, opacity: 1 },
   },
   // StyleX keys a conditional value per condition, so the focused case is
   // restated here; otherwise an invalid control would flip back to the accent
   // ring the moment it takes focus.
   invalid: {
     boxShadow: {
-      default: `${field.well}, ${INVALID_RING}`,
-      ':focus-visible': `${field.well}, ${INVALID_RING}`,
+      default: `${shadow.inset}, ${INVALID_RING}`,
+      ':focus-visible': `${shadow.inset}, ${INVALID_RING}`,
     },
   },
   /**
@@ -70,9 +71,9 @@ export const well = stylex.create({
     margin: 0,
     borderWidth: 0,
     borderStyle: 'none',
-    backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-within': `${field.well}, ${RING}` },
-    color: field.value,
+    backgroundColor: colors.wellBackground,
+    boxShadow: { default: shadow.inset, ':focus-within': `${shadow.inset}, ${RING}` },
+    color: colors.label,
     cornerShape: corner.shape,
     outlineStyle: 'none',
     cursor: 'text',
@@ -82,8 +83,8 @@ export const well = stylex.create({
   },
   shellInvalid: {
     boxShadow: {
-      default: `${field.well}, ${INVALID_RING}`,
-      ':focus-within': `${field.well}, ${INVALID_RING}`,
+      default: `${shadow.inset}, ${INVALID_RING}`,
+      ':focus-within': `${shadow.inset}, ${INVALID_RING}`,
     },
   },
   /** The control inside a shell: the shell already is the well. */
@@ -104,7 +105,7 @@ export const well = stylex.create({
     letterSpacing: text.controlTracking,
     outlineStyle: 'none',
     cursor: { default: 'auto', ':disabled': 'default' },
-    '::placeholder': { color: field.placeholder, opacity: 1 },
+    '::placeholder': { color: colors.hintLabel, opacity: 1 },
   },
   /** The family's one disabled value, for a part `:disabled` cannot reach. */
   dimmed: { opacity: field.disabledOpacity },
@@ -125,9 +126,9 @@ export const well = stylex.create({
     padding: 0,
     borderWidth: 0,
     borderStyle: 'none',
-    backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-visible': `${field.well}, ${RING}` },
-    color: field.checkedMark,
+    backgroundColor: colors.wellBackground,
+    boxShadow: { default: shadow.inset, ':focus-visible': `${shadow.inset}, ${RING}` },
+    color: colors.background,
     cornerShape: corner.shape,
     outlineStyle: 'none',
     opacity: { default: 1, ':disabled': field.disabledOpacity },
@@ -138,14 +139,14 @@ export const well = stylex.create({
   },
   /** Stored state: the ink fill and its top highlight in place of the well. */
   checked: {
-    backgroundColor: field.checkedFill,
-    boxShadow: { default: field.checkedEdge, ':focus-visible': `${field.checkedEdge}, ${RING}` },
+    backgroundColor: colors.label,
+    boxShadow: { default: shadow.inkEdge, ':focus-visible': `${shadow.inkEdge}, ${RING}` },
   },
   /** The invalid ring on that ink edge, at rest and while focused. */
   checkedInvalid: {
     boxShadow: {
-      default: `${field.checkedEdge}, ${INVALID_RING}`,
-      ':focus-visible': `${field.checkedEdge}, ${INVALID_RING}`,
+      default: `${shadow.inkEdge}, ${INVALID_RING}`,
+      ':focus-visible': `${shadow.inkEdge}, ${INVALID_RING}`,
     },
   },
 });

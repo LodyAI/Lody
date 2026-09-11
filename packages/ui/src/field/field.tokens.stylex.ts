@@ -1,12 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
 import { control, radius, space, text } from '../tokens/scales.stylex';
 
-/**
- * One token group for the whole field family — label, control, help and error.
- * Input, Textarea and every control that migrates next read these, so a state
- * has one colour in one place instead of one per component.
- */
+/** Dimensions shared by the whole field family. Colours remain semantic tokens. */
 export const field = stylex.defineVars({
   heightSmall: control.small,
   heightMedium: control.medium,
@@ -45,49 +40,4 @@ export const field = stylex.defineVars({
   // The rules put disabled at 45% opacity on the control. It is one value for
   // the whole family, so the control and its label cannot drift apart.
   disabledOpacity: '0.45',
-  background: colors.wellBackground,
-  well: shadow.inset,
-  value: colors.label,
-  label: colors.label,
-  placeholder: colors.tertiaryLabel,
-  hint: colors.tertiaryLabel,
-  // The chevron on a trigger and any icon at rest: a hint, not a label.
-  icon: colors.tertiaryLabel,
-  error: colors.destructive,
-  ring: colors.accent,
-  invalidRing: colors.destructive,
-  // Stored state is ink: the rules give a checked box and a switch that is on
-  // the `label` fill with `background` on top of it, the same pair the primary
-  // button uses, and the same ink edge as its top highlight. `accent` stays on
-  // live state and is not a fill.
-  checkedFill: colors.label,
-  checkedMark: colors.background,
-  checkedEdge: shadow.inkEdge,
-  // The switch thumb is raised on both tracks: it reads against the well when
-  // the switch is off and against the ink when it is on.
-  thumb: colors.raisedBackground,
-  thumbShadow: shadow.raised,
-});
-
-/**
- * Re-declares the colour-valued tokens on the element that carries a forced
- * palette; see the note in `button.tokens.stylex.ts` for why a group declared
- * only at the document root keeps the root palette inside a themed subtree.
- */
-export const fieldPaletteTheme = stylex.createTheme(field, {
-  background: colors.wellBackground,
-  well: shadow.inset,
-  value: colors.label,
-  label: colors.label,
-  placeholder: colors.tertiaryLabel,
-  hint: colors.tertiaryLabel,
-  icon: colors.tertiaryLabel,
-  error: colors.destructive,
-  ring: colors.accent,
-  invalidRing: colors.destructive,
-  checkedFill: colors.label,
-  checkedMark: colors.background,
-  checkedEdge: shadow.inkEdge,
-  thumb: colors.raisedBackground,
-  thumbShadow: shadow.raised,
 });

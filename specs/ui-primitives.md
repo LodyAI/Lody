@@ -45,11 +45,11 @@ that panel is unreachable in it; the surface names the panel once and the lists
 under it follow. Product surfaces do not otherwise place these lists.
 
 Every control in this family shares one set of state appearances: a sunken
-resting surface with no border, a placeholder in the hint colour, an accent ring
-on focus, a destructive ring while invalid that persists when the control is
-focused, and reduced opacity on the whole control when disabled. The states are
-defined once for the family, so a control added later inherits them rather than
-choosing its own.
+resting surface whose inset edge remains identifiable against adjacent surfaces,
+a readable placeholder, an accent ring on focus, a destructive ring while
+invalid that persists when the control is focused, and reduced opacity on the
+whole control when disabled. The states are defined once for the family, so a
+control added later inherits them rather than choosing its own.
 
 A control that stores a value — a ticked checkbox, the selected radio option, a
 switch that is on — shows that as ink, because the accent colour marks live
@@ -69,7 +69,14 @@ viewer. Those classes must leave the primitive's visual identity under its props
 Semantic StyleX tokens provide light and dark values. A theme applies to a subtree
 so a primitive responds without product code selecting raw palette values. Token
 names describe meaning and interaction role; component tokens derive from those
-semantic values or documented fixed dimensions.
+semantic values or documented fixed dimensions. Component styles read semantic
+colours directly; a component variable group does not repeat a semantic colour
+only to rename it.
+
+Normal-size text tokens maintain at least 4.5:1 contrast on every surface rung on
+which the package permits them. Non-text icon ink, control edges, focus rings and
+invalid rings maintain at least 3:1. A subtle mixed fill may supplement a state,
+but keyboard focus does not rely on that fill as its only visible signal.
 
 A forced theme applies to the subtree it is placed on, including the primitives
 inside it. A component token that derives from a semantic colour resolves against
@@ -116,3 +123,6 @@ stored value, are recorded in the
 The select and the combobox, the separate token group their lists take, and the
 container a modal names for them are recorded in the
 [UI select and combobox note](../.agents/notes/implemented/feature/2026-09-10-ui-select-combobox.md).
+The semantic contrast contracts, identifiable control edge and removal of
+component colour relays are recorded in the
+[UI semantic colour contracts note](../.agents/notes/implemented/architecture/2026-09-11-ui-semantic-color-contracts.md).

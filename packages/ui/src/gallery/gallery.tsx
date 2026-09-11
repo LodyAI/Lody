@@ -192,7 +192,7 @@ const styles = stylex.create({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
-    color: colors.tertiaryLabel,
+    color: colors.hintLabel,
   },
   matrix: {
     display: 'grid',
@@ -213,7 +213,7 @@ const styles = stylex.create({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
-    color: colors.tertiaryLabel,
+    color: colors.hintLabel,
     overflowWrap: 'anywhere',
   },
   // A board cannot show an open popup without covering the samples under it, so
@@ -255,8 +255,8 @@ const styles = stylex.create({
     paddingInline: '12px',
     borderRadius: radius.medium,
     cornerShape: corner.shape,
-    backgroundColor: button.secondaryBackground,
-    boxShadow: `${button.secondaryShadow}, 0 0 0 ${button.ringWidth} ${button.ring}`,
+    backgroundColor: colors.raisedBackground,
+    boxShadow: `${shadow.raised}, 0 0 0 ${button.ringWidth} ${colors.accent}`,
     color: colors.label,
     fontSize: text.subheadlineSize,
     fontWeight: 500,
@@ -268,11 +268,11 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     height: field.heightMedium,
     paddingInline: field.paddingXMedium,
-    backgroundColor: field.background,
-    boxShadow: `${field.well}, 0 0 0 ${field.ringWidth} ${field.ring}`,
+    backgroundColor: colors.wellBackground,
+    boxShadow: `${shadow.inset}, 0 0 0 ${field.ringWidth} ${colors.accent}`,
     borderRadius: field.radiusMedium,
     cornerShape: corner.shape,
-    color: field.value,
+    color: colors.label,
     fontSize: field.text,
     fontWeight: 500,
     letterSpacing: text.controlTracking,
@@ -290,7 +290,8 @@ const SURFACES = [
 const CONTENT_COLORS = [
   { name: 'label', value: colors.label, note: 'the thing' },
   { name: 'secondaryLabel', value: colors.secondaryLabel, note: 'about the thing' },
-  { name: 'tertiaryLabel', value: colors.tertiaryLabel, note: 'placeholder, hint, icon at rest' },
+  { name: 'hintLabel', value: colors.hintLabel, note: 'placeholder and help text' },
+  { name: 'tertiaryLabel', value: colors.tertiaryLabel, note: 'icon at rest' },
 ];
 
 const FILLS = [
@@ -305,6 +306,7 @@ const ROLE_COLORS = [
   { name: 'onAccent', value: colors.onAccent, note: 'content on accent' },
   { name: 'destructive', value: colors.destructive, note: 'destructive fill, invalid ring' },
   { name: 'onDestructive', value: colors.onDestructive, note: 'content on destructive' },
+  { name: 'controlEdge', value: colors.controlEdge, note: 'identifiable well and thumb edge' },
 ];
 
 const GRAYS = [
@@ -448,26 +450,34 @@ const CONSTS = [
 ];
 
 const FIELD_COLORS = [
-  { name: 'field.background', value: field.background, note: 'the control is a well' },
-  { name: 'field.value', value: field.value, note: 'what the person typed' },
-  { name: 'field.label', value: field.label, note: 'the field label' },
-  { name: 'field.placeholder', value: field.placeholder, note: 'the empty prompt' },
-  { name: 'field.hint', value: field.hint, note: 'help under the control' },
-  { name: 'field.icon', value: field.icon, note: 'the chevron on a trigger' },
-  { name: 'field.error', value: field.error, note: 'the error message' },
-  { name: 'field.ring', value: field.ring, note: 'focus' },
-  { name: 'field.invalidRing', value: field.invalidRing, note: 'invalid' },
+  { name: 'field.background', value: colors.wellBackground, note: 'colors.wellBackground' },
+  { name: 'field.value', value: colors.label, note: 'colors.label' },
+  { name: 'field.label', value: colors.label, note: 'colors.label' },
+  { name: 'field.placeholder', value: colors.hintLabel, note: 'colors.hintLabel' },
+  { name: 'field.hint', value: colors.hintLabel, note: 'colors.hintLabel' },
+  { name: 'field.icon', value: colors.tertiaryLabel, note: 'colors.tertiaryLabel' },
+  { name: 'field.error', value: colors.destructive, note: 'colors.destructive' },
+  { name: 'field.ring', value: colors.accent, note: 'colors.accent' },
+  { name: 'field.invalidRing', value: colors.destructive, note: 'colors.destructive' },
 ];
 
 const POPUP_COLORS = [
-  { name: 'popup.background', value: popup.background, note: 'the floating rung' },
-  { name: 'popup.label', value: popup.label, note: 'a row' },
-  { name: 'popup.indicator', value: popup.indicator, note: 'the tick on the current row' },
-  { name: 'popup.highlight', value: popup.highlight, note: 'where the keyboard or pointer is' },
-  { name: 'popup.selected', value: popup.selected, note: 'the row that holds the value' },
-  { name: 'popup.groupLabel', value: popup.groupLabel, note: 'a group heading' },
-  { name: 'popup.separator', value: popup.separator, note: 'between groups' },
-  { name: 'popup.hint', value: popup.hint, note: 'no matches, scroll arrows' },
+  { name: 'popup.background', value: colors.raisedBackground, note: 'colors.raisedBackground' },
+  { name: 'popup.label', value: colors.label, note: 'colors.label' },
+  { name: 'popup.indicator', value: colors.label, note: 'colors.label' },
+  {
+    name: 'popup.highlight',
+    value: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
+    note: 'subtle fill plus an accent inset ring',
+  },
+  {
+    name: 'popup.selected',
+    value: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
+    note: 'subtle fill plus the tick',
+  },
+  { name: 'popup.groupLabel', value: colors.secondaryLabel, note: 'colors.secondaryLabel' },
+  { name: 'popup.separator', value: colors.separator, note: 'colors.separator' },
+  { name: 'popup.hint', value: colors.hintLabel, note: 'colors.hintLabel' },
 ];
 
 const SELECT_SIZES = [
@@ -485,9 +495,9 @@ const FRUIT = [
 const LANGUAGES = ['TypeScript', 'Rust', 'Python', 'Ruby'];
 
 const CHOICE_COLORS = [
-  { name: 'field.checkedFill', value: field.checkedFill, note: 'a control that holds a value' },
-  { name: 'field.checkedMark', value: field.checkedMark, note: 'the tick and the dot on it' },
-  { name: 'field.thumb', value: field.thumb, note: 'the switch thumb, on both tracks' },
+  { name: 'field.checkedFill', value: colors.label, note: 'colors.label' },
+  { name: 'field.checkedMark', value: colors.background, note: 'colors.background' },
+  { name: 'field.thumb', value: colors.raisedBackground, note: 'colors.raisedBackground' },
 ];
 
 const FIELD_SIZES = [
@@ -994,7 +1004,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Content"
-        rule="label is the thing, secondaryLabel is about the thing, tertiaryLabel is a hint."
+        rule="label is the thing, secondaryLabel is about it, hintLabel is readable prompt or help text, and tertiaryLabel is non-text icon ink."
       >
         <PaletteSplit palettes={palettes}>
           <div {...stylex.props(styles.textSample)}>
@@ -1002,9 +1012,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <span {...stylex.props(dyn.text(colors.secondaryLabel))}>
               secondaryLabel — 4 files changed
             </span>
-            <span {...stylex.props(dyn.text(colors.tertiaryLabel))}>
-              tertiaryLabel — Describe the task
-            </span>
+            <span {...stylex.props(dyn.text(colors.hintLabel))}>hintLabel — Describe the task</span>
           </div>
           <Grid>
             {CONTENT_COLORS.map((token) => (
@@ -1299,10 +1307,10 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             ))}
             <ShadowChip
               name="field.well"
-              box={field.well}
-              fill={field.background}
+              box={shadow.inset}
+              fill={colors.wellBackground}
               ink={false}
-              note="the control is sunken, not outlined"
+              note="sunken control with a contrast-checked inset edge"
             />
           </Grid>
         </PaletteSplit>
@@ -1403,17 +1411,17 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             ))}
             <ShadowChip
               name="field.checkedEdge"
-              box={field.checkedEdge}
-              fill={field.checkedFill}
+              box={shadow.inkEdge}
+              fill={colors.label}
               ink
               note="the ink highlight a checked control carries"
             />
             <ShadowChip
               name="field.thumbShadow"
-              box={field.thumbShadow}
-              fill={field.thumb}
+              box={`0 0 0 1px ${colors.controlEdge}, ${shadow.raised}`}
+              fill={colors.raisedBackground}
               ink={false}
-              note="the thumb is raised on both tracks"
+              note="the thumb is raised and identifiable on both tracks"
             />
           </Grid>
         </PaletteSplit>
@@ -1454,8 +1462,8 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             ))}
             <ShadowChip
               name="popup.shadow"
-              box={popup.shadow}
-              fill={popup.background}
+              box={shadow.popover}
+              fill={colors.raisedBackground}
               ink={false}
               note="the floating rung, above the page"
             />

@@ -1,11 +1,9 @@
-import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
-import { field, fieldPaletteTheme } from '../src/field/field.tokens.stylex';
+import { field } from '../src/field/field.tokens.stylex';
 import { Input } from '../src/field/input';
 import { Textarea } from '../src/field/textarea';
-import { forcedThemeClassNames } from '../src/theme/theme';
 
 function classesOf(html: string, tag: string): string[] {
   const open = new RegExp(`<${tag}\\b[^>]*>`).exec(html)?.[0] ?? '';
@@ -186,20 +184,9 @@ describe('Input and Textarea', () => {
 });
 
 describe('field tokens', () => {
-  test('compile to custom property references', () => {
-    expect(field.background).toMatch(/^var\(--/);
-    expect(field.ring).toMatch(/^var\(--/);
-    expect(field.invalidRing).toMatch(/^var\(--/);
-  });
-
-  test('the palette theme rides along with every forced palette', () => {
-    const themeClasses = (stylex.props(fieldPaletteTheme).className ?? '')
-      .split(' ')
-      .filter(Boolean);
-    expect(themeClasses.length).toBeGreaterThan(0);
-    for (const name of themeClasses) {
-      expect(forcedThemeClassNames('light')).toContain(name);
-      expect(forcedThemeClassNames('dark')).toContain(name);
-    }
+  test('keep component dimensions in their own variable group', () => {
+    expect(field.heightMedium).toMatch(/^var\(--/);
+    expect(field.ringWidth).toMatch(/^var\(--/);
+    expect(field.switchWidth).toMatch(/^var\(--/);
   });
 });

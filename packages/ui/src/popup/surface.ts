@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { colors, shadow } from '../tokens/colors.stylex';
 import { corner, duration, ease, text, z } from '../tokens/scales.stylex';
 import { popup } from './popup.tokens.stylex';
 
@@ -11,10 +12,10 @@ import { popup } from './popup.tokens.stylex';
  * together.
  *
  * A row states two different facts at once. `highlighted` is where the keyboard
- * or the pointer is right now and takes `popup.highlight`; `selected` is the row
- * that holds the value and takes `popup.selected`. When the highlight lands on
- * the selected row the highlight wins the fill, because that is the one that
- * moves — the tick keeps saying which row is current.
+ * or the pointer is right now and carries an accent inset ring; `selected` is
+ * the row that holds the value and carries a tick. When the highlight lands on
+ * the selected row it wins the fill, while the tick keeps saying which row is
+ * current.
  */
 export const surface = stylex.create({
   /** The floating rung: raised background and the popover shadow, together. */
@@ -26,11 +27,11 @@ export const surface = stylex.create({
     maxHeight: 'var(--available-height)',
     maxWidth: 'var(--available-width)',
     padding: popup.inset,
-    backgroundColor: popup.background,
-    boxShadow: popup.shadow,
+    backgroundColor: colors.raisedBackground,
+    boxShadow: shadow.popover,
     borderRadius: popup.radius,
     cornerShape: corner.shape,
-    color: popup.label,
+    color: colors.label,
     fontFamily: 'inherit',
     fontSize: popup.text,
     fontWeight: 500,
@@ -80,27 +81,30 @@ export const surface = stylex.create({
     borderRadius: popup.itemRadius,
     cornerShape: corner.shape,
     backgroundColor: 'transparent',
-    color: popup.label,
+    color: colors.label,
     // A list row is not a button: the pointer picks it, it does not press it.
     cursor: 'default',
     userSelect: 'none',
     outlineStyle: 'none',
-    // A row owns its edge, which is no edge. Base UI moves DOM focus onto the
-    // highlighted row, and the product shell puts an inset accent ring on any
-    // focused `[tabindex]` through a zero-specificity `:where()` rule — it
-    // already exempts `[role="menuitem"]` for this exact reason, and an option
-    // is the same case. Stating `none` here means the row cannot pick up a ring
-    // from any host: the fill is how this system says where the keyboard is.
+    // A row owns its edge. Base UI moves DOM focus onto the highlighted row,
+    // and the product shell puts a ring on focused `[tabindex]` through a
+    // zero-specificity rule. The rest state suppresses that host ring; the
+    // highlighted state below supplies the package's contrast-checked one.
     boxShadow: 'none',
     scrollMarginBlock: popup.inset,
-    transitionProperty: 'background-color, opacity',
+    transitionProperty: 'background-color, box-shadow, opacity',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
   /** The row that holds the value. */
-  itemSelected: { backgroundColor: popup.selected },
+  itemSelected: {
+    backgroundColor: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
+  },
   /** Where the keyboard or the pointer is; it wins over the selected fill. */
-  itemHighlighted: { backgroundColor: popup.highlight },
+  itemHighlighted: {
+    backgroundColor: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
+    boxShadow: `inset 0 0 0 2px ${colors.accent}`,
+  },
   /** The same 45% the whole library uses, and no pointer. */
   itemDisabled: { opacity: 0.45, pointerEvents: 'none' },
   /**
@@ -126,7 +130,7 @@ export const surface = stylex.create({
     flexShrink: 0,
     width: popup.indicatorSize,
     height: popup.indicatorSize,
-    color: popup.indicator,
+    color: colors.label,
   },
   indicatorGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
   /** A group heading: about the rows under it, so the secondary label colour. */
@@ -136,7 +140,7 @@ export const surface = stylex.create({
     alignItems: 'center',
     minHeight: popup.itemHeight,
     paddingInline: popup.itemPaddingX,
-    color: popup.groupLabel,
+    color: colors.secondaryLabel,
     fontSize: popup.groupLabelSize,
     lineHeight: popup.groupLabelLeading,
     fontWeight: 500,
@@ -150,7 +154,7 @@ export const surface = stylex.create({
     flexShrink: 0,
     marginBlock: popup.inset,
     marginInline: `calc(-1 * ${popup.inset})`,
-    backgroundColor: popup.separator,
+    backgroundColor: colors.separator,
   },
   /**
    * "No matches": a hint rather than a row, because it cannot be picked.
@@ -170,7 +174,7 @@ export const surface = stylex.create({
     alignItems: 'center',
     minHeight: { default: popup.itemHeight, ':empty': 0 },
     paddingInline: { default: popup.itemPaddingX, ':empty': 0 },
-    color: popup.hint,
+    color: colors.hintLabel,
     fontWeight: 400,
     userSelect: 'none',
   },
@@ -181,8 +185,8 @@ export const surface = stylex.create({
     justifyContent: 'center',
     flexShrink: 0,
     height: popup.scrollArrowHeight,
-    backgroundColor: popup.background,
-    color: popup.hint,
+    backgroundColor: colors.raisedBackground,
+    color: colors.tertiaryLabel,
     cursor: 'default',
     userSelect: 'none',
   },

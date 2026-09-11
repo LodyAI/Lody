@@ -10,6 +10,7 @@ import {
   type Ref,
 } from 'react';
 import { appendClassName } from '../internal/class-name';
+import { colors } from '../tokens/colors.stylex';
 import { text } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 
@@ -45,7 +46,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: field.gap,
-    color: field.label,
+    color: colors.label,
     fontSize: field.labelSize,
     lineHeight: field.labelLeading,
     fontWeight: 500,
@@ -58,8 +59,8 @@ const styles = stylex.create({
     lineHeight: field.labelLeading,
     fontWeight: 400,
   },
-  hint: { color: field.hint },
-  error: { color: field.error },
+  hint: { color: colors.hintLabel },
+  error: { color: colors.destructive },
   // Disabled is one opacity for the family; the control dims through its own
   // `:disabled`, so nothing here stacks a second layer on top of it.
   dimmed: { opacity: field.disabledOpacity },

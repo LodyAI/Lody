@@ -6,6 +6,7 @@ import { appendClassName } from '../internal/class-name';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
+import { colors } from '../tokens/colors.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -108,13 +109,13 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   /** An empty trigger reads as a prompt, in the same hint colour as a placeholder. */
-  placeholder: { color: field.placeholder },
+  placeholder: { color: colors.hintLabel },
   icon: {
     display: 'flex',
     flexShrink: 0,
     width: field.iconSize,
     height: field.iconSize,
-    color: field.icon,
+    color: colors.tertiaryLabel,
   },
   /** The positioner carries no appearance; the popup inside it does. */
   positioner: { outlineStyle: 'none' },

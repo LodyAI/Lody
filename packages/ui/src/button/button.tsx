@@ -1,7 +1,7 @@
 import { Button as BaseButton } from '@base-ui/react/button';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps } from 'react';
-import { colors } from '../tokens/colors.stylex';
+import { colors, shadow } from '../tokens/colors.stylex';
 import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
 
@@ -22,7 +22,7 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
 }
 
 const PRESS = { transform: 'translateY(1px)' };
-const RING = `0 0 0 ${button.ringWidth} ${button.ring}`;
+const RING = `0 0 0 ${button.ringWidth} ${colors.accent}`;
 
 const styles = stylex.create({
   base: {
@@ -90,33 +90,33 @@ const styles = stylex.create({
   pill: { borderRadius: radius.full, cornerShape: corner.round },
   primary: {
     backgroundColor: {
-      default: button.primaryBackground,
-      ':hover': `color-mix(in oklab, ${button.primaryBackground}, ${button.primaryLabel} 12%)`,
+      default: colors.label,
+      ':hover': `color-mix(in oklab, ${colors.label}, ${colors.background} 12%)`,
     },
-    color: button.primaryLabel,
+    color: colors.background,
     boxShadow: {
-      default: button.primaryEdge,
-      ':focus-visible': `${button.primaryEdge}, ${RING}`,
+      default: shadow.inkEdge,
+      ':focus-visible': `${shadow.inkEdge}, ${RING}`,
       ':active': 'none',
     },
     transform: { default: 'none', ':active': PRESS.transform },
   },
   secondary: {
     backgroundColor: {
-      default: button.secondaryBackground,
-      ':hover': `color-mix(in oklab, ${button.secondaryBackground}, ${colors.label} 4%)`,
+      default: colors.raisedBackground,
+      ':hover': `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 4%)`,
     },
     color: colors.label,
     boxShadow: {
-      default: button.secondaryShadow,
-      ':focus-visible': `${button.secondaryShadow}, ${RING}`,
+      default: shadow.raised,
+      ':focus-visible': `${shadow.raised}, ${RING}`,
       ':active': 'none',
     },
     transform: { default: 'none', ':active': PRESS.transform },
   },
   ghost: {
-    backgroundColor: { default: 'transparent', ':hover': button.ghostHover },
-    color: { default: button.ghostLabel, ':hover': colors.label },
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
     boxShadow: { default: 'none', ':focus-visible': RING },
   },
   destructive: {

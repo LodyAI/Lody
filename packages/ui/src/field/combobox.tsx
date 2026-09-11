@@ -6,6 +6,7 @@ import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
+import { colors } from '../tokens/colors.stylex';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -118,7 +119,7 @@ const styles = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: 'transparent',
-    color: { default: field.icon, ':hover': field.value },
+    color: { default: colors.tertiaryLabel, ':hover': colors.label },
     cursor: { default: 'default', ':disabled': 'default' },
     outlineStyle: 'none',
   },

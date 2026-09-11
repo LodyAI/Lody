@@ -1,5 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
 import { control, radius, text } from '../tokens/scales.stylex';
 
 export const button = stylex.defineVars({
@@ -20,32 +19,5 @@ export const button = stylex.defineVars({
   textMini: text.footnoteSize,
   text: text.subheadlineSize,
   gap: '6px',
-  primaryBackground: colors.label,
-  primaryLabel: colors.background,
-  primaryEdge: shadow.inkEdge,
-  secondaryBackground: colors.raisedBackground,
-  secondaryShadow: shadow.raised,
-  ghostLabel: colors.secondaryLabel,
-  ghostHover: colors.hoverFill,
-  ring: colors.accent,
   ringWidth: '2px',
-});
-
-/**
- * The colour-valued tokens above are declared once at the document root, so a
- * custom property that points at a semantic token resolves against the palette
- * in force there and inherits that resolved value. A theme applied to a subtree
- * would leave a button carrying the root palette. This theme re-declares those
- * tokens on the element that carries the palette, where they resolve again.
- * `ThemeRoot` applies it with every forced palette.
- */
-export const buttonPaletteTheme = stylex.createTheme(button, {
-  primaryBackground: colors.label,
-  primaryLabel: colors.background,
-  primaryEdge: shadow.inkEdge,
-  secondaryBackground: colors.raisedBackground,
-  secondaryShadow: shadow.raised,
-  ghostLabel: colors.secondaryLabel,
-  ghostHover: colors.hoverFill,
-  ring: colors.accent,
 });
