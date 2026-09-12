@@ -5336,28 +5336,49 @@ export class SessionExecutionService {
         // Cancel it through the plain ACP session cancel instead of reporting
         // a stale no-op while the work continues.
         if (this.deps.isEngineTurnActive(sessionId)) {
-          const session = this.deps.sessionManager.getSession(sessionId);
-          if (!session?.agentClient?.isCreated() || !session.acpSessionId) {
-            // Cannot deliver a cancel to the engine turn. Keep the activity
-            // marker so status and the GC guard still see the work (process
-            // exit releases it) instead of reporting a phantom stop.
-            return { success: false, error: 'The agent is no longer connected.' };
-          }
-          try {
-            await session.agentClient.cancel(session.acpSessionId);
+          // The ACP cancel is session-wide and dispatch is not serialized
+          // behind a stop request: a client turn starting between the
+          // ownership snapshot and the awaited cancel would take the bullet
+          // meant for the engine turn, and this branch would then clear the
+          // new turn's presence. Hold the rewrite barrier across the whole
+          // check-cancel-clear sequence so no turn can start inside it.
+          const releaseBarrier = this.tryAcquireSessionRewriteBarrier(sessionId);
+          if (!releaseBarrier) {
             this.deps.logger.debug(
-              `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
+              `[${sessionId}] Skipping engine-turn cancel: a rewrite is already in progress`
             );
-          } catch (error) {
-            // The turn may still be running: keep the marker and report the
-            // failure rather than releasing status/GC and claiming a stop.
-            return { success: false, error: formatErrorMessage(error) };
+          } else {
+            try {
+              if (this.deps.isEngineTurnActive(sessionId)) {
+                const session = this.deps.sessionManager.getSession(sessionId);
+                if (!session?.agentClient?.isCreated() || !session.acpSessionId) {
+                  // Cannot deliver a cancel to the engine turn. Keep the
+                  // activity marker so status and the GC guard still see the
+                  // work (process exit releases it) instead of reporting a
+                  // phantom stop.
+                  return { success: false, error: 'The agent is no longer connected.' };
+                }
+                try {
+                  await session.agentClient.cancel(session.acpSessionId);
+                  this.deps.logger.debug(
+                    `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
+                  );
+                } catch (error) {
+                  // The turn may still be running: keep the marker and report
+                  // the failure rather than releasing status/GC and claiming
+                  // a stop.
+                  return { success: false, error: formatErrorMessage(error) };
+                }
+                this.deps.clearEngineTurnActivity(sessionId);
+                this.deps.clearSessionActivePresence(sessionId);
+                await this.clearCancelRequest(sessionId);
+                this.clearTurnCancellation(sessionId, turnId);
+              }
+              return { success: true };
+            } finally {
+              releaseBarrier();
+            }
           }
-          this.deps.clearEngineTurnActivity(sessionId);
-          this.deps.clearSessionActivePresence(sessionId);
-          await this.clearCancelRequest(sessionId);
-          this.clearTurnCancellation(sessionId, turnId);
-          return { success: true };
         }
         const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
         if (releaseConflict) {
