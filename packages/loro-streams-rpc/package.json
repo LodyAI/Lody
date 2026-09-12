@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "LODY_LORO_STREAMS_RPC_INTEGRATION=1 vitest run tests/loro-streams-rpc.integration.test.ts",
     "test:watch": "vitest"

@@ -21,7 +21,7 @@
     "clean": "rimraf dist dist-dev",
     "format": "prettier --write src/**/*.ts",
     "format:check": "prettier --check src/**/*.ts",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "bench:acp-history": "vitest bench tests/acp-history.bench.ts",
     "bench:turn-diff-store": "pnpm --filter @lody/turn-diff-store bench",

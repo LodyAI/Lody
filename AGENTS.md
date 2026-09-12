@@ -58,6 +58,8 @@ Repository map and entry points: [README.md](README.md#repository).
 - Node.js 22+; use the pnpm in `package.json`. `pnpm install` (nested checkouts
   skip it); standalone work uses a separate clone. `pnpm start:local` starts the
   desktop; root `pnpm build` uses the same local composition.
+- Workspace typechecks use TypeScript 7's `tsc`; keep the `typescript` package
+  alias on `@typescript/typescript6` for tools that still require the compiler API.
 - Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
   type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits

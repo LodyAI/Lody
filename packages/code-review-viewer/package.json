@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "pnpm --filter @lody/code-review-helper build:standalone && node scripts/build-viewer.mjs",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "catalog:"

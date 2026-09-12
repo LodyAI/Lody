@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write src/**/*.ts",
     "format:check": "prettier --check src/**/*.ts"
   },

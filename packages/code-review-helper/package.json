@@ -41,7 +41,7 @@
     "build:standalone": "vite build --config vite.standalone.config.ts && pnpm run build:prompt-text",
     "storybook": "storybook dev -p 6017",
     "build-storybook": "storybook build",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -72,14 +72,14 @@
     }
   },
   "devDependencies": {
-    "@typescript/native-preview": "7.0.0-dev.20251217.1",
+    "@typescript/native": "npm:typescript@7.0.2",
     "oxlint": "^1.61.0",
     "oxlint-tsgolint": "^0.22.0",
     "prettier": "^3.6.2",
     "proxy-from-env": "^1.1.0",
     "tar": "^7.5.7",
     "tailwindcss": "^4.3.0",
-    "typescript": "^5.9.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "undici": "catalog:",
     "zstd-stream": "^1.1.0"
   },

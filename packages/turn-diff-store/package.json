@@ -24,7 +24,7 @@
   },
   "scripts": {
     "bench": "tsx benchmarks/store.bench.ts",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
