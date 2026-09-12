@@ -6,6 +6,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Message hub and transports
 
+- `usage/usage-tracking-service.ts` — ordered delivery of Grok prompt usage,
+  cumulative-provider staging, and acknowledgement-based retry retention.
+  Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).
+
 - `message-handler.ts` — the CLI's central message hub (largest file): session chat
   handling (`handleSessionChat`), ACP update buffering/flush, Code Collab v2 machine
   RPC wiring, local project control, session file upload/send, and the turn cloud
