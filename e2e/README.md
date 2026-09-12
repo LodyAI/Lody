@@ -50,7 +50,8 @@ pnpm --filter @lody/e2e journey:coverage
 
 `e2e:build` prepares the renderer and synchronized CLI once. The other commands
 never rebuild, which keeps scenario timing about product behavior rather than
-toolchain work. `e2e:acceptance` creates a unique round under
+toolchain work. `e2e:check` also dry-runs every Cucumber scenario so ambiguous
+or undefined step bindings fail before Electron starts. `e2e:acceptance` creates a unique round under
 `e2e/artifacts/acceptance/`; it never overwrites an earlier round. Supported
 subjects are `desktop-local-bootstrap`, `desktop-session-lifecycle`,
 `desktop-review-lifecycle`, `desktop-work-lifecycle`, and `desktop-lifecycle`.
