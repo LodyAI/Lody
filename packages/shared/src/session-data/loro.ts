@@ -245,14 +245,18 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     async replaceTurn(turnId, turn) {
       if (turn.id !== turnId)
         return rejected('invalid_input', [{ path: ['id'], code: 'immutable_id' }]);
-      if (!writer.read(turnId)) return rejected('not_found');
+      // Stage through the writer's prepare/commit boundary: only changed fields
+      // and items are validated, so unchanged opaque stored content survives.
+      let commit: (() => void) | undefined;
       try {
-        parseHistoryWrite(HistoryEntryWriteSchema, turn);
+        commit = writer.prepareReplace(turnId, turn as unknown as SessionHistory);
       } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
+        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
+        return indeterminate(error);
       }
+      if (!commit) return rejected('not_found');
       try {
-        writer.replace(turnId, turn as unknown as SessionHistory);
+        commit();
       } catch (cause) {
         return indeterminate(cause);
       }
@@ -263,7 +267,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       key: K,
       change: SessionFieldChange<SessionTurnWritableValues[K]>
     ) {
-      if (!writer.read(turnId)) return rejected('not_found');
       if (change.kind === 'set') {
         try {
           parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
@@ -271,8 +274,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
           return rejected('invalid_input', issuesOf(error));
         }
       }
+      let updated: boolean;
       try {
-        writer.setField(
+        updated = writer.setField(
           turnId,
           key,
           (change.kind === 'set' ? change.value : undefined) as SessionHistoryInput[typeof key]
@@ -280,46 +284,60 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       } catch (cause) {
         return indeterminate(cause);
       }
+      // `setField` locates by id and diffs only this field; `false` means the
+      // turn is absent, without materializing the turn body as a preflight.
+      if (!updated) return rejected('not_found');
       return accepted('set-field', [turnId]);
     },
     async resumeAssistant(turnId) {
-      const target = writer.read(turnId);
-      if (!target) return rejected('not_found');
-      if (target.role !== 'assistant') return rejected('invalid_input');
+      let roleMismatch = false;
+      let updated: boolean;
       try {
-        writer.updateEntry(turnId, (turn) => {
+        updated = writer.updateEntry(turnId, (turn) => {
+          if (turn.role !== 'assistant') {
+            roleMismatch = true;
+            return turn;
+          }
           applyResumeAssistant(turn as unknown as Record<string, unknown>);
           return turn;
         });
       } catch (cause) {
         return indeterminate(cause);
       }
+      if (!updated) return rejected('not_found');
+      if (roleMismatch) return rejected('invalid_input');
       return accepted('resume-assistant', [turnId]);
     },
     async markTurnSeen(turnId) {
-      if (!writer.read(turnId)) return rejected('not_found');
+      let updated: boolean;
       try {
-        writer.updateEntry(turnId, (turn) => {
+        updated = writer.updateEntry(turnId, (turn) => {
           applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
           return turn;
         });
       } catch (cause) {
         return indeterminate(cause);
       }
+      if (!updated) return rejected('not_found');
       return accepted('mark-seen', [turnId]);
     },
     async openAssistantTurn(input) {
-      const existing = writer.read(input.turnId);
-      if (existing) {
-        if (existing.role !== 'assistant') return rejected('invalid_input');
-        try {
-          writer.updateEntry(input.turnId, (turn) => {
-            applyOpenAssistantTurn(turn as unknown as Record<string, unknown>, input);
+      let roleMismatch = false;
+      let updated: boolean;
+      try {
+        updated = writer.updateEntry(input.turnId, (turn) => {
+          if (turn.role !== 'assistant') {
+            roleMismatch = true;
             return turn;
-          });
-        } catch (cause) {
-          return indeterminate(cause);
-        }
+          }
+          applyOpenAssistantTurn(turn as unknown as Record<string, unknown>, input);
+          return turn;
+        });
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      if (updated) {
+        if (roleMismatch) return rejected('invalid_input');
         return accepted('open-assistant-turn', [input.turnId]);
       }
       const entry = createAssistantTurn(input);
@@ -341,17 +359,20 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       } catch (error) {
         return rejected('invalid_input', issuesOf(error));
       }
-      const target = writer.read(entryId);
-      if (!target) return rejected('not_found');
-      if (!hasTaskProposal(target, proposalId)) return rejected('not_found');
+      let found = false;
+      let updated: boolean;
       try {
-        writer.updateEntry(entryId, (entry) => {
+        updated = writer.updateEntry(entryId, (entry) => {
+          if (!hasTaskProposal(entry, proposalId)) return entry;
           resolveTaskProposalOnEntry(entry, proposalId, resolution);
+          found = true;
           return entry;
         });
       } catch (cause) {
         return indeterminate(cause);
       }
+      if (!updated) return rejected('not_found');
+      if (!found) return rejected('not_found');
       return accepted('resolve-task-proposal', [entryId]);
     },
     async respondPermission(requestId, outcome, respondOptions) {

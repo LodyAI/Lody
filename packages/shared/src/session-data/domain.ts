@@ -46,7 +46,6 @@ export type SessionTurn = {
   readonly permissionWaitMs?: number;
   readonly finished?: boolean;
   readonly sendStatus?: 'timeout';
-  readonly $cid?: string;
 };
 
 /**

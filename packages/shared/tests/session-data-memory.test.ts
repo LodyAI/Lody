@@ -20,6 +20,13 @@ const makeHarness = (
   return {
     data: memory,
     injectStoredField: patch,
+    injectStoredItem(turnId, item) {
+      memory.applyPeerMutation((turns) => {
+        const turn = turns.find((candidate) => candidate.id === turnId);
+        if (!turn) throw new Error(`missing turn ${turnId}`);
+        turn.items = [...(turn.items ?? []), item] as never;
+      });
+    },
     peerSetField: patch,
     peerAppend: (turn) => {
       memory.applyPeerMutation((turns) => {

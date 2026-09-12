@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Loro, isContainer, LoroMap } from 'loro-crdt';
+import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '../src/schema';
 import { createHistoryWriter } from '../src/history-writer';
 import {
@@ -37,6 +37,13 @@ const makeHarness = (doc = new Loro()): SessionDataHarness => {
       // Raw write: models a field a newer peer or an older build stored that the
       // current schema does not declare.
       map.set(key, value as Parameters<LoroMap['set']>[1]);
+      doc.commit();
+    },
+    injectStoredItem(turnId, item) {
+      const map = findMap(turnId);
+      if (!map) throw new Error(`missing turn ${turnId}`);
+      // Raw item append: models opaque content the current build must retain.
+      (map.get('items') as LoroList).push(item as never);
       doc.commit();
     },
     peerSetField(turnId, key, value) {

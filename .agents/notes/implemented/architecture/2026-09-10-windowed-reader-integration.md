@@ -132,6 +132,16 @@ Immer (`useStrictShallowCopy`) because loro-mirror's queue identity is a non-enu
 when an observation lands during an in-flight scan, so a turn written after the scan's count read is
 still acknowledged.
 
+Two locality/compatibility rules are enforced at the adapter boundary. `replaceTurn` stages through
+the shared writer's new `prepareReplace` prepare/commit split, so only changed fields and items are
+validated: an unchanged opaque item or a legacy extra subfield of a known item survives, while a
+changed invalid item is still a pre-write rejection and a post-prepare failure is `indeterminate`.
+Scalar `setTurnField` and `markTurnSeen` no longer preflight with a full turn body read — `setField`
+locates by id and diffs only the named field, and its `false` result is the not-found signal.
+`SessionTurn` no longer declares a `$cid`; container ids stay inside the adapter.
+`tests/session-data-contract.ts` covers the opaque-item replacement and the rejected-changed-item
+control on both backends.
+
 The control plane moved to `@lody/shared/session-control-plane` (`sessionControlPlaneSchema`,
 `createControlPlaneDoc`, `createSessionControlPlaneMirror`) so the CLI and renderer can build one
 history-less control plane; the component copies are re-exports.
@@ -143,7 +153,9 @@ callback that binds the stored snapshot and cursor with no async gap) rather tha
 command. `readHistorySnapshot`/`readFullHistory` remain deliberate bottom-level exposures owned by
 `SessionDocument` (synchronous dispatch output and explicit full reads); they are not a second writer.
 Queue promotion appends through `SessionData.commands.appendTurn`. Owner/seal mapping and old-format
-migration remain separate.
+migration remain separate. `observe` still returns the whole directory and a positionless `changed`
+for every doc event; per-range invalidation, stale-async fencing and a stable window lease for the UI
+cache are the remaining v3 reader work, owned by the port adapter and `lib/conversation-view`.
 
 Verification: the shared suite (99 files / 1164 tests), components (469 files / 3538 tests) and
 CLI (2700 tests, 4 skipped, run with a redirected `HOME` because the sandbox blocks `~/.lody`

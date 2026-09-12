@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistoryInput } from '../schema';
 import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
+import { prepareReplacement } from '../history-writer';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
 import {
@@ -238,19 +239,25 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     async replaceTurn(turnId, turn) {
       if (turn.id !== turnId)
         return rejected('invalid_input', [{ path: ['id'], code: 'immutable_id' }]);
+      const initial = turns[findIndex(turnId)];
+      if (!initial) return rejected('not_found');
+      // Same changed-only rule as the Loro adapter: validate changed fields and
+      // items, retaining unchanged opaque stored content.
+      let prepared: SessionTurn;
       try {
-        parseHistoryWrite(HistoryEntryWriteSchema, turn);
+        prepared = withoutUndefined(
+          clone(prepareReplacement(initial, turn))
+        ) as unknown as SessionTurn;
       } catch (error) {
         return toRejection(error);
       }
-      if (findIndex(turnId) < 0) return rejected('not_found');
       return mutating('replace', [turnId], () => {
         // Re-locate at commit time: a peer edit between the precondition and the
         // mutation cannot redirect this write to a stale position.
         const index = findIndex(turnId);
         if (index < 0) return false;
         const next = turns.slice();
-        next[index] = clone(turn);
+        next[index] = clone(prepared);
         turns = next;
         return true;
       });

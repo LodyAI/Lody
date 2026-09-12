@@ -21,6 +21,8 @@ export type SessionDataHarness = {
   readonly data: SessionData;
   /** Inject a raw field into a stored turn, as legacy/unknown stored data. */
   injectStoredField(turnId: string, key: string, value: unknown): void;
+  /** Inject a raw item into a stored turn, as a newer peer's opaque content. */
+  injectStoredItem(turnId: string, item: unknown): void;
   /** A peer's independent field write through the shared writer rules. */
   peerSetField(turnId: string, key: string, value: unknown): void;
   /** A peer's independent append. */
@@ -316,6 +318,40 @@ export function runSessionDataContract(
       if (createdRead.state === 'ready') {
         expect(JSON.stringify(createdRead.turn.items)).toContain('created');
       }
+    });
+
+    it('replaces one known field without re-validating unchanged stored items', async () => {
+      const harness = await create();
+      const { data } = harness;
+      await data.commands.appendTurn(assistantTurn('a'));
+      // A newer peer's unknown item and a known item carrying a legacy extra
+      // subfield: both are untouched by the replacement and must survive.
+      const opaqueItems = [
+        { type: 'future_item', futurePayload: 'opaque' },
+        { type: 'text', text: 'legacy', legacyField: 7 },
+      ];
+      for (const item of opaqueItems) harness.injectStoredItem('a', item);
+
+      const read = await data.history.readTurn('a');
+      if (read.state !== 'ready') throw new Error('expected the appended turn');
+      const result = await data.commands.replaceTurn('a', { ...read.turn, finished: false });
+      expect(result.status).toBe('accepted');
+
+      const stored = harness.readStored().find((turn) => turn.id === 'a')!;
+      expect(stored.finished).toBe(false);
+      expect(stored.items).toEqual([...(assistantTurn('a').items ?? []), ...opaqueItems]);
+
+      // Control: a *changed* known item with an invalid field is still rejected,
+      // and the stored turn is untouched.
+      const rejectedResult = await data.commands.replaceTurn('a', {
+        ...read.turn,
+        items: [...(read.turn.items ?? []), { type: 'text', text: 42 }] as never,
+      });
+      expect(rejectedResult.status).toBe('rejected');
+      expect(harness.readStored().find((turn) => turn.id === 'a')!.items).toEqual([
+        ...(assistantTurn('a').items ?? []),
+        ...opaqueItems,
+      ]);
     });
 
     it('rejects invalid input before storage changes', async () => {

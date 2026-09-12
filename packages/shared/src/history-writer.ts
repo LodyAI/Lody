@@ -230,7 +230,7 @@ function matchesRollbackReceipt(
   );
 }
 
-function prepareReplacement(previous: unknown, incoming: unknown): Record<string, unknown> {
+export function prepareReplacement(previous: unknown, incoming: unknown): Record<string, unknown> {
   if (!record(previous) || !record(incoming))
     throw new HistoryWriteError([{ path: [], code: 'invalid_turn' }]);
   const result = { ...previous };
@@ -323,6 +323,13 @@ export interface HistoryWriter {
   ): () => void;
   append(entry: SessionHistory): void;
   replace(turnId: string, entry: SessionHistory): boolean;
+  /**
+   * Stage a single-turn replacement without writing. Validates only changed
+   * fields/items through the shared prepare rule (unchanged opaque stored
+   * content is retained), so a `HistoryWriteError` thrown here is a pre-write
+   * rejection. Returns a commit closure, or `undefined` when the turn is absent.
+   */
+  prepareReplace(turnId: string, entry: SessionHistory): (() => void) | undefined;
   read(turnId: string): SessionHistory | undefined;
   /** Existing typed callback API; only its changed turns/items reach the writer. */
   update(updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]): void;
@@ -519,15 +526,24 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       doc.commit();
     },
     replace(id, entry) {
+      const commit = writer.prepareReplace(id, entry);
+      if (!commit) return false;
+      commit();
+      return true;
+    },
+    prepareReplace(id, entry) {
       const target = locate(id);
-      if (!target) return false;
+      if (!target) return undefined;
       const { map } = target;
       if (entry.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
-      const previous = map.toJSON();
+      // Validate only changed fields/items and retain unchanged opaque stored
+      // content; this runs before any CRDT mutation.
+      const previous = map.toJSON() as SessionHistoryInput;
       const value = prepareReplacement(previous, entry);
-      diffHistoryContainer(map, sessionHistorySchema, previous, value, undefined);
-      doc.commit();
-      return true;
+      return () => {
+        diffHistoryContainer(map, sessionHistorySchema, previous, value, undefined);
+        doc.commit();
+      };
     },
     read(id) {
       return locate(id)?.map.toJSON() as SessionHistory | undefined;
