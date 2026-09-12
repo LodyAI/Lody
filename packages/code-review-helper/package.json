@@ -78,7 +78,7 @@
     "storybook": "^9.1.17",
     "tailwindcss": "^4.3.0",
     "typescript": "catalog:",
-    "vite-plugin-singlefile": "^2.3.0",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^3.2.4"
   },
   "license": "Apache-2.0"
