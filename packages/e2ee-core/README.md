@@ -1,5 +1,9 @@
 # @lody/e2ee-core
 
+**Design review in progress:** the [updated ledger types and API](../../specs/e2ee-ledger.zh.md)
+specify the intended single-signer format and pure verification boundary. The implementation
+described below is an earlier prototype, not that design's frozen API. Lody integration is paused.
+
 Experimental control-log and signed content-encryption primitives. **Electron main imports the device store only;
 it is not end-to-end encryption for Lody.** [Protocol draft](../../specs/e2ee-control-log.zh.md).
 
