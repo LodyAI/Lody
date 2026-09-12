@@ -37,7 +37,7 @@ behavior for malformed or legacy nested children.
 
 | Operation                           | Targets                                                                         | Metadata readiness                                                             |
 | ----------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Archive a Session                   | The selected Session and direct children whose `parentSessionId` equals its id. | Target discovery must use complete metadata; see the implementation gap below. |
+| Archive a Session                   | The selected Session and direct children whose `parentSessionId` equals its id. | Target discovery reads the repository metadata index directly.                 |
 | Restore a Session                   | The selected Session and the same direct children.                              | Target discovery must use complete metadata.                                   |
 | Permanently delete an archived root | The selected Session and the same direct children.                              | Reject before mutation unless the metadata set used for discovery is complete. |
 | Delete exact Session ids            | Exactly the ids supplied by the caller.                                         | Must not wait for global metadata hydration or discover additional Sessions.   |
@@ -76,11 +76,11 @@ This Spec does not define worker supervision, status or result aggregation, unre
 permission routing, worker panels, settle, or handoff behavior. Those product choices
 remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
 
-Archive and restore currently discover direct children from a client metadata cache
-that can be incomplete while Session Detail is already interactive. They can therefore
-miss a child during cold-start hydration, contrary to the target contract above.
-[#574](https://github.com/LodyAI/Lody/issues/574) tracks the required readiness or
-complete-query fix.
+Archive reads the repository metadata index for every action, so an interactive root
+does not depend on the client projection having discovered its direct children. The
+query must complete before the first archive write, and query failure aborts the action
+without mutation. Restore still discovers direct children from the client metadata
+cache and therefore retains the cold-start implementation gap.
 
 ## Evidence
 
