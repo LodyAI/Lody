@@ -1102,6 +1102,69 @@ describe('session command helpers', () => {
     }
   });
 
+  it('continues local project resolution when machine Flock freshness sync fails', async () => {
+    const rootPath = mkdtempSync(path.join(os.tmpdir(), 'lody-session-git-project-'));
+    try {
+      execFileSync('git', ['init'], { cwd: rootPath, stdio: 'ignore' });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'init',
+        ],
+        { cwd: rootPath, stdio: 'ignore' }
+      );
+      const syncFlockDocOrThrow = vi
+        .fn()
+        .mockRejectedValue(new Error('Streams sync failed: network_error'));
+      const manager = {
+        syncFlockDocOrThrow,
+        repo: {
+          getDocMeta: vi.fn(async () => ({
+            meta: {
+              localProjects: {
+                'local-project-1': {
+                  id: 'local-project-1',
+                  name: 'lody',
+                  rootPath,
+                  createdAtMs: 1,
+                },
+              },
+            },
+          })),
+          openFlockDoc: vi.fn(async () => ({
+            flock: {
+              scan: () => [],
+            },
+          })),
+        },
+      } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+      await expect(
+        resolveLocalProjectRefOrThrow(
+          manager,
+          'workspace-1' as WorkspaceId,
+          'machine-id' as MachineId,
+          'lody'
+        )
+      ).resolves.toEqual({
+        kind: 'local',
+        localProjectId: 'local-project-1',
+      });
+      expect(syncFlockDocOrThrow).toHaveBeenCalledWith(
+        getMachineFlockDocId('workspace-1' as WorkspaceId, 'machine-id' as MachineId),
+        expect.objectContaining({ reason: 'session.local-projects:machine-id' })
+      );
+    } finally {
+      rmSync(rootPath, { recursive: true, force: true });
+    }
+  });
   it('does not synthesize a branch for non-git local projects', async () => {
     const rootPath = mkdtempSync(path.join(os.tmpdir(), 'lody-session-non-git-'));
     try {
