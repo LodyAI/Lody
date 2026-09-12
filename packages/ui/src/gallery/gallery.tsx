@@ -6,7 +6,10 @@ import { Checkbox } from '../field/checkbox';
 import { Combobox } from '../field/combobox';
 import { Field } from '../field/field';
 import { field } from '../field/field.tokens.stylex';
-import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
+import { ChevronDownGlyph, ChevronRightGlyph, DotGlyph, TickGlyph } from '../internal/glyphs';
+import { ContextMenu } from '../menu/context-menu';
+import { Menu } from '../menu/menu';
+import { Menubar } from '../menu/menubar';
 import { Input } from '../field/input';
 import { Radio, RadioGroup } from '../field/radio';
 import { Select } from '../field/select';
@@ -228,6 +231,10 @@ const styles = stylex.create({
     zIndex: 'auto',
   },
   popupList: { overflowY: 'visible' },
+  // The menu stand-in keeps `popup.menuWidth` rather than neutralising it the
+  // way the list stand-in does: the width floor is the one declaration a menu
+  // states for itself, so the board has to be able to read it back.
+  menuReplica: { position: 'static', maxHeight: 'none', zIndex: 'auto' },
   // The far end of the rise is invisible by definition, so it is a probe rather
   // than a sample: it carries the real class and reports its transform into the
   // metrics list instead of leaving a blank gap on the board.
@@ -241,6 +248,22 @@ const styles = stylex.create({
     minWidth: '220px',
   },
   scrollArrowGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
+  /** Something to right-click: a context menu attaches to what is already there. */
+  contextArea: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    minWidth: '220px',
+    height: control.large,
+    paddingInline: space[3],
+    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    userSelect: 'none',
+  },
   // A row is picked, not pressed, so the board shows the two fills side by side
   // rather than asking the reader to hover one.
   replicaRow: { cursor: 'default' },
@@ -467,7 +490,13 @@ const POPUP_COLORS = [
   { name: 'popup.selected', value: popup.selected, note: 'the row that holds the value' },
   { name: 'popup.groupLabel', value: popup.groupLabel, note: 'a group heading' },
   { name: 'popup.separator', value: popup.separator, note: 'between groups' },
-  { name: 'popup.hint', value: popup.hint, note: 'no matches, scroll arrows' },
+  { name: 'popup.hint', value: popup.hint, note: 'no matches, scroll arrows, a row icon' },
+  { name: 'popup.destructive', value: popup.destructive, note: 'a command that destroys' },
+  {
+    name: 'popup.destructiveHighlight',
+    value: popup.destructiveHighlight,
+    note: 'the keyboard on one',
+  },
 ];
 
 const SELECT_SIZES = [
@@ -498,6 +527,24 @@ const FIELD_SIZES = [
 
 const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['mini', 'small', 'medium', 'large'] as const;
+
+/** A stand-in for a caller's glyph on a row that removes something. */
+function CrossGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+    </svg>
+  );
+}
 
 function PlusGlyph() {
   return (
@@ -922,6 +969,186 @@ function LanguageCombobox({ children, ...rest }: ComponentProps<typeof Combobox.
         )}
       </Combobox.Content>
     </Combobox.Root>
+  );
+}
+
+/** One row of the stand-in menu, in whichever state the board is showing. */
+function MenuReplicaRow({
+  label,
+  icon,
+  inset,
+  shortcut,
+  leading,
+  trailing,
+  tone,
+  highlighted,
+  open,
+  disabled,
+  rowRef,
+}: {
+  label: string;
+  icon?: ReactNode;
+  inset?: boolean;
+  shortcut?: string;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  tone?: 'destructive';
+  highlighted?: boolean;
+  open?: boolean;
+  disabled?: boolean;
+  rowRef?: Ref<HTMLDivElement>;
+}) {
+  const destructive = tone === 'destructive';
+  return (
+    <div
+      ref={rowRef}
+      {...stylex.props(
+        surface.item,
+        destructive && surface.itemDestructive,
+        open && surface.itemOpen,
+        highlighted && surface.itemHighlighted,
+        highlighted && destructive && surface.itemDestructiveHighlighted,
+        disabled && surface.itemDisabled
+      )}
+    >
+      {leading}
+      {icon ? (
+        <span {...stylex.props(surface.itemIcon, destructive && surface.itemIconInherit)}>
+          {icon}
+        </span>
+      ) : null}
+      {inset ? <span aria-hidden="true" {...stylex.props(surface.itemIcon)} /> : null}
+      <span {...stylex.props(surface.itemText)}>{label}</span>
+      {shortcut ? <span {...stylex.props(surface.itemShortcut)}>{shortcut}</span> : null}
+      {trailing}
+    </div>
+  );
+}
+
+/**
+ * The menu surface, drawn from `popup/surface.ts` on a stand-in so every row
+ * state can be read at once, with the metrics that shape it taken off the
+ * rendered parts rather than written down beside them. The real menus above it
+ * open over whatever is under them, which a board cannot hold still.
+ */
+function MenuReplica() {
+  const menuWidth = useMeasured<HTMLDivElement>('min-width');
+  const shortcutSize = useMeasured<HTMLSpanElement>('font-size');
+  const iconBox = useMeasured<HTMLSpanElement>('width');
+
+  const metrics = [
+    { name: 'popup.menuWidth', value: menuWidth.value },
+    { name: 'the row icon box', value: iconBox.value },
+    { name: 'a shortcut', value: shortcutSize.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'menu \u00b7 stand-in'}</LegendKey>
+      <div
+        ref={menuWidth.ref}
+        {...stylex.props(surface.popup, surface.popupMenu, styles.menuReplica)}
+      >
+        <div {...stylex.props(surface.groupLabel)}>Session</div>
+        <MenuReplicaRow label="New task" icon={<PlusGlyph />} shortcut={'\u2318N'} />
+        <MenuReplicaRow
+          label="Rename"
+          inset
+          trailing={
+            <span ref={shortcutSize.ref} {...stylex.props(surface.itemShortcut)}>
+              {'\u2318\u21a9'}
+            </span>
+          }
+          highlighted
+        />
+        <MenuReplicaRow
+          label="Copy link"
+          leading={
+            <span ref={iconBox.ref} {...stylex.props(surface.indicator)}>
+              <span {...stylex.props(surface.indicatorGlyph)}>
+                <TickGlyph />
+              </span>
+            </span>
+          }
+        />
+        <MenuReplicaRow
+          label="Sort by name"
+          leading={
+            <span {...stylex.props(surface.indicator)}>
+              <span {...stylex.props(surface.indicatorGlyph)}>
+                <DotGlyph />
+              </span>
+            </span>
+          }
+        />
+        <MenuReplicaRow
+          label="Export"
+          inset
+          open
+          trailing={
+            <span {...stylex.props(surface.itemIcon, surface.itemSubmenuGlyph)}>
+              <ChevronRightGlyph />
+            </span>
+          }
+        />
+        <div {...stylex.props(surface.separator)} />
+        <MenuReplicaRow label="Delete" icon={<CrossGlyph />} tone="destructive" />
+        <MenuReplicaRow label="Delete" icon={<CrossGlyph />} tone="destructive" highlighted />
+        <MenuReplicaRow label="Archive" inset disabled />
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          Every row state at once: an icon row, the highlight, a tick, a dot, the row holding an
+          open submenu, a destructive command at rest and under the keyboard, and a disabled one.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A menu a reader can actually open, written the way a surface writes one. */
+function SessionMenu() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger render={<Button variant="secondary" />}>Session</Menu.Trigger>
+      <Menu.Content>
+        <Menu.Group>
+          <Menu.GroupLabel>Session</Menu.GroupLabel>
+          <Menu.Item icon={<PlusGlyph />} shortcut={'\u2318N'}>
+            New task
+          </Menu.Item>
+          <Menu.Item inset>Rename</Menu.Item>
+        </Menu.Group>
+        <Menu.CheckboxItem defaultChecked>Notify me when it finishes</Menu.CheckboxItem>
+        <Menu.RadioGroup defaultValue="recent">
+          <Menu.GroupLabel>Sort by</Menu.GroupLabel>
+          <Menu.RadioItem value="recent">Recent</Menu.RadioItem>
+          <Menu.RadioItem value="name">Name</Menu.RadioItem>
+        </Menu.RadioGroup>
+        <Menu.Submenu>
+          <Menu.SubmenuTrigger inset>Export</Menu.SubmenuTrigger>
+          <Menu.Content>
+            <Menu.Item>PDF</Menu.Item>
+            <Menu.Item>PNG</Menu.Item>
+          </Menu.Content>
+        </Menu.Submenu>
+        <Menu.Separator />
+        <Menu.Item inset disabled>
+          Archive
+        </Menu.Item>
+        <Menu.Item icon={<CrossGlyph />} tone="destructive">
+          Delete
+        </Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -1522,6 +1749,61 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </LanguageCombobox>
               </Field.Root>
             </FieldRow>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Menu · dropdown, context menu and menubar"
+        rule="A menu is the same floating surface a Select opens, so it reads the popup group and its rows are the rows of a list. One declaration differs: a list takes the width of the control it belongs to, and a menu — opened by whatever the surface already had there — states its own. A command that destroys something is the one row that is not the label colour, and its highlight is mixed toward destructive so the fill cannot say 'an ordinary command'. ContextMenu and Menubar re-use these rows rather than restating them: only the way in differs."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>dropdown</LegendKey>
+              <Cluster>
+                <SessionMenu />
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>context menu</LegendKey>
+              <Cluster>
+                <ContextMenu.Root>
+                  <ContextMenu.Trigger>
+                    <div {...stylex.props(styles.contextArea)}>Right-click this area</div>
+                  </ContextMenu.Trigger>
+                  <ContextMenu.Content>
+                    <ContextMenu.Item inset>Rename</ContextMenu.Item>
+                    <ContextMenu.Item inset>Duplicate</ContextMenu.Item>
+                    <ContextMenu.Separator />
+                    <ContextMenu.Item inset tone="destructive">
+                      Delete
+                    </ContextMenu.Item>
+                  </ContextMenu.Content>
+                </ContextMenu.Root>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>menubar</LegendKey>
+              <Cluster>
+                <Menubar.Root>
+                  <Menubar.Menu>
+                    <Menubar.Trigger>File</Menubar.Trigger>
+                    <Menubar.Content>
+                      <Menubar.Item shortcut={'\u2318N'}>New task</Menubar.Item>
+                      <Menubar.Item shortcut={'\u2318S'}>Save</Menubar.Item>
+                    </Menubar.Content>
+                  </Menubar.Menu>
+                  <Menubar.Menu>
+                    <Menubar.Trigger>Edit</Menubar.Trigger>
+                    <Menubar.Content>
+                      <Menubar.Item shortcut={'\u2318Z'}>Undo</Menubar.Item>
+                      <Menubar.Item tone="destructive">Delete</Menubar.Item>
+                    </Menubar.Content>
+                  </Menubar.Menu>
+                </Menubar.Root>
+              </Cluster>
+            </Row>
+            <MenuReplica />
           </Rows>
         </PaletteSplit>
       </Section>

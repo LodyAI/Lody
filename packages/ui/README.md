@@ -11,7 +11,8 @@ behavior.
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
 | `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
-| `src/popup`         | The floating list a Select or Combobox opens, and its tokens        |
+| `src/popup`         | The floating surface a list or a menu opens on, and its tokens      |
+| `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface             |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -81,10 +82,48 @@ the whole control; inside a `Combobox.InputGroup` the group is the well and the
 input is bare, so a chevron beside it lands inside one control rather than beside
 a second one.
 
+A `Menu` is that same floating surface with commands on it. It is also the
+dropdown menu: Base UI has no separate part for one, so a second name would be a
+second thing to keep in step. A menu is opened by whatever the surface already
+had there, through Base UI's `render`:
+
+```tsx
+<Menu.Root>
+  <Menu.Trigger render={<Button variant="ghost" icon aria-label="Session actions" />}>
+    <MoreIcon />
+  </Menu.Trigger>
+  <Menu.Content>
+    <Menu.Item shortcut="⌘R" onClick={rename}>Rename</Menu.Item>
+    <Menu.Submenu>
+      <Menu.SubmenuTrigger inset>Export</Menu.SubmenuTrigger>
+      <Menu.Content>
+        <Menu.Item onClick={exportPdf}>PDF</Menu.Item>
+      </Menu.Content>
+    </Menu.Submenu>
+    <Menu.Separator />
+    <Menu.Item tone="destructive" onClick={remove}>Delete</Menu.Item>
+  </Menu.Content>
+</Menu.Root>
+```
+
+`ContextMenu` and `Menubar` restate only the way in — a right click or a long
+press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
+them, so a command looks and behaves the same wherever a person meets it. A row
+answers `onClick`; a row that should leave the menu up says `closeOnClick={false}`
+rather than cancelling the event. Where focus goes after a menu closes is the
+product's policy, passed as `finalFocus`.
+
+A row's leading box holds a caller's icon, a tick or a dot, and sizes what is in
+it: a glyph placed there states its own dimensions as 100% rather than arriving
+at its icon library's default, because this package has no descendant selector to
+reach it with. A row with no icon takes no box, so an icon-less menu is not
+indented for nothing; a row in a mixed list asks for one with `inset`.
+
 A popup mounts on the document by default. A surface that owns a focus scope and
 a scroll lock — a modal — states its panel once with `PopupContainerProvider`,
-and every Select and Combobox under it mounts inside the panel instead of being
-treated as outside it. `@lody/components`' `DialogContent` already does this.
+and every Select, Combobox and Menu under it mounts inside the panel instead of
+being treated as outside it. `@lody/components`' `DialogContent` already does
+this.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in
@@ -94,7 +133,9 @@ The intended behavior is specified in [Shared UI primitives](../../specs/ui-prim
 The integration decision is recorded in the
 [UI Button migration takeover note](../../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md);
 the field family and the Tailwind field concepts it replaces are recorded in the
-[UI field primitives note](../../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
+[UI field primitives note](../../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md);
+the menu family and the migration still owed to it are recorded in the
+[UI menu primitives note](../../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

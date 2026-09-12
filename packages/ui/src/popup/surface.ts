@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { corner, duration, ease, text, z } from '../tokens/scales.stylex';
+import { corner, duration, ease, space, text, z } from '../tokens/scales.stylex';
 import { popup } from './popup.tokens.stylex';
 
 /**
@@ -48,8 +48,36 @@ export const surface = stylex.create({
     // The product shell stacks its own surfaces; a popup belongs above them.
     zIndex: z.popover,
   },
+  /**
+   * A menu surface is not the width of what opened it.
+   *
+   * A list belongs to a control that shows the value it holds, so it takes
+   * `--anchor-width` and the two read as one control. A menu is opened by
+   * whatever happens to be there — often a 28px icon button — so it states its
+   * own width and grows past it for the longest row.
+   */
+  popupMenu: {
+    minWidth: popup.menuWidth,
+    // A list keeps its scroll in `list`, between the two scroll arrows. A menu
+    // has no such part — its rows are the popup's own children — so the popup
+    // is the scrolling box, bounded by the `--available-height` it already has.
+    overflowY: 'auto',
+    overflowX: 'hidden',
+  },
   /** Where the rise starts and ends: 4px below the resting position. */
   popupHidden: { opacity: 0, transform: `translateY(${popup.rise})` },
+  /**
+   * The same 4px, on the other three sides.
+   *
+   * A Select list always opens below its trigger, so the rules could name one
+   * direction. A menu flips to stay on screen and a submenu opens beside its
+   * row, so the distance is stated against the anchor instead of against the
+   * page: the popup starts one step further from what opened it and closes that
+   * step as it arrives, whichever side it landed on.
+   */
+  popupHiddenAbove: { opacity: 0, transform: `translateY(calc(-1 * ${popup.rise}))` },
+  popupHiddenAfter: { opacity: 0, transform: `translateX(${popup.rise})` },
+  popupHiddenBefore: { opacity: 0, transform: `translateX(calc(-1 * ${popup.rise}))` },
   /**
    * A Select popup that overlaps its trigger so the selected row's text sits
    * on the trigger's value reports `side="none"`. Moving it would slide that
@@ -104,6 +132,20 @@ export const surface = stylex.create({
   /** The same 45% the whole library uses, and no pointer. */
   itemDisabled: { opacity: 0.45, pointerEvents: 'none' },
   /**
+   * The row that owns an open surface: a submenu trigger while its submenu is
+   * up. It keeps the highlight it was given when the pointer moved onto it, so
+   * the row the submenu belongs to does not go dark the moment the pointer
+   * crosses into the submenu it opened.
+   */
+  itemOpen: { backgroundColor: popup.highlight },
+  /**
+   * A command that destroys something. It is the only row whose label is not
+   * `popup.label`, and its highlight is mixed toward `destructive` so what the
+   * keyboard is on stays the thing the row is about.
+   */
+  itemDestructive: { color: popup.destructive },
+  itemDestructiveHighlighted: { backgroundColor: popup.destructiveHighlight },
+  /**
    * The label of a row. It takes the remaining width so a long one truncates
    * instead of pushing the tick out of the popup.
    */
@@ -129,6 +171,80 @@ export const surface = stylex.create({
     color: popup.indicator,
   },
   indicatorGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
+  /**
+   * The same box at the start of a menu row, holding whatever the caller gave
+   * rather than a tick. It is the hint colour, because the rules put an icon at
+   * rest with the chevron and the placeholder; the glyph inside it is sized by
+   * this box, never by whatever an icon package decided its default was.
+   */
+  itemIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: popup.indicatorSize,
+    height: popup.indicatorSize,
+    color: popup.hint,
+    pointerEvents: 'none',
+  },
+  /** On a destructive row the icon is part of what the row says, not a hint. */
+  itemIconInherit: { color: 'inherit' },
+  /**
+   * Trailing metadata: a keyboard shortcut, a count, a hint. It sits after the
+   * label, which already takes the width, and never grows or shrinks with it.
+   */
+  itemShortcut: {
+    flexShrink: 0,
+    paddingInlineStart: space[3],
+    color: popup.hint,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    fontWeight: 500,
+    // A shortcut is a set of keys rather than a word: the glyphs line up in a
+    // column when several rows carry one.
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  /** The chevron that says a row opens a submenu. */
+  itemSubmenuGlyph: { marginInlineEnd: `calc(-1 * ${popup.itemGap} / 2)` },
+  /**
+   * A menubar trigger: a menu row laid out along a bar instead of down a list.
+   * It reads the same tokens as a row, so a bar and the menus it opens cannot
+   * drift into two vocabularies.
+   */
+  barItem: {
+    boxSizing: 'border-box',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: popup.itemGap,
+    height: popup.itemHeight,
+    paddingInline: popup.itemPaddingX,
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: popup.itemRadius,
+    cornerShape: corner.shape,
+    backgroundColor: 'transparent',
+    color: popup.label,
+    fontFamily: 'inherit',
+    fontSize: popup.text,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    lineHeight: 1,
+    cursor: 'default',
+    userSelect: 'none',
+    whiteSpace: 'nowrap',
+    outlineStyle: 'none',
+    boxShadow: 'none',
+    opacity: { default: 1, ':disabled': 0.45 },
+    transitionProperty: 'background-color, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /** Hovered, or holding the menu that is currently up: the same one fill. */
+  barItemOpen: { backgroundColor: popup.highlight },
+  /** The bar itself: a row of triggers, on whatever rung the surface is. */
+  bar: { display: 'flex', alignItems: 'center', gap: space[1] },
   /** A group heading: about the rows under it, so the secondary label colour. */
   groupLabel: {
     boxSizing: 'border-box',
@@ -187,3 +303,22 @@ export const surface = stylex.create({
     userSelect: 'none',
   },
 });
+
+/** Which side of its anchor a popup landed on, as Base UI reports it. */
+export type PopupSide = 'top' | 'bottom' | 'left' | 'right' | 'inline-start' | 'inline-end';
+
+/**
+ * The hidden end of the rise for the side a popup actually landed on.
+ *
+ * StyleX cannot express `[data-starting-style]`, so both ends of the transition
+ * are read off Base UI's transition status in JS and the hidden one is a class
+ * of its own. A list only ever opens below its trigger, so `popupHidden` alone
+ * covers it; a menu flips to stay on screen and a submenu opens beside its row,
+ * so the direction is chosen from the side rather than assumed.
+ */
+export function hiddenSurfaceForSide(side: PopupSide | 'none' | undefined) {
+  if (side === 'top') return surface.popupHiddenAbove;
+  if (side === 'right' || side === 'inline-end') return surface.popupHiddenAfter;
+  if (side === 'left' || side === 'inline-start') return surface.popupHiddenBefore;
+  return surface.popupHidden;
+}
