@@ -77,6 +77,13 @@ export class MachineRuntime {
         handler(event.sessionId);
       }
     });
+    // An agent process that dies unexpectedly reports only `exit` (never
+    // `terminated`), so the engine-turn marker must clear on that path too —
+    // a crashed agent must not leave its session permanently busy and
+    // GC-exempt.
+    this.sessionManager.on('exit', (event) => {
+      this.handler?.clearEngineTurnActivity(event.sessionId);
+    });
     this.options.logger.debug('Session manager initialized');
 
     this.handler = new MessageHandler(
