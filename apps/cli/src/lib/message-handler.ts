@@ -3061,8 +3061,8 @@ export class MessageHandler {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
-        syncWorkspaceDirty: async (sessionId, session) =>
-          await this.turnPostProcessingService.syncWorkspaceDirty(sessionId, session),
+        syncWorkspaceGitState: async (sessionId, session) =>
+          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session),
         notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
           await this.notifySessionCompleted(sessionId, userId, occurrenceId),
       },

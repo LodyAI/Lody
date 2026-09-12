@@ -13,9 +13,10 @@ That machine-initiated write surprised users who had asked for something else,
 and it ran on work they had not decided to keep. The enforcement moved from the
 machine into the Create PR prompt, which now instructs the agent to commit and
 push at the end of each turn and lets the user override that in conversation. The
-existing `SessionMeta.workspaceDirty` probe becomes the visible safety net: when a
-turn still ends dirty, the Info Bar raises `Commit & Push` as the HIGHEST-priority
-action item, ahead of conflict repair, CI repair, and Merge. An instruction is
+`SessionMeta.workspaceDirty` + `workspaceUnpushed` probes become the visible safety
+net: when a turn still ends with unpublished work, the Info Bar raises
+`Commit & Push` as the HIGHEST-priority action item, ahead of conflict repair, CI
+repair, and Merge. An instruction is
 weaker than an enforced hook, so the remaining risk is an agent that ignores it;
 the whole point of the ranking change is that this case is now visible instead of
 silently corrected.
@@ -50,12 +51,12 @@ Three pieces, in the order a user meets them:
    same text, so the two paths cannot drift.
 2. **The signal.** `updateSessionDiffStats` already probed the worktree and wrote
    `SessionMeta.workspaceDirty` onto the OWNER session's doc meta — the same entry
-   that carries `pullRequests` and the poller's `pullRequestState`. Its semantics are
-   unchanged and it is now the only post-turn git work; the probe itself was only
-   extracted into a reusable `probeWorkspaceDirty` for the cancellation path below.
-   It stays conservative about an indeterminate result: a transient `git` failure
-   leaves the durable value alone rather than clobbering a real `dirty=true` into a
-   stale `false`.
+   that carries `pullRequests` and the poller's `pullRequestState`. It now also
+   writes `workspaceUnpushed` (see the correction below), and is the only post-turn
+   git work. Both probes stay conservative about an indeterminate result: a
+   transient `git` failure contributes no key, so the durable value survives rather
+   than being clobbered into a stale `false`. They are independent — one failing
+   must not suppress the other.
 3. **The action item.** `resolveSessionInfoBarGitHubActionIds` returns every
    applicable action in priority order instead of selecting one, with
    `commit-and-push` first whenever the tree is dirty. Rules and the full ranking:
@@ -90,10 +91,45 @@ guarded so cancellation still settles if the probe throws, and a
 `workspaceDirtyPublished` latch keeps a post-diff-stats cancellation check from
 re-running the same probe. Reverting either production guard fails its test.
 
+### Correction: a dirty tree is only half the signal
+
+The first version of this change gated the action on `workspaceDirty` alone and
+deleted `hasUnpushedCommits` along with the auto-commit loop that used it. Review
+caught that this reopens the hole from the other side, and the reviewer was right.
+
+`workspaceDirty` comes from `git status --porcelain`, so it goes false the instant
+the agent commits. If the agent commits but the push fails or is skipped, the tree
+is clean, the flag is `false`, the bar offers no `Commit & Push` — and because the
+poller's readiness reflects the REMOTE head, it happily offers Merge. Merging there
+lands a PR that is missing the local commits. That is the same "user thinks the PR
+is current" failure this whole change exists to prevent, reached by a different
+route, and it was made WORSE than the old behavior: the removed auto-commit loop had
+a second phase that explicitly prompted the agent to push unpushed commits.
+
+`hasUnpushedCommits` is restored (`git rev-list @{u}..HEAD --count`) and published as
+`SessionMeta.workspaceUnpushed`. `getSessionGitHubState` combines the two into
+`hasUnpublishedWork`, and the PR-linked `Commit & Push` gates on that. The no-PR
+`Commit & Push` still gates on `workspaceDirty` alone — with no PR there is no remote
+branch to be behind.
+
+A local `@{u}..HEAD` count was preferred over comparing against the PR head: it needs
+no API call, cannot be stale, and the PR poller deliberately strips `headCommitSha`
+from `pullRequests` entries, so that comparison has no reliable input. The no-upstream
+case returns `undefined` (inconclusive, no write) rather than `false`, because
+reporting "nothing to push" for a branch with no tracking ref is exactly the false
+all-clear being fixed.
+
+`COMMIT_AND_PUSH_PROMPT` was softened to match: the action can now fire on a clean
+tree, so the prompt says to skip the commit when there is nothing to commit and to
+report a failed push instead of stopping silently. Both locale entries were updated
+alongside it — the UI sends the localized string, so changing only the constant
+would be a no-op in production.
+
 ## Why Commit & Push outranks Merge
 
 This is the load-bearing part of the change. Without the auto-commit hook, a dirty
-tree means the PR head is not the author's latest work. The previous ranking put
+tree — or an unpushed commit — means the PR head is not the author's latest work.
+The previous ranking put
 `Resolve Conflicts`, `Fix CI Errors`, and Merge ahead of `Commit & Push`, and each
 of those acts on the pushed head: merging would land a PR missing the changes still
 in the worktree, and "fix CI" would reason about a commit that no longer represents
@@ -121,10 +157,14 @@ button's job, which returns as soon as merge leads again.
 - **Add dirtiness to the per-PR `pullRequestState` entry.** Rejected: dirtiness is
   a property of the session's checkout, not of a PR — a session with two associated
   PRs has one worktree — and those entries carry a documented ≤50B budget.
+- **Fold "unpushed" into `workspaceDirty` as one flag.** Rejected: they go stale at
+  different moments, and a single flag named for the working tree would silently
+  change meaning for `hasChanges` (which gates Create PR). Two honest booleans cost
+  one extra byte of meta.
 
 ## Removals and their consequence
 
-`AutoPromptRunner` and its test, `hasUnpushedCommits`, `markPromptWorkingStarted`,
+`AutoPromptRunner` and its test, `markPromptWorkingStarted`,
 the `onAutoPromptStart` / `onAutoPromptEnd` callbacks,
 `TurnRuntimeState.autoPromptInFlight`, and `ExecutionSnapshot.hasActiveAutomation`
 are gone; nothing set or read them after
@@ -160,7 +200,7 @@ enough that the `Commit & Push` action item stays rare. That is a prompt-adheren
 question no test in this repo can settle, and it is the reason the UI signal ships
 alongside the instruction rather than after it.
 
-Known limits of the signal itself. `workspaceDirty` is refreshed only when a turn
+Known limits of the signal itself. The flags are refreshed only when a turn
 reaches finalization or one of the two cancellation routes, and only for sessions
 with a resolvable GitHub repository. It therefore does NOT refresh when a turn ends
 by throwing (an agent/model error aborts before `finalizeTurn`), nor for a yielded

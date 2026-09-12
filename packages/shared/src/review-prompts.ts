@@ -38,13 +38,15 @@ export const CREATE_DRAFT_PR_PROMPT = `Create a draft PR for the current worktre
 ${PR_BRANCH_UPKEEP_INSTRUCTION}`;
 
 export const COMMIT_AND_PUSH_PROMPT = [
-  'Commit all current changes and push to the remote branch.',
+  'Publish the current branch: commit anything uncommitted, then push to the remote branch.',
   '',
   'Instructions:',
   '- Generate a concise, descriptive commit message based on the changes',
   '- Stage all changes (git add -A)',
   '- Commit with the generated message',
-  '- Push to the current branch',
+  '- If the working tree is already clean, skip the commit — the branch may simply',
+  '  hold commits that were never pushed',
+  '- Push to the current branch, and report it if the push fails',
 ].join('\n');
 
 export type ReviewPromptContext = {

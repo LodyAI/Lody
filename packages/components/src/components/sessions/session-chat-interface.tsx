@@ -2315,6 +2315,7 @@ export const SessionChatInterface = memo(
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
+      hasUnpublishedWork,
       hasChanges,
     } = useMemo(
       () => getSessionGitHubState(session, workspaceSession),
@@ -4717,6 +4718,7 @@ export const SessionChatInterface = memo(
         canShowGitHubActions,
         hasExistingPr,
         workspaceDirty,
+        hasUnpublishedWork,
         hasChanges,
         isAgentBusy,
         prCiState: liveCiFailed ? 'f' : latestPrState?.s,
@@ -4812,6 +4814,7 @@ export const SessionChatInterface = memo(
       sessionDocReady,
       t,
       workspaceDirty,
+      hasUnpublishedWork,
       hasChanges,
     ]);
 

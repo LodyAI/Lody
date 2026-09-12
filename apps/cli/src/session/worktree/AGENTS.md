@@ -26,17 +26,22 @@ and file responsibilities: [../README.md](../README.md).
 ## Worktrees, branches, and setup
 
 - Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.
-  A PR-linked session that ends dirty is reported through `SessionMeta.workspaceDirty`, which
-  raises the Info Bar's `Commit & Push` action; the agent is asked to keep the branch current
-  by the Create PR prompt (`packages/shared/src/review-prompts.ts`), which the user can
-  override in conversation. Do not re-add an automatic post-turn commit/push.
-- Because that flag is now the ONLY uncommitted-work signal, BOTH cancellation routes must
-  refresh it via `syncWorkspaceDirty`: the one in `finalizeTurn` (Stop raced finalization)
+  A PR-linked session that ends with unpublished work is reported through
+  `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's
+  `Commit & Push` action; the agent is asked to keep the branch current by the Create PR
+  prompt (`packages/shared/src/review-prompts.ts`), which the user can override in
+  conversation. Do not re-add an automatic post-turn commit/push.
+- Publish BOTH flags or the signal has a hole: `git status` goes clean the moment the agent
+  commits, so a commit whose push failed reads as "all clear" and the Info Bar offers Merge
+  against a PR head that is a commit behind. The two probes are independent — one being
+  inconclusive must not suppress the other, and an inconclusive probe contributes no key so
+  the durable value survives instead of becoming a stale `false`.
+- Because these flags are now the ONLY unpublished-work signal, BOTH cancellation routes must
+  refresh them via `syncWorkspaceGitState`: the one in `finalizeTurn` (Stop raced finalization)
   and `finalizeCancelledTurn` (Stop during the prompt — the common one). That helper owns
   the GitHub-capability gate itself because those callers carry no `ProjectRef`; do not
-  re-test it per call site. An inconclusive probe leaves the durable value alone rather
-  than writing a stale `false`. The flag is NOT written for a session with no GitHub
-  repository — nothing can act on it there.
+  re-test it per call site. The flags are NOT written for a session with no GitHub
+  repository — nothing can act on them there.
 - Resume a Session on a local project with the workspace's current branch as-is, worktree mode
   included: a persisted `acpSessionId` proves prior execution, so the stored `project.branch` is
   historical state, not a checkout request. A legacy direct local Session may re-enter

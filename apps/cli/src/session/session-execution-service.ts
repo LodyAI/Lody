@@ -209,8 +209,8 @@ type TurnFinalizationEffects = {
     project?: ProjectRef;
     branchName?: string | null;
   }) => Promise<{ readonly baseBranch: string } | null>;
-  /** Publish `SessionMeta.workspaceDirty` alone, for paths that skip diff stats. */
-  syncWorkspaceDirty: (sessionId: SessionId, session: ISession) => Promise<void>;
+  /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
+  syncWorkspaceGitState: (sessionId: SessionId, session: ISession) => Promise<void>;
   refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
   notifySessionCompleted: (
     sessionId: SessionId,
@@ -2104,8 +2104,8 @@ export class SessionExecutionService {
       }
 
       // A stopped turn leaves the agent's edits on disk and nothing commits them
-      // on the session's behalf, so `workspaceDirty` — the flag that raises the
-      // Info Bar's Commit & Push — has to be refreshed here too. This is the
+      // or pushes on the session's behalf, so the dirty/unpushed flags that
+      // raise the Info Bar's Commit & Push have to be refreshed here too. This is the
       // route a Stop during the PROMPT takes; the one in `finalizeTurn` only
       // covers a Stop that raced finalization. Publish before idle so the flag
       // has landed by the time the UI stops showing Working.
@@ -2113,9 +2113,9 @@ export class SessionExecutionService {
       if (cancelledSession) {
         yield* self.ignoreWithWarning(
           options.sessionId,
-          'Failed to sync workspaceDirty for cancelled turn',
+          'Failed to sync workspace git state for cancelled turn',
           self.tryPromise(() =>
-            self.deps.turnFinalization.syncWorkspaceDirty(options.sessionId, cancelledSession)
+            self.deps.turnFinalization.syncWorkspaceGitState(options.sessionId, cancelledSession)
           )
         );
       }
@@ -2704,9 +2704,9 @@ export class SessionExecutionService {
     } = ctx;
     const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
     const githubProject = resolveProjectGitHubRepo(project);
-    // Set once `updateSessionDiffStats` has published a fresh value, so a later
-    // cancellation check does not re-run `git status` for the same answer.
-    let workspaceDirtyPublished = false;
+    // Set once `updateSessionDiffStats` has published fresh values, so a later
+    // cancellation check does not re-run the same probes for the same answer.
+    let workspaceGitStatePublished = false;
     const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
       if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
         return false;
@@ -2715,18 +2715,24 @@ export class SessionExecutionService {
         `[${sessionId}] Turn ${turnId} was cancelled during ${stage}; skipping remaining completion post-processing`
       );
       // The rest of finalization is skipped, but the agent's edits are still on
-      // disk. `workspaceDirty` is what raises the Info Bar's Commit & Push, and
-      // nothing commits on the session's behalf, so an interrupted turn that
-      // left a stale `false` here would hide real uncommitted work behind a PR
-      // that looks current. Keep it best-effort: cancellation must still settle.
-      if (!workspaceDirtyPublished) {
+      // disk. The dirty/unpushed flags are what raise the Info Bar's Commit &
+      // Push, and nothing commits or pushes on the session's behalf, so an
+      // interrupted turn that left stale `false`s here would hide real
+      // unpublished work behind a PR that looks current. Keep it best-effort:
+      // cancellation must still settle.
+      if (!workspaceGitStatePublished) {
         try {
-          await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceDirty', async () => {
-            await this.deps.turnFinalization.syncWorkspaceDirty(sessionId, session);
-          });
+          await this.runTurnFinalizationStage(
+            sessionId,
+            turnId,
+            'syncWorkspaceGitState',
+            async () => {
+              await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
+            }
+          );
         } catch (error) {
           this.deps.logger.debug(
-            `[${sessionId}] Failed to sync workspaceDirty after cancellation: ${formatErrorMessage(error)}`
+            `[${sessionId}] Failed to sync workspace git state after cancellation: ${formatErrorMessage(error)}`
           );
         }
       }
@@ -2796,7 +2802,7 @@ export class SessionExecutionService {
           preferredBaseBranch: preferredStatsBaseBranch,
           skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
         });
-        workspaceDirtyPublished = true;
+        workspaceGitStatePublished = true;
       });
 
       if (await stopIfTurnCancelled('diff recording')) {

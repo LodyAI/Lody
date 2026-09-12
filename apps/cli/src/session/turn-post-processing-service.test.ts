@@ -200,6 +200,7 @@ describe('TurnPostProcessingService', () => {
         if (key === 'merge-base origin/main HEAD') return 'merge-base\n';
         if (key === 'diff --numstat --no-renames merge-base HEAD') return '2\t1\tsrc/app.ts\n';
         if (key === 'ls-files --others --exclude-standard -z') return '';
+        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
         throw new Error(`Unexpected git args: ${key}`);
       }),
     } as unknown as ISession;
@@ -216,10 +217,10 @@ describe('TurnPostProcessingService', () => {
     );
   });
 
-  it('publishes only workspaceDirty when a cancelled turn skips diff stats', async () => {
+  it('publishes the git-state flags without diff stats when a cancelled turn skips them', async () => {
     // A cancelled turn bails out of finalization before diff stats run, but the
-    // agent's edits are still on disk and nothing commits them now. The probe
-    // must still reach the owner meta, and must not invent diffStats.
+    // agent's edits are still on disk. Both flags must still reach the owner
+    // meta, and the patch must not invent diffStats.
     const logger = createLogger();
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({ project: githubProject })),
@@ -233,17 +234,80 @@ describe('TurnPostProcessingService', () => {
     const exec = vi.fn(async (_command: string, args: string[]) => {
       const key = args.join(' ');
       if (key === 'status --porcelain') return ' M src/app.ts\n';
+      if (key === 'rev-list @{u}..HEAD --count') return '0\n';
       throw new Error(`Unexpected git args: ${key}`);
     });
     const session = { getWorkdir: () => '/repo', exec } as unknown as ISession;
 
-    await service.syncWorkspaceDirty(sessionId, session);
+    await service.syncWorkspaceGitState(sessionId, session);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', {
+      workspaceDirty: true,
+      workspaceUnpushed: false,
+    });
+  });
+
+  it('reports a clean tree that still holds unpushed commits', async () => {
+    // The regression guard: `git status` goes clean the moment the agent commits,
+    // so a commit whose push failed would otherwise publish an all-clear and let
+    // the Info Bar offer Merge against a PR head that is a commit behind.
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: githubProject })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const session = {
+      getWorkdir: () => '/repo',
+      exec: vi.fn(async (_command: string, args: string[]) => {
+        const key = args.join(' ');
+        if (key === 'status --porcelain') return '';
+        if (key === 'rev-list @{u}..HEAD --count') return '2\n';
+        throw new Error(`Unexpected git args: ${key}`);
+      }),
+    } as unknown as ISession;
+
+    await service.syncWorkspaceGitState(sessionId, session);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', {
+      workspaceDirty: false,
+      workspaceUnpushed: true,
+    });
+  });
+
+  it('keeps the two probes independent when only one is inconclusive', async () => {
+    // No upstream configured makes `@{u}` throw. That must not suppress the
+    // dirty answer, and must not publish a stale `workspaceUnpushed: false`.
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: githubProject })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const session = {
+      getWorkdir: () => '/repo',
+      exec: vi.fn(async (_command: string, args: string[]) => {
+        const key = args.join(' ');
+        if (key === 'status --porcelain') return ' M src/app.ts\n';
+        throw new Error('fatal: no upstream configured for branch');
+      }),
+    } as unknown as ISession;
+
+    await service.syncWorkspaceGitState(sessionId, session);
 
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', { workspaceDirty: true });
   });
 
   it('inherits the owner project when a child tab carries no ProjectRef', async () => {
-    // Cancellation reaches syncWorkspaceDirty from call sites that pass no
+    // Cancellation reaches syncWorkspaceGitState from call sites that pass no
     // project, so the gate reads meta. A child Tab shares the owner's checkout
     // and may not repeat the binding — falling back to the owner keeps Side
     // Chats from silently losing the dirty signal.
@@ -265,15 +329,18 @@ describe('TurnPostProcessingService', () => {
     const session = {
       getWorkdir: () => '/repo',
       exec: vi.fn(async (_command: string, args: string[]) => {
-        if (args.join(' ') === 'status --porcelain') return ' M src/app.ts\n';
-        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+        const key = args.join(' ');
+        if (key === 'status --porcelain') return ' M src/app.ts\n';
+        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
+        throw new Error(`Unexpected git args: ${key}`);
       }),
     } as unknown as ISession;
 
-    await service.syncWorkspaceDirty(sessionId, session);
+    await service.syncWorkspaceGitState(sessionId, session);
 
     expect(upsertDocMeta).toHaveBeenCalledWith('session-parent-session-1', {
       workspaceDirty: true,
+      workspaceUnpushed: false,
     });
   });
 
@@ -299,14 +366,19 @@ describe('TurnPostProcessingService', () => {
       const session = {
         getWorkdir: () => '/repo',
         exec: vi.fn(async (_command: string, args: string[]) => {
-          if (args.join(' ') === 'status --porcelain') return ' M src/app.ts\n';
-          throw new Error(`Unexpected git args: ${args.join(' ')}`);
+          const key = args.join(' ');
+          if (key === 'status --porcelain') return ' M src/app.ts\n';
+          if (key === 'rev-list @{u}..HEAD --count') return '0\n';
+          throw new Error(`Unexpected git args: ${key}`);
         }),
       } as unknown as ISession;
 
-      await service.syncWorkspaceDirty(sessionId, session);
+      await service.syncWorkspaceGitState(sessionId, session);
 
-      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', { workspaceDirty: true });
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', {
+        workspaceDirty: true,
+        workspaceUnpushed: false,
+      });
     }
   );
 
@@ -328,7 +400,7 @@ describe('TurnPostProcessingService', () => {
     const exec = vi.fn();
     const session = { getWorkdir: () => '/repo', exec } as unknown as ISession;
 
-    await service.syncWorkspaceDirty(sessionId, session);
+    await service.syncWorkspaceGitState(sessionId, session);
 
     expect(exec).not.toHaveBeenCalled();
     expect(upsertDocMeta).not.toHaveBeenCalled();
@@ -352,7 +424,7 @@ describe('TurnPostProcessingService', () => {
       }),
     } as unknown as ISession;
 
-    await service.syncWorkspaceDirty(sessionId, session);
+    await service.syncWorkspaceGitState(sessionId, session);
 
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
@@ -383,6 +455,7 @@ describe('TurnPostProcessingService', () => {
         if (key === 'diff --numstat --no-renames turn-base') return '99\t88\twrong.ts\n';
         if (key === 'ls-files --others --exclude-standard -z') return '';
         if (key === 'status --porcelain') return ' M src/app.ts\n';
+        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
         throw new Error(`Unexpected git args: ${key}`);
       }),
     } as unknown as ISession;

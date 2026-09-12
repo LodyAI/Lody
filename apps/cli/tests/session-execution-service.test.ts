@@ -175,7 +175,7 @@ const createBaseDeps = (
       syncSessionBranchName: vi.fn(async () => null),
       updateSessionDiffStats: vi.fn(async () => []),
       detectAndAssociatePR: vi.fn(async () => null),
-      syncWorkspaceDirty: vi.fn(async () => {}),
+      syncWorkspaceGitState: vi.fn(async () => {}),
       notifySessionCompleted: vi.fn(async () => {}),
     },
     recordChatFailure: vi.fn(async () => {}),
@@ -2417,7 +2417,7 @@ describe('SessionExecutionService', () => {
         updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
         refreshCodeCollabSharedState,
         detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
-        syncWorkspaceDirty: vi.fn(async () => {}),
+        syncWorkspaceGitState: vi.fn(async () => {}),
         notifySessionCompleted: vi.fn(async () => {}),
       },
     });
@@ -5438,9 +5438,9 @@ describe('SessionExecutionService', () => {
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     // Stopping mid-prompt is the common Stop, and it never reaches finalizeTurn.
-    // The agent's edits are still on disk with nothing to commit them, so this
-    // route has to refresh the flag that raises the Info Bar's Commit & Push.
-    expect(deps.turnFinalization.syncWorkspaceDirty).toHaveBeenCalledWith(
+    // The agent's work is still unpublished with nothing to commit or push it,
+    // so this route has to refresh the flags that raise Commit & Push.
+    expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-prompt-cancel',
       expect.anything()
     );
@@ -5905,7 +5905,7 @@ describe('SessionExecutionService', () => {
         syncSessionBranchName: vi.fn(async () => null),
         updateSessionDiffStats: vi.fn(async () => []),
         detectAndAssociatePR: vi.fn(async () => null),
-        syncWorkspaceDirty: vi.fn(async () => {}),
+        syncWorkspaceGitState: vi.fn(async () => {}),
         notifySessionCompleted: vi.fn(async () => {}),
       },
       processMessageQueue: vi.fn(async () => {}),
@@ -5932,9 +5932,9 @@ describe('SessionExecutionService', () => {
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     // The rest of finalization is skipped, but the interrupted turn may have
-    // left edits on disk and nothing commits them now — the dirty probe is the
-    // only thing that raises the Info Bar's Commit & Push, so it still runs.
-    expect(deps.turnFinalization.syncWorkspaceDirty).toHaveBeenCalledWith(
+    // left unpublished work and nothing commits or pushes it now — the git-state
+    // probe is the only thing that raises Commit & Push, so it still runs.
+    expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-finalizing-cancel',
       expect.anything()
     );

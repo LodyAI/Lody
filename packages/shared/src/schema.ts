@@ -893,6 +893,14 @@ export type SessionMeta = {
   diffStats?: SessionDiffStats;
   /** True if workspace has uncommitted changes (staged or unstaged) */
   workspaceDirty?: boolean;
+  /**
+   * True if the working branch has local commits its upstream lacks. Tracked
+   * separately from `workspaceDirty` because they go stale at different moments:
+   * committing clears `workspaceDirty` while the remote — and therefore the PR
+   * head a reviewer reads — is still behind. Consumers that ask "is the PR head
+   * the author's latest work?" must check BOTH.
+   */
+  workspaceUnpushed?: boolean;
   /** If set, this session is a child tab of another session and shares its workspace directory. */
   parentSessionId?: SessionId;
   /**

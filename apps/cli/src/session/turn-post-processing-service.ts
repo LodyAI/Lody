@@ -11,6 +11,7 @@ import {
 
 import {
   getGitDiffStats,
+  hasUnpushedCommits,
   isWorkspaceDirty,
   type GitRunner,
   type GitWorkingTreeDiffBaseline,
@@ -122,16 +123,16 @@ export class TurnPostProcessingService {
   }
 
   /**
-   * Probe the worktree and publish `SessionMeta.workspaceDirty` on the OWNER
-   * session, without touching diff stats.
+   * Probe the checkout and publish `SessionMeta.workspaceDirty` +
+   * `workspaceUnpushed` on the OWNER session, without touching diff stats.
    *
-   * A CANCELLED turn skips the rest of finalization, but the agent's edits are
-   * still on disk. `workspaceDirty` is the only signal that raises the Info
-   * Bar's `Commit & Push` action, and nothing commits on the session's behalf
-   * anymore, so leaving a stale `false` there would hide real uncommitted work
-   * behind a PR that looks current.
+   * A CANCELLED turn skips the rest of finalization, but whatever the agent
+   * reached is still on disk. These two flags are the only signals that raise
+   * the Info Bar's `Commit & Push` action, and nothing commits or pushes on the
+   * session's behalf anymore, so leaving stale `false`s here would hide real
+   * unpublished work behind a PR that looks current.
    */
-  async syncWorkspaceDirty(sessionId: SessionId, session: ISession): Promise<void> {
+  async syncWorkspaceGitState(sessionId: SessionId, session: ISession): Promise<void> {
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const activeMeta = await sessionDoc.getMetaState();
@@ -146,39 +147,40 @@ export class TurnPostProcessingService {
         return;
       }
       const runGit: GitRunner = (args) => session.exec('git', args, session.getWorkdir(), false);
-      const workspaceDirty = await this.probeWorkspaceDirty(sessionId, runGit);
-      if (workspaceDirty === undefined) {
+      const metaPatch = await this.probeWorkspaceGitState(sessionId, runGit);
+      if (Object.keys(metaPatch).length === 0) {
         return;
       }
-      await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, {
-        workspaceDirty,
-      });
+      await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(
-        `[${sessionId}] Failed to persist workspaceDirty: ${formatErrorMessage(error)}`
+        `[${sessionId}] Failed to persist workspace git state: ${formatErrorMessage(error)}`
       );
     }
   }
 
   /**
-   * `undefined` means the probe was inconclusive (git could not be queried).
-   * Callers must leave the durable value alone in that case rather than writing
-   * a stale `false`.
+   * The publishable subset of `{workspaceDirty, workspaceUnpushed}`.
+   *
+   * An inconclusive probe (git could not be queried) contributes NO key, so the
+   * durable value survives instead of being overwritten with a stale `false`.
+   * The two probes are independent: one failing must not suppress the other.
    */
-  private async probeWorkspaceDirty(
+  private async probeWorkspaceGitState(
     sessionId: SessionId,
     runGit: GitRunner
-  ): Promise<boolean | undefined> {
-    try {
-      const workspaceDirty = await isWorkspaceDirty(runGit);
-      this.deps.logger.debug(`[${sessionId}] Workspace dirty: ${workspaceDirty}`);
-      return workspaceDirty;
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to check workspace dirty state: ${formatErrorMessage(error)}`
-      );
-      return undefined;
-    }
+  ): Promise<Pick<Partial<SessionMeta>, 'workspaceDirty' | 'workspaceUnpushed'>> {
+    const [workspaceDirty, workspaceUnpushed] = await Promise.all([
+      isWorkspaceDirty(runGit),
+      hasUnpushedCommits(runGit),
+    ]);
+    this.deps.logger.debug(
+      `[${sessionId}] Workspace dirty: ${workspaceDirty}, unpushed: ${workspaceUnpushed}`
+    );
+    return {
+      ...(workspaceDirty !== undefined ? { workspaceDirty } : {}),
+      ...(workspaceUnpushed !== undefined ? { workspaceUnpushed } : {}),
+    };
   }
 
   async updateSessionDiffStats(
@@ -217,19 +219,16 @@ export class TurnPostProcessingService {
       this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
     }
 
-    const workspaceDirty = await this.probeWorkspaceDirty(sessionId, runGit);
+    // Only conclusive probes contribute a key. `undefined` means git could not be
+    // queried (transient spawn failure); overwriting the durable value with a
+    // stale `false` would hide Create PR / Commit & Push on a session that really
+    // does have unpublished work, until a later turn recomputes it.
+    const workspaceGitState = await this.probeWorkspaceGitState(sessionId, runGit);
 
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      const metaPatch: Partial<SessionMeta> = { diffStats };
-      // Only persist workspaceDirty when the probe was conclusive. `undefined`
-      // means git could not be queried (transient spawn failure); overwriting the
-      // durable value with a stale `false` would hide Create PR / Commit & Push on
-      // a genuinely dirty session until a later turn recomputes it.
-      if (workspaceDirty !== undefined) {
-        metaPatch.workspaceDirty = workspaceDirty;
-      }
+      const metaPatch: Partial<SessionMeta> = { diffStats, ...workspaceGitState };
       await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(

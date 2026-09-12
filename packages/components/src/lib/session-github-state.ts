@@ -17,6 +17,14 @@ export type SessionGitHubState = {
   hasExistingPr: boolean;
   workspaceDirty: boolean;
   /**
+   * Whether the branch holds work the remote does not have yet — uncommitted
+   * (`workspaceDirty`) OR committed but unpushed. This, not `workspaceDirty`
+   * alone, answers "is the PR head the author's latest work?": committing
+   * clears the dirty flag while the PR head stays behind, and offering Merge on
+   * that state lands a PR missing the local commits.
+   */
+  hasUnpublishedWork: boolean;
+  /**
    * Whether the session has any changes to base a PR on — uncommitted
    * (`workspaceDirty`) OR already committed (`diffStats.allChange > 0`). These
    * two signals come from independent writers (post-turn `git status` vs the
@@ -86,6 +94,7 @@ export const getSessionGitHubState = (
     : null;
 
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
+  const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
   const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
 
@@ -96,6 +105,7 @@ export const getSessionGitHubState = (
     canShowGitHubActions: !!repoFullName,
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
+    hasUnpublishedWork: workspaceDirty || workspaceUnpushed,
     hasChanges: workspaceDirty || hasCommittedDiff,
   };
 };

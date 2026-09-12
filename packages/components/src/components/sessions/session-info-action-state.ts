@@ -34,6 +34,7 @@ export function resolveSessionInfoBarGitHubActionIds({
   canShowGitHubActions,
   hasExistingPr,
   workspaceDirty,
+  hasUnpublishedWork,
   hasChanges,
   isAgentBusy,
   prCiState,
@@ -43,11 +44,17 @@ export function resolveSessionInfoBarGitHubActionIds({
 }: {
   canShowGitHubActions: boolean;
   hasExistingPr: boolean;
+  /** Uncommitted-only. Gates "Commit & Push" on a session with no PR yet. */
   workspaceDirty: boolean;
   /**
+   * Uncommitted OR committed-but-unpushed. Gates "Commit & Push" on a session
+   * that already has a PR, because that is the state in which the PR head is
+   * behind the author's latest work; see `getSessionGitHubState`.
+   */
+  hasUnpublishedWork: boolean;
+  /**
    * Whether there is anything to base a PR on — committed OR uncommitted. Gates
-   * "Create PR"; see `getSessionGitHubState`. Distinct from `workspaceDirty`,
-   * which is uncommitted-only and gates "Commit & Push".
+   * "Create PR"; see `getSessionGitHubState`.
    */
   hasChanges: boolean;
   isAgentBusy: boolean;
@@ -67,12 +74,17 @@ export function resolveSessionInfoBarGitHubActionIds({
     //
     // `commit-and-push` outranks conflict/CI repair and merge because it is the
     // only one that protects work the user can still lose. Turn finalization no
-    // longer auto-commits on the session's behalf (that surprised users who had
-    // not asked for a commit), so a dirty tree here means the PR head is NOT the
-    // author's latest work. Offering "Merge" first on that state invites merging
-    // a PR that is missing the changes still sitting in the worktree.
+    // longer commits or pushes on the session's behalf (that surprised users who
+    // had not asked for it), so unpublished work here means the PR head is NOT
+    // the author's latest work. Offering "Merge" first on that state invites
+    // landing a PR that is missing it.
+    //
+    // This reads `hasUnpublishedWork`, NOT `workspaceDirty`: `git status` goes
+    // clean the moment the agent commits, so a commit whose push failed would
+    // otherwise drop the action and leave Merge as the top offer against a stale
+    // remote head — the precise failure this ranking exists to prevent.
     const actions: SessionInfoBarGitHubActionId[] = [];
-    if (workspaceDirty) {
+    if (hasUnpublishedWork) {
       actions.push('commit-and-push');
     }
     if (prStatus === 'draft') {

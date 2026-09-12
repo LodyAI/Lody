@@ -8,6 +8,7 @@ const BASE_INPUT = {
   canShowGitHubActions: true,
   hasExistingPr: false,
   workspaceDirty: false,
+  hasUnpublishedWork: false,
   hasChanges: false,
   isAgentBusy: false,
 };
@@ -18,6 +19,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
         hasChanges: true,
       })
     ).toEqual(['create-pr', 'create-draft-pr', 'commit-and-push']);
@@ -46,6 +48,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
       })
     ).toEqual(['commit-and-push']);
   });
@@ -65,6 +68,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
         prStatus: 'draft',
         prMergeState: 'd',
         prCiState: 'f',
@@ -128,6 +132,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       ...BASE_INPUT,
       hasExistingPr: true,
       workspaceDirty: true,
+      hasUnpublishedWork: true,
       prStatus: 'open' as const,
     };
 
@@ -149,12 +154,46 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
     ).toEqual(['commit-and-push', 'merge']);
   });
 
+  it('keeps Commit & Push ahead of Merge after a commit whose push did not land', () => {
+    // The regression this guards: `workspaceDirty` comes from `git status`, so it
+    // goes false the instant the agent commits. A commit whose push failed leaves
+    // a clean tree while the PR head is still the previous commit — and with only
+    // the dirty flag the bar would drop the action and offer Merge, landing a PR
+    // that is missing the local commits.
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...BASE_INPUT,
+        hasExistingPr: true,
+        workspaceDirty: false,
+        hasUnpublishedWork: true,
+        prStatus: 'open',
+        prMergeState: 'c',
+        prCiState: 's',
+        prReadiness: 'y',
+      })
+    ).toEqual(['commit-and-push', 'merge']);
+  });
+
+  it('offers Merge alone once the branch is committed AND pushed', () => {
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...BASE_INPUT,
+        hasExistingPr: true,
+        prStatus: 'open',
+        prMergeState: 'c',
+        prCiState: 's',
+        prReadiness: 'y',
+      })
+    ).toEqual(['merge']);
+  });
+
   it('offers no PR action after the PR is terminal', () => {
     expect(
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
         prStatus: 'merged',
         prReadiness: 'y',
       })
@@ -166,6 +205,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
         isAgentBusy: true,
       })
     ).toEqual([]);
@@ -173,6 +213,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
+        hasUnpublishedWork: true,
         canShowGitHubActions: false,
       })
     ).toEqual([]);

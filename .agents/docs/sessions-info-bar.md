@@ -81,13 +81,20 @@ labelClassName`) so the stage diffstat never clips. Wired from
   including a direct Local Project with a resolved GitHub repository. For an open
   associated PR, `resolveSessionInfoBarGitHubActionIds` returns EVERY applicable
   action in priority order rather than picking one, because the collapse below keeps
-  the rest reachable. `Commit & Push` is the TOP priority whenever
-  `SessionMeta.workspaceDirty` is set — ahead of `Resolve Conflicts`, `Fix CI Errors`,
+  the rest reachable. `Commit & Push` is the TOP priority whenever the session has
+  UNPUBLISHED WORK — ahead of `Resolve Conflicts`, `Fix CI Errors`,
   `Ready for review`, and Merge. That ranking is load-bearing, not cosmetic: turn
-  finalization no longer auto-commits on the session's behalf (see
-  `apps/cli/src/session/turn-post-processing-service.ts`), so a dirty tree means the
-  PR head is NOT the author's latest work, and this action item is the only signal
-  that stops a user from merging or reviewing a stale PR. Below it, conflicts show
+  finalization no longer commits or pushes on the session's behalf (see
+  `apps/cli/src/session/turn-post-processing-service.ts`), so unpublished work means
+  the PR head is NOT the author's latest work, and this action item is the only signal
+  that stops a user from merging or reviewing a stale PR.
+  "Unpublished" is `SessionMeta.workspaceDirty` OR `workspaceUnpushed`, combined by
+  `getSessionGitHubState` into `hasUnpublishedWork`. BOTH are required and neither is
+  redundant: `workspaceDirty` comes from `git status --porcelain`, so it goes false the
+  instant the agent commits, while a commit whose push failed leaves the PR head a
+  commit behind. Gating this action on `workspaceDirty` alone drops it exactly there
+  and promotes Merge against a stale remote head. `workspaceDirty` alone still gates
+  the no-PR `Commit & Push`, where there is no remote branch to be behind. Below it, conflicts show
   `Resolve Conflicts` (an immediate agent prompt), failed/error CI shows
   `Fix CI Errors` (refresh details, include a bounded failed-check snapshot, then send
   an agent prompt), and proven readiness shows the shared Merge split-button. Its

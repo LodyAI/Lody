@@ -11,9 +11,10 @@ Translation: current
 执行额外的、用户没有要求过的 commit 与 push 回合。这种由机器发起的写入让那些
 本来在做别的事情的用户感到意外，而且提交的是他们尚未决定保留的工作。现在这项
 约束从机器移到了 Create PR 的提示里：提示要求 Agent 在每轮结束时提交并推送，
-用户可以在对话中覆盖它。原有的 `SessionMeta.workspaceDirty` 探测成为可见的兜底
-信号——回合结束时工作区仍为脏，Info Bar 就把 `Commit & Push` 作为最高优先级的
-action item 显示出来，排在冲突修复、CI 修复和 Merge 之前。提示的约束力弱于强制
+用户可以在对话中覆盖它。`SessionMeta.workspaceDirty` 与 `workspaceUnpushed` 两个
+探测成为可见的兜底信号——回合结束时仍有未发布的工作，Info Bar 就把
+`Commit & Push` 作为最高优先级的 action item 显示出来，排在冲突修复、CI 修复和
+Merge 之前。提示的约束力弱于强制
 钩子，因此残留风险是 Agent 忽略它；而把优先级改成这样的全部意义，正是让这种
 情况变得可见，而不是被静默纠正。
 
@@ -44,11 +45,10 @@ GitHub 会话回合结束后运行。它执行 `git status --porcelain`，发现
    文本，两条路径因此无法各自漂移。
 2. **信号。** `updateSessionDiffStats` 原本就会探测工作区并把
    `SessionMeta.workspaceDirty` 写到 OWNER 会话的 doc meta 上——也就是承载
-   `pullRequests` 和轮询器 `pullRequestState` 的同一个 entry。它的语义没有改变，
-   现在是回合结束后唯一的 git 工作；探测本身只是被抽成可复用的
-   `probeWorkspaceDirty` 供下面的取消路径使用。它对不确定的结果保持保守：
-   `git` 的瞬时失败会保留原有的持久值，而不是把真实的 `dirty=true` 覆盖成过期的
-   `false`。
+   `pullRequests` 和轮询器 `pullRequestState` 的同一个 entry。它现在还会写
+   `workspaceUnpushed`（见下方的更正），并且是回合结束后唯一的 git 工作。两个探测
+   对不确定的结果都保持保守：`git` 的瞬时失败不贡献任何 key，因此持久值会被保留，
+   而不是被覆盖成过期的 `false`。两者相互独立——其中一个失败不能压制另一个。
 3. **Action item。** `resolveSessionInfoBarGitHubActionIds` 现在按优先级返回所有
    适用的 action，而不是只选一个；工作区为脏时 `commit-and-push` 排在最前。规则
    与完整排序见 [sessions-info-bar.md](../../../docs/sessions-info-bar.md)。
@@ -79,10 +79,36 @@ owner 的，因此不重复声明绑定的 Side Chat 依然能上报它共享的
 diff stats 之后的取消检查重复执行同一次探测。回退任何一处生产代码的保护都会
 让对应测试失败。
 
+### 更正：脏工作区只是信号的一半
+
+本次改动的第一版只用 `workspaceDirty` 作为判据，并且连同使用它的自动提交循环一起
+删掉了 `hasUnpushedCommits`。Review 指出这从另一侧重新打开了同一个洞，指出得没错。
+
+`workspaceDirty` 来自 `git status --porcelain`，因此 Agent 一提交它就变成 false。
+如果 Agent 提交了但推送失败或被跳过，工作区是干净的、标志是 `false`、bar 不显示
+`Commit & Push`——而由于轮询器的 readiness 反映的是**远端** head，它会照常提供
+Merge。此时合并会落地一个缺少本地提交的 PR。这正是本次改动想要防止的"用户以为
+PR 是最新的"那类失败，只是从另一条路径到达；而且比旧行为更糟：被删掉的自动提交
+循环原本有第二个阶段，专门提示 Agent 推送未推送的提交。
+
+`hasUnpushedCommits` 已恢复（`git rev-list @{u}..HEAD --count`），并以
+`SessionMeta.workspaceUnpushed` 发布。`getSessionGitHubState` 把两者合成
+`hasUnpublishedWork`，关联 PR 时的 `Commit & Push` 以它为判据。没有 PR 时的
+`Commit & Push` 仍只看 `workspaceDirty`——没有 PR 就没有会落后的远端分支。
+
+选择本地的 `@{u}..HEAD` 计数而非与 PR head 比较：它不需要 API 调用、不会过期，而且
+PR 轮询器会刻意从 `pullRequests` entry 中剥掉 `headCommitSha`，那种比较没有可靠
+输入。没有 upstream 的情况返回 `undefined`（不确定，不写入）而不是 `false`，因为
+对一个没有跟踪引用的分支报告"没有东西要推"，正是此处要修复的那种虚假的"一切正常"。
+
+`COMMIT_AND_PUSH_PROMPT` 也做了相应放宽：该 action 现在可能在干净工作区上触发，
+所以提示改为"没有可提交内容时跳过提交"，并要求推送失败时明确说明而不是静默停止。
+两个 locale 条目同步更新了——UI 发送的是本地化字符串，只改常量在生产中是空操作。
+
 ## 为什么 Commit & Push 优先于 Merge
 
-这是本次改动中真正承重的部分。没有了自动提交钩子，脏的工作区就意味着 PR head
-不是作者最新的工作。旧的排序把 `Resolve Conflicts`、`Fix CI Errors` 和 Merge 排在
+这是本次改动中真正承重的部分。没有了自动提交钩子，脏的工作区——或一个未推送的
+提交——就意味着 PR head 不是作者最新的工作。旧的排序把 `Resolve Conflicts`、`Fix CI Errors` 和 Merge 排在
 `Commit & Push` 之前，而这三者都作用于已推送的 head：合并会落地一个缺少工作区
 改动的 PR，"修复 CI"则会针对一个已不能代表该分支的提交进行推理。把
 `Commit & Push` 提到最前，等于把唯一能让其余三者变得有意义的操作放在最前面。
@@ -105,10 +131,13 @@ merge 重新排到最前时它就会回来。
 - **把脏状态加进每个 PR 的 `pullRequestState` entry。** 否决：脏是会话 checkout 的
   属性而非 PR 的属性——一个关联了两个 PR 的会话只有一个工作区——而且那些
   entry 有明确的 ≤50B 预算。
+- **把"未推送"并入 `workspaceDirty` 合成一个标志。** 否决：两者失效的时刻不同，
+  而一个以工作区命名的标志会悄悄改变 `hasChanges`（Create PR 的判据）的含义。
+  两个语义诚实的布尔值只多花一个字节的 meta。
 
 ## 移除的内容及其后果
 
-`AutoPromptRunner` 及其测试、`hasUnpushedCommits`、`markPromptWorkingStarted`、
+`AutoPromptRunner` 及其测试、`markPromptWorkingStarted`、
 `onAutoPromptStart` / `onAutoPromptEnd` 回调、`TurnRuntimeState.autoPromptInFlight`
 以及 `ExecutionSnapshot.hasActiveAutomation` 都已删除；钩子移除后没有任何代码再
 设置或读取它们。`session-edit-and-resend-service.ts` 曾在改写持久历史前的三处
@@ -136,7 +165,7 @@ shim 在此沙盒中退出码为 1，且它的依赖没有一个在本次改动�
 action item 保持罕见。这是一个本仓库任何测试都无法回答的提示遵从性问题，也正是
 UI 信号与提示一同发布、而不是滞后发布的原因。
 
-信号本身的已知局限。`workspaceDirty` 只在回合到达 finalization 或两条取消路径
+信号本身的已知局限。两个标志只在回合到达 finalization 或两条取消路径
 之一时刷新，且只针对能解析出 GitHub 仓库的会话。因此当回合以抛错结束时它不会
 刷新（Agent/模型错误会在 `finalizeTurn` 之前中断），被新 prompt 顶替的 yielded
 回合同样不会——不过接替它的回合自身的 finalization 会覆盖这种情况。一个留下了
