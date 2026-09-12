@@ -599,6 +599,20 @@ export class AuthService {
     return null
   }
 
+  /** Main-only lease for local E2EE identity selection, not Org authorization. */
+  async getDeviceIdentityAccount() {
+    const generation = this.authGeneration
+    const response = await this.getSession()
+    const { userId } = readSessionFromResponse(response)
+    if (!userId || generation !== this.authGeneration) throw new Error('e2ee-account-required')
+    return {
+      userId,
+      assertCurrent: () => {
+        if (generation !== this.authGeneration) throw new Error('e2ee-account-changed')
+      }
+    }
+  }
+
   async getSession(options?: unknown) {
     const generation = this.authGeneration
     const parsedOptions = parseSessionQueryOptions(options)

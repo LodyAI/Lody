@@ -135,6 +135,32 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  e2eeRecovery: {
+    availability: defineCloudQuery<Record<string, never>, { enabled: boolean }>(
+      'cloudAccount',
+      'e2eeRecovery:availability'
+    ),
+    put: defineCloudMutation<
+      {
+        accountId: string;
+        backupId: string;
+        identity: string;
+        revision: number;
+        ciphertext: ArrayBuffer;
+      },
+      { backupId: string }
+    >('cloudAccount', 'e2eeRecovery:put'),
+    get: defineCloudQuery<
+      { backupId: string; revision?: number },
+      {
+        accountId: string;
+        backupId: string;
+        identity: string;
+        revision: number;
+        ciphertext: ArrayBuffer;
+      } | null
+    >('cloudAccount', 'e2eeRecovery:get'),
+  },
   sessionSharing: {
     requestVerification: mutation<ConvexApi['sessionSharing']['requestVerification']>(
       'sessionSharing:requestVerification'

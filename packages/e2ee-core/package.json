@@ -1,0 +1,41 @@
+{
+  "name": "@lody/e2ee-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node-store": "./src/node-store.ts",
+    "./node-epoch-store": "./src/node-epoch-store.ts",
+    "./node-history-store": "./src/node-history-store.ts",
+    "./node-device-store": "./src/node-device-store.ts",
+    "./node-user-store": "./src/node-user-store.ts",
+    "./node-received-key-store": "./src/node-received-key-store.ts",
+    "./node-key-outbox": "./src/node-key-outbox.ts",
+    "./streams": "./src/streams.ts",
+    "./streams-content": "./src/streams-content.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test",
+    "format": "prettier --write src test package.json tsconfig.json README.md AGENTS.md",
+    "format:check": "prettier --check src test package.json tsconfig.json README.md AGENTS.md"
+  },
+  "dependencies": {
+    "@hpke/chacha20poly1305": "1.8.0",
+    "@hpke/core": "1.9.0",
+    "@loro-dev/streams-client": "catalog:",
+    "@loro-dev/streams-crdt": "catalog:",
+    "@noble/ciphers": "2.1.1",
+    "@noble/ed25519": "3.2.0"
+  },
+  "devDependencies": {
+    "@loro-dev/flock-wasm": "catalog:",
+    "@types/node": "catalog:",
+    "loro-crdt": "catalog:",
+    "tsx": "4.23.13",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  }
+}

@@ -100,6 +100,11 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Local file resources
 
+- `services/e2ee-key-protection*` is opt-in main-only epoch/device-key wrapping, not
+  persistence or authorization. Reject plaintext-auth mode, unavailable/unknown
+  OS storage and Linux `basic_text`; never add a plaintext fallback or expose raw
+  keys via IPC. `e2ee-device-service` and `e2ee-user-service` return public descriptors under a main-owned account lease; local mode rejects before auth. See the [E2EE draft](../../../specs/e2ee-control-log.zh.md).
+
 - CLI `file/resolve-local` owns session/path resolution; Electron owns file IO. Never
   put local file bytes back into the daemon's JSON response or expose filesystem
   paths in resource URLs. `local-file-resource.ts` issues opaque renderer-lifetime

@@ -1,6 +1,8 @@
 import type { BrowserWindow } from 'electron'
 import type { AppUpdaterService } from '../services/app-updater-service'
 import type { AuthService } from '../services/auth-service'
+import type { E2eeDeviceService } from '../services/e2ee-device-service'
+import type { E2eeUserService } from '../services/e2ee-user-service'
 import type { CliService } from '../services/cli-service'
 import type { GlobalShortcutsService } from '../services/global-shortcuts-service'
 import type { LoroDataPlaneRelay } from '../services/loro-data-plane-relay'
@@ -13,6 +15,8 @@ export type IpcServiceDeps = {
   cliService: CliService
   appUpdaterService: AppUpdaterService
   authService: AuthService
+  e2eeDeviceService: E2eeDeviceService
+  e2eeUserService: E2eeUserService
   notificationService: NotificationService
   terminalRelay: TerminalRelay
   publicBrowserService: PublicBrowserService

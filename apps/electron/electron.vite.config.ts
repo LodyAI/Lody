@@ -100,7 +100,7 @@ export default defineConfig(({ mode }) => {
       define: viteEnvDefine,
       build: {
         externalizeDeps: {
-          exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect']
+          exclude: ['@lody/cli-supervisor', '@lody/shared', '@lody/e2ee-core', 'effect']
         }
       }
     },

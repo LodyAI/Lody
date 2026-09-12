@@ -1,4 +1,6 @@
 import { productWindows } from '../../window-state'
+import { BrowserWindow, dialog } from 'electron'
+import { saveRecoveryFile, readRecoveryFile } from '../../services/e2ee-recovery-file-io'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   ElectronAuthCallbackInputSchema,
@@ -21,6 +23,130 @@ const workspaceSelections = new WeakMap<
 
 export class AuthIpc extends IpcService {
   static override readonly groupName = 'auth'
+
+  private recoveryFileSelector() {
+    const event = getIpcContext().event
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) throw new Error('e2ee-window-unavailable')
+    return async (assertCurrent: () => void) => {
+      const result = await dialog.showOpenDialog(window, {
+        properties: ['openFile'],
+        filters: [{ name: 'Lody recovery file', extensions: ['json'] }]
+      })
+      assertProductWindowSender(event)
+      assertCurrent()
+      if (result.canceled) return null
+      if (result.filePaths.length !== 1) throw new Error('invalid-recovery-file')
+      return await readRecoveryFile(result.filePaths[0], () => {
+        assertProductWindowSender(event)
+        assertCurrent()
+      })
+    }
+  }
+
+  @IpcMethod()
+  async selectRecoveryBackup() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeUserService.selectRecoveryBackup(
+      this.recoveryFileSelector()
+    )
+  }
+
+  @IpcMethod()
+  async restoreRecoveryBackup(backup: {
+    accountId: string
+    backupId: string
+    identity: string
+    revision: number
+    ciphertext: Uint8Array
+  }) {
+    assertAuthSender()
+    if (
+      !backup ||
+      typeof backup !== 'object' ||
+      typeof backup.accountId !== 'string' ||
+      typeof backup.backupId !== 'string' ||
+      typeof backup.identity !== 'string' ||
+      typeof backup.revision !== 'number' ||
+      !(backup.ciphertext instanceof Uint8Array)
+    )
+      throw new Error('invalid-recovery-backup')
+    return await getIpcServiceDeps().e2eeUserService.restoreRecoveryBackup(
+      backup,
+      this.recoveryFileSelector()
+    )
+  }
+
+  @IpcMethod()
+  async verifyRecoveryBackup(revision: unknown, ciphertext: unknown) {
+    assertAuthSender()
+    if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0)
+      throw new Error('invalid-recovery-revision')
+    if (!(ciphertext instanceof Uint8Array) || ciphertext.length === 0 || ciphertext.length > 2346)
+      throw new Error('invalid-recovery-backup')
+    return await getIpcServiceDeps().e2eeUserService.verifyRecoveryBackup(
+      revision,
+      ciphertext,
+      this.recoveryFileSelector()
+    )
+  }
+
+  @IpcMethod()
+  async exportRecoveryBackup(revision: unknown) {
+    assertAuthSender()
+    if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0)
+      throw new Error('invalid-recovery-revision')
+    const event = getIpcContext().event
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) throw new Error('e2ee-window-unavailable')
+    return await getIpcServiceDeps().e2eeUserService.exportRecoveryBackup(
+      revision,
+      async (file, backupId, assertCurrent) => {
+        const result = await dialog.showSaveDialog(window, {
+          defaultPath: `lody-recovery-${backupId}.json`,
+          filters: [{ name: 'Lody recovery file', extensions: ['json'] }]
+        })
+        assertProductWindowSender(event)
+        assertCurrent()
+        if (result.canceled || !result.filePath) return false
+        await saveRecoveryFile(result.filePath, file, () => {
+          assertProductWindowSender(event)
+          assertCurrent()
+        })
+        return true
+      }
+    )
+  }
+
+  @IpcMethod()
+  async createUserIdentity() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeUserService.create()
+  }
+
+  @IpcMethod()
+  async getUserIdentity() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeUserService.load()
+  }
+
+  @IpcMethod()
+  async initializeDeviceIdentity() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeDeviceService.initialize()
+  }
+
+  @IpcMethod()
+  async createDeviceIdentity() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeDeviceService.create()
+  }
+
+  @IpcMethod()
+  async getDeviceIdentity() {
+    assertAuthSender()
+    return await getIpcServiceDeps().e2eeDeviceService.load()
+  }
 
   @IpcMethod()
   async completeCallback(payload: ElectronAuthCallbackInput) {

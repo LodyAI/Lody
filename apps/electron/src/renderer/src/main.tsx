@@ -22,6 +22,7 @@ import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive 
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './desktop-devbar'
+import { DeviceIdentityInitializer } from './device-identity-initializer'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -174,6 +175,7 @@ try {
       <RendererCommitSentinel />
       <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
         <Provider store={jotaiStore}>
+          {import.meta.env.VITE_LODY_PLATFORM === 'cloud' && <DeviceIdentityInitializer />}
           <RouterProvider router={router} />
         </Provider>
       </ErrorBoundary>

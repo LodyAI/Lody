@@ -5,6 +5,7 @@ import {
 import { app, BrowserWindow, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
+import { join } from 'node:path'
 import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
@@ -18,7 +19,13 @@ import { TerminalRelay } from './services/terminal-relay'
 import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
 import { NotificationService } from './services/notification-service'
 import { AuthService } from './services/auth-service'
-import { authClient } from './auth'
+import { authClient, authBaseURL } from './auth'
+import { E2eeDeviceService } from './services/e2ee-device-service'
+import {
+  createElectronDeviceProtection,
+  createElectronUserProtection
+} from './services/e2ee-key-protection'
+import { E2eeUserService } from './services/e2ee-user-service'
 import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
 import { configureDevbarDiagnostics } from './services/devbar-service'
@@ -195,6 +202,20 @@ if (hasSingleInstanceLock) {
       protocol: LODY_PROTOCOL
     })
     const authService = new AuthService()
+    const e2eeUserService = new E2eeUserService({
+      enabled: !isLocalPlatform(),
+      directory: join(app.getPath('userData'), 'e2ee-users'),
+      authOrigin: authBaseURL,
+      account: () => authService.getDeviceIdentityAccount(),
+      protection: createElectronUserProtection()
+    })
+    const e2eeDeviceService = new E2eeDeviceService({
+      enabled: !isLocalPlatform(),
+      directory: join(app.getPath('userData'), 'e2ee-devices'),
+      authOrigin: authBaseURL,
+      account: () => authService.getDeviceIdentityAccount(),
+      protection: createElectronDeviceProtection()
+    })
     const cliService = new CliService({
       resolveBootstrapSession: async () => {
         return await authService.getBootstrapSession()
@@ -261,6 +282,8 @@ if (hasSingleInstanceLock) {
       cliService,
       appUpdaterService,
       authService,
+      e2eeDeviceService,
+      e2eeUserService,
       notificationService,
       terminalRelay,
       publicBrowserService,

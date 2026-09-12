@@ -32,6 +32,7 @@ import {
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { AccountMachinesOverview } from './account-machines-overview';
+import { E2eeRecoverySettings } from './e2ee-recovery-settings';
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
@@ -635,6 +636,14 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     }
   }, [authClient, organizations, signOut, t]);
 
+  const recoverySettings =
+    surface === 'account' && currentUserId ? (
+      <E2eeRecoverySettings
+        key={rawSession?.session?.id ?? currentUserId}
+        accountId={currentUserId}
+      />
+    ) : null;
+
   if (orgLoading) {
     return (
       <AccountSettingsPure
@@ -646,6 +655,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         hasAdminPermission={false}
         members={[]}
         pendingInvitations={[]}
+        accountMachinesSlot={recoverySettings}
         onSignOut={() => {
           void signOut();
         }}
@@ -664,6 +674,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   }
 
   if (!activeOrganization) {
+    if (surface === 'account') return recoverySettings;
     return <p className="text-sm text-muted-foreground">No organization</p>;
   }
 
@@ -676,7 +687,14 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       hasAdminPermission={hasAdminPermission}
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
-      accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
+      accountMachinesSlot={
+        surface === 'account' ? (
+          <>
+            {recoverySettings}
+            <AccountMachinesOverview />
+          </>
+        ) : undefined
+      }
       workspaceOwnershipSlot={
         role === 'owner' && currentUserId ? (
           <WorkspaceOwnershipTransfer
