@@ -4,6 +4,7 @@ import {
   type SessionHistory,
   type SessionId,
 } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { createControlPlaneDoc } from './control-plane-doc';
@@ -29,7 +30,16 @@ export function createConversationSession(
       getHistory: () => mirror.getState().history as unknown as SessionHistory[],
       subscribe: (listener) => mirror.subscribe(() => listener()),
     });
-    return { mirror, history, historyWriter: mirror.historyWriter };
+    return {
+      mirror,
+      history,
+      historyWriter: mirror.historyWriter,
+      sessionData: createLoroSessionData({
+        sessionId: options.sessionId,
+        doc,
+        writer: mirror.historyWriter,
+      }),
+    };
   }
   const mirror = new Mirror({
     doc: createControlPlaneDoc(doc, { ignoredRootKeys: CONTROL_PLANE_IGNORED_ROOT_KEYS }),
@@ -40,5 +50,15 @@ export function createConversationSession(
   });
   const history = createConversationViewFromDoc(doc, options);
   // No full-history reader callback: local commands read their target directly.
-  return { mirror, history, historyWriter: createHistoryWriter(doc) };
+  const historyWriter = createHistoryWriter(doc);
+  return {
+    mirror,
+    history,
+    historyWriter,
+    sessionData: createLoroSessionData({
+      sessionId: options.sessionId,
+      doc,
+      writer: historyWriter,
+    }),
+  };
 }

@@ -1,4 +1,5 @@
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
+import type { SessionData } from '@lody/shared/session-data';
 import { atom } from 'jotai';
 import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
@@ -111,6 +112,11 @@ export type SessionDocStore = {
   readonly history: ConversationView;
   /** The only write path for turns; byte-identical to the Mirror writes it replaced. */
   readonly historyWriter: HistoryWriter;
+  /**
+   * CRDT-neutral domain seam for session history. UI business operations call
+   * its commands; `historyWriter` stays for storage-owned capabilities only.
+   */
+  readonly sessionData: SessionData;
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.

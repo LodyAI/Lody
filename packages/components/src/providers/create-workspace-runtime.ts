@@ -72,10 +72,7 @@ import {
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
-import {
-  createConversationSession,
-  isConversationViewEnabled,
-} from '@/lib/conversation-view';
+import { createConversationSession, isConversationViewEnabled } from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -3671,7 +3668,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const persistedDoc = await repo.openPersistedDoc(roomId);
     const sessionDoc = persistedDoc.doc as LoroDoc;
 
-    const { mirror, history, historyWriter } = createConversationSession(sessionDoc, {
+    const { mirror, history, historyWriter, sessionData } = createConversationSession(sessionDoc, {
       sessionId,
       windowed: isConversationViewEnabled(),
     });
@@ -3811,6 +3808,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       subscribe: (listener) => mirror.subscribe(listener as never),
       history,
       historyWriter,
+      sessionData,
       dispose: () => {
         disposed = true;
         stopSyncNow();

@@ -10,6 +10,7 @@ import {
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
 import {
@@ -150,7 +151,15 @@ describe('createDirectWorkspaceWriter', () => {
         acquireSessionStore: async () => {
           await acquired;
           // Windowed composition has no full-history Mirror callback.
-          return { historyWriter: createHistoryWriter(doc) } as never;
+          const historyWriter = createHistoryWriter(doc);
+          return {
+            historyWriter,
+            sessionData: createLoroSessionData({
+              sessionId: 'session' as never,
+              doc,
+              writer: historyWriter,
+            }),
+          } as never;
         },
         releaseSessionStoreRef: () => {},
         acquirePreviewVisualCommentStore: async () => {
@@ -236,7 +245,15 @@ describe('createDirectWorkspaceWriter', () => {
     });
     const writer = createDirectWorkspaceWriter({
       repo: {} as never,
-      acquireSessionStore: async () => mirror as never,
+      acquireSessionStore: async () =>
+        ({
+          ...mirror,
+          sessionData: createLoroSessionData({
+            sessionId: 'session-1' as never,
+            doc,
+            writer: mirror.historyWriter,
+          }),
+        }) as never,
       releaseSessionStoreRef: () => {},
       acquirePreviewVisualCommentStore: async () => {
         throw new Error('not used');
