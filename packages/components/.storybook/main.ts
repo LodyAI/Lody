@@ -1,15 +1,15 @@
-const tailwindcss = require('@tailwindcss/vite').default;
-const { loadEnv } = require('vite');
-const { resolve } = require('node:path');
-const wasm = require('vite-plugin-wasm').default;
-const topLevelAwait = require('../vite-top-level-await-fixed.cjs');
-const { loroCrdtWasmUrlWorkaround } = require('../vite-wasm-workarounds.ts');
-const {
-  requirePreviewPublicBaseDomain,
-} = require('../../../scripts/preview-public-base-domain.mjs');
+import { fileURLToPath } from 'node:url';
+import type { StorybookConfig } from '@storybook/react-vite';
+import tailwindcss from '@tailwindcss/vite';
+import { loadEnv } from 'vite';
+import wasm from 'vite-plugin-wasm';
+import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
+import topLevelAwait from '../vite-top-level-await-fixed.cjs';
+import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 
-/** @type {import('@storybook/react-vite').StorybookConfig} */
-const config = {
+const packageRoot = fileURLToPath(new URL('..', import.meta.url));
+
+const config: StorybookConfig = {
   stories: ['../src/stories/**/*.mdx', '../src/stories/**/*.stories.@(js|jsx|ts|tsx)'],
   framework: {
     name: '@storybook/react-vite',
@@ -18,7 +18,7 @@ const config = {
   async viteFinal(viteConfig) {
     const mode = viteConfig.mode ?? 'development';
     const previewPublicBaseDomain = requirePreviewPublicBaseDomain(
-      { ...loadEnv(mode, resolve(__dirname, '..'), ''), ...process.env },
+      { ...loadEnv(mode, packageRoot, ''), ...process.env },
       `@lody/components Storybook (${mode})`
     );
     viteConfig.define = {
@@ -54,4 +54,4 @@ const config = {
   },
 };
 
-module.exports = config;
+export default config;
