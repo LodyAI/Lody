@@ -88,6 +88,10 @@
       "types": "./src/message-schemas.ts",
       "import": "./src/message-schemas.ts"
     },
+    "./session-data": {
+      "types": "./src/session-data/index.ts",
+      "import": "./src/session-data/index.ts"
+    },
     "./terminal-protocol": {
       "types": "./src/terminal-protocol.ts",
       "import": "./src/terminal-protocol.ts"

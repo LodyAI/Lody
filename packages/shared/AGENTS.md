@@ -51,6 +51,14 @@
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
   `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
+- The CRDT-neutral seam is `src/session-data` (`SessionData`): UI/CLI session
+  business depends on its query/command/durability ports, never on Loro, Mirror,
+  a CID or a storage offset. A field change is explicit (`set`/`clear`), a command
+  result states its phase (`accepted`/`rejected`/`indeterminate`), and local
+  acceptance stays separate from local durability and remote sync. `createLoroSessionData`
+  delegates to the one shared `HistoryWriter`; it must not grow a second writer.
+  The independent in-memory double runs the same contract
+  (`tests/session-data-contract.ts`) so callers cannot rely on Loro details.
 - The pinned Mirror text-event patch copies only an existing single text leaf's path.
   Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
   paths retain the general reader. Future Mirror patches must compose with this patch,
