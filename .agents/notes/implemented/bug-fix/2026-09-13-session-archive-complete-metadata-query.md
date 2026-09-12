@@ -4,6 +4,7 @@ Status: implemented
 Translation: current
 
 Contract: [Session relations and operation targets](../../../../specs/session-relations.md)
+Implementation: [#658](https://github.com/LodyAI/Lody/pull/658)
 
 [中文](2026-09-13-session-archive-complete-metadata-query.zh.md)
 
