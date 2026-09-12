@@ -3602,8 +3602,10 @@ export class MessageHandler {
         if (meta.machineId !== this.machineId) continue;
         // Skip sessions that are already idle
         if (meta.status?.type === 'idle') continue;
-        // Skip sessions that are still actively running locally.
+        // Skip sessions that are still actively running locally — a client
+        // turn's presence, or an engine-opened turn's activity marker.
         if (this.hasSessionActivePresence(sessionId)) continue;
+        if (this.store.isEngineTurnActive(sessionId)) continue;
 
         await sessionDoc.setStatus(SessionStatusFactory.idle());
         resetCount += 1;
@@ -9633,6 +9635,9 @@ export class MessageHandler {
       const turnPhase = this.store.getTurnPhase(sessionId);
       if (turnPhase === 'prompting') status = 'running';
       if (turnPhase === 'finalizing') status = 'finalizing';
+      // Engine-opened turns write no presence and own no client-turn phase,
+      // so only their activity marker can keep the monitor from reading idle.
+      if (this.store.isEngineTurnActive(sessionId)) status = 'running';
     }
     return {
       status,
