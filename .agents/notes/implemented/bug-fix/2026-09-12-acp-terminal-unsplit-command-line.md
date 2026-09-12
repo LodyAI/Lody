@@ -1,7 +1,9 @@
 # Accept an unsplit ACP terminal command line
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-12-acp-terminal-unsplit-command-line.zh.md)
 
 ## Abstract
 
