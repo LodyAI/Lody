@@ -345,6 +345,37 @@ describe('cloneHistoryThroughTurn', () => {
     expect(result?.acpTurnId).toBe('turn-answer-1');
   });
 
+  it('rejects an engine-opened turn as a fork boundary', () => {
+    const assistant = (id: string, acpTurnId?: string): SessionHistoryInput => ({
+      id,
+      timestamp: '2026-07-27T00:00:00.000Z',
+      role: 'assistant',
+      items: [{ type: 'text', text: id }],
+      fileDiff: [],
+      finished: true,
+      read: true,
+      status: undefined,
+      sendStatus: undefined,
+      acpTurnId,
+    });
+
+    // A finished engine-opened turn carries an `auto:` id that is deliberately
+    // not a fork position; cloning through it must be refused here instead of
+    // forwarded to `session/fork`.
+    expect(
+      cloneHistoryThroughTurn(
+        [
+          assistant('assistant-1', 'turn-answer-1'),
+          assistant('assistant:autonomous-auto:41', 'auto:41'),
+        ],
+        'assistant:autonomous-auto:41',
+        sourceSessionId,
+        'Original',
+        targetSessionId
+      )
+    ).toBeNull();
+  });
+
   it('clones the completed prefix while an unfinished assistant turn is active', () => {
     const history: SessionHistoryInput[] = [
       ...sourceHistory,

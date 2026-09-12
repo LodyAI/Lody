@@ -212,6 +212,7 @@ import type {
   SessionFilePayload,
   TaskProposalMeta,
 } from '@lody/shared';
+import { isAutonomousTurnId } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
@@ -1740,6 +1741,9 @@ export const SessionChatStreamView = forwardRef<
 
                   const canForkAssistantMessage =
                     row.item.message.finished === true &&
+                    !(
+                      row.item.message.acpTurnId && isAutonomousTurnId(row.item.message.acpTurnId)
+                    ) &&
                     (row.item.message.id === lastCompletedAssistantMessageId ||
                       Boolean(row.item.message.acpTurnId));
                   const fileDiffOverride =

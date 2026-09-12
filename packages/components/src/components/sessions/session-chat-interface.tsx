@@ -405,7 +405,11 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
-import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
+import {
+  collectPendingScheduledTasksFromHistory,
+  isAutonomousTurnId,
+  type PendingScheduledTask,
+} from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
 import {
   getPullRequestNumber,
@@ -2976,6 +2980,9 @@ export const SessionChatInterface = memo(
         if (!entry) continue;
         if (entry.role === 'user') return null;
         if (entry.role !== 'assistant') continue;
+        // Engine-opened turns (`auto:` ids) are not fork positions; skip them
+        // and keep walking to the real provider boundary.
+        if (entry.acpTurnId && isAutonomousTurnId(entry.acpTurnId)) continue;
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
@@ -4663,18 +4670,17 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      const openedBy =
-        openerSessionId
-          ? {
-              sessionId: openerSessionId,
-              title:
-                (openerSessionMeta?.title ?? '').trim() ||
-                (docMetaCacheReady
-                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
-                  : t('sessions.untitled', 'Untitled session')),
-              target: openerNavigationTarget,
-            }
-          : null;
+      const openedBy = openerSessionId
+        ? {
+            sessionId: openerSessionId,
+            title:
+              (openerSessionMeta?.title ?? '').trim() ||
+              (docMetaCacheReady
+                ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                : t('sessions.untitled', 'Untitled session')),
+            target: openerNavigationTarget,
+          }
+        : null;
       if (!openedBy && opened.length === 0) return undefined;
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [

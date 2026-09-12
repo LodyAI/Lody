@@ -2,6 +2,7 @@ import {
   buildPendingUserHistoryEntry,
   getServerNow,
   getSessionRoomId,
+  isAutonomousTurnId,
   isSessionGoalActive,
   normalizeSessionInputBlocks,
   resolveLatestSessionGoalFromHistory,
@@ -72,6 +73,10 @@ const resolveEditableTail = (
     if (entry.finished !== true || !entry.acpTurnId) {
       return null;
     }
+    // An engine-opened turn (a cron fire, a task wake) is finished and carries
+    // an id, but its `auto:` id is deliberately not a fork position — skip it
+    // and keep walking to the real provider boundary.
+    if (isAutonomousTurnId(entry.acpTurnId)) continue;
     return { userIndex, user, forkTurnId: entry.acpTurnId };
   }
 
