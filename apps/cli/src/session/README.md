@@ -32,7 +32,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
-- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats).
+- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
+  and the `workspaceDirty` probe that drives the Info Bar's Commit & Push action;
+  both cancellation routes run `syncWorkspaceDirty` alone, which self-gates on the
+  session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`

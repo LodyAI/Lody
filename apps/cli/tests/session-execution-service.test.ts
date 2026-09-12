@@ -175,7 +175,7 @@ const createBaseDeps = (
       syncSessionBranchName: vi.fn(async () => null),
       updateSessionDiffStats: vi.fn(async () => []),
       detectAndAssociatePR: vi.fn(async () => null),
-      autoCommitAndPushForPR: vi.fn(async () => {}),
+      syncWorkspaceDirty: vi.fn(async () => {}),
       notifySessionCompleted: vi.fn(async () => {}),
     },
     recordChatFailure: vi.fn(async () => {}),
@@ -2417,7 +2417,7 @@ describe('SessionExecutionService', () => {
         updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
         refreshCodeCollabSharedState,
         detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
-        autoCommitAndPushForPR: vi.fn(async () => {}),
+        syncWorkspaceDirty: vi.fn(async () => {}),
         notifySessionCompleted: vi.fn(async () => {}),
       },
     });
@@ -2441,11 +2441,6 @@ describe('SessionExecutionService', () => {
       activeSession,
       expect.objectContaining({
         baseCommitHash: 'abc123',
-        preferredBaseBranch: 'release/v2',
-      })
-    );
-    expect(deps.turnFinalization.autoCommitAndPushForPR).toHaveBeenCalledWith(
-      expect.objectContaining({
         preferredBaseBranch: 'release/v2',
       })
     );
@@ -5442,6 +5437,13 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+    // Stopping mid-prompt is the common Stop, and it never reaches finalizeTurn.
+    // The agent's edits are still on disk with nothing to commit them, so this
+    // route has to refresh the flag that raises the Info Bar's Commit & Push.
+    expect(deps.turnFinalization.syncWorkspaceDirty).toHaveBeenCalledWith(
+      'session-prompt-cancel',
+      expect.anything()
+    );
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
     expect(history[1]).toMatchObject({
       id: 'assistant-prompt-cancel',
@@ -5903,7 +5905,7 @@ describe('SessionExecutionService', () => {
         syncSessionBranchName: vi.fn(async () => null),
         updateSessionDiffStats: vi.fn(async () => []),
         detectAndAssociatePR: vi.fn(async () => null),
-        autoCommitAndPushForPR: vi.fn(async () => {}),
+        syncWorkspaceDirty: vi.fn(async () => {}),
         notifySessionCompleted: vi.fn(async () => {}),
       },
       processMessageQueue: vi.fn(async () => {}),
@@ -5915,6 +5917,9 @@ describe('SessionExecutionService', () => {
       sessionId: 'session-finalizing-cancel' as SessionId,
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
+      // GitHub-capable: the dirty probe is scoped to sessions whose Info Bar can
+      // actually offer Commit & Push.
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
       acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
       userTurnId: 'turn-finalizing-user',
       userId: 'user-2',
@@ -5926,150 +5931,18 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+    // The rest of finalization is skipped, but the interrupted turn may have
+    // left edits on disk and nothing commits them now — the dirty probe is the
+    // only thing that raises the Info Bar's Commit & Push, so it still runs.
+    expect(deps.turnFinalization.syncWorkspaceDirty).toHaveBeenCalledWith(
+      'session-finalizing-cancel',
+      expect.anything()
+    );
+    expect(deps.turnFinalization.updateSessionDiffStats).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-finalizing-cancel', {
       lastHandledUserMsgId: 'turn-finalizing-user',
       processingUserMsgId: undefined,
     });
-  });
-
-  it('cancels an active auto prompt during turn finalization', async () => {
-    let meta: Record<string, unknown> = {};
-    let history: unknown[] = [
-      {
-        id: 'turn-finalizing-auto-prompt-user',
-        role: 'user',
-        timestamp: new Date().toISOString(),
-        status: 'pending',
-        items: [{ type: 'text', text: 'hello' }],
-        fileDiff: [],
-      },
-    ];
-    let autoPromptStarted!: () => void;
-    const autoPromptStartedPromise = new Promise<void>((resolve) => {
-      autoPromptStarted = resolve;
-    });
-    let abortObserved = false;
-    const sessionDoc = {
-      getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => history),
-      updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
-        history = updater(history);
-      }),
-      setStatus: vi.fn(async () => {}),
-      setProject: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      roomId: 'session-session-finalizing-auto-prompt-cancel',
-    };
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const createdSession = {
-      sessionId: 'session-finalizing-auto-prompt-cancel' as SessionId,
-      acpSessionId: 'acp-finalizing-auto-prompt-cancel' as ACPSessionId,
-      agentClient,
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/tmp',
-      getHostWorkdir: () => '/tmp',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-finalizing-auto-prompt-cancel'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => createdSession),
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(async () => createdSession as unknown),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
-      meta = { ...meta, ...patch };
-    });
-    const deps = createBaseDeps({
-      sessionManager,
-      beginConversationTurn: vi.fn(() => 'assistant-finalizing-auto-prompt-turn'),
-      getActiveTurnId: vi.fn(() => undefined),
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta,
-          getDocMeta: vi.fn(async () => ({
-            meta,
-          })),
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        updateAcpCapabilities: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
-      turnFinalization: {
-        finalizeACPState: vi.fn(async () => {}),
-        flushSessionUsage: vi.fn(async () => {}),
-        syncSessionBranchName: vi.fn(async () => null),
-        updateSessionDiffStats: vi.fn(async () => []),
-        detectAndAssociatePR: vi.fn(async () => null),
-        autoCommitAndPushForPR: vi.fn(async (ctx) => {
-          if (!ctx.abortSignal) {
-            throw new Error('missing abort signal');
-          }
-          ctx.onAutoPromptStart?.();
-          autoPromptStarted();
-          await new Promise<void>((resolve) => {
-            if (ctx.abortSignal?.aborted) {
-              abortObserved = true;
-              resolve();
-              return;
-            }
-            ctx.abortSignal?.addEventListener(
-              'abort',
-              () => {
-                abortObserved = true;
-                resolve();
-              },
-              { once: true }
-            );
-          });
-          ctx.onAutoPromptEnd?.();
-        }),
-        notifySessionCompleted: vi.fn(async () => {}),
-      },
-      processMessageQueue: vi.fn(async () => {}),
-    });
-
-    const service = new SessionExecutionService(deps);
-    const startPromise = service.startSession({
-      type: 'session/create',
-      sessionId: 'session-finalizing-auto-prompt-cancel' as SessionId,
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-finalizing-auto-prompt-user',
-      userId: 'user-2',
-      userName: 'User 2',
-      userEmail: 'user2@example.com',
-    });
-
-    await autoPromptStartedPromise;
-    await expect(
-      service.cancelSession({
-        type: 'session/cancel',
-        sessionId: 'session-finalizing-auto-prompt-cancel' as SessionId,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        turnId: 'assistant-finalizing-auto-prompt-turn',
-      })
-    ).resolves.toEqual({ success: true });
-    await startPromise;
-
-    expect(abortObserved).toBe(true);
-    expect(agentClient.cancel).toHaveBeenCalledWith('acp-finalizing-auto-prompt-cancel');
-    expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
-    expect(deps.processMessageQueue).not.toHaveBeenCalled();
   });
 
   it('fails startSession when the agent client is missing instead of silently finalizing', async () => {

@@ -59,7 +59,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
     ).toEqual([]);
   });
 
-  it('offers Ready for review instead of merge or repair actions for a draft PR', () => {
+  it('offers Commit & Push ahead of Ready for review on a dirty draft PR', () => {
     expect(
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
@@ -70,14 +70,26 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prCiState: 'f',
         prReadiness: 'y',
       })
+    ).toEqual(['commit-and-push', 'ready-for-review']);
+  });
+
+  it('offers only Ready for review on a clean draft PR', () => {
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...BASE_INPUT,
+        hasExistingPr: true,
+        prStatus: 'draft',
+        prMergeState: 'd',
+        prCiState: 'f',
+        prReadiness: 'y',
+      })
     ).toEqual(['ready-for-review']);
   });
 
-  it('prioritizes conflict repair, CI repair, and direct merge over workspaceDirty', () => {
+  it('ranks conflict repair, CI repair, and direct merge when the worktree is clean', () => {
     const existingPr = {
       ...BASE_INPUT,
       hasExistingPr: true,
-      workspaceDirty: true,
       prStatus: 'open' as const,
     };
 
@@ -88,7 +100,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prCiState: 'f',
         prReadiness: 'n',
       })
-    ).toEqual(['resolve-conflicts']);
+    ).toEqual(['resolve-conflicts', 'fix-ci-errors']);
     expect(
       resolveSessionInfoBarGitHubActionIds({
         ...existingPr,
@@ -105,6 +117,36 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         prReadiness: 'y',
       })
     ).toEqual(['merge']);
+  });
+
+  it('puts Commit & Push ahead of conflict repair, CI repair, and merge on a dirty PR', () => {
+    // The machine no longer auto-commits at the end of a turn, so a dirty tree
+    // means the PR head is NOT the author's latest work. Merging or "fixing" CI
+    // first would act on a stale head, so the uncommitted work leads and the
+    // rest stay reachable through the chevron.
+    const dirtyPr = {
+      ...BASE_INPUT,
+      hasExistingPr: true,
+      workspaceDirty: true,
+      prStatus: 'open' as const,
+    };
+
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...dirtyPr,
+        prMergeState: 'd',
+        prCiState: 'f',
+        prReadiness: 'n',
+      })
+    ).toEqual(['commit-and-push', 'resolve-conflicts', 'fix-ci-errors']);
+    expect(
+      resolveSessionInfoBarGitHubActionIds({
+        ...dirtyPr,
+        prMergeState: 'c',
+        prCiState: 's',
+        prReadiness: 'y',
+      })
+    ).toEqual(['commit-and-push', 'merge']);
   });
 
   it('offers no PR action after the PR is terminal', () => {

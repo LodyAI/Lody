@@ -185,24 +185,6 @@ export const listUntrackedFiles = async (
 };
 
 /**
- * Check if local branch has commits not yet pushed to its upstream remote.
- * Returns false if there is no upstream configured or if the branch is up to date.
- */
-export const hasUnpushedCommits = async (runGit: GitRunner): Promise<boolean> => {
-  if (!(await isInsideGitWorktree(runGit))) {
-    return false;
-  }
-
-  try {
-    const count = await runGit(['rev-list', '@{u}..HEAD', '--count']);
-    return parseInt(count.trim(), 10) > 0;
-  } catch {
-    // No upstream configured or other error — treat as nothing to push
-    return false;
-  }
-};
-
-/**
  * Get the current HEAD commit hash.
  * Returns null if not in a git worktree or if there are no commits.
  */

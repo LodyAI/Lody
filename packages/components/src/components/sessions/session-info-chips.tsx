@@ -50,7 +50,7 @@ import { GoalActionButton, formatTokensCompact } from './session-goal-banner';
 import { ScheduledTaskList, useResolvedScheduledTasks } from './scheduled-tasks-panel';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
-import { PrMergeButton } from './pr-merge-button';
+import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -426,9 +426,12 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
     );
   }
 
-  const standardOverflowActions = overflowActions.filter(
-    (action): action is ContextChipStandardAction => action.kind !== 'merge'
-  );
+  // Merge can be demoted out of the primary slot (a dirty worktree outranks it),
+  // and a demoted action must stay reachable rather than silently vanish. In the
+  // menu it collapses to one item that performs the already-selected method;
+  // picking a different method remains the split button's job, which is back as
+  // soon as merge is the top-priority action again.
+  const hasOverflow = overflowActions.length > 0;
 
   return (
     <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
@@ -441,7 +444,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
-      {standardOverflowActions.length > 0 ? (
+      {hasOverflow ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -454,15 +457,29 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" sideOffset={6}>
-            {standardOverflowActions.map((action) => (
-              <DropdownMenuItem
-                key={action.id}
-                disabled={action.disabled}
-                onSelect={action.onClick}
-              >
-                {action.label}
-              </DropdownMenuItem>
-            ))}
+            {overflowActions.map((action) =>
+              action.kind === 'merge' ? (
+                <DropdownMenuItem
+                  key={action.id}
+                  disabled={action.disabled || action.isMerging}
+                  onSelect={() => void action.onMerge(action.method)}
+                >
+                  {action.isMerging ? (
+                    t('sessions.prTab.merging', 'Merging…')
+                  ) : (
+                    <PrMergeMethodLabel method={action.method} />
+                  )}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  key={action.id}
+                  disabled={action.disabled}
+                  onSelect={action.onClick}
+                >
+                  {action.label}
+                </DropdownMenuItem>
+              )
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}

@@ -10,11 +10,32 @@ import type { ReviewFinding } from './review';
  * paths cannot drift.
  */
 
-export const CREATE_PR_PROMPT =
-  'Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
+/**
+ * Standing instruction appended to the PR-creation prompts.
+ *
+ * Opening a PR is what makes "is the branch pushed?" matter: from that moment a
+ * reviewer reads the PR head as the author's latest work. The machine used to
+ * enforce that by auto-prompting the agent to commit+push at the end of every
+ * turn, which surprised users who had not asked for a commit. The enforcement
+ * now lives here instead — an instruction the agent follows and the user can
+ * override in conversation — with the Info Bar's `Commit & Push` action as the
+ * visible fallback when a turn still ends on a dirty tree.
+ */
+const PR_BRANCH_UPKEEP_INSTRUCTION = [
+  'After the PR exists, keep it current: at the end of every turn in this conversation,',
+  'commit any outstanding changes and push them to the PR branch before you finish, so',
+  'the PR head always matches your latest work. Treat this as the default rather than',
+  'something to ask about each time. Skip it only when the user interrupts you or asks',
+  'for something that overrides it — in that case say so instead of pushing silently.',
+].join(' ');
 
-export const CREATE_DRAFT_PR_PROMPT =
-  'Create a draft PR for the current worktree. Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
+export const CREATE_PR_PROMPT = `Create a PR for the current worktree (a regular PR, not a draft). Use \`gh\` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.
+
+${PR_BRANCH_UPKEEP_INSTRUCTION}`;
+
+export const CREATE_DRAFT_PR_PROMPT = `Create a draft PR for the current worktree. Use \`gh\` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.
+
+${PR_BRANCH_UPKEEP_INSTRUCTION}`;
 
 export const COMMIT_AND_PUSH_PROMPT = [
   'Commit all current changes and push to the remote branch.',

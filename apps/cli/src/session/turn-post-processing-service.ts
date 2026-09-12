@@ -11,7 +11,6 @@ import {
 
 import {
   getGitDiffStats,
-  hasUnpushedCommits,
   isWorkspaceDirty,
   type GitRunner,
   type GitWorkingTreeDiffBaseline,
@@ -23,7 +22,6 @@ import { detectPullRequestForBranch, type DetectedPullRequest } from '@/lib/pr-d
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from '@/session/session-manager';
-import type { AutoPromptContext, AutoPromptResult } from './auto-prompt-runner';
 import type { CloudPrAssociationPort } from '@lody/platform';
 
 export type TurnPostProcessingServiceDeps = {
@@ -32,7 +30,6 @@ export type TurnPostProcessingServiceDeps = {
   workspaceId: WorkspaceId;
   preferredBaseBranch: string;
   prAssociation: CloudPrAssociationPort | null;
-  runAutoPrompt: (ctx: AutoPromptContext) => Promise<AutoPromptResult>;
 };
 
 type SessionPullRequestMeta = NonNullable<SessionMeta['pullRequests']>[number];
@@ -124,6 +121,66 @@ export class TurnPostProcessingService {
     return branchName;
   }
 
+  /**
+   * Probe the worktree and publish `SessionMeta.workspaceDirty` on the OWNER
+   * session, without touching diff stats.
+   *
+   * A CANCELLED turn skips the rest of finalization, but the agent's edits are
+   * still on disk. `workspaceDirty` is the only signal that raises the Info
+   * Bar's `Commit & Push` action, and nothing commits on the session's behalf
+   * anymore, so leaving a stale `false` there would hide real uncommitted work
+   * behind a PR that looks current.
+   */
+  async syncWorkspaceDirty(sessionId: SessionId, session: ISession): Promise<void> {
+    try {
+      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const activeMeta = await sessionDoc.getMetaState();
+      const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+      // Gate on GitHub-capability HERE rather than at each caller. Cancellation
+      // reaches this from several sites that carry no `ProjectRef`, and a second
+      // copy of the rule is how the two cancel routes drift apart. A child Tab's
+      // own meta may omit `project`; it shares the owner's checkout, so the
+      // owner's binding is the correct fallback.
+      const project = activeMeta?.project ?? workspace.ownerMeta?.project;
+      if (!resolveProjectGitHubRepo(project)) {
+        return;
+      }
+      const runGit: GitRunner = (args) => session.exec('git', args, session.getWorkdir(), false);
+      const workspaceDirty = await this.probeWorkspaceDirty(sessionId, runGit);
+      if (workspaceDirty === undefined) {
+        return;
+      }
+      await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, {
+        workspaceDirty,
+      });
+    } catch (error) {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to persist workspaceDirty: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
+  /**
+   * `undefined` means the probe was inconclusive (git could not be queried).
+   * Callers must leave the durable value alone in that case rather than writing
+   * a stale `false`.
+   */
+  private async probeWorkspaceDirty(
+    sessionId: SessionId,
+    runGit: GitRunner
+  ): Promise<boolean | undefined> {
+    try {
+      const workspaceDirty = await isWorkspaceDirty(runGit);
+      this.deps.logger.debug(`[${sessionId}] Workspace dirty: ${workspaceDirty}`);
+      return workspaceDirty;
+    } catch (error) {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to check workspace dirty state: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   async updateSessionDiffStats(
     sessionId: SessionId,
     session: ISession,
@@ -160,15 +217,7 @@ export class TurnPostProcessingService {
       this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
     }
 
-    let workspaceDirty: boolean | undefined;
-    try {
-      workspaceDirty = await isWorkspaceDirty(runGit);
-      this.deps.logger.debug(`[${sessionId}] Workspace dirty: ${workspaceDirty}`);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to check workspace dirty state: ${formatErrorMessage(error)}`
-      );
-    }
+    const workspaceDirty = await this.probeWorkspaceDirty(sessionId, runGit);
 
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -267,163 +316,5 @@ export class TurnPostProcessingService {
       );
     }
     return detected;
-  }
-
-  async autoCommitAndPushForPR(ctx: {
-    sessionId: SessionId;
-    session: ISession;
-    sessionDoc: SessionDocument;
-    project?: ProjectRef;
-    preferredBaseBranch?: string;
-    isTurnCancelled?: () => boolean;
-    abortSignal?: AbortSignal;
-    onAutoPromptStart?: () => void | Promise<void>;
-    onAutoPromptEnd?: () => void | Promise<void>;
-  }): Promise<void> {
-    const { sessionId, session, sessionDoc, project } = ctx;
-    const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
-    const shouldStop = (stage: string): boolean => {
-      if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
-        return false;
-      }
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: turn cancelled during ${stage}; skipping remaining work`
-      );
-      return true;
-    };
-
-    if (
-      !resolveProjectGitHubRepo(project) ||
-      (project?.kind === 'local' && project.useWorktree !== true)
-    ) {
-      return;
-    }
-
-    const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-    if (workspace.pullRequests.length === 0) {
-      return;
-    }
-
-    const preferredBaseBranch = ctx.preferredBaseBranch ?? project?.branch;
-    const workdir = session.getWorkdir();
-    const runGit: GitRunner = (args) => session.exec('git', args, workdir, false);
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (shouldStop('dirty state check')) {
-        return;
-      }
-
-      let dirty: boolean | undefined = false;
-      try {
-        dirty = await isWorkspaceDirty(runGit);
-      } catch (error) {
-        this.deps.logger.debug(
-          `[${sessionId}] auto-commit-push: failed to check dirty state: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-
-      // `undefined` (indeterminate) is treated as "nothing to commit" here: a
-      // transient git failure must not spuriously prompt the agent to commit.
-      if (!dirty) {
-        break;
-      }
-
-      if (shouldStop('commit prompt')) {
-        return;
-      }
-
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: workspace dirty, prompting agent to commit+push (attempt ${attempt + 1}/2)`
-      );
-
-      try {
-        const result = await this.deps.runAutoPrompt({
-          sessionId,
-          session,
-          sessionDoc,
-          abortSignal: ctx.abortSignal,
-          onPromptStart: ctx.onAutoPromptStart,
-          onPromptEnd: ctx.onAutoPromptEnd,
-          promptText:
-            'Your workspace has uncommitted changes. Please commit all changes with an appropriate commit message and push to the remote branch.',
-        });
-        if (shouldStop('commit prompt completion')) {
-          return;
-        }
-        await this.updateSessionDiffStats(sessionId, session, {
-          turnId: result.turnId,
-          baseCommitHash: result.baseCommitHash ?? undefined,
-          turnStartWorkingTreeDiff: result.turnStartWorkingTreeDiff,
-          preferredBaseBranch,
-        });
-      } catch (error) {
-        if (shouldStop('commit prompt failure')) {
-          return;
-        }
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push: agent prompt failed: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-    }
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (shouldStop('unpushed state check')) {
-        return;
-      }
-
-      let unpushed = false;
-      try {
-        unpushed = await hasUnpushedCommits(runGit);
-      } catch (error) {
-        this.deps.logger.debug(
-          `[${sessionId}] auto-commit-push: failed to check unpushed state: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-
-      if (!unpushed) {
-        break;
-      }
-
-      if (shouldStop('push prompt')) {
-        return;
-      }
-
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: unpushed commits detected, prompting agent to push (attempt ${attempt + 1}/2)`
-      );
-
-      try {
-        const result = await this.deps.runAutoPrompt({
-          sessionId,
-          session,
-          sessionDoc,
-          abortSignal: ctx.abortSignal,
-          onPromptStart: ctx.onAutoPromptStart,
-          onPromptEnd: ctx.onAutoPromptEnd,
-          promptText:
-            'You have local commits that have not been pushed to the remote. Please push your changes now.',
-        });
-        if (shouldStop('push prompt completion')) {
-          return;
-        }
-        await this.updateSessionDiffStats(sessionId, session, {
-          turnId: result.turnId,
-          baseCommitHash: result.baseCommitHash ?? undefined,
-          turnStartWorkingTreeDiff: result.turnStartWorkingTreeDiff,
-          preferredBaseBranch,
-        });
-      } catch (error) {
-        if (shouldStop('push prompt failure')) {
-          return;
-        }
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push: push prompt failed: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-    }
   }
 }

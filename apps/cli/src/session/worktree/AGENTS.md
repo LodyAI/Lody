@@ -25,9 +25,18 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Worktrees, branches, and setup
 
-- Post-turn automatic commit/push is allowed for GitHub worktrees and local projects with
-  `ProjectRef.useWorktree === true`. Never run it against a local project's original directory,
-  even when that project has a `githubRepoFullName` or associated PR.
+- Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.
+  A PR-linked session that ends dirty is reported through `SessionMeta.workspaceDirty`, which
+  raises the Info Bar's `Commit & Push` action; the agent is asked to keep the branch current
+  by the Create PR prompt (`packages/shared/src/review-prompts.ts`), which the user can
+  override in conversation. Do not re-add an automatic post-turn commit/push.
+- Because that flag is now the ONLY uncommitted-work signal, BOTH cancellation routes must
+  refresh it via `syncWorkspaceDirty`: the one in `finalizeTurn` (Stop raced finalization)
+  and `finalizeCancelledTurn` (Stop during the prompt — the common one). That helper owns
+  the GitHub-capability gate itself because those callers carry no `ProjectRef`; do not
+  re-test it per call site. An inconclusive probe leaves the durable value alone rather
+  than writing a stale `false`. The flag is NOT written for a session with no GitHub
+  repository — nothing can act on it there.
 - Resume a Session on a local project with the workspace's current branch as-is, worktree mode
   included: a persisted `acpSessionId` proves prior execution, so the stored `project.branch` is
   historical state, not a checkout request. A legacy direct local Session may re-enter

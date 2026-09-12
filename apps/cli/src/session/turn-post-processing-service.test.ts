@@ -3,14 +3,13 @@ import type { LocalProjectId, ProjectRef, SessionId, SessionMeta, WorkspaceId } 
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
-import type { AutoPromptContext, AutoPromptResult } from './auto-prompt-runner';
 import type { ISession } from './session-manager';
 import { TurnPostProcessingService } from './turn-post-processing-service';
 
 const sessionId = 'session-1' as SessionId;
 const parentSessionId = 'parent-session-1' as SessionId;
 const workspaceId = 'workspace-1' as WorkspaceId;
-const project: ProjectRef = {
+const githubProject: ProjectRef = {
   kind: 'github',
   repoFullName: 'owner/repo',
   branch: 'main',
@@ -46,23 +45,13 @@ const createSessionDoc = () =>
     })),
   }) as unknown as SessionDocument;
 
-const createService = (options: {
-  logger: Logger;
-  runAutoPrompt?: (ctx: AutoPromptContext) => Promise<AutoPromptResult>;
-  workspaceDocument?: LoroDocumentManager;
-}) =>
+const createService = (options: { logger: Logger; workspaceDocument?: LoroDocumentManager }) =>
   new TurnPostProcessingService({
     logger: options.logger,
     workspaceDocument: options.workspaceDocument ?? ({} as unknown as LoroDocumentManager),
     workspaceId,
     preferredBaseBranch: 'main',
     prAssociation: null,
-    runAutoPrompt:
-      options.runAutoPrompt ??
-      (async (_ctx: AutoPromptContext) => ({
-        turnId: 'auto-turn',
-        baseCommitHash: 'base',
-      })),
   });
 
 describe('TurnPostProcessingService', () => {
@@ -130,96 +119,6 @@ describe('TurnPostProcessingService', () => {
     expect(exec).toHaveBeenCalledTimes(1);
   });
 
-  it('does not auto-commit a local project running in its original directory', async () => {
-    const logger = createLogger();
-    const runAutoPrompt = vi.fn(async (_ctx: AutoPromptContext): Promise<AutoPromptResult> => {
-      return {
-        turnId: 'auto-turn',
-        baseCommitHash: 'base',
-      };
-    });
-    const service = createService({ logger, runAutoPrompt });
-    const sessionDoc = createSessionDoc();
-    const exec = vi.fn();
-    const session = {
-      getWorkdir: () => '/repo',
-      exec,
-    } as unknown as ISession;
-
-    await service.autoCommitAndPushForPR({
-      sessionId,
-      session,
-      sessionDoc,
-      project: localProject,
-    });
-
-    expect(sessionDoc.getMetaState).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
-    expect(runAutoPrompt).not.toHaveBeenCalled();
-  });
-
-  it('skips forced commit checks when the turn is already cancelled', async () => {
-    const logger = createLogger();
-    const runAutoPrompt = vi.fn(async (_ctx: AutoPromptContext): Promise<AutoPromptResult> => {
-      return {
-        turnId: 'auto-turn',
-        baseCommitHash: 'base',
-      };
-    });
-    const service = createService({ logger, runAutoPrompt });
-    const exec = vi.fn();
-    const session = {
-      getWorkdir: () => '/repo',
-      exec,
-    } as unknown as ISession;
-
-    await service.autoCommitAndPushForPR({
-      sessionId,
-      session,
-      sessionDoc: createSessionDoc(),
-      project,
-      isTurnCancelled: () => true,
-    });
-
-    expect(exec).not.toHaveBeenCalled();
-    expect(runAutoPrompt).not.toHaveBeenCalled();
-  });
-
-  it('does not continue to push checks after an aborted commit prompt', async () => {
-    const logger = createLogger();
-    let cancelled = false;
-    const runAutoPrompt = vi.fn(async (_ctx: AutoPromptContext): Promise<AutoPromptResult> => {
-      cancelled = true;
-      throw new Error('Auto prompt aborted');
-    });
-    const service = createService({ logger, runAutoPrompt });
-    const gitCommands: string[] = [];
-    const session = {
-      getWorkdir: () => '/repo',
-      exec: vi.fn(async (_command: string, args: string[]) => {
-        const key = args.join(' ');
-        gitCommands.push(key);
-        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-        if (key === 'status --porcelain') return ' M src/app.ts\n';
-        throw new Error(`Unexpected git args: ${key}`);
-      }),
-    } as unknown as ISession;
-
-    await service.autoCommitAndPushForPR({
-      sessionId,
-      session,
-      sessionDoc: createSessionDoc(),
-      project: { ...localProject, useWorktree: true },
-      isTurnCancelled: () => cancelled,
-    });
-
-    expect(runAutoPrompt).toHaveBeenCalledTimes(1);
-    // isWorkspaceDirty no longer runs a separate --is-inside-work-tree pre-probe;
-    // `git status --porcelain` is the single command.
-    expect(gitCommands).toEqual(['status --porcelain']);
-    expect(logger.error).not.toHaveBeenCalled();
-  });
-
   it('syncs branch names to the parent session for child sessions', async () => {
     const logger = createLogger();
     const childSetBranchName = vi.fn();
@@ -262,14 +161,11 @@ describe('TurnPostProcessingService', () => {
     expect(logger.debug).not.toHaveBeenCalled();
   });
 
-  it('prompts child sessions to commit when the parent session has an associated PR', async () => {
+  it('publishes a child session\u2019s dirty worktree onto the owning parent meta', async () => {
+    // A Side Chat / child Tab shares the parent's checkout, so the Info Bar's
+    // Commit & Push decision has to read one dirty flag. Writing it to the child
+    // would leave the parent (the session the user is looking at) claiming clean.
     const logger = createLogger();
-    const runAutoPrompt = vi.fn(async (_ctx: AutoPromptContext): Promise<AutoPromptResult> => {
-      return {
-        turnId: 'auto-turn',
-        baseCommitHash: 'base',
-      };
-    });
     const setLatestAssistantHistoryFileDiff = vi.fn();
     const childSessionDoc = {
       getMetaState: vi.fn(async () => ({
@@ -294,48 +190,171 @@ describe('TurnPostProcessingService', () => {
         upsertDocMeta,
       },
     } as unknown as LoroDocumentManager;
-    const service = createService({ logger, runAutoPrompt, workspaceDocument });
-    let statusCalls = 0;
+    const service = createService({ logger, workspaceDocument });
     const session = {
       getWorkdir: () => '/repo',
       exec: vi.fn(async (_command: string, args: string[]) => {
         const key = args.join(' ');
-        if (key === 'rev-parse --is-inside-work-tree') return 'true\n';
-        if (key === 'status --porcelain') {
-          statusCalls += 1;
-          return statusCalls === 1 ? ' M src/app.ts\n' : '';
-        }
+        if (key === 'status --porcelain') return ' M src/app.ts\n';
         if (key === 'rev-parse --verify origin/main^{commit}') return 'origin-main\n';
         if (key === 'merge-base origin/main HEAD') return 'merge-base\n';
-        if (key === 'diff --numstat --no-renames merge-base HEAD') return '';
-        if (key === 'diff --numstat --no-renames base') return '';
+        if (key === 'diff --numstat --no-renames merge-base HEAD') return '2\t1\tsrc/app.ts\n';
         if (key === 'ls-files --others --exclude-standard -z') return '';
-        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
         throw new Error(`Unexpected git args: ${key}`);
       }),
     } as unknown as ISession;
 
-    await service.autoCommitAndPushForPR({
-      sessionId,
-      session,
-      sessionDoc: childSessionDoc,
-      project,
+    await service.updateSessionDiffStats(sessionId, session, {
+      turnId: 'assistant-turn-1',
+      skipHistoryFileDiff: true,
     });
 
     expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledWith(parentSessionId);
-    expect(runAutoPrompt).toHaveBeenCalledTimes(1);
-    expect(runAutoPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId,
-        session,
-        sessionDoc: childSessionDoc,
-        promptText: expect.stringContaining('uncommitted changes'),
-      })
-    );
     expect(upsertDocMeta).toHaveBeenCalledWith(
       'session-parent-session-1',
-      expect.objectContaining({ workspaceDirty: false })
+      expect.objectContaining({ workspaceDirty: true })
     );
+  });
+
+  it('publishes only workspaceDirty when a cancelled turn skips diff stats', async () => {
+    // A cancelled turn bails out of finalization before diff stats run, but the
+    // agent's edits are still on disk and nothing commits them now. The probe
+    // must still reach the owner meta, and must not invent diffStats.
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: githubProject })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const exec = vi.fn(async (_command: string, args: string[]) => {
+      const key = args.join(' ');
+      if (key === 'status --porcelain') return ' M src/app.ts\n';
+      throw new Error(`Unexpected git args: ${key}`);
+    });
+    const session = { getWorkdir: () => '/repo', exec } as unknown as ISession;
+
+    await service.syncWorkspaceDirty(sessionId, session);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', { workspaceDirty: true });
+  });
+
+  it('inherits the owner project when a child tab carries no ProjectRef', async () => {
+    // Cancellation reaches syncWorkspaceDirty from call sites that pass no
+    // project, so the gate reads meta. A child Tab shares the owner's checkout
+    // and may not repeat the binding — falling back to the owner keeps Side
+    // Chats from silently losing the dirty signal.
+    const logger = createLogger();
+    const childSessionDoc = {
+      getMetaState: vi.fn(async () => ({ parentSessionId })),
+    } as unknown as SessionDocument;
+    const parentSessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: githubProject })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async (id: SessionId) =>
+        id === parentSessionId ? parentSessionDoc : childSessionDoc
+      ),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const session = {
+      getWorkdir: () => '/repo',
+      exec: vi.fn(async (_command: string, args: string[]) => {
+        if (args.join(' ') === 'status --porcelain') return ' M src/app.ts\n';
+        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+      }),
+    } as unknown as ISession;
+
+    await service.syncWorkspaceDirty(sessionId, session);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-parent-session-1', {
+      workspaceDirty: true,
+    });
+  });
+
+  it.each([true, false])(
+    'refreshes a GitHub-capable local project (useWorktree=%s)',
+    async (useWorktree) => {
+      // A local ProjectRef resolves its repo from `githubRepoFullName`, not
+      // `repoFullName`, so the gate has to accept this shape or a linked local
+      // project would silently stop reporting uncommitted work. `useWorktree`
+      // is deliberately NOT part of the gate: unlike the removed auto-commit,
+      // this probe is read-only, so running it in the project's original shared
+      // directory is safe — and the Info Bar offers Commit & Push there too.
+      const logger = createLogger();
+      const sessionDoc = {
+        getMetaState: vi.fn(async () => ({ project: { ...localProject, useWorktree } })),
+      } as unknown as SessionDocument;
+      const upsertDocMeta = vi.fn(async () => {});
+      const workspaceDocument = {
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        repo: { upsertDocMeta },
+      } as unknown as LoroDocumentManager;
+      const service = createService({ logger, workspaceDocument });
+      const session = {
+        getWorkdir: () => '/repo',
+        exec: vi.fn(async (_command: string, args: string[]) => {
+          if (args.join(' ') === 'status --porcelain') return ' M src/app.ts\n';
+          throw new Error(`Unexpected git args: ${args.join(' ')}`);
+        }),
+      } as unknown as ISession;
+
+      await service.syncWorkspaceDirty(sessionId, session);
+
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', { workspaceDirty: true });
+    }
+  );
+
+  it('skips the dirty probe for a session with no GitHub repository', async () => {
+    // Nothing can act on the flag without a repo, and the probe costs a process
+    // spawn on every cancelled turn of every plain local session.
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        project: { kind: 'local', localProjectId: 'local-project-1' as LocalProjectId },
+      })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const exec = vi.fn();
+    const session = { getWorkdir: () => '/repo', exec } as unknown as ISession;
+
+    await service.syncWorkspaceDirty(sessionId, session);
+
+    expect(exec).not.toHaveBeenCalled();
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('leaves the durable workspaceDirty alone when the cancelled-turn probe fails', async () => {
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: githubProject, workspaceDirty: true })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const session = {
+      getWorkdir: () => '/repo',
+      exec: vi.fn(async () => {
+        throw new Error('spawn git ENOMEM');
+      }),
+    } as unknown as ISession;
+
+    await service.syncWorkspaceDirty(sessionId, session);
+
+    expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('can skip history fileDiff while still updating session diff stats', async () => {

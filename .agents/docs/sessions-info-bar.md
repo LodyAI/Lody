@@ -79,17 +79,29 @@ labelClassName`) so the stage diffstat never clips. Wired from
   The context stage is also the single owner of agent-driven GitHub/worktree actions:
   a changed GitHub-capable workspace without a PR shows `Create PR` + `Commit & Push`,
   including a direct Local Project with a resolved GitHub repository. For an open
-  associated PR, compact poller state selects exactly one higher-priority path:
-  conflicts show `Resolve Conflicts` (an immediate agent prompt), failed/error CI
-  shows `Fix CI Errors` (refresh details, include a bounded failed-check snapshot,
-  then send an agent prompt), and proven readiness shows the shared Merge split-button.
-  Its dropdown selects merge/squash/rebase without merging; the primary half performs
-  the selected method. Other dirty PRs retain `Commit & Push`. Do not infer that PR
+  associated PR, `resolveSessionInfoBarGitHubActionIds` returns EVERY applicable
+  action in priority order rather than picking one, because the collapse below keeps
+  the rest reachable. `Commit & Push` is the TOP priority whenever
+  `SessionMeta.workspaceDirty` is set — ahead of `Resolve Conflicts`, `Fix CI Errors`,
+  `Ready for review`, and Merge. That ranking is load-bearing, not cosmetic: turn
+  finalization no longer auto-commits on the session's behalf (see
+  `apps/cli/src/session/turn-post-processing-service.ts`), so a dirty tree means the
+  PR head is NOT the author's latest work, and this action item is the only signal
+  that stops a user from merging or reviewing a stale PR. Below it, conflicts show
+  `Resolve Conflicts` (an immediate agent prompt), failed/error CI shows
+  `Fix CI Errors` (refresh details, include a bounded failed-check snapshot, then send
+  an agent prompt), and proven readiness shows the shared Merge split-button. Its
+  dropdown selects merge/squash/rebase without merging; the primary half performs the
+  selected method. A terminal (merged/closed) PR offers nothing. Do not infer that PR
   review comments are actionable, so there is no automatic `Fix PR Comments` action.
   The action array is priority ordered:
   the first action renders as the single explicit TEXT button in the `StageChip` trailing slot;
   when more actions exist, a small chevron beside it opens the remaining actions in an
-  upward-opening menu. The primary action + chevron form one subtle, borderless background
+  upward-opening menu. A DEMOTED merge action must stay in that menu (as one item that
+  performs the already-selected method) instead of being filtered out — dropping it
+  would make proven readiness unreachable on exactly the dirty sessions that rank
+  Commit & Push first. Regression coverage: `tests/session-info-bar-actions.test.tsx`
+  + the `DirtyWorktreeOutranksMerge` story. The primary action + chevron form one subtle, borderless background
   surface with a low-contrast internal divider (single actions use the same surface without the chevron). Neither half
   leaves an external focus outline/ring; keyboard focus stays visible as an internal background tint.
   Under 420px,
