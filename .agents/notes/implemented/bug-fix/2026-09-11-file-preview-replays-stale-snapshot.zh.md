@@ -14,6 +14,7 @@ Translation: current
 - `applied` 与 `no-op` 都要消费。同文 Refresh 是 no-op，不消费就会在重挂时再打一遍。
 - 用 state updater 比较 seq，避免丢掉 ack 前到达的更新事件。
 - 干净编辑器重挂用最后一次已 ack 的外部文本。`subscribeText` 不会推进 `data.snapshot`；没有这个来源，Preview 再回源码会滚回打开时的快照。
+- 每次 ack 绑到当时的 snapshot 文本。snapshot 没变才用 ack 重挂；后续 openFile / Refresh 推进 snapshot 则丢掉过期 ack。
 - 有未保存草稿时仍用本地草稿（`hasAcceptedLocalContentChange` / dirty），不用已 ack 快照。
 - 不改保存 API、磁盘写入，也不改冲突 `preservePending`。`load_with_conflicts` 在 apply 后仍保留待保存缓冲。
 

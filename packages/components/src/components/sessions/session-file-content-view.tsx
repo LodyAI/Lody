@@ -644,7 +644,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
-  const lastAckedExternalTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<{ text: string; snapshotText: string } | undefined>(
+    undefined
+  );
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -766,7 +768,13 @@ function SessionFileContentViewImpl({
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
-          lastAckedExternalTextRef.current = externalTextUpdate.text;
+          lastAckedExternalTextRef.current = {
+            text: externalTextUpdate.text,
+            snapshotText:
+              data.status === 'ready' && data.snapshot.kind === 'text'
+                ? data.snapshot.text
+                : externalTextUpdate.text,
+          };
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -779,12 +787,18 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
-          lastAckedExternalTextRef.current = externalTextUpdate.text;
+          lastAckedExternalTextRef.current = {
+            text: externalTextUpdate.text,
+            snapshotText:
+              data.status === 'ready' && data.snapshot.kind === 'text'
+                ? data.snapshot.text
+                : externalTextUpdate.text,
+          };
         }
         return;
       }
     },
-    [externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -882,7 +896,11 @@ function SessionFileContentViewImpl({
     if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
       return latestEditorTextRef.current ?? snapshotText;
     }
-    return lastAckedExternalTextRef.current ?? snapshotText;
+    const acked = lastAckedExternalTextRef.current;
+    if (acked && acked.snapshotText === snapshotText) {
+      return acked.text;
+    }
+    return snapshotText;
   };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
