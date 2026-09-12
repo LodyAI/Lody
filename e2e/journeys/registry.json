@@ -199,6 +199,55 @@
       "estimatedMinutes": 3
     },
     {
+      "id": "LODY-WINDOW-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "Connect an auxiliary Workspace window with isolated persistent sync caches",
+      "owner": "desktop-windows",
+      "feature": "src/features/desktop-windows.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "63f89f6ae59f0e7ec1bb23be631e3a0a5cc18c0957db634d5b0cf06cf2ce1a8e",
+      "ownerPaths": [
+        "packages/components/src/providers/create-workspace-runtime.ts",
+        "packages/components/src/lib/desktop-window.ts",
+        "packages/components/src/lib/eager-sync-high-water-cache.ts"
+      ],
+      "actions": [
+        { "id": "workspace.enterLocal" },
+        { "id": "window.observeAuxiliaryIndexedDb" },
+        { "id": "window.openAuxiliaryWorkspace" },
+        { "id": "window.verifyAuxiliaryRuntimeReady" },
+        { "id": "window.verifyAuxiliaryCacheNamespace" }
+      ],
+      "checkpoints": [
+        "auxiliary renderer exposes an editable composer after runtime initialization",
+        "auxiliary Repo database name ends in its session-scoped window id",
+        "eager-sync high-water lookup uses the same Repo cache namespace"
+      ],
+      "cleanup": [
+        "desktop process tree exits",
+        "isolated desktop profile and per-window caches are deleted"
+      ],
+      "coverage": {
+        "renderer": "Primary and auxiliary Workspace windows with an editable composer",
+        "electronIpc": "Real primary and auxiliary Electron windows through app.openWindow IPC",
+        "bundledCli": "Real owned runtime for local Workspace entry",
+        "durableState": "Window-scoped Repo and eager-sync high-water IndexedDB access",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
       "id": "LODY-REVIEW-001",
       "state": "active",
       "priority": "P1",

@@ -22,9 +22,9 @@ Loro Streams 的持久化游标表示对应本地副本已可靠写入的远端�
 
 ## 验证
 
-组件运行时测试断言主窗口与辅助窗口的 Repo 数据库名、remote cursor 数据库名和 high-water namespace 来自同一个 cache identity。high-water 持久化测试使用同一 workspace 的两个窗口 namespace，验证一个窗口写入的同步进度不会被另一个窗口读到；原有测试继续覆盖写入和裁剪行为。
+组件运行时测试断言主窗口与辅助窗口的 Repo 数据库名、remote cursor 数据库名和 high-water namespace 来自同一个 cache identity。high-water 持久化测试使用同一 workspace 的两个窗口 namespace，验证一个窗口写入的同步进度不会被另一个窗口读到；原有测试继续覆盖写入和裁剪行为。`LODY-WINDOW-001` 桌面 E2E 使用真实 Electron 主窗口、辅助 renderer、IPC 和本地 CLI，并在辅助 renderer 启动前观测 IndexedDB 调用，断言它完成 runtime 初始化、Repo 数据库包含自己的窗口 id，且 high-water 查询使用相同 namespace。
 
 - Node 22 下组件全量测试通过：456 个文件、3468 项测试。
 - 仓库全量 typecheck、lint、i18n、Code Collab import、platform boundary、public boundary 和文档检查通过。
 - `pnpm check` 的测试阶段仅有一个无关的 CLI worktree GC 用例失败：macOS 临时目录分别以 `/private/var/...` 和 `/var/...` 表示时，测试按字符串比较路径。该失败发生在 Electron 测试之前，因此本轮没有取得完整 `pnpm check` 成功结果。
-- 尚未在托管桌面应用中自动化复现双窗口切换；原现场操作需要在包含本修复的构建中复验。
+- OSS E2E 不启用 cloud Streams，因此不会打开 remote cursor 数据库；该数据库名仍由组件运行时测试覆盖。托管桌面的双 Workspace 切换仍需在包含本修复的构建中复验。
