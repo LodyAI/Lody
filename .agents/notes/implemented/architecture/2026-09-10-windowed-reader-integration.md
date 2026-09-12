@@ -80,53 +80,67 @@ immediate send survives snapshot reload, with an old-body materialization guard.
 
 ## Session data port
 
-Session business code (renderer hooks, `WorkspaceWriter`, CLI `SessionDocument`, MCP)
-still named Loro containers, the Mirror and `HistoryWriter` callbacks directly, so a future
-database CRDT would force an edit at every consumer. `packages/shared/src/session-data`
-now owns a CRDT-neutral seam: `SessionHistoryReader` (`count`/`readTurn`/`readRange`/
-`readVisiblePage`), `SessionHistoryCommands` and a separate durability port. Nothing in the
-port names Loro, Mirror, a CID or a storage offset; business identity is a turn/request id or
-an opaque raw cursor.
+Session business code (renderer hooks, `WorkspaceWriter`, CLI `SessionDocument`, MCP) named
+Loro containers, the Mirror and `HistoryWriter` callbacks directly, so a future database CRDT
+would force an edit at every consumer. `packages/shared/src/session-data` now owns a
+CRDT-neutral seam. Its DTOs come from `domain.ts` and never import the storage schema; the port
+names Loro, Mirror or a CID nowhere. The reader is fully async: `count`, `readAt`/`readTurn`/
+`readRange`, `readDirectory` (identity/state only) and a gap-free `observe` whose initial
+directory is captured at the same moment the listener goes live. Identity lookups read `id`
+shallowly and materialize only the target body. Read states separate missing / invalid /
+unavailable (`incomplete`/`unsupported`/`failed`). Display paging is business logic, not a
+storage method: `pageVisibleTranscript` scans raw rows through the reader, counts displayable
+turns, keeps the cursor a raw position and never reports an empty tail as the end, so no
+caller-supplied predicate crosses a backend boundary.
 
-Two rules make it trustworthy and distinguish it from a renamed CRDT API. A field change is
-explicit: `set(value)` or `clear`, never an `undefined`-means-delete contract that cannot
-cross JSON/worker/Rust. A command result states its phase: `accepted` (retrying duplicates
-it), `rejected` (nothing applied, safe to fix and retry) or `indeterminate` (never auto-retry).
-Local acceptance stays separate from local durability (`waitDurable`) and remote sync. A
-conditional field write re-locates its target inside the adapter's commit, so a peer edit
-between read and write cannot be overwritten outside the named field; `clear` removes only
-that field and leaves unknown stored fields intact.
+Three rules distinguish this from a renamed CRDT API. A field change is explicit (`set`/`clear`),
+never an `undefined`-means-delete contract that cannot cross JSON/worker/Rust. A command result
+states its phase: `accepted` (retrying duplicates it), `rejected` (validated and refused before
+storage; safe to fix and retry) or `indeterminate` (never auto-retry); an accepted write whose
+post-accept side effect failed carries `postAcceptError` and is never re-issued or reported as a
+pre-write rejection. Local acceptance stays separate from local durability: `waitDurable` rejects
+with `SessionDurabilityError('unavailable')` when no barrier exists and `'invalid_receipt'` for a
+receipt the store did not issue, so a public promise never silently stands in for persistence it
+did not perform.
 
 `createLoroSessionData` is the only Loro implementation and delegates to the one shared
-`HistoryWriter`; the session entrypoint injects `mirror.historyWriter` so no second writer
-exists. `createMemorySessionData` is an independent array/Map implementation with no Loro,
-Mirror or CID import, and both run the same contract (`tests/session-data-contract.ts`),
-including hidden-row paging, bad raw slots, unknown-field preservation and the
-accepted/durability split. `tests/session-data-consumer.test.ts` then drives the real
-`createDirectWorkspaceWriter` against the in-memory implementation, which is what proves the
-renderer consumer depends on the port rather than on Loro.
+`HistoryWriter`; the session entrypoint injects `mirror.historyWriter`, so no second writer exists.
+Domain command rules live once in `planner.ts` and are applied by both adapters; the permission
+outcome rule is shared with `history-writer.ts` too. `createMemorySessionData` is an independent
+array/Map implementation with no Loro, Mirror or CID import, and both run the same contract
+(`tests/session-data-contract.ts`) for hidden-row paging, shifted byte-trim reachability, bad raw
+slots, unknown-field preservation, the accepted/durability split and a forged receipt.
+`tests/session-data-consumer.test.ts` drives the real `createDirectWorkspaceWriter` against the
+in-memory implementation, which is what proves the renderer consumer depends on the port.
 
-Migrated callers: `SessionDocument` exposes `sessionData` and its assistant reopen/create
-(`openAssistantTurn`) and permission outcome (`respondPermission`) use it, so opening a turn
-no longer materializes unrelated history and an answer locates only its own turn; the
-renderer `WorkspaceWriter` routes append/replace/permission/task-proposal/assistant-open
-through it and surfaces a rejected command instead of silently dropping it; MCP
-`session_history` pages through `readVisiblePage`, where `limit` counts displayable turns,
-the cursor is a raw position, and a hidden tail is never reported as an empty history.
+Migrated callers: the renderer `WorkspaceWriter` routes
+append/replace/permission/task-proposal/assistant-open through the port and surfaces a rejected
+command instead of dropping it; `SessionDocument` exposes `sessionData`, and its assistant
+reopen/create (`openAssistantTurn`) and permission outcome (`respondPermission`) use it, so opening
+a turn no longer materializes unrelated history and an answer locates only its own turn; MCP
+`session_history` pages through `pageVisibleTranscript`, and its pure response builder recomputes
+`hasOlder` after the 128 KiB byte cap so entries shifted off a page stay reachable.
 
-Not migrated in this change, and therefore still raw: `SessionDocument.init` builds the full
-`sessionMirror` and `getHistory()` materializes it (a control-plane Mirror plus a shared
-reader is still outstanding), `ConversationView` continues to read the raw list as the UI's
-display cache, and queue/fork/import paths still use whole-history `updateHistory`. Owner/
-seal mapping and old-format migration remain separate work, as does replacing the Mirror
-`WeakMap` copy provenance with a storage-owned handle. `setTurnField`/`resumeAssistant`/
-`clearField` are implemented and contract-tested but have no production caller yet.
+The control plane moved to `@lody/shared/session-control-plane` (`sessionControlPlaneSchema`,
+`createControlPlaneDoc`, `createSessionControlPlaneMirror`) so the CLI and renderer can build one
+history-less control plane; the component copies are re-exports. The port also gained an idempotent
+`markTurnSeen` command with the shared planner.
 
-Verification: shared `session-data` contract plus real-Loro regressions for clear
-round-trips, unknown fields, a bad raw slot and two-replica convergence; the components suite
-(469 files / 3538 tests) and the CLI suite (2695 tests, 4 skipped) pass, along with the
-shared, components and CLI typechecks. These are library-level checks; they do not establish
-device-scale cold-open, memory or owner/seal behaviour.
+Not migrated in this change: `SessionDocument.init` still builds the full `sessionMirror` and
+`getHistory()` materializes it. The shared control plane is the prepared step; the remaining work
+is switching `doc.ts` to it and moving the synchronous consumers (dispatch/reconcile wakeups, the
+structured `session output` wait) onto the read/observe port, which requires updating several
+service test doubles that construct an uninitialized `SessionDocument`. `ConversationView` still
+reads the raw list as the UI display cache; queue/fork/import still use whole-history
+`updateHistory`; ACP batches are not yet a domain command; and the Mirror `WeakMap` copy provenance
+is not yet a storage-owned handle. `setTurnField`/`resumeAssistant`/`clearField`/`markTurnSeen` are
+implemented and contract-tested; `markTurnSeen` has no production caller yet. Owner/seal mapping and
+old-format migration remain separate.
+
+Verification: the shared suite (99 files / 1164 tests), components (469 files / 3538 tests) and
+CLI (2700 tests, 4 skipped, run with a redirected `HOME` because the sandbox blocks `~/.lody`
+writes) all pass, with shared/components/CLI typechecks. These are library-level checks; they do
+not establish device-scale cold-open, memory or owner/seal behaviour.
 
 ## Verification
 

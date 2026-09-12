@@ -21,13 +21,18 @@
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the
   actual SessionDocument/HistoryWriter boundary; a mock updateHistory cannot prove it.
-- Copying stored history uses a writer-captured snapshot, never a caller-supplied
-  "trusted" array. Preserve unchanged opaque content; parse authored changes and new
-  notices. Prepend copies to target initialization rows without replacing their containers;
-  reject colliding ids. Rollback captures only the changed range and retains current content
-  of untouched rows and later appended rows. Reject changes to existing row identity/order and edits inside that range,
-  except pending-to-seen read acknowledgement on newly inserted user rows.
+- The pinned Mirror text-event patch copies one existing single text leaf's path. Preserve
+  descriptors, old snapshots and subscriber delivery; structural/multi-event/tree paths use
+  the general reader. Future patches must compose with it, never replace it.
+- Copying stored history uses a writer-captured snapshot, never a caller-supplied "trusted"
+  array. Preserve unchanged opaque content; parse authored changes and new notices. Prepend
+  copies without replacing target initialization containers; reject colliding ids. Rollback
+  captures only the changed range, retains untouched/later rows, and rejects row identity/order
+  edits in that range, except pending-to-seen on newly inserted user rows.
   External ACP imports remain new input.
+- Session data ports (`src/session-data`): UI/CLI business depends on `SessionData`
+  (explicit set/clear, phased results, separated durability), never raw Loro/Mirror.
+  Invariants: [session-data scope](src/session-data/AGENTS.md).
 - Tool fields other than type/toolCallId are independent
   edits: derive their parsers from the tool message schema and validate changed fields,
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
@@ -51,10 +56,7 @@
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
   `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
-- The pinned Mirror text-event patch copies only an existing single text leaf's path.
-  Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
-  paths retain the general reader. Future Mirror patches must compose with this patch,
-  never silently replace it. No storage schema or write validation depends on this optimization.
+
 These contracts bind producers and consumers, including UI and CLI callers outside
 this package. Read them when changing daemon protocol negotiation, MCP/Role catalogs,
 per-turn MCP selection, or Role-based session creation and dispatch.
