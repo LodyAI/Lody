@@ -13,8 +13,6 @@ import type {
 import {
   canStopAgentEnabled,
   findActiveSessionContextCompaction,
-  getContextCompactionReconciliationAttemptKey,
-  isDurableContextCompactionReconciliation,
   isSessionContextCompacting,
 } from '../src/lib/session-context-compaction';
 import { useSessionContextCompactionReconciliation } from '../src/components/sessions/use-session-context-compaction-reconciliation';
@@ -50,7 +48,6 @@ describe('isSessionContextCompacting', () => {
     expect(findActiveSessionContextCompaction(historyWithStatus('in_progress'))).toEqual({
       turnId: 'assistant:turn-1',
       toolCallId: 'context-compaction-1',
-      status: 'in_progress',
       turnFinished: false,
     });
   });
@@ -63,60 +60,6 @@ describe('isSessionContextCompacting', () => {
   it('does not treat host turn finalization as provider termination', () => {
     expect(isSessionContextCompacting(historyWithStatus('pending', true))).toBe(true);
     expect(isSessionContextCompacting(historyWithStatus('in_progress', true))).toBe(true);
-  });
-
-  it('retries non-durable outcomes and isolates attempts by daemon generation', () => {
-    const base = {
-      sessionId: 'session-1',
-      turnId: 'assistant:turn-1',
-      toolCallId: 'context-compaction-1',
-    };
-    expect(
-      getContextCompactionReconciliationAttemptKey({
-        ...base,
-        ownerInstanceId: 'daemon-1',
-        isSessionActive: true,
-        isConnectivityOnline: true,
-      })
-    ).not.toBe(
-      getContextCompactionReconciliationAttemptKey({
-        ...base,
-        ownerInstanceId: 'daemon-2',
-        isSessionActive: true,
-        isConnectivityOnline: true,
-      })
-    );
-    expect(
-      getContextCompactionReconciliationAttemptKey({
-        ...base,
-        ownerInstanceId: 'daemon-1',
-        isSessionActive: true,
-        isConnectivityOnline: true,
-      })
-    ).not.toBe(
-      getContextCompactionReconciliationAttemptKey({
-        ...base,
-        ownerInstanceId: 'daemon-1',
-        isSessionActive: false,
-        isConnectivityOnline: true,
-      })
-    );
-    for (const outcome of ['active', 'unknown', 'unchanged'] as const) {
-      expect(
-        isDurableContextCompactionReconciliation({
-          type: 'session/reconcile-context-compaction_response',
-          ...base,
-          outcome,
-        })
-      ).toBe(false);
-    }
-    expect(
-      isDurableContextCompactionReconciliation({
-        type: 'session/reconcile-context-compaction_response',
-        ...base,
-        outcome: 'reconciled',
-      })
-    ).toBe(true);
   });
 });
 
@@ -132,7 +75,7 @@ describe('context compaction reconciliation retry transitions', () => {
       sessionId,
       turnId: 'assistant:turn-1',
       toolCallId: 'context-compaction-1',
-      outcome: 'active',
+      outcome: 'retry',
     } satisfies SessionContextCompactionReconcileResponse);
     const runtime = { requestSessionContextCompactionReconciliation: request };
 
@@ -154,14 +97,17 @@ describe('context compaction reconciliation retry transitions', () => {
     const root = createRoot(document.createElement('div'));
     try {
       await act(async () => root.render(createElement(Probe, { isSessionActive: true })));
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).not.toHaveBeenCalled();
 
-      await act(async () => root.render(createElement(Probe, { isSessionActive: true })));
+      await act(async () => root.render(createElement(Probe, { isSessionActive: false })));
       expect(request).toHaveBeenCalledTimes(1);
 
       await act(async () => root.render(createElement(Probe, { isSessionActive: false })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isSessionActive: true })));
+      await act(async () => root.render(createElement(Probe, { isSessionActive: false })));
       expect(request).toHaveBeenCalledTimes(2);
-      expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
     } finally {
       act(() => root.unmount());
       delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
@@ -179,7 +125,7 @@ describe('context compaction reconciliation retry transitions', () => {
       sessionId,
       turnId: 'assistant:turn-1',
       toolCallId: 'context-compaction-1',
-      outcome: 'unknown',
+      outcome: 'retry',
     } satisfies SessionContextCompactionReconcileResponse);
     const runtime = { requestSessionContextCompactionReconciliation: request };
 
@@ -201,14 +147,20 @@ describe('context compaction reconciliation retry transitions', () => {
     const root = createRoot(document.createElement('div'));
     try {
       await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).not.toHaveBeenCalled();
 
       await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
+      expect(request).not.toHaveBeenCalled();
+
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: true })));
       expect(request).toHaveBeenCalledTimes(1);
 
       await act(async () => root.render(createElement(Probe, { isConnectivityOnline: true })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: true })));
       expect(request).toHaveBeenCalledTimes(2);
-      expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
     } finally {
       act(() => root.unmount());
       delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;

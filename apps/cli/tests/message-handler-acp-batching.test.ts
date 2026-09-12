@@ -482,7 +482,7 @@ describe('MessageHandler ACP batching', () => {
         sessionId: SessionId;
         turnId: string;
         toolCallId: string;
-      }): Promise<{ outcome: string }>;
+      }): Promise<{ outcome: string; error?: string }>;
       executionService: {
         getExecutionSnapshot(sessionId: SessionId): {
           activeTurnId?: string;
@@ -494,9 +494,7 @@ describe('MessageHandler ACP batching', () => {
         };
       };
       sessionActivePresence: { has(sessionId: SessionId): boolean };
-      sessionDispatchWatcher: {
-        enqueueSessionCheck(sessionId: SessionId): Promise<void>;
-      };
+      sessionDispatchWatcher: { hasPendingDispatch(sessionId: SessionId): boolean };
     };
     const findCompaction = (history: SessionHistoryInput[], toolCallId = 'compact-stale') =>
       history
@@ -536,7 +534,7 @@ describe('MessageHandler ACP batching', () => {
           turnId,
           toolCallId: 'compact-stale',
         })
-      ).resolves.toMatchObject({ outcome: 'unknown' });
+      ).resolves.toMatchObject({ outcome: 'retry' });
       expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
 
       const getExecutionSnapshot = vi.spyOn(host.executionService, 'getExecutionSnapshot');
@@ -554,7 +552,7 @@ describe('MessageHandler ACP batching', () => {
           turnId,
           toolCallId: 'compact-stale',
         })
-      ).resolves.toMatchObject({ outcome: 'active' });
+      ).resolves.toMatchObject({ outcome: 'retry' });
       expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
 
       getExecutionSnapshot.mockReturnValue({
@@ -574,43 +572,79 @@ describe('MessageHandler ACP batching', () => {
           turnId,
           toolCallId: 'compact-stale',
         })
-      ).resolves.toMatchObject({ outcome: 'unknown' });
+      ).resolves.toMatchObject({ outcome: 'retry' });
       expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
 
       const ensureDocRoomJoined = vi.spyOn(doc, 'ensureDocRoomJoined').mockResolvedValue(undefined);
       const waitUntilSynced = vi.spyOn(doc, 'waitUntilSynced').mockResolvedValueOnce(false);
+      const originalUpdateHistory = doc.updateHistory.bind(doc);
       const updateHistory = vi.spyOn(doc, 'updateHistory');
-      const enqueueSessionCheck = vi
-        .spyOn(host.sessionDispatchWatcher, 'enqueueSessionCheck')
-        .mockResolvedValue(undefined);
       await expect(
         host.reconcileSessionContextCompaction({
           sessionId,
           turnId,
           toolCallId: 'compact-stale',
         })
-      ).resolves.toMatchObject({ outcome: 'unknown' });
+      ).resolves.toMatchObject({ outcome: 'retry' });
       expect(ensureDocRoomJoined).toHaveBeenCalled();
       expect(updateHistory).not.toHaveBeenCalled();
       expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'in_progress' });
 
-      let confirmDurableWrite!: (synced: boolean) => void;
-      const durableWrite = new Promise<boolean>((resolve) => {
-        confirmDurableWrite = resolve;
+      getExecutionSnapshot.mockReturnValue({
+        hasActiveTurn: false,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: true,
+        hasRewriteBarrier: false,
+        hasActiveAutomation: false,
       });
-      waitUntilSynced.mockResolvedValueOnce(true).mockReturnValueOnce(durableWrite);
-      const reconciliation = host.reconcileSessionContextCompaction({
+      hasActivePresence.mockReset().mockReturnValue(false);
+      vi.spyOn(host.sessionDispatchWatcher, 'hasPendingDispatch').mockReturnValue(false);
+      const concurrentTurnId = 'assistant:concurrent-turn';
+      updateHistory.mockImplementationOnce(async (updateFn, options) => {
+        await originalUpdateHistory((history) => {
+          history.push({
+            id: concurrentTurnId,
+            role: 'assistant',
+            timestamp: '2026-09-12T00:00:00.000Z',
+            items: [{ type: 'text', text: 'concurrent turn' }],
+          });
+          return history;
+        });
+        getExecutionSnapshot.mockReturnValue({
+          activeTurnId: concurrentTurnId,
+          hasActiveTurn: true,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: true,
+          hasRewriteBarrier: false,
+          hasActiveAutomation: false,
+        });
+        await originalUpdateHistory(updateFn, options);
+      });
+      waitUntilSynced.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+      const reconciliation = await host.reconcileSessionContextCompaction({
         sessionId,
         turnId,
         toolCallId: 'compact-stale',
       });
-      await vi.waitFor(() => expect(enqueueSessionCheck).toHaveBeenCalledWith(sessionId));
-      expect(host.executionService.getExecutionSnapshot(sessionId).hasRewriteBarrier).toBe(false);
-      confirmDurableWrite(true);
-      await expect(reconciliation).resolves.toMatchObject({ outcome: 'reconciled' });
+      expect(reconciliation.error).toBeUndefined();
+      expect(reconciliation.outcome).toBe('reconciled');
+      expect(updateHistory).toHaveBeenCalledWith(expect.any(Function), { onlyEntryId: turnId });
+      expect((await doc.getHistory()).find((entry) => entry.id === concurrentTurnId)).toMatchObject(
+        {
+          items: [{ type: 'text', text: 'concurrent turn' }],
+        }
+      );
       expect(hasActivePresence).toHaveBeenCalled();
       expect(findCompaction(await doc.getHistory())).toMatchObject({ status: 'failed' });
       expect(isSessionContextCompacting(await doc.getHistory())).toBe(false);
+
+      getExecutionSnapshot.mockReturnValue({
+        hasActiveTurn: false,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: true,
+        hasRewriteBarrier: false,
+        hasActiveAutomation: false,
+      });
 
       const unsyncedTurnId = host.beginConversationTurn(sessionId);
       host.enqueueACPUpdate(sessionId, {
@@ -632,7 +666,7 @@ describe('MessageHandler ACP batching', () => {
           turnId: unsyncedTurnId,
           toolCallId: 'compact-unsynced',
         })
-      ).resolves.toMatchObject({ outcome: 'unknown' });
+      ).resolves.toMatchObject({ outcome: 'retry' });
       expect(findCompaction(await doc.getHistory(), 'compact-unsynced')).toMatchObject({
         status: 'failed',
       });

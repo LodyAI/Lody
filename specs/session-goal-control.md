@@ -103,6 +103,6 @@ Executed validation: adapter tests for the prompt-metadata transport, CLI tests
 for transport selection and for queueing a resume behind a draining turn, and
 component tests for capability-driven command availability. Host regressions cover
 prompt-lifetime-independent acceptance, more than three competing turns,
-supersession before provider submission, rewrite-barrier release, and visible startup
-failures. Agent-client wire tests cover cold pause/clear and unchanged manual `/goal xxx`
-prompts. No live Codex goal was exercised end to end.
+supersession before provider submission, and visible startup failures. Agent-client
+wire tests cover cold pause/clear and unchanged manual `/goal xxx` prompts. No live Codex goal
+was exercised end to end.

@@ -2,11 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { MachineId, SessionId } from '@lody/shared';
 
 import type { WorkspaceRuntime } from '@/atoms/runtime';
-import {
-  type ActiveSessionContextCompaction,
-  getContextCompactionReconciliationAttemptKey,
-  isDurableContextCompactionReconciliation,
-} from '@/lib/session-context-compaction';
+import type { ActiveSessionContextCompaction } from '@/lib/session-context-compaction';
 
 type ReconciliationRuntime = Pick<
   WorkspaceRuntime,
@@ -32,36 +28,35 @@ export const useSessionContextCompactionReconciliation = ({
   runtime: ReconciliationRuntime | null;
   sessionId: SessionId;
 }): void => {
-  const attemptsRef = useRef(new Set<string>());
+  const lastAttemptEvidenceRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!runtime || !canReconcile || !activeCompaction?.turnFinished) {
+    if (
+      !runtime ||
+      !canReconcile ||
+      !isConnectivityOnline ||
+      isSessionActive ||
+      !activeCompaction?.turnFinished
+    ) {
+      lastAttemptEvidenceRef.current = null;
       return;
     }
-    const attemptKey = getContextCompactionReconciliationAttemptKey({
+    const evidence = JSON.stringify([
       sessionId,
-      turnId: activeCompaction.turnId,
-      toolCallId: activeCompaction.toolCallId,
+      activeCompaction.turnId,
+      activeCompaction.toolCallId,
       ownerInstanceId,
-      isSessionActive,
       isConnectivityOnline,
-    });
-    if (attemptsRef.current.has(attemptKey)) return;
-    attemptsRef.current.add(attemptKey);
+    ]);
+    if (lastAttemptEvidenceRef.current === evidence) return;
+    lastAttemptEvidenceRef.current = evidence;
     void runtime
       .requestSessionContextCompactionReconciliation(machineId, {
         sessionId,
         turnId: activeCompaction.turnId,
         toolCallId: activeCompaction.toolCallId,
       })
-      .then((result) => {
-        if (!isDurableContextCompactionReconciliation(result)) {
-          attemptsRef.current.delete(attemptKey);
-        }
-      })
-      .catch(() => {
-        attemptsRef.current.delete(attemptKey);
-      });
+      .catch(() => undefined);
   }, [
     activeCompaction,
     canReconcile,

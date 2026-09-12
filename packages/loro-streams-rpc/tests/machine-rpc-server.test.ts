@@ -944,7 +944,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         return {
           type: 'session/reconcile-context-compaction_response' as const,
           ...args,
-          outcome: 'unchanged' as const,
+          outcome: 'retry' as const,
         };
       }
     );

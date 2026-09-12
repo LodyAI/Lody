@@ -35,12 +35,13 @@ Translation: current
 - 已 finished 的 assistant turn 可能包含未持久化 provider 终态的旧 context-compaction
   activity。打开该 Session 时可以请求修复，但只有 owner daemon 能修改指定 turn 和 tool
   item，且必须先由实时执行所有权证明该 turn 已不活跃。Turn `finished`、持久化 Session
-  status、经过时间、daemon 重启或缺少 live evidence 均不充分。Daemon 离线、不支持该能力、
-  不持有 Session 或无法确定时，历史保持不变。Repair 必须读取已完成远端同步的 Session
-  document；rewrite barrier 仅覆盖最终 live-state 检查和本地修改，释放后必须同时唤醒普通
-  turn 与 Goal turn dispatch；只有写入确认后才能返回 `reconciled`。非终态结果可在后续
-  history、browser connectivity 恢复（即使 Machine presence 始终 online）、daemon generation
-  或稳定的 Session activity 状态切换证据变化时重试；presence heartbeat 不得退化成轮询。
+  status、经过时间、daemon 重启或缺少 live evidence 均不充分。Renderer 只在 Session inactive
+  且 connectivity ready 时请求修复。Daemon 离线、不支持该能力、不持有 Session、仍有 live
+  work 或无法确定时，历史保持不变。Repair 必须读取已完成远端同步的 Session document，拒绝
+  任何 live Session work，再次确认 owner，并通过 `onlyEntryId` 只更新指定 entry；并发的新 turn
+  使用不同 identity，必须保持不变。只有写入确认后才能返回 `reconciled`，其他结果统一返回
+  `retry`。Retry evidence 只由 exact candidate、daemon generation、connectivity 和稳定的 Session
+  activity 状态切换界定；presence heartbeat 不得退化成轮询。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 

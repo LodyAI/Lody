@@ -649,8 +649,7 @@ export const SessionContextCompactionReconcileResponseSchema = z
     sessionId: SessionIdSchema,
     turnId: z.string().trim().min(1),
     toolCallId: z.string().trim().min(1),
-    outcome: z.enum(['reconciled', 'unchanged', 'active', 'unknown']),
-    activeTurnId: z.string().trim().min(1).optional(),
+    outcome: z.enum(['reconciled', 'retry']),
     error: z.string().trim().min(1).optional(),
   })
   .strict();

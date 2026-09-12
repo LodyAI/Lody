@@ -6790,7 +6790,7 @@ export class MessageHandler {
   }): Promise<SessionContextCompactionReconcileResponse> {
     const response = (
       outcome: SessionContextCompactionReconcileResponse['outcome'],
-      options: { activeTurnId?: string; error?: string } = {}
+      options: { error?: string } = {}
     ): SessionContextCompactionReconcileResponse => ({
       type: 'session/reconcile-context-compaction_response',
       ...args,
@@ -6809,88 +6809,52 @@ export class MessageHandler {
             : undefined;
         return meta?.machineId === this.machineId;
       };
-      const inspectLiveWork = (): {
-        activeTurnId?: string;
-        outcome: SessionContextCompactionReconcileResponse | null;
-      } => {
+      const hasLiveSessionWork = (): boolean => {
         const execution = this.executionService.getExecutionSnapshot(args.sessionId);
-        if (execution.activeTurnId === args.turnId) {
-          return {
-            activeTurnId: execution.activeTurnId,
-            outcome: response('active', { activeTurnId: execution.activeTurnId }),
-          };
-        }
-        if (
-          !execution.activeTurnId &&
-          (execution.hasActiveTurn ||
-            execution.hasBlockingPendingCreate ||
-            execution.hasActiveAutomation ||
-            this.sessionActivePresence.has(args.sessionId) ||
-            this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId))
-        ) {
-          return {
-            outcome: response('unknown', {
-              error: 'The daemon still has unassigned Session work.',
-            }),
-          };
-        }
-        return {
-          ...(execution.activeTurnId ? { activeTurnId: execution.activeTurnId } : {}),
-          outcome: null,
-        };
+        return (
+          execution.hasActiveTurn ||
+          execution.hasBlockingPendingCreate ||
+          execution.hasActiveAutomation ||
+          this.sessionActivePresence.has(args.sessionId) ||
+          this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId)
+        );
       };
 
       if (!(await verifyOwnership())) {
-        return response('unknown', { error: 'The target daemon does not own this Session.' });
-      }
-      const initialLiveWork = inspectLiveWork();
-      if (initialLiveWork.outcome) {
-        return initialLiveWork.outcome;
+        return response('retry', { error: 'The target daemon does not own this Session.' });
       }
 
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
       await sessionDoc.ensureDocRoomJoined();
       if (!(await sessionDoc.waitUntilSynced())) {
-        return response('unknown', { error: 'Session history is not synced with its owner.' });
+        return response('retry', { error: 'Session history is not synced with its owner.' });
       }
 
-      const releaseBarrier = this.executionService.tryAcquireSessionRewriteBarrier(args.sessionId);
-      if (!releaseBarrier) {
-        return response('unknown', { error: 'Session ownership is changing.' });
+      if (hasLiveSessionWork()) {
+        return response('retry', { error: 'The daemon still has live Session work.' });
+      }
+
+      if (!(await verifyOwnership())) {
+        return response('retry', { error: 'The target daemon no longer owns this Session.' });
       }
 
       let reconciled = false;
-      let observedActiveTurnId: string | undefined;
-      try {
-        if (!(await verifyOwnership())) {
-          return response('unknown', { error: 'The target daemon no longer owns this Session.' });
-        }
-        const liveWork = inspectLiveWork();
-        if (liveWork.outcome) {
-          return liveWork.outcome;
-        }
-        observedActiveTurnId = liveWork.activeTurnId;
-        await sessionDoc.updateHistory((history) => {
+      await sessionDoc.updateHistory(
+        (history) => {
           reconciled = settleContextCompactionItemAsFailed(history, args);
           return history;
-        });
-      } finally {
-        releaseBarrier();
-        // A turn offer or History update may have been checked while the barrier
-        // was held. Queue a follow-up after release so ACKed work cannot be stranded.
-        void this.sessionDispatchWatcher.enqueueSessionCheck(args.sessionId);
-      }
+        },
+        { onlyEntryId: args.turnId }
+      );
 
       if (reconciled && !(await sessionDoc.waitUntilSynced())) {
-        return response('unknown', {
+        return response('retry', {
           error: 'The reconciled Session history was not confirmed by its owner.',
         });
       }
-      return response(reconciled ? 'reconciled' : 'unchanged', {
-        ...(observedActiveTurnId ? { activeTurnId: observedActiveTurnId } : {}),
-      });
+      return response(reconciled ? 'reconciled' : 'retry');
     } catch (error) {
-      return response('unknown', { error: formatErrorMessage(error) });
+      return response('retry', { error: formatErrorMessage(error) });
     }
   }
 

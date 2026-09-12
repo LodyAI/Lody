@@ -7211,46 +7211,6 @@ describe('SessionExecutionService goal control', () => {
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);
   });
 
-  it('retains an accepted goal action until a rewrite barrier releases', async () => {
-    const { service, submitted, completion, delivered, failures } = createGoalService({
-      transport: 'promptMeta',
-    });
-    const internals = service as unknown as {
-      pendingGoalTurnBySession: Map<SessionId, unknown>;
-      waitForSessionRewriteBarrierRelease: (sessionId: SessionId) => Promise<void>;
-    };
-    const waitingForBarrier = createDeferred<void>();
-    const originalWait = internals.waitForSessionRewriteBarrierRelease.bind(service);
-    vi.spyOn(internals, 'waitForSessionRewriteBarrierRelease').mockImplementation(
-      async (sessionId) => {
-        waitingForBarrier.resolve();
-        await originalWait(sessionId);
-      }
-    );
-    const releaseBarrier = service.tryAcquireSessionRewriteBarrier(goalSessionId);
-    expect(releaseBarrier).not.toBeNull();
-
-    try {
-      const response = await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
-      expect(response).toMatchObject({ accepted: true, disposition: 'queued' });
-      await waitingForBarrier.promise;
-      expect(internals.pendingGoalTurnBySession.has(goalSessionId)).toBe(true);
-      expect(delivered).toEqual([]);
-      expect(failures).toEqual([]);
-
-      releaseBarrier?.();
-      await submitted.promise;
-      expect(delivered).toEqual([expect.objectContaining({ goalControl: { action: 'resume' } })]);
-      expect(failures).toEqual([]);
-      const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
-      completion.resolve();
-      await released;
-    } finally {
-      releaseBarrier?.();
-      completion.resolve();
-    }
-  });
-
   it('retains an accepted goal across more than three competing turns', async () => {
     const { service, submitted, completion, delivered } = createGoalService({
       transport: 'promptMeta',
@@ -7302,7 +7262,7 @@ describe('SessionExecutionService goal control', () => {
         return originalMeta();
       };
       const internals = service as unknown as {
-        startGoalTurn: (request: unknown) => Promise<'claimed' | 'rewrite-barrier' | 'not-claimed'>;
+        startGoalTurn: (request: unknown) => Promise<boolean>;
       };
       const originalStart = internals.startGoalTurn.bind(service);
       const settled = createDeferred<void>();

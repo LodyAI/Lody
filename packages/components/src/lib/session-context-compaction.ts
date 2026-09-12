@@ -1,32 +1,10 @@
-import type { SessionContextCompactionReconcileResponse, SessionHistory } from '@lody/shared';
+import type { SessionHistory } from '@lody/shared';
 
 export type ActiveSessionContextCompaction = {
   turnId: string;
   toolCallId: string;
-  status: 'pending' | 'in_progress';
   turnFinished: boolean;
 };
-
-export const getContextCompactionReconciliationAttemptKey = (args: {
-  sessionId: string;
-  turnId: string;
-  toolCallId: string;
-  ownerInstanceId: string | null;
-  isSessionActive: boolean;
-  isConnectivityOnline: boolean;
-}): string =>
-  JSON.stringify([
-    args.sessionId,
-    args.turnId,
-    args.toolCallId,
-    args.ownerInstanceId,
-    args.isSessionActive,
-    args.isConnectivityOnline,
-  ]);
-
-export const isDurableContextCompactionReconciliation = (
-  result: SessionContextCompactionReconcileResponse | null
-): boolean => result?.outcome === 'reconciled';
 
 export const findActiveSessionContextCompaction = (
   history: readonly Pick<SessionHistory, 'id' | 'role' | 'items' | 'finished'>[]
@@ -42,7 +20,6 @@ export const findActiveSessionContextCompaction = (
       return {
         turnId: entry.id,
         toolCallId: item.toolCallId,
-        status: item.status,
         turnFinished: entry.finished === true,
       };
     }

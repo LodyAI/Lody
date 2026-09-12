@@ -1623,7 +1623,7 @@ const toLegacyRpcErrorResponse = (
       sessionId: (cancelContext?.sessionId ?? '') as SessionId,
       turnId: cancelContext?.turnId ?? '',
       toolCallId: cancelContext?.toolCallId ?? '',
-      outcome: 'unknown',
+      outcome: 'retry',
       error: `${error.code}: ${error.message}`,
     };
   }
