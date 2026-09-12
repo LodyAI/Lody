@@ -49,6 +49,24 @@ import {
 
 const HISTORY_ROOT_KEY = 'history';
 
+/**
+ * Durability is a construction-time decision, never a silent default: a caller
+ * either supplies a real local persistence barrier or explicitly declares that
+ * the store has none. In the latter case `waitDurable` rejects with
+ * `SessionDurabilityError('unavailable')` instead of pretending an in-memory
+ * accept is durable.
+ */
+export type LoroSessionDurabilityOptions =
+  | {
+      /** Local persistence barrier, e.g. `repo.flush` or `repo.persistPendingChanges`. */
+      readonly durable: () => Promise<void>;
+      readonly durability?: undefined;
+    }
+  | {
+      readonly durable?: undefined;
+      readonly durability: 'unavailable';
+    };
+
 export type LoroSessionDataOptions = {
   sessionId: SessionId;
   doc: LoroDoc;
@@ -58,15 +76,9 @@ export type LoroSessionDataOptions = {
    * history writes; omit it only in tests that build a standalone adapter.
    */
   writer?: HistoryWriter;
-  /**
-   * Local durability barrier (e.g. `repo.flush`). When omitted, `waitDurable`
-   * rejects with `SessionDurabilityError('unavailable')` instead of pretending
-   * the accepted change is persisted.
-   */
-  durable?: () => Promise<void>;
   /** Awaited after a change is accepted, before the command resolves. */
   afterAccept?: (receipt: SessionWriteReceipt) => void | Promise<void>;
-};
+} & LoroSessionDurabilityOptions;
 
 export type LoroSessionData = SessionData & {
   /** The shared writer, for storage-owned capabilities (capture/copy/rollback). */

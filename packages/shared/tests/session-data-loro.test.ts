@@ -56,8 +56,16 @@ describe('loro session data adapter', () => {
   it('converges two replicas after UI- and agent-side domain writes', async () => {
     const left = new Loro();
     const right = new Loro();
-    const leftData = createLoroSessionData({ sessionId: contractSessionId, doc: left });
-    const rightData = createLoroSessionData({ sessionId: contractSessionId, doc: right });
+    const leftData = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc: left,
+      durability: 'unavailable',
+    });
+    const rightData = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc: right,
+      durability: 'unavailable',
+    });
 
     await leftData.commands.appendTurn({
       id: 'user-1',
@@ -150,7 +158,11 @@ describe('loro session data adapter', () => {
 
   it('refuses to claim durability when no barrier exists, and rejects a forged receipt', async () => {
     const doc = new Loro();
-    const data = createLoroSessionData({ sessionId: contractSessionId, doc });
+    const data = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc,
+      durability: 'unavailable',
+    });
     const result = await data.commands.appendTurn({
       id: 'turn',
       role: 'user',

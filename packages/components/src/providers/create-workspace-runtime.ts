@@ -3671,6 +3671,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const { mirror, history, historyWriter, sessionData } = createConversationSession(sessionDoc, {
       sessionId,
       windowed: isConversationViewEnabled(),
+      // Local IndexedDB durability barrier. Remote convergence is `waitUntilSynced`.
+      durable: () => repo.flush(),
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);

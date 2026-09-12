@@ -18,8 +18,20 @@ import { createConversationViewFromHistory } from './create-conversation-view-fr
 /** The switch changes readers only. Both modes use the shared history writer. */
 export function createConversationSession(
   doc: LoroDoc,
-  options: CreateConversationViewFromDocOptions & { windowed: boolean; sessionId: SessionId }
+  options: CreateConversationViewFromDocOptions & {
+    windowed: boolean;
+    sessionId: SessionId;
+    /**
+     * Local persistence barrier for this doc (the renderer passes `repo.flush`).
+     * Omitting it declares the store has no local durability, so `waitDurable`
+     * rejects instead of treating local acceptance as persistence.
+     */
+    durable?: () => Promise<void>;
+  }
 ) {
+  const durability = options.durable
+    ? ({ durable: options.durable } as const)
+    : ({ durability: 'unavailable' } as const);
   if (!options.windowed) {
     const mirror = createSessionMirror({
       doc,
@@ -38,6 +50,7 @@ export function createConversationSession(
         sessionId: options.sessionId,
         doc,
         writer: mirror.historyWriter,
+        ...durability,
       }),
     };
   }
@@ -59,6 +72,7 @@ export function createConversationSession(
       sessionId: options.sessionId,
       doc,
       writer: historyWriter,
+      ...durability,
     }),
   };
 }

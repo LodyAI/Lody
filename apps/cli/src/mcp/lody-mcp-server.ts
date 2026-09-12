@@ -122,8 +122,6 @@ import {
   selectDefaultAgentConfigForCreate,
   resolveTurnDispatchConfig,
   sendSessionChatResult,
-  isVisibleTranscriptTurn,
-  toSessionTranscriptEntry,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -144,13 +142,8 @@ import {
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
 import { publishTaskProposal } from '@/mcp/task-proposal';
-import { pageVisibleTranscript } from '@lody/shared/session-data';
-import {
-  buildSessionHistoryPage,
-  parseSessionHistoryCursor,
-  truncateSessionHistoryText as truncateUtf8HeadTail,
-  type SessionHistoryPageEntry,
-} from '@/mcp/session-history-page';
+import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
+import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import { version as cliVersion } from '@/pkg';
 import { uploadTaskImages } from '@/lib/task-image-upload';
 import {
@@ -1999,24 +1992,13 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const beforeIndex = parseSessionHistoryCursor(input.cursor, sessionId, Number.MAX_SAFE_INTEGER);
-    // Bounded business paging: scan raw rows backwards until `limit` displayable
-    // entries are collected. `limit` counts displayable turns; the cursor is a
-    // raw position, so hidden/empty rows never shift the caller.
-    const page = await pageVisibleTranscript(sessionDoc.sessionData.history, {
-      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
-      ...(beforeIndex < Number.MAX_SAFE_INTEGER ? { cursor: String(beforeIndex) } : {}),
-      isVisible: isVisibleTranscriptTurn,
-    });
-    const entries: SessionHistoryPageEntry[] = [];
-    page.turns.forEach((turn, offset) => {
-      const formatted = toSessionTranscriptEntry(page.positions[offset] ?? 0, turn);
-      if (formatted) entries.push(formatted);
-    });
-    return buildSessionHistoryPage({
+    // Bounded business paging: `limit` counts displayable turns, the cursor is a
+    // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+    return await buildSessionHistoryForReader({
       sessionId,
-      entries,
-      hasOlder: page.hasMore,
+      history: sessionDoc.sessionData.history,
+      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+      ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
       maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
     });
   });

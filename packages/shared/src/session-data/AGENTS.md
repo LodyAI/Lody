@@ -20,10 +20,12 @@ storage offset.
   MUST NOT be re-issued or reported as a pre-write rejection. Validate input and locate
   the target before mutating; a throw after the writer is invoked is `indeterminate`,
   not a rejection.
-- **Durability is separate** from acceptance and remote sync. `waitDurable` rejects with
-  `SessionDurabilityError('unavailable')` when the store has no barrier, and with
+- **Durability is separate** from acceptance and remote sync, and is a construction-time
+  choice: a caller passes a real local barrier (`repo.flush`) or explicitly declares
+  `durability: 'unavailable'`. `waitDurable` rejects with
+  `SessionDurabilityError('unavailable')` when there is no barrier, and with
   `'invalid_receipt'` for a receipt it did not issue; a receipt is an opaque capability,
-  never a caller-shaped object.
+  never a caller-shaped object. Never treat an in-memory accept as persisted.
 - **Async windowed reads.** `count`, `readAt`/`readTurn`/`readRange`, `readDirectory`
   (identity/state only, never bodies) and a gap-free `observe` whose initial directory is
   captured at the same point the listener goes live. Read states distinguish
