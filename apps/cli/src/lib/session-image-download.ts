@@ -21,6 +21,7 @@ type DownloadSessionImageAsPromptBlockArgs = {
   token: string;
   logger?: SessionImageDownloadLogger;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
 };
 
@@ -133,10 +134,12 @@ export async function downloadSessionImageForPrompt(
   const maxAttempts = SESSION_IMAGE_DOWNLOAD_RETRY_DELAYS_MS.length + 1;
 
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
+    args.signal?.throwIfAborted();
     const attemptNumber = attemptIndex + 1;
     try {
       const response = await fetchImpl(imageUrl, {
         method: 'GET',
+        signal: args.signal,
         headers: {
           Authorization: `Bearer ${args.token}`,
         },
@@ -177,6 +180,7 @@ export async function downloadSessionImageForPrompt(
         sizeBytes: bytes.byteLength,
       };
     } catch (error) {
+      args.signal?.throwIfAborted();
       if (error instanceof SessionImageDownloadHttpError && !error.retryable) {
         throw error;
       }

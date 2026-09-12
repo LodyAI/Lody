@@ -12,6 +12,25 @@ const baseArgs = {
 };
 
 describe('downloadSessionImageAsPromptBlock', () => {
+  it('cancels the active download without retrying it', async () => {
+    const controller = new AbortController();
+    const download = downloadSessionImageAsPromptBlock({
+      ...baseArgs,
+      signal: controller.signal,
+      fetchImpl: (async (_url, options) =>
+        await new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+            once: true,
+          });
+        })) as typeof fetch,
+      sleep: async () => {
+        throw new Error('Cancelled downloads must not retry');
+      },
+    });
+    controller.abort();
+    await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('retries transient network failures before returning an ACP image block', async () => {
     const fetchMock = vi
       .fn()

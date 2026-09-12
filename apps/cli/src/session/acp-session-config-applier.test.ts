@@ -21,6 +21,35 @@ function createLogger(): Logger {
 }
 
 describe('applyAcpSessionRunConfig', () => {
+  it('does not send later configuration after cancellation during a request', async () => {
+    const controller = new AbortController();
+    const sent: string[] = [];
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [],
+      setSessionMode: async () => {
+        sent.push('mode');
+        controller.abort();
+      },
+      unstable_setSessionModel: async () => {
+        sent.push('model');
+      },
+    } as unknown as AgentClient;
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-1' as SessionId,
+          acpSessionId: 'acp-1' as ACPSessionId,
+          agentClient,
+        },
+        config: { modeId: 'agent', modelId: 'model-a' },
+        logger: createLogger(),
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(sent).toEqual(['mode']);
+  });
+
   it('applies mode, model, and remaining options to an established ACP session', async () => {
     const setSessionMode = vi.fn(async () => undefined);
     const setSessionModel = vi.fn(async () => undefined);

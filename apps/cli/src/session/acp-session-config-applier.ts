@@ -92,6 +92,7 @@ export async function applyAcpSessionRunConfig(args: {
   session: AcpSessionConfigTarget;
   config: AcpSessionRunConfig;
   logger: Logger;
+  signal?: AbortSignal;
 }): Promise<AcpSessionRunConfigApplyResult> {
   const { session, config, logger } = args;
   const { sessionId, acpSessionId, agentClient } = session;
@@ -135,6 +136,7 @@ export async function applyAcpSessionRunConfig(args: {
   const targetModelId =
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
+  args.signal?.throwIfAborted();
   if (config.modeId) {
     try {
       await agentClient.setSessionMode?.(acpSessionId, config.modeId);
@@ -149,6 +151,7 @@ export async function applyAcpSessionRunConfig(args: {
       );
     }
   }
+  args.signal?.throwIfAborted();
   if (config.modelId) {
     try {
       await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
@@ -162,6 +165,7 @@ export async function applyAcpSessionRunConfig(args: {
   }
 
   for (const [configId, value] of configOptionEntries) {
+    args.signal?.throwIfAborted();
     if (configId === modeConfigId) {
       if (!config.modeId && typeof value === 'string') {
         try {
@@ -208,6 +212,7 @@ export async function applyAcpSessionRunConfig(args: {
     }
   }
 
+  args.signal?.throwIfAborted();
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
   const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
     acpSessionId,

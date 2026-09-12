@@ -1636,18 +1636,22 @@ export class MessageHandler {
     context: {
       sessionDoc: SessionDocument;
       basedOnUserTurnId?: string;
+      signal?: AbortSignal;
     }
   ): Promise<void> {
     const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
       config,
       logger: this.logger,
+      signal: context.signal,
     });
 
+    context.signal?.throwIfAborted();
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
       const persistRuntimeConfig = async (): Promise<void> => {
         await this.awaitTurnHistoryGate(session.sessionId);
+        context.signal?.throwIfAborted();
         context.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
       };
       void persistRuntimeConfig().catch((error) => {
@@ -1911,6 +1915,7 @@ export class MessageHandler {
     sessionId: SessionId;
     imageId: string;
     expectedMimeType: string;
+    signal?: AbortSignal;
   }): Promise<DownloadedSessionImagePromptBlock> {
     return await downloadSessionImageForPrompt({
       ...args,
@@ -2179,6 +2184,7 @@ export class MessageHandler {
     fileId: string;
     expectedSha256?: string;
     destPath: string;
+    signal?: AbortSignal;
   }): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'error'; message: string }> {
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
@@ -2190,6 +2196,7 @@ export class MessageHandler {
     try {
       response = await fetch(fileUrl, {
         method: 'GET',
+        signal: args.signal,
         headers: { Authorization: `Bearer ${this.token}` },
       });
     } catch (error) {
@@ -2265,6 +2272,7 @@ export class MessageHandler {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     fileBlocks: Extract<SessionInputBlock, { type: 'file' }>[];
+    signal?: AbortSignal;
   }): Promise<ContentBlock[]> {
     if (args.fileBlocks.length === 0) {
       return [];
@@ -2295,6 +2303,7 @@ export class MessageHandler {
 
     const promptBlocks: ContentBlock[] = [];
     for (const block of args.fileBlocks) {
+      args.signal?.throwIfAborted();
       const storageSessionId = block.storageSessionId ?? args.sessionId;
       // Deterministic name from fileId+fileName (no collision bump). A resend
       // lands on this same name, so the reuse check below can hit it; bumping
@@ -2354,6 +2363,7 @@ export class MessageHandler {
 
         if (!servedLocally) {
           const result = await this.downloadSessionFileToDisk({
+            signal: args.signal,
             workspaceId: args.workspaceId,
             sessionId: storageSessionId,
             fileId: block.fileId,
@@ -2411,6 +2421,7 @@ export class MessageHandler {
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
+    signal?: AbortSignal;
   }): Promise<ContentBlock[]> {
     const textParts: string[] = [];
     const imageInputBlocks: Extract<SessionInputBlock, { type: 'image' }>[] = [];
@@ -2449,6 +2460,7 @@ export class MessageHandler {
     const imagePromptAttachments = await Promise.all(
       imageInputBlocks.map(async (block) => {
         const downloaded = await this.fetchSessionImageForPrompt({
+          signal: args.signal,
           workspaceId: args.workspaceId,
           sessionId: block.storageSessionId ?? args.sessionId,
           imageId: block.imageId,
@@ -2457,6 +2469,7 @@ export class MessageHandler {
         return { inputBlock: block, downloaded };
       })
     );
+    args.signal?.throwIfAborted();
     const imageBlocks = imagePromptAttachments.map(({ downloaded }) => downloaded.block);
 
     // Keep ACP image blocks for visual context, and also expose the same bytes
@@ -2469,7 +2482,9 @@ export class MessageHandler {
 
     // Materialize human→agent file attachments under `<workspace>/.lody/attachments/`
     // and reference them with ACP resource links (never inline their contents).
+    args.signal?.throwIfAborted();
     const fileAttachmentBlocks = await this.materializeSessionFileAttachments({
+      signal: args.signal,
       workspaceId: args.workspaceId,
       sessionId: args.sessionId,
       fileBlocks: fileInputBlocks,
