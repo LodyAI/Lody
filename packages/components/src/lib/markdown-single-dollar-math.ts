@@ -197,6 +197,38 @@ const fencedCodeEnd = (value: string, lineStart: number, fence: MarkdownFence): 
   return value.length;
 };
 
+export const markdownHasUnclosedFence = (value: string): boolean => {
+  let lineStart = 0;
+
+  while (lineStart < value.length) {
+    const fence = markdownFenceAt(value, lineStart);
+    const nextLine = lineEndAfter(value, lineStart);
+    if (!fence) {
+      if (nextLine <= lineStart) break;
+      lineStart = nextLine;
+      continue;
+    }
+
+    let cursor = nextLine;
+    let closed = false;
+    while (cursor < value.length) {
+      if (isClosingMarkdownFence(value, cursor, fence)) {
+        closed = true;
+        cursor = lineEndAfter(value, cursor);
+        break;
+      }
+      const after = lineEndAfter(value, cursor);
+      if (after <= cursor) break;
+      cursor = after;
+    }
+    if (!closed) return true;
+    if (cursor <= lineStart) break;
+    lineStart = cursor;
+  }
+
+  return false;
+};
+
 const backtickRunLength = (value: string, start: number): number => {
   let cursor = start;
   while (cursor < value.length && value[cursor] === '`') cursor += 1;
