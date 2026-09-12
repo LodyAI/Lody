@@ -49,8 +49,31 @@ export function createAssistantTurn(input: OpenAssistantTurnInput): Draft {
 }
 
 /**
+ * Execution states that `seen` must never overwrite. `seen` is a read
+ * acknowledgement, not an execution outcome: a turn that already started or
+ * finished must not be pulled back to `seen` by a read that observed `pending`
+ * before the writer advanced it. `pending_apply` is a pre-submission state that
+ * still carries pending work, so it is not treated as unread either.
+ */
+const SEEN_REGRESSION_BLOCKED = new Set<string>([
+  'processing',
+  'handled',
+  'failed',
+  'canceled',
+  'pending_apply',
+]);
+
+/** Whether marking this turn seen would regress an advanced execution state. */
+export function markTurnSeenBlocked(draft: Draft): boolean {
+  return typeof draft.status === 'string' && SEEN_REGRESSION_BLOCKED.has(draft.status);
+}
+
+/**
  * Mark a turn seen. Returns whether it changed anything; the legacy `read` flag
  * is derived from the same mapping the storage layer uses for `seen`.
+ *
+ * Callers must check `markTurnSeenBlocked` first: `seen` only advances an unread
+ * or absent-status turn, and an advanced execution state stays untouched.
  */
 export function applyMarkTurnSeen(draft: Draft): boolean {
   if (draft.status === 'seen' && draft.read === true) return false;

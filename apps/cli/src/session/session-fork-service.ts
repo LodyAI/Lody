@@ -15,12 +15,12 @@ import {
   type SessionForkSpec,
   type SessionForkOperation,
   type SessionHistoryInput,
-  type StoredHistorySnapshot,
   type SessionMeta,
   type ProjectRef,
   resolveSessionMcpSelection,
   resolveSessionTaskToolsEnabled,
 } from '@lody/shared';
+import type { SessionSnapshot, SessionTurn } from '@lody/shared/session-data';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
@@ -48,7 +48,7 @@ type WorktreeForkPreparedInput = {
   targetMeta: SessionMeta;
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
-  sourceSnapshot: StoredHistorySnapshot;
+  sourceSnapshot: SessionSnapshot;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -473,7 +473,7 @@ export class SessionForkService {
     // path; the rejection order below is unchanged.
     const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
       this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      sourceDoc.captureStoredHistory(),
+      sourceDoc.sessionData.snapshots.capture(),
       this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
       reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
     ]);
@@ -549,7 +549,7 @@ export class SessionForkService {
     // repaired session can never drift from a normally-forked one's title.
     const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
-      sourceSnapshot.history,
+      sourceSnapshot.read() as SessionHistoryInput[],
       spec.sourceTurnId,
       sourceSessionId,
       sourceTitle,
@@ -865,7 +865,17 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        await targetDoc.copyStoredHistory(sourceSnapshot, historyResult.history);
+        const copyResult = targetDoc.sessionData.snapshots.copyFrom(
+          sourceSnapshot,
+          historyResult.history as unknown as readonly SessionTurn[]
+        );
+        if (copyResult.status !== 'accepted') {
+          throw new SessionForkOperationError(
+            'TARGET_WRITE_FAILED',
+            'The forked history could not be written.',
+            copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
+          );
+        }
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -1004,7 +1014,17 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        await targetDoc.copyStoredHistory(sourceSnapshot, historyResult.history);
+        const copyResult = targetDoc.sessionData.snapshots.copyFrom(
+          sourceSnapshot,
+          historyResult.history as unknown as readonly SessionTurn[]
+        );
+        if (copyResult.status !== 'accepted') {
+          throw new SessionForkOperationError(
+            'TARGET_WRITE_FAILED',
+            'The forked history could not be written.',
+            copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
+          );
+        }
         targetDoc.setForkOperation(undefined);
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,

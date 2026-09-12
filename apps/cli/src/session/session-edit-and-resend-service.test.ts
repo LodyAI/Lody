@@ -115,17 +115,25 @@ function createHarness(
   const sessionDoc = {
     getMetaState: vi.fn(async () => meta),
     getHistory: vi.fn(realDoc.getHistory.bind(realDoc)),
-    updateHistoryWithRollback: vi.fn(
-      async (update: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-        events.push('history');
-        const rollback = await realDoc.updateHistoryWithRollback(update);
-        history = await realDoc.getHistory();
-        return () => {
-          rollback();
-          history = loro.getList('history').toJSON() as SessionHistoryInput[];
-        };
-      }
-    ),
+    sessionData: {
+      commands: {
+        updateHistoryWithRollback: vi.fn(
+          async (update: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+            events.push('history');
+            const result = await realDoc.sessionData.commands.updateHistoryWithRollback(update);
+            if (result.status !== 'accepted') throw new Error('history write rejected');
+            history = await realDoc.getHistory();
+            return {
+              ...result,
+              rollback: () => {
+                result.rollback();
+                history = loro.getList('history').toJSON() as SessionHistoryInput[];
+              },
+            };
+          }
+        ),
+      },
+    },
   };
   const repo = {
     upsertDocMeta: vi.fn(async () => {

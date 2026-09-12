@@ -54,8 +54,12 @@ export const attachAutoMarkLatestUserHistoryAsRead = (
           const turn = await findLatestPendingUserTurn(data);
           if (disposed) return;
           if (!turn || turn.id === lastMarkedTurnId) continue;
-          lastMarkedTurnId = turn.id;
-          await data.commands.markTurnSeen(turn.id);
+          // The command re-checks the status inside its commit and refuses to
+          // regress an execution state a concurrent writer advanced. Record the
+          // id only on an accepted write: a rejected precondition stays
+          // retryable, and an indeterminate result is not "done".
+          const result = await data.commands.markTurnSeen(turn.id);
+          if (result.status === 'accepted') lastMarkedTurnId = turn.id;
         } while (rerunRequested);
       } finally {
         running = false;

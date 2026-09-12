@@ -30,5 +30,8 @@ export function composeTestSessionDoc(
     session: { id: sessionDoc.sessionId, ...(options.session ?? {}) },
     history: options.history ?? [],
   } as never);
+  // Composition is storage-only now; a normal (non-read-only) open arms the
+  // auto-read policy explicitly.
+  sessionDoc.attachAutoRead();
   return doc;
 }

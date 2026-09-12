@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '../src/schema';
+import type { SessionId } from '../src/ids';
 import { createHistoryWriter } from '../src/history-writer';
 import {
   createLoroSessionData,
@@ -191,6 +192,105 @@ describe('loro session data adapter', () => {
         turnIds: ['turn'],
       } as never)
     ).rejects.toMatchObject({ code: 'invalid_receipt' });
+  });
+
+  it('invalidates every snapshot handle when the source store closes', async () => {
+    const doc = new Loro();
+    const data = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc,
+      durability: 'unavailable',
+    });
+    const snapshots = data.snapshots;
+    expect(snapshots.capabilities.copy).toBe(true);
+    const snapshot = snapshots.capture();
+    expect(snapshot.sessionId).toBe(contractSessionId);
+    await data.commands.appendTurn({
+      id: 'turn',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      items: [{ type: 'text', text: 'x' }],
+      fileDiff: [],
+    });
+    // The store's teardown hook invalidates the source of every handle.
+    snapshots.closeSource();
+    const closed = expect.objectContaining({ code: 'source_closed' });
+    expect(() => snapshots.capture()).toThrowError(closed);
+    expect(() => snapshots.release(snapshot)).toThrowError(closed);
+    expect(() => snapshot.read()).toThrowError(closed);
+    expect(() => snapshots.copyFrom(snapshot, [])).toThrowError(closed);
+  });
+
+  it('reports source_closed on a cross-store copy after the source store closes', () => {
+    const sourceDoc = new Loro();
+    const source = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc: sourceDoc,
+      durability: 'unavailable',
+    });
+    const targetDoc = new Loro();
+    const target = createLoroSessionData({
+      sessionId: 'target-session' as SessionId,
+      doc: targetDoc,
+      durability: 'unavailable',
+    });
+    const snapshot = source.snapshots.capture();
+    source.snapshots.closeSource();
+    // The target store stays open, but the handle's source is gone.
+    expect(() => target.snapshots.copyFrom(snapshot, [])).toThrowError(
+      expect.objectContaining({ code: 'source_closed' })
+    );
+    expect(() => snapshot.read()).toThrowError(expect.objectContaining({ code: 'source_closed' }));
+  });
+
+  it('binds an imported history write, its stored baseline and the cursor with no await gap', async () => {
+    const doc = new Loro();
+    let cursorState: unknown = { importedTurnHashes: ['old'] };
+    const data = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc,
+      durability: 'unavailable',
+      historyImportCursor: {
+        read: () => cursorState,
+        write: (cursor) => {
+          cursorState = cursor;
+        },
+      },
+    });
+    await data.commands.appendTurn({
+      id: 'a',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      items: [{ type: 'text', text: 'x' }],
+      fileDiff: [],
+    });
+    const seenCursors: unknown[] = [];
+    const result = await data.commands.applyHistoryImport({
+      update: (history, cursor) => {
+        // The callback sees the cursor read at the start of the same block.
+        seenCursors.push(cursor);
+        return [
+          ...history,
+          {
+            id: 'b',
+            role: 'assistant',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            items: [{ type: 'text', text: 'y' }],
+            fileDiff: [],
+          },
+        ];
+      },
+      createCursor: (stored) => ({
+        importedTurnHashes: [
+          ...((cursorState as { importedTurnHashes: string[] }).importedTurnHashes ?? []),
+          `hash-${stored.length}`,
+        ],
+      }),
+    });
+    expect(result.status).toBe('accepted');
+    expect(seenCursors).toEqual([{ importedTurnHashes: ['old'] }]);
+    expect(cursorState).toEqual({ importedTurnHashes: ['old', 'hash-2'] });
+    expect((await data.history.count())).toBe(2);
   });
 
   it('reports an accepted write whose post-accept side effect failed', async () => {

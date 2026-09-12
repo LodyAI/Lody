@@ -5,6 +5,14 @@ import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-sch
 import { prepareReplacement } from '../history-writer';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
+import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
+import {
+  checkSessionSnapshot,
+  mintSessionSnapshot,
+  sessionSnapshotContext,
+  SessionSnapshotError,
+  type SessionSnapshotService,
+} from './snapshot';
 import {
   applyMarkTurnSeen,
   applyOpenAssistantTurn,
@@ -12,6 +20,7 @@ import {
   applyResumeAssistant,
   createAssistantTurn,
   hasTaskProposal,
+  markTurnSeenBlocked,
   parseTaskProposalResolution,
   resolveTaskProposalOnEntry,
 } from './planner';
@@ -25,6 +34,7 @@ import {
   type SessionHistoryCommands,
   type SessionHistoryReader,
   type SessionObservation,
+  type SessionRollbackCommandResult,
   type SessionTurn,
   type SessionTurnRead,
   type SessionTurnWritableValues,
@@ -76,6 +86,13 @@ export type MemorySessionData = SessionData & {
   pendingDurableCount(): number;
   /** Mutate storage as a peer would, bypassing this instance's commands. */
   applyPeerMutation(mutate: (turns: SessionTurn[]) => void): void;
+  /**
+   * An honest snapshot service for this store: capture/release are real and
+   * handle validation matches the Loro backend, but `capabilities.copy` is
+   * `false` and `copyFrom` returns `rejected('unsupported')` — this double
+   * never claims stored-copy support it does not implement.
+   */
+  readonly snapshots: SessionSnapshotService;
 };
 
 const clone = <T>(value: T): T =>
@@ -129,8 +146,9 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     return -1;
   };
 
-  const notify = () => {
-    for (const listener of listeners) listener({ kind: 'changed' });
+  const notify = (range?: { from: number; to: number }) => {
+    for (const listener of listeners)
+      listener(range ? { kind: 'changed', from: range.from, to: range.to } : { kind: 'changed' });
   };
 
   const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
@@ -139,9 +157,26 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     const rows: SessionDirectoryRow[] = [];
     for (let position = lo; position < hi; position += 1) {
       const turn = turns[position];
-      rows.push(
-        turn ? { position, state: 'ready', turnId: turn.id } : { position, state: 'invalid' }
-      );
+      if (!turn) {
+        rows.push({ position, state: 'invalid' });
+        continue;
+      }
+      const scalars = pickDirectoryScalars(turn);
+      if (!scalars) {
+        rows.push({ position, state: 'invalid' });
+        continue;
+      }
+      rows.push({
+        position,
+        state: 'ready',
+        turnId: turn.id,
+        scalars,
+        ...(scalars.role === 'user'
+          ? { inputConfig: pickDirectoryInputConfig(turn.inputConfig) }
+          : {}),
+        itemCount: Array.isArray(turn.items) ? turn.items.length : 0,
+        planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
+      });
     }
     return rows;
   };
@@ -165,9 +200,15 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   ): Promise<SessionCommandResult> => {
     const plan: MemoryCommitPlan = { kind, turnIds };
     await options.beforeCommit?.(plan);
+    const beforeLength = turns.length;
     const applied = mutation(plan);
     if (!applied) return rejected('conflict');
-    notify();
+    const changedId = plan.turnIds[0];
+    const from = changedId !== undefined ? findIndex(changedId) : -1;
+    // A structural mutation reports the tail from the first touched row; a
+    // scalar write reports only its own turn.
+    if (from >= 0) notify({ from, to: turns.length !== beforeLength ? turns.length : from + 1 });
+    else notify();
     const receipt = issueReceipt(kind, plan.turnIds.slice());
     try {
       await options.afterCommit?.(plan);
@@ -206,6 +247,10 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     },
     async readDirectory(from, to) {
       return directory(from, to);
+    },
+    async readAll() {
+      // Detached clone of the whole store in one read.
+      return turns.map((turn) => clone(turn));
     },
     observe(listener) {
       // The listener is registered before the snapshot is taken in the same
@@ -310,6 +355,9 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         if (index < 0) return false;
         const next = turns.slice();
         const updated = { ...(next[index] as Record<string, unknown>) };
+        // Same commit-time guard as the Loro adapter: never regress a status a
+        // concurrent writer advanced; a blocked write is `rejected('conflict')`.
+        if (markTurnSeenBlocked(updated)) return false;
         const changed = applyMarkTurnSeen(updated);
         if (!changed) return true;
         next[index] = withoutUndefined(updated) as SessionTurn;
@@ -443,6 +491,15 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         return true;
       });
     },
+    // The double never claims writer-owned guarded operations it cannot perform
+    // honestly: rollback compensation and the no-gap import binding are storage
+    // rules, so both are explicit `unsupported` rejections.
+    async updateHistoryWithRollback() {
+      return rejected('unsupported') as SessionRollbackCommandResult;
+    },
+    async applyHistoryImport() {
+      return rejected('unsupported');
+    },
   };
 
   const durability = {
@@ -466,11 +523,68 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     },
   };
 
+  // # Honest snapshot service
+  //
+  // This double captures a real detached copy of its own store and enforces the
+  // same handle scoping as the Loro backend (forged/foreign/released handles
+  // throw the matching `SessionSnapshotError`). It does not implement stored
+  // copy, so `capabilities.copy` is `false` and `copyFrom` always returns
+  // `rejected('unsupported')` after handle validation.
+  const snapshotToken = {};
+  const issuedSnapshots = new WeakSet<object>();
+
+  const snapshots: SessionSnapshotService = {
+    capabilities: { copy: false },
+    capture() {
+      // One consistent capture: a single detached clone of the whole store.
+      const captured = turns.map(clone);
+      const snapshot = mintSessionSnapshot(
+        {
+          token: snapshotToken,
+          backend: 'memory',
+          payload: captured,
+          issued: issuedSnapshots,
+          isClosed: () => false,
+        },
+        sessionId,
+        () => {
+          if (!issuedSnapshots.has(snapshot))
+            throw new SessionSnapshotError('released', 'The snapshot was released.');
+          return captured.map(clone);
+        }
+      );
+      issuedSnapshots.add(snapshot);
+      return snapshot;
+    },
+    release(snapshot) {
+      const issuer = sessionSnapshotContext(snapshot);
+      if (issuer === undefined)
+        throw new SessionSnapshotError(
+          'invalid_snapshot',
+          'Not a snapshot capability of any store.'
+        );
+      if (issuer.token !== snapshotToken)
+        throw new SessionSnapshotError(
+          'cross_store',
+          'The snapshot was issued by a different store.'
+        );
+      // Idempotent: releasing an already-released handle is a no-op.
+      issuedSnapshots.delete(snapshot);
+    },
+    copyFrom(snapshot) {
+      // Handle validation first: a bad handle throws, only a valid one reports
+      // the honest `unsupported` result.
+      checkSessionSnapshot(snapshot, snapshotToken, false);
+      return rejected('unsupported');
+    },
+  };
+
   return {
     sessionId,
     history: reader,
     commands,
     durability,
+    snapshots,
     readStored: storedTurns,
     markDurable() {
       durableSerial = acceptedSerial;

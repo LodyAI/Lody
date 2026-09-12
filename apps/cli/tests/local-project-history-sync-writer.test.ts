@@ -326,8 +326,11 @@ describe('history import through the real SessionDocument writer', () => {
     peer.import(loro.export({ mode: 'snapshot' }));
     location(peer).set('endColumn', 99);
     peer.commit();
-    const original = doc.updateHistoryAndCursor.bind(doc);
-    vi.spyOn(doc, 'updateHistoryAndCursor').mockImplementationOnce((...args) => {
+    // Hook the port command the service now drives: the peer edit lands before
+    // the synchronous write block, so the write-time decision must see it.
+    const commands = doc.sessionData.commands;
+    const original = commands.applyHistoryImport.bind(commands);
+    vi.spyOn(commands, 'applyHistoryImport').mockImplementationOnce((...args) => {
       loro.import(peer.export({ mode: 'update', from: loro.version() }));
       return original(...args);
     });

@@ -40,6 +40,30 @@ storage offset.
   mixed tool/subagent batch that may belong to an older turn, and creates a missing bound
   target under the caller's id. Both adapters apply the same shared notification/content
   planners; the caller never passes a JSON op list.
+- **Storage-owned snapshot service.** `data.snapshots` is the port's opaque-handle
+  stored-copy service. `capture()` must be the shared writer's `capture()` (Loro) or an
+  honest store snapshot (memory) — never a stitched read of a changing page.
+  `snapshot.read()` is the handle's own full, detached stored read (export/replay/hash
+  use it instead of stitching paginated reads). `release` is idempotent and
+  issuing-store-only; forged/foreign/released handles throw `SessionSnapshotError` with
+  the matching code, and `source_closed` applies once the issuing store closes
+  (`LoroSessionData.snapshots.closeSource()`, the store teardown hook called by
+  `SessionDocument.destroy`). `copyFrom` admits same-backend cross-store handles (the
+  fork flow: capture on the source, copy into the target) and rejects a different
+  backend with `cross_store`. Provenance stays in `history-writer.ts`; adapters only
+  scope handles to the issuing store identity + `sessionId`. A backend without stored
+  copy declares `capabilities.copy = false` and returns `rejected('unsupported')` — never
+  a false capability.
+- **Writer-owned guarded operations.** `commands.updateHistoryWithRollback` (guarded
+  whole-history update + compensation) and `commands.applyHistoryImport` (imported
+  history write + stored snapshot read + cursor creation in ONE synchronous block, no
+  await gap; the cursor setter arrives as a construction-time control-plane accessor)
+  are port commands over the one shared writer. A business throw from the callback
+  propagates unchanged and proves nothing was applied; a backend without the rules
+  (memory) rejects `unsupported` instead of faking them. Business code never calls the
+  raw `SessionDocument.captureStoredHistory/copyStoredHistory/updateHistoryWithRollback`
+  facade methods; those raw-writer facades remain only as back-compat surface (their
+  stored-handle types predate the port).
 - **The in-memory double** exists to prove async reads/writes and real consumer contracts;
   it is not a second copy of domain rules. Both backends run
   `tests/session-data-contract.ts`, and a real consumer runs against the double in

@@ -142,25 +142,50 @@ locates by id and diffs only the named field, and its `false` result is the not-
 `tests/session-data-contract.ts` covers the opaque-item replacement and the rejected-changed-item
 control on both backends.
 
+The CLI open path separates storage composition from the auto-read write policy. `composeSessionData`
+composes the reader/writer/control plane only; `init({ skipAutoRead: true })` — the temporary-snapshot
+read path — never arms the write observer, so opening a doc cannot change it. Normal `init` and
+`initOffline` call `attachAutoRead()`, and `init` then marks the latest unread turn. Marking seen is
+guarded at the commit site: `markTurnSeen` refuses to regress an advanced execution state
+(`processing`/`handled`/`failed`/`canceled`/`pending_apply`) with `rejected('conflict')`, so the
+auto-read's asynchronous `pending` observation cannot overwrite a status a concurrent writer
+advanced; the helper records its last-marked id only on an accepted write.
+
 The control plane moved to `@lody/shared/session-control-plane` (`sessionControlPlaneSchema`,
 `createControlPlaneDoc`, `createSessionControlPlaneMirror`) so the CLI and renderer can build one
 history-less control plane; the component copies are re-exports.
 
-Not migrated in this change: `ConversationView` still reads the raw list as the UI display cache;
-fork already uses the storage-owned `capture`/`copyFrom` handle, but external-history **import** still
-goes through the composed `SessionDocument.updateHistoryAndCursor` (a whole-history `updateHistory`
-callback that binds the stored snapshot and cursor with no async gap) rather than a dedicated port
-command. `readHistorySnapshot`/`readFullHistory` remain deliberate bottom-level exposures owned by
-`SessionDocument` (synchronous dispatch output and explicit full reads); they are not a second writer.
-Queue promotion appends through `SessionData.commands.appendTurn`. Owner/seal mapping and old-format
-migration remain separate. `observe` still returns the whole directory and a positionless `changed`
-for every doc event; per-range invalidation, stale-async fencing and a stable window lease for the UI
-cache are the remaining v3 reader work, owned by the port adapter and `lib/conversation-view`.
+The display cache is now reader-backed. `createConversationSession` (windowed mode) builds
+`history` with `createConversationViewFromReader` over `sessionData.history`; `createConversationViewFromDoc`
+remains only for the non-windowed/rollback path, and the reader module imports no `loro-crdt` and names
+no CID. Identity is `turnId` everywhere (index, pins, hydration); `acquireRange` pins by the ids it
+captured (surviving a later insert/delete) and `release` cancels the lease's chunked hydration; every
+async read/lease is generation-guarded so a response resolving after a structural change, after
+release, or after `dispose` cannot overwrite the snapshot. `observe.initial` builds the index and each
+ranged `changed` re-reads only the affected range (directory plus hydrated turns in it); `reset` is
+the only full re-read. Directory rows carry the send-critical Role/MCP/option config, so sending does
+not wait on the idle pass. `readAll()` is the reader's one consistent full read; `readConversationHistory`
+(export/replay/copy) uses it when present instead of stitching pages.
 
-Verification: the shared suite (99 files / 1164 tests), components (469 files / 3538 tests) and
-CLI (2700 tests, 4 skipped, run with a redirected `HOME` because the sandbox blocks `~/.lody`
-writes) all pass, with shared/components/CLI typechecks. These are library-level checks; they do
-not establish device-scale cold-open, memory or owner/seal behaviour.
+The snapshot service is wired to its business consumers: fork captures through
+`sessionData.snapshots.capture()`, clones the boundary with `snapshot.read()`, and copies into the
+target with `copyFrom` (same-backend cross-store handles are admitted; memory→Loro is `cross_store`);
+edit-and-resend rollback uses `commands.updateHistoryWithRollback`; the three external-history import
+sites use `commands.applyHistoryImport`, which binds the write, the stored baseline read and the
+cursor creation in one synchronous block with no await gap. A backend without stored copy (memory)
+returns `rejected('unsupported')` rather than faking it, and forged/foreign/released/source-closed
+handles throw.
+
+Remaining raw exposures (owners as noted): `createConversationViewFromDoc` / `createConversationViewFromHistory`
+(the rollback path) and the `SessionDocument` facades `getHistory`/`readHistorySnapshot`/`captureStoredHistory`
+/`copyStoredHistory`/`updateHistoryWithRollback`/`updateHistoryAndCursor` remain as back-compat surface
+owned by `apps/cli/src/lib/loro/doc.ts`; no business caller uses the raw copy/rollback facades. Owner/seal
+mapping and old-format migration remain separate.
+
+Verification: shared 100 files / 1190 tests, components 470 files / 3566 tests, CLI 262 files / 2703 tests
+(4 skipped), all run with a redirected `HOME` and the harness's broken `GIT_CONFIG_COUNT` variables unset;
+shared/components/CLI typechecks, lint, `docs check` and `check:quick` pass. These are library-level
+checks; they do not establish device-scale cold-open, memory or owner/seal behaviour.
 
 ## Verification
 

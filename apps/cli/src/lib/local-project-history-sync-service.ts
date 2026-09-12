@@ -316,6 +316,29 @@ function areStringArraysEqual(left: readonly string[], right: readonly string[])
   return left.length === right.length && isPrefix(left, right);
 }
 
+/**
+ * The composed import operation on the port: the history write, the stored
+ * snapshot read and the cursor creation happen in one synchronous block with
+ * no await gap. The business callback returns only its decision and the
+ * selected history; a pre-write rejection surfaces as a retryable error.
+ */
+async function applyBoundHistoryImport(
+  sessionDoc: SessionDocument,
+  update: (
+    history: SessionHistoryInput[],
+    cursor: SessionExternalHistoryCursorDocState | undefined
+  ) => SessionHistoryInput[],
+  createCursor: (stored: SessionHistoryInput[]) => SessionExternalHistoryCursorDocState
+): Promise<void> {
+  const result = await sessionDoc.sessionData.commands.applyHistoryImport({ update, createCursor });
+  if (result.status === 'accepted') return;
+  throw new Error(
+    result.status === 'rejected'
+      ? `History import was rejected before commit: ${result.reason.code}`
+      : 'History import outcome is unknown'
+  );
+}
+
 async function readSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
   externalHistory: ExternalAcpHistorySyncMeta
@@ -933,7 +956,8 @@ export class LocalProjectHistorySyncService {
     });
     const lastMessageAt = resolveSourceUpdatedAtMs(info, getServerNow());
 
-    await sessionDoc.updateHistoryAndCursor(
+    await applyBoundHistoryImport(
+      sessionDoc,
       (history, cursor) => {
         const sourceHashes = resolveImportedTurnHashes(
           latestExternalHistory,
@@ -1141,7 +1165,8 @@ export class LocalProjectHistorySyncService {
 
     try {
       const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistoryAndCursor(
+      await applyBoundHistoryImport(
+        sessionDoc,
         () => args.materialized.history,
         (stored) => createImportCursor(args.materialized.turnHashes, stored)
       );
@@ -1213,7 +1238,8 @@ export class LocalProjectHistorySyncService {
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
     let appended = 0;
     try {
-      await sessionDoc.updateHistoryAndCursor(
+      await applyBoundHistoryImport(
+        sessionDoc,
         (history, cursor) => {
           const importedTurnHashes = resolveImportedTurnHashes(
             externalHistory,

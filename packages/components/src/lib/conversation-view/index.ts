@@ -7,6 +7,10 @@ export {
   type IdleScheduler,
 } from './create-conversation-view-from-doc';
 export {
+  createConversationViewFromReader,
+  type CreateConversationViewFromReaderOptions,
+} from './create-conversation-view-from-reader';
+export {
   createConversationViewFromHistory,
   type CreateConversationViewFromHistoryOptions,
 } from './create-conversation-view-from-history';

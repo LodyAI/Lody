@@ -91,4 +91,49 @@ export type SessionDirectoryRow = {
   /** Business id when the slot declares one; absent for invalid/unknown slots. */
   readonly turnId?: string;
   readonly reason?: SessionUnavailableReason;
+  /**
+   * Shallow scalar/index facts, read without materializing the turn body. The
+   * UI display cache builds its index row from these before any body hydration.
+   */
+  readonly scalars?: SessionDirectoryScalars;
+  /**
+   * Shallow send configuration (Role / MCP selection / option values), never the
+   * prompt or input blocks. Enough to send with the correct sticky Role before
+   * the body is hydrated.
+   */
+  readonly inputConfig?: unknown;
+  /** Item / plan counts when cheaply available; omitted rather than guessed. */
+  readonly itemCount?: number;
+  readonly planCount?: number;
 };
+
+/** The shallow scalars in a directory row, mirrored from the turn's own fields. */
+export type SessionDirectoryScalars = {
+  readonly id: string;
+  readonly role: SessionTurnRole;
+  readonly timestamp: string;
+  readonly status?: SessionTurnStatus;
+  readonly finished?: boolean;
+  readonly endedAt?: number;
+  readonly sendStatus?: 'timeout';
+  readonly userTurnId?: string;
+  readonly acpTurnId?: string;
+  readonly startedAt?: number;
+  readonly permissionWaitMs?: number;
+};
+
+/**
+ * The body-independent send-config keys a directory row may carry. Kept here so
+ * an adapter and any consumer pick the same subset in one place.
+ */
+export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
+  'agentRoleId',
+  'agentRoleRevision',
+  'modeId',
+  'modelId',
+  'cliType',
+  'agentType',
+  'mcpServerIds',
+  'configOptionValues',
+  'taskToolsEnabled',
+] as const;

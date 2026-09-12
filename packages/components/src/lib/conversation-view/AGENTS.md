@@ -26,6 +26,21 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   structural batches may then safely skip the subsumed turn events. Summary inputs
   use the renderer's tolerant item normalization in both readers; never rewrite
   invalid/unknown stored items while deriving their display summaries.
+- **Reader-backed composition**: the windowed display cache reads through
+  `createConversationViewFromReader` over `sessionData.history`
+  (`create-conversation-session.ts`); `createConversationViewFromDoc` remains
+  only for the non-windowed/rollback path. That module never imports
+  `loro-crdt`, never names a CID/container id and never touches a raw doc: its
+  synchronous accessors read an in-memory snapshot that async port reads
+  populate (`readDirectory` for index rows and send config, `readTurn` for
+  bodies). Identity is `turnId`, never a position; leases pin by id with
+  refcounts, and every async read/lease carries a generation — a response
+  resolving after a structural change, after its lease was released, or after
+  `dispose` is discarded. `observe.initial` builds the index; each ranged
+  `changed` re-reads ONLY the affected raw range (directory + the hydrated
+  turns inside it) and `reset` is the only full re-read. Contract:
+  `tests/conversation-view-from-reader.test.ts` (both `createLoroSessionData`
+  and `createMemorySessionData` backends).
 - **Write** through `@lody/shared` HistoryWriter in both feature-flag modes.
   Never recreate its parser, materializer, rollback or stored-copy behavior here.
   `createConversationSession` owns reader composition; windowed writes do not

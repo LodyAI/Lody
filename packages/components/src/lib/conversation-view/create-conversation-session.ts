@@ -9,11 +9,9 @@ import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { createControlPlaneDoc } from './control-plane-doc';
 import { CONTROL_PLANE_IGNORED_ROOT_KEYS, sessionControlPlaneSchema } from './control-plane-schema';
-import {
-  createConversationViewFromDoc,
-  type CreateConversationViewFromDocOptions,
-} from './create-conversation-view-from-doc';
+import type { CreateConversationViewFromDocOptions } from './create-conversation-view-from-doc';
 import { createConversationViewFromHistory } from './create-conversation-view-from-history';
+import { createConversationViewFromReader } from './create-conversation-view-from-reader';
 
 /** The switch changes readers only. Both modes use the shared history writer. */
 export function createConversationSession(
@@ -61,18 +59,22 @@ export function createConversationSession(
     validateUpdates: false,
     initialState: { session: { id: options.sessionId } },
   });
-  const history = createConversationViewFromDoc(doc, options);
   // No full-history reader callback: local commands read their target directly.
   const historyWriter = createHistoryWriter(doc);
+  const sessionData = createLoroSessionData({
+    sessionId: options.sessionId,
+    doc,
+    writer: historyWriter,
+    ...durability,
+  });
+  // The display cache reads through the CRDT-neutral session-data port, not
+  // the raw doc; the raw `createConversationViewFromDoc` remains only for the
+  // non-windowed/rollback path.
+  const history = createConversationViewFromReader(sessionData.history, options);
   return {
     mirror,
     history,
     historyWriter,
-    sessionData: createLoroSessionData({
-      sessionId: options.sessionId,
-      doc,
-      writer: historyWriter,
-      ...durability,
-    }),
+    sessionData,
   };
 }

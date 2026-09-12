@@ -1849,7 +1849,30 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       writer,
       // A real local durability barrier; `repo.flush()` persists the repo.
       durable: () => this.repo.flush(),
+      // The composed history import binds its cursor through the control plane:
+      // the adapter reads/writes the cursor in the same synchronous block as
+      // the history write, with no await gap.
+      historyImportCursor: {
+        read: () => this.mirror?.getState().externalHistoryCursor,
+        write: (cursor) => {
+          this.mirror?.setState({
+            externalHistoryCursor: cursor as SessionExternalHistoryCursorDocState,
+          });
+        },
+      },
     });
+  }
+
+  /**
+   * Arm the auto-read observe policy (mark the latest unread user turn seen).
+   *
+   * Deliberately separate from storage composition: a read-only open
+   * (`init({ skipAutoRead: true })`, the temporary-snapshot path) composes the
+   * reader/writer without arming a write observer, so opening a doc cannot
+   * change it. Normal `init`/`initOffline` arm it explicitly. Idempotent.
+   */
+  attachAutoRead(): void {
+    if (this.historyAutoReadHandle) return;
     this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.sessionData);
   }
 
@@ -1891,7 +1914,10 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     // Create the mirror before remote sync completes so dispatch watchers can subscribe
     // immediately; the room join continues in the background and remote changes merge later.
     this.composeSessionData(this.handle.doc);
+    // A read-only open (`skipAutoRead`) composes storage without arming the
+    // auto-read write policy; normal init arms it and marks the initial turn.
     if (!options.skipAutoRead) {
+      this.attachAutoRead();
       await this.markLatestUserHistoryAsSeenIfNeeded();
     }
     this.remoteSyncReady = this.startDocRoomSync();
@@ -1976,6 +2002,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
     this.composeSessionData(this.handle.doc, initialState);
+    // Offline composition is a normal open; arm the auto-read policy that
+    // composition no longer owns.
+    this.attachAutoRead();
   }
 
   private async startDocRoomSync(): Promise<void> {
@@ -2658,13 +2687,15 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     createCursor: (stored: SessionHistoryInput[]) => SessionExternalHistoryCursorDocState
   ): Promise<void> {
     if (!this.mirror) throw new Error('Mirror not initialized');
-    const cursorBefore = this.mirror.getState()
-      .externalHistoryCursor as SessionExternalHistoryCursorDocState | undefined;
-    const writer = this.sessionData.writer;
-    writer.update((history) => update(history, cursorBefore));
-    // Capture immediately, before an awaited caller could observe a peer/local edit.
-    const cursor = createCursor(writer.readStored());
-    this.mirror.setState({ externalHistoryCursor: cursor });
+    // The composed import operation on the port binds the write, the stored
+    // snapshot read and the cursor creation in one synchronous block; the
+    // control-plane accessors were supplied at composition time.
+    const result = await this.sessionData.commands.applyHistoryImport({ update, createCursor });
+    if (result.status === 'accepted') return;
+    if (result.status === 'rejected') {
+      throw new HistoryWriteError(result.reason.issues ?? [{ path: [], code: 'invalid_input' }]);
+    }
+    throw result.cause;
   }
 
   /**
@@ -3097,6 +3128,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
     this.docRoomStatusListeners.clear();
+    // Invalidate outstanding stored-history snapshot handles: their source is
+    // this store, which is going away. Subsequent use reports `source_closed`.
+    this.sessionDataInstance?.snapshots.closeSource();
     this.mirror?.dispose();
     this.mirror = null;
     this.handle = null;

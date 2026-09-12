@@ -9,6 +9,7 @@ export type {
   SessionHistoryCommands,
   SessionHistoryReader,
   SessionObservation,
+  SessionRollbackCommandResult,
   SessionWritableField,
   SessionWriteReceipt,
   OpenAssistantTurnInput,
@@ -16,8 +17,15 @@ export type {
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
 export { SessionDurabilityError, type SessionDurabilityErrorCode } from './types';
+export {
+  SessionSnapshotError,
+  type SessionSnapshot,
+  type SessionSnapshotErrorCode,
+  type SessionSnapshotService,
+} from './snapshot';
 export type {
   SessionDirectoryRow,
+  SessionDirectoryScalars,
   SessionTurn,
   SessionTurnRead,
   SessionTurnRole,
@@ -25,6 +33,7 @@ export type {
   SessionTurnWritableValues,
   SessionUnavailableReason,
 } from './domain';
+export { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
 export {
   applyMarkTurnSeen,
   applyOpenAssistantTurn,
@@ -32,6 +41,7 @@ export {
   applyResumeAssistant,
   createAssistantTurn,
   hasTaskProposal,
+  markTurnSeenBlocked,
   parseTaskProposalResolution,
   resolveTaskProposalOnEntry,
 } from './planner';
@@ -46,4 +56,9 @@ export {
   type MemorySessionData,
   type MemorySessionDataOptions,
 } from './memory';
-export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
+export {
+  createLoroSessionData,
+  type LoroSessionData,
+  type LoroSessionDataOptions,
+  type LoroSessionSnapshotService,
+} from './loro';

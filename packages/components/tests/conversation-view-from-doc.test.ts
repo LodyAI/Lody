@@ -510,7 +510,7 @@ describe('body-independent configuration and tolerant summaries', () => {
 
   it.each([false, true])(
     'isolates invalid stored items without rewriting history: windowed=%s',
-    (windowed) => {
+    async (windowed) => {
       const doc = buildSessionDoc(buildFixtureHistory(1));
       const items = (doc.getList('history').get(1) as LoroMap).get('items') as LoroList;
       items.insert(0, null);
@@ -526,6 +526,20 @@ describe('body-independent configuration and tolerant summaries', () => {
         scheduleIdle: idle.scheduleIdle,
       });
       try {
+        // The windowed arm now reads through the session-data port, so the
+        // snapshot populates asynchronously; drain the manual idle pass until
+        // the initial directory, tail hydration and the background pass settle.
+        await vi.waitFor(
+          async () => {
+            idle.runAll();
+            const settled = await Promise.race([
+              session.history.ready.then(() => true),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20)),
+            ]);
+            if (!settled) throw new Error('background pass not settled yet');
+          },
+          { interval: 10, timeout: 10_000 }
+        );
         expect(session.history.index(1)?.summary?.headText).toContain('Answer for round 0');
         expect(session.history.index(1)?.summary?.toolCalls).toBe(1);
         expect(session.history.turn(1)?.items?.[0]).toBeNull();

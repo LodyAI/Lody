@@ -1,4 +1,4 @@
-import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
+import { isContainer, type LoroDoc, type LoroEventBatch, type LoroList, type LoroMap } from 'loro-crdt';
 import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
@@ -9,13 +9,21 @@ import {
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
-import { createHistoryWriter, type HistoryWriter } from '../history-writer';
+import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
+import { createHistoryWriter, type HistoryWriter, type StoredHistorySnapshot } from '../history-writer';
+import {
+  mintSessionSnapshot,
+  sessionSnapshotContext,
+  SessionSnapshotError,
+  type SessionSnapshotService,
+} from './snapshot';
 import {
   applyMarkTurnSeen,
   applyOpenAssistantTurn,
   applyResumeAssistant,
   createAssistantTurn,
   hasTaskProposal,
+  markTurnSeenBlocked,
   parseTaskProposalResolution,
   resolveTaskProposalOnEntry,
 } from './planner';
@@ -28,6 +36,7 @@ import {
   type SessionHistoryCommands,
   type SessionHistoryReader,
   type SessionObservation,
+  type SessionRollbackCommandResult,
   type SessionTurn,
   type SessionTurnRead,
   type SessionTurnWritableValues,
@@ -79,11 +88,34 @@ export type LoroSessionDataOptions = {
   writer?: HistoryWriter;
   /** Awaited after a change is accepted, before the command resolves. */
   afterAccept?: (receipt: SessionWriteReceipt) => void | Promise<void>;
+  /**
+   * Control-plane cursor access for the composed history import: the adapter
+   * reads the current cursor and writes the new one inside the same synchronous
+   * block as the history write, so there is no await gap between them. The
+   * session entrypoint supplies the Mirror-backed accessors; tests may omit it
+   * (reads as undefined, writes are dropped).
+   */
+  historyImportCursor?: {
+    readonly read: () => unknown;
+    readonly write: (cursor: unknown) => void;
+  };
 } & LoroSessionDurabilityOptions;
 
 export type LoroSessionData = SessionData & {
   /** The shared writer, for storage-owned capabilities (capture/copy/rollback). */
   readonly writer: HistoryWriter;
+  /**
+   * The storage-owned snapshot service, bound to this store's identity and
+   * session id. `closeSource` is the store's teardown hook (called by the
+   * owning `SessionDocument.destroy`): every outstanding handle then reports
+   * `source_closed`.
+   */
+  readonly snapshots: LoroSessionSnapshotService;
+};
+
+export type LoroSessionSnapshotService = SessionSnapshotService & {
+  /** Internal teardown hook; not part of the public snapshot service contract. */
+  closeSource(): void;
 };
 
 const asStoredTurn = (value: unknown): SessionTurn | undefined => {
@@ -163,23 +195,110 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     return { status: 'accepted', receipt };
   };
 
+  /** Shallow send config for a user turn: small collections only, never the body. */
+  const shallowInputConfig = (map: LoroMap): unknown => {
+    const config = map.get('inputConfig');
+    if (!isContainer(config)) return pickDirectoryInputConfig(config);
+    if (config.kind() !== 'Map') return undefined;
+    const configMap = config as LoroMap;
+    const value = { ...configMap.getShallowValue() } as Record<string, unknown>;
+    for (const key of ['mcpServerIds', 'configOptionValues'] as const) {
+      if (value[key] === undefined) continue;
+      const field = configMap.get(key);
+      value[key] = isContainer(field) ? (field as LoroList).toJSON() : field;
+    }
+    return pickDirectoryInputConfig(value);
+  };
+
+  const readDirectoryRow = (position: number): SessionDirectoryRow => {
+    const value = list.get(position);
+    if (isContainer(value)) {
+      if (value.kind() !== 'Map') return { position, state: 'invalid' };
+      const map = value as LoroMap;
+      const scalars = pickDirectoryScalars(map.getShallowValue());
+      if (!scalars) return { position, state: 'invalid' };
+      return {
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+        // Send config is eager for user turns; counts are deliberately omitted
+        // here (one container crossing each) and arrive with a summary or a
+        // hydration read.
+        ...(scalars.role === 'user' ? { inputConfig: shallowInputConfig(map) } : {}),
+      };
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const scalars = pickDirectoryScalars(record);
+      if (!scalars) return { position, state: 'invalid' };
+      const itemCount = Array.isArray(record.items) ? record.items.length : undefined;
+      const planCount = Array.isArray(record.plan) ? record.plan.length : undefined;
+      return {
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+        ...(scalars.role === 'user' ? { inputConfig: pickDirectoryInputConfig(record.inputConfig) } : {}),
+        ...(itemCount !== undefined ? { itemCount } : {}),
+        ...(planCount !== undefined ? { planCount } : {}),
+      };
+    }
+    return { position, state: 'invalid' };
+  };
+
   const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
     const lo = Math.max(0, Math.min(from, list.length));
     const hi = Math.max(lo, Math.min(to, list.length));
     const rows: SessionDirectoryRow[] = [];
     for (let position = lo; position < hi; position += 1) {
-      const identity = readIdentity(list.get(position));
-      rows.push(
-        identity
-          ? {
-              position,
-              state: 'ready',
-              ...(identity.turnId !== undefined ? { turnId: identity.turnId } : {}),
-            }
-          : { position, state: 'invalid' }
-      );
+      rows.push(readDirectoryRow(position));
     }
     return rows;
+  };
+
+  /**
+   * The raw positions a batch touched, for a consumer that re-reads only the
+   * affected window. Structural list edits report `[structuralFrom, length)`
+   * because later positions shifted; child edits report their own turn.
+   */
+  const changeRangeOf = (batch: LoroEventBatch): { from: number; to: number } | undefined => {
+    let from = Number.POSITIVE_INFINITY;
+    let to = -1;
+    let structuralFrom = Number.POSITIVE_INFINITY;
+    let structural = false;
+    for (const event of batch.events) {
+      if (event.target === list.id && event.diff.type === 'list') {
+        structural = true;
+        let cursor = 0;
+        for (const delta of event.diff.diff) {
+          if (delta.retain !== undefined) {
+            cursor += delta.retain;
+          } else if (delta.delete !== undefined) {
+            structuralFrom = Math.min(structuralFrom, cursor);
+          } else if (delta.insert !== undefined) {
+            structuralFrom = Math.min(structuralFrom, cursor);
+            cursor += delta.insert.length;
+          }
+        }
+        continue;
+      }
+      if (event.path[0] !== HISTORY_ROOT_KEY) continue;
+      const index = event.path[1];
+      if (typeof index === 'number') {
+        from = Math.min(from, index);
+        to = Math.max(to, index + 1);
+      } else {
+        from = 0;
+        to = list.length;
+      }
+    }
+    if (structural) {
+      const lo = Number.isFinite(structuralFrom) ? structuralFrom : 0;
+      return { from: Math.max(0, Math.min(lo, list.length)), to: list.length };
+    }
+    if (to < 0) return undefined;
+    return { from: Math.max(0, Math.min(from, list.length)), to: Math.max(0, Math.min(to, list.length)) };
   };
 
   const history: SessionHistoryReader = {
@@ -209,11 +328,20 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     async readDirectory(from, to) {
       return directory(from, to);
     },
+    async readAll() {
+      // One detached synchronous read of the stored list: a single consistent
+      // snapshot, never a stitched count + paginated read.
+      return writer.readStored() as unknown as SessionTurn[];
+    },
     observe(listener) {
       // Subscribe first, then snapshot in the same synchronous block: a change
       // can neither be missed between the two nor delivered before `initial`.
-      const unsubscribeDoc = doc.subscribe(() => {
-        listener({ kind: 'changed' });
+      const unsubscribeDoc = doc.subscribe((batch) => {
+        const range = changeRangeOf(batch);
+        // A batch that does not touch `history` (e.g. a control root) is not a
+        // history change; unrelated roots never invalidate the display cache.
+        if (!range) return;
+        listener({ kind: 'changed', from: range.from, to: range.to });
       });
       const initial = Promise.resolve(directory(0, list.length));
       let active = true;
@@ -310,8 +438,15 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
     async markTurnSeen(turnId) {
       let updated: boolean;
+      let blocked = false;
       try {
         updated = writer.updateEntry(turnId, (turn) => {
+          // Re-check the business condition inside the commit: a status advanced
+          // by a concurrent writer since the caller's read is never regressed.
+          if (markTurnSeenBlocked(turn as unknown as Record<string, unknown>)) {
+            blocked = true;
+            return turn;
+          }
           applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
           return turn;
         });
@@ -319,6 +454,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return indeterminate(cause);
       }
       if (!updated) return rejected('not_found');
+      if (blocked) return rejected('conflict');
       return accepted('mark-seen', [turnId]);
     },
     async openAssistantTurn(input) {
@@ -440,6 +576,37 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
       return accepted('apply-agent-batch', touched);
     },
+    async updateHistoryWithRollback(update): Promise<SessionRollbackCommandResult> {
+      let rollback: () => void;
+      try {
+        rollback = writer.updateWithRollback((turns) => update(turns));
+      } catch (error) {
+        // A HistoryWriteError is a validated pre-write refusal. A business
+        // abort thrown by the callback proves nothing was applied either, but
+        // it is not an input rejection: it propagates unchanged, matching the
+        // storage facade the caller used before the port.
+        if (error instanceof HistoryWriteError)
+          return rejected('invalid_input', issuesOf(error)) as SessionRollbackCommandResult;
+        throw error;
+      }
+      return { status: 'accepted', receipt: issueReceipt('rollback', []), rollback };
+    },
+    async applyHistoryImport(input): Promise<SessionCommandResult> {
+      const cursor = options.historyImportCursor?.read();
+      try {
+        writer.update((turns) => input.update(turns, cursor as never));
+      } catch (error) {
+        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
+        throw error;
+      }
+      // Same synchronous block as the write: capture the stored baseline and
+      // bind the new cursor with no await gap, so a peer edit can neither fall
+      // between them nor be blessed into the baseline.
+      const stored = writer.readStored();
+      const nextCursor = input.createCursor(stored);
+      options.historyImportCursor?.write(nextCursor);
+      return { status: 'accepted', receipt: issueReceipt('import-history', []) };
+    },
   };
 
   const durability = {
@@ -460,5 +627,117 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
   };
 
-  return { sessionId, history, commands, durability, writer };
+  // # Storage-owned snapshot service
+  //
+  // Capture and copy go through the shared writer (`capture`/`copyFrom`), so
+  // stored-copy provenance stays the module WeakMap in `history-writer.ts` and
+  // is never re-implemented here. The service adds scoping: each handle is
+  // minted against the issuing store's identity and session id, only the
+  // issuing store can `release` it, a handle from a different backend is
+  // `cross_store`, and after `closeSource` (the owning store's teardown hook)
+  // every operation reports `source_closed`. `copyFrom` admits same-backend
+  // cross-store handles: the fork flow copies a source snapshot into a target
+  // doc, and the writer's module-level provenance is what makes that safe.
+  const snapshotToken = {};
+  const issuedSnapshots = new WeakSet<object>();
+  const capturedWriters = new WeakMap<object, StoredHistorySnapshot>();
+  let snapshotSourceClosed = false;
+
+  const snapshotRead = (snapshot: object): readonly SessionTurn[] => {
+    if (snapshotSourceClosed)
+      throw new SessionSnapshotError('source_closed', 'The session store is closed.');
+    if (!issuedSnapshots.has(snapshot))
+      throw new SessionSnapshotError('released', 'The snapshot was released.');
+    // The writer's snapshot getter returns a detached structuredClone on each
+    // access; a caller can mutate its copy without touching the capture.
+    return capturedWriters.get(snapshot)!.history as unknown as readonly SessionTurn[];
+  };
+
+  const snapshots: LoroSessionSnapshotService = {
+    capabilities: { copy: true },
+    capture() {
+      if (snapshotSourceClosed)
+        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
+      // One consistent capture of the stored document, never a stitched read.
+      const stored = writer.capture();
+      const snapshot = mintSessionSnapshot(
+        {
+          token: snapshotToken,
+          backend: 'loro',
+          payload: stored,
+          issued: issuedSnapshots,
+          isClosed: () => snapshotSourceClosed,
+        },
+        sessionId,
+        () => snapshotRead(snapshot)
+      );
+      capturedWriters.set(snapshot, stored);
+      issuedSnapshots.add(snapshot);
+      return snapshot;
+    },
+    release(snapshot) {
+      if (snapshotSourceClosed)
+        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
+      const issuer = sessionSnapshotContext(snapshot);
+      if (issuer === undefined)
+        throw new SessionSnapshotError(
+          'invalid_snapshot',
+          'Not a snapshot capability of any store.'
+        );
+      if (issuer.token !== snapshotToken)
+        throw new SessionSnapshotError(
+          'cross_store',
+          'The snapshot was issued by a different store.'
+        );
+      // Idempotent: releasing an already-released handle is a no-op.
+      issuedSnapshots.delete(snapshot);
+    },
+    copyFrom(snapshot, selection) {
+      if (snapshotSourceClosed)
+        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
+      const issuer = sessionSnapshotContext(snapshot);
+      if (issuer === undefined)
+        throw new SessionSnapshotError(
+          'invalid_snapshot',
+          'Not a snapshot capability of any store.'
+        );
+      // Same-backend cross-store handles are the fork flow; a memory handle has
+      // no writer provenance this store could honour.
+      if (issuer.backend !== 'loro')
+        throw new SessionSnapshotError(
+          'cross_store',
+          'The snapshot was issued by a different backend.'
+        );
+      if (issuer.isClosed())
+        throw new SessionSnapshotError('source_closed', 'The snapshot source store is closed.');
+      if (!issuer.issued.has(snapshot))
+        throw new SessionSnapshotError('released', 'The snapshot was released.');
+      const stored = issuer.payload as StoredHistorySnapshot;
+      try {
+        writer.copyFrom(stored, selection as unknown as SessionHistoryInput[]);
+      } catch (error) {
+        // The writer validates colliding ids and prepares every authored change
+        // before any mutation, so a HistoryWriteError here is a pre-write
+        // rejection; anything else is an indeterminate post-invocation throw.
+        if (error instanceof HistoryWriteError) {
+          if (error.issues?.some((issue) => issue.code === 'copy_target_conflict'))
+            return rejected('conflict', issuesOf(error));
+          return rejected('invalid_input', issuesOf(error));
+        }
+        return indeterminate(error);
+      }
+      return {
+        status: 'accepted',
+        receipt: issueReceipt(
+          'copy',
+          selection.map((turn) => turn.id)
+        ),
+      };
+    },
+    closeSource() {
+      snapshotSourceClosed = true;
+    },
+  };
+
+  return { sessionId, history, commands, durability, writer, snapshots };
 }

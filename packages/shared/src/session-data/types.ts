@@ -2,6 +2,8 @@ import type { MessageContent, ModelInfo } from '../ai';
 import type { AcpSessionNotification } from '../acp/schema';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
+import type { SessionHistoryInput } from '../schema';
+import type { SessionSnapshotService } from './snapshot';
 import type {
   SessionDirectoryRow,
   SessionTurn,
@@ -28,6 +30,7 @@ import type {
 
 export type {
   SessionDirectoryRow,
+  SessionDirectoryScalars,
   SessionTurn,
   SessionTurnRole,
   SessionTurnStatus,
@@ -36,6 +39,7 @@ export type {
   SessionWritableField,
   SessionTurnWritableValues,
 } from './domain';
+export { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
 
 /**
  * An explicit field change. `set` with an explicit value, or `clear` to remove
@@ -82,6 +86,9 @@ export interface SessionWriteReceipt {
     | 'resolve-task-proposal'
     | 'mark-seen'
     | 'respond-permission'
+    | 'copy'
+    | 'rollback'
+    | 'import-history'
     | 'apply-agent-batch';
 }
 
@@ -147,6 +154,23 @@ export type SessionCommandResult =
   | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
 
+/**
+ * A guarded whole-history update that carries its own compensation: an
+ * accepted result includes the `rollback` closure that restores only the range
+ * the update changed, and never a caller-supplied snapshot of it. Backends
+ * without rollback support reject with `unsupported` instead of faking one.
+ */
+export type SessionRollbackCommandResult =
+  | {
+      readonly status: 'accepted';
+      readonly receipt: SessionWriteReceipt;
+      /** Restore the changed range only; retains edits to untouched rows. */
+      readonly rollback: () => void;
+      readonly postAcceptError?: unknown;
+    }
+  | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
+  | { readonly status: 'indeterminate'; readonly cause: unknown };
+
 export const sessionTurnReadIsReady = (
   read: SessionTurnRead
 ): read is { state: 'ready'; turn: SessionTurn } => read.state === 'ready';
@@ -189,6 +213,13 @@ export interface SessionHistoryReader {
   readRange(from: number, to: number): Promise<readonly SessionTurnRead[]>;
   /** Shallow identity/state for raw slots `[from, to)`; never a turn body. */
   readDirectory(from: number, to: number): Promise<readonly SessionDirectoryRow[]>;
+  /**
+   * One consistent full read of the stored history, detached. Export/replay/hash
+   * use this instead of stitching `count()` plus `readRange()` across a changing
+   * source. It is a read capability, not copy provenance: a stored copy still
+   * goes through the opaque snapshot handle.
+   */
+  readAll(): Promise<readonly SessionTurn[]>;
   /** Live observation with a gap-free initial directory. */
   observe(listener: SessionDataChangeListener): SessionObservation;
 }
@@ -216,7 +247,10 @@ export interface SessionHistoryCommands {
   resumeAssistant(turnId: string): Promise<SessionCommandResult>;
   /**
    * Mark a turn seen: `status = 'seen'` and the legacy `read = true`. Idempotent;
-   * the adapter re-locates the turn at commit time.
+   * the adapter re-locates the turn at commit time. Refuses to regress an
+   * advanced execution state (`processing`/`handled`/`failed`/`canceled`/
+   * `pending_apply`) that a concurrent writer committed: that is a
+   * `rejected('conflict')` precondition failure, never a silent overwrite.
    */
   markTurnSeen(turnId: string): Promise<SessionCommandResult>;
   /** Reopen an existing assistant turn or create it, as one business operation. */
@@ -245,6 +279,31 @@ export interface SessionHistoryCommands {
    * target-local write.
    */
   applyAgentBatch(input: ApplyAgentBatchInput): Promise<SessionCommandResult>;
+  /**
+   * Apply a guarded whole-history update and return its compensation. The
+   * business callback decides and selects; it never writes storage. A throw
+   * from the callback (business abort) propagates unchanged and proves nothing
+   * was applied. Backends without rollback support reject with `unsupported`.
+   */
+  updateHistoryWithRollback(
+    update: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): Promise<SessionRollbackCommandResult>;
+  /**
+   * One composed import operation: the guarded history write, the stored
+   * snapshot read and the cursor creation happen in one synchronous block with
+   * no await gap, so a peer edit can neither fall between them nor be blessed
+   * into the baseline. The business callback returns only its decision and the
+   * selected history; the cursor write goes through a control-plane setter the
+   * adapter received at construction. Backends without import support reject
+   * with `unsupported` instead of faking the binding.
+   */
+  applyHistoryImport<TCursor>(input: {
+    readonly update: (
+      history: SessionHistoryInput[],
+      cursor: TCursor | undefined
+    ) => SessionHistoryInput[];
+    readonly createCursor: (stored: SessionHistoryInput[]) => TCursor;
+  }): Promise<SessionCommandResult>;
 }
 
 /**
@@ -276,4 +335,12 @@ export interface SessionData {
   readonly history: SessionHistoryReader;
   readonly commands: SessionHistoryCommands;
   readonly durability: SessionDurability;
+  /**
+   * The storage-owned stored-history snapshot service. Absent only for a
+   * backend that supports no snapshot capture at all; a backend that captures
+   * but cannot copy declares `capabilities.copy = false` rather than omitting
+   * the service. Handles are opaque capabilities scoped to this store: they are
+   * released explicitly and become invalid when the source store closes.
+   */
+  readonly snapshots?: SessionSnapshotService;
 }

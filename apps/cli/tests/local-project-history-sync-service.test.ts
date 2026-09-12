@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getExternalAcpHistoryImportKey, getSessionRoomId } from '@lody/shared';
+import { createMemorySessionData } from '@lody/shared/session-data';
 import type {
   ACPSessionId,
   ExternalAcpHistorySyncMeta,
@@ -415,22 +416,36 @@ describe('buildExistingHistorySessionIndex', () => {
 });
 
 describe('history import persistence', () => {
-  function createHarness(options: { failMetaWrite?: boolean; remoteSyncConfirmed?: boolean } = {}) {
+  function createHarness(
+    options: {
+      failMetaWrite?: boolean;
+      remoteSyncConfirmed?: boolean;
+      rejectImport?: boolean;
+    } = {}
+  ) {
     let storedHistory: SessionHistoryInput[] = [];
     let importedTurnHashes: string[] = [];
     const calls: string[] = [];
+    // The honest in-memory double: its composed import rejects `unsupported`
+    // instead of faking the no-gap binding; used by the rejection case below.
+    const memoryData = createMemorySessionData({ sessionId: 'imported-memory' as never });
     const sessionDoc = {
-      updateHistoryAndCursor: vi.fn(
-        async (
-          update: (history: SessionHistoryInput[]) => SessionHistoryInput[],
-          createCursor: (history: SessionHistoryInput[]) => { importedTurnHashes?: string[] }
-        ) => {
-          calls.push('history');
-          storedHistory = update(storedHistory);
-          calls.push('cursor');
-          importedTurnHashes = createCursor(storedHistory).importedTurnHashes ?? [];
-        }
-      ),
+      sessionData: {
+        commands: {
+          applyHistoryImport: (input: Parameters<
+            typeof memoryData.commands.applyHistoryImport
+          >[0]) => {
+            if (options.rejectImport) return memoryData.commands.applyHistoryImport(input);
+            // Mirrors the port's one synchronous block: the write, the stored
+            // baseline and the cursor creation with no await gap.
+            calls.push('history');
+            storedHistory = input.update(storedHistory, { importedTurnHashes });
+            calls.push('cursor');
+            importedTurnHashes = input.createCursor(storedHistory).importedTurnHashes ?? [];
+            return Promise.resolve({ status: 'accepted' as const });
+          },
+        },
+      },
       getExternalHistoryCursor: vi.fn(async () => ({ importedTurnHashes })),
       setExternalHistoryCursor: vi.fn(async (cursor: { importedTurnHashes: string[] }) => {
         calls.push('cursor');
@@ -532,6 +547,18 @@ describe('history import persistence', () => {
       preserveStatus: true,
     });
     expect(harness.deleteDoc).not.toHaveBeenCalled();
+  });
+
+  it('rejects a memory-backed import explicitly instead of faking the binding', async () => {
+    const harness = createHarness({ rejectImport: true });
+
+    await expect(harness.importNewSession(importArgs())).rejects.toThrow(
+      'History import was rejected before commit: unsupported'
+    );
+    // The rejected import never publishes meta and cleans up the incomplete doc.
+    expect(harness.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.deleteDoc).toHaveBeenCalledTimes(1);
+    expect(harness.cleanSessionDoc).toHaveBeenCalledTimes(1);
   });
 
   it('deletes the newly allocated session when persistence fails', async () => {

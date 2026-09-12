@@ -367,25 +367,35 @@ export class SessionEditAndResendService {
           id: spec.replacementUserTurnId,
         };
         let previousUserId: string | undefined;
-        const rollbackHistory = await sessionDoc.updateHistoryWithRollback((currentHistory) => {
-          const currentGoal =
-            resolveLatestSessionGoalFromHistory(currentHistory) ??
-            (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
-          if (isSessionGoalActive(currentGoal)) {
-            throw new Error(
-              '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
-            );
+        const rollbackResult = await sessionDoc.sessionData.commands.updateHistoryWithRollback(
+          (currentHistory) => {
+            const currentGoal =
+              resolveLatestSessionGoalFromHistory(currentHistory) ??
+              (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
+            if (isSessionGoalActive(currentGoal)) {
+              throw new Error(
+                '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
+              );
+            }
+            const currentEditable = resolveEditableTail(currentHistory, spec.expectedUserTurnId);
+            if (!currentEditable || currentEditable.forkTurnId !== commitEditable.forkTurnId) {
+              throw new Error(
+                '[STALE_USER_TURN] The editable history boundary changed before commit.'
+              );
+            }
+            const prefix = currentHistory.slice(0, currentEditable.userIndex);
+            previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
+            return [...prefix, replacement];
           }
-          const currentEditable = resolveEditableTail(currentHistory, spec.expectedUserTurnId);
-          if (!currentEditable || currentEditable.forkTurnId !== commitEditable.forkTurnId) {
-            throw new Error(
-              '[STALE_USER_TURN] The editable history boundary changed before commit.'
-            );
-          }
-          const prefix = currentHistory.slice(0, currentEditable.userIndex);
-          previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
-          return [...prefix, replacement];
-        });
+        );
+        if (rollbackResult.status !== 'accepted') {
+          throw new Error(
+            rollbackResult.status === 'rejected'
+              ? `[HISTORY_WRITE_FAILED] History replacement was rejected before commit: ${rollbackResult.reason.code}`
+              : `[HISTORY_WRITE_FAILED] History replacement outcome is unknown: ${formatErrorMessage(rollbackResult.cause)}`
+          );
+        }
+        const rollbackHistory = rollbackResult.rollback;
         try {
           await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(spec.sessionId), {
             acpSessionId: preparedSessionId,
