@@ -165,19 +165,14 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
   const inlineImages = imageBlocks.slice(0, MAX_INLINE_IMAGES);
   const overflowImageCount = Math.max(0, imageBlocks.length - inlineImages.length);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // The synced editing flag can mount a disabled field before startEdit resolves.
-  // Reattach when pending changes so focus happens after the field is enabled.
-  const focusEditorAtEnd = useCallback(
-    (textarea: HTMLTextAreaElement | null) => {
-      textareaRef.current = textarea;
-      if (!textarea || isPending) return;
-      textarea.focus();
-      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-      textarea.scrollTop = textarea.scrollHeight;
-    },
-    [isPending]
-  );
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusEditorAtEnd = useCallback((textarea: HTMLTextAreaElement | null) => {
+    textareaRef.current = textarea;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.scrollTop = textarea.scrollHeight;
+  }, []);
 
   if (isEditing) {
     // Enter, the confirm button, and clicking away all commit; Shift+Enter inserts a
@@ -192,7 +187,8 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
           )}
         >
           <textarea
-            ref={focusEditorAtEnd}
+            // The synced editing flag can arrive before startEdit resolves; attach when enabled.
+            ref={isPending ? null : focusEditorAtEnd}
             value={editValue}
             rows={3}
             className={cn(
@@ -221,14 +217,13 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
               onCommitEdit();
             }}
           />
-          {/* Keep the entire footer in the editing surface: blank-space presses
-              must not blur/save, and the confirm button commits through its click
-              instead of racing the blur handler for the same write. */}
+          {/* Keep footer presses from blur-saving before focus or confirmation. */}
           <div
             className="flex justify-end px-1 pb-1"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={(event) => {
-              if (event.target === event.currentTarget) focusEditorAtEnd(textareaRef.current);
+            onMouseDown={(event) => {
+              event.preventDefault();
+              if (event.button === 0 && event.target === event.currentTarget)
+                focusEditorAtEnd(textareaRef.current);
             }}
           >
             <IconAction

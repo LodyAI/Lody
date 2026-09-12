@@ -19,12 +19,11 @@ end without saving; physical native-keyboard behavior remains unverified.
   focus handler and control guards instead of adding an outer handler. Combined
   height, textarea size, mobile spacing, and shell-owned native insets stay intact.
 - The synchronized editing flag can mount a disabled textarea before the start-edit
-  write resolves. A pending-dependent callback ref focuses it when enabled and
-  places the caret at the text end; mount-only autofocus runs too early. The ref
-  stays stable during typing, preserving manual caret placement without a new effect.
-- Prevent mouse-down blur across the queue footer and focus at the text end on
-  blank-space clicks, scrolling the last line into view. Confirmation and outside
-  clicks still save; sent-message editing retains its existing focus behavior.
+  write resolves. Attach a stable focus ref only when enabled; it places the caret
+  at the text end without a pending-dependent callback or a new effect.
+- One mouse-down handler prevents footer blur and focuses primary-button presses
+  on blank space at the text end, scrolling the last line into view. Confirmation
+  and outside clicks still save; sent-message editing retains its existing focus behavior.
 
 ## Verification and limits
 
@@ -34,5 +33,8 @@ end without saving; physical native-keyboard behavior remains unverified.
 - [Queue lifecycle coverage](../../../../packages/components/tests/message-queue-row-editing.test.tsx)
   explicitly holds and resolves the start-edit promise; focus failed before the
   fix and passed afterward, including editing and saving.
+- Using mount-only autofocus or unstable refs, or removing scrolling or blur
+  prevention, each reproduced a regression. Merging the footer handlers and attaching
+  the ref only when enabled retained all 6 queue and 15 browser test outcomes.
 - Validation uses real components with synthetic fixtures; installed production
   binaries and physical native keyboards were not exercised.
