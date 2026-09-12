@@ -3,10 +3,19 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
-import { useConversationVersion, useTurnRange } from '../src/hooks/use-conversation-view';
+import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
+import {
+  useConversationVersion,
+  useConversationTail,
+  useTurnRange,
+} from '../src/hooks/use-conversation-view';
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
-import { createConversationViewFromDoc, type ConversationView } from '../src/lib/conversation-view';
+import {
+  createConversationViewFromDoc,
+  createConversationSession,
+  collectConversationConfigSources,
+  type ConversationView,
+} from '../src/lib/conversation-view';
 import type { SessionSearchBlock } from '../src/lib/session-chat-search';
 import {
   buildFixtureHistory,
@@ -15,6 +24,9 @@ import {
   FIXTURE_SESSION_ID,
   reimport,
 } from './conversation-view-fixtures';
+import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
+import { useSessionTurnFacts } from '../src/components/sessions/session-turn-facts';
+import { useSessionMcpSelection } from '../src/hooks/use-session-mcp-selection';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -134,3 +146,81 @@ describe('conversation view React readers', () => {
     expect(blocks.find((block) => block.messageId === 'a-0')?.messageIndex).toBe(1);
   });
 });
+
+vi.mock('../src/hooks/use-workspace-mcp-catalog', () => ({
+  useWorkspaceMcpCatalog: () => ({ servers: CATALOG, synced: true }),
+}));
+const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }];
+it.each([false, true])(
+  'preserves explicit empty MCP selection after mounting composer hooks: windowed=%s',
+  async (windowed) => {
+    const host = container;
+    const history = buildFixtureHistory(25);
+    for (const turn of history)
+      if (turn.role === 'assistant')
+        turn.items = Array.from({ length: 400 }, () => ({ type: 'text', text: 'body' }));
+    history[48]!.inputConfig = {
+      ...history[48]!.inputConfig,
+      agentRoleId: null,
+      mcpServerIds: [],
+      configOptionValues: { effort: 'high' },
+      taskToolsEnabled: true,
+    };
+    const doc = buildSessionDoc(history);
+    const idle = createManualIdle();
+    let resume!: () => void;
+    const gate = new Promise<void>((r) => (resume = r));
+    const session = createConversationSession(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      windowed,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: () => gate,
+    });
+    let sent: readonly string[] | undefined;
+    let selected: readonly string[] = [];
+    function Stream() {
+      useConversationStreamItems(session.history, FIXTURE_SESSION_ID);
+      return null;
+    }
+    function Composer() {
+      const tail = useConversationTail(session.history, { extendToLastUserTurn: true });
+      const config = resolveSessionConversationConfig(
+        collectConversationConfigSources(session.history, tail.from)
+      );
+      useSessionTurnFacts(session.history);
+      selected = useSessionMcpSelection(config.mcpServerIds, { existingSession: true }).selectedIds;
+      return (
+        <>
+          <Stream />
+          <button
+            onClick={() => {
+              sent = [...selected];
+            }}
+          >
+            send
+          </button>
+        </>
+      );
+    }
+    try {
+      await act(async () => root.render(<Composer />));
+      await act(async () => vi.runAllTimersAsync());
+      act(() => host.querySelector('button')!.click());
+      const before = sent;
+      resume();
+      await act(async () => {
+        await gate;
+        await Promise.resolve();
+        await vi.runAllTimersAsync();
+      });
+      expect(selected, 'after hydration').toEqual([]);
+      expect(before, 'send while range loading').toEqual([]);
+    } finally {
+      resume();
+      await act(async () => root.render(null));
+      session.history.dispose();
+      session.mirror.dispose();
+      doc.free();
+    }
+  }
+);

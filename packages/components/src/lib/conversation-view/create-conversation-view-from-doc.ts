@@ -190,13 +190,18 @@ export function createConversationViewFromDoc(
 
   const readIndexInputConfig = (map: LoroMap) => {
     const config = map.get('inputConfig');
-    return pickIndexInputConfig(
-      isContainer(config)
-        ? config.kind() === 'Map'
-          ? (config as LoroMap).getShallowValue()
-          : undefined
-        : config
-    );
+    if (!isContainer(config)) return pickIndexInputConfig(config);
+    if (config.kind() !== 'Map') return undefined;
+    const configMap = config as LoroMap;
+    const value = configMap.getShallowValue();
+    // Only these small collections need deep reads. Do not materialize the
+    // input config's prompt, inputBlocks or the owning turn's body.
+    for (const key of ['mcpServerIds', 'configOptionValues'] as const) {
+      if (value[key] === undefined) continue;
+      const field = configMap.get(key);
+      value[key] = isContainer(field) ? field.toJSON() : field;
+    }
+    return pickIndexInputConfig(value);
   };
 
   const withHydratedFacts = (row: TurnIndexRow, turn: SessionHistory): TurnIndexRow => {

@@ -31,3 +31,5 @@ export {
   type CreateConversationDerivationOptions,
   type DeriveTurnFact,
 } from './derivation';
+
+export { readConversationHistory } from './read-conversation-history';

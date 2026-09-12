@@ -25,13 +25,21 @@ export type TurnSummary = {
 export { SUMMARY_SOURCE_WINDOW as TURN_SUMMARY_HEAD_CHARS } from '../conversation-outline';
 
 /**
- * Role-selection scalars of a user turn's `inputConfig`, read shallowly
- * (never `prompt`, `inputBlocks`, or option maps). Enough for the sticky Agent
- * Role scan and the conversation source fence over turns that are not hydrated.
+ * Send configuration of a user turn, available before its body is hydrated.
+ * Read only these scalars and small option/selection collections, never prompt
+ * or inputBlocks. Explicit empty selections must not become defaults.
  */
 export type TurnIndexInputConfig = Pick<
   SessionTurnInputConfig,
-  'agentRoleId' | 'agentRoleRevision' | 'modeId' | 'modelId' | 'cliType' | 'agentType'
+  | 'agentRoleId'
+  | 'agentRoleRevision'
+  | 'modeId'
+  | 'modelId'
+  | 'cliType'
+  | 'agentType'
+  | 'mcpServerIds'
+  | 'configOptionValues'
+  | 'taskToolsEnabled'
 >;
 
 /**

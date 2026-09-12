@@ -315,7 +315,7 @@ import {
 } from '@/hooks/use-conversation-view';
 import {
   collectConversationConfigSources,
-  collectHydratedRange,
+  readConversationHistory,
   countUserTurns,
 } from '@/lib/conversation-view';
 import {
@@ -3393,11 +3393,9 @@ export const SessionChatInterface = memo(
         }
 
         const turnCount = conversationView.turnCount;
-        const range = conversationView.acquireRange(0, turnCount);
         try {
-          await range.ready;
           const history = conversationCopyRange(
-            collectHydratedRange(conversationView, 0, turnCount),
+            await readConversationHistory(conversationView),
             throughMessageId
           );
           const last = history.at(-1);
@@ -3439,8 +3437,6 @@ export const SessionChatInterface = memo(
           toast.error(
             t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
           );
-        } finally {
-          range.release();
         }
       },
       [
@@ -4647,18 +4643,17 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      const openedBy =
-        openerSessionId
-          ? {
-              sessionId: openerSessionId,
-              title:
-                (openerSessionMeta?.title ?? '').trim() ||
-                (docMetaCacheReady
-                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
-                  : t('sessions.untitled', 'Untitled session')),
-              target: openerNavigationTarget,
-            }
-          : null;
+      const openedBy = openerSessionId
+        ? {
+            sessionId: openerSessionId,
+            title:
+              (openerSessionMeta?.title ?? '').trim() ||
+              (docMetaCacheReady
+                ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                : t('sessions.untitled', 'Untitled session')),
+            target: openerNavigationTarget,
+          }
+        : null;
       if (!openedBy && opened.length === 0) return undefined;
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
@@ -4911,19 +4906,10 @@ export const SessionChatInterface = memo(
         copyConversationHistory: handleCopyConversationHistory,
         getShareImageData: async () => {
           if (!conversationView?.turnCount) return null;
-          const count = conversationView.turnCount;
-          const range = conversationView.acquireRange(0, count);
-          try {
-            await range.ready;
-            return {
-              messages: collectConversationMessages(
-                collectHydratedRange(conversationView, 0, count)
-              ),
-              agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
-            };
-          } finally {
-            range.release();
-          }
+          return {
+            messages: collectConversationMessages(await readConversationHistory(conversationView)),
+            agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
+          };
         },
         startShareImageSelection: shareSelection.start,
         openSearch,

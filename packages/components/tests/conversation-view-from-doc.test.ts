@@ -4,10 +4,11 @@ import {
   resolveSessionConversationConfig,
   type SessionHistory,
 } from '@lody/shared';
-import { LoroMap, LoroText, type ContainerID, type LoroList } from 'loro-crdt';
+import { LoroMap, LoroText, LoroList, type ContainerID } from 'loro-crdt';
 import {
   collectConversationConfigSources,
   createConversationViewFromDoc,
+  createConversationSession,
 } from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
@@ -272,6 +273,7 @@ describe('createConversationViewFromDoc', () => {
       modelId: 'sonnet',
       cliType: 'builtin',
       agentType: 'claude',
+      configOptionValues: { effort: 'low' },
     });
     range.release();
   });
@@ -459,4 +461,81 @@ describe('createConversationViewFromDoc item budgets', () => {
     expect(rangeChanges).toBeGreaterThan(1);
     range.release();
   });
+});
+
+describe('body-independent configuration and tolerant summaries', () => {
+  it('keeps explicit empty MCP selection and options current without reading turn bodies', () => {
+    const { doc, view } = openView(12, { tailKeep: 0, maxHydrated: 0 });
+    const peer = reimport(doc);
+    const config = (peer.getList('history').get(22) as LoroMap).get('inputConfig') as LoroMap;
+    const selection = config.setContainer('mcpServerIds', new LoroList());
+    config.set('taskToolsEnabled', true);
+    const options = config.get('configOptionValues') as LoroMap;
+    options.set('effort', 'high');
+    const sync = () => {
+      peer.commit();
+      doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    };
+    const resolve = () =>
+      resolveSessionConversationConfig(collectConversationConfigSources(view, 0));
+    try {
+      sync();
+      expect(resolve()).toMatchObject({
+        mcpServerIds: [],
+        configOptionValues: { effort: 'high' },
+        taskToolsEnabled: true,
+      });
+      expect(view.isHydrated(22)).toBe(false);
+      selection.push('chosen-mcp');
+      options.set('effort', 'low');
+      config.set('taskToolsEnabled', false);
+      sync();
+      expect(resolve()).toMatchObject({
+        mcpServerIds: ['chosen-mcp'],
+        configOptionValues: { effort: 'low' },
+        taskToolsEnabled: false,
+      });
+      selection.delete(0, 1);
+      config.delete('configOptionValues');
+      sync();
+      expect(resolve().mcpServerIds).toEqual([]);
+      expect(resolve().configOptionValues).toBeUndefined();
+      expect(view.isHydrated(22)).toBe(false);
+    } finally {
+      view.dispose();
+      peer.free();
+      doc.free();
+    }
+  });
+
+  it.each([false, true])(
+    'isolates invalid stored items without rewriting history: windowed=%s',
+    (windowed) => {
+      const doc = buildSessionDoc(buildFixtureHistory(1));
+      const items = (doc.getList('history').get(1) as LoroMap).get('items') as LoroList;
+      items.insert(0, null);
+      items.insert(1, { type: 'future_extension' });
+      items.insert(2, { type: 'text', text: 42 });
+      doc.commit();
+      const before = doc.getList('history').toJSON();
+      const version = doc.version().toJSON();
+      const idle = createManualIdle();
+      const session = createConversationSession(doc, {
+        sessionId: FIXTURE_SESSION_ID,
+        windowed,
+        scheduleIdle: idle.scheduleIdle,
+      });
+      try {
+        expect(session.history.index(1)?.summary?.headText).toContain('Answer for round 0');
+        expect(session.history.index(1)?.summary?.toolCalls).toBe(1);
+        expect(session.history.turn(1)?.items?.[0]).toBeNull();
+        expect(doc.getList('history').toJSON()).toEqual(before);
+        expect(doc.version().toJSON()).toEqual(version);
+      } finally {
+        session.history.dispose();
+        session.mirror.dispose();
+        doc.free();
+      }
+    }
+  );
 });

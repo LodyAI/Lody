@@ -1,4 +1,5 @@
 import type { MessageContent, SessionHistory } from '@lody/shared';
+import { normalizeMessageContent } from '../../components/ai-gui/message-content-guards';
 import { firstTextOf, proseLengthOf } from '../conversation-outline';
 import { isContainer, type LoroList, type LoroMap, type LoroText } from 'loro-crdt';
 import { TURN_SUMMARY_HEAD_CHARS, type TurnSummary } from './types';
@@ -12,7 +13,9 @@ import { TURN_SUMMARY_HEAD_CHARS, type TurnSummary } from './types';
  * make a round's title and tick weight change the moment it is evicted.
  */
 export function summarizeTurn(entry: Pick<SessionHistory, 'items'>): TurnSummary {
-  const items = (Array.isArray(entry.items) ? entry.items : []) as MessageContent[];
+  const items = (Array.isArray(entry.items) ? entry.items : [])
+    .map(normalizeMessageContent)
+    .filter((item): item is MessageContent => item !== null);
   let toolCalls = 0;
   let thoughts = 0;
   for (const item of items) {

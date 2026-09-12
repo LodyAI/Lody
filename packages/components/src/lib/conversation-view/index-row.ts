@@ -1,9 +1,9 @@
-import type { Role, SessionHistory } from '@lody/shared';
+import { normalizeSessionTurnInputConfig, type Role, type SessionHistory } from '@lody/shared';
 import { summarizeTurn } from './turn-summary';
 import { isPlainRecord } from './is-plain-record';
 import type { TurnIndexInputConfig, TurnIndexRow } from './types';
 
-/** The shallow role-selection subset of a user turn's `inputConfig`. */
+/** The body-independent send configuration subset of a user turn's `inputConfig`. */
 export function pickIndexInputConfig(value: unknown): TurnIndexInputConfig | undefined {
   if (!isPlainRecord(value)) return undefined;
   const out: TurnIndexInputConfig = {};
@@ -17,7 +17,14 @@ export function pickIndexInputConfig(value: unknown): TurnIndexInputConfig | und
     out.cliType = value.cliType as TurnIndexInputConfig['cliType'];
   }
   if (typeof value.agentType === 'string') out.agentType = value.agentType;
-  return out;
+  return {
+    ...out,
+    ...normalizeSessionTurnInputConfig({
+      mcpServerIds: value.mcpServerIds,
+      configOptionValues: value.configOptionValues,
+      taskToolsEnabled: value.taskToolsEnabled,
+    }),
+  };
 }
 
 /** Copy the index scalars out of any record-shaped source (a hydrated turn or a shallow value). */

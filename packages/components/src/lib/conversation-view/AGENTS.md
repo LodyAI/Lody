@@ -14,15 +14,18 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   edits; release also cancels remaining hydration chunks. Positional readers
   reacquire on `structure`, including same-length replacements. The
   LRU (`maxHydrated`) never evicts pinned turns or the last `tailKeep`
-  turns, which are hydrated eagerly for streaming. User Role-selection config
-  is read shallowly during indexing and refreshed synchronously on config edits;
-  sending must not depend on idle progress to resolve the sticky Role, including
-  explicit None. Summaries and counts fill in idle chunks and resolve `ready`. Hydrated objects equal
+  turns, which are hydrated eagerly for streaming. User send configuration
+  is indexed without reading prompt/inputBlocks or turn bodies; only MCP selections
+  and option maps need small collection reads. Refresh it on config edits. Sending
+  must not depend on idle progress for Role, explicit empty MCP selection, option
+  values or task-tool settings. Summaries and counts fill in idle chunks and resolve `ready`. Hydrated objects equal
   Mirror's output (`tests/conversation-view-from-doc.test.ts`) and are patched
   copy-on-write from doc events (`apply-turn-event.ts`), falling back to a
   full re-read when a path does not resolve. Every full read also replaces
   all index scalars from that same turn, including absent/deleted fields;
-  structural batches may then safely skip the subsumed turn events.
+  structural batches may then safely skip the subsumed turn events. Summary inputs
+  use the renderer's tolerant item normalization in both readers; never rewrite
+  invalid/unknown stored items while deriving their display summaries.
 - **Write** through `@lody/shared` HistoryWriter in both feature-flag modes.
   Never recreate its parser, materializer, rollback or stored-copy behavior here.
   `createConversationSession` owns reader composition; windowed writes do not
@@ -37,7 +40,9 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   `tests/control-plane-mirror.test.ts`.
 - **Whole-history readers** use `createConversationDerivation` (a fact table
   filled by a background hydrate-derive-release pass, updated from view
-  events) or hydrate on demand and release. Never scan `turn(i)` over all
+  events) or `readConversationHistory` for one-shot copy/image sharing. That helper
+  reacquires after structural changes and rejects missing turns, then releases;
+  a captured CID lease does not certify the current positional range. Never scan `turn(i)` over all
   turns synchronously.
   Structural changes restart incomplete fact coverage and invalidate affected
   cached facts. Open search acquires new membership and refreshes cached block
