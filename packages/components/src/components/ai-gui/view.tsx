@@ -6349,6 +6349,24 @@ const StandardToolContentBlock = ({
           />
         );
       }
+      // Render image blobs inline; fall through to download link for everything else.
+      if (
+        'blob' in content.resource && 
+        typeof content.resource.mimeType === 'string' &&
+        content.resource.mimeType.toLowerCase().startsWith('image/')
+      ) {
+        const src = buildSafeBase64DataUrl(content.resource.mimeType, content.resource.blob);
+        if (src) {
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-muted-foreground">Resource</div>
+            <img
+              src={src}
+              alt={content.resource.uri || 'Resource image'}
+              className="max-h-80 w-full rounded-lg object-contain"
+            />
+          </div>
+        }
+      }
       const href = sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
