@@ -1,7 +1,9 @@
 # Rebuild the session sharing dialog and reader layout
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-session-share-dialog-and-reader-layout.zh.md)
 
 ## Abstract
 

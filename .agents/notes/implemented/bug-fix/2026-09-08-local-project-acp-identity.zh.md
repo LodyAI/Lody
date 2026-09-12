@@ -1,7 +1,9 @@
 # 本地项目 ACP 归属元数据
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[English](2026-09-08-local-project-acp-identity.md)
 
 ## 摘要
 

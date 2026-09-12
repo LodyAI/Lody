@@ -1,7 +1,9 @@
 # Preserve ACP processes across identity changes
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-remove-identity-acp-restarts.zh.md)
 
 ## Abstract
 

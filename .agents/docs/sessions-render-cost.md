@@ -43,3 +43,33 @@ Task Index stays mounted in every workspace window because visible Tasks pages
 also consume it. Sidebar hiding unmounts the sidebar subtree and disables the
 runtime eager-sync environment until it is shown again. Current Session sync is
 independent of that prefetch gate. See [window behavior](../../specs/desktop-windows.zh.md).
+
+Background prefetch does not materialize UI stores. The workspace runtime sends
+room identity and transport configuration to `eager-sync-worker-client.ts`; one
+disposable worker at a time imports/syncs a raw Loro Doc and persists a snapshot.
+The worker sends only completion status back, and retains no warm Doc or Mirror.
+The independent IndexedDB cache holds at most 128 MiB / 64 snapshots; each row
+atomically stores binary state and its activity checkpoint. Before constructing a
+worker (and its Loro WASM), the parent checks that checkpoint and skips already
+covered activity; the worker checks it again for cross-window races. Cache keys
+use workspace plus room, so auxiliary windows reuse rather than duplicate rows.
+The coordinator also loads a bounded timestamp-only high-water index before it
+seeds candidates. This keeps snapshots evicted by the 64-row LRU from causing
+repeat worker creation at every startup, without reading Doc or history data.
+Foreground store creation cancels that room's prefetch, reads a completed
+snapshot, and merges it into the renderer's own document before creating its
+Mirror. Existing cached UI stores are excluded from prefetch so a background
+result cannot silently leave their in-memory state stale. The main repo and its
+unsent writes remain separate.
+
+The coordinator uses concurrency/batch size 1, with 1.5-second batch cooldowns on
+desktop/web and 3 seconds on mobile. A renderer-wide queue also serializes runtime
+instances across workspace transitions; separate windows each have their own slot
+but share workspace cache rows. Cancellation kills the worker even during
+synchronous WASM work, and the parent withdraws its local peer. Local targets use
+the existing local readiness plane; remote targets use the same configured Streams
+endpoint as the mounted foreground transport. This isolates background
+materialization from UI execution, but does not remove foreground full-history
+import/Mirror cost or daemon-side document loading.
+
+Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).

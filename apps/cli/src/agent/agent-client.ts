@@ -44,7 +44,7 @@ import {
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
 import { buildLodyMcpHttpHeaders } from '@/mcp/lody-mcp-http-protocol';
-import { TerminalManager } from '@/session/terminal-manager';
+import { TerminalManager, TerminalSpawnError } from '@/session/terminal-manager';
 import { reportError } from 'src/utils/telemetry';
 import { formatErrorMessage } from '@/utils/format-error';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
@@ -1273,19 +1273,29 @@ export class AgentClient implements acp.Client {
         return acc;
       }, {}) ?? undefined;
 
-    const terminalId = await this.terminalManager.createTerminal(
-      params.sessionId,
-      params.command,
-      params.args ?? [],
-      params.cwd ?? undefined,
-      env,
-      typeof params.outputByteLimit === 'bigint'
-        ? params.outputByteLimit > BigInt(Number.MAX_SAFE_INTEGER)
-          ? Number.MAX_SAFE_INTEGER
-          : Number(params.outputByteLimit)
-        : (params.outputByteLimit ?? undefined)
-    );
-    return { terminalId };
+    try {
+      const terminalId = await this.terminalManager.createTerminal(
+        params.sessionId,
+        params.command,
+        params.args ?? [],
+        params.cwd ?? undefined,
+        env,
+        typeof params.outputByteLimit === 'bigint'
+          ? params.outputByteLimit > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(params.outputByteLimit)
+          : (params.outputByteLimit ?? undefined)
+      );
+      return { terminalId };
+    } catch (error) {
+      if (error instanceof TerminalSpawnError) {
+        // An unusable command is a bad request, not a transport failure: answer
+        // with a JSON-RPC code the agent can classify. A raw errno (`-2`) is
+        // untyped on the wire and some agents abandon the ACP session over it.
+        throw acp.RequestError.invalidParams({ details: error.message }, error.message);
+      }
+      throw error;
+    }
   }
   async terminalOutput?(params: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
     this.ensureSessionMatch(params.sessionId as ACPSessionId);

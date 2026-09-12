@@ -1,7 +1,9 @@
 # Give the page back the wheel over a Mermaid diagram
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-mermaid-diagram-gestures.zh.md)
 
 ## Abstract
 
