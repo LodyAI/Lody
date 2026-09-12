@@ -57,7 +57,7 @@ export function useCodexProviderCredential(
         },
       });
       const response = await Promise.race([authentication.promise, inputFailure]);
-      if (response.disposition !== 'authenticated' || response.capabilitiesRefreshed !== true) {
+      if (response.disposition !== 'authenticated') {
         throw new Error(response.error ?? 'Codex credential verification failed');
       }
       const publicationDurability = response.publicationDurability ?? 'durable';

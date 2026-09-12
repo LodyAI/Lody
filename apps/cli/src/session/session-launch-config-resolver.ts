@@ -28,7 +28,7 @@ type RepoLike = {
 
 export type AgentConfigLaunchFields = Pick<
   AgentConfigMeta,
-  'id' | 'machineId' | 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'
+  'customAcp' | 'runtimeOverrides' | 'env'
 >;
 
 type WorkspaceDocumentLike = {
@@ -182,10 +182,7 @@ export async function resolveSessionLaunchConfig(input: {
   }
 
   if (snapshot.agentConfig) {
-    return resolveSessionLaunchConfigFromSources({
-      legacy: snapshot.legacy,
-      agentConfig: snapshot.agentConfig,
-    });
+    return snapshot.resolution;
   }
 
   try {
@@ -199,10 +196,7 @@ export async function resolveSessionLaunchConfig(input: {
         agentConfig: null,
       });
     }
-    return resolveSessionLaunchConfigFromSources({
-      legacy: snapshot.legacy,
-      agentConfig,
-    });
+    return resolveSessionLaunchConfigFromSources({ legacy: snapshot.legacy, agentConfig });
   } catch (error) {
     input.logger.debug(
       `[${input.sessionId}] Failed to read agent config ${

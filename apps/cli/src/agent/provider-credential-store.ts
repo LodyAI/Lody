@@ -19,15 +19,7 @@ const CredentialEntrySchema = z
   })
   .strict();
 
-const CredentialRecordV1Schema = z
-  .object({
-    v: z.literal(1),
-    current: CredentialEntrySchema,
-    previous: CredentialEntrySchema.optional(),
-  })
-  .strict();
-
-const CredentialRecordV2Schema = z
+const CredentialRecordSchema = z
   .object({
     v: z.literal(2),
     workspaceId: z.string().min(1),
@@ -37,10 +29,7 @@ const CredentialRecordV2Schema = z
   })
   .strict();
 
-const CredentialRecordSchema = z.union([CredentialRecordV1Schema, CredentialRecordV2Schema]);
-
 type CredentialRecord = z.infer<typeof CredentialRecordSchema>;
-type CredentialRecordV2 = z.infer<typeof CredentialRecordV2Schema>;
 type CredentialBoundConfig = Pick<
   AgentConfigMeta,
   'id' | 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'
@@ -75,20 +64,6 @@ async function writeRecord(filePath: string, record: CredentialRecord): Promise<
   }
 }
 
-function credentialRecordV2(
-  workspaceId: WorkspaceId,
-  configId: string,
-  entries: Pick<CredentialRecord, 'current' | 'previous'>
-): CredentialRecordV2 {
-  return {
-    v: 2,
-    workspaceId,
-    configId,
-    current: entries.current,
-    ...(entries.previous ? { previous: entries.previous } : {}),
-  };
-}
-
 export async function listCodexProviderCredentialConfigIds(
   workspaceId: WorkspaceId
 ): Promise<string[]> {
@@ -102,7 +77,7 @@ export async function listCodexProviderCredentialConfigIds(
       .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
       .map(async (entry) => {
         const record = await readRecord(path.join(directory, entry.name));
-        return record?.v === 2 && record.workspaceId === workspaceId ? record.configId : null;
+        return record?.workspaceId === workspaceId ? record.configId : null;
       })
   );
   return [...new Set(ids.filter((id): id is string => id !== null))];
@@ -149,12 +124,15 @@ export async function stageCodexProviderCredential(
         (entry) => entry?.binding === publishedBinding
       )
     : undefined;
-  const stagedRecord = credentialRecordV2(workspaceId, desiredConfig.id, {
+  const stagedRecord: CredentialRecord = {
+    v: 2,
+    workspaceId,
+    configId: desiredConfig.id,
     current: { binding: desiredBinding, apiKey: normalizedKey },
     ...(previousEntry && previousEntry.binding !== desiredBinding
       ? { previous: previousEntry }
       : {}),
-  });
+  };
   await writeRecord(filePath, stagedRecord);
 
   const recordStillMatches = async (): Promise<boolean> => {
@@ -167,10 +145,12 @@ export async function stageCodexProviderCredential(
   return {
     finalize: async () => {
       if (!(await recordStillMatches())) return;
-      await writeRecord(
-        filePath,
-        credentialRecordV2(workspaceId, desiredConfig.id, { current: stagedRecord.current })
-      );
+      await writeRecord(filePath, {
+        v: 2,
+        workspaceId,
+        configId: desiredConfig.id,
+        current: stagedRecord.current,
+      });
     },
     rollback: async () => {
       if (!(await recordStillMatches())) return;
@@ -203,13 +183,13 @@ export async function reconcileCodexProviderCredential(
     await rm(filePath, { force: true });
     return;
   }
-  await writeRecord(
-    filePath,
-    credentialRecordV2(workspaceId, configId, {
-      current,
-      ...(previous ? { previous } : {}),
-    })
-  );
+  await writeRecord(filePath, {
+    v: 2,
+    workspaceId,
+    configId,
+    current,
+    ...(previous ? { previous } : {}),
+  });
 }
 
 export async function hydrateCodexProviderCredential<T extends CredentialBoundConfig>(

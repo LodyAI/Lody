@@ -810,16 +810,24 @@ export function applyProviderSetupCancellationToFlock(
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
   const configForRemoval = config ?? capturedConfig;
+  const upgradesExactCancellationToWildcard = Boolean(
+    existingCancellation?.setupRevision && !cancellation.setupRevision
+  );
   if (
     cancellation.setupRevision &&
     (!setup?.setupRevision || setup.setupRevision !== cancellation.setupRevision)
   ) {
     return false;
   }
-  if (existingCancellation && !setup && (!config || cancellation.preservePublishedConfig)) {
+  if (
+    existingCancellation &&
+    !upgradesExactCancellationToWildcard &&
+    !setup &&
+    (!config || cancellation.preservePublishedConfig)
+  ) {
     return false;
   }
-  if (!existingCancellation) {
+  if (!existingCancellation || upgradesExactCancellationToWildcard) {
     flock.set(machineFlockKeys.providerSetupCancellation(cancellation.id), cancellation, nowMs);
   }
   if (setup) {

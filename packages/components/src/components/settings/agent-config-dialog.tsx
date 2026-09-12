@@ -17,7 +17,7 @@ import {
   getLodyCodexCustomProvider,
   getLodyCodexCredentialBinding,
   isAllowedCredentialEndpoint,
-  LODY_CODEX_API_KEY_ENV,
+  isReservedCodexCredentialEnvKey,
   LODY_CODEX_PROVIDER_STATE_ENV,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
@@ -804,10 +804,16 @@ function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, s
   return additionalEnv;
 }
 
-function omitKeys(env: Record<string, string>, keys: readonly string[]): Record<string, string> {
-  const result = { ...env };
-  for (const key of keys) delete result[key];
-  return result;
+function omitCodexManagedEnv(
+  env: Record<string, string>,
+  managedKeys: readonly string[]
+): Record<string, string> {
+  const managedKeySet = new Set(managedKeys);
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => !managedKeySet.has(key) && !isReservedCodexCredentialEnvKey(key)
+    )
+  );
 }
 
 function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigFormData {
@@ -984,6 +990,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const [formData, setFormData] = useState<AgentConfigFormData>(initialForm);
   const [submitting, setSubmitting] = useState(false);
+  const requestOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen && submitting) return;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange, submitting]
+  );
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
@@ -1624,10 +1637,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const additionalEnv = isDeepSeekBuiltin
     ? omitDeepSeekProtectedEnv(formData.env)
     : managesCodexEnvironment
-      ? omitKeys(formData.env, [
+      ? omitCodexManagedEnv(formData.env, [
           CODEX_API_KEY_ENV,
           CODEX_CONFIG_ENV,
-          LODY_CODEX_API_KEY_ENV,
           LODY_CODEX_PROVIDER_STATE_ENV,
         ])
       : formData.env;
@@ -2017,7 +2029,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         {isNarrowLayout && (
           <button
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={() => requestOpenChange(false)}
             aria-label={t('common.close', 'Close')}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -2129,7 +2141,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {isNarrowLayout && (
             <button
               type="button"
-              onClick={() => (canGoBack ? setMobileView('picker') : onOpenChange(false))}
+              onClick={() => (canGoBack ? setMobileView('picker') : requestOpenChange(false))}
               aria-label={
                 canGoBack
                   ? t('settings.agent.dialog.back', 'Back to type list')
@@ -2602,10 +2614,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   const managedKeys = [
                     CODEX_API_KEY_ENV,
                     CODEX_CONFIG_ENV,
-                    LODY_CODEX_API_KEY_ENV,
                     LODY_CODEX_PROVIDER_STATE_ENV,
                   ];
-                  const next = omitKeys(env, managedKeys);
+                  const next = omitCodexManagedEnv(env, managedKeys);
                   for (const key of managedKeys) {
                     if (formData.env[key]) next[key] = formData.env[key];
                   }
@@ -2637,7 +2648,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => requestOpenChange(false)}
             disabled={submitting}
             size="sm"
           >
@@ -2668,7 +2679,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogContent
         overlayClassName={
           nestedInDialog

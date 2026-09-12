@@ -7049,8 +7049,8 @@ describe('SessionExecutionService', () => {
     expect(a).toEqual(expect.objectContaining({ success: true }));
     expect(b).toEqual(expect.objectContaining({ success: true }));
     expect(c).toEqual(expect.objectContaining({ success: true }));
-    expect(a).toBe(b);
-    expect(a).toBe(c);
+    expect(a).toEqual(b);
+    expect(a).toEqual(c);
   });
 
   it('keeps shared capability work alive until its last consumer cancels', async () => {

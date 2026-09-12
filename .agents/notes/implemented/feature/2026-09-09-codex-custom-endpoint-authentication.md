@@ -48,6 +48,9 @@ The verification probe itself does not mutate the shared capability cache. Its r
 the setup manager as a deferred publication and is cached only after the exact setup revision wins
 durable AgentConfig publication inside the per-config credential mutation sequence. Cancelled,
 superseded, failed, and durability-uncertain attempts publish no capabilities.
+Authenticated provisioning and background setup share the same deferred probe result. The probe
+retains one publication promise to deduplicate cache writes; RPC responses are ordinary values
+and do not require shared object identity.
 
 ## Failure and cleanup
 
@@ -60,7 +63,10 @@ ordinary live queue drains, and removes the other binding. Its initial snapshot 
 each ID's references are re-read inside the per-config credential mutation sequence so concurrent
 publication cannot be pruned by a stale startup snapshot. A post-commit flush failure reports
 uncertain durability, retains both bindings, and makes the renderer resync instead of reporting a
-normal failed save. A stale or superseded setup
+normal failed save. Capability-cache publication is best effort after the config commit. The
+renderer therefore accepts an authenticated provisioning response even when
+`capabilitiesRefreshed` is false; that flag cannot authorize failure compensation for a config
+already committed. A stale or superseded setup
 returns a conflict. Automatic failure cleanup names the request's exact revision, so an old request
 cannot cancel a newer setup. Metadata-only edits bypass provisioning, and a replacement commit
 merges the latest published name, prompt, brand, and title-generation fields instead of replacing
@@ -83,6 +89,26 @@ enumerated credential IDs with workspace row IDs, allowing it to collect credent
 older direct-delete clients.
 
 ## Evidence
+
+### Ablation review
+
+The branch review compared each removal with the existing behavioral suites:
+
+| Removal                                                                              | Observed result                                                                                                                                                  | Decision                                                                             |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Previous credential binding during staging                                           | Two real-store tests failed: the published endpoint lost its key during the commit window and after recovery to the old config.                                  | Retain both bindings until publication is durable.                                   |
+| Cached RPC response object and its `published` flag                                  | Only reference-identity assertions failed; all response fields and the single probe/publication remained equal.                                                  | Remove the cache and assert response values.                                         |
+| V1 credential reader and V2 envelope factory                                         | All seven real-store tests and setup recovery tests passed with the existing V2 writer.                                                                          | Keep one strict V2 schema; this unreleased feature has no V1 migration contract.     |
+| Recomputing an already-resolved launch snapshot and requiring unused identity fields | Session execution and manager suites, plus CLI typechecking, passed.                                                                                             | Reuse the snapshot and retain only the three launch fields consumed by the resolver. |
+| Requiring capability-cache success for an authenticated credential save              | New renderer tests reproduced both durable and uncertain saves being rejected; removing the condition made both pass, with uncertain results waiting for resync. | Let the committed authentication outcome own save success.                           |
+
+No endpoint, binding, cancellation, publication-order, or crash-recovery guarantee was removed.
+The V2 envelope remains unchanged. Older experimental V1 files are no longer read and require
+credential provisioning again. The review used synthetic fixtures and did not send credentials
+to a live provider. Component onboarding tests require Node 22 here: the installed Node 26
+exposes an unavailable global `localStorage` to the test environment.
+
+### Feature coverage
 
 The [draft specification](../../../../specs/codex-custom-endpoint-authentication.md) owns the
 behavior. Shared tests cover endpoint policy, reversible overlays, collision rejection, malformed

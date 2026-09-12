@@ -18,10 +18,12 @@ type AgentConfigEnvironment = {
   env: Record<string, string | undefined> | undefined;
 };
 
+export function isReservedCodexCredentialEnvKey(key: string): boolean {
+  return key.toUpperCase() === LODY_CODEX_API_KEY_ENV;
+}
+
 export function agentConfigContainsCodexCredential(config: AgentConfigEnvironment): boolean {
-  return Boolean(
-    config.env && Object.prototype.hasOwnProperty.call(config.env, LODY_CODEX_API_KEY_ENV)
-  );
+  return Boolean(config.env && Object.keys(config.env).some(isReservedCodexCredentialEnvKey));
 }
 
 export function assertAgentConfigDoesNotContainCodexCredential(
@@ -60,6 +62,12 @@ function parseState(value: string | undefined): ProviderState | null {
     : ({ present: false } as const);
   if (state?.v !== 1) return null;
   return { v: 1, previousModelProvider };
+}
+
+function deleteReservedCodexCredentialEnvKeys(env: Record<string, string>): void {
+  for (const key of Object.keys(env)) {
+    if (isReservedCodexCredentialEnvKey(key)) delete env[key];
+  }
 }
 
 export function isAllowedCredentialEndpoint(value: string): boolean {
@@ -111,7 +119,7 @@ export function getLodyCodexCredentialBinding(config: CodexCredentialBoundConfig
     runtimeOverrides: config.runtimeOverrides ?? null,
     env: Object.fromEntries(
       Object.entries(config.env)
-        .filter(([key]) => key !== LODY_CODEX_API_KEY_ENV)
+        .filter(([key]) => !isReservedCodexCredentialEnvKey(key))
         .sort(([left], [right]) => left.localeCompare(right))
     ),
   });
@@ -150,7 +158,7 @@ export function buildLodyCodexCustomProviderEnv(
     wire_api: 'responses',
     requires_openai_auth: false,
   };
-  delete next[LODY_CODEX_API_KEY_ENV];
+  deleteReservedCodexCredentialEnvKeys(next);
   next[LODY_CODEX_PROVIDER_STATE_ENV] = JSON.stringify(state);
   next[CODEX_CONFIG_ENV] = JSON.stringify({
     ...config,
@@ -177,7 +185,7 @@ export function removeLodyCodexCustomProviderEnv(
   }
   if (Object.keys(providers).length > 0) config.model_providers = providers;
   else delete config.model_providers;
-  delete next[LODY_CODEX_API_KEY_ENV];
+  deleteReservedCodexCredentialEnvKeys(next);
   delete next[LODY_CODEX_PROVIDER_STATE_ENV];
   if (Object.keys(config).length > 0) next[CODEX_CONFIG_ENV] = JSON.stringify(config);
   else delete next[CODEX_CONFIG_ENV];

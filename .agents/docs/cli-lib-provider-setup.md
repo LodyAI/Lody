@@ -39,6 +39,9 @@ The live provisioning probe does not update the shared capability cache. The man
 publishes its result only after the exact setup wins durable AgentConfig publication,
 inside that config ID's credential mutation sequence. A cancelled, superseded, failed,
 or durability-uncertain attempt cannot replace capabilities for the published config.
+After a durable config commit, a failed cache write does not fail credential provisioning.
+The renderer uses the authenticated result and publication durability to finish the save;
+`capabilitiesRefreshed` reports cache status only.
 
 A successful flush finalizes the credential to the published binding. A post-commit
 flush failure reports uncertain durability and retains both bindings; the renderer
