@@ -28,8 +28,9 @@ offline-to-online 转换、稳定的 Session activity 状态切换或新的 daem
 barrier 释放后会显式 enqueue 一次普通 dispatch recheck，并解析 execution service 的 barrier
 waiter。Goal action 会在等待期间保留其进程内 pending request，因此 repair 期间已接受的普通 turn
 和 Goal turn 都不会被搁置或误报为启动失败。同一 daemon 的 Session activity 从 active 变为
-inactive 时会触发一次新的有界 reconciliation；单纯 heartbeat 更新不会。远端写入确认在
-barrier 外进行；确认失败或不可用时返回 `unknown`，不能报告持久化成功。reconciliation RPC
+inactive，或 browser connectivity 从 offline 变为 online 时，会触发一次新的有界
+reconciliation；单纯 heartbeat 更新不会。远端写入确认在 barrier 外进行；确认失败或不可用时
+返回 `unknown`，不能报告持久化成功。reconciliation RPC
 使用普通 request lane，因为 document sync 和 history write 不是快速控制面工作。
 
 目标 turn 仍 active，或存在未归属工作导致结论不确定时，历史不变。当 daemon 能证明该 turn
@@ -56,5 +57,6 @@ owner 能提供证据。本次变更不假定每一条历史未完成 compaction
 
 行为测试覆盖精确 item 修改、active 与 indeterminate 所有权结果、cold/unsynced document、
 写入确认失败、rewrite barrier 释放后的普通 turn 与 Goal turn dispatch、owner-daemon generation、
-同 daemon activity 释放、control lane 隔离、本地 capability gating 和 Loro Streams RPC 分发。
-共享 schema 会校验请求与响应 shape。本次没有加入启动扫描、存储迁移或端到端 provider fixture。
+同 daemon activity 释放、Machine presence 保持 online 时的 local-first browser connectivity
+恢复、control lane 隔离、本地 capability gating 和 Loro Streams RPC 分发。共享 schema 会校验
+请求与响应 shape。本次没有加入启动扫描、存储迁移或端到端 provider fixture。

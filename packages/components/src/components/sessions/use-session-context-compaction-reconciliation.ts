@@ -16,6 +16,7 @@ type ReconciliationRuntime = Pick<
 export const useSessionContextCompactionReconciliation = ({
   activeCompaction,
   canReconcile,
+  isConnectivityOnline,
   isSessionActive,
   machineId,
   ownerInstanceId,
@@ -24,6 +25,7 @@ export const useSessionContextCompactionReconciliation = ({
 }: {
   activeCompaction: ActiveSessionContextCompaction | null;
   canReconcile: boolean;
+  isConnectivityOnline: boolean;
   isSessionActive: boolean;
   machineId: MachineId;
   ownerInstanceId: string | null;
@@ -42,6 +44,7 @@ export const useSessionContextCompactionReconciliation = ({
       toolCallId: activeCompaction.toolCallId,
       ownerInstanceId,
       isSessionActive,
+      isConnectivityOnline,
     });
     if (attemptsRef.current.has(attemptKey)) return;
     attemptsRef.current.add(attemptKey);
@@ -62,6 +65,7 @@ export const useSessionContextCompactionReconciliation = ({
   }, [
     activeCompaction,
     canReconcile,
+    isConnectivityOnline,
     isSessionActive,
     machineId,
     ownerInstanceId,

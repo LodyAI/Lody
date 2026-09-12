@@ -76,12 +76,14 @@ describe('isSessionContextCompacting', () => {
         ...base,
         ownerInstanceId: 'daemon-1',
         isSessionActive: true,
+        isConnectivityOnline: true,
       })
     ).not.toBe(
       getContextCompactionReconciliationAttemptKey({
         ...base,
         ownerInstanceId: 'daemon-2',
         isSessionActive: true,
+        isConnectivityOnline: true,
       })
     );
     expect(
@@ -89,12 +91,14 @@ describe('isSessionContextCompacting', () => {
         ...base,
         ownerInstanceId: 'daemon-1',
         isSessionActive: true,
+        isConnectivityOnline: true,
       })
     ).not.toBe(
       getContextCompactionReconciliationAttemptKey({
         ...base,
         ownerInstanceId: 'daemon-1',
         isSessionActive: false,
+        isConnectivityOnline: true,
       })
     );
     for (const outcome of ['active', 'unknown', 'unchanged'] as const) {
@@ -116,7 +120,7 @@ describe('isSessionContextCompacting', () => {
   });
 });
 
-describe('context compaction reconciliation activity transitions', () => {
+describe('context compaction reconciliation retry transitions', () => {
   it('retries after the same daemon releases active Session presence', async () => {
     const sessionId = 'session-1' as SessionId;
     const machineId = 'machine-1' as MachineId;
@@ -136,6 +140,7 @@ describe('context compaction reconciliation activity transitions', () => {
       useSessionContextCompactionReconciliation({
         activeCompaction,
         canReconcile: true,
+        isConnectivityOnline: true,
         isSessionActive,
         machineId,
         ownerInstanceId: 'daemon-1',
@@ -155,6 +160,53 @@ describe('context compaction reconciliation activity transitions', () => {
       expect(request).toHaveBeenCalledTimes(1);
 
       await act(async () => root.render(createElement(Probe, { isSessionActive: false })));
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
+    } finally {
+      act(() => root.unmount());
+      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    }
+  });
+
+  it('retries after browser connectivity returns while the local machine stays online', async () => {
+    const sessionId = 'session-1' as SessionId;
+    const machineId = 'machine-1' as MachineId;
+    const activeCompaction = findActiveSessionContextCompaction(
+      historyWithStatus('in_progress', true)
+    );
+    const request = vi.fn().mockResolvedValue({
+      type: 'session/reconcile-context-compaction_response',
+      sessionId,
+      turnId: 'assistant:turn-1',
+      toolCallId: 'context-compaction-1',
+      outcome: 'unknown',
+    } satisfies SessionContextCompactionReconcileResponse);
+    const runtime = { requestSessionContextCompactionReconciliation: request };
+
+    const Probe = ({ isConnectivityOnline }: { isConnectivityOnline: boolean }) => {
+      useSessionContextCompactionReconciliation({
+        activeCompaction,
+        canReconcile: true,
+        isConnectivityOnline,
+        isSessionActive: false,
+        machineId,
+        ownerInstanceId: 'daemon-1',
+        runtime,
+        sessionId,
+      });
+      return null;
+    };
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const root = createRoot(document.createElement('div'));
+    try {
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { isConnectivityOnline: true })));
       expect(request).toHaveBeenCalledTimes(2);
       expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
     } finally {

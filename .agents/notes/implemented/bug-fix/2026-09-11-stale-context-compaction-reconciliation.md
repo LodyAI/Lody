@@ -35,8 +35,9 @@ explicitly enqueues an ordinary dispatch recheck and resolves the execution serv
 barrier waiters. Goal actions retain their process-local pending request while waiting,
 so neither a user turn nor a Goal turn accepted during repair can remain stranded or be
 misreported as a startup failure. A same-daemon Session activity transition from active
-to inactive starts a new bounded reconciliation attempt; heartbeat-only presence updates
-do not. Remote write confirmation happens after the barrier is released, and a failed or
+to inactive or a browser connectivity transition from offline to online starts a new
+bounded reconciliation attempt; heartbeat-only presence updates do not. Remote write
+confirmation happens after the barrier is released, and a failed or
 unavailable confirmation returns `unknown`, never durable success. The reconciliation
 RPC uses the ordinary request lane because document sync and history writes are not fast
 control-plane work.
@@ -71,6 +72,7 @@ more than the exact activity requested by the current view.
 Behavioral coverage exercises exact-item mutation, active and indeterminate ownership
 outcomes, cold/unsynced documents, write-confirmation failure, ordinary and Goal turn
 dispatch after a rewrite barrier, owner-daemon generations, same-daemon activity release,
+local-first browser connectivity restoration while Machine presence remains online,
 control-lane isolation, local capability gating, and Loro Streams RPC dispatch. Shared
 schemas validate the request and response shapes. No startup scan, storage migration, or
 end-to-end provider fixture was added.

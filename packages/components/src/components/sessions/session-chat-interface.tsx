@@ -2719,6 +2719,7 @@ export const SessionChatInterface = memo(
     useSessionContextCompactionReconciliation({
       activeCompaction: activeContextCompaction,
       canReconcile: canReconcileContextCompaction,
+      isConnectivityOnline: browserOnline,
       isSessionActive,
       machineId: session.machineId,
       ownerInstanceId: sessionMachinePresenceInstanceId,

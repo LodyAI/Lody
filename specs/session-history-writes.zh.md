@@ -39,8 +39,8 @@ Translation: current
   不持有 Session 或无法确定时，历史保持不变。Repair 必须读取已完成远端同步的 Session
   document；rewrite barrier 仅覆盖最终 live-state 检查和本地修改，释放后必须同时唤醒普通
   turn 与 Goal turn dispatch；只有写入确认后才能返回 `reconciled`。非终态结果可在后续
-  history、连接、daemon generation 或稳定的 Session activity 状态切换证据变化时重试；
-  presence heartbeat 不得退化成轮询。
+  history、browser connectivity 恢复（即使 Machine presence 始终 online）、daemon generation
+  或稳定的 Session activity 状态切换证据变化时重试；presence heartbeat 不得退化成轮询。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 

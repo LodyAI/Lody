@@ -13,6 +13,7 @@ export const getContextCompactionReconciliationAttemptKey = (args: {
   toolCallId: string;
   ownerInstanceId: string | null;
   isSessionActive: boolean;
+  isConnectivityOnline: boolean;
 }): string =>
   JSON.stringify([
     args.sessionId,
@@ -20,6 +21,7 @@ export const getContextCompactionReconciliationAttemptKey = (args: {
     args.toolCallId,
     args.ownerInstanceId,
     args.isSessionActive,
+    args.isConnectivityOnline,
   ]);
 
 export const isDurableContextCompactionReconciliation = (
