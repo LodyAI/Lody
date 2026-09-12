@@ -79,7 +79,11 @@ import {
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
-import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
+import {
+  lodyPresenceNowMsAtom,
+  lodyPresenceStatesAtom,
+  lodyPresenceSyncStateAtom,
+} from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -327,7 +331,6 @@ import {
   getEffectiveSessionActivitySummary,
   getLatestPullRequestInfo,
 } from '@/components/sessions/session-list-rows';
-import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { getLocalProjectVisibilityKey as buildLocalProjectKey } from '@/lib/visible-local-project-index';
 import {
   isThoughtLevelSelector,
@@ -749,9 +752,13 @@ function WorkspaceChatLanding({
   const onlineMachineIds = useOnlineMachineIds();
   const onlineMachineIdsRef = useRef(onlineMachineIds);
   onlineMachineIdsRef.current = onlineMachineIds;
+  const presenceSyncState = useAtomValue(lodyPresenceSyncStateAtom);
   const isPresenceMachineOnline = useCallback(
-    (machineId: string) => onlineMachineIds.has(machineId as MachineId),
-    [onlineMachineIds]
+    (machineId: string) =>
+      machineId === localProbeResult?.machineId ||
+      onlineMachineIds.has(machineId as MachineId) ||
+      presenceSyncState !== 'synced',
+    [localProbeResult?.machineId, onlineMachineIds, presenceSyncState]
   );
   const freshRepositories = useCloudQuery(
     cloudOperations.github.getWorkspaceRepositories,
@@ -1907,12 +1914,12 @@ function WorkspaceChatLanding({
   const onlineMachineCount = useMemo(() => {
     let count = 0;
     for (const machineId of machines.keys()) {
-      if (onlineMachineIds.has(machineId)) {
+      if (isPresenceMachineOnline(machineId)) {
         count += 1;
       }
     }
     return count;
-  }, [machines, onlineMachineIds]);
+  }, [machines, isPresenceMachineOnline]);
   const hasNoMachine = !hasAnyOnlineMachine;
 
   // ── Sync selectedMachineId from selectedAgent (e.g. when restored from defaults) ──
@@ -2480,7 +2487,7 @@ function WorkspaceChatLanding({
           projectMachineId: project.machineId,
           visibleLocalMachineId,
           targetMachine: machinesRef.current.get(project.machineId),
-          isMachineOnline: (machineId) => onlineMachineIdsRef.current.has(machineId),
+          isMachineOnline: isPresenceMachineOnline,
         })
       ) {
         throw new Error(
@@ -2542,7 +2549,7 @@ function WorkspaceChatLanding({
         return response.state;
       });
     },
-    [isElectron, runtime, t, userId, visibleLocalMachineId]
+    [isElectron, isPresenceMachineOnline, runtime, t, userId, visibleLocalMachineId]
   );
 
   // Collapse the machine map down to a single boolean: is the selected
@@ -3843,15 +3850,14 @@ function WorkspaceChatLanding({
      as Tabs since they're already inline. */
 
   /* ── Machine ── */
-  const mobileSheetOnlineMachines = useOnlineMachines();
   const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
-    return mobileSheetOnlineMachines.map((m) => ({
+    return Array.from(selectableMachines.values()).map((m) => ({
       value: m.id as MachineId,
       label: m.name,
       searchText: m.name,
       icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
     }));
-  }, [mobileSheetOnlineMachines]);
+  }, [selectableMachines]);
   const mobileSheetSelectedMachineLabel = useMemo(() => {
     if (!selectedMachineId) return null;
     return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
@@ -4373,7 +4379,7 @@ function WorkspaceChatLanding({
       .map(([machineId, machine]) => ({
         id: machineId,
         name: machine.name,
-        isOnline: onlineMachineIds.has(machineId),
+        isOnline: isPresenceMachineOnline(machineId),
         isPrivate: showProjectSharing && accessByMachineId.get(machineId)?.sharedWithTeam === false,
       }))
       .sort((left, right) => {
@@ -4382,7 +4388,7 @@ function WorkspaceChatLanding({
         }
         return left.name.localeCompare(right.name);
       });
-  }, [accessByMachineId, onlineMachineIds, machines, showProjectSharing]);
+  }, [accessByMachineId, isPresenceMachineOnline, machines, showProjectSharing]);
   /* The mobile-home machine pill bar was dropped — rows now group by
      machine via sticky section headings, so we just hand the full list
      of online / known machines straight through. No filter state, no
@@ -4760,7 +4766,7 @@ function WorkspaceChatLanding({
             ? activity.latestMessageAt
             : null;
         const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
-        const isOnline = onlineMachineIds.has(session.machineId);
+        const isOnline = isPresenceMachineOnline(session.machineId);
         const repoFullName = getSessionGitHubRepoFullName(session);
         const localProjectKey = getSessionLocalProjectKey(session);
         const kind: MobileConversationKind = repoFullName
@@ -4876,7 +4882,7 @@ function WorkspaceChatLanding({
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileHomeShowArchived,
-    onlineMachineIds,
+    isPresenceMachineOnline,
     showProjectSharing,
     t,
     teamMembersByUserId,
@@ -5686,7 +5692,7 @@ function WorkspaceChatLanding({
             ? activity.latestMessageAt
             : null;
         const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
-        const isOnline = onlineMachineIds.has(session.machineId);
+        const isOnline = isPresenceMachineOnline(session.machineId);
         const kind: MobileConversationKind =
           mobileProjectContext.kind === 'github'
             ? 'github'
@@ -5752,7 +5758,7 @@ function WorkspaceChatLanding({
     liveSessionStatuses,
     mobileProjectContext,
     mobileProjectShowArchived,
-    onlineMachineIds,
+    isPresenceMachineOnline,
     t,
     teamMembersByUserId,
     userId,
