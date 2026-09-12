@@ -1,5 +1,5 @@
-import { lazy, Suspense, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { useId, type FormEvent } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   AGENT_ROLE_NAME_MAX_LENGTH,
@@ -21,13 +21,11 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { Switch } from '@/ui/switch';
 import { Textarea } from '@/ui/textarea';
-import { Field, Section } from './form-primitives';
-
-const AgentRoleEmojiPicker = lazy(() => import('./agent-role-emoji-picker'));
+import { EmojiField } from './emoji-field';
+import { Field, FormMessage, Section } from './form-primitives';
 
 export type AgentRoleMachineOption = {
   machineId: MachineId;
@@ -110,7 +108,11 @@ export function AgentRoleForm({
             card: an emoji and a name need no section heading to be read. */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <AgentRoleEmojiField value={value.emoji} onChange={(emoji) => update({ emoji })} />
+            <EmojiField
+              value={value.emoji}
+              defaultEmoji={DEFAULT_AGENT_ROLE_EMOJI}
+              onChange={(emoji) => update({ emoji })}
+            />
             <Input
               id={`${fieldId}-name`}
               autoComplete="off"
@@ -333,81 +335,6 @@ export function AgentRoleForm({
  * unfinished form — so the button shows the default glyph and clicking it is a
  * change, the way a Notion page icon works.
  */
-function AgentRoleEmojiField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (emoji: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  // The settings editor is a Dialog, whose scroll lock swallows wheel events in
-  // a body-level portal — and this popover's whole content is a scrolling list.
-  // Same rule as `option-selector.tsx`.
-  const portalContainer = open
-    ? triggerRef.current?.closest<HTMLElement>('[data-lody-dialog-content]')
-    : null;
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-label={t('settings.agentRoles.form.emoji')}
-          className="flex h-9 w-11 items-center justify-center rounded-md border border-input-border bg-input-field text-lg leading-none transition-colors hover:bg-hover/60 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <span aria-hidden="true">{value || DEFAULT_AGENT_ROLE_EMOJI}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-fit p-0"
-        portalContainer={portalContainer}
-        // The list is long and the search field wants the caret; taking focus to
-        // the popover root would fight the picker's own keyboard handling.
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
-        <Suspense
-          fallback={
-            <div className="flex h-[320px] w-72 items-center justify-center">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
-            </div>
-          }
-        >
-          <AgentRoleEmojiPicker
-            onSelect={(emoji) => {
-              onChange(emoji);
-              setOpen(false);
-            }}
-          />
-        </Suspense>
-        {value ? (
-          <div className="border-t border-border/60 p-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 w-full justify-start text-xs text-muted-foreground"
-              onClick={() => {
-                onChange('');
-                setOpen(false);
-              }}
-            >
-              {t('settings.agentRoles.form.emojiReset', {
-                emoji: DEFAULT_AGENT_ROLE_EMOJI,
-              })}
-            </Button>
-          </div>
-        ) : null}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function RunConfigIssueText({ issue }: { issue: AgentRoleRunConfigIssue }) {
   const { t } = useTranslation();
   const describe = (): string => {
@@ -509,28 +436,5 @@ function ConfigOptionField({
         onChange={onChange}
       />
     </Field>
-  );
-}
-
-function FormMessage({ tone, children }: { tone: 'error' | 'warning'; children: ReactNode }) {
-  return (
-    <p
-      role={tone === 'error' ? 'alert' : 'status'}
-      className={cn(
-        'flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-snug',
-        tone === 'error'
-          ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'border-status-warning/30 bg-status-warning/10 text-foreground/90'
-      )}
-    >
-      <AlertTriangle
-        className={cn(
-          'mt-0.5 h-3.5 w-3.5 shrink-0',
-          tone === 'error' ? 'text-destructive' : 'text-status-warning'
-        )}
-        aria-hidden="true"
-      />
-      <span className="min-w-0">{children}</span>
-    </p>
   );
 }

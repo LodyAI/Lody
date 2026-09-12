@@ -42,7 +42,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
-  ([AGENTS.md](worktree/AGENTS.md)).
+  ([AGENTS.md](worktree/AGENTS.md)). `worktree-gc.ts` reconciles the Lody-managed
+  worktree tree against Session state: archived or deleted root Sessions lose their
+  directory (after a backup commit, branch kept); contract in
+  [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
 

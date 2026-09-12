@@ -350,6 +350,7 @@ type RpcServerDeps = {
   cancelSession?: (args: {
     sessionId: SessionId;
     turnId: string;
+    subagentTaskId?: string;
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
@@ -1067,6 +1068,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.cancelSession({
             sessionId: request.params.sessionId,
             turnId: request.params.turnId,
+            subagentTaskId: request.params.subagentTaskId,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;

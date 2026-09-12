@@ -12,7 +12,6 @@ import {
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
   type LodyGoalCapability,
-  type LodySubagentTask,
   type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
@@ -428,19 +427,6 @@ export type AgentSessionWarning = {
   message: string;
   source?: string;
 };
-
-const LodySubagentTaskSchema = z.object({
-  taskId: z.string().min(1),
-  description: z.string(),
-  status: z.enum(['running', 'completed', 'failed', 'timed_out', 'killed', 'lost']),
-  agentId: z.string().optional(),
-  subagentType: z.string().optional(),
-  modelId: z.string().optional(),
-  thinkingEffort: z.string().optional(),
-  startedAtEpochSeconds: z.number(),
-  endedAtEpochSeconds: z.number().nullable(),
-  stopReason: z.string().optional(),
-});
 
 export type SteerApplicationLease = {
   release: () => void;
@@ -1348,27 +1334,16 @@ export class AgentClient implements acp.Client {
     return parseRateLimitsSnapshot(response);
   }
 
-  async listSubagents(activeOnly = false): Promise<readonly LodySubagentTask[]> {
-    const result = await this.requestSubagentExtension<{ tasks?: unknown }>(
-      LODY_EXTENSION_METHODS.subagentsList,
-      { activeOnly }
-    );
-    return z.array(LodySubagentTaskSchema).parse(result.tasks);
-  }
-
   async cancelSubagent(taskId: string, reason?: string): Promise<void> {
-    await this.requestSubagentExtension(LODY_EXTENSION_METHODS.subagentsCancel, {
-      taskId,
-      reason,
-    });
-  }
-
-  async getSubagentOutput(taskId: string, tail?: number): Promise<string> {
-    const result = await this.requestSubagentExtension<{ output?: unknown }>(
-      LODY_EXTENSION_METHODS.subagentsOutput,
-      { taskId, tail }
-    );
-    return z.string().parse(result.output);
+    if (this.lodyExtensionCapabilities.subagents?.cancel !== true) {
+      throw new Error('[ACP_SUBAGENT_UNSUPPORTED] Agent did not advertise subagent management');
+    }
+    const sessionId = this.acpSessionId;
+    const connection = this.connection;
+    if (!sessionId || !connection) {
+      throw new Error('[ACP_SUBAGENT_UNAVAILABLE] ACP session is not connected');
+    }
+    await connection.request(LODY_EXTENSION_METHODS.subagentsCancel, { sessionId, taskId, reason });
   }
 
   getGoalCapability(): LodyGoalCapability | undefined {
@@ -1446,25 +1421,6 @@ export class AgentClient implements acp.Client {
     );
   }
 
-  private async requestSubagentExtension<T extends Record<string, unknown>>(
-    method: string,
-    params: Record<string, unknown>
-  ): Promise<T> {
-    const subagents = this.lodyExtensionCapabilities.subagents;
-    const supported =
-      (method === LODY_EXTENSION_METHODS.subagentsList && subagents?.list === true) ||
-      (method === LODY_EXTENSION_METHODS.subagentsCancel && subagents?.cancel === true) ||
-      (method === LODY_EXTENSION_METHODS.subagentsOutput && subagents?.output === true);
-    if (!supported) {
-      throw new Error('[ACP_SUBAGENT_UNSUPPORTED] Agent did not advertise subagent management');
-    }
-    const sessionId = this.acpSessionId;
-    const connection = this.connection;
-    if (!sessionId || !connection) {
-      throw new Error('[ACP_SUBAGENT_UNAVAILABLE] ACP session is not connected');
-    }
-    return connection.request<T, Record<string, unknown>>(method, { sessionId, ...params });
-  }
   async extMethod(
     method: string,
     params: Record<string, unknown>

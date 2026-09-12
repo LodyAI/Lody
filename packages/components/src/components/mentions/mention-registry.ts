@@ -1,3 +1,4 @@
+import type { MentionPrepare } from '@/ui/mention/index';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
@@ -42,6 +43,7 @@ export type MentionCategoryId =
   | 'pr'
   | 'skill'
   | 'command'
+  | 'prompt_shortcut'
   | 'session'
   | 'agent_role';
 
@@ -52,10 +54,11 @@ export type MentionIcon =
   | 'pr'
   | 'skill'
   | 'command'
+  | 'prompt_shortcut'
   | 'session'
   | 'agent_role';
 
-export type MentionCategoryStatus = 'ready' | 'loading' | 'error';
+export type MentionCategoryStatus = 'ready' | 'loading' | 'error' | 'disabled';
 
 /**
  * Side-panel content for a highlighted candidate. Deliberately neutral: the
@@ -81,6 +84,10 @@ export type MentionCandidateDetail = {
 export type MentionCandidate = {
   /** Payload recorded on the mention range; also the row key. */
   value: string;
+  /** Diagnostic rows stay visible but cannot commit by pointer or keyboard. */
+  disabled?: boolean;
+  disabledReason?: string;
+  onPrepare?: MentionPrepare;
   /** What the user can type to match exactly, driving Enter-on-exact-match. */
   label: string;
   /**
@@ -94,7 +101,6 @@ export type MentionCandidate = {
   icon: MentionIcon;
   title: string;
   subtitle?: string;
-  disabled?: boolean;
   trailing?: string;
   /** Render the title in the monospace face (paths, tokens). */
   mono?: boolean;
@@ -187,6 +193,8 @@ export type MentionMenuView =
       /** Categories whose own name matches, offered above the results. */
       categories: MentionCategory[];
       groups: MentionCandidateGroup[];
+      /** Direct grouped triggers activate only their own sources, even while empty. */
+      queriedCategories?: readonly MentionCategory[];
     }
   /** `@issue:foo` — second level, scoped to one category. */
   | {
@@ -219,9 +227,14 @@ export function selectMentionViewActivations(
   categories: readonly MentionCategory[]
 ): MentionCategoryActivation[] {
   const queried =
-    view?.level === 'category' ? [view.category] : view?.level === 'aggregate' ? categories : [];
+    view?.level === 'category'
+      ? [view.category]
+      : view?.level === 'aggregate'
+        ? (view.queriedCategories ?? categories)
+        : [];
   const bySource = new Map<MentionSourceKey, MentionCategoryActivation>();
   for (const category of queried) {
+    if (category.status === 'disabled') continue;
     if (category.activation) bySource.set(category.activation.sourceKey, category.activation);
   }
   return [...bySource.values()];
@@ -247,7 +260,12 @@ export function selectMentionMenuView(
     const category = categories.find((entry) => entry.namespace === namespaced.namespace);
     if (category) {
       const { term } = namespaced;
-      return { level: 'category', category, term, candidates: category.getCandidates(term) };
+      return {
+        level: 'category',
+        category,
+        term,
+        candidates: category.status === 'disabled' ? [] : category.getCandidates(term),
+      };
     }
   }
 
@@ -258,6 +276,7 @@ export function selectMentionMenuView(
   const limit = options?.aggregateLimitPerCategory ?? AGGREGATE_LIMIT_PER_CATEGORY;
   const groups: MentionCandidateGroup[] = [];
   for (const category of categories) {
+    if (category.status === 'disabled') continue;
     // `limit` is passed down so a source can stop early, and enforced here so
     // the cap holds whether or not it did.
     const candidates = category.getCandidates(search, limit).slice(0, limit);
@@ -285,13 +304,26 @@ export function selectMentionMenuViewForTrigger(
   if (trigger === MENTION_TRIGGER) {
     return selectMentionMenuView(categories, search, options);
   }
+  if (trigger === '/') {
+    const directCategories = categories.filter((category) => category.directTrigger === '/');
+    return {
+      level: 'aggregate',
+      term: search,
+      categories: [],
+      queriedCategories: directCategories,
+      groups: directCategories.map((category) => ({
+        category,
+        candidates: category.status === 'disabled' ? [] : category.getCandidates(search),
+      })),
+    };
+  }
   const direct = categories.find((entry) => entry.directTrigger === trigger);
   if (!direct) return null;
   return {
     level: 'category',
     category: direct,
     term: search,
-    candidates: direct.getCandidates(search),
+    candidates: direct.status === 'disabled' ? [] : direct.getCandidates(search),
   };
 }
 
@@ -543,7 +575,7 @@ export function buildAgentRoleCandidates(
 
 export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
   return {
-    value: command.name,
+    value: `acp-command:${command.name}`,
     label: command.name,
     // A slash command already owns the whole prompt: its `/` trigger only fires
     // on a slash-only composer, so the trigger span *is* the prompt.
@@ -584,7 +616,10 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
   return {
     status: source.status ?? 'ready',
     message: source.message,
-    activation: source.onActivate ? { sourceKey, activate: source.onActivate } : undefined,
+    activation:
+      source.status !== 'disabled' && source.onActivate
+        ? { sourceKey, activate: source.onActivate }
+        : undefined,
   };
 }
 
@@ -602,6 +637,9 @@ export type MentionCategorySources = {
   };
   command?: SourceState & {
     commands: readonly AcpCommandSummary[];
+  };
+  promptShortcut?: SourceState & {
+    getCandidates: MentionCategory['getCandidates'];
   };
   session?: SourceState & {
     items: readonly SessionMentionItem[];
@@ -621,16 +659,22 @@ export type MentionSourceKey = keyof MentionCategorySources;
  */
 export function useMentionCategories(sources: MentionCategorySources): MentionCategory[] {
   const { t } = useTranslation();
-  const { file, issuePr, skill, command, session, agentRole } = sources;
+  const { file, issuePr, skill, command, promptShortcut, session, agentRole } = sources;
 
   // Partitioned once: the cache holds both types, and re-splitting it inside
   // `getCandidates` would walk the whole list twice on every keystroke.
   const issueSuggestions = React.useMemo(
-    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'issue') : []),
+    () =>
+      issuePr?.enabled && issuePr.status !== 'disabled'
+        ? issuePr.suggestions.filter((item) => item.type === 'issue')
+        : [],
     [issuePr]
   );
   const prSuggestions = React.useMemo(
-    () => (issuePr?.enabled ? issuePr.suggestions.filter((item) => item.type === 'pr') : []),
+    () =>
+      issuePr?.enabled && issuePr.status !== 'disabled'
+        ? issuePr.suggestions.filter((item) => item.type === 'pr')
+        : [],
     [issuePr]
   );
   return React.useMemo(() => {
@@ -738,12 +782,24 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
       });
     }
 
+    if (promptShortcut?.enabled) {
+      categories.push({
+        id: 'prompt_shortcut',
+        namespace: 'shortcut',
+        directTrigger: '/',
+        label: t('mention.category.promptShortcut.label', 'Prompt Shortcuts'),
+        icon: 'prompt_shortcut',
+        ...sourceCategoryFields('promptShortcut', promptShortcut),
+        getCandidates: promptShortcut.getCandidates,
+      });
+    }
+
     if (command?.enabled) {
       categories.push({
         id: 'command',
         namespace: 'cmd',
         directTrigger: '/',
-        label: t('mention.category.command.label', 'Commands'),
+        label: t('mention.category.command.label', 'Agent Commands'),
         icon: 'command',
         ...sourceCategoryFields('command', command),
         getCandidates: (term, limit) => buildCommandCandidates(command.commands, term, limit),
@@ -751,5 +807,16 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
     }
 
     return categories;
-  }, [agentRole, command, file, issuePr, issueSuggestions, prSuggestions, session, skill, t]);
+  }, [
+    agentRole,
+    command,
+    promptShortcut,
+    file,
+    issuePr,
+    issueSuggestions,
+    prSuggestions,
+    session,
+    skill,
+    t,
+  ]);
 }

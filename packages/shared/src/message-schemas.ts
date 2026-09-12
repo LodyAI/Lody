@@ -631,6 +631,7 @@ export const SessionCancelRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     turnId: z.string(),
+    subagentTaskId: z.string().trim().min(1).optional(),
   })
   .strict();
 

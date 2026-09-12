@@ -235,6 +235,40 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('cancels only the named native child and rejects a stale parent turn', async () => {
+    const runningChildren = new Set(['child-1', 'child-2']);
+    const sessionManager = {
+      getSession: () => ({
+        agentClient: {
+          isCreated: () => true,
+          cancelSubagent: async (id: string) => {
+            runningChildren.delete(id);
+          },
+        },
+      }),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({ sessionManager, getActiveTurnId: () => 'parent-1' });
+    // A child control must never enter the parent Stop/history mutation path.
+    deps.workspaceDocument.getOrCreateSessionDoc = async () => {
+      throw new Error('Parent Stop was invoked');
+    };
+    const service = new SessionExecutionService(deps);
+    const request = {
+      type: 'session/cancel' as const,
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'parent-1',
+      subagentTaskId: 'child-1',
+    };
+    expect(await service.cancelSession({ ...request, turnId: 'old-parent' })).toMatchObject({
+      success: false,
+    });
+    expect([...runningChildren]).toEqual(['child-1', 'child-2']);
+    expect(await service.cancelSession(request)).toEqual({ success: true });
+    expect([...runningChildren]).toEqual(['child-2']);
+    expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
+  });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
@@ -6274,6 +6308,69 @@ describe('SessionExecutionService', () => {
     expect(result).toEqual({ success: true });
     expect(session.agentClient.cancel).not.toHaveBeenCalled();
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-cancel', {
+      lastCanceledTurn: undefined,
+    });
+  });
+
+  it('finalizes a stale unfinished compaction turn when no live runtime owns it', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const compactionItem = {
+      type: 'tool_call',
+      toolCallId: 'context-compaction-stale',
+      title: 'Context compacting',
+      status: 'in_progress',
+      activityKind: 'context_compaction',
+    };
+    const history = [
+      {
+        id: 'assistant-stale-compaction',
+        role: 'assistant',
+        items: [compactionItem],
+        finished: false,
+      },
+    ];
+    const sessionDoc = {
+      getHistory: vi.fn(async () => history),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
+        update(history);
+      }),
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      getActiveTurnId: vi.fn(() => undefined),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({ meta: {} })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-stale-compaction' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant-stale-compaction',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(compactionItem.status).toBe('failed');
+    expect(sessionDoc.updateHistory).toHaveBeenCalled();
+    expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-compaction', {
       lastCanceledTurn: undefined,
     });
   });

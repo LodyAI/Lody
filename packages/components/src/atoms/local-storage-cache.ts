@@ -34,7 +34,7 @@ export const setWorkspaceReposCacheAtom = atom(
   }
 );
 
-// ============ Chat Landing State (persisted to localStorage, scoped by user/window surface) ============
+// ============ Chat Landing State (persisted per workspace) ============
 
 export interface ChatLandingSessionState {
   prompt: string;
@@ -55,12 +55,14 @@ const DEFAULT_CHAT_LANDING_STATE: ChatLandingSessionState = {
 };
 
 /**
- * Chat landing state atom family. Normal chat uses the userId key; alternate
- * surfaces may append a suffix so they do not clobber the user's main draft.
+ * Chat landing state atom family. The draft key includes the user/surface and
+ * workspace slug. Workspace windows are peers: every window uses the same
+ * durable storage contract, while the workspace key prevents cross-workspace
+ * draft leakage.
  */
-export const chatLandingSessionStateAtomFamily = atomFamily((stateKey: string | null) =>
+export const chatLandingSessionStateAtomFamily = atomFamily((draftKey: string) =>
   atomWithStorage<ChatLandingSessionState>(
-    stateKey ? `${CHAT_LANDING_STATE_KEY_PREFIX}:${stateKey}` : CHAT_LANDING_STATE_KEY_PREFIX,
+    `${CHAT_LANDING_STATE_KEY_PREFIX}:${draftKey}`,
     DEFAULT_CHAT_LANDING_STATE
   )
 );

@@ -188,6 +188,7 @@ describe('MessageHandler machine registration', () => {
       providerSetup: 1,
       acpProtocolAuthentication: 2,
       codexCustomEndpointCredentials: 2,
+      subagentCancellation: 1,
     });
 
     await handler.cleanup();

@@ -39,6 +39,17 @@ export const markAssistantTurnFinished = (
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
     if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
+      // A terminal turn cannot retain an actionable question. The existing
+      // history subscription releases its permission waiter from this outcome.
+      for (const item of entry.items ?? []) {
+        if (
+          item.type === 'tool_call' &&
+          item.permissionRequest &&
+          !item.permissionRequest.outcome
+        ) {
+          item.permissionRequest = { ...item.permissionRequest, outcome: { outcome: 'cancelled' } };
+        }
+      }
       if (settleContextCompactionAsFailed && entry.items) {
         let changed = false;
         const items = entry.items.map((item) => {

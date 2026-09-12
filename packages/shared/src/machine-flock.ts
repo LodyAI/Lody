@@ -20,18 +20,7 @@ import type {
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from './project';
-import {
-  buildNeedToDeleteSessionQueueItem,
-  mergeNeedToDeleteSessionQueueItem,
-  type NeedToDeleteSessionQueueRecord,
-} from './session-delete-queue';
-import type {
-  AgentConfigMeta,
-  MachineLegacyMetaFields,
-  NeedToDeleteSessionQueueItem,
-  SessionLaunchConfig,
-  SessionMeta,
-} from './schema';
+import type { AgentConfigMeta, SessionLaunchConfig, SessionMeta } from './schema';
 import {
   agentConfigContainsCodexCredential,
   assertAgentConfigDoesNotContainCodexCredential,
@@ -93,67 +82,6 @@ export type MachineDeleteLocalProjectCommand = {
   cleanupWorktrees?: true;
   status?: 'completed';
   cleanupResult?: LocalProjectWorktreeCleanupResult;
-};
-
-export const buildMachineArchiveSessionCommand = (options: {
-  requestedAt: number;
-  requestedBy?: string;
-}): MachineArchiveSessionCommand => ({
-  v: 1,
-  requestedAt: options.requestedAt,
-  ...(options.requestedBy ? { requestedBy: options.requestedBy } : {}),
-});
-
-export const shouldQueueMachineDeleteSession = (
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean => {
-  if (session.parentSessionId) {
-    return false;
-  }
-  return (
-    session.isWorktree === true ||
-    (session.project?.kind !== 'local' && nonEmptyString(session.repoFullName) !== undefined)
-  );
-};
-
-export const machineDeleteCommandToQueueItem = (
-  command: MachineDeleteSessionCommand
-): NeedToDeleteSessionQueueRecord => {
-  const { v: _v, ...queueItem } = command;
-  return queueItem;
-};
-
-export const buildMachineDeleteSessionCommand = (options: {
-  session: Pick<
-    SessionMeta,
-    'project' | 'repoFullName' | 'branchName' | 'baseBranch' | 'isWorktree' | 'parentSessionId'
-  >;
-  machineMeta?: Pick<MachineLegacyMetaFields, 'localProjects'>;
-  requestedAt: number;
-  existing?: NeedToDeleteSessionQueueItem | MachineDeleteSessionCommand;
-}): MachineDeleteSessionCommand | null => {
-  if (!shouldQueueMachineDeleteSession(options.session)) {
-    return null;
-  }
-  const existing =
-    options.existing && typeof options.existing === 'object' && 'v' in options.existing
-      ? machineDeleteCommandToQueueItem(options.existing)
-      : options.existing;
-  const queueItem = mergeNeedToDeleteSessionQueueItem(
-    existing,
-    buildNeedToDeleteSessionQueueItem({
-      session: options.session,
-      machineMeta: options.machineMeta,
-      requestedAt: options.requestedAt,
-    })
-  );
-  const { isWorktree, requestedAt, ...rest } = queueItem;
-  return {
-    v: 1,
-    ...rest,
-    requestedAt: requestedAt ?? options.requestedAt,
-    ...(isWorktree === true ? { isWorktree: true } : {}),
-  };
 };
 
 export const buildMachineDeleteLocalProjectCommand = (options: {
@@ -1216,11 +1144,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
-
-const nonEmptyString = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
 
 const isMissing = (value: unknown): value is null | undefined =>
   value === undefined || value === null;

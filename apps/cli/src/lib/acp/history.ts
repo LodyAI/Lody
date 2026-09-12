@@ -13,6 +13,7 @@ import {
   ToolCallContentSchema,
   parseHistoryWrite,
   HistoryWriteError,
+  parseLodyTaskMeta,
 } from '@lody/shared';
 import type { ModelInfo } from '@lody/shared';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
@@ -867,6 +868,9 @@ const filterNotificationsForHistory = (
         );
     }
     if (update.sessionUpdate !== 'tool_call_update') return true;
+    // Task snapshots are small lifecycle facts, not replaceable tool output.
+    // The history applier merges them by taskId for both live and resumed views.
+    if (parseLodyTaskMeta(update._meta)) return true;
     // Tool call updates are often "full snapshots" (especially terminal output). Persisting all
     // intermediate snapshots causes the CRDT history to blow up. We keep only terminal state
     // transitions that represent a finished tool call.
@@ -1290,8 +1294,10 @@ export const ensurePermissionRequestOnToolCall = async (
       let entryUpdated = false;
       const nextContents = parsed.map((content) => {
         if (content.type === 'tool_call' && content.toolCallId === toolCallId) {
-          entryUpdated = true;
           updated = true;
+          // A delayed request still belongs to this tool, never the next turn.
+          if (entry.finished === true || typeof entry.endedAt === 'number') return content;
+          entryUpdated = true;
           return mergeToolCallWithPermission(content, requestId, request);
         }
         return content;

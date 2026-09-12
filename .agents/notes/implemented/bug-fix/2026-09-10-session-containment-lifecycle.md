@@ -76,5 +76,17 @@ or complete-query contract and its regression coverage are tracked in
 archive-semantics fix.
 
 The action, navigation, relation-card, header-menu, and archive-tree suites own the
-regression coverage. Repository-wide check results are recorded in the PR status
-rather than duplicated here.
+focused regression coverage. Desktop journey `LODY-SESSION-004` exercises the full
+user sequence with two real worktree forks: archive and archived-root delete remove
+the opener and its child Tab while the opened Sessions, their ACP processes, and
+their worktrees survive. It then opens both survivors to verify non-navigable deleted
+provenance. The same journey delays the real initial metadata Flock scan across a
+renderer reload and closes an empty child Tab populated by live metadata events,
+proving exact cleanup remains available before full hydration. Repository-wide check
+results are recorded in the PR status rather than duplicated here. The journey waits
+for every blocked metadata scan and the canonical root-Tab route before teardown, so
+runtime evidence cannot race the hydration-triggered navigation. Run-configuration
+menu steps accept an already selected Agent and use keyboard submenu activation. Fork
+steps likewise use keyboard activation and identify the source ACP Session by its
+project working directory, avoiding hover-card interception and concurrent title-agent
+events.

@@ -25,7 +25,6 @@ import {
   applyAgentRunConfigSelection,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
-  buildLegacyMachineRestoreQueueCleanupPatch,
   buildSessionArchiveMetaPatch,
   buildSessionRestoreMetaPatch,
   filterAuthorizedMachineMetas,
@@ -57,7 +56,6 @@ import {
   resolveLocalProjectRefOrThrow,
   selectLocalProjectsBySelector,
   selectTargetMachineForCreate,
-  shouldQueueMachineDelete,
   shouldReadStdinForChatArgResolution,
   shouldWaitForSessionCompletion,
   selectSessionTranscriptEntries,
@@ -947,27 +945,6 @@ describe('session command helpers', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('only queues machine-side deletion for sessions with repo-backed resources', () => {
-    expect(shouldQueueMachineDelete(createSessionMeta({ repoFullName: 'owner/repo' }))).toBe(true);
-    expect(
-      shouldQueueMachineDelete(
-        createSessionMeta({
-          parentSessionId: 'parent-session' as SessionId,
-          repoFullName: 'owner/repo',
-          isWorktree: true,
-        })
-      )
-    ).toBe(false);
-    expect(
-      shouldQueueMachineDelete(
-        createSessionMeta({
-          repoFullName: '   ',
-        })
-      )
-    ).toBe(false);
-    expect(shouldQueueMachineDelete(createSessionMeta())).toBe(false);
-  });
-
   it('lists child sessions for lifecycle cascade commands', async () => {
     const parentSessionId = 'parent-session' as SessionId;
     const childSessionId = 'child-session' as SessionId;
@@ -1013,27 +990,6 @@ describe('session command helpers', () => {
     expect(buildSessionRestoreMetaPatch()).toEqual({
       isArchived: false,
     });
-
-    expect(
-      buildLegacyMachineRestoreQueueCleanupPatch('session-1', {
-        needToArchiveSessions: { 'session-1': true, 'session-2': true },
-        needToDeleteSessions: {
-          'session-1': { requestedAt: 2000 },
-          'session-3': { requestedAt: 2000 },
-        },
-      })
-    ).toEqual({
-      needToArchiveSessions: { 'session-2': true },
-      needToDeleteSessions: {
-        'session-3': { requestedAt: 2000 },
-      },
-    });
-    expect(
-      buildLegacyMachineRestoreQueueCleanupPatch('session-1', {
-        needToArchiveSessions: { 'session-2': true },
-        needToDeleteSessions: {},
-      })
-    ).toBeNull();
   });
 
   it('matches local project selectors against normalized paths', () => {

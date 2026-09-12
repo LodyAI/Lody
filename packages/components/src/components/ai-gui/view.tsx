@@ -77,7 +77,8 @@ import { VisualAnnotationReferenceCard } from './visual-annotation-reference-car
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
-import { authTokenAtom } from '@/atoms/runtime';
+import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
+import { machineSupportsSubagentCancellation } from '@lody/shared';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -149,6 +150,7 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
+import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
 import { resolvePermissionRecord } from './permission-record';
 import {
@@ -3490,9 +3492,35 @@ const AssistantToolCallVirtualRow = memo(
     prev.fontSize === next.fontSize
 );
 
-const AssistantSubagentTasksRow = ({ message }: { message: SessionHistoryParsed }) => {
+const AssistantSubagentTasksRow = ({
+  message,
+  sessionId,
+}: {
+  message: SessionHistoryParsed;
+  sessionId: SessionId;
+}) => {
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
-  return <SubagentTaskPanel tasks={tasks} />;
+  const runtime = useAtomValue(runtimeAtom);
+  const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const machine = useAtomValue(getMachineMetaByIdAtomFamily(session?.machineId));
+  const { t } = useTranslation();
+  const onCancel =
+    runtime && session?.machineId && machineSupportsSubagentCancellation(machine)
+      ? async (taskId: string) => {
+          const response = await runtime.requestSessionCancel(
+            session.machineId,
+            sessionId,
+            message.id,
+            {
+              subagentTaskId: taskId,
+              timeoutMs: 30_000,
+            }
+          );
+          if (!response?.success)
+            throw new Error(response?.error || t('sessions.subagentTasks.cancelFailed'));
+        }
+      : undefined;
+  return <SubagentTaskPanel tasks={tasks} onCancel={onCancel} />;
 };
 
 /**
@@ -4070,7 +4098,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         );
       }
       case 'subagent_tasks':
-        return <AssistantSubagentTasksRow message={message} />;
+        return <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />;
       case 'footer':
         return (
           <AssistantTurnFooter
@@ -4602,7 +4630,16 @@ const ImagePreviewDialog = ({
   );
 };
 
-const UserImageBlock = ({
+const UserImageBlock = (props: Parameters<typeof WorkspaceUserImageBlock>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderImage(props.entry)}</>
+  ) : (
+    <WorkspaceUserImageBlock {...props} />
+  );
+};
+
+const WorkspaceUserImageBlock = ({
   entry,
   onPreviewRequest,
   variant = 'full',
@@ -4885,7 +4922,16 @@ export const ImageGroupBubble = ({
  * one list (decision #3) at the call site; this component handles however many
  * it is handed.
  */
-export const SessionFileGroup = ({
+export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderFiles(props.files, props.sessionId)}</>
+  ) : (
+    <WorkspaceSessionFileGroup {...props} />
+  );
+};
+
+const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -5738,9 +5784,7 @@ const ToolCallCard = memo(function ToolCallCard({
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
-        <span>
-          {t('sessions.activity.codexRetrying', 'Connection interrupted, Codex is retrying')}
-        </span>
+        <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
   }
@@ -6413,6 +6457,7 @@ const PermissionRequestBlock = ({
   /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
   collapseByDefault?: boolean;
 }) => {
+  const readonly = useContext(SessionReadonlyContext);
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
   const { respondToPermission, isReady } = usePermissionResponse();
@@ -6432,6 +6477,14 @@ const PermissionRequestBlock = ({
 
   if (!permission) {
     return null;
+  }
+
+  if (readonly && !permission.outcome) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        {t('sharing.permissionPending', 'Waiting for the author')}
+      </div>
+    );
   }
 
   if (askQuestionMeta && readonlyAnswers) {

@@ -36,6 +36,7 @@ import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$wo
 import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId'
 import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace'
 import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats'
+import { Route as WorkspaceNameAuthSettingsPromptShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/prompt-shortcuts'
 import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects'
 import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences'
 import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people'
@@ -197,6 +198,12 @@ const WorkspaceNameAuthSettingsStatsRoute =
   WorkspaceNameAuthSettingsStatsRouteImport.update({
     id: '/stats',
     path: '/stats',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any)
+const WorkspaceNameAuthSettingsPromptShortcutsRoute =
+  WorkspaceNameAuthSettingsPromptShortcutsRouteImport.update({
+    id: '/prompt-shortcuts',
+    path: '/prompt-shortcuts',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
   } as any)
 const WorkspaceNameAuthSettingsProjectsRoute =
@@ -361,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
   '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
@@ -407,6 +415,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
   '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
   '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
@@ -457,6 +466,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
   '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
   '/$workspaceName/_auth/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
+  '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
   '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
   '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
   '/$workspaceName/_auth/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
@@ -507,6 +517,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/projects'
+    | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/tasks/$taskId'
@@ -553,6 +564,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/people'
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/projects'
+    | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/tasks/$taskId'
@@ -602,6 +614,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/people'
     | '/$workspaceName/_auth/settings/preferences'
     | '/$workspaceName/_auth/settings/projects'
+    | '/$workspaceName/_auth/settings/prompt-shortcuts'
     | '/$workspaceName/_auth/settings/stats'
     | '/$workspaceName/_auth/settings/workspace'
     | '/$workspaceName/_auth/tasks/$taskId'
@@ -820,6 +833,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport
       parentRoute: typeof WorkspaceNameAuthSettingsRoute
     }
+    '/$workspaceName/_auth/settings/prompt-shortcuts': {
+      id: '/$workspaceName/_auth/settings/prompt-shortcuts'
+      path: '/prompt-shortcuts'
+      fullPath: '/$workspaceName/settings/prompt-shortcuts'
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRouteImport
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute
+    }
     '/$workspaceName/_auth/settings/projects': {
       id: '/$workspaceName/_auth/settings/projects'
       path: '/projects'
@@ -997,6 +1017,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute
   WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute
   WorkspaceNameAuthSettingsProjectsRoute: typeof WorkspaceNameAuthSettingsProjectsRoute
+  WorkspaceNameAuthSettingsPromptShortcutsRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
   WorkspaceNameAuthSettingsStatsRoute: typeof WorkspaceNameAuthSettingsStatsRoute
   WorkspaceNameAuthSettingsWorkspaceRoute: typeof WorkspaceNameAuthSettingsWorkspaceRoute
   WorkspaceNameAuthSettingsIndexRoute: typeof WorkspaceNameAuthSettingsIndexRoute
@@ -1035,6 +1056,8 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
       WorkspaceNameAuthSettingsPreferencesRoute,
     WorkspaceNameAuthSettingsProjectsRoute:
       WorkspaceNameAuthSettingsProjectsRoute,
+    WorkspaceNameAuthSettingsPromptShortcutsRoute:
+      WorkspaceNameAuthSettingsPromptShortcutsRoute,
     WorkspaceNameAuthSettingsStatsRoute: WorkspaceNameAuthSettingsStatsRoute,
     WorkspaceNameAuthSettingsWorkspaceRoute:
       WorkspaceNameAuthSettingsWorkspaceRoute,
