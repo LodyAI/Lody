@@ -57,7 +57,7 @@ import { Switch } from '@lody/ui/switch';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { Textarea } from '@lody/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { MachinePills, type MachinePillItem } from './machine-pills';
 import {
   AlertDialog,
@@ -906,25 +906,25 @@ function LocalProjectDetail({
           toggle sits at the end of the tab bar; each tab body scrolls on its
           own with scrollbar-pro so long lists never push the layout. */}
       <div className="flex h-full min-h-0 flex-col p-4 pt-3">
-        <Tabs defaultValue="sync" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Tabs.Root defaultValue="sync" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-2">
-            <TabsList className="h-8">
-              <TabsTrigger value="sync" className="gap-1.5 px-2.5 text-xs">
+            <Tabs.List>
+              <Tabs.Tab value="sync">
                 <MessagesSquare className="h-3.5 w-3.5" />
                 {t('workspace.projects.historySyncSection', 'Conversation sync')}
-              </TabsTrigger>
-              <TabsTrigger value="worktree" className="gap-1.5 px-2.5 text-xs">
+              </Tabs.Tab>
+              <Tabs.Tab value="worktree">
                 <TerminalSquare className="h-3.5 w-3.5" />
                 {t('workspace.projects.worktreeSetupTab', 'Worktree setup')}
-              </TabsTrigger>
-              <TabsTrigger value="skills" className="gap-1.5 px-2.5 text-xs">
+              </Tabs.Tab>
+              <Tabs.Tab value="skills">
                 <Boxes className="h-3.5 w-3.5" />
                 {t('workspace.projects.skills.tabLabel', 'Skills')}
-              </TabsTrigger>
-            </TabsList>
+              </Tabs.Tab>
+            </Tabs.List>
             <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
           </div>
-          <TabsContent value="sync" className="mt-3 flex min-h-0 flex-1 flex-col">
+          <Tabs.Panel value="sync" className="flex min-h-0 flex-1 flex-col">
             <LocalHistorySection
               row={row}
               onSyncHistory={onSyncHistory}
@@ -932,10 +932,10 @@ function LocalProjectDetail({
               onResolveHistoryConflict={onResolveHistoryConflict}
               onHistorySelectionChange={onHistorySelectionChange}
             />
-          </TabsContent>
-          <TabsContent
+          </Tabs.Panel>
+          <Tabs.Panel
             value="worktree"
-            className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
+            className="scrollbar-pro min-h-0 flex-1 overflow-y-auto pr-1"
           >
             <div className="flex flex-col gap-5">
               <WorktreeSetupEditor
@@ -957,14 +957,14 @@ function LocalProjectDetail({
                 onSave={(config) => onWorktreeCleanupChange?.(row, config)}
               />
             </div>
-          </TabsContent>
-          <TabsContent
+          </Tabs.Panel>
+          <Tabs.Panel
             value="skills"
-            className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
+            className="scrollbar-pro min-h-0 flex-1 overflow-y-auto pr-1"
           >
             <ProjectSkillsTab source={skillsSource} />
-          </TabsContent>
-        </Tabs>
+          </Tabs.Panel>
+        </Tabs.Root>
       </div>
     </TooltipProvider>
   );
@@ -1176,25 +1176,25 @@ function GithubProjectDetail({
     : null;
   return (
     <div className="flex h-full min-h-0 flex-col p-4 pt-3">
-      <Tabs defaultValue="worktree" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs.Root defaultValue="worktree" className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between gap-2">
-          <TabsList className="h-8">
-            <TabsTrigger value="worktree" className="gap-1.5 px-2.5 text-xs">
+          <Tabs.List>
+            <Tabs.Tab value="worktree">
               <TerminalSquare className="h-3.5 w-3.5" />
               {t('workspace.projects.worktreeSetupTab', 'Worktree setup')}
-            </TabsTrigger>
-            <TabsTrigger value="skills" className="gap-1.5 px-2.5 text-xs">
+            </Tabs.Tab>
+            <Tabs.Tab value="skills">
               <Boxes className="h-3.5 w-3.5" />
               {t('workspace.projects.skills.tabLabel', 'Skills')}
-            </TabsTrigger>
-          </TabsList>
+            </Tabs.Tab>
+          </Tabs.List>
           <span className="rounded-sm bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground">
             {row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}
           </span>
         </div>
-        <TabsContent
+        <Tabs.Panel
           value="worktree"
-          className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
+          className="scrollbar-pro min-h-0 flex-1 overflow-y-auto pr-1"
         >
           <div className="flex flex-col gap-5">
             <WorktreeSetupEditor
@@ -1212,14 +1212,14 @@ function GithubProjectDetail({
               onSave={(config) => onWorktreeCleanupChange?.(row, config)}
             />
           </div>
-        </TabsContent>
-        <TabsContent
+        </Tabs.Panel>
+        <Tabs.Panel
           value="skills"
-          className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
+          className="scrollbar-pro min-h-0 flex-1 overflow-y-auto pr-1"
         >
           <ProjectSkillsTab source={skillsSource} />
-        </TabsContent>
-      </Tabs>
+        </Tabs.Panel>
+      </Tabs.Root>
     </div>
   );
 }
@@ -1438,24 +1438,20 @@ export function WorktreeSetupEditor({
           {renderShellTextarea(shell)}
         </div>
       ) : (
-        <Tabs defaultValue="bash" className="flex flex-col gap-2">
-          <TabsList className="h-8 self-start">
-            <TabsTrigger value="bash" className="gap-1.5 px-2.5 text-xs">
+        <Tabs.Root defaultValue="bash">
+          <Tabs.List className="self-start">
+            <Tabs.Tab value="bash">
               <TerminalSquare className="h-3.5 w-3.5" />
               Bash
-            </TabsTrigger>
-            <TabsTrigger value="powershell" className="gap-1.5 px-2.5 text-xs">
+            </Tabs.Tab>
+            <Tabs.Tab value="powershell">
               <TerminalSquare className="h-3.5 w-3.5" />
               PowerShell
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="bash" className="mt-0">
-            {renderShellTextarea('bash')}
-          </TabsContent>
-          <TabsContent value="powershell" className="mt-0">
-            {renderShellTextarea('powershell')}
-          </TabsContent>
-        </Tabs>
+            </Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="bash">{renderShellTextarea('bash')}</Tabs.Panel>
+          <Tabs.Panel value="powershell">{renderShellTextarea('powershell')}</Tabs.Panel>
+        </Tabs.Root>
       )}
 
       {isSaving ? (

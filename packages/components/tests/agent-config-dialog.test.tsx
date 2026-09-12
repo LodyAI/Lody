@@ -264,10 +264,15 @@ describe('AgentConfigDialog', () => {
   };
 
   const selectTab = async (name: string): Promise<void> => {
+    // A whole press, not just its first half: the strip is Base UI's now and a
+    // tab is taken on the click, while Radix took it on the mousedown.
     await act(async () => {
-      getTabByName(name).dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
-      );
+      const tab = getTabByName(name);
+      const press = { bubbles: true, cancelable: true, button: 0 };
+      tab.dispatchEvent(new MouseEvent('mousedown', press));
+      tab.focus();
+      tab.dispatchEvent(new MouseEvent('mouseup', press));
+      tab.click();
     });
   };
 

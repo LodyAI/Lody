@@ -67,12 +67,12 @@ import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-prog
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
+import { Collapsible } from '@lody/ui/collapsible';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
 import { Select } from '@lody/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
@@ -2825,7 +2825,7 @@ function DeepSeekHarnessPanel({
   const { t } = useTranslation();
   return (
     <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
-      <Tabs
+      <Tabs.Root
         value={endpointMode}
         onValueChange={(value) => {
           if (value === 'official' || value === 'custom') {
@@ -2833,18 +2833,18 @@ function DeepSeekHarnessPanel({
           }
         }}
       >
-        <TabsList className="grid h-8 w-full grid-cols-2">
-          <TabsTrigger value="official" className="px-2.5 text-xs">
+        <Tabs.List stretch>
+          <Tabs.Tab value="official">
             {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
-          </TabsTrigger>
-          <TabsTrigger value="custom" className="px-2.5 text-xs">
+          </Tabs.Tab>
+          <Tabs.Tab value="custom">
             {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="official" className="mt-3">
+          </Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="official">
           <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
-        </TabsContent>
-        <TabsContent value="custom" className="mt-3 space-y-3">
+        </Tabs.Panel>
+        <Tabs.Panel value="custom" className="space-y-3">
           <Field
             htmlFor="deepseek-endpoint"
             label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
@@ -2878,8 +2878,8 @@ function DeepSeekHarnessPanel({
             onChange={onApiKeyChange}
             label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
           />
-        </TabsContent>
-      </Tabs>
+        </Tabs.Panel>
+      </Tabs.Root>
     </div>
   );
 }
@@ -3066,18 +3066,20 @@ function PresetPanel({
         </Field>
       ) : null}
 
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-            {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
-            <Lock className="h-3 w-3 opacity-70" aria-hidden="true" />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
+      <Collapsible.Root>
+        <Collapsible.Trigger
+          render={
+            <button
+              type="button"
+              className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <ChevronDown className="h-3 w-3 transition-transform group-data-[panel-open]:rotate-180" />
+          {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
+          <Lock className="h-3 w-3 opacity-70" aria-hidden="true" />
+        </Collapsible.Trigger>
+        <Collapsible.Panel className="mt-2">
           <div className="rounded-md border border-border/60 bg-background/50">
             <dl className="divide-y divide-border/40 text-[11px]">
               {Object.entries(injectedEnv).map(([key, value]) => (
@@ -3098,8 +3100,8 @@ function PresetPanel({
               </div>
             </dl>
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+        </Collapsible.Panel>
+      </Collapsible.Root>
     </div>
   );
 }
@@ -3149,25 +3151,27 @@ function Section({
   action?: ReactNode;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible.Root defaultOpen={defaultOpen}>
       <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-medium text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
-            {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        </CollapsibleTrigger>
+        <Collapsible.Trigger
+          render={
+            <button
+              type="button"
+              className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-medium text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[panel-open]:rotate-180" />
+          <span className="min-w-0 truncate">{title}</span>
+          {typeof count === 'number' && count > 0 ? (
+            <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
+              {count}
+            </span>
+          ) : null}
+        </Collapsible.Trigger>
         {action}
       </div>
-      <CollapsibleContent className="mt-2">
+      <Collapsible.Panel className="mt-2">
         <div className="pl-1">
           {disabled ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
@@ -3175,8 +3179,8 @@ function Section({
             children
           )}
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 

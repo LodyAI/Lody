@@ -6,6 +6,13 @@ export type {
   ButtonTone,
   ButtonVariant,
 } from './button/button';
+export { Accordion } from './disclosure/accordion';
+export type {
+  AccordionItemProps,
+  AccordionPanelProps,
+  AccordionRootProps,
+  AccordionTriggerProps,
+} from './disclosure/accordion';
 export { AlertDialog } from './dialog/alert-dialog';
 export type {
   AlertDialogContentProps,
@@ -14,6 +21,8 @@ export type {
 } from './dialog/alert-dialog';
 export { Checkbox } from './field/checkbox';
 export type { CheckboxProps } from './field/checkbox';
+export { Collapsible } from './disclosure/collapsible';
+export type { CollapsiblePanelProps } from './disclosure/collapsible';
 export { Combobox } from './field/combobox';
 export type {
   ComboboxClearProps,
@@ -99,6 +108,14 @@ export type {
 } from './field/select';
 export { Switch } from './field/switch';
 export type { SwitchProps } from './field/switch';
+export { Tabs } from './disclosure/tabs';
+export type {
+  TabsListProps,
+  TabsPanelProps,
+  TabsRootProps,
+  TabsSize,
+  TabsTabProps,
+} from './disclosure/tabs';
 export { Textarea } from './field/textarea';
 export type { TextareaProps, TextareaResize } from './field/textarea';
 export { ThemeRoot, forcedThemeClassNames } from './theme/theme';

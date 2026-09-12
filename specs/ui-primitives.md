@@ -107,6 +107,31 @@ screen reader, so it never carries a control's name — every control it describ
 states its own name, and a surface that groups several of them lets the second
 appear without the wait the first had.
 
+A surface may also show one thing out of several, and there are three ways it
+does so: the choices side by side with the thing under them, the choices stacked
+with the thing opening in place beneath the one chosen, and a single such thing
+on its own. These are one family rather than three components, because each is a
+control that says what is shown and a region that shows it; only the arrangement
+differs. None of them holds a value — what they pick is what a person sees, not
+what is stored — so none takes a name, a validity or a field around it.
+
+The strip of choices is a sunken track with the chosen one raised out of it, and
+that mark is one thing that moves between the choices rather than a light that
+turns on under each, because the strip is a single control. It is provided by
+the strip itself rather than assembled by a surface. The choices are stated
+once at a size, and a strip told to take the width it is offered divides that
+width between them. Moving along the strip with the keyboard does not take a
+choice, because what a choice reveals may be expensive to produce; a surface
+whose regions are cheap may ask for the opposite.
+
+A stacked choice is a row with no fill of its own, separated from the next by
+the line the system gives a list, and it says what it hides with a mark that
+turns over as it opens. One is open at a time unless the surface says otherwise.
+A lone one has no list around it, so it has neither that line nor that row: it
+is opened by whatever the surface already had there. What opens is animated from
+its own measured height, so what it holds keeps its spacing on something inside
+it rather than on the part being measured.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is
