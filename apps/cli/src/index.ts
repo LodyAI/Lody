@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // MUST stay the first import: it exits with a readable message on the runtimes where
-// the SQLite binding cannot load — Node < 22.14 segfaults rather than throwing, and
+// the SQLite binding cannot load — Node-API < 10 segfaults rather than throwing, and
 // 32-bit ARM has no prebuild. See utils/sqlite-runtime-support.ts.
 import './utils/sqlite-runtime-support';
 import './instrument';

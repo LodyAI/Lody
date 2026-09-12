@@ -91,9 +91,10 @@ they never generate selectors, shell commands, or executable product code.
 
 The local Journey Foundry takes one eligible backlog row at a time under the
 [restricted authoring contract](./journeys/AUTHORING.md). It requires a clean
-maintainer checkout, Node.js 22+, the pinned pnpm, macOS desktop prerequisites,
-and an authenticated Codex CLI. `codex login` may use the maintainer's ChatGPT
-account; GitHub receives neither that login nor an API key.
+maintainer checkout, Node.js 22.14-22.x or 23.6+ (Node-API 10+), the pinned pnpm,
+macOS desktop prerequisites, and an authenticated Codex CLI. `codex login` may
+use the maintainer's ChatGPT account; GitHub receives neither that login nor an
+API key.
 
 The author command creates an ephemeral detached worktree and invokes Codex
 there with a restricted environment, ignored user configuration, an ephemeral
