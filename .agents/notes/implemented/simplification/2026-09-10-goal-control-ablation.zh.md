@@ -1,7 +1,9 @@
 # Goal control 审查与消融
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[English](2026-09-10-goal-control-ablation.md)
 
 ## 摘要
 

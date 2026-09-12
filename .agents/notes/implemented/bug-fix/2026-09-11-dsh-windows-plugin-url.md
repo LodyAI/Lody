@@ -1,7 +1,9 @@
 # Import the DSH adapter through a file URL
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-11-dsh-windows-plugin-url.zh.md)
 
 ## Abstract
 

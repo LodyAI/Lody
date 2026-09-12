@@ -1,7 +1,9 @@
 # Conversation context fallback
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-conversation-context-fallback.zh.md)
 
 ## Abstract
 

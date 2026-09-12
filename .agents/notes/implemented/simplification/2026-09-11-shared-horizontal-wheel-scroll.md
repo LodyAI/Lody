@@ -1,8 +1,10 @@
 # Centralize horizontal wheel scrolling
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/617
+
+[中文](2026-09-11-shared-horizontal-wheel-scroll.zh.md)
 
 ## Abstract
 

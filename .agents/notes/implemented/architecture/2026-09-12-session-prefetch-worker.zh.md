@@ -1,7 +1,9 @@
 # 会话预同步移入串行 Worker
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[English](2026-09-12-session-prefetch-worker.md)
 
 ## 摘要
 

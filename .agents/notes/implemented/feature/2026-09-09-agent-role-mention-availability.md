@@ -1,7 +1,9 @@
 # Cross-machine plain chat and visible unavailable Roles
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-agent-role-mention-availability.zh.md)
 
 ## Abstract
 

@@ -1,7 +1,9 @@
 # Give goal actions their own control plane instead of the `/goal` prompt bridge
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-goal-control-plane.zh.md)
 
 ## Abstract
 
@@ -153,7 +155,7 @@ advertisement. Typecheck passes for shared, RPC, CLI, and components.
 Not verified: a live Codex session pausing and resuming a real goal, and the
 managed-runtime build path that consumes a published `acp-extension-core`.
 
-Follow-up correction (2026-09-10): the [independent review and ablation](../simplification/2026-09-10-goal-control-ablation.zh.md)
+Follow-up correction (2026-09-10): the [independent review and ablation](../simplification/2026-09-10-goal-control-ablation.md)
 found gaps in startup acknowledgement, cross-transport supersession, and cold-session
 status control. The host correction above addresses these findings and the
 three-wait drop reported in [PR #554](https://github.com/LodyAI/Lody/pull/554).

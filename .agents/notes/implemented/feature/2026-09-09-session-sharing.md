@@ -1,7 +1,9 @@
 # Read original conversations through explicit share links
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-session-sharing.zh.md)
 
 ## Abstract
 
