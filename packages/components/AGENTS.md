@@ -36,8 +36,9 @@ mobile surfaces. Background for the rules below:
   [module graph note](../../.agents/notes/implemented/testing/2026-09-10-components-test-module-graph.md).
 - `vitest.config.ts` deliberately omits `vite-plugin-top-level-await` and
   `vite-tsconfig-paths`; `vite.config.ts` keeps both because the product bundle
-  needs them. Run the suite with `NODE_ENV=test` — a `production` value resolves
-  React to a build without `act`.
+  needs them. The plugin reads `tsconfig.vite.json`; keep the type-only React
+  mappings from `tsconfig.json` out of the runtime resolver. Run the suite with
+  `NODE_ENV=test` — a `production` value resolves React to a build without `act`.
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.
