@@ -3,12 +3,18 @@ import { colors, shadow } from '../tokens/colors.stylex';
 import { control, radius, space, text } from '../tokens/scales.stylex';
 
 /**
- * One token group for every list that floats over the page — the Select popup,
- * the Combobox popup, and the menus that follow. It is deliberately not part of
- * the `field` group: a trigger is a control on the well rung and reads `field`,
- * while the list it opens is on the floating rung and shares its vocabulary with
- * a menu rather than with an input. A menu that reached for `field.background`
- * would be naming the wrong thing to get the right colour.
+ * One token group for everything that floats over the page — the Select popup,
+ * the Combobox popup, the menus, and the Popover that holds content instead of
+ * rows. It is deliberately not part of the `field` group: a trigger is a
+ * control on the well rung and reads `field`, while the list it opens is on the
+ * floating rung and shares its vocabulary with a menu rather than with an input.
+ * A menu that reached for `field.background` would be naming the wrong thing to
+ * get the right colour.
+ *
+ * A Popover is the same surface with prose on it rather than commands, so it
+ * reads this group too. Giving it one of its own would mean two floating
+ * surfaces that can drift apart — a popover and the menu beside it opening at
+ * two radii over two shadows — which is exactly what `menu-styles.ts` was.
  */
 export const popup = stylex.defineVars({
   // The floating rung: raised background plus the popover shadow, together.
@@ -37,9 +43,20 @@ export const popup = stylex.defineVars({
   // commands. A menu surface therefore states a width of its own and grows past
   // it for the longest row.
   menuWidth: '200px',
+  // A Popover's content is not rows, so the 4px inset that lets a row reach the
+  // surface's edge is the wrong padding for it: prose needs room. This pair is
+  // what a popover replaces on the shared surface, the way `menuWidth` is what
+  // a menu replaces — it also steps the type from the control rule to the prose
+  // rule, which is a fact about type rather than a token of its own.
+  panelPadding: space[3],
+  panelGap: space[2],
   label: colors.label,
   hint: colors.tertiaryLabel,
   groupLabel: colors.secondaryLabel,
+  // The sentence under a popover's title. `groupLabel` resolves to the same
+  // colour today and means something else — a heading over rows — so the two
+  // are named apart rather than shared for the value they happen to agree on.
+  description: colors.secondaryLabel,
   separator: colors.separator,
   // Two different facts about a row: `highlighted` is where the keyboard or the
   // pointer is right now, `selected` is the row that holds the value, and the
@@ -77,6 +94,7 @@ export const popupPaletteTheme = stylex.createTheme(popup, {
   label: colors.label,
   hint: colors.tertiaryLabel,
   groupLabel: colors.secondaryLabel,
+  description: colors.secondaryLabel,
   separator: colors.separator,
   highlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
   selected: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,

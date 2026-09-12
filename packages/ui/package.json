@@ -6,15 +6,19 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./alert-dialog": "./src/dialog/alert-dialog.tsx",
     "./button": "./src/button/button.tsx",
     "./checkbox": "./src/field/checkbox.tsx",
     "./combobox": "./src/field/combobox.tsx",
     "./context-menu": "./src/menu/context-menu.tsx",
+    "./dialog": "./src/dialog/dialog.tsx",
+    "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
     "./gallery": "./src/gallery/gallery.tsx",
     "./input": "./src/field/input.tsx",
     "./menu": "./src/menu/menu.tsx",
     "./menubar": "./src/menu/menubar.tsx",
+    "./popover": "./src/popover/popover.tsx",
     "./popup-container": "./src/popup/portal-container.tsx",
     "./radio": "./src/field/radio.tsx",
     "./select": "./src/field/select.tsx",
@@ -22,7 +26,8 @@
     "./textarea": "./src/field/textarea.tsx",
     "./theme": "./src/theme/theme.tsx",
     "./tokens/colors.stylex": "./src/tokens/colors.stylex.ts",
-    "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts"
+    "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
+    "./tooltip": "./src/tooltip/tooltip.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
