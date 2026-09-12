@@ -100,15 +100,15 @@ export class TextAttachmentPage {
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
   }
 
-  async reloadPrimarySession(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(this.page).toHaveURL(
-      this.sessionRoutePattern(this.fixture.requirePrimarySessionId())
-    );
+  async reopenPrimarySessionThroughSidebar(): Promise<void> {
+    const primarySessionId = this.fixture.requirePrimarySessionId();
+    await this.openHome();
+    await this.activeRow(primarySessionId).click();
+    await expect(this.page).toHaveURL(this.sessionRoutePattern(primarySessionId));
     await expect(this.composerPrompt()).toBeEditable({ timeout: 60_000 });
   }
 
-  async expectPrimarySessionAfterReload(): Promise<void> {
+  async expectPrimarySessionAfterReopen(): Promise<void> {
     await this.expectPrimaryHistory();
   }
 

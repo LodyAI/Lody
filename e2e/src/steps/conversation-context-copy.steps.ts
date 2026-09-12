@@ -22,8 +22,7 @@ Given('用户已在隔离桌面配置上下文复制用的确定性 Agent', asyn
   }
   await this.onboarding.waitForLocalBootstrap();
   const fixture = new ContextCopyFixture(
-    `${this.artifacts.scenarioDir}/context-copy-scripted-acp.ndjson`,
-    `${this.artifacts.scenarioDir}/context-copy-release-main-stream.signal`
+    `${this.artifacts.scenarioDir}/context-copy-scripted-acp.ndjson`
   );
   const page = new ContextCopyPage(this.harness.page, fixture);
   await this.onboarding.skipConfigurationAndEnterProduct();
@@ -54,16 +53,19 @@ Then(
   }
 );
 
-When('用户重新载入上下文复制主 Session 界面', async function (this: LodyWorld) {
-  await journeyFor(this).page.reloadPrimarySession();
+When('用户返回主页并从侧栏重新打开上下文复制主 Session', async function (this: LodyWorld) {
+  await journeyFor(this).page.reopenPrimarySessionThroughSidebar();
 });
 
-Then('主 Session 历史和按 Agent 回复的上下文复制仍然成立', async function (this: LodyWorld) {
-  await journeyFor(this).page.expectPrimaryHistoryAndCopyPersistAfterReload();
-});
+Then(
+  '重新打开后主 Session 历史和按 Agent 回复的上下文复制仍然成立',
+  async function (this: LodyWorld) {
+    await journeyFor(this).page.expectPrimaryHistoryAndCopyAfterReopen();
+  }
+);
 
 When(
-  '主 Session 的 Agent 通过显式 ACP 信号开始未完成的流式回复并导出完整 Markdown',
+  '用户发送请求触发未完成的流式回复并从界面导出完整 Markdown',
   async function (this: LodyWorld) {
     await journeyFor(this).page.startPrimaryStreamingAndCopyCompleteSession();
   }
@@ -73,12 +75,12 @@ Then('剪贴板包含流式前缀和未完成响应标记', async function (this
   await journeyFor(this).page.expectIncompletePrimarySessionClipboard();
 });
 
-When('确定性 ACP 收到继续主 Session 流式回复的外部信号', async function (this: LodyWorld) {
-  await journeyFor(this).page.releasePrimaryStreamingResponse();
+When('用户停止未完成回复并发送新的完整响应请求', async function (this: LodyWorld) {
+  await journeyFor(this).page.stopPrimaryStreamAndRequestCompletedResponse();
 });
 
 Then(
-  '完成后的完整 Session 导出包含流式结尾且不再带未完成响应标记',
+  '用户请求完成后的完整 Session 导出包含流式结尾且不再带未完成响应标记',
   async function (this: LodyWorld) {
     await journeyFor(this).page.expectCompletedPrimarySessionClipboard();
   }

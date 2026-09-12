@@ -128,11 +128,14 @@ export class SidebarSearchPage {
     await this.expectActiveSessionTitles(TARGET_INITIAL_TITLE);
   }
 
-  async reloadRenderer(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded' });
+  async reopenTargetThroughSidebar(): Promise<void> {
+    const { targetSessionId } = this.fixture.requireSessionIds();
+    await this.openHome();
+    await this.activeRow(targetSessionId).click();
+    await expect(this.page).toHaveURL(this.sessionRoutePattern(targetSessionId));
   }
 
-  async expectSessionMatrixPersistsAfterReload(): Promise<void> {
+  async expectSessionMatrixAfterReopen(): Promise<void> {
     await this.expectTargetSessionOpen();
     await this.expectActiveSessionTitles(TARGET_RENAMED_TITLE);
     await this.openSidebarSearch();

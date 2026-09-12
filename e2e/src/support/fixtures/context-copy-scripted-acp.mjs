@@ -1,11 +1,9 @@
-import { appendFileSync, existsSync, watch } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { basename, dirname } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 
 const eventLogPath = process.argv[2];
-const releasePrimaryStreamSignalPath = process.argv[3];
 const sessions = new Set();
 const pendingStreams = new Map();
 const streamModes = new Map();
@@ -14,6 +12,7 @@ const prompts = {
   first: 'CONTEXT-PRIMARY-USER-RICH',
   second: 'CONTEXT-PRIMARY-LATER-USER',
   'primary-stream': 'CONTEXT-PRIMARY-STREAM',
+  'primary-complete': 'CONTEXT-PRIMARY-COMPLETE',
   'isolated-stream': 'CONTEXT-ISOLATED-CANCEL',
 };
 
@@ -21,6 +20,8 @@ const responses = {
   first:
     "CONTEXT-PRIMARY-ASSISTANT-RICH\n\n### Preserve this answer\n\n```ts\nexport const retainedAssistantCode = 'primary-assistant';\n```",
   second: 'CONTEXT-PRIMARY-LATER-ASSISTANT: this must not be in the first prefix.',
+  'primary-complete':
+    'CONTEXT-PRIMARY-STREAM-PREFIX: visible in the completed response.\n\nCONTEXT-PRIMARY-STREAM-TAIL: available in the completed user-requested response.',
 };
 
 function record(event, details = {}) {
@@ -50,30 +51,6 @@ async function emitText(client, sessionId, text) {
       sessionUpdate: 'agent_message_chunk',
       content: { type: 'text', text },
     },
-  });
-}
-
-function waitForPrimaryReleaseOrCancel(sessionId) {
-  if (existsSync(releasePrimaryStreamSignalPath)) return Promise.resolve('released');
-  return new Promise((resolve, reject) => {
-    const release = () => {
-      watcher.close();
-      pendingStreams.delete(sessionId);
-      resolve('released');
-    };
-    const watcher = watch(dirname(releasePrimaryStreamSignalPath), (event, filename) => {
-      if (event !== 'rename' || filename !== basename(releasePrimaryStreamSignalPath)) return;
-      if (!existsSync(releasePrimaryStreamSignalPath)) return;
-      release();
-    });
-    const cancel = () => {
-      watcher.close();
-      pendingStreams.delete(sessionId);
-      resolve('cancelled');
-    };
-    pendingStreams.set(sessionId, cancel);
-    watcher.once('error', reject);
-    if (existsSync(releasePrimaryStreamSignalPath)) release();
   });
 }
 
@@ -111,7 +88,7 @@ const agent = acp
       record('prompt-end', { sessionId: params.sessionId, mode, stopReason: 'end_turn' });
       return { stopReason: 'end_turn' };
     }
-    if (mode === 'first' || mode === 'second') {
+    if (mode === 'first' || mode === 'second' || mode === 'primary-complete') {
       await emitText(client, params.sessionId, responses[mode]);
       record('prompt-end', { sessionId: params.sessionId, mode, stopReason: 'end_turn' });
       return { stopReason: 'end_turn' };
@@ -124,17 +101,9 @@ const agent = acp
         'CONTEXT-PRIMARY-STREAM-PREFIX: visible while generating.'
       );
       record('stream-ready', { sessionId: params.sessionId, mode });
-      const result = await waitForPrimaryReleaseOrCancel(params.sessionId);
-      if (result === 'released') {
-        await emitText(
-          client,
-          params.sessionId,
-          'CONTEXT-PRIMARY-STREAM-TAIL: available only after explicit release.'
-        );
-      }
-      const stopReason = result === 'released' ? 'end_turn' : 'cancelled';
-      record('prompt-end', { sessionId: params.sessionId, mode, stopReason });
-      return { stopReason };
+      await waitForCancel(params.sessionId);
+      record('prompt-end', { sessionId: params.sessionId, mode, stopReason: 'cancelled' });
+      return { stopReason: 'cancelled' };
     }
     if (mode === 'isolated-stream') {
       streamModes.set(params.sessionId, mode);

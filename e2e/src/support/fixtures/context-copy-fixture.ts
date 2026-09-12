@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
@@ -17,8 +17,10 @@ export const SECOND_RESPONSE =
   'CONTEXT-PRIMARY-LATER-ASSISTANT: this must not be in the first prefix.';
 export const PRIMARY_STREAM_PROMPT = 'CONTEXT-PRIMARY-STREAM: hold after the visible prefix.';
 export const PRIMARY_STREAM_PREFIX = 'CONTEXT-PRIMARY-STREAM-PREFIX: visible while generating.';
+export const PRIMARY_COMPLETE_PROMPT =
+  'CONTEXT-PRIMARY-COMPLETE: return a complete response after the user stopped streaming.';
 export const PRIMARY_STREAM_TAIL =
-  'CONTEXT-PRIMARY-STREAM-TAIL: available only after explicit release.';
+  'CONTEXT-PRIMARY-STREAM-TAIL: available in the completed user-requested response.';
 export const ISOLATED_STREAM_PROMPT = 'CONTEXT-ISOLATED-CANCEL: do not share the primary history.';
 export const ISOLATED_STREAM_PREFIX = 'CONTEXT-ISOLATED-PREFIX: visible before cancellation.';
 export const INCOMPLETE_RESPONSE_MARKER = 'The last response was still generating when copied.';
@@ -27,6 +29,7 @@ export type ContextCopyPromptMode =
   | 'first'
   | 'second'
   | 'primary-stream'
+  | 'primary-complete'
   | 'isolated-stream'
   | 'title'
   | 'unknown';
@@ -55,18 +58,9 @@ export class ContextCopyFixture {
   readonly agentCommandLine: string;
   private readonly sessionIds: Partial<Record<'primary' | 'isolated', string>> = {};
 
-  constructor(
-    readonly eventLogPath: string,
-    readonly releasePrimaryStreamSignalPath: string
-  ) {
+  constructor(readonly eventLogPath: string) {
     writeFileSync(eventLogPath, '', 'utf8');
-    rmSync(releasePrimaryStreamSignalPath, { force: true });
-    this.agentCommandLine = [
-      process.execPath,
-      SCRIPTED_ACP_ENTRY,
-      eventLogPath,
-      releasePrimaryStreamSignalPath,
-    ]
+    this.agentCommandLine = [process.execPath, SCRIPTED_ACP_ENTRY, eventLogPath]
       .map(quoteCommandArgument)
       .join(' ');
   }
@@ -85,10 +79,6 @@ export class ContextCopyFixture {
     return sessionId;
   }
 
-  releasePrimaryStream(): void {
-    writeFileSync(this.releasePrimaryStreamSignalPath, 'release\n', { flag: 'wx' });
-  }
-
   async waitForEvent(
     event: ContextCopyAcpEvent['event'],
     mode: ContextCopyPromptMode
@@ -104,12 +94,6 @@ export class ContextCopyFixture {
       )
       .toBe(true);
     return match!;
-  }
-
-  async expectPrimaryStreamReleased(): Promise<void> {
-    const completed = await this.waitForEvent('prompt-end', 'primary-stream');
-    expect(completed.stopReason).toBe('end_turn');
-    expect(existsSync(this.releasePrimaryStreamSignalPath)).toBe(true);
   }
 
   readEvents(): ContextCopyAcpEvent[] {

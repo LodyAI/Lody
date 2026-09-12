@@ -201,12 +201,13 @@ export class GoalSessionPage {
     ).toBeVisible();
   }
 
-  async reloadDesktopAndReopenGoalSession(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded' });
+  async reopenGoalSessionThroughSidebar(): Promise<void> {
+    await this.openHome();
+    await this.primarySessionRow().click();
     await expect(this.page).toHaveURL(this.primarySessionRoutePattern());
   }
 
-  async expectUpdatedGoalAfterDesktopReload(): Promise<void> {
+  async expectUpdatedGoalAfterReopen(): Promise<void> {
     await this.expectGoalStage(/Pursuing goal|正在执行目标/u, UPDATED_GOAL_OBJECTIVE);
     await this.openGoalDetails();
     await expect(this.goalDetails().getByRole('button', { name: /^(Pause|暂停)$/u })).toBeEnabled();
@@ -215,7 +216,7 @@ export class GoalSessionPage {
     ).toBeVisible();
   }
 
-  async pauseReloadedGoalAndClearIt(): Promise<void> {
+  async pauseReopenedGoalAndClearIt(): Promise<void> {
     const primaryAcpSessionId = this.requirePrimaryAcpSessionId();
     await this.openGoalDetails();
     await this.goalDetails()

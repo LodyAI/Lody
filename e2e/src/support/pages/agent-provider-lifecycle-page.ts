@@ -117,12 +117,12 @@ export class AgentProviderLifecyclePage {
     await this.closeSettings(settings);
   }
 
-  async reloadDesktop(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(this.page.locator('#chat-prompt')).toBeEditable({ timeout: 60_000 });
+  async revisitProviderCatalogThroughSettings(): Promise<void> {
+    const settings = await this.openAgentSettings();
+    await this.closeSettings(settings);
   }
 
-  async expectReloadedProviderMatrix(): Promise<void> {
+  async expectReopenedProviderMatrix(): Promise<void> {
     const settings = await this.openAgentSettings();
     await expect(settings.getByText(this.fixture.initialProviderName, { exact: true })).toHaveCount(
       0

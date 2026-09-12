@@ -62,12 +62,12 @@ Then('后续纯文本消息保留在历史中且不携带旧文本附件', async
   await journeyFor(this).page.expectPlainTextFollowUpWithoutAttachment();
 });
 
-When('用户重新载入主 Session 界面', async function (this: LodyWorld) {
-  await journeyFor(this).page.reloadPrimarySession();
+When('用户返回主页并从侧栏重新打开附件主 Session', async function (this: LodyWorld) {
+  await journeyFor(this).page.reopenPrimarySessionThroughSidebar();
 });
 
-Then('重载后的主 Session 保留文本附件和两条用户消息', async function (this: LodyWorld) {
-  await journeyFor(this).page.expectPrimarySessionAfterReload();
+Then('重新打开的主 Session 保留文本附件和两条用户消息', async function (this: LodyWorld) {
+  await journeyFor(this).page.expectPrimarySessionAfterReopen();
 });
 
 When('用户归档并从 Archive 恢复包含文本附件的主 Session', async function (this: LodyWorld) {

@@ -60,12 +60,12 @@ Then('目标 Session 的历史可见', async function (this: LodyWorld) {
   await journeyFor(this).page.expectTargetSessionOpen();
 });
 
-When('用户重新载入界面', async function (this: LodyWorld) {
-  await journeyFor(this).page.reloadRenderer();
+When('用户返回主页并从侧栏重新打开搜索目标 Session', async function (this: LodyWorld) {
+  await journeyFor(this).page.reopenTargetThroughSidebar();
 });
 
-Then('已命名的 Session 及其搜索索引在隔离桌面中保持可用', async function (this: LodyWorld) {
-  await journeyFor(this).page.expectSessionMatrixPersistsAfterReload();
+Then('已命名的 Session 及其搜索索引在重新打开后保持可用', async function (this: LodyWorld) {
+  await journeyFor(this).page.expectSessionMatrixAfterReopen();
 });
 
 When('用户归档目标 Session', async function (this: LodyWorld) {

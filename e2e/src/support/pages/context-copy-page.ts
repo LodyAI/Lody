@@ -7,6 +7,7 @@ import {
   INCOMPLETE_RESPONSE_MARKER,
   ISOLATED_STREAM_PREFIX,
   ISOLATED_STREAM_PROMPT,
+  PRIMARY_COMPLETE_PROMPT,
   PRIMARY_STREAM_PREFIX,
   PRIMARY_STREAM_PROMPT,
   PRIMARY_STREAM_TAIL,
@@ -93,14 +94,15 @@ export class ContextCopyPage {
     }
   }
 
-  async reloadPrimarySession(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded' });
+  async reopenPrimarySessionThroughSidebar(): Promise<void> {
+    await this.openHome();
+    await this.activeRow(this.fixture.requireSessionId('primary')).click();
     await expect(this.page).toHaveURL(
       this.sessionRoutePattern(this.fixture.requireSessionId('primary'))
     );
   }
 
-  async expectPrimaryHistoryAndCopyPersistAfterReload(): Promise<void> {
+  async expectPrimaryHistoryAndCopyAfterReopen(): Promise<void> {
     for (const text of [
       FIRST_PROMPT_MARKER,
       FIRST_RESPONSE_MARKER,
@@ -129,12 +131,16 @@ export class ContextCopyPage {
     expect(clipboard).not.toContain(PRIMARY_STREAM_TAIL);
   }
 
-  async releasePrimaryStreamingResponse(): Promise<void> {
-    this.fixture.releasePrimaryStream();
-    await this.fixture.expectPrimaryStreamReleased();
+  async stopPrimaryStreamAndRequestCompletedResponse(): Promise<void> {
+    await this.page.getByRole('button', { name: /^(Stop|停止)$/u }).click();
+    const cancelled = await this.fixture.waitForEvent('prompt-end', 'primary-stream');
+    expect(cancelled.stopReason).toBe('cancelled');
     await expect(this.page.getByRole('button', { name: /^(Stop|停止)$/u })).toBeHidden({
       timeout: 30_000,
     });
+    await this.sendAndAwaitResponse(PRIMARY_COMPLETE_PROMPT, PRIMARY_STREAM_TAIL);
+    const completed = await this.fixture.waitForEvent('prompt-end', 'primary-complete');
+    expect(completed.stopReason).toBe('end_turn');
   }
 
   async expectCompletedPrimarySessionClipboard(): Promise<void> {

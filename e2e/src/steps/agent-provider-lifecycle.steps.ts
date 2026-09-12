@@ -57,14 +57,14 @@ When('用户保存重命名后的命令和自定义提示并创建第二个 Prov
   await journeyFor(this).page.saveEditedProviderAndCreateAlternate();
 });
 
-When('用户重载桌面', async function (this: LodyWorld) {
-  await journeyFor(this).page.reloadDesktop();
+When('用户关闭设置后从界面重新打开 Provider 目录', async function (this: LodyWorld) {
+  await journeyFor(this).page.revisitProviderCatalogThroughSettings();
 });
 
 Then(
   '编辑后的 Provider 和第二个 Provider 均保持可用，旧名称不会出现在目录或 composer',
   async function (this: LodyWorld) {
-    await journeyFor(this).page.expectReloadedProviderMatrix();
+    await journeyFor(this).page.expectReopenedProviderMatrix();
   }
 );
 

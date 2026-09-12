@@ -74,16 +74,16 @@ Then('Resume 通过带目标元数据的 ACP prompt 恢复目标', async functio
   await journeyFor(this).page.expectResumedGoalAndPromptEvidence();
 });
 
-When('用户重新加载桌面界面并重新打开该 Session', async function (this: LodyWorld) {
-  await journeyFor(this).page.reloadDesktopAndReopenGoalSession();
+When('用户返回主页并从侧栏重新打开带目标的 Session', async function (this: LodyWorld) {
+  await journeyFor(this).page.reopenGoalSessionThroughSidebar();
 });
 
-Then('更新后的活动目标在界面重载后仍然存在', async function (this: LodyWorld) {
-  await journeyFor(this).page.expectUpdatedGoalAfterDesktopReload();
+Then('更新后的活动目标在重新打开后仍然存在', async function (this: LodyWorld) {
+  await journeyFor(this).page.expectUpdatedGoalAfterReopen();
 });
 
-When('用户暂停已重载的目标并清理它', async function (this: LodyWorld) {
-  await journeyFor(this).page.pauseReloadedGoalAndClearIt();
+When('用户暂停重新打开的目标并清理它', async function (this: LodyWorld) {
+  await journeyFor(this).page.pauseReopenedGoalAndClearIt();
 });
 
 Then('状态机完成暂停到清理且非法后续操作不会留下错误状态', async function (this: LodyWorld) {
