@@ -29,8 +29,9 @@ Lody 在 prompt in-flight 时记录 `runtime.cancelRequested` 并发送 provider
 保留原有 owner fiber 和 runtime，直到 ACP 返回，再由 scope 执行取消收尾并释放 ownership。
 期间新用户消息保持 pending，不能到达 ACP。steer 在异步准备后及 provider 接受 ACK 后都
 检查取消标记。Stop 后到达的成功 ACK 不得替换 source invocation、将 source 强制结算为
-handled 或转移 ownership。它返回 `stale-turn`，释放 application lease，不重新排队已被
-接受的 steer；现有 owner 继续等待 cancelled terminal。daemon 与客户端均不会把这个
+handled 或转移 ownership。它将该 exact steer 用户轮次标为 `canceled`，不改变 dispatch pointer，
+然后返回 `stale-turn` 并释放 application lease。已接受的 steer 不能停留在 `pending_apply`，
+也不能重新排队；现有 owner 继续等待 cancelled terminal。daemon 与客户端均不会把这个
 disposition 当作重放 steer 的许可。提交 prompt 前的取消及 finalization teardown 保留原路径。
 
 此前 CLI 的 scope finalizer 已通过 `pendingPromptCompletion` 保留 runtime，并非在 Stop 时
@@ -62,8 +63,9 @@ renderer retry hook 和 daemon 历史修复均已移除。历史上的未完成�
   保留未完成历史和 ownership。外部中断测试仍覆盖 raw 完成、进程终止及终止失败。
 - steer 测试覆盖请求前和异步准备期间的 Stop，验证未投递历史及其 dispatch pointer 保留。
   受控的接受 ACK 在 Stop 后到达时，source invocation、用户轮次和 dispatch owner 均不改变，
-  source 历史不提前完成、不报告 handled，也不重放 steer；provider terminal 最后将 source
-  结算为 cancelled 并释放 owner。补上 ACK 后检查前，该 race 在 `e4a860a2` 上失败。
+  source 历史不提前完成、不报告 handled，也不重放 steer。已接受的 steer 在 provider terminal
+  前后均为 `canceled`；terminal 将 source 结算为 cancelled 并释放 owner。steer 终态断言在
+  `ae24a723` 上失败，当时条目会停留在 `pending_apply`。
 - 契约：[会话历史写入](../../../../specs/session-history-writes.zh.md)。
 - PR：[Lody #618](https://github.com/LodyAI/Lody/pull/618)。
 - 适配器实现：[Codex adapter #41](https://github.com/LodyAI/acp-extension-codex/pull/41)。

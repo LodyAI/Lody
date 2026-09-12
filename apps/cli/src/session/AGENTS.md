@@ -55,7 +55,8 @@ Contract: specs/session-orchestration.md.
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never submit steer after Stop; a late accepted ACK cannot transfer ownership or requeue.
+- Never submit steer after Stop. A late accepted ACK cancels that exact steer entry without
+  transferring ownership, changing dispatch pointers or requeueing it.
   Requeue unaccepted steer via its pointer, not entry status, only before submission or on
   `AgentSteerNotDeliveredError`; skip active or handled entries.
 - Resume must REOPEN the in-progress assistant entry, clearing

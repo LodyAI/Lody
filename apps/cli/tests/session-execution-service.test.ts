@@ -5528,7 +5528,7 @@ describe('SessionExecutionService', () => {
         expect(meta.processingUserMsgId).toBe(message.userTurnId);
         expect(meta.latestUserMsgId).not.toBe('steer-user-turn');
         expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
-          status: 'pending_apply',
+          status: 'canceled',
         });
       }
       expect(agentClient.pendingPromptCompletion).not.toBeNull();
@@ -5634,7 +5634,7 @@ describe('SessionExecutionService', () => {
     if (steering) {
       expect(deliveredSteers).toEqual([[{ type: 'text', text: 'change direction' }]]);
       expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
-        status: 'pending_apply',
+        status: 'canceled',
       });
     }
     expect(meta).toMatchObject({

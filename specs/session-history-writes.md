@@ -61,8 +61,10 @@ That tolerance must not authorize creating new malformed items locally.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
 - If Stop wins while a submitted steer awaits acceptance, a later successful ACK must
   not transfer ownership, change the source invocation or settle the source as handled.
-  Keep the current cancellation owner until provider completion. Do not requeue the
-  accepted steer: rejection of the local ownership transfer is not proof of non-delivery.
+  Mark that exact steer user turn `canceled` before returning `stale-turn`, without
+  changing dispatch pointers. Keep the current cancellation owner until provider completion.
+  Do not requeue the accepted steer: rejection of the local ownership transfer is not
+  proof of non-delivery.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned

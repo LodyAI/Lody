@@ -37,9 +37,10 @@ the scope then runs cancellation finalization and releases ownership. A new user
 message remains pending and cannot reach ACP during that interval. Steer admission
 also checks the existing cancellation flag after asynchronous preparation and after
 the provider's acceptance ACK. A successful ACK after Stop cannot replace the source
-invocation, force its settlement to handled, or transfer ownership. It returns
-`stale-turn` without requeueing an already accepted steer and releases the application
-lease; the existing owner continues to its cancelled terminal outcome. Neither the
+invocation, force its settlement to handled, or transfer ownership. It marks that exact
+steer user turn `canceled` without changing dispatch pointers, then returns `stale-turn`
+and releases the application lease. The accepted steer cannot remain `pending_apply`
+or be requeued; the existing owner continues to its cancelled terminal outcome. Neither the
 daemon nor the client treats that disposition as permission to replay the steer.
 Cancellation before prompt submission and finalization teardown retain their existing paths.
 
@@ -86,8 +87,9 @@ neither hiding progress nor rewriting history can interrupt native execution.
   precedes the request or arrives while prompt blocks are being built. A controlled
   acceptance ACK arriving after Stop preserves the source invocation, user-turn and
   dispatch owner, leaves source history unfinished, and never reports handled or
-  replays the steer. Provider terminal then settles the source as cancelled and
-  releases ownership. This race failed on `e4a860a2` before the post-ACK guard.
+  replays the steer. The accepted steer is `canceled` both before and after provider
+  terminal, which settles the source as cancelled and releases ownership. The terminal
+  steer assertion failed on `ae24a723` with the entry stranded in `pending_apply`.
 - Contract: [Session history writes](../../../../specs/session-history-writes.md).
 - Pull request: [Lody #618](https://github.com/LodyAI/Lody/pull/618).
 - Adapter implementation: [Codex adapter #41](https://github.com/LodyAI/acp-extension-codex/pull/41).

@@ -44,7 +44,8 @@ Translation: current
   和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
   将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
 - 已提交的 steer 等待接受时，若 Stop 先发生，则后到的成功 ACK 不得转移 ownership、
-  改变 source invocation 或将 source 结算为 handled。保持当前 cancellation owner，
+  改变 source invocation 或将 source 结算为 handled。返回 `stale-turn` 前，将该 exact steer
+  用户轮次标为 `canceled`，不改变 dispatch pointer。保持当前 cancellation owner，
   直到 provider 完成。不得重排该已接受的 steer：拒绝本地 ownership 转移不代表消息未投递。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。

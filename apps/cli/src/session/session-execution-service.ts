@@ -1558,6 +1558,14 @@ export class SessionExecutionService {
           runtime.activePromptRun !== ownedPromptRun
         ) {
           // Provider acceptance forbids replay; Stop keeps the source cancellation owner.
+          if (runtime.cancelRequested) {
+            await this.setTerminalUserTurnStatus(
+              options.sessionId,
+              sessionDoc,
+              options.userTurnId,
+              'canceled'
+            );
+          }
           return reject(
             'stale-turn',
             'Steer application arrived after cancellation or ownership changed'
