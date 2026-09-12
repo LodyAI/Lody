@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildLodyCodexCustomProviderEnv,
   LODY_CODEX_API_KEY_ENV,
+  withLodyCodexCredentialRevision,
   type AgentConfigMeta,
   type WorkspaceId,
 } from '@lody/shared';
@@ -24,7 +25,11 @@ async function seedCredential(agentConfig: AgentConfigMeta, apiKey: string): Pro
   await staged.finalize();
 }
 
-function config(baseUrl = 'https://relay.example.com/v1'): AgentConfigMeta {
+function config(
+  baseUrl = 'https://relay.example.com/v1',
+  credentialRevision?: string
+): AgentConfigMeta {
+  const env = buildLodyCodexCustomProviderEnv({}, { baseUrl });
   return {
     id: 'codex-test',
     machineId: 'machine-test',
@@ -32,7 +37,7 @@ function config(baseUrl = 'https://relay.example.com/v1'): AgentConfigMeta {
     description: undefined,
     cliType: 'builtin',
     agentType: 'codex',
-    env: buildLodyCodexCustomProviderEnv({}, { baseUrl }),
+    env: credentialRevision ? withLodyCodexCredentialRevision(env, credentialRevision) : env,
   } as AgentConfigMeta;
 }
 
@@ -176,13 +181,58 @@ describe('provider credential store', () => {
     ).toBeUndefined();
   });
 
-  it('atomically replaces the active key for the same launch binding', async () => {
-    const published = config('https://relay.example.com/v1');
+  it('keeps the published key when same-endpoint rotation crashes before Flock commit', async () => {
+    const published = config('https://relay.example.com/v1', 'revision-1');
+    const desired = config('https://relay.example.com/v1', 'revision-2');
     await seedCredential(published, 'old-key');
-    await seedCredential(published, 'new-key');
+    await stageCodexProviderCredential(workspaceId, desired, 'new-key', published);
+
+    // The pending setup still carries the published generation; only Flock commit
+    // publishes the desired generation. Startup therefore restores the old key.
+    await reconcileCodexProviderCredential(workspaceId, published.id, [published, published]);
+    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
+    });
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+
+    // Cancelling the pending setup leaves the same published generation authoritative.
+    await reconcileCodexProviderCredential(workspaceId, published.id, [published]);
 
     expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
+    });
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+  });
+
+  it('uses the rotated key when Flock committed before credential finalize', async () => {
+    const published = config('https://relay.example.com/v1', 'revision-1');
+    const desired = config('https://relay.example.com/v1', 'revision-2');
+    await seedCredential(published, 'old-key');
+    await stageCodexProviderCredential(workspaceId, desired, 'new-key', published);
+
+    await reconcileCodexProviderCredential(workspaceId, published.id, [desired]);
+
+    expect((await hydrateCodexProviderCredential(workspaceId, desired)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'new-key',
+    });
+    expect(
+      (await hydrateCodexProviderCredential(workspaceId, published)).env[LODY_CODEX_API_KEY_ENV]
+    ).toBeUndefined();
+  });
+
+  it('rejects a key rotation whose caller did not advance credential identity', async () => {
+    const published = config();
+    await seedCredential(published, 'old-key');
+
+    await expect(
+      stageCodexProviderCredential(workspaceId, published, 'new-key', published)
+    ).rejects.toThrow(/fresh credential revision/);
+    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
   });
 });

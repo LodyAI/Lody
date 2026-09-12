@@ -32,10 +32,13 @@ Credential-changing Codex replacements keep the old launch config published duri
 the probe. The post-probe cross-store commit may retain the old and desired
 machine-local credential bindings until publication chooses one. Publishing merges
 the current display metadata into the verified launch config, writes `agentConfig`,
-and deletes `providerSetup` in one Flock commit. Same-binding key rotation omits the
-unchanged `agentConfig` write. The authentication slot becomes committed immediately
-before that Flock commit; Cancel or timeout wins before this boundary and is too late
-after it.
+and deletes `providerSetup` in one Flock commit. Before staging, the daemon embeds the
+setup revision into the desired config's Lody-owned provider state. This non-secret
+generation participates in the launch binding, so same-endpoint key rotation still
+publishes a distinct `agentConfig` identity and recovery can distinguish the keys.
+The credential store rejects a rotation without a fresh generation before replacing
+the active credential. The authentication slot becomes committed immediately before
+that Flock commit; Cancel or timeout wins before this boundary and is too late after it.
 
 The live provisioning probe does not update the shared capability cache. The manager
 publishes its result only after the exact setup wins durable AgentConfig publication,

@@ -16,8 +16,11 @@ the existing encrypted ACP authentication-input exchange. A candidate remains in
 through the live probe and is stored under `provider-credentials` only after that probe succeeds.
 The store binds credentials to the complete launch-relevant configuration. Its normal state has
 one active binding. The post-probe commit window may hold exactly two bindings, the currently
-published config and the desired config, until Flock publication selects the survivor. It has no
-candidate generations or migration layer for this unreleased feature. The file stores a SHA-256
+published config and the desired config, until Flock publication selects the survivor. The
+Lody-owned provider state carries the non-secret setup revision as its credential generation, so
+two different keys cannot have the same binding even when the endpoint and every other launch
+field are unchanged. This removes the need for a same-binding pending/committed state in the
+credential file. The file stores a SHA-256
 digest of the canonical launch binding rather than the raw binding and its environment values.
 Its versioned envelope also stores non-secret workspace/config identity so startup recovery can
 enumerate an orphan after a legacy client deletes the only workspace row.
@@ -40,12 +43,13 @@ The feature requires a negotiated `codexCustomEndpointCredentials` capability. A
 an expected non-secret setup revision and starts in `awaiting-auth`. The explicit
 credential-provisioning RPC waits for that exact row on the target daemon, so an asynchronous
 Flock upload cannot race config lookup. It always requests and replaces the submitted key, even
-when the same endpoint already has a credential. The revision exists only in the setup and RPC;
-it is fresh for every submit attempt and is not part of the published Codex config or credential
-record. The existing authentication slot and abort signal remain live through setup synchronization,
-secret input, probe, credential staging, and config publication. The slot becomes committed in the
-synchronous boundary immediately before the Flock commit: cancellation wins before that point and
-is too late afterward. Remote HTTP endpoints are rejected; HTTPS and loopback HTTP are accepted.
+when the same endpoint already has a credential. The revision is fresh for every submit attempt.
+The daemon embeds it into the desired provider state immediately before credential staging and
+publishes that revisionized config only if the setup CAS wins. The existing authentication slot
+and abort signal remain live through setup synchronization, secret input, probe, credential
+staging, and config publication. The slot becomes committed in the synchronous boundary
+immediately before the Flock commit: cancellation wins before that point and is too late afterward.
+Remote HTTP endpoints are rejected; HTTPS and loopback HTTP are accepted.
 The verification probe itself does not mutate the shared capability cache. Its result is handed to
 the setup manager as a deferred publication and is cached only after the exact setup revision wins
 durable AgentConfig publication inside the per-config credential mutation sequence. Cancelled,
@@ -73,8 +77,9 @@ already committed. A stale or superseded setup
 returns a conflict. Automatic failure cleanup names the request's exact revision, so an old request
 cannot cancel a newer setup. Metadata-only edits bypass provisioning, and a replacement commit
 merges the latest published name, prompt, brand, and title-generation fields instead of replacing
-them with a stale setup snapshot. Same-binding key rotation consumes the setup without rewriting
-the published config.
+them with a stale setup snapshot. Same-endpoint key rotation publishes a new credential revision;
+the credential store rejects a rotation without a fresh identity before it can replace the active
+key.
 
 Switching to ChatGPT or deleting a provider first writes a revision-independent setup cancellation
 before changing the config. The durable wildcard prevents an in-flight replacement from
@@ -107,6 +112,7 @@ The branch review compared each removal with the existing behavioral suites:
 | Recomputing an already-resolved launch snapshot and requiring unused identity fields | Session execution and manager suites, plus CLI typechecking, passed.                                                                                             | Reuse the snapshot and retain only the three launch fields consumed by the resolver. |
 | Requiring capability-cache success for an authenticated credential save              | New renderer tests reproduced both durable and uncertain saves being rejected; removing the condition made both pass, with uncertain results waiting for resync. | Let the committed authentication outcome own save success.                           |
 | Exact-case credential-key checks                                                      | Lowercase and mixed-case aliases crossed AgentConfig and binding filters even though Windows launch treats them as the reserved slot.                            | Use one case-insensitive shared predicate at every boundary.                          |
+| Same-binding key replacement                                                         | A crash after credential staging but before Flock commit lost the only copy of the previously published key.                                                    | Put the setup revision in provider state and make every credential generation a distinct launch binding. |
 
 No endpoint, binding, cancellation, publication-order, or crash-recovery guarantee was removed.
 The V2 envelope remains unchanged. Older experimental V1 files are no longer read and require
@@ -122,7 +128,8 @@ configuration, setup revision parsing, wildcard cancellation, publication durabi
 of exact- and mixed-case forms of the protocol-owned one-shot secret at both setup and AgentConfig
 boundaries. CLI tests cover delayed setup
 visibility, forced key rotation, cancellation during a deferred live probe, the commit boundary,
-same-binding rotation with uncertain flush, real-store publication uncertainty, dual-binding crash
+same-endpoint generation rotation with uncertain flush, pre-commit and post-commit crash cuts,
+real-store publication uncertainty, dual-binding crash
 recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
 replay, legacy direct-delete orphan enumeration, binding mismatch, digest-only binding persistence,
 deferred capability publication, and credential injection at the common

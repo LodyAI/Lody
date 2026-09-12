@@ -12,6 +12,7 @@ import {
   LODY_CODEX_API_KEY_ENV,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
+  withLodyCodexCredentialRevision,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -832,9 +833,12 @@ describe('AgentConfigDialog', () => {
 
   it('saves a metadata-only Codex edit without asking for or rotating the API key', async () => {
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
-    const env = buildLodyCodexCustomProviderEnv(
-      { EXTRA_FLAG: '1' },
-      { baseUrl: 'https://relay.example.com/v1' }
+    const env = withLodyCodexCredentialRevision(
+      buildLodyCodexCustomProviderEnv(
+        { EXTRA_FLAG: '1' },
+        { baseUrl: 'https://relay.example.com/v1' }
+      ),
+      'revision-published'
     );
     await renderDialog(
       {

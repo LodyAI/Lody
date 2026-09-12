@@ -119,6 +119,9 @@ export async function stageCodexProviderCredential(
   const filePath = recordPath(workspaceId, desiredConfig.id);
   const previousRecord = await readRecord(filePath);
   const publishedBinding = publishedConfig ? getCredentialBindingDigest(publishedConfig) : null;
+  if (publishedBinding && publishedBinding === desiredBinding) {
+    throw new Error('Codex credential rotation requires a fresh credential revision');
+  }
   const previousEntry = publishedBinding
     ? [previousRecord?.current, previousRecord?.previous].find(
         (entry) => entry?.binding === publishedBinding
@@ -129,9 +132,7 @@ export async function stageCodexProviderCredential(
     workspaceId,
     configId: desiredConfig.id,
     current: { binding: desiredBinding, apiKey: normalizedKey },
-    ...(previousEntry && previousEntry.binding !== desiredBinding
-      ? { previous: previousEntry }
-      : {}),
+    ...(previousEntry ? { previous: previousEntry } : {}),
   };
   await writeRecord(filePath, stagedRecord);
 

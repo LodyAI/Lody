@@ -43,11 +43,15 @@ or launch-relevant environment value fails closed. POSIX storage uses `0700` dir
 Creation, key rotation, and launch-binding changes use a non-secret durable setup draft with an
 exact setup revision. The credential RPC waits for that revision to become visible on the target
 daemon, always requests a replacement key, and probes the staged config with the in-memory
-candidate. One authentication lifecycle and its abort signal cover setup synchronization, secret
-input, probe, credential staging, and config publication. The final abort check and transition to
-`committed` occur synchronously immediately before the Flock commit. Cancellation before that
-boundary wins and publishes nothing; cancellation or timeout after it is too late and cannot return
-`cancelled`. Probe failure writes no credential. A durable RPC success means the final non-secret
+candidate. Immediately before credential staging, the daemon copies that revision into the
+Lody-owned provider state as `credentialRevision`. Because provider state participates in the
+canonical launch binding, two API keys never share a credential identity even when every other
+launch field is unchanged. One authentication lifecycle and its abort signal cover setup
+synchronization, secret input, probe, credential staging, and config publication. The final abort
+check and transition to `committed` occur synchronously immediately before the Flock commit.
+Cancellation before that boundary wins and publishes nothing; cancellation or timeout after it is
+too late and cannot return `cancelled`. Probe failure writes no credential. A durable RPC success
+means the final non-secret
 `AgentConfig` was published and the setup was removed. A post-commit flush failure instead reports
 uncertain publication durability, retains both credential bindings, and forces the renderer to
 resync authoritative config before presenting the result; it is not handled as an ordinary failed
@@ -64,7 +68,9 @@ revision. During an edit, the previous published launch config remains live
 until publication. Display metadata, prompt, title-generation, and other non-binding edits update
 the published config directly and do not request the API key or run a probe. A replacement
 publication merges the latest published metadata instead of overwriting it with the setup snapshot.
-Same-binding key rotation consumes the setup without rewriting the unchanged `AgentConfig`.
+Same-endpoint key rotation publishes the new `credentialRevision` in `AgentConfig`; that Flock
+generation selects the matching key during crash recovery. The credential store rejects any
+rotation that reaches it without a fresh identity before it can overwrite the active key.
 Machines that do not advertise the credential protocol cannot submit credential-changing edits.
 
 The dedicated form owns only the provider entry and ownership marker it generates. Returning to

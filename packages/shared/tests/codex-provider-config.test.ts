@@ -13,6 +13,7 @@ import {
   LODY_CODEX_MODEL_PROVIDER_ID,
   LODY_CODEX_PROVIDER_STATE_ENV,
   removeLodyCodexCustomProviderEnv,
+  withLodyCodexCredentialRevision,
 } from '../src/codex-provider-config';
 
 describe('Lody Codex custom provider config', () => {
@@ -83,6 +84,30 @@ describe('Lody Codex custom provider config', () => {
       getLodyCodexCredentialBinding({ ...config, env: cleanEnv })
     );
     expect(removeLodyCodexCustomProviderEnv(configured)[lowerCaseKey]).toBeUndefined();
+  });
+
+  it('makes the non-secret credential generation part of the launch binding', () => {
+    const env = buildLodyCodexCustomProviderEnv(
+      { EXTRA_FLAG: '1' },
+      { baseUrl: 'https://relay.example.com/v1' }
+    );
+    const revisionOne = withLodyCodexCredentialRevision(env, 'revision-1');
+    const revisionTwo = withLodyCodexCredentialRevision(env, 'revision-2');
+    const config = { cliType: 'builtin', agentType: 'codex', env };
+
+    expect(getLodyCodexCustomProvider(revisionOne)).toEqual({
+      baseUrl: 'https://relay.example.com/v1',
+      credentialRevision: 'revision-1',
+    });
+    expect(getLodyCodexCredentialBinding({ ...config, env: revisionOne })).not.toBe(
+      getLodyCodexCredentialBinding({ ...config, env: revisionTwo })
+    );
+    const rebuilt = buildLodyCodexCustomProviderEnv(revisionOne, {
+      baseUrl: 'https://relay.example.com/v1',
+    });
+    expect(getLodyCodexCredentialBinding({ ...config, env: rebuilt })).toBe(
+      getLodyCodexCredentialBinding({ ...config, env: revisionOne })
+    );
   });
 
   it('restores the exact prior selector and existing API key', () => {

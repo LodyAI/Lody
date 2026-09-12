@@ -147,7 +147,10 @@ receives a custom `model_providers` entry through `CODEX_CONFIG` and sets
 `requires_openai_auth = false`. Its key arrives through encrypted authentication input, stays
 in the target machine's owner-only provider credential store, and is injected only while the
 SHA-256 digest of its canonical launch binding matches. The raw binding and its environment are
-not copied into the credential file.
+not copied into the credential file. Each successful credential publication embeds its non-secret
+setup revision in the Lody-owned provider state, so changing only the API key still changes the
+binding identity. The published Flock generation therefore selects the old or new key across a
+crash at the commit boundary.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts

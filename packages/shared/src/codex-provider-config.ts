@@ -5,7 +5,10 @@ export const LODY_CODEX_PROVIDER_STATE_ENV = 'LODY_CODEX_CUSTOM_ENDPOINT_STATE';
 export const LODY_CODEX_MODEL_PROVIDER_ID = 'lody-custom-endpoint';
 
 export type CodexAuthenticationMode = 'chatgpt' | 'api-key';
-export type LodyCodexCustomProvider = { baseUrl: string };
+export type LodyCodexCustomProvider = {
+  baseUrl: string;
+  credentialRevision?: string;
+};
 export type CodexCredentialBoundConfig = {
   cliType: string;
   agentType: string;
@@ -37,6 +40,7 @@ export function assertAgentConfigDoesNotContainCodexCredential(
 type ProviderState = {
   v: 1;
   previousModelProvider: { present: false } | { present: true; value: unknown };
+  credentialRevision?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -58,11 +62,23 @@ function parseState(value: string | undefined): ProviderState | null {
   const state = parseRecord(value);
   const previous = asRecord(state?.previousModelProvider);
   if (typeof previous?.present !== 'boolean') return null;
+  if (
+    state?.credentialRevision !== undefined &&
+    (typeof state.credentialRevision !== 'string' ||
+      !state.credentialRevision.trim() ||
+      state.credentialRevision.length > 1024)
+  ) {
+    return null;
+  }
   const previousModelProvider = previous.present
     ? ({ present: true, value: previous.value } as const)
     : ({ present: false } as const);
   if (state?.v !== 1) return null;
-  return { v: 1, previousModelProvider };
+  return {
+    v: 1,
+    previousModelProvider,
+    ...(state.credentialRevision ? { credentialRevision: state.credentialRevision } : {}),
+  };
 }
 
 function deleteReservedCodexCredentialEnvKeys(env: Record<string, string>): void {
@@ -108,7 +124,32 @@ export function getLodyCodexCustomProvider(
   ) {
     return null;
   }
-  return { baseUrl: provider.base_url };
+  return {
+    baseUrl: provider.base_url,
+    ...(state.credentialRevision ? { credentialRevision: state.credentialRevision } : {}),
+  };
+}
+
+/** Bind a non-secret credential generation to the config selected by Flock publication. */
+export function withLodyCodexCredentialRevision(
+  env: Record<string, string>,
+  credentialRevision: string
+): Record<string, string> {
+  const normalizedRevision = credentialRevision.trim();
+  const state = parseState(env[LODY_CODEX_PROVIDER_STATE_ENV]);
+  if (!getLodyCodexCustomProvider(env) || !state) {
+    throw new Error('Cannot bind a credential revision to an unmanaged Codex provider');
+  }
+  if (!normalizedRevision || normalizedRevision.length > 1024) {
+    throw new Error('Codex credential revision must contain 1 to 1024 characters');
+  }
+  return {
+    ...env,
+    [LODY_CODEX_PROVIDER_STATE_ENV]: JSON.stringify({
+      ...state,
+      credentialRevision: normalizedRevision,
+    } satisfies ProviderState),
+  };
 }
 
 export function getLodyCodexCredentialBinding(config: CodexCredentialBoundConfig): string | null {
@@ -128,7 +169,7 @@ export function getLodyCodexCredentialBinding(config: CodexCredentialBoundConfig
 
 export function buildLodyCodexCustomProviderEnv(
   env: Record<string, string>,
-  input: LodyCodexCustomProvider
+  input: Pick<LodyCodexCustomProvider, 'baseUrl'>
 ): Record<string, string> {
   const baseUrl = input.baseUrl.trim();
   if (!isAllowedCredentialEndpoint(baseUrl)) {
@@ -151,7 +192,13 @@ export function buildLodyCodexCustomProviderEnv(
     (Object.prototype.hasOwnProperty.call(config, 'model_provider')
       ? { present: true as const, value: config.model_provider }
       : { present: false as const });
-  const state: ProviderState = { v: 1, previousModelProvider };
+  const state: ProviderState = {
+    v: 1,
+    previousModelProvider,
+    ...(existingState?.credentialRevision
+      ? { credentialRevision: existingState.credentialRevision }
+      : {}),
+  };
   providers[LODY_CODEX_MODEL_PROVIDER_ID] = {
     name: 'Custom OpenAI-compatible endpoint',
     base_url: baseUrl,

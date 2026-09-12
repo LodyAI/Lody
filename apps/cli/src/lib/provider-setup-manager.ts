@@ -7,12 +7,13 @@ import {
   getMachineFlockProviderSetups,
   findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
-  getLodyCodexCredentialBinding,
   getLodyCodexCustomProvider,
   getServerNow,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  withLodyCodexCredentialRevision,
   writeMachineFlockRowToFlock,
+  type AgentConfigMeta,
   type AgentConfigId,
   type MachineId,
   type MachineFlockWritableFlock,
@@ -159,9 +160,13 @@ export class ProviderSetupManager {
         throw new Error('Provider setup was cancelled or replaced');
       }
       const publishedConfig = await this.readAgentConfig(setup.id);
+      const verifiedConfig: AgentConfigMeta = {
+        ...setup.config,
+        env: withLodyCodexCredentialRevision(setup.config.env, setupRevision),
+      };
       const staged = await this.stageCredential(
         this.workspaceId,
-        setup.config,
+        verifiedConfig,
         apiKey,
         publishedConfig
       );
@@ -178,7 +183,8 @@ export class ProviderSetupManager {
         () => {
           markCommitted?.();
           publicationCommitted = true;
-        }
+        },
+        verifiedConfig
       ).catch(async (error: unknown) => {
         if (!publicationCommitted) await staged.rollback();
         throw error;
@@ -533,7 +539,8 @@ export class ProviderSetupManager {
     attempt: number,
     expectedSetupRevision?: string,
     signal?: AbortSignal,
-    markCommitted?: () => void
+    markCommitted?: () => void,
+    verifiedConfig?: AgentConfigMeta
   ): Promise<PublishVerifiedConfigResult> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
@@ -584,26 +591,20 @@ export class ProviderSetupManager {
 
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
+    const publicationBase = verifiedConfig ?? setup.config;
     const publishedConfig =
       setup.replacesPublishedConfig && currentConfig
         ? {
-            ...setup.config,
+            ...publicationBase,
             name: currentConfig.name,
             description: currentConfig.description,
             prompt: currentConfig.prompt,
             titleGeneration: currentConfig.titleGeneration,
             brandId: currentConfig.brandId,
           }
-        : setup.config;
-    const currentBinding = currentConfig ? getLodyCodexCredentialBinding(currentConfig) : null;
-    const desiredBinding = getLodyCodexCredentialBinding(publishedConfig);
-    const rotatesSameBinding = Boolean(
-      expectedSetupRevision && currentBinding && desiredBinding && currentBinding === desiredBinding
-    );
+        : publicationBase;
     assertAgentConfigDoesNotContainCodexCredential(publishedConfig);
-    if (!rotatesSameBinding) {
-      flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
-    }
+    flock.set(machineFlockKeys.agentConfig(setupId), publishedConfig, now);
     // Publishing is the user adding the provider explicitly, so the earlier same-type
     // removal intent has to be retracted too, or the list holds it while startup still
     // treats it as removed.

@@ -10,9 +10,11 @@ import {
   getMachineFlockProviderSetups,
   getMachineFlockProviderSetupCancellations,
   buildLodyCodexCustomProviderEnv,
+  getLodyCodexCustomProvider,
   LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  withLodyCodexCredentialRevision,
   writeMachineFlockRowToFlock,
   type AgentConfigId,
   type MachineFlockKey,
@@ -91,6 +93,16 @@ function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask 
     createdAt: 10,
     updatedAt: 10,
   };
+}
+
+function expectCredentialRevision(
+  config: ProviderSetupTask['config'] | undefined,
+  revision: string
+): asserts config is ProviderSetupTask['config'] {
+  expect(config).toBeDefined();
+  expect(getLodyCodexCustomProvider(config?.env)).toMatchObject({
+    credentialRevision: revision,
+  });
 }
 
 function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
@@ -526,15 +538,19 @@ describe('ProviderSetupManager', () => {
       publishCapabilities
     );
 
-    expect(readState(harness.flock).config?.env).toEqual(replacement.config.env);
+    const published = readState(harness.flock).config;
+    expectCredentialRevision(published, 'revision-new');
+    expect(published.env).toMatchObject({
+      CODEX_CONFIG: replacement.config.env.CODEX_CONFIG,
+    });
     expect(readState(harness.flock).setup).toBeUndefined();
     expect(harness.execution.probeMachineAcpCapabilitiesForProviderSetup).not.toHaveBeenCalled();
-    expect(harness.stageCredential).toHaveBeenCalledWith(
-      workspaceId,
-      replacement.config,
-      'new-key',
-      oldConfig
-    );
+    const [stagedWorkspaceId, stagedConfig, stagedKey, stagedPublishedConfig] =
+      harness.stageCredential.mock.calls[0]!;
+    expect(stagedWorkspaceId).toBe(workspaceId);
+    expect(stagedConfig.env).toEqual(published.env);
+    expect(stagedKey).toBe('new-key');
+    expect(stagedPublishedConfig).toMatchObject({ id: oldConfig.id, env: oldConfig.env });
     expect(harness.finalizeCredential).toHaveBeenCalledTimes(1);
     expect(harness.rollbackCredential).not.toHaveBeenCalled();
     expect(publishCapabilities).toHaveBeenCalledTimes(1);
@@ -667,11 +683,14 @@ describe('ProviderSetupManager', () => {
     await expect(
       harness.manager.commitCredentialSetup(setupId, 'revision-2', 'next-key')
     ).resolves.toBe('durable');
-    expect(readState(machineFlock)).toEqual({
-      setup: undefined,
-      config: nextSetup.config,
-      cancellation: undefined,
+    const nextState = readState(machineFlock);
+    expect(nextState.setup).toBeUndefined();
+    expect(nextState.cancellation).toBeUndefined();
+    expect(nextState.config).toMatchObject({
+      id: nextSetup.config.id,
+      env: expect.objectContaining({ CODEX_CONFIG: nextSetup.config.env.CODEX_CONFIG }),
     });
+    expectCredentialRevision(nextState.config, 'revision-2');
     expect(finalize).toHaveBeenCalledTimes(1);
     harness.manager.stop();
   });
@@ -710,12 +729,13 @@ describe('ProviderSetupManager', () => {
       )
     ).resolves.toBe('uncertain');
 
-    expect(harness.stageCredential).toHaveBeenCalledWith(
-      workspaceId,
-      replacement.config,
-      'new-key',
-      oldConfig
-    );
+    const [stagedWorkspaceId, stagedConfig, stagedKey, stagedPublishedConfig] =
+      harness.stageCredential.mock.calls[0]!;
+    expect(stagedWorkspaceId).toBe(workspaceId);
+    expect(stagedConfig.env.CODEX_CONFIG).toBe(replacement.config.env.CODEX_CONFIG);
+    expect(stagedKey).toBe('new-key');
+    expect(stagedPublishedConfig).toMatchObject({ id: oldConfig.id, env: oldConfig.env });
+    expectCredentialRevision(stagedConfig, 'revision-new');
     expect(harness.finalizeCredential).not.toHaveBeenCalled();
     expect(harness.rollbackCredential).not.toHaveBeenCalled();
     expect(publishCapabilities).not.toHaveBeenCalled();
@@ -776,8 +796,10 @@ describe('ProviderSetupManager', () => {
       expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'old-key',
       });
+      const uncertainConfig = readState(flock).config;
+      expectCredentialRevision(uncertainConfig, 'revision-new');
       expect(
-        (await hydrateCodexProviderCredential(workspaceId, replacement.config)).env
+        (await hydrateCodexProviderCredential(workspaceId, uncertainConfig)).env
       ).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'new-key',
       });
@@ -919,7 +941,13 @@ describe('ProviderSetupManager', () => {
       releaseA.resolve();
       await recovery;
 
-      expect((await hydrateCodexProviderCredential(workspaceId, newConfigB)).env).toMatchObject({
+      const publishedConfigB = getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))[
+        configBId
+      ];
+      expectCredentialRevision(publishedConfigB, 'revision-b-new');
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, publishedConfigB)).env
+      ).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'b-new-key',
       });
     } finally {
@@ -932,7 +960,7 @@ describe('ProviderSetupManager', () => {
     }
   });
 
-  it('reports uncertain durability after a same-binding key rotation commits before flush fails', async () => {
+  it('retains both same-endpoint credential generations when durability is uncertain', async () => {
     const previousDataDir = process.env.LODY_DATA_DIR;
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-rotation-'));
     process.env.LODY_DATA_DIR = dataDir;
@@ -966,11 +994,151 @@ describe('ProviderSetupManager', () => {
         harness.manager.commitCredentialSetup(setupId, 'revision-rotation', 'new-key')
       ).resolves.toBe('uncertain');
 
+      const uncertainConfig = readState(flock).config;
+      expectCredentialRevision(uncertainConfig, 'revision-rotation');
+      expect(readState(flock).setup).toBeUndefined();
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, uncertainConfig)).env
+      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env
+      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'old-key' });
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the published key when same-endpoint staging crashes before Flock commit', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-precommit-crash-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const flock = new FakeMachineFlock();
+    const publishedConfig = {
+      ...createSetup().config,
+      env: withLodyCodexCredentialRevision(
+        buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+        'revision-published'
+      ),
+    };
+    const desiredConfig = {
+      ...publishedConfig,
+      env: withLodyCodexCredentialRevision(publishedConfig.env, 'revision-rotation'),
+    };
+    const pendingSetup: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-rotation',
+      replacesPublishedConfig: true,
+      config: publishedConfig,
+    };
+    const harness = createHarnessForFlock(
+      flock,
+      {},
+      { reconcileCredential: reconcileCodexProviderCredential }
+    );
+
+    try {
+      await seedCredential(publishedConfig, 'old-key');
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: publishedConfig,
+      });
+      seedSetup(flock, pendingSetup);
+      await stageCodexProviderCredential(workspaceId, desiredConfig, 'new-key', publishedConfig);
+
+      await harness.manager.kick({ recoverCredentials: true });
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.providerSetupCancellation(setupId),
+        value: {
+          v: 1,
+          id: setupId,
+          machineId,
+          cancelledAt: 20,
+          preservePublishedConfig: true,
+          setupRevision: 'revision-rotation',
+        },
+      });
+      await harness.manager.kick();
+
       expect(readState(flock).config).toEqual(publishedConfig);
       expect(readState(flock).setup).toBeUndefined();
       expect(
         (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env
-      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
+      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'old-key' });
+      expect(
+        (await hydrateCodexProviderCredential(workspaceId, desiredConfig)).env[
+          LODY_CODEX_API_KEY_ENV
+        ]
+      ).toBeUndefined();
+    } finally {
+      harness.manager.stop();
+      if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousDataDir;
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers the rotated key after Flock commit when credential finalize did not run', async () => {
+    const previousDataDir = process.env.LODY_DATA_DIR;
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-finalize-crash-'));
+    process.env.LODY_DATA_DIR = dataDir;
+    const flock = new FakeMachineFlock();
+    const stageWithoutFinalize: typeof stageCodexProviderCredential = async (...args) => {
+      const staged = await stageCodexProviderCredential(...args);
+      return {
+        rollback: staged.rollback,
+        finalize: async () => {
+          throw new Error('simulated daemon crash before finalize');
+        },
+      };
+    };
+    const harness = createHarnessForFlock(flock, {}, { stageCredential: stageWithoutFinalize });
+    const publishedConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+    };
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-rotation',
+      replacesPublishedConfig: true,
+      config: publishedConfig,
+    };
+
+    try {
+      await seedCredential(publishedConfig, 'old-key');
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.agentConfig(setupId),
+        value: publishedConfig,
+      });
+      seedSetup(flock, replacement);
+
+      await expect(
+        harness.manager.commitCredentialSetup(setupId, 'revision-rotation', 'new-key')
+      ).resolves.toBe('durable');
+      const committedConfig = readState(flock).config;
+      expectCredentialRevision(committedConfig, 'revision-rotation');
+      harness.manager.stop();
+
+      const recoveredHarness = createHarnessForFlock(
+        flock,
+        {},
+        { reconcileCredential: reconcileCodexProviderCredential }
+      );
+      try {
+        await recoveredHarness.manager.kick({ recoverCredentials: true });
+        expect(
+          (await hydrateCodexProviderCredential(workspaceId, committedConfig)).env
+        ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
+        expect(
+          (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env[
+            LODY_CODEX_API_KEY_ENV
+          ]
+        ).toBeUndefined();
+      } finally {
+        recoveredHarness.manager.stop();
+      }
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
@@ -1006,10 +1174,12 @@ describe('ProviderSetupManager', () => {
 
     await harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key');
 
-    expect(readState(harness.flock).config).toEqual({
-      ...replacement.config,
+    const published = readState(harness.flock).config;
+    expectCredentialRevision(published, 'revision-new');
+    expect(published).toMatchObject({
       name: 'New Name',
       prompt: 'new prompt',
+      env: expect.objectContaining({ CODEX_CONFIG: replacement.config.env.CODEX_CONFIG }),
     });
     harness.manager.stop();
   });
