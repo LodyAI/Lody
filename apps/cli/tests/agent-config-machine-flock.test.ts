@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LoroRepo } from 'loro-repo';
 import {
+  buildLodyCodexCustomProviderEnv,
+  getMachineFlockProviderSetupCancellations,
+  LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
+  readMachineFlockRowsFromFlock,
   type AgentConfigMeta,
   type MachineFlockKey,
   type MachineId,
@@ -68,7 +72,33 @@ const customConfig: AgentConfigMeta = {
   env: {},
 } as AgentConfigMeta;
 
+const codexCustomEndpointConfig: AgentConfigMeta = {
+  id: 'agent-config-codex-custom',
+  machineId,
+  name: 'Codex custom endpoint',
+  cliType: 'builtin',
+  agentType: 'codex',
+  env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+} as AgentConfigMeta;
+
 describe('machine flock agent config opt-out', () => {
+  it.each([
+    LODY_CODEX_API_KEY_ENV,
+    'lody_codex_custom_endpoint_api_key',
+    'LoDy_CoDeX_Custom_Endpoint_Api_Key',
+  ])('rejects the reserved Codex credential key %s without mutating Machine Flock', async (key) => {
+    const { repo, flock } = createFakeRepo();
+
+    await expect(
+      upsertMachineAgentConfig(repo, workspaceId, {
+        ...kimiConfig,
+        agentType: 'codex',
+        env: { [key]: 'must-not-sync' },
+      })
+    ).rejects.toThrow(/machine-local credential/);
+    expect(flock.rows.size).toBe(0);
+  });
+
   it('records an opt-out when a managed builtin config is deleted', async () => {
     const { repo, flock } = createFakeRepo();
     await upsertMachineAgentConfig(repo, workspaceId, kimiConfig);
@@ -86,6 +116,9 @@ describe('machine flock agent config opt-out', () => {
     );
     const optOutRow = flock.rows.get(JSON.stringify(machineFlockKeys.builtinAgentOptOut('kimi')));
     expect(optOutRow?.value).toEqual({ v: 1, removedAt: expect.any(Number) });
+    expect(getMachineFlockProviderSetupCancellations(readMachineFlockRowsFromFlock(flock))).toEqual(
+      {}
+    );
   });
 
   it('clears the opt-out when the same builtin type is added back', async () => {
@@ -116,6 +149,25 @@ describe('machine flock agent config opt-out', () => {
 
     // Custom providers are outside startup auto-registration, so no opt-out is needed or wanted.
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(new Set());
+  });
+
+  it('writes the wildcard cleanup barrier when a custom Codex endpoint is deleted', async () => {
+    const { repo, flock } = createFakeRepo();
+    await upsertMachineAgentConfig(repo, workspaceId, codexCustomEndpointConfig);
+
+    await deleteMachineAgentConfig(repo, workspaceId, codexCustomEndpointConfig);
+
+    expect(await readMachineAgentConfigs(repo, workspaceId, machineId)).toEqual({});
+    const cancellation = getMachineFlockProviderSetupCancellations(
+      readMachineFlockRowsFromFlock(flock)
+    )[codexCustomEndpointConfig.id];
+    expect(cancellation).toEqual(
+      expect.objectContaining({
+        id: codexCustomEndpointConfig.id,
+        machineId,
+      })
+    );
+    expect(cancellation).not.toHaveProperty('setupRevision');
   });
 
   it('records an opt-out even when the config row is already gone', async () => {

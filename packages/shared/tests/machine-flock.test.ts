@@ -8,6 +8,8 @@ import {
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderSetups,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDeleteLocalProjectIds,
@@ -30,6 +32,10 @@ import {
   type MachineFlockKey,
   type MachineFlockWritableFlock,
 } from '../src/machine-flock';
+import {
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
+} from '../src/codex-provider-config';
 import {
   getRateLimitEntryKey,
   getAcpCapabilityCacheKey,
@@ -409,6 +415,29 @@ describe('machine Flock helpers', () => {
     expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
   });
 
+  it.each([
+    LODY_CODEX_API_KEY_ENV,
+    'lody_codex_custom_endpoint_api_key',
+    'LoDy_CoDeX_Custom_Endpoint_Api_Key',
+  ])('rejects the machine-local Codex credential key %s at agent config boundaries', (key) => {
+    const agentConfigId = 'credential-bearing-config' as AgentConfigId;
+    const config = {
+      id: agentConfigId,
+      machineId: 'machine-1' as MachineId,
+      name: 'Codex',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      env: { [key]: 'must-not-sync' },
+    } as AgentConfigMeta;
+    const flock = new FakeMachineFlock();
+
+    expect(() => writeAgentConfigToFlock(flock, config)).toThrow(/machine-local credential/);
+    expect(flock.commits).toBe(0);
+
+    flock.set(machineFlockKeys.agentConfig(agentConfigId), config);
+    expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
+  });
+
   it('normalizes null optional fields in agent config rows', () => {
     const agentConfigId = 'config-null-optionals' as AgentConfigId;
     const row = {
@@ -695,6 +724,154 @@ describe('machine Flock helpers', () => {
 
       expect(optOuts(flock)).toEqual(new Set());
     });
+
+    it('does not apply a stale cancellation to a newer credential revision', () => {
+      const flock = new FakeMachineFlock();
+      const id = 'setup-1' as AgentConfigId;
+      const config = {
+        ...kimi(id),
+        agentType: 'codex' as const,
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          {
+            baseUrl: 'https://relay.example.test/v1',
+          }
+        ),
+      };
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.providerSetup(id),
+        value: {
+          v: 1,
+          id,
+          machineId,
+          config,
+          status: 'awaiting-auth',
+          setupRevision: 'revision-new',
+          attempt: 1,
+          createdAt: 10,
+          updatedAt: 10,
+        },
+      });
+
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          setupRevision: 'revision-old',
+          preservePublishedConfig: true,
+          cancelledAt: 20,
+        })
+      ).toBe(false);
+      expect(
+        readMachineFlockRowsFromFlock(flock, {
+          prefixes: [machineFlockKeys.providerSetup(id)],
+        })
+      ).not.toEqual({});
+    });
+
+    it('upgrades an exact cancellation to wildcard and never downgrades it', () => {
+      const flock = new FakeMachineFlock();
+      const id = 'setup-1' as AgentConfigId;
+      flock.set(machineFlockKeys.providerSetupCancellation(id), {
+        v: 1,
+        id,
+        machineId,
+        setupRevision: 'revision-1',
+        preservePublishedConfig: true,
+        cancelledAt: 10,
+      });
+
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          cancelledAt: 20,
+        })
+      ).toBe(true);
+      expect(
+        getMachineFlockProviderSetupCancellations(readMachineFlockRowsFromFlock(flock))[id]
+      ).toEqual({ v: 1, id, machineId, cancelledAt: 20 });
+
+      flock.set(machineFlockKeys.providerSetup(id), {
+        v: 1,
+        id,
+        machineId,
+        config: {
+          ...kimi(id),
+          agentType: 'codex',
+          env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+        },
+        status: 'awaiting-auth',
+        setupRevision: 'revision-2',
+        attempt: 1,
+        createdAt: 30,
+        updatedAt: 30,
+      });
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          setupRevision: 'revision-2',
+          preservePublishedConfig: true,
+          cancelledAt: 40,
+        })
+      ).toBe(true);
+      expect(
+        getMachineFlockProviderSetupCancellations(readMachineFlockRowsFromFlock(flock))[id]
+      ).toEqual({ v: 1, id, machineId, cancelledAt: 20 });
+    });
+
+    it.each([
+      { preservePublishedConfig: true, expectedConfigCount: 1 },
+      { preservePublishedConfig: false, expectedConfigCount: 0 },
+    ])(
+      'uses a revision-less cancellation as a barrier for any in-flight replacement',
+      ({ preservePublishedConfig, expectedConfigCount }) => {
+        const flock = new FakeMachineFlock();
+        const id = 'setup-1' as AgentConfigId;
+        const publishedConfig = kimi(id);
+        writeAgentConfigToFlock(flock, publishedConfig);
+        writeMachineFlockRowToFlock(flock, {
+          key: machineFlockKeys.providerSetup(id),
+          value: {
+            v: 1,
+            id,
+            machineId,
+            config: {
+              ...publishedConfig,
+              agentType: 'codex',
+              env: buildLodyCodexCustomProviderEnv(
+                {},
+                { baseUrl: 'https://relay.example.test/v1' }
+              ),
+            },
+            status: 'awaiting-auth',
+            setupRevision: 'revision-new',
+            replacesPublishedConfig: true,
+            attempt: 1,
+            createdAt: 10,
+            updatedAt: 10,
+          },
+        });
+
+        expect(
+          applyProviderSetupCancellationToFlock(flock, {
+            v: 1,
+            id,
+            machineId,
+            preservePublishedConfig,
+            cancelledAt: 20,
+          })
+        ).toBe(true);
+
+        const rows = readMachineFlockRowsFromFlock(flock);
+        expect(getMachineFlockProviderSetups(rows)).toEqual({});
+        expect(Object.keys(getMachineFlockAgentConfigs(rows))).toHaveLength(expectedConfigCount);
+      }
+    );
 
     it('rejects an agentType that has no managed runtime', () => {
       // deepseek is a builtin provider but stays outside startup auto-registration, so it must

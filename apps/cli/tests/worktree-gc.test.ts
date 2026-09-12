@@ -110,13 +110,21 @@ describe('WorktreeGarbageCollector', () => {
   it('removes an archived local-project worktree, commits pending work, and keeps the branch', async () => {
     const sessionId = 'gc-archived-local' as SessionId;
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
+    const expectedWorktreePath = fs.realpathSync.native(worktree.hostPath);
     fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'unsaved\n', 'utf8');
-    const { gc, runCleanupScript } = createGc({
-      [sessionId]: {
-        kind: 'archived',
-        meta: sessionMeta(sessionId, { isArchived: true, isWorktree: true }),
-      },
+    let cleanupWorktreePath: string | undefined;
+    const runCleanupScript = vi.fn<WorktreeGcDeps['runCleanupScript']>(async (input) => {
+      cleanupWorktreePath = fs.realpathSync.native(input.worktreePath);
     });
+    const { gc } = createGc(
+      {
+        [sessionId]: {
+          kind: 'archived',
+          meta: sessionMeta(sessionId, { isArchived: true, isWorktree: true }),
+        },
+      },
+      { runCleanupScript }
+    );
 
     const result = await gc.sweep();
 
@@ -125,10 +133,8 @@ describe('WorktreeGarbageCollector', () => {
     expect(runGit(rootPath, ['branch', '--list', worktree.branch])).toContain(worktree.branch);
     expect(runGit(rootPath, ['show', `${worktree.branch}:pending.txt`])).toBe('unsaved');
     expect(runCleanupScript).toHaveBeenCalledTimes(1);
-    expect(runCleanupScript.mock.calls[0]?.[0]).toMatchObject({
-      sessionId,
-      worktreePath: worktree.hostPath,
-    });
+    expect(runCleanupScript.mock.calls[0]?.[0].sessionId).toBe(sessionId);
+    expect(cleanupWorktreePath).toBe(expectedWorktreePath);
   });
 
   it('removes an archived GitHub worktree and keeps its branch in the bare clone', async () => {

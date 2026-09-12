@@ -496,7 +496,11 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
@@ -3134,7 +3138,10 @@ export class MessageHandler {
       logger: this.logger,
       onEvents: (events, { authoritative }) =>
         this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
-      onReady: () => this.rescanMachineCommands(),
+      onReady: () => {
+        this.rescanMachineCommands();
+        void this.providerSetupManager.kick({ recoverCredentials: true });
+      },
     });
     this.worktreeGc = new WorktreeGarbageCollector({
       reposDir: path.join(getLodyDataDir(), 'repos'),
@@ -3244,7 +3251,14 @@ export class MessageHandler {
           const message: MachineAcpAuthenticateRequestValidated = (() => {
             switch (args.action) {
               case 'start':
-                return { ...common, action: args.action, configId: args.configId };
+                return {
+                  ...common,
+                  action: args.action,
+                  configId: args.configId,
+                  purpose: args.purpose,
+                  setupRevision: args.setupRevision,
+                  expectedBindingDigest: args.expectedBindingDigest,
+                };
               case 'cancel':
                 return {
                   ...common,
@@ -8041,16 +8055,49 @@ export class MessageHandler {
     message: MachineAcpAuthenticateRequestValidated,
     options: Parameters<SessionExecutionService['authenticateMachineAcp']>[1] = {}
   ): Promise<MachineAcpAuthenticateResponse> {
-    const response = await this.executionService.authenticateMachineAcp(message, options);
+    const response = await this.executionService.authenticateMachineAcp(message, {
+      ...options,
+      ...(message.action === 'start' && message.purpose === 'provision-provider-credential'
+        ? {
+            commitCodexProviderCredential: async ({
+              configId,
+              setupRevision,
+              expectedBindingDigest,
+              apiKey,
+              signal,
+              markCommitted,
+              publishCapabilities,
+            }) => ({
+              publicationDurability: await this.providerSetupManager.commitCredentialSetup(
+                configId,
+                setupRevision,
+                expectedBindingDigest,
+                apiKey,
+                signal,
+                () => {
+                  markCommitted();
+                  this.logger.debug(
+                    `[provider-setup] Commit boundary requestId=${message.requestId} configId=${configId} setupRevision=${setupRevision}`
+                  );
+                },
+                publishCapabilities
+              ),
+            }),
+          }
+        : {}),
+    });
     if (
       message.action === 'start' &&
       response.success &&
-      response.disposition === 'authenticated'
+      response.disposition === 'authenticated' &&
+      response.capabilitiesRefreshed === true
     ) {
       try {
         // Re-read and probe the durable task's own config. Never publish based
         // on caller-supplied launch fields from this unauthenticated RPC.
-        await this.providerSetupManager.resumeAfterAuthentication(message.configId);
+        if (message.purpose !== 'provision-provider-credential') {
+          await this.providerSetupManager.resumeAfterAuthentication(message.configId);
+        }
       } catch (error) {
         this.logger.debug(
           `[provider-setup] Failed to resume ${message.configId} after authentication: ${formatErrorMessage(

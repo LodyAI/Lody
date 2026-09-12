@@ -5,8 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  buildLodyCodexCustomProviderEnv,
+  CODEX_API_KEY_ENV,
+  CODEX_CONFIG_ENV,
+  CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+  LODY_CODEX_API_KEY_ENV,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
+  withLodyCodexCredentialRevision,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -23,6 +29,7 @@ import { TooltipProvider } from '../src/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
+const codexConfigId = 'codex-config' as AgentConfigId;
 const kimiConfigId = 'kimi-config' as AgentConfigId;
 type RefreshCapabilities = ComponentProps<typeof AgentConfigDialog>['onRefreshCapabilities'];
 
@@ -98,6 +105,23 @@ const createTitleConfigMachine = (): MachineViewMeta => ({
       // Codex resolves its ladder through a dedicated branch; every other agent
       // goes through this map.
       modelReasoningEfforts: { 'kimi-k2-turbo': ['low', 'medium'] },
+      availableCommands: [],
+      fetchedAt: Date.now(),
+    },
+  },
+});
+
+const createCodexMachine = (): MachineViewMeta => ({
+  ...createMachine('Codex workstation'),
+  acpCapabilities: {
+    [getAcpCapabilityCacheKey(codexConfigId)]: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      sourceVersion: 'codex@1.0.0',
+      modes: [],
+      models: [],
+      configOptions: [],
       availableCommands: [],
       fetchedAt: Date.now(),
     },
@@ -199,14 +223,15 @@ describe('AgentConfigDialog', () => {
       agentType: 'codex',
       success: true,
     }),
-    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected']
+    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
+    onOpenChange = vi.fn<(open: boolean) => void>()
   ) => {
     await act(async () => {
       root?.render(
         <TooltipProvider>
           <AgentConfigDialog
             open
-            onOpenChange={vi.fn()}
+            onOpenChange={onOpenChange}
             mode={mode}
             machine={machine}
             onSubmit={onSubmit}
@@ -598,6 +623,296 @@ describe('AgentConfigDialog', () => {
           EXTRA_FLAG: '1',
           DEEPSEEK_API_KEY: 'sk-deepseek-test',
           DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+        },
+      })
+    );
+  });
+
+  it('configures Codex with a Base URL and API Key before its creation probe', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: args.machineId,
+      configId: args.configId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      success: true,
+    }));
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: { name: 'Codex Relay', cliType: 'builtin', agentType: 'codex' },
+      },
+      createMachine('Relay workstation', {
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+        codexCustomEndpointCredentials: CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+      }),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      onRefreshCapabilities
+    );
+
+    expect(getTabByName('ChatGPT').getAttribute('aria-selected')).toBe('true');
+    await selectTab('Base URL + API Key');
+    const createButton = getPrimaryAction('Create');
+    expect(createButton.disabled).toBe(true);
+
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-base-url')!,
+        '  https://relay.example.com/v1  '
+      );
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-api-key')!,
+        '  sk-relay-test  '
+      );
+    });
+    expect(createButton.disabled).toBe(false);
+
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload?.codexApiKey).toBe('sk-relay-test');
+    expect(payload?.backgroundSetup).toBe(true);
+    expect(payload?.env[CODEX_API_KEY_ENV]).toBeUndefined();
+    expect(payload?.env[LODY_CODEX_API_KEY_ENV]).toBeUndefined();
+    expect(payload?.env[CODEX_CONFIG_ENV]).not.toContain('sk-relay-test');
+    expect(JSON.parse(payload?.env[CODEX_CONFIG_ENV] ?? '{}')).toMatchObject({
+      model_provider: 'lody-custom-endpoint',
+      model_providers: {
+        'lody-custom-endpoint': {
+          base_url: 'https://relay.example.com/v1',
+          env_key: LODY_CODEX_API_KEY_ENV,
+          wire_api: 'responses',
+          requires_openai_auth: false,
+        },
+      },
+    });
+    expect(onRefreshCapabilities).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('Sign in with ChatGPT');
+  });
+
+  it('blocks every dialog dismissal while provider provisioning is submitting', async () => {
+    let finishSubmit: () => void = () => undefined;
+    const submitPending = new Promise<void>((resolve) => {
+      finishSubmit = resolve;
+    });
+    const onSubmit = vi.fn(() => submitPending);
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: { name: 'Codex Relay', cliType: 'builtin', agentType: 'codex' },
+      },
+      createMachine('Relay workstation', {
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+        codexCustomEndpointCredentials: CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+      }),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      undefined,
+      undefined,
+      onOpenChange
+    );
+    await selectTab('Base URL + API Key');
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-base-url')!,
+        'https://relay.example.com/v1'
+      );
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-api-key')!,
+        'sk-relay-test'
+      );
+      getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+
+    const closeButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Close'
+    );
+    expect(closeButton).toBeDefined();
+    await act(async () => {
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-lody-dialog-content]')).not.toBeNull();
+
+    finishSubmit();
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it('uses a new setup revision for each provisioning submit attempt', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const onSubmit = vi
+      .fn<(payload: AgentConfigSubmitPayload) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('first attempt failed'))
+      .mockResolvedValueOnce(undefined);
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: { name: 'Codex Relay', cliType: 'builtin', agentType: 'codex' },
+      },
+      createMachine('Relay workstation', {
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+        codexCustomEndpointCredentials: CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+      }),
+      onSubmit
+    );
+    await selectTab('Base URL + API Key');
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-base-url')!,
+        'https://relay.example.com/v1'
+      );
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-api-key')!,
+        'sk-relay-test'
+      );
+    });
+
+    const createButton = getPrimaryAction('Create');
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(createButton.disabled).toBe(false));
+    await act(async () => {
+      createButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+
+    const firstRevision = onSubmit.mock.calls[0]![0].setupRevision;
+    const secondRevision = onSubmit.mock.calls[1]![0].setupRevision;
+    expect(firstRevision).toEqual(expect.any(String));
+    expect(secondRevision).toEqual(expect.any(String));
+    expect(secondRevision).not.toBe(firstRevision);
+  });
+
+  it('hydrates a Codex custom endpoint and does not offer ChatGPT reauthentication', async () => {
+    const env = {
+      ...buildLodyCodexCustomProviderEnv(
+        { EXTRA_FLAG: '1' },
+        { baseUrl: 'https://relay.example.com/v1' }
+      ),
+      lody_codex_custom_endpoint_api_key: 'sk-must-not-render',
+    };
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: codexConfigId,
+          machineId,
+          name: 'Codex Relay',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'codex',
+          env,
+        },
+      },
+      createCodexMachine()
+    );
+
+    expect(getTabByName('Base URL + API Key').getAttribute('aria-selected')).toBe('true');
+    expect(document.body.querySelector<HTMLInputElement>('#codex-base-url')?.value).toBe(
+      'https://relay.example.com/v1'
+    );
+    expect(document.body.querySelector<HTMLInputElement>('#codex-api-key')?.value).toBe('');
+    expect(findSignInAgainButton()).toBeUndefined();
+    expect((await openAdditionalEnvSection()).value).not.toContain(
+      'lody_codex_custom_endpoint_api_key'
+    );
+  });
+
+  it('saves a metadata-only Codex edit without asking for or rotating the API key', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const env = withLodyCodexCredentialRevision(
+      buildLodyCodexCustomProviderEnv(
+        { EXTRA_FLAG: '1' },
+        { baseUrl: 'https://relay.example.com/v1' }
+      ),
+      'revision-published'
+    );
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: codexConfigId,
+          machineId,
+          name: 'Codex Relay',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'codex',
+          env,
+        },
+      },
+      createCodexMachine(),
+      onSubmit
+    );
+
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#agent-config-name')!,
+        'Renamed Relay'
+      );
+    });
+    const save = getPrimaryAction('Save');
+    expect(save.disabled).toBe(false);
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    const payload = onSubmit.mock.calls[0]![0];
+    expect(payload).toMatchObject({ name: 'Renamed Relay', env });
+    expect(payload).not.toHaveProperty('codexApiKey');
+    expect(payload).not.toHaveProperty('backgroundSetup');
+    expect(payload).not.toHaveProperty('setupRevision');
+  });
+
+  it('switches a managed Codex endpoint back to ChatGPT without dropping other config', async () => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const env = buildLodyCodexCustomProviderEnv(
+      {
+        EXTRA_FLAG: '1',
+        CODEX_CONFIG: JSON.stringify({ model: 'gpt-custom' }),
+      },
+      { baseUrl: 'https://relay.example.com/v1' }
+    );
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: codexConfigId,
+          machineId,
+          name: 'Codex Relay',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'codex',
+          env,
+        },
+      },
+      createCodexMachine(),
+      onSubmit
+    );
+
+    await selectTab('ChatGPT');
+    await act(async () => {
+      getPrimaryAction('Save').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          EXTRA_FLAG: '1',
+          CODEX_CONFIG: JSON.stringify({ model: 'gpt-custom' }),
         },
       })
     );

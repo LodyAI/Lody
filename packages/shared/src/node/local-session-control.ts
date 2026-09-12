@@ -530,6 +530,17 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       (value.action === 'start'
         ? typeof value.configId === 'string' &&
           value.configId.trim().length > 0 &&
+          (typeof value.purpose === 'undefined' ||
+            value.purpose === 'authenticate' ||
+            value.purpose === 'provision-provider-credential') &&
+          (value.purpose === 'provision-provider-credential'
+            ? typeof value.setupRevision === 'string' &&
+              value.setupRevision.trim().length > 0 &&
+              value.setupRevision.length <= 1024 &&
+              typeof value.expectedBindingDigest === 'string' &&
+              /^[0-9a-f]{64}$/u.test(value.expectedBindingDigest)
+            : typeof value.setupRevision === 'undefined' &&
+              typeof value.expectedBindingDigest === 'undefined') &&
           typeof value.authenticationRequestId === 'undefined' &&
           typeof value.authorizationCode === 'undefined' &&
           typeof value.interactionId === 'undefined' &&
@@ -570,7 +581,8 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.customAcp === 'undefined' &&
       typeof value.runtimeOverrides === 'undefined' &&
       typeof value.env === 'undefined' &&
-      typeof value.methodId === 'undefined'
+      typeof value.methodId === 'undefined' &&
+      (value.action === 'start' || typeof value.expectedBindingDigest === 'undefined')
     );
   }
 
@@ -816,6 +828,9 @@ export function isLocalSessionControlResponse(
         value.disposition === 'error') &&
       (typeof value.capabilitiesRefreshed === 'undefined' ||
         typeof value.capabilitiesRefreshed === 'boolean') &&
+      (typeof value.publicationDurability === 'undefined' ||
+        value.publicationDurability === 'durable' ||
+        value.publicationDurability === 'uncertain') &&
       (typeof value.authRequired === 'undefined' || typeof value.authRequired === 'boolean') &&
       (typeof value.authMethods === 'undefined' ||
         (Array.isArray(value.authMethods) && value.authMethods.every(isAcpAuthMethodSummary))) &&

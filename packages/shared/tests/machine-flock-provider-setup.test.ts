@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentConfigId, MachineId } from '../src/ids';
+import { buildLodyCodexCustomProviderEnv } from '../src/codex-provider-config';
 import {
   getMachineFlockProviderSetups,
   machineFlockKeys,
@@ -79,5 +80,54 @@ describe('machine flock provider setup rows', () => {
     expect(parsed?.value).toEqual(setup);
     expect(parsed?.value).not.toHaveProperty('authorizationUrl');
     expect(parsed?.value).not.toHaveProperty('userCode');
+  });
+
+  it('rejects a setup config containing the one-shot Codex credential', () => {
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config: {
+          ...setup.config,
+          env: { LODY_CODEX_CUSTOM_ENDPOINT_API_KEY: 'sk-must-not-sync' },
+        },
+      })
+    ).toBeUndefined();
+  });
+
+  it('does not guess that unrelated user-owned env values are protocol credentials', () => {
+    const config = {
+      ...setup.config,
+      env: buildLodyCodexCustomProviderEnv(
+        { CODEX_API_KEY: 'preserved-user-value', TOKENIZERS_PARALLELISM: 'false' },
+        { baseUrl: 'https://relay.example.test/v1' }
+      ),
+    };
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config,
+        setupRevision: 'revision-1',
+      })
+    ).toBeDefined();
+  });
+
+  it('requires an exact setup revision for a custom Codex provider row', () => {
+    const config = {
+      ...setup.config,
+      env: buildLodyCodexCustomProviderEnv(
+        {},
+        { baseUrl: 'https://relay.example.test/v1' }
+      ),
+    };
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), { ...setup, config })
+    ).toBeUndefined();
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), {
+        ...setup,
+        config,
+        setupRevision: 'revision-2',
+      })
+    ).toBeDefined();
   });
 });

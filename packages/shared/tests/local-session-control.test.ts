@@ -63,6 +63,12 @@ describe('local session control node validators', () => {
       action: 'start',
       configId: 'config-1',
     };
+    const provision = {
+      ...request,
+      purpose: 'provision-provider-credential',
+      setupRevision: 'revision-1',
+      expectedBindingDigest: 'a'.repeat(64),
+    };
     const progress = {
       type: 'machine/acp-authentication-progress',
       machineId: 'machine-1',
@@ -90,6 +96,7 @@ describe('local session control node validators', () => {
       success: true,
       disposition: 'authenticated',
       capabilitiesRefreshed: false,
+      publicationDurability: 'uncertain',
       authRequired: true,
       authMethods: [{ type: 'terminal', args: ['--login'] }],
       error: 'Authentication required',
@@ -129,6 +136,16 @@ describe('local session control node validators', () => {
     };
     expect(isLocalSessionControlRequest(request)).toBe(true);
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+    expect(isLocalSessionControlRequest(provision)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(provision)).toBe(true);
+    expect(isLocalSessionControlRequest({ ...provision, setupRevision: undefined })).toBe(false);
+    expect(isLocalSessionControlRequestCjs({ ...provision, setupRevision: undefined })).toBe(false);
+    expect(isLocalSessionControlRequest({ ...provision, expectedBindingDigest: undefined })).toBe(
+      false
+    );
+    expect(
+      isLocalSessionControlRequestCjs({ ...provision, expectedBindingDigest: undefined })
+    ).toBe(false);
     expect(isLocalSessionControlRequest(submitCode)).toBe(true);
     expect(isLocalSessionControlRequestCjs(submitCode)).toBe(true);
     expect(isLocalSessionControlRequest(submitInput)).toBe(true);

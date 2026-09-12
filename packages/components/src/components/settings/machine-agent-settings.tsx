@@ -5,6 +5,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
+  getLodyCodexCustomProvider,
   type AcpSessionMonitorSnapshot,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -40,6 +41,7 @@ import { useAgentConfigMigration } from '@/hooks/use-agent-config-migration';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
+import { useCodexProviderCredential } from '@/hooks/use-codex-provider-credential';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { canDeleteOfflineMachine, canManageAllMachines } from '@/lib/machine-deletion';
@@ -182,6 +184,7 @@ export function MachineAgentSettings({
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const provisionCodexCredential = useCodexProviderCredential(runtime, workspaceId);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const getConvexErrorMessage = useConvexErrorMessage();
   // Remote daemon restart/upgrade is brokered through the cloud control plane
@@ -908,12 +911,42 @@ export function MachineAgentSettings({
             machineId: dialogMachine.id,
           };
           if (payload.backgroundSetup) {
-            await createSetup(config);
+            await createSetup({ config, setupRevision: payload.setupRevision });
           } else {
             await createConfig(config);
           }
+          if (payload.codexApiKey) {
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            try {
+              const provision = await provisionCodexCredential({
+                config,
+                setupRevision: payload.setupRevision,
+                apiKey: payload.codexApiKey,
+              });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
+            } catch (error) {
+              if (payload.backgroundSetup) {
+                await deleteSetup({
+                  id: config.id,
+                  machineId: config.machineId,
+                  expectedSetupRevision: payload.setupRevision,
+                });
+              } else await deleteConfig(config);
+              throw error;
+            }
+          }
         } else {
-          await updateConfig({
+          const removingCodexCredential =
+            getLodyCodexCustomProvider(dialogMode.config.env) !== null &&
+            getLodyCodexCustomProvider(payload.env) === null;
+          const nextConfig: AgentConfigMeta = {
             id: dialogMode.config.id as AgentConfigId,
             machineId: dialogMode.config.machineId,
             name: payload.name,
@@ -926,7 +959,51 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-          });
+          };
+          if (payload.codexApiKey) {
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            await updateConfig({
+              ...dialogMode.config,
+              name: nextConfig.name,
+              description: nextConfig.description,
+              prompt: nextConfig.prompt,
+              titleGeneration: nextConfig.titleGeneration,
+              brandId: nextConfig.brandId,
+            });
+            await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
+            try {
+              const provision = await provisionCodexCredential({
+                config: nextConfig,
+                setupRevision: payload.setupRevision,
+                apiKey: payload.codexApiKey,
+              });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
+            } catch (error) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                expectedSetupRevision: payload.setupRevision,
+                preservePublishedConfig: true,
+              });
+              throw error;
+            }
+          } else {
+            if (removingCodexCredential) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                preservePublishedConfig: true,
+              });
+            }
+            await updateConfig(nextConfig);
+          }
         }
       } catch (error) {
         console.error('Failed to save agent config:', error);
@@ -938,7 +1015,17 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [dialogMachine, dialogMode, createConfig, createSetup, updateConfig, t]
+    [
+      dialogMachine,
+      dialogMode,
+      createConfig,
+      createSetup,
+      deleteConfig,
+      deleteSetup,
+      provisionCodexCredential,
+      updateConfig,
+      t,
+    ]
   );
 
   const handleRetrySetup = useCallback(
@@ -956,7 +1043,12 @@ export function MachineAgentSettings({
   const handleDeleteSetup = useCallback(
     async (setup: ProviderSetupTask) => {
       try {
-        await deleteSetup(setup.id);
+        await deleteSetup({
+          id: setup.id,
+          machineId: setup.machineId,
+          expectedSetupRevision: setup.setupRevision,
+          preservePublishedConfig: setup.replacesPublishedConfig === true,
+        });
       } catch (error) {
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'));
         throw error;
@@ -968,14 +1060,21 @@ export function MachineAgentSettings({
   const handleDeleteConfig = useCallback(
     async (config: AgentConfigMeta) => {
       try {
-        await deleteConfig(config.id);
+        if (getLodyCodexCustomProvider(config.env)) {
+          await deleteSetup({
+            id: config.id,
+            machineId: config.machineId,
+            preservePublishedConfig: false,
+          });
+        }
+        await deleteConfig(config);
       } catch (error) {
         console.error('Failed to delete agent config:', error);
         toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'));
         throw error;
       }
     },
-    [deleteConfig, t]
+    [deleteConfig, deleteSetup, t]
   );
 
   const showBanner = mode === 'agents' && migration.status === 'running';

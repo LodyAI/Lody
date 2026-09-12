@@ -21,6 +21,11 @@ import type {
   WorktreeSetupScriptConfig,
 } from './project';
 import type { AgentConfigMeta, SessionLaunchConfig, SessionMeta } from './schema';
+import {
+  agentConfigContainsCodexCredential,
+  assertAgentConfigDoesNotContainCodexCredential,
+  getLodyCodexCustomProvider,
+} from './codex-provider-config';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
 
@@ -112,7 +117,7 @@ export type ProviderSetupFailureCode =
   | 'verification-failed';
 
 /**
- * Durable intent to create a managed builtin provider on one machine.
+ * Durable intent to create or replace a managed builtin provider on one machine.
  *
  * The final AgentConfig stays nested here and is not discoverable by session
  * creation until the owning machine publishes it after a successful live
@@ -129,7 +134,16 @@ export type ProviderSetupTask = {
   createdAt: number;
   updatedAt: number;
   failureCode?: ProviderSetupFailureCode;
+  /** Snapshot of whether this setup stages over an already-published config. */
+  replacesPublishedConfig?: true;
+  /** Exact non-secret setup generation expected by the target-machine provision RPC. */
+  setupRevision?: string;
 };
+
+/** Guard the one-shot secret owned by this protocol at its workspace-state boundary. */
+export function providerSetupContainsCodexCredential(config: AgentConfigMeta): boolean {
+  return agentConfigContainsCodexCredential(config);
+}
 
 /**
  * Convergent cancellation intent for a provider setup id.
@@ -142,6 +156,10 @@ export type ProviderSetupCancellation = {
   id: AgentConfigId;
   machineId: MachineId;
   cancelledAt: number;
+  /** Preserve a config that was already published before this setup began. */
+  preservePublishedConfig?: boolean;
+  /** Omitted to cancel any in-flight revision for an explicit provider removal. */
+  setupRevision?: string;
 };
 
 /**
@@ -706,7 +724,8 @@ export function getMachineFlockProviderSetupCancellations(
 export function applyProviderSetupCancellationToFlock(
   flock: MachineFlockWritableFlock,
   cancellation: ProviderSetupCancellation,
-  nowMs: number = cancellation.cancelledAt
+  nowMs: number = cancellation.cancelledAt,
+  capturedConfig?: AgentConfigMeta
 ): boolean {
   const rows = readMachineFlockRowsFromFlock(flock, {
     prefixes: [
@@ -718,23 +737,34 @@ export function applyProviderSetupCancellationToFlock(
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
-  if (existingCancellation && !setup && !config) {
+  const configForRemoval = config ?? capturedConfig;
+  const upgradesExactCancellationToWildcard = Boolean(
+    existingCancellation?.setupRevision && !cancellation.setupRevision
+  );
+  if (
+    cancellation.setupRevision &&
+    (!setup?.setupRevision || setup.setupRevision !== cancellation.setupRevision)
+  ) {
     return false;
   }
-  if (!existingCancellation) {
+  if (
+    existingCancellation &&
+    !upgradesExactCancellationToWildcard &&
+    !setup &&
+    (!config || cancellation.preservePublishedConfig)
+  ) {
+    return false;
+  }
+  if (!existingCancellation || upgradesExactCancellationToWildcard) {
     flock.set(machineFlockKeys.providerSetupCancellation(cancellation.id), cancellation, nowMs);
   }
   if (setup) {
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
-  if (config) {
-    // Cancelling a published setup is the user removing this provider, so it needs
-    // the same removal record as deleting it from the list.
-    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
-    if (optOut) {
-      flock.set(optOut.key, optOut.value, nowMs);
-    }
-    flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
+  if (configForRemoval && !cancellation.preservePublishedConfig) {
+    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, configForRemoval, nowMs);
+    if (optOut) flock.set(optOut.key, optOut.value, nowMs);
+    if (config) flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
   }
   flock.commit();
   return true;
@@ -833,6 +863,7 @@ export function writeAgentConfigToFlock(
   config: AgentConfigMeta,
   nowMs?: number
 ): boolean {
+  assertAgentConfigDoesNotContainCodexCredential(config);
   const rows = readMachineFlockRowsFromFlock(flock, {
     prefixes: [
       machineFlockKeys.agentConfig(config.id),
@@ -955,6 +986,9 @@ export function writeMachineFlockRowToFlock(
   row: MachineFlockRow,
   nowMs?: number
 ): boolean {
+  if (row.key[0] === 'agentConfig') {
+    assertAgentConfigDoesNotContainCodexCredential(row.value as AgentConfigMeta);
+  }
   const normalized = parseMachineFlockRow(row.key, row.value);
   if (!normalized) {
     return false;
@@ -1399,6 +1433,9 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   ) {
     return undefined;
   }
+  if (agentConfigContainsCodexCredential({ env: value.env })) {
+    return undefined;
+  }
 
   const config = {
     id: value.id as AgentConfigId,
@@ -1466,14 +1503,23 @@ const normalizeProviderSetupTask = (value: unknown): ProviderSetupTask | undefin
     return undefined;
   }
   const config = normalizeAgentConfigMeta(value.config);
+  const codexProvider = config ? getLodyCodexCustomProvider(config.env) : null;
+  const setupRevision = isNonEmptyString(value.setupRevision)
+    ? value.setupRevision
+    : undefined;
   if (
     !config ||
     config.id !== value.id ||
     config.machineId !== value.machineId ||
     config.cliType !== 'builtin' ||
     !isBuiltinAgentType(config.agentType) ||
-    hasBuiltinRuntimeOverrideValues(config.runtimeOverrides)
+    (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
+      !(config.agentType === 'codex' && codexProvider && setupRevision)) ||
+    providerSetupContainsCodexCredential(config)
   ) {
+    return undefined;
+  }
+  if (Boolean(codexProvider) !== Boolean(setupRevision)) {
     return undefined;
   }
   if (!isMissing(value.failureCode) && !isProviderSetupFailureCode(value.failureCode)) {
@@ -1490,6 +1536,8 @@ const normalizeProviderSetupTask = (value: unknown): ProviderSetupTask | undefin
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     ...(value.failureCode ? { failureCode: value.failureCode } : {}),
+    ...(value.replacesPublishedConfig === true ? { replacesPublishedConfig: true } : {}),
+    ...(setupRevision ? { setupRevision } : {}),
   };
 };
 
@@ -1511,6 +1559,10 @@ const normalizeProviderSetupCancellation = (
     id: value.id as AgentConfigId,
     machineId: value.machineId as MachineId,
     cancelledAt: value.cancelledAt,
+    ...(value.preservePublishedConfig === true ? { preservePublishedConfig: true } : {}),
+    ...(isNonEmptyString(value.setupRevision)
+      ? { setupRevision: value.setupRevision }
+      : {}),
   };
 };
 

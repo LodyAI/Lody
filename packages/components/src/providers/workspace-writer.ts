@@ -1,8 +1,11 @@
 import type {
+  AgentConfigMeta,
   PreviewVisualCommentMutation,
+  ProviderSetupCancellation,
   SessionId,
   SessionHistory,
   PermissionOutcome,
+  ProviderSetupTask,
   TaskProposalMeta,
 } from '@lody/shared';
 
@@ -57,6 +60,24 @@ export interface WorkspaceWriter {
     key: readonly string[],
     value: unknown
   ): Promise<{ inserted: boolean; value: unknown }>;
+
+  /**
+   * Publish a provider setup and retract its wildcard cancellation barrier in
+   * one Flock transaction. Peers must never observe the barrier removed while
+   * the replacement setup is still absent.
+   */
+  replaceProviderSetup(flockDocId: string, setup: ProviderSetupTask): Promise<void>;
+
+  /**
+   * Merge a provider cancellation with the current rows in one Flock commit.
+   * Returns the effective marker so callers cannot project an exact cancellation
+   * over an existing wildcard barrier.
+   */
+  applyProviderSetupCancellation(
+    flockDocId: string,
+    cancellation: ProviderSetupCancellation,
+    capturedConfig?: AgentConfigMeta
+  ): Promise<ProviderSetupCancellation | undefined>;
 
   /** Flock-doc row delete. */
   flockRowDelete(flockDocId: string, key: readonly string[]): Promise<void>;

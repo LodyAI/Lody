@@ -64,6 +64,8 @@ import {
   type ManagedRuntimeName,
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
+import { hydrateProviderCredential } from '@/agent/provider-credential-store';
+import type { ProviderCredentialConfig } from '@/agent/provider-credential-adapter';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
 import {
   GitCredentialBroker,
@@ -945,15 +947,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config.configOptionValues,
       config.taskToolsEnabled
     );
+    const providerCredentialConfig = this.captureProviderCredentialConfig(config);
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-    });
+    const launch = await this.resolveSessionProcessLaunch(config, { providerCredentialConfig });
     signal.throwIfAborted();
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
 
@@ -1326,10 +1323,55 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     };
   }
 
+  private async resolveSessionProcessLaunch(
+    config: SessionConfig,
+    options: {
+      onManagedRuntimeProgress?: (event: ManagedRuntimeProgressEvent) => void;
+      providerCredentialConfig?: ProviderCredentialConfig;
+    } = {}
+  ): Promise<ResolvedAcpProcessLaunch> {
+    const providerCredentialConfig =
+      options.providerCredentialConfig ?? this.captureProviderCredentialConfig(config);
+    const hydratedConfig = providerCredentialConfig
+      ? await hydrateProviderCredential(this.workspaceId, providerCredentialConfig)
+      : undefined;
+    const launchEnv = hydratedConfig
+      ? { ...hydratedConfig.env, ...(config.env ?? {}) }
+      : config.env;
+    const launch = await resolveACPProcessLaunchAsync({
+      cliType: config.agentCliType,
+      agentType: config.agentType,
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
+      env: launchEnv,
+      onManagedRuntimeProgress: options.onManagedRuntimeProgress,
+    });
+    return {
+      ...launch,
+      env: { ...(launchEnv ?? {}), ...(launch.env ?? {}) },
+    };
+  }
+
+  private captureProviderCredentialConfig(
+    config: SessionConfig
+  ): ProviderCredentialConfig | undefined {
+    return config.agentConfigId
+      ? {
+          id: config.agentConfigId,
+          cliType: config.agentCliType,
+          agentType: config.agentType,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+          env: { ...(config.env ?? {}) },
+        }
+      : undefined;
+  }
+
   private async createSessionInnerWithAgent(
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
+    const providerCredentialConfig = this.captureProviderCredentialConfig(config);
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
@@ -1364,12 +1406,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     const launchResolutionStartedAt = performance.now();
     let managedRuntimeReadyLogged = false;
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
+    const launch = await this.resolveSessionProcessLaunch(config, {
+      providerCredentialConfig,
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
         if (event.phase === 'complete' && !managedRuntimeReadyLogged) {

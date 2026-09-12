@@ -4,6 +4,9 @@ import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
   computeTitleGenerationDefaults,
+  buildLodyCodexCustomProviderEnv,
+  CODEX_API_KEY_ENV,
+  CODEX_CONFIG_ENV,
   DEEPSEEK_HARNESS_API_KEY_ENV,
   DEEPSEEK_HARNESS_BASE_URL_ENV,
   formatCustomAcpCommandLine,
@@ -11,11 +14,18 @@ import {
   getAcpCapabilityCacheKey,
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
+  getLodyCodexCustomProvider,
+  getLodyCodexCredentialBinding,
+  isAllowedCredentialEndpoint,
+  isReservedCodexCredentialEnvKey,
+  LODY_CODEX_PROVIDER_STATE_ENV,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
+  machineSupportsCodexCustomEndpointCredentials,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
+  removeLodyCodexCustomProviderEnv,
   serializeCustomAcpLaunchSpec,
   machineSupportsAcpProtocolAuthentication,
   supportsBuiltinAuthentication,
@@ -30,6 +40,7 @@ import {
   type ManagedBuiltinAgentType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
+  type CodexAuthenticationMode,
   type MachineAcpBinaryProgressMessage,
   type MachineAcpBinaryStatusResponse,
   type MachineAcpCapabilitiesRefreshResponse,
@@ -571,6 +582,10 @@ export type AgentConfigFormData = {
   deepseekEndpointMode?: DeepSeekEndpointMode;
   /** Draft custom DEEPSEEK_BASE_URL while the official tab is selected. */
   deepseekCustomBaseUrl?: string;
+  /** Dialog-only Codex authentication choice; persisted through env. */
+  codexAuthenticationMode?: CodexAuthenticationMode;
+  codexApiKey?: string;
+  codexBaseUrl?: string;
 };
 
 export type AgentConfigSubmitPayload = {
@@ -589,6 +604,10 @@ export type AgentConfigSubmitPayload = {
   brandId?: AgentBrandId;
   /** Persist as a durable target-machine setup instead of publishing immediately. */
   backgroundSetup?: true;
+  /** One-shot secret sent through the encrypted machine authentication flow. */
+  codexApiKey?: string;
+  /** Causal token for matching the durable setup row to the one-shot RPC. */
+  setupRevision?: string;
 };
 
 export type AgentConfigDialogMode =
@@ -716,6 +735,22 @@ function isDeepSeekBuiltinForm(form: Pick<AgentConfigFormData, 'cliType' | 'agen
   return form.cliType === 'builtin' && form.agentType === 'deepseek';
 }
 
+function isCodexBuiltinForm(form: Pick<AgentConfigFormData, 'cliType' | 'agentType'>): boolean {
+  return form.cliType === 'builtin' && form.agentType === 'codex';
+}
+
+function hydrateCodexAuthenticationForm(form: AgentConfigFormData): AgentConfigFormData {
+  if (!isCodexBuiltinForm(form)) return form;
+  const customProvider = getLodyCodexCustomProvider(form.env);
+  return {
+    ...form,
+    codexAuthenticationMode:
+      form.codexAuthenticationMode ?? (customProvider ? 'api-key' : 'chatgpt'),
+    codexApiKey: form.codexApiKey ?? '',
+    codexBaseUrl: form.codexBaseUrl ?? customProvider?.baseUrl ?? '',
+  };
+}
+
 function getDeepSeekEndpointMode(form: AgentConfigFormData): DeepSeekEndpointMode {
   return form.deepseekEndpointMode === 'custom' ? 'custom' : 'official';
 }
@@ -769,6 +804,18 @@ function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, s
   return additionalEnv;
 }
 
+function omitCodexManagedEnv(
+  env: Record<string, string>,
+  managedKeys: readonly string[]
+): Record<string, string> {
+  const managedKeySet = new Set(managedKeys);
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => !managedKeySet.has(key) && !isReservedCodexCredentialEnvKey(key)
+    )
+  );
+}
+
 function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigFormData {
   if (!isDeepSeekBuiltinForm(form)) return form;
   const env = { ...form.env };
@@ -796,6 +843,15 @@ function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, s
       ? (formData.deepseekCustomBaseUrl ?? '').trim()
       : DEEPSEEK_OFFICIAL_BASE_URL;
   return env;
+}
+
+function buildCodexSubmitEnv(formData: AgentConfigFormData): Record<string, string> {
+  if (formData.codexAuthenticationMode !== 'api-key') {
+    return removeLodyCodexCustomProviderEnv(formData.env);
+  }
+  return buildLodyCodexCustomProviderEnv(formData.env, {
+    baseUrl: formData.codexBaseUrl ?? '',
+  });
 }
 
 function getPresetTokenEnvKey(
@@ -912,24 +968,35 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const initialForm = useMemo<AgentConfigFormData>(() => {
     if (mode.kind === 'edit') {
-      return hydrateDeepSeekEndpointForm({
-        name: mode.config.name,
-        cliType: mode.config.cliType,
-        agentType: mode.config.agentType,
-        customCommandLine: mode.config.customAcp
-          ? formatCustomAcpCommandLine(mode.config.customAcp)
-          : undefined,
-        runtimeOverrides: mode.config.runtimeOverrides,
-        prompt: mode.config.prompt ?? '',
-        env: mode.config.env || {},
-        titleGeneration: mode.config.titleGeneration,
-      });
+      return hydrateCodexAuthenticationForm(
+        hydrateDeepSeekEndpointForm({
+          name: mode.config.name,
+          cliType: mode.config.cliType,
+          agentType: mode.config.agentType,
+          customCommandLine: mode.config.customAcp
+            ? formatCustomAcpCommandLine(mode.config.customAcp)
+            : undefined,
+          runtimeOverrides: mode.config.runtimeOverrides,
+          prompt: mode.config.prompt ?? '',
+          env: mode.config.env || {},
+          titleGeneration: mode.config.titleGeneration,
+        })
+      );
     }
-    return hydrateDeepSeekEndpointForm({ ...DEFAULT_FORM, ...mode.initialForm });
+    return hydrateCodexAuthenticationForm(
+      hydrateDeepSeekEndpointForm({ ...DEFAULT_FORM, ...mode.initialForm })
+    );
   }, [mode]);
 
   const [formData, setFormData] = useState<AgentConfigFormData>(initialForm);
   const [submitting, setSubmitting] = useState(false);
+  const requestOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen && submitting) return;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange, submitting]
+  );
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
@@ -1031,6 +1098,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const isCustom = formData.cliType === 'custom';
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
+  const isCodexBuiltin = isCodexBuiltinForm(formData);
+  const codexAuthenticationMode = formData.codexAuthenticationMode ?? 'chatgpt';
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
@@ -1068,7 +1137,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           env: formData.env,
         }) ||
         (authRequired && usesProtocolAuthentication)
-      : authRequired && (isManagedBuiltin || usesProtocolAuthentication);
+      : authRequired &&
+        (isManagedBuiltin || usesProtocolAuthentication) &&
+        !(isCodexBuiltin && codexAuthenticationMode === 'api-key');
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1132,17 +1203,55 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // only safe once that daemon advertises the protocol. Derived here rather
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
+  const codexSubmitEnv = useMemo(() => {
+    if (
+      !isCodexBuiltin ||
+      codexAuthenticationMode !== 'api-key' ||
+      !isAllowedCredentialEndpoint(formData.codexBaseUrl ?? '')
+    ) {
+      return null;
+    }
+    try {
+      return buildCodexSubmitEnv(formData);
+    } catch {
+      return null;
+    }
+  }, [codexAuthenticationMode, formData, isCodexBuiltin]);
+  const codexCredentialProvisioningRequired = useMemo(() => {
+    if (!isCodexBuiltin || codexAuthenticationMode !== 'api-key') return false;
+    if (mode.kind === 'create' || formData.codexApiKey?.trim()) return true;
+    if (!codexSubmitEnv) return true;
+    return (
+      getLodyCodexCredentialBinding(mode.config) !==
+      getLodyCodexCredentialBinding({
+        cliType: formData.cliType,
+        agentType: formData.agentType,
+        customAcp: parsedCustomAcp ?? undefined,
+        runtimeOverrides: formData.runtimeOverrides,
+        env: codexSubmitEnv,
+      })
+    );
+  }, [
+    codexAuthenticationMode,
+    codexSubmitEnv,
+    formData,
+    isCodexBuiltin,
+    mode,
+    parsedCustomAcp,
+  ]);
   const backgroundManagedBuiltinSetup =
     machineSupportsProviderSetupProtocol(machine) &&
-    requiresBuiltinCreationVerification &&
-    usesDefaultManagedRuntime;
+    ((isCodexBuiltin && codexCredentialProvisioningRequired) ||
+      (requiresBuiltinCreationVerification && usesDefaultManagedRuntime));
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
-  const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
+  const buildSubmitPayload = useCallback((setupRevision?: string): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
       env = buildPresetEnv(activePreset, activeCredentialMode, formData);
     } else if (isDeepSeekBuiltinForm(formData)) {
       env = buildDeepSeekSubmitEnv(formData);
+    } else if (isCodexBuiltinForm(formData)) {
+      env = codexSubmitEnv ?? buildCodexSubmitEnv(formData);
     }
     const agentType = formData.agentType as AgentType;
     const titleGeneration = acpProvidesSessionTitle
@@ -1163,6 +1272,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       description: undefined,
       brandId: resolvedBrandId,
       ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
+      ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
+        ? {
+            codexApiKey: formData.codexApiKey?.trim(),
+            setupRevision,
+          }
+        : {}),
     };
   }, [
     activeCredentialMode,
@@ -1170,6 +1285,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     acpProvidesSessionTitle,
     agentConfigId,
     backgroundManagedBuiltinSetup,
+    codexCredentialProvisioningRequired,
+    codexSubmitEnv,
     formData,
     isCustom,
     isPreset,
@@ -1177,12 +1294,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     resolvedBrandId,
   ]);
   const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
-    const payload = buildSubmitPayload();
+    const payload = buildSubmitPayload(
+      codexCredentialProvisioningRequired ? crypto.randomUUID() : undefined
+    );
     const payloadKey = JSON.stringify(payload);
     if (lastPersistedPayloadKeyRef.current === payloadKey) return;
     await onSubmit(payload);
     lastPersistedPayloadKeyRef.current = payloadKey;
-  }, [buildSubmitPayload, onSubmit]);
+  }, [buildSubmitPayload, codexCredentialProvisioningRequired, onSubmit]);
 
   useEffect(() => {
     if (
@@ -1512,7 +1631,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     });
   }, [isPreset, titleSelectors, formData.titleGeneration?.configOptionValues]);
 
-  const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekProtectedEnv(formData.env) : formData.env;
+  const managesCodexEnvironment =
+    isCodexBuiltin &&
+    (codexAuthenticationMode === 'api-key' || getLodyCodexCustomProvider(formData.env) !== null);
+  const additionalEnv = isDeepSeekBuiltin
+    ? omitDeepSeekProtectedEnv(formData.env)
+    : managesCodexEnvironment
+      ? omitCodexManagedEnv(formData.env, [
+          CODEX_API_KEY_ENV,
+          CODEX_CONFIG_ENV,
+          LODY_CODEX_PROVIDER_STATE_ENV,
+        ])
+      : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
   const invalidateBuiltinVerification = () => {
@@ -1547,6 +1677,21 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const updateDeepSeekCustomBaseUrl = (value: string) => {
     invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, deepseekCustomBaseUrl: value }));
+  };
+
+  const updateCodexAuthenticationMode = (authenticationMode: CodexAuthenticationMode) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, codexAuthenticationMode: authenticationMode }));
+  };
+
+  const updateCodexApiKey = (value: string) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, codexApiKey: value }));
+  };
+
+  const updateCodexBaseUrl = (value: string) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, codexBaseUrl: value }));
   };
 
   const selectOption = (opt: AgentTypeOption) => {
@@ -1719,6 +1864,31 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         );
       }
     }
+    if (isCodexBuiltin && codexAuthenticationMode === 'api-key') {
+      if (
+        codexCredentialProvisioningRequired &&
+        (!machineSupportsProviderSetupProtocol(machine) ||
+          !machineSupportsCodexCustomEndpointCredentials(machine))
+      ) {
+        return t(
+          'agents.disableReason.codexCredentialProtocol',
+          'Update Lody on this machine to configure a Codex API key securely'
+        );
+      }
+      if (codexCredentialProvisioningRequired && !(formData.codexApiKey ?? '').trim()) {
+        return t('agents.disableReason.missingCodexApiKey', 'Please enter your Codex API Key');
+      }
+      const baseUrl = (formData.codexBaseUrl ?? '').trim();
+      if (!baseUrl) {
+        return t('agents.disableReason.missingCodexBaseUrl', 'Please enter a Base URL');
+      }
+      if (!isAllowedCredentialEndpoint(baseUrl)) {
+        return t(
+          'agents.disableReason.invalidCodexBaseUrl',
+          'Use HTTPS, or HTTP only for a loopback endpoint'
+        );
+      }
+    }
     if (activePreset && !(formData.presetToken ?? '').trim()) {
       return t('agents.disableReason.missingPresetToken', 'Please paste your {{preset}} token', {
         preset: t(activePreset.labelKey, activePreset.label),
@@ -1859,7 +2029,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         {isNarrowLayout && (
           <button
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={() => requestOpenChange(false)}
             aria-label={t('common.close', 'Close')}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -1971,7 +2141,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {isNarrowLayout && (
             <button
               type="button"
-              onClick={() => (canGoBack ? setMobileView('picker') : onOpenChange(false))}
+              onClick={() => (canGoBack ? setMobileView('picker') : requestOpenChange(false))}
               aria-label={
                 canGoBack
                   ? t('settings.agent.dialog.back', 'Back to type list')
@@ -2067,6 +2237,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               onApiKeyChange={updateDeepSeekApiKey}
               customBaseUrl={formData.deepseekCustomBaseUrl ?? ''}
               onCustomBaseUrlChange={updateDeepSeekCustomBaseUrl}
+            />
+          ) : null}
+
+          {isCodexBuiltin ? (
+            <CodexAuthenticationPanel
+              mode={codexAuthenticationMode}
+              onModeChange={updateCodexAuthenticationMode}
+              apiKey={formData.codexApiKey ?? ''}
+              onApiKeyChange={updateCodexApiKey}
+              baseUrl={formData.codexBaseUrl ?? ''}
+              onBaseUrlChange={updateCodexBaseUrl}
             />
           ) : null}
 
@@ -2381,7 +2562,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
           <Section
             title={
-              activePreset || isDeepSeekBuiltin
+              activePreset || isDeepSeekBuiltin || managesCodexEnvironment
                 ? t(
                     'settings.agent.dialog.section.envAdditional',
                     'Additional environment variables'
@@ -2414,11 +2595,32 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 )}
               </p>
             ) : null}
+            {!activePreset && managesCodexEnvironment ? (
+              <p className="mb-2 text-xs text-muted-foreground">
+                {t(
+                  'settings.agent.dialog.codex.envHint',
+                  'The generated CODEX_CONFIG and machine-local credential slot are managed above.'
+                )}
+              </p>
+            ) : null}
             <EnvVarsTextarea
               value={additionalEnv}
               onChange={(env) => {
-                if (!isDeepSeekBuiltin) {
+                if (!isDeepSeekBuiltin && !managesCodexEnvironment) {
                   updateEnvironment(env);
+                  return;
+                }
+                if (managesCodexEnvironment) {
+                  const managedKeys = [
+                    CODEX_API_KEY_ENV,
+                    CODEX_CONFIG_ENV,
+                    LODY_CODEX_PROVIDER_STATE_ENV,
+                  ];
+                  const next = omitCodexManagedEnv(env, managedKeys);
+                  for (const key of managedKeys) {
+                    if (formData.env[key]) next[key] = formData.env[key];
+                  }
+                  updateEnvironment(next);
                   return;
                 }
                 const next = omitDeepSeekProtectedEnv(env);
@@ -2446,7 +2648,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => requestOpenChange(false)}
             disabled={submitting}
             size="sm"
           >
@@ -2477,7 +2679,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogContent
         overlayClassName={
           nestedInDialog
@@ -2883,6 +3085,95 @@ function DeepSeekHarnessPanel({
             onChange={onApiKeyChange}
             label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
           />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function CodexAuthenticationPanel({
+  mode,
+  onModeChange,
+  apiKey,
+  onApiKeyChange,
+  baseUrl,
+  onBaseUrlChange,
+}: {
+  mode: CodexAuthenticationMode;
+  onModeChange: (value: CodexAuthenticationMode) => void;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
+  baseUrl: string;
+  onBaseUrlChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+      <Tabs
+        value={mode}
+        onValueChange={(value) => {
+          if (value === 'chatgpt' || value === 'api-key') onModeChange(value);
+        }}
+      >
+        <TabsList className="grid h-8 w-full grid-cols-2">
+          <TabsTrigger value="chatgpt" className="px-2.5 text-xs">
+            {t('settings.agent.dialog.codex.chatgptTab', 'ChatGPT')}
+          </TabsTrigger>
+          <TabsTrigger value="api-key" className="px-2.5 text-xs">
+            {t('settings.agent.dialog.codex.apiKeyTab', 'Base URL + API Key')}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="chatgpt" className="mt-3">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {t(
+              'settings.agent.dialog.codex.chatgptHelp',
+              'Use Codex with your ChatGPT account. Lody will ask you to sign in when verification needs it.'
+            )}
+          </p>
+        </TabsContent>
+        <TabsContent value="api-key" className="mt-3 space-y-3">
+          <Field
+            htmlFor="codex-base-url"
+            label={t('settings.agent.dialog.codex.baseUrlLabel', 'Base URL')}
+            hint={t(
+              'settings.agent.dialog.codex.baseUrlHelp',
+              'Required HTTPS endpoint with OpenAI Responses API support. Loopback HTTP is allowed for local development.'
+            )}
+          >
+            <Input
+              id="codex-base-url"
+              type="url"
+              autoComplete="off"
+              spellCheck={false}
+              value={baseUrl}
+              onChange={(event) => onBaseUrlChange(event.target.value)}
+              placeholder={t(
+                'settings.agent.dialog.codex.baseUrlPlaceholder',
+                'https://api.example.com/v1'
+              )}
+              className="h-9 font-mono"
+            />
+          </Field>
+          <Field
+            htmlFor="codex-api-key"
+            label={t('settings.agent.dialog.codex.apiKeyLabel', 'API Key')}
+            hint={t(
+              'settings.agent.dialog.codex.apiKeyHelp',
+              'Sent securely to this machine, stored locally, and injected only when Codex starts.'
+            )}
+            icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+          >
+            <Input
+              id="codex-api-key"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={apiKey}
+              onChange={(event) => onApiKeyChange(event.target.value)}
+              placeholder={t('settings.agent.dialog.codex.apiKeyPlaceholder', 'sk-XXXXXXXXXXXX')}
+              className="h-9 font-mono"
+            />
+          </Field>
         </TabsContent>
       </Tabs>
     </div>

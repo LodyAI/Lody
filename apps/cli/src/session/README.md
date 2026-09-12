@@ -180,6 +180,9 @@ fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
 `../lib/git-credential-helper-script.ts`. Session process trees are already correct —
 `prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
 [worktree/AGENTS.md](worktree/AGENTS.md).
+Provider credential hydration is deliberately earlier: both speculative preparation and cold
+startup capture the canonical AgentConfig before GitHub/session env injection, hydrate its
+machine-local secret, and only then merge the temporary env into the child-process launch.
 
 ### Commit identity
 

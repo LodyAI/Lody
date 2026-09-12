@@ -32,6 +32,9 @@ context/message-flow.md "Upstream".
 - `acp-authentication.ts` / `acp-authentication-output.ts` — the authentication lifecycle
   and the incremental conversion of bounded provider output into allowlisted authorization
   URLs, device codes, expiry, and Claude's optional browser-returned code input.
+- `provider-credential-store.ts` / `provider-credential-adapter.ts` — the provider-neutral
+  machine-local secret transaction and the adapters that bind a provider config to its launch
+  secret. Process-launch callers hydrate through this boundary without knowing the provider.
 - `acp-binary-manager.ts` — registry binary-distribution agents (tar/zip install).
 - `npx-cache.ts` — npx cache isolation plus poisoning detection/purge for resilient
   registry launches.
@@ -141,9 +144,20 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command, and everything else (registry and custom ACP) opens a
 temporary standard ACP connection in the same bounded lifecycle. Kimi runs `acp --login`;
 Grok runs the official `login --device-auth`; Claude Code runs the official
-`auth login --claudeai` subscription flow; Codex always runs the official
-`login --device-auth` ChatGPT flow so Web can complete authentication against a remote
-machine.
+`auth login --claudeai` subscription flow. Codex normally runs the official
+`login --device-auth` ChatGPT flow. A Codex provider configured with Base URL + API Key
+receives a custom `model_providers` entry through `CODEX_CONFIG` and sets
+`requires_openai_auth = false`. Its key arrives through encrypted authentication input and stays
+in the target machine's owner-only provider credential store. The generic store owns staging,
+rollback, finalization, reconciliation, enumeration, and launch hydration; a Codex adapter owns
+provider detection, binding identity, validation, and the final environment overlay. The key is
+injected only while the SHA-256 digest of its canonical launch binding matches. The raw binding
+and its environment are not copied into the credential file. Each successful credential
+publication embeds its non-secret setup revision in the Lody-owned provider state, so changing
+only the API key still changes the binding identity. Provisioning carries the renderer-confirmed
+digest and the daemon verifies it before secret input and again before credential staging. The
+published Flock generation therefore selects the old or new key across a crash at the commit
+boundary.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts
@@ -154,7 +168,10 @@ Grok and Codex authentication requirements come from ACP session creation becaus
 `codex login status` cannot account for custom model providers with
 `requires_openai_auth = false`. Because protocol authentication spans launch preparation,
 JSON-RPC requests, and process cleanup, the running slot also carries an `AbortController`
-that termination raises before any child exists.
+that termination raises before any child exists. Custom Codex provisioning keeps that same slot
+through setup synchronization, live probe, credential staging, and final publication. Cancel wins
+until the synchronous Flock commit boundary; after it the publication wins, and a flush failure is
+reported as uncertain durability rather than a cancelled or ordinary failed save.
 
 The real-process authentication test keeps method selection, versioned secret metadata, form
 submission, URL parsing, protocol stdout integrity, and process cleanup on one spawned ACP

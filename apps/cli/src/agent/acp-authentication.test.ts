@@ -2,7 +2,11 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
-import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
+import {
+  ACP_AUTHORIZATION_URL_MAX_LENGTH,
+  buildLodyCodexCustomProviderEnv,
+  LODY_CODEX_API_KEY_ENV,
+} from '@lody/shared';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,6 +52,123 @@ describe('AcpAuthenticationManager', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('accepts a managed Codex API key only through the secret interaction', async () => {
+    const storeCodexApiKey = vi.fn(async () => ({ publicationDurability: 'durable' as const }));
+    const spawnProcess = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: spawnProcess as never,
+    });
+    const result = manager.authenticate({
+      requestId: 'codex-credential',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+      storeCodexApiKey,
+      onProgress: (progress) => {
+        if (progress.status !== 'input-required') return;
+        expect(progress.form.fields).toEqual([
+          expect.objectContaining({ id: 'apiKey', type: 'secret' }),
+        ]);
+        expect(
+          manager.submitAuthenticationInput(
+            'codex-credential',
+            progress.interactionId,
+            JSON.stringify({ action: 'accept', content: { apiKey: 'sk-encrypted-input' } })
+          )
+        ).toEqual({ success: true, disposition: 'input-accepted' });
+      },
+    });
+
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
+    expect(storeCodexApiKey).toHaveBeenCalledWith(
+      'sk-encrypted-input',
+      expect.any(AbortSignal),
+      expect.any(Function)
+    );
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('requests a replacement key during explicit provisioning even when an old key is hydrated', async () => {
+    const storeCodexApiKey = vi.fn(async () => ({ publicationDurability: 'durable' as const }));
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn() as never,
+    });
+    const env = buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' });
+    const result = manager.authenticate({
+      requestId: 'codex-rotation',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: { ...env, [LODY_CODEX_API_KEY_ENV]: 'old-key' },
+      forceCodexApiKeyInput: true,
+      storeCodexApiKey,
+      onProgress: (progress) => {
+        if (progress.status !== 'input-required') return;
+        manager.submitAuthenticationInput(
+          'codex-rotation',
+          progress.interactionId,
+          JSON.stringify({ action: 'accept', content: { apiKey: 'new-key' } })
+        );
+      },
+    });
+
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
+    expect(storeCodexApiKey).toHaveBeenCalledWith(
+      'new-key',
+      expect.any(AbortSignal),
+      expect.any(Function)
+    );
+  });
+
+  it('rejects cancellation after provider publication crosses its commit boundary', async () => {
+    const committed = createDeferred<void>();
+    const finishFlush = createDeferred<void>();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: vi.fn() as never,
+    });
+    const result = manager.authenticate({
+      requestId: 'codex-commit-boundary',
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
+      forceCodexApiKeyInput: true,
+      storeCodexApiKey: async (_apiKey, _signal, markCommitted) => {
+        markCommitted();
+        committed.resolve();
+        await finishFlush.promise;
+        return { publicationDurability: 'durable' };
+      },
+      onProgress: (progress) => {
+        if (progress.status !== 'input-required') return;
+        manager.submitAuthenticationInput(
+          'codex-commit-boundary',
+          progress.interactionId,
+          JSON.stringify({ action: 'accept', content: { apiKey: 'new-key' } })
+        );
+      },
+    });
+
+    await committed.promise;
+    expect(manager.cancel('codex-commit-boundary')).toEqual({
+      success: true,
+      disposition: 'not-running',
+    });
+    finishFlush.resolve();
+
+    await expect(result).resolves.toEqual({
+      success: true,
+      disposition: 'authenticated',
+      publicationDurability: 'durable',
+    });
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {
