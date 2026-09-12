@@ -29,42 +29,62 @@ into one component at a time. Source-consumed; consumers compile it through
   `aria-invalid`, which `Field.Root` renders onto the control, so the ring and
   what a screen reader announces are one fact; `src/field/invalid.ts` owns that
   reading. StyleX cannot express an attribute selector, so it is read in JS.
-- A trigger reads `field` and the list it opens reads `popup`: the two are on
-  different elevation rungs and the list shares its vocabulary with a menu, not
-  with an input. `src/popup/surface.ts` holds the appearance both lists share,
-  the way `src/field/well.ts` holds the one the controls share.
+- A trigger reads `field` and the list it opens reads `popup`: different rungs,
+  and the list shares its vocabulary with a menu rather than an input.
+  `src/popup/surface.ts` holds the appearance the floating parts share, the way
+  `src/field/well.ts` holds the controls' and `src/dialog/surface.ts` the modals'.
 - `Select.Value` resolves its text from `Select.Root items`, never from the rows.
   A caller whose row text differs from its value states the list on the root as
   well, or the trigger names the raw value; `test/select.test.tsx` pins both.
-- `Select.Content` and `Combobox.Content` assemble Base UI's portal, positioner,
-  popup, list and scroll arrows so a caller writes rows rather than plumbing.
-  They mount into the nearest `PopupContainerProvider`, and switch to the
-  absolute positioning strategy when they do: a host container that centres
-  itself with `translate` is the containing block for `position: fixed`
-  descendants, and a viewport-anchored popup inside one lands at its own offset.
+- Every floating part's `Content` assembles Base UI's portal, positioner and
+  popup so a caller writes contents rather than plumbing, and takes the
+  positioning props outside. They mount into the nearest
+  `PopupContainerProvider`, switching to the absolute strategy when they do: a
+  container centred with `translate` is the containing block for `fixed`
+  descendants, so a viewport-anchored popup inside one lands at its own offset.
 - `Menu` is the dropdown menu; Base UI has no separate part for one and a second
   name would be a second thing to keep in step. `ContextMenu` and `Menubar`
   restate only the way in and re-export `Menu`'s rows. A menu reads `popup` and
   replaces exactly one of a list's declarations, its `--anchor-width`; the rest
   of the surface, and every row, is shared through `src/popup/surface.ts`.
 - A menu row's leading box sizes the glyph in it; a caller's icon must fill the
-  box rather than arrive at its library's default, because StyleX has no
-  descendant selector to reach it with. A checkbox or radio row's box holds its
-  mark only — Base UI unmounts the mark while the row is unticked, so an icon
-  sharing that box would move as the row toggles.
-- `Menu.Trigger` is Base UI's, unstyled: a menu is opened by whatever the surface
-  already had there, through `render={<Button …/>}`. Post-close focus is the
-  product's policy, passed as `finalFocus`; this package does not decide it.
+  box rather than take its library's default, because StyleX has no descendant
+  selector to reach it with. A checkbox or radio row's box holds its mark only —
+  Base UI unmounts the mark while unticked, so an icon there would move as the
+  row toggles.
+- Every trigger here is Base UI's, unstyled: a surface opens a menu, a popover or
+  a modal with whatever it already had there, through `render={<Button …/>}`.
+  Post-close focus is the product's policy, passed as `finalFocus`.
+- `Popover` reads `popup` too and replaces five of a list's declarations: the
+  anchor width, the row inset, and the three that make type a control's rather
+  than prose. `test/popover.test.tsx` pins that as a count.
+- Dialog, AlertDialog and Drawer are one family on the modal rung sharing
+  `dialog/surface.ts` and the `dialog` group; only the way in and what may
+  dismiss them differ. An outside press does not answer an alert dialog, but
+  Escape does. `Content` names its own panel to `PopupContainerProvider` and
+  holds it in state, not a ref: React attaches a child's refs before its
+  parent's, so a popup mounting in the same commit reads null and lands on the
+  body — the one case that mechanism exists to prevent.
+- There is no `Sheet`. A panel arriving from an edge promises it can be sent
+  back, so it is Base UI's `Drawer` — a viewport that lays the panel out, a
+  panel whose `transform` carries the drag — not a `Dialog` pinned to an edge,
+  which spends that property on its own centring. `side` is the writing
+  direction's edge and `Root` derives the physical swipe from it; `inset` is the
+  second axis: flush meets the window and squares two corners, inset floats at
+  `dialog.drawerInset` and keeps four.
+- `Tooltip` is the one floating part that does not read `popup`: the ladder
+  inverts it, `label` under `shadow.medium`. Base UI makes a tooltip visual-only
+  — no role, no `aria-describedby` — so every trigger states its own
+  `aria-label`; a migrated caller whose only name was its tooltip has no name.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
   document's palette — a light panel on a dark page would open a dark list.
-- A part that renders on the floating rung declares its own edge. Base UI moves
-  DOM focus onto the highlighted row, and the product shell rings any focused
-  `[tabindex]` through a zero-specificity `:where()` rule; a row states
-  `box-shadow: none` so no host can put a ring on it. `Combobox.Empty` stays
-  mounted so a screen reader has a live region, so it collapses through `:empty`
-  rather than being hidden — hiding it takes the region out of the tree.
+- A part on the floating or modal rung declares its own edge, which is no edge:
+  the shell rings any focused `[tabindex]` through a zero-specificity `:where()`
+  rule and Base UI focuses the highlighted row and the open panel, so both state
+  `box-shadow: none` / `outline: none`. `Combobox.Empty` stays mounted for its
+  live region and collapses through `:empty`; hiding it drops it from the tree.
 - Files that call `defineVars`, `createTheme` or `defineConsts` end in
   `.stylex.ts`. Their arguments are object literals; the compiler cannot
   evaluate helpers. Vars are imported from that file by a specifier ending in

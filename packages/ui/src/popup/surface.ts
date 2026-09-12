@@ -64,6 +64,54 @@ export const surface = stylex.create({
     overflowY: 'auto',
     overflowX: 'hidden',
   },
+  /**
+   * A popover surface: the same rung with content on it instead of rows.
+   *
+   * It replaces five declarations, the way `popupMenu` replaces one, and
+   * `test/popover.test.tsx` pins that as a count so a sixth cannot appear
+   * quietly. Two are layout: a list is the width of the control it belongs to
+   * and insets by 4px so a row can reach its edge, while a popover is opened by
+   * whatever the surface already had there and holds prose, which needs room
+   * rather than a row's bleed. The other three are the type — size, weight and
+   * tracking — stepping from the control rule to the prose rule, 14 at weight
+   * 400, because what is in a popover is sentences rather than the labels of
+   * commands. A control placed inside one brings its own step with it.
+   */
+  popupPanel: {
+    minWidth: 'auto',
+    gap: popup.panelGap,
+    padding: popup.panelPadding,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 400,
+    letterSpacing: 'normal',
+  },
+  /** A popover's title and the sentence under it: one block, not two. */
+  panelHeader: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  /**
+   * The popover's heading. It is not a dialog title — the rules reserve
+   * `headline` for a panel that owns the window — so it takes the control step
+   * the surface around it already speaks in, at the weight that makes it a
+   * heading.
+   */
+  panelTitle: {
+    margin: 0,
+    fontSize: popup.text,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 600,
+    letterSpacing: text.controlTracking,
+    color: popup.label,
+  },
+  /** What the heading is about, so the secondary label at the footnote step. */
+  panelDescription: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 400,
+    color: popup.description,
+  },
   /** Where the rise starts and ends: 4px below the resting position. */
   popupHidden: { opacity: 0, transform: `translateY(${popup.rise})` },
   /**
