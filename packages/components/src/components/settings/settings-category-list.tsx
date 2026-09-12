@@ -1,7 +1,7 @@
 import { useCallback, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bug, ChevronRight } from 'lucide-react';
-import { Card, CardContent } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { bugReportDialogOpenAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
@@ -259,20 +259,15 @@ export function SettingsCategoryGrid() {
               onClick={() => openCategory(category)}
               className="block text-left"
             >
-              <Card className="h-full hover:bg-hover transition-colors cursor-pointer">
-                <CardContent className="p-6">
-                  <div className="flex flex-col gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <category.icon className="h-6 w-6 text-primary" />
-                    </div>
-
-                    <div>
-                      <h3 className="font-semibold text-lg mb-1">{category.label}</h3>
-                      <p className="text-sm text-muted-foreground">{category.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <Card.Root interactive className="h-full">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <category.icon className="h-6 w-6 text-primary" />
+                </div>
+                <Card.Header>
+                  <Card.Title>{category.label}</Card.Title>
+                  <Card.Description>{category.description}</Card.Description>
+                </Card.Header>
+              </Card.Root>
             </button>
           ))}
       </div>

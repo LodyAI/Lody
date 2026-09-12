@@ -4,7 +4,7 @@ import { Loader2, Mail } from 'lucide-react';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 
@@ -31,87 +31,79 @@ export function ForgotPasswordPage({
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4 text-center">
-          <div className="flex justify-center">
-            <div className="rounded-full bg-primary/10 p-3">
-              <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
-            </div>
+      <Card.Root className="w-full max-w-md">
+        <div className="flex justify-center">
+          <div className="rounded-full bg-primary/10 p-3">
+            <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
           </div>
-          <div className="space-y-1">
-            <CardTitle
-              id="forgot-password-title"
-              as="h1"
-              className="text-2xl font-semibold tracking-tight"
-            >
-              {t('forgotPassword.title', 'Reset your password')}
-            </CardTitle>
-            <CardDescription>
-              {t(
-                'forgotPassword.description',
-                'Enter your account email and we will send you a password reset link.'
-              )}
-            </CardDescription>
+        </div>
+        <Card.Header className="text-center">
+          <Card.Title id="forgot-password-title" as="h1">
+            {t('forgotPassword.title', 'Reset your password')}
+          </Card.Title>
+          <Card.Description>
+            {t(
+              'forgotPassword.description',
+              'Enter your account email and we will send you a password reset link.'
+            )}
+          </Card.Description>
+        </Card.Header>
+        <form
+          onSubmit={onSubmit}
+          className="grid gap-4"
+          aria-labelledby="forgot-password-title"
+          aria-describedby={submitError ? 'forgot-password-error' : undefined}
+          aria-busy={submitting}
+        >
+          <div className="grid gap-2">
+            <UiField.Label htmlFor="forgot-password-email">
+              {t('forgotPassword.emailLabel', 'Email address')}
+            </UiField.Label>
+            <Input
+              id="forgot-password-email"
+              type="email"
+              autoComplete="email"
+              required
+              placeholder={t('forgotPassword.emailPlaceholder', 'you@example.com')}
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              disabled={submitting}
+            />
           </div>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={onSubmit}
-            className="grid gap-4"
-            aria-labelledby="forgot-password-title"
-            aria-describedby={submitError ? 'forgot-password-error' : undefined}
-            aria-busy={submitting}
-          >
-            <div className="grid gap-2">
-              <UiField.Label htmlFor="forgot-password-email">
-                {t('forgotPassword.emailLabel', 'Email address')}
-              </UiField.Label>
-              <Input
-                id="forgot-password-email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder={t('forgotPassword.emailPlaceholder', 'you@example.com')}
-                value={email}
-                onChange={(event) => onEmailChange(event.target.value)}
-                disabled={submitting}
-              />
-            </div>
 
-            {sent ? (
-              <Alert.Root tone="success">
-                <Alert.Description>
-                  {t(
-                    'forgotPassword.sent',
-                    'If an account exists for this email, a reset link has been sent.'
-                  )}
-                </Alert.Description>
-              </Alert.Root>
-            ) : null}
+          {sent ? (
+            <Alert.Root tone="success">
+              <Alert.Description>
+                {t(
+                  'forgotPassword.sent',
+                  'If an account exists for this email, a reset link has been sent.'
+                )}
+              </Alert.Description>
+            </Alert.Root>
+          ) : null}
 
-            {submitError !== null && submitError.length > 0 ? (
-              <Alert.Root tone="danger">
-                <Alert.Description id="forgot-password-error">{submitError}</Alert.Description>
-              </Alert.Root>
-            ) : null}
+          {submitError !== null && submitError.length > 0 ? (
+            <Alert.Root tone="danger">
+              <Alert.Description id="forgot-password-error">{submitError}</Alert.Description>
+            </Alert.Root>
+          ) : null}
 
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {t('forgotPassword.sending', 'Sending reset link...')}
-                </>
-              ) : (
-                t('forgotPassword.submit', 'Send reset link')
-              )}
-            </Button>
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('forgotPassword.sending', 'Sending reset link...')}
+              </>
+            ) : (
+              t('forgotPassword.submit', 'Send reset link')
+            )}
+          </Button>
 
-            <Button type="button" variant="ghost" onClick={onBackToLogin} disabled={submitting}>
-              {t('forgotPassword.backToLogin', 'Back to login')}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+          <Button type="button" variant="ghost" onClick={onBackToLogin} disabled={submitting}>
+            {t('forgotPassword.backToLogin', 'Back to login')}
+          </Button>
+        </form>
+      </Card.Root>
     </div>
   );
 }

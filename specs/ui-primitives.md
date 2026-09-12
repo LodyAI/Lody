@@ -159,6 +159,34 @@ reader, because its shape already says it, and it stops moving where a person
 has asked for less movement — while the mark that says work is under way keeps
 turning there, since it is the only thing saying the work has not stopped.
 
+Not everything on a surface reports or acts. Three things say what a page is
+made of while nothing is happening: a block that groups what belongs together, a
+word that states a fact about the thing beside it, and a line between the rows
+of a list. Each answers the question this system asks of every part — what its
+edge is — differently. The block's edge is the shadow that lifts it off the page.
+The word has no edge and no place on the ladder at all: it appears on a page, on
+a block, on a row of a list a person has opened and on a panel over the window,
+so what it is filled with is a film of its own colour over whatever it happens
+to sit on. The line is the edge, and it is the only one the system allows: it
+divides rows, never encloses a surface and never underlines a heading, and it
+says what it is to a screen reader rather than pretending to be decoration.
+
+A block is a panel one step nearer the page than the one that must be answered,
+and it is made of the same parts: a heading, a sentence about it, what a person
+came for, and the answers. It does not contain another of itself, and it is not a
+control — a surface may say that pressing the block does something, and then the
+surface provides what is pressed, because what a press does is the product's
+decision and not the block's.
+
+A word that states a fact says what kind of fact by tint alone, never by
+colouring the words: the colours this system gives to outcomes are tuned for a
+mark the size of a glyph rather than for text this small, and a word is never
+wordless, so the tint can carry the kind while the word carries the fact. It
+reports the same four outcomes a message does, and one more — that something is
+happening now — because that is live state and the system has a colour for it.
+It is never a control: nothing about it answers a pointer or takes focus, and a
+surface that needs those needs a button.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is
@@ -237,3 +265,11 @@ the migration of the Radix menus still owed to it are recorded in the
 The popover on that same surface, the modal rung the dialog family shares, the
 inverted tooltip, and the migration still owed to them are recorded in the
 [UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
+The three disclosures and the height a reveal animates are recorded in the
+[UI disclosure primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-disclosure-primitives.md);
+the messages, the waits, and the toast migration deferred with them are recorded
+in the
+[UI feedback primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-feedback-primitives.md).
+The card rung as a component, the badge that is on no rung, the one line the
+rules allow, and the Card callers still owed a flush surface are recorded in the
+[UI card, badge and separator note](../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md).

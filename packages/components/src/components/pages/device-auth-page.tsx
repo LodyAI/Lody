@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import { Input } from '@lody/ui/input';
 
 export interface DeviceAuthPageProps {
@@ -34,15 +34,15 @@ export function DeviceAuthPage({
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle id="device-auth-title" as="h1" className="text-2xl">
+      <Card.Root className="w-full max-w-md">
+        <Card.Header className="text-center">
+          <Card.Title id="device-auth-title" as="h1">
             {t('device.title')}
-          </CardTitle>
-          <CardDescription>{t('device.description')}</CardDescription>
-        </CardHeader>
+          </Card.Title>
+          <Card.Description>{t('device.description')}</Card.Description>
+        </Card.Header>
 
-        <CardContent>
+        <div>
           {success ? (
             <div className="space-y-4">
               <Alert.Root tone="success">
@@ -107,8 +107,8 @@ export function DeviceAuthPage({
               </form>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Card.Root>
     </div>
   );
 }

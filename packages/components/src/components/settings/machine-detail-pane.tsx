@@ -25,7 +25,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Switch } from '@lody/ui/switch';
@@ -357,15 +357,10 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
   const metaBadges = (
     <>
       {isLocal && (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          {t('workspace.machines.thisDevice', 'This device')}
-        </Badge>
+        <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge>
       )}
       {ownerName && !isOwn && (
-        <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
-          <UserRound className="h-2.5 w-2.5" />
-          {ownerName}
-        </Badge>
+        <Badge icon={<UserRound className="h-3 w-3" />}>{ownerName}</Badge>
       )}
       {isMobile && (
         <span
@@ -378,13 +373,8 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
           )}
         />
       )}
-      <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
-        <Laptop className="h-2.5 w-2.5" />
-        {machine.os || '-'}
-      </Badge>
-      <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
-        {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
-      </Badge>
+      <Badge icon={<Laptop className="h-3 w-3" />}>{machine.os || '-'}</Badge>
+      <Badge>{machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}</Badge>
     </>
   );
 

@@ -28,7 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Switch } from '@lody/ui/switch';
@@ -295,9 +295,7 @@ export function McpServerRow({
               <span className="min-w-0 truncate text-sm font-medium leading-tight">
                 {server.name}
               </span>
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {MCP_TRANSPORT_LABELS[server.transport]}
-              </Badge>
+              <Badge>{MCP_TRANSPORT_LABELS[server.transport]}</Badge>
             </span>
             <span className="mt-0.5 block truncate font-mono text-[11px] leading-tight text-muted-foreground">
               {describeMcpConnection(server.connection) ?? '—'}

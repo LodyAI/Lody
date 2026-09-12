@@ -2,8 +2,9 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Github, Loader2 } from 'lucide-react';
 
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface DesktopGithubInstallPageProps {
@@ -22,35 +23,26 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-md"
       >
-        <Card className="relative overflow-hidden rounded-2xl border-border/60 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.25)]">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"
-          />
-          <CardHeader className="items-center gap-8 px-8 pt-11 pb-6 text-center">
-            <HandoffVisual />
-            <div className="flex flex-col items-center gap-3.5">
-              <CardTitle className="text-2xl font-semibold tracking-tight">
-                {t('desktopGithubInstall.title', 'Continue in Lody Desktop')}
-              </CardTitle>
-              <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                {t('desktopGithubInstall.opening', 'Opening Lody Desktop…')}
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="px-8 pb-9">
-            {deepLink ? (
-              <Button render={<a href={deepLink} />} size="large" className="w-full">
-                {openLabel}
-              </Button>
-            ) : (
-              <Button size="large" className="w-full" disabled>
-                {openLabel}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        <Card.Root>
+          <HandoffVisual />
+          <Card.Header className="items-center text-center">
+            <Card.Title as="h1">
+              {t('desktopGithubInstall.title', 'Continue in Lody Desktop')}
+            </Card.Title>
+            <Badge tone="running" icon={<Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}>
+              {t('desktopGithubInstall.opening', 'Opening Lody Desktop…')}
+            </Badge>
+          </Card.Header>
+          {deepLink ? (
+            <Button render={<a href={deepLink} />} size="large" className="w-full">
+              {openLabel}
+            </Button>
+          ) : (
+            <Button size="large" className="w-full" disabled>
+              {openLabel}
+            </Button>
+          )}
+        </Card.Root>
       </motion.div>
     </div>
   );

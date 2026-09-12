@@ -19,6 +19,9 @@ behavior.
 | `src/tooltip`       | The inverted chip that names what is under the pointer               |
 | `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows   |
 | `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back |
+| `src/card`          | The card rung as a component: a block of a page, and its tokens      |
+| `src/badge`         | A standing fact about the thing beside it, on no rung at all         |
+| `src/separator`     | The one line the rules allow: between the rows of a list or a table  |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -374,6 +377,67 @@ mark and not the state, and where it goes is the surface's decision.
   <Spinner size="small" label={null} />
   Saving
 </Button>
+```
+
+A `Card` is the elevation ladder's card step made a component, and its parts are
+a Dialog's: what separates a panel that owns the window from a block that owns a
+region of a page is the rung and the heading step, not what either is made of.
+It takes the same `headline` a dialog's title does, because the rules reserve
+`title` for a page that is a page.
+
+```tsx
+<Card.Root>
+  <Card.Header>
+    <Card.Title as="h2">Worktree setup</Card.Title>
+    <Card.Description>Commands that run once, before the agent starts.</Card.Description>
+  </Card.Header>
+  <Input placeholder="pnpm install" />
+  <Card.Footer>
+    <Button variant="ghost" size="small">Reset</Button>
+    <Button size="small" onClick={save}>Save</Button>
+  </Card.Footer>
+</Card.Root>
+```
+
+A card **does not nest**: two of them one inside the other are the same fill
+twice in the light palette, where the card rung and the page are one white. A
+block inside a card is the region rung, which a surface lays out. And a card
+renders no control of its own — `interactive` marks it as the pressable thing
+and answers the pointer with `card.hover`, while the button or the link stays
+the caller's, because what a press does is a product decision.
+
+A `Badge` is a standing fact about the thing beside it, and the one part of this
+system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
+so it takes no background from the ladder. Its tone is a *film* of that tone
+over whatever is underneath, and its words stay ink in all five — `warning` is
+2.8:1 on a near-white surface, a colour for a 16px mark rather than for 11px
+text, and a badge is never wordless, so the tint carries the tone and the word
+carries the fact.
+
+```tsx
+<Badge>Plus</Badge>
+<Badge tone="running">Opening Lody Desktop…</Badge>
+<Badge tone="danger">Failed</Badge>
+<Badge icon={<Laptop className="h-3 w-3" />}>macOS</Badge>
+```
+
+The tones are the four a message reports plus `running`, which `Progress` adds
+for the same reason: something being reached is live state, which is what
+`accent` is for. There is no hover, no focus ring and no filled variant — a chip
+a person can press is a `Button`. The leading box is the caller's glyph, the way
+a menu row's is, and a badge neither grows nor shrinks: a surface that must cap a
+long one caps the badge itself, since a chip that shrank would be clipped by a
+tight row rather than by a decision.
+
+A `Separator` is the one line the rules allow: between the rows of a list or a
+table, never around a surface — that is a shadow — and never under a header,
+which is a gap. It is announced rather than hidden, because a line here is never
+decoration, and it carries no margin of its own: where it sits in a stack is the
+surface's layout.
+
+```tsx
+<Separator />
+<Separator orientation="vertical" />
 ```
 
 The state mapping every control in this family shares — rest, placeholder,

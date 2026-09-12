@@ -48,7 +48,7 @@ import {
 } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Switch } from '@lody/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -253,9 +253,7 @@ export function DesktopMachineMenu({
           <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{label}</span>
           {selectedIsLocal ? (
-            <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-              {t('chat.machineSelector.local', 'Local')}
-            </Badge>
+            <Badge>{t('chat.machineSelector.local', 'Local')}</Badge>
           ) : null}
           {selectedOption?.isPrivate ? (
             <LockKeyhole
@@ -287,9 +285,7 @@ export function DesktopMachineMenu({
               {option.label}
             </span>
             {option.value === visibleLocalMachineId ? (
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {t('chat.machineSelector.local', 'Local')}
-              </Badge>
+              <Badge>{t('chat.machineSelector.local', 'Local')}</Badge>
             ) : null}
             {option.isPrivate ? (
               <Tooltip delayDuration={250}>

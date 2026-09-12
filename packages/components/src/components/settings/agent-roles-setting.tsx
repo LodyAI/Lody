@@ -33,7 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { settingContainerClass } from '.';
@@ -259,15 +259,13 @@ export function AgentRoleRow({
               <span className="min-w-0 truncate text-sm font-medium leading-tight">
                 {role.name}
               </span>
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              <Badge>
                 {role.visibility === 'workspace'
                   ? t('settings.agentRoles.visibility.workspace')
                   : t('settings.agentRoles.visibility.private')}
               </Badge>
               {role.promptPrefix ? (
-                <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
-                  {t('settings.agentRoles.hasPrompt')}
-                </Badge>
+                <Badge>{t('settings.agentRoles.hasPrompt')}</Badge>
               ) : null}
             </span>
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">

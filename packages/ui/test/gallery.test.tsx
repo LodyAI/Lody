@@ -1,6 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
+import { badge } from '../src/badge/badge.tokens.stylex';
+import { card } from '../src/card/card.tokens.stylex';
 import { dialog } from '../src/dialog/dialog.tokens.stylex';
 import { disclosure } from '../src/disclosure/disclosure.tokens.stylex';
 import { feedback } from '../src/feedback/feedback.tokens.stylex';
@@ -219,6 +221,33 @@ describe('UiGallery', () => {
     expect(board).toContain('indeterminate');
     for (const name of tokenNames(feedback)) {
       expect(board, `feedback.${name} is missing from the board`).toContain(`feedback.${name}`);
+    }
+  });
+
+  test('shows the card rung as a component, and names every token it takes', () => {
+    // A card is not portalled, so what the board holds is the real thing in
+    // both of its states: a block with a heading, a body and the answers, and
+    // the same block marked as the pressable thing inside the caller's button.
+    expect(board).toContain('Worktree setup');
+    expect(board).toContain('<h4');
+    expect(board).toContain('<button type="button"');
+    for (const name of tokenNames(card)) {
+      expect(board, `card.${name} is missing from the board`).toContain(`card.${name}`);
+    }
+  });
+
+  test('shows a badge on three rungs, a line in both axes, and their tokens', () => {
+    // A badge is on no rung, and the board is where that either holds or does
+    // not: the same four tones sit on the page, on a card and on the floating
+    // rung where the ladder's own named fills collapse.
+    for (const rung of ['on a page', 'on a card', 'on a menu']) {
+      expect(board, `the badge row ${rung} is missing from the board`).toContain(rung);
+    }
+    // The line is the primitive rather than a hand-drawn div, in both axes.
+    expect(board).toContain('role="separator"');
+    expect(board).toContain('aria-orientation="vertical"');
+    for (const name of tokenNames(badge)) {
+      expect(board, `badge.${name} is missing from the board`).toContain(`badge.${name}`);
     }
   });
 

@@ -1,6 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { badgePaletteTheme } from '../badge/badge.tokens.stylex';
 import { buttonPaletteTheme } from '../button/button.tokens.stylex';
+import { cardPaletteTheme } from '../card/card.tokens.stylex';
 import { dialogPaletteTheme } from '../dialog/dialog.tokens.stylex';
 import { disclosurePaletteTheme } from '../disclosure/disclosure.tokens.stylex';
 import { feedbackPaletteTheme } from '../feedback/feedback.tokens.stylex';
@@ -17,7 +19,9 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * it; a group declared only at the document root keeps the root palette.
  */
 const componentPaletteThemes = [
+  badgePaletteTheme,
   buttonPaletteTheme,
+  cardPaletteTheme,
   dialogPaletteTheme,
   disclosurePaletteTheme,
   feedbackPaletteTheme,
