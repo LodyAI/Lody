@@ -660,7 +660,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   const capturedWriters = new WeakMap<object, StoredHistorySnapshot>();
   let snapshotSourceClosed = false;
 
-  const snapshotRead = (snapshot: object): readonly SessionTurn[] => {
+  const snapshotRead = async (snapshot: object): Promise<readonly SessionTurn[]> => {
     if (snapshotSourceClosed)
       throw new SessionSnapshotError('source_closed', 'The session store is closed.');
     if (!issuedSnapshots.has(snapshot))
@@ -672,7 +672,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
 
   const snapshots: LoroSessionSnapshotService = {
     capabilities: { copy: true },
-    capture() {
+    async capture() {
       if (snapshotSourceClosed)
         throw new SessionSnapshotError('source_closed', 'The session store is closed.');
       // One consistent capture of the stored document, never a stitched read.
@@ -709,7 +709,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       // Idempotent: releasing an already-released handle is a no-op.
       issuedSnapshots.delete(snapshot);
     },
-    copyFrom(snapshot, selection) {
+    async copyFrom(snapshot, selection) {
       if (snapshotSourceClosed)
         throw new SessionSnapshotError('source_closed', 'The session store is closed.');
       const issuer = sessionSnapshotContext(snapshot);

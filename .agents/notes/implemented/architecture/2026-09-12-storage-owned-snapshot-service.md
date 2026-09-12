@@ -83,9 +83,14 @@ back-compat surface (the latter now delegates to the port command, reconstructin
 - Cross-store `copyFrom` is admitted only between stores of the same backend (Loro);
   memory-to-Loro or Loro-to-memory is `cross_store`. Fork therefore goes through the
   port, while the port's handle scoping stays meaningful.
-- `copyFrom` returns a synchronous `SessionCommandResult` and does not run the adapter's
-  async `afterAccept` hook; the writer preflights every rejection before mutation, so an
-  accepted receipt still means the copy is applied.
+- The public handle/service methods are `Promise`-returning: `capabilities` and `release`
+  stay synchronous, while `capture()`, `read()` and `copyFrom()` are `async`. This was
+  revised from the initial synchronous signature so a database-backed store can capture,
+  read and copy without blocking the caller; the Loro adapter still performs its capture,
+  detached read and copy synchronously inside the async body (no `await` gap), so its
+  atomicity is unchanged and the memory double is a genuinely delayed async peer.
+  `copyFrom` does not run the adapter's async `afterAccept` hook; the writer preflights
+  every rejection before mutation, so an accepted receipt still means the copy is applied.
 - `updateHistoryWithRollback` propagates business throws instead of wrapping them in
   `rejected`: the CLI's message-mapped error paths depend on that, and such a throw
   proves nothing was applied (it happens inside the writer's produce step).

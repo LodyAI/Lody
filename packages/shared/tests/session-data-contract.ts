@@ -529,28 +529,28 @@ export function runSessionDataContract(
       expect(() => snapshots.release(forged)).toThrowError(
         expect.objectContaining({ code: 'invalid_snapshot' })
       );
-      expect(() => snapshots.copyFrom(forged, [])).toThrowError(
+      await expect(snapshots.copyFrom(forged, [])).rejects.toThrowError(
         expect.objectContaining({ code: 'invalid_snapshot' })
       );
 
       // Only the issuing store can release a handle.
       const other = await create();
-      const foreign = other.data.snapshots!.capture();
+      const foreign = await other.data.snapshots!.capture();
       expect(() => snapshots.release(foreign)).toThrowError(
         expect.objectContaining({ code: 'cross_store' })
       );
 
       // Release is idempotent; a released handle is refused by read and copyFrom.
-      const own = snapshots.capture();
+      const own = await snapshots.capture();
       expect(own.sessionId).toBe(sessionId);
-      expect(own.read()).toEqual([]);
+      await expect(own.read()).resolves.toEqual([]);
       snapshots.release(own);
       expect(() => snapshots.release(own)).not.toThrow();
-      expect(() => own.read()).toThrowError(expect.objectContaining({ code: 'released' }));
-      expect(() => snapshots.copyFrom(own, [])).toThrowError(
+      await expect(own.read()).rejects.toThrowError(expect.objectContaining({ code: 'released' }));
+      await expect(snapshots.copyFrom(own, [])).rejects.toThrowError(
         expect.objectContaining({ code: 'released' })
       );
-      expect(() => snapshots.copyFrom(own, [])).toThrowError(SessionSnapshotError);
+      await expect(snapshots.copyFrom(own, [])).rejects.toThrowError(SessionSnapshotError);
     });
 
     it('copies a cross-store selection, retaining opaque stored items and rejecting colliding ids', async () => {
@@ -564,17 +564,18 @@ export function runSessionDataContract(
       await source.commands.appendTurn(userTurn('b'));
       // A stored item carries a legacy subfield the caller never authored.
       sourceHarness.injectStoredItem('a', { type: 'text', text: 'legacy', legacyField: 7 });
-      const snapshot = sourceSnapshots.capture();
+      const snapshot = await sourceSnapshots.capture();
 
       // read() is the handle's own full, detached read of the captured source:
       // it sees the stored content, and mutating one copy cannot change it.
-      expect(snapshot.read().map((turn) => turn.id)).toEqual(['a', 'b']);
-      expect(snapshot.read()[0]!.items).toEqual([
+      const captured = (await snapshot.read()) as SessionTurn[];
+      expect(captured.map((turn) => turn.id)).toEqual(['a', 'b']);
+      expect(captured[0]!.items).toEqual([
         { type: 'text', text: 'hello' },
         { type: 'text', text: 'legacy', legacyField: 7 },
       ]);
-      (snapshot.read() as SessionTurn[]).push(userTurn('mutated'));
-      expect(snapshot.read().map((turn) => turn.id)).toEqual(['a', 'b']);
+      captured.push(userTurn('mutated'));
+      expect((await snapshot.read()).map((turn) => turn.id)).toEqual(['a', 'b']);
 
       const targetHarness = await create();
       const target = targetHarness.data;
@@ -598,7 +599,7 @@ export function runSessionDataContract(
       // The fork flow: a target store copies a source store's snapshot. The
       // copy is prepended, the opaque subfield comes from the captured source,
       // the target's initialization row is retained and the source is untouched.
-      const copied = target.snapshots!.copyFrom(snapshot, selection);
+      const copied = await target.snapshots!.copyFrom(snapshot, selection);
       expect(copied.status).toBe('accepted');
       if (copied.status === 'accepted') {
         expect(copied.receipt.kind).toBe('copy');
@@ -612,7 +613,7 @@ export function runSessionDataContract(
       expect(sourceHarness.readStored().map((turn) => turn.id)).toEqual(['a', 'b']);
 
       // A colliding id in the target store is a validated pre-write rejection.
-      const collision = target.snapshots!.copyFrom(snapshot, selection);
+      const collision = await target.snapshots!.copyFrom(snapshot, selection);
       expect(collision.status).toBe('rejected');
       if (collision.status === 'rejected') expect(collision.reason.code).toBe('conflict');
       expect(targetHarness.readStored().map((turn) => turn.id)).toEqual(['a', 'c']);
@@ -626,15 +627,15 @@ export function runSessionDataContract(
       if (snapshots.capabilities.copy) return; // this backend supports the writer-owned ops
 
       await data.commands.appendTurn(userTurn('a'));
-      const snapshot = snapshots.capture();
+      const snapshot = await snapshots.capture();
       // A valid handle reaches the honest capability report...
-      const result = snapshots.copyFrom(snapshot, [userTurn('a')]);
+      const result = await snapshots.copyFrom(snapshot, [userTurn('a')]);
       expect(result.status).toBe('rejected');
       if (result.status === 'rejected') expect(result.reason.code).toBe('unsupported');
       // ...while a handle from another store is still a foreign scope.
       const other = await create();
-      const foreign = other.data.snapshots!.capture();
-      expect(() => snapshots.copyFrom(foreign, [])).toThrowError(
+      const foreign = await other.data.snapshots!.capture();
+      await expect(snapshots.copyFrom(foreign, [])).rejects.toThrowError(
         expect.objectContaining({ code: 'cross_store' })
       );
       // The double never fakes the writer-owned guarded operations either.

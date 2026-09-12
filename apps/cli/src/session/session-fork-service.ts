@@ -551,7 +551,7 @@ export class SessionForkService {
     // repaired session can never drift from a normally-forked one's title.
     const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
-      sourceSnapshot.read() as SessionHistoryInput[],
+      (await sourceSnapshot.read()) as SessionHistoryInput[],
       spec.sourceTurnId,
       sourceSessionId,
       sourceTitle,
@@ -868,7 +868,7 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        const copyResult = targetDoc.sessionData.snapshots.copyFrom(
+        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
@@ -1018,7 +1018,7 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        const copyResult = targetDoc.sessionData.snapshots.copyFrom(
+        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );

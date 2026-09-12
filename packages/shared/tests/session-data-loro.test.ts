@@ -203,7 +203,7 @@ describe('loro session data adapter', () => {
     });
     const snapshots = data.snapshots;
     expect(snapshots.capabilities.copy).toBe(true);
-    const snapshot = snapshots.capture();
+    const snapshot = await snapshots.capture();
     expect(snapshot.sessionId).toBe(contractSessionId);
     await data.commands.appendTurn({
       id: 'turn',
@@ -215,13 +215,13 @@ describe('loro session data adapter', () => {
     // The store's teardown hook invalidates the source of every handle.
     snapshots.closeSource();
     const closed = expect.objectContaining({ code: 'source_closed' });
-    expect(() => snapshots.capture()).toThrowError(closed);
+    await expect(snapshots.capture()).rejects.toThrowError(closed);
     expect(() => snapshots.release(snapshot)).toThrowError(closed);
-    expect(() => snapshot.read()).toThrowError(closed);
-    expect(() => snapshots.copyFrom(snapshot, [])).toThrowError(closed);
+    await expect(snapshot.read()).rejects.toThrowError(closed);
+    await expect(snapshots.copyFrom(snapshot, [])).rejects.toThrowError(closed);
   });
 
-  it('reports source_closed on a cross-store copy after the source store closes', () => {
+  it('reports source_closed on a cross-store copy after the source store closes', async () => {
     const sourceDoc = new Loro();
     const source = createLoroSessionData({
       sessionId: contractSessionId,
@@ -234,13 +234,15 @@ describe('loro session data adapter', () => {
       doc: targetDoc,
       durability: 'unavailable',
     });
-    const snapshot = source.snapshots.capture();
+    const snapshot = await source.snapshots.capture();
     source.snapshots.closeSource();
     // The target store stays open, but the handle's source is gone.
-    expect(() => target.snapshots.copyFrom(snapshot, [])).toThrowError(
+    await expect(target.snapshots.copyFrom(snapshot, [])).rejects.toThrowError(
       expect.objectContaining({ code: 'source_closed' })
     );
-    expect(() => snapshot.read()).toThrowError(expect.objectContaining({ code: 'source_closed' }));
+    await expect(snapshot.read()).rejects.toThrowError(
+      expect.objectContaining({ code: 'source_closed' })
+    );
   });
 
   it('binds an imported history write, its stored baseline and the cursor with no await gap', async () => {

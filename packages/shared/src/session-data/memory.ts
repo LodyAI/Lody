@@ -546,7 +546,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
 
   const snapshots: SessionSnapshotService = {
     capabilities: { copy: false },
-    capture() {
+    async capture() {
       // One consistent capture: a single detached clone of the whole store.
       const captured = turns.map(clone);
       const snapshot = mintSessionSnapshot(
@@ -558,7 +558,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
           isClosed: () => false,
         },
         sessionId,
-        () => {
+        async () => {
           if (!issuedSnapshots.has(snapshot))
             throw new SessionSnapshotError('released', 'The snapshot was released.');
           return captured.map(clone);
@@ -582,7 +582,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       // Idempotent: releasing an already-released handle is a no-op.
       issuedSnapshots.delete(snapshot);
     },
-    copyFrom(snapshot) {
+    async copyFrom(snapshot) {
       // Handle validation first: a bad handle throws, only a valid one reports
       // the honest `unsupported` result.
       checkSessionSnapshot(snapshot, snapshotToken, false);

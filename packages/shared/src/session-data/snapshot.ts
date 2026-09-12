@@ -38,9 +38,10 @@ export interface SessionSnapshot {
   /**
    * One consistent, detached full read of the captured stored history. Throws
    * `SessionSnapshotError('released' | 'source_closed')` once the handle's
-   * capability is gone.
+   * capability is gone. Async so a database backend can read its snapshot
+   * without blocking the caller (the Loro adapter answers synchronously).
    */
-  read(): readonly SessionTurn[];
+  read(): Promise<readonly SessionTurn[]>;
 }
 
 export type SessionSnapshotErrorCode =
@@ -67,8 +68,12 @@ export class SessionSnapshotError extends Error {
  */
 export interface SessionSnapshotService {
   readonly capabilities: { readonly copy: boolean };
-  /** One consistent capture of the store's stored history. */
-  capture(): SessionSnapshot;
+  /**
+   * One consistent capture of the store's stored history. Async so a database
+   * backend can capture without blocking (the Loro adapter answers
+   * synchronously and its handle read is a detached clone).
+   */
+  capture(): Promise<SessionSnapshot>;
   /** Invalidate a handle. Idempotent for this store's already-released handles. */
   release(snapshot: SessionSnapshot): void;
   /**
@@ -80,7 +85,10 @@ export interface SessionSnapshotService {
    * backend admits handles captured by another store of the same backend (the
    * fork flow).
    */
-  copyFrom(snapshot: SessionSnapshot, selection: readonly SessionTurn[]): SessionCommandResult;
+  copyFrom(
+    snapshot: SessionSnapshot,
+    selection: readonly SessionTurn[]
+  ): Promise<SessionCommandResult>;
 }
 
 export type SessionSnapshotBackend = 'loro' | 'memory';
@@ -110,7 +118,7 @@ const issuedByStore = new WeakMap<object, SessionSnapshotIssuerContext>();
 export function mintSessionSnapshot(
   context: SessionSnapshotIssuerContext,
   sessionId: SessionId,
-  read: () => readonly SessionTurn[]
+  read: () => Promise<readonly SessionTurn[]>
 ): SessionSnapshot {
   const snapshot = Object.freeze({ sessionId, read }) as unknown as SessionSnapshot;
   issuedByStore.set(snapshot, context);

@@ -67,8 +67,12 @@ Fork 在源上捕获（`sourceDoc.sessionData.snapshots.capture()`）、用 `sna
 
 - 跨存储 `copyFrom` 只允许同后端（Loro）之间；memory→Loro 或 Loro→memory 判
   `cross_store`。因此 fork 走端口，而端口句柄的作用域仍然有效。
-- `copyFrom` 同步返回 `SessionCommandResult`，不经过适配器的异步 `afterAccept` 钩子；
-  writer 在写入前预检所有拒绝，因此 accepted 回执仍表示拷贝已应用。
+- 公共句柄/服务方法改为返回 `Promise`：`capabilities` 与 `release` 保持同步，而
+  `capture()`、`read()`、`copyFrom()` 为 `async`。这是对最初同步签名的修订，使数据库后
+  端无需阻塞调用方即可 capture/read/copy；Loro 适配器仍在 async 函数体内同步完成
+  capture、分离式读取与拷贝（无 `await` 间隙），原子性不变，memory 双实现则是真正有延迟
+  的异步对端。`copyFrom` 不经过适配器的异步 `afterAccept` 钩子；writer 在写入前预检所有
+  拒绝，因此 accepted 回执仍表示拷贝已应用。
 - `updateHistoryWithRollback` 原样传播业务异常而不是包成 `rejected`：CLI 按消息映射错误
   码的路径依赖这一点，且这类异常发生在 writer 的 produce 步骤内、证明未写入。
 - 回执 kind 联合新增 `'copy'`、`'rollback'`、`'import-history'`；没有消费方对它做穷举
