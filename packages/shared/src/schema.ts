@@ -97,9 +97,11 @@ export type InitializingStage = 'git-clone' | 'managed-runtime' | 'acp' | 'resum
 export type SessionRunningActivity = 'image_generation';
 export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
+export type SessionRunningPhase = 'finalizing';
+
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity }
+  | { type: 'running'; activity?: SessionRunningActivity; phase?: SessionRunningPhase }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';

@@ -7,15 +7,16 @@ Translation: current
 
 ## Abstract
 
-After the assistant turn is stamped `finished`, the desktop footer already shows the completion time and duration. Session presence can still be `running` during host finalization, so the activity row kept saying "Thinking" under that finished bubble. The row is omitted when the last history entry is a finished assistant **and** live presence is leftover `running`. Goal resume has no user row; thinking presence is published only after `openAssistantEntry`, so the gap stays on `initializing` and the presence-driven label remains.
+After the assistant turn is stamped `finished`, the desktop footer already shows the completion time and duration. Session presence stays `running` until the turn scope releases, so the activity row kept saying "Thinking" under that finished bubble. Host and viewer deliver presence and history on separate planes, so a finished last bubble cannot prove the live turn has stopped. The execution owner now publishes an optional `running.phase = finalizing` at the shared prompt/autoPrompt exit; the UI hides Thinking from that phase only.
 
 ## Decision
 
-- Hide leftover Thinking under a finished last assistant while presence is `running` (same-turn finalize tail).
-- Do not hide for `initializing` or `requestPermission`. Goal resume stays on initializing until the assistant entry exists.
-- Publish `thinking` presence after `openAssistantEntry` on continueSession, not before prompt setup.
-- Do not clear presence on `history.finished`.
+- Add optional `phase: 'finalizing'` on `{ type: 'running' }`. Do not add `activity: 'finalizing'`; old `ActiveSessionStatusSchema` would reject the enum and drop the whole presence entry.
+- `markPromptWorkingEnded` reports `finalizing` without clearing presence. `markPromptWorkingStarted` already restores `thinking`, including autoPrompt restart.
+- UI hides the activity row only when live presence is `running` with `phase === 'finalizing'`. Do not hide from last-history `finished`.
+- Keep the original continueSession thinking order. An earlier `openAssistantEntry` already ran before initializing; moving thinking after the inner open cannot fence lagged viewer history.
+- Old clients strip unknown `phase` and keep `running`. Mixed old hosts without `phase` still show leftover Thinking.
 
 ## Evidence and limits
 
-A Windows 0.93.3 tester confirmed leftover Thinking under a finished first Codex reply, then it disappeared. Unit tests cover last-entry finished vs open vs later user turn, initializing/permission not hidden, and continueSession thinking-after-assistant-entry order. Packaged Electron and a live goal-resume GUI click were not retested here.
+A Windows 0.93.3 tester confirmed leftover Thinking under a finished first Codex reply, then it disappeared. Independent review reproduced a goal resume where presence was `running` and prompt was in flight while the viewer's history still ended on the previous finished assistant. Unit tests cover presence-only hide, old running parsers keeping the session, goal resume with lagged history, usage-flush finalization, autoPrompt start/end, and permission remaining a distinct status. Packaged Electron click-through of the fix was not retested here.

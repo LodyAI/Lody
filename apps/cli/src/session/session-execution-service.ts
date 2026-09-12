@@ -901,6 +901,7 @@ export class SessionExecutionService {
     triggerReason: string
   ): Promise<void> {
     try {
+      this.deps.setSessionActivePresencePhase(sessionId, 'finalizing');
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.captureStatusChanged(sessionId, 'idle', undefined, triggerReason);
     } catch (error) {
@@ -4455,6 +4456,7 @@ export class SessionExecutionService {
 
         bindReadySession(readySession);
         yield* acpReplaySuppression.release;
+        self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
         yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));
         self.captureStatusChanged(sessionId, 'running', undefined, 'chat_dispatch');
         self.scheduleLiveActivitySummarySync(userId, {
@@ -4481,9 +4483,6 @@ export class SessionExecutionService {
         yield* abortIfCancelled();
 
         yield* openAssistantEntry();
-        // Goal turns have no user row. Presence must stay `initializing` until
-        // the assistant entry exists, or the finished last bubble hides Thinking.
-        self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
 
         yield* abortIfCancelled();
 

@@ -1,26 +1,10 @@
-import type { SessionHistoryInput, SessionStatus } from '@lody/shared';
-
-type HistoryEntry = Pick<SessionHistoryInput, 'role' | 'finished'> | undefined | null;
+import type { SessionStatus } from '@lody/shared';
 
 /**
- * The session activity row is rendered under the last history bubble.
- * A finished assistant already shows completion chrome (timestamp / duration).
- * Keeping "Thinking" under that bubble is a false status for leftover presence
- * on the same turn. Initializing / permission presence is a new turn (goal
- * resume has no user row) and must keep the presence-driven label.
- *
- * Do not use this to clear session presence.
+ * Only the execution owner's explicit phase can distinguish prompt activity
+ * from finalization. History and presence arrive independently, so a finished
+ * history entry cannot prove that the live turn has stopped thinking.
  */
-export const shouldHideThinkingUnderFinishedAssistant = (
-  history: readonly HistoryEntry[] | null | undefined,
-  liveStatusType?: SessionStatus['type'] | null
-): boolean => {
-  if (liveStatusType === 'initializing' || liveStatusType === 'requestPermission') {
-    return false;
-  }
-  if (!history?.length) {
-    return false;
-  }
-  const last = history[history.length - 1];
-  return last?.role === 'assistant' && last.finished === true;
-};
+export const shouldHideThinkingDuringFinalization = (
+  liveStatus: SessionStatus | null | undefined
+): boolean => liveStatus?.type === 'running' && liveStatus.phase === 'finalizing';

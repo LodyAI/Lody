@@ -184,7 +184,7 @@ import {
   writeStoredPathLauncherPreference,
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
-import { shouldHideThinkingUnderFinishedAssistant } from '@/lib/agent-activity-visibility';
+import { shouldHideThinkingDuringFinalization } from '@/lib/agent-activity-visibility';
 import { cn } from '@/lib/utils';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
@@ -3616,17 +3616,14 @@ export const SessionChatInterface = memo(
       sessionProject,
       workspaceId,
     ]);
-    const hideThinkingUnderFinishedAssistant = shouldHideThinkingUnderFinishedAssistant(
-      sessionHistory,
-      liveSessionStatus?.type
-    );
+    const hideThinkingDuringFinalization = shouldHideThinkingDuringFinalization(liveSessionStatus);
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : hideThinkingUnderFinishedAssistant
+            : hideThinkingDuringFinalization
               ? null
               : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
           : hasPendingDispatch && statusStripState == null

@@ -1,60 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import type { SessionStatus } from '@lody/shared';
+import { shouldHideThinkingDuringFinalization } from '../src/lib/agent-activity-visibility';
 
-import { shouldHideThinkingUnderFinishedAssistant } from '../src/lib/agent-activity-visibility';
-
-describe('shouldHideThinkingUnderFinishedAssistant', () => {
-  it('keeps the activity row when history is empty or still on the user turn', () => {
-    expect(shouldHideThinkingUnderFinishedAssistant(undefined)).toBe(false);
-    expect(shouldHideThinkingUnderFinishedAssistant([])).toBe(false);
-    expect(shouldHideThinkingUnderFinishedAssistant([{ role: 'user', finished: undefined }])).toBe(
-      false
+describe('shouldHideThinkingDuringFinalization', () => {
+  it('hides thinking only during an explicitly reported finalization', () => {
+    expect(shouldHideThinkingDuringFinalization({ type: 'running', phase: 'finalizing' })).toBe(
+      true
     );
   });
 
-  it('keeps the activity row while the last assistant turn is still open', () => {
-    expect(
-      shouldHideThinkingUnderFinishedAssistant([
-        { role: 'user' },
-        { role: 'assistant', finished: false },
-      ])
-    ).toBe(false);
-    expect(shouldHideThinkingUnderFinishedAssistant([{ role: 'assistant' }])).toBe(false);
-  });
-
-  it('hides thinking under a finished last assistant bubble', () => {
-    expect(
-      shouldHideThinkingUnderFinishedAssistant([
-        { role: 'user' },
-        { role: 'assistant', finished: true },
-      ])
-    ).toBe(true);
-    expect(
-      shouldHideThinkingUnderFinishedAssistant([{ role: 'assistant', finished: true }], 'running')
-    ).toBe(true);
-  });
-
-  it('keeps presence-driven activity when a new turn is initializing without a user row', () => {
-    expect(
-      shouldHideThinkingUnderFinishedAssistant(
-        [{ role: 'assistant', finished: true }],
-        'initializing'
-      )
-    ).toBe(false);
-    expect(
-      shouldHideThinkingUnderFinishedAssistant(
-        [{ role: 'assistant', finished: true }],
-        'requestPermission'
-      )
-    ).toBe(false);
-  });
-
-  it('shows thinking again when a later user turn is already in history', () => {
-    expect(
-      shouldHideThinkingUnderFinishedAssistant([
-        { role: 'user' },
-        { role: 'assistant', finished: true },
-        { role: 'user' },
-      ])
-    ).toBe(false);
+  it.each<SessionStatus | null | undefined>([
+    undefined,
+    null,
+    { type: 'idle' },
+    { type: 'running' },
+    { type: 'running', activity: 'image_generation' },
+    { type: 'initializing' },
+    { type: 'requestPermission' },
+  ])('honors live activity without inferring completion from history: %j', (status) => {
+    expect(shouldHideThinkingDuringFinalization(status)).toBe(false);
   });
 });
