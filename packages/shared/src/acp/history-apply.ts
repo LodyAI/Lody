@@ -168,17 +168,13 @@ export const readLodyTurnOrigin = (update: { _meta?: unknown }): string | undefi
   return typeof origin === 'string' && origin.length > 0 ? origin : undefined;
 };
 
-/** Autonomous id prefix stamped on engine-opened turns (`auto:<engineTurnId>`). */
-const AUTONOMOUS_TURN_ID_PREFIX = 'auto:';
-
 /**
  * Whether a `_meta.lody.turnId` names a turn the agent engine opened itself
  * rather than a client-dispatched turn. Such ids are non-numeric on purpose:
  * `session/fork` parses the published id back into a fork position, and an
  * engine turn must never resolve into one.
  */
-export const isAutonomousTurnId = (turnId: string): boolean =>
-  turnId.startsWith(AUTONOMOUS_TURN_ID_PREFIX);
+export { isAutonomousTurnId } from './turn-identity';
 
 /**
  * Whether a `session/update` is the end marker of an engine-opened turn

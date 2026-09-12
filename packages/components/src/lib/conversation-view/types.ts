@@ -61,6 +61,7 @@ export const INDEX_SCALAR_KEYS = [
   'sendStatus',
   'userTurnId',
   'acpTurnId',
+  'acpTurnOrigin',
   'startedAt',
   'permissionWaitMs',
 ] as const;

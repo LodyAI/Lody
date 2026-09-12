@@ -296,6 +296,30 @@ describe('SessionEditAndResendService', () => {
     );
   });
 
+  it('skips an engine-opened turn when resolving the fork boundary', async () => {
+    const history = [
+      historyFixture()[0]!,
+      historyFixture()[1]!,
+      {
+        id: 'assistant-autonomous',
+        timestamp: '2026-08-03T00:00:01.500Z',
+        role: 'assistant' as const,
+        items: [{ type: 'text' as const, text: 'cron status update' }],
+        fileDiff: [],
+        finished: true,
+        acpTurnId: 'auto:41',
+        acpTurnOrigin: 'cron_job',
+      },
+      historyFixture()[2]!,
+      historyFixture()[3]!,
+    ];
+    const harness = createHarness({ active: true, history });
+
+    const result = await harness.service.editAndResend(spec);
+    expect(result, JSON.stringify(result)).toMatchObject({ success: true });
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
+  });
+
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {
     const harness = createHarness({
       beforeReplace: async (doc) => {

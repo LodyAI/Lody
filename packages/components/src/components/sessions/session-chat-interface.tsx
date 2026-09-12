@@ -376,7 +376,11 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import type { AnalyticsOutcome } from '@lody/shared';
-import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
+import {
+  collectPendingScheduledTasksFromHistory,
+  isAutonomousTurnId,
+  type PendingScheduledTask,
+} from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
 import {
   getPullRequestNumber,
@@ -2916,6 +2920,9 @@ export const SessionChatInterface = memo(
         if (!entry) continue;
         if (entry.role === 'user') return null;
         if (entry.role !== 'assistant') continue;
+        // Engine-opened turns (`auto:` ids) are history entries, not fork
+        // positions; keep walking to the real provider boundary.
+        if (entry.acpTurnId && isAutonomousTurnId(entry.acpTurnId)) continue;
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];

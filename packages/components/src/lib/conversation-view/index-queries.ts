@@ -1,4 +1,4 @@
-import { resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
+import { isAutonomousTurnId, resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
 import { isEmptyAssistantIndexRow } from './index-row';
 import {
   conversationTailStart,
@@ -56,7 +56,9 @@ export function resolveLastAssistantTurnIds(
     // A duplicate id renders once, at its first position; later copies are skipped.
     if (view.indexOf(row.id) !== i) continue;
     if (lastAssistantMessageId === null) lastAssistantMessageId = row.id;
-    if (row.finished === true) {
+    if (row.finished === true && !isAutonomousTurnId(row.acpTurnId ?? '')) {
+      // Engine-opened turns are rendered history, not fork positions. Keep
+      // walking so session-level Fork targets the latest real provider turn.
       lastCompletedAssistantMessageId = row.id;
       break;
     }
