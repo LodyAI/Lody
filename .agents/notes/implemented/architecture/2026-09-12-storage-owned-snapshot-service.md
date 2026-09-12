@@ -15,11 +15,11 @@ foreign/forged handles throw `cross_store`/`invalid_snapshot`, and closing the s
 store turns every outstanding handle into `source_closed`. `snapshot.read()` is the
 handle's own full, detached stored read, and `copyFrom` admits same-backend cross-store
 handles, so the real fork flow runs capture-on-source/copy-into-target through the port.
-The guarded whole-history rollback and the no-gap composed history import also moved to
+The guarded editable-tail replacement and the no-gap composed history import also moved to
 port commands. Provenance stays in `history-writer.ts`; the adapters only scope handles.
 The in-memory double captures and releases honestly but declares `capabilities.copy =
-false` and returns `rejected('unsupported')` for copy, rollback and import, so no second
-backend can pretend those capabilities.
+false` and returns `rejected('unsupported')` for copy, tail replacement and import, so no
+second backend can pretend those capabilities.
 
 ## Design
 
@@ -28,7 +28,8 @@ business caller → data.snapshots.capture() → SessionSnapshot (branded, per-s
 business caller → snapshot.read()           → full detached stored turns (export/replay/hash)
 business caller → target.snapshots.copyFrom(snapshot, selection) → SessionCommandResult
                         ↑ selection only; the stored payload never crosses the port
-business caller → data.commands.updateHistoryWithRollback(update) → rollback closure
+business caller → data.commands.replaceEditableTail({expectedUserTurnId, expectedForkTurnId, …})
+                        → { previousUserTurnId, rollback }
 business caller → data.commands.applyHistoryImport({update, createCursor})
 store teardown   → SessionDocument.destroy → snapshots.closeSource()
 ```
@@ -47,16 +48,17 @@ by any writer over any doc; the port merely narrows it to same-backend handles.
 
 The Loro adapter implements `snapshots` over the shared `HistoryWriter`'s
 `capture()`/`copyFrom()`, `read()` over the captured writer snapshot's detached getter,
-and the two guarded commands over the same writer: `updateHistoryWithRollback` returns
-the writer's compensation closure (a `HistoryWriteError` is a pre-write rejection, a
-business throw from the callback propagates unchanged and proves nothing was applied),
-and `applyHistoryImport` binds the writer update, `writer.readStored()` and the cursor
-creation in one synchronous block, writing the cursor through a construction-time
-control-plane accessor (`historyImportCursor`, wired by `composeSessionData` to the
-control Mirror) — there is no await gap for a peer edit to fall into. The adapter has no
-lifecycle of its own, so the snapshot service exposes an internal `closeSource()` and the
-CLI's existing teardown path (`SessionDocument.destroy`) calls it; no new lifecycle was
-invented.
+and the two guarded commands over the same writer. `replaceEditableTail` runs the shared
+`planner.ts` rule inside the writer's conditional commit and returns the writer's
+compensation closure plus the resolved `previousUserTurnId`; a domain refusal
+(`invalid_input`/`active_goal`/`stale_boundary`) and a `HistoryWriteError` are both
+pre-write rejections that prove nothing was applied. `applyHistoryImport` binds the writer
+update, `writer.readStored()` and the cursor creation in one synchronous block, writing the
+cursor through a construction-time control-plane accessor (`historyImportCursor`, wired by
+`composeSessionData` to the control Mirror) — there is no await gap for a peer edit to fall
+into. The adapter has no lifecycle of its own, so the snapshot service exposes an internal
+`closeSource()` and the CLI's existing teardown path (`SessionDocument.destroy`) calls it;
+no new lifecycle was invented.
 
 The memory double mints and releases real handles with the same validation codes, but
 declares `capabilities.copy = false` and answers a valid handle's `copyFrom` — and both
@@ -68,15 +70,17 @@ implement.
 Fork captures on the source (`sourceDoc.sessionData.snapshots.capture()`), reads the
 clone boundary with `snapshot.read()`, and copies into the target via
 `targetDoc.sessionData.snapshots.copyFrom(...)`, mapping a rejection to
-`TARGET_WRITE_FAILED`. Edit-and-resend drives
-`sessionDoc.sessionData.commands.updateHistoryWithRollback(...)` and keeps its
-compensation call. Local-project history sync drives
+`TARGET_WRITE_FAILED`. Edit-and-resend calls
+`sessionDoc.sessionData.commands.replaceEditableTail({ expectedUserTurnId,
+expectedForkTurnId, replacement, fallbackGoal })` and maps a `rejected` result
+(`active_goal` → `ACTIVE_AUTOMATION`, `stale_boundary` → `STALE_USER_TURN`) to its
+failure response, keeping the returned compensation for a failed meta commit.
+Local-project history sync drives
 `sessionDoc.sessionData.commands.applyHistoryImport(...)` at all three sites through one
 `applyBoundHistoryImport` helper. No business code calls the raw
-`SessionDocument.captureStoredHistory/copyStoredHistory/updateHistoryWithRollback`
-facades anymore; those raw-writer facades and `updateHistoryAndCursor` remain only as
-back-compat surface (the latter now delegates to the port command, reconstructing a
-`HistoryWriteError` on rejection).
+`SessionDocument.captureStoredHistory/copyStoredHistory` facades anymore; those raw-writer
+facades and `updateHistoryAndCursor` remain only as back-compat surface (the latter now
+delegates to the port command, reconstructing a `HistoryWriteError` on rejection).
 
 ## Trade-offs
 
@@ -88,12 +92,16 @@ back-compat surface (the latter now delegates to the port command, reconstructin
   revised from the initial synchronous signature so a database-backed store can capture,
   read and copy without blocking the caller; the Loro adapter still performs its capture,
   detached read and copy synchronously inside the async body (no `await` gap), so its
-  atomicity is unchanged and the memory double is a genuinely delayed async peer.
+  atomicity is unchanged. The memory double only marks its methods `async`; its body adds
+  no controllable delay.
   `copyFrom` does not run the adapter's async `afterAccept` hook; the writer preflights
   every rejection before mutation, so an accepted receipt still means the copy is applied.
-- `updateHistoryWithRollback` propagates business throws instead of wrapping them in
-  `rejected`: the CLI's message-mapped error paths depend on that, and such a throw
-  proves nothing was applied (it happens inside the writer's produce step).
+- `replaceEditableTail` reports a domain refusal as `rejected` instead of propagating a
+  thrown business error: the command owns the eligibility/goal rule, so the adapter can
+  name the reason (`active_goal`/`stale_boundary`/`invalid_input`) and the caller maps it
+  without message matching. This replaced the earlier arbitrary
+  `updateHistoryWithRollback(update)` callback entry, whose business throw carried the
+  reason as text.
 - The receipt kind union gained `'copy'`, `'rollback'` and `'import-history'`; no
   consumer switches exhaustively on it.
 

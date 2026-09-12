@@ -186,7 +186,9 @@ success with an unfilled lease is not allowed.
 The snapshot service is wired to its business consumers: fork captures through
 `sessionData.snapshots.capture()`, clones the boundary with `snapshot.read()`, and copies into the
 target with `copyFrom` (same-backend cross-store handles are admitted; memory→Loro is `cross_store`);
-edit-and-resend rollback uses `commands.updateHistoryWithRollback`; the three external-history import
+edit-and-resend replaces its tail with `commands.replaceEditableTail`, whose eligibility/active-goal
+rule is re-applied inside the store's commit and which returns `previousUserTurnId` plus a range-scoped
+rollback; the three external-history import
 sites use `commands.applyHistoryImport`, which binds the write, the stored baseline read and the
 cursor creation in one synchronous block with no await gap. A backend without stored copy (memory)
 returns `rejected('unsupported')` rather than faking it, and forged/foreign/released/source-closed
@@ -194,11 +196,11 @@ handles throw.
 
 Remaining raw exposures (owners as noted): `createConversationViewFromDoc` / `createConversationViewFromHistory`
 (the rollback path) and the `SessionDocument` facades `getHistory`/`readHistorySnapshot`/`captureStoredHistory`
-/`copyStoredHistory`/`updateHistoryWithRollback`/`updateHistoryAndCursor` remain as back-compat surface
+/`copyStoredHistory`/`updateHistoryAndCursor` remain as back-compat surface
 owned by `apps/cli/src/lib/loro/doc.ts`; no business caller uses the raw copy/rollback facades. Owner/seal
 mapping and old-format migration remain separate.
 
-Verification: shared 100 files / 1190 tests, components 470 files / 3566 tests, CLI 262 files / 2703 tests
+Verification: shared 100 files / 1198 tests, components 470 files / 3578 tests, CLI 262 files / 2703 tests
 (4 skipped), all run with a redirected `HOME` and the harness's broken `GIT_CONFIG_COUNT` variables unset;
 shared/components/CLI typechecks, lint, `docs check` and `check:quick` pass. These are library-level
 checks; they do not establish device-scale cold-open, memory or owner/seal behaviour.

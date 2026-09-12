@@ -12,10 +12,10 @@ PR #376 的存储拷贝能力从「经 CLI 门面传递的模块级句柄」改�
 存储的身份与 `sessionId`；调用方只传选择集与句柄，`release` 幂等地使其失效，伪造/异库
 句柄抛 `invalid_snapshot`/`cross_store`，源存储关闭后所有存量句柄一律报
 `source_closed`。`snapshot.read()` 是句柄自带的完整、分离式存储读取，`copyFrom` 接受同
-后端跨存储句柄，因此真实的 fork 流程以「源上捕获、目标内拷贝」走端口。受保护的整段历史
-回滚与无异步间隙的组合式历史导入也移入端口命令。溯源仍留在 `history-writer.ts`，适配器
+后端跨存储句柄，因此真实的 fork 流程以「源上捕获、目标内拷贝」走端口。受保护的可编辑尾
+替换与无异步间隙的组合式历史导入也移入端口命令。溯源仍留在 `history-writer.ts`，适配器
 只做句柄作用域。内存替身诚实支持签发与释放，但声明 `capabilities.copy = false`，对拷贝、
-回滚与导入一律返回 `rejected('unsupported')`，任何第二后端都不能假装具备这些能力。
+尾替换与导入一律返回 `rejected('unsupported')`，任何第二后端都不能假装具备这些能力。
 
 ## 设计
 
@@ -24,7 +24,8 @@ PR #376 的存储拷贝能力从「经 CLI 门面传递的模块级句柄」改�
 业务调用方 → snapshot.read()           → 完整分离式存储读取（导出/回放/哈希）
 业务调用方 → target.snapshots.copyFrom(snapshot, selection) → SessionCommandResult
                         ↑ 只有选择集；存储载荷不越过端口
-业务调用方 → data.commands.updateHistoryWithRollback(update) → 回滚闭包
+业务调用方 → data.commands.replaceEditableTail({expectedUserTurnId, expectedForkTurnId, …})
+                        → { previousUserTurnId, rollback }
 业务调用方 → data.commands.applyHistoryImport({update, createCursor})
 存储拆除     → SessionDocument.destroy → snapshots.closeSource()
 ```
@@ -39,9 +40,10 @@ PR #376 的存储拷贝能力从「经 CLI 门面传递的模块级句柄」改�
 端口只是把它收窄到同后端句柄。
 
 Loro 适配器在共享 `HistoryWriter` 的 `capture()`/`copyFrom()` 之上实现 `snapshots`，
-`read()` 走捕获的 writer 快照的分离式 getter，两条受保护命令同样只走该 writer：
-`updateHistoryWithRollback` 返回 writer 的补偿闭包（`HistoryWriteError` 是写前拒绝，回调
-抛出的业务错误原样传播且证明未写入），`applyHistoryImport` 把 writer 更新、
+`read()` 走捕获的 writer 快照的分离式 getter，两条受保护命令同样只走该 writer。
+`replaceEditableTail` 在 writer 的条件提交内运行共享 `planner.ts` 规则，返回 writer 的补偿
+闭包与解析出的 `previousUserTurnId`；领域拒绝（`invalid_input`/`active_goal`/`stale_boundary`）
+与 `HistoryWriteError` 都是写前拒绝，证明未写入。`applyHistoryImport` 把 writer 更新、
 `writer.readStored()` 与游标创建绑定在同一个同步块里，游标经构造期传入的控制面访问器
 （`historyImportCursor`，由 `composeSessionData` 接到控制 Mirror）写出——不存在让对端编辑
 插入的异步间隙。适配器本身没有生命周期，故快照服务暴露内部 `closeSource()`，由 CLI 既有
@@ -55,13 +57,15 @@ Loro 适配器在共享 `HistoryWriter` 的 `capture()`/`copyFrom()` 之上实�
 
 Fork 在源上捕获（`sourceDoc.sessionData.snapshots.capture()`）、用 `snapshot.read()` 读克隆
 边界，并经 `targetDoc.sessionData.snapshots.copyFrom(...)` 拷入目标，拒绝时映射为
-`TARGET_WRITE_FAILED`。编辑重发驱动
-`sessionDoc.sessionData.commands.updateHistoryWithRollback(...)` 并保留补偿调用。本地项目
-历史同步在全部三处经一个 `applyBoundHistoryImport` 助手驱动
-`sessionDoc.sessionData.commands.applyHistoryImport(...)`。业务代码不再调用原始的
-`SessionDocument.captureStoredHistory/copyStoredHistory/updateHistoryWithRollback` 门面；
-这些原生 writer 门面与 `updateHistoryAndCursor` 仅作为兼容面保留（后者现委托端口命令，
-并在被拒时重建 `HistoryWriteError`）。
+`TARGET_WRITE_FAILED`。编辑重发调用
+`sessionDoc.sessionData.commands.replaceEditableTail({ expectedUserTurnId,
+expectedForkTurnId, replacement, fallbackGoal })`，把 `rejected` 结果映射为失败响应
+（`active_goal` → `ACTIVE_AUTOMATION`，`stale_boundary` → `STALE_USER_TURN`），并在 meta
+提交失败时保留返回的补偿闭包。本地项目历史同步在全部三处经一个 `applyBoundHistoryImport`
+助手驱动 `sessionDoc.sessionData.commands.applyHistoryImport(...)`。业务代码不再调用原始的
+`SessionDocument.captureStoredHistory/copyStoredHistory` 门面；这些原生 writer 门面与
+`updateHistoryAndCursor` 仅作为兼容面保留（后者现委托端口命令，并在被拒时重建
+`HistoryWriteError`）。
 
 ## 权衡
 
@@ -70,11 +74,14 @@ Fork 在源上捕获（`sourceDoc.sessionData.snapshots.capture()`）、用 `sna
 - 公共句柄/服务方法改为返回 `Promise`：`capabilities` 与 `release` 保持同步，而
   `capture()`、`read()`、`copyFrom()` 为 `async`。这是对最初同步签名的修订，使数据库后
   端无需阻塞调用方即可 capture/read/copy；Loro 适配器仍在 async 函数体内同步完成
-  capture、分离式读取与拷贝（无 `await` 间隙），原子性不变，memory 双实现则是真正有延迟
-  的异步对端。`copyFrom` 不经过适配器的异步 `afterAccept` 钩子；writer 在写入前预检所有
-  拒绝，因此 accepted 回执仍表示拷贝已应用。
-- `updateHistoryWithRollback` 原样传播业务异常而不是包成 `rejected`：CLI 按消息映射错误
-  码的路径依赖这一点，且这类异常发生在 writer 的 produce 步骤内、证明未写入。
+  capture、分离式读取与拷贝（无 `await` 间隙），原子性不变。memory 双实现只是把方法标记
+  为 async，函数体内没有可控延迟。`copyFrom` 不经过适配器的异步 `afterAccept` 钩子；
+  writer 在写入前预检所有拒绝，因此 accepted 回执仍表示拷贝已应用。
+- `replaceEditableTail` 把领域拒绝报成 `rejected` 而不是传播业务异常：命令自己拥有
+  可编辑尾与 active goal 规则，适配器可以给出原因
+  （`active_goal`/`stale_boundary`/`invalid_input`），调用方无需按消息文本匹配。这取代了
+  更早的任意 `updateHistoryWithRollback(update)` 回调入口——那时业务异常只能靠文本携带
+  原因。
 - 回执 kind 联合新增 `'copy'`、`'rollback'`、`'import-history'`；没有消费方对它做穷举
   匹配。
 

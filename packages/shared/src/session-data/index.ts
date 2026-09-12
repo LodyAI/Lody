@@ -5,14 +5,17 @@ export type {
   SessionDataChange,
   SessionDataChangeListener,
   SessionDurability,
+  SessionEditableTailRejection,
+  SessionEditableTailRejectionCode,
+  SessionEditableTailResult,
   SessionFieldChange,
   SessionHistoryCommands,
   SessionHistoryReader,
   SessionObservation,
-  SessionRollbackCommandResult,
   SessionWritableField,
   SessionWriteReceipt,
   OpenAssistantTurnInput,
+  ReplaceEditableTailInput,
   TaskProposalResolution,
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
@@ -43,7 +46,10 @@ export {
   hasTaskProposal,
   markTurnSeenBlocked,
   parseTaskProposalResolution,
+  resolveEditableTail,
   resolveTaskProposalOnEntry,
+  type EditableTail,
+  type EditableTailTurn,
 } from './planner';
 export {
   pageVisibleTranscript,

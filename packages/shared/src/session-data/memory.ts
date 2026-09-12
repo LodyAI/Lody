@@ -30,11 +30,11 @@ import {
   type SessionData,
   type SessionDataChangeListener,
   type SessionDirectoryRow,
+  type SessionEditableTailResult,
   type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
   type SessionObservation,
-  type SessionRollbackCommandResult,
   type SessionTurn,
   type SessionTurnRead,
   type SessionTurnWritableValues,
@@ -505,8 +505,8 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     // The double never claims writer-owned guarded operations it cannot perform
     // honestly: rollback compensation and the no-gap import binding are storage
     // rules, so both are explicit `unsupported` rejections.
-    async updateHistoryWithRollback() {
-      return rejected('unsupported') as SessionRollbackCommandResult;
+    async replaceEditableTail(): Promise<SessionEditableTailResult> {
+      return { status: 'rejected', reason: { code: 'unsupported' } };
     },
     async applyHistoryImport() {
       return rejected('unsupported');

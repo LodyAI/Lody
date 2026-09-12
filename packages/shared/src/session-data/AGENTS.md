@@ -57,16 +57,21 @@ storage offset.
   scope handles to the issuing store identity + `sessionId`. A backend without stored
   copy declares `capabilities.copy = false` and returns `rejected('unsupported')` — never
   a false capability.
-- **Writer-owned guarded operations.** `commands.updateHistoryWithRollback` (guarded
-  whole-history update + compensation) and `commands.applyHistoryImport` (imported
-  history write + stored snapshot read + cursor creation in ONE synchronous block, no
-  await gap; the cursor setter arrives as a construction-time control-plane accessor)
-  are port commands over the one shared writer. A business throw from the callback
-  propagates unchanged and proves nothing was applied; a backend without the rules
-  (memory) rejects `unsupported` instead of faking them. Business code never calls the
-  raw `SessionDocument.captureStoredHistory/copyStoredHistory/updateHistoryWithRollback`
-  facade methods; those raw-writer facades remain only as back-compat surface (their
-  stored-handle types predate the port).
+- **Writer-owned guarded operations.** `commands.replaceEditableTail` replaces the editable
+  tail user turn from explicit domain inputs (`expectedUserTurnId`, `expectedForkTurnId`,
+  `replacement`, `fallbackGoal`): the eligibility rule and the active-goal guard live once in
+  `planner.ts` (`resolveEditableTail` / `planEditableTailReplacement`) and are re-applied
+  against the history read inside the store's commit, so a tail that moved after the caller's
+  own check is `rejected('stale_boundary'|'active_goal')`, never overwritten. The accepted
+  result carries `previousUserTurnId` (the caller's meta commit needs it) and a range-scoped
+  `rollback` that retains rows appended after the replacement. `commands.applyHistoryImport`
+  (imported history write + stored snapshot read + cursor creation in ONE synchronous block,
+  no await gap; the cursor setter arrives as a construction-time control-plane accessor) is
+  still a caller-supplied update/cursor callback. Both are port commands over the one shared
+  writer; a backend without the rules (memory) rejects `unsupported` instead of faking them.
+  Business code never passes a raw writer callback or names `SessionHistoryInput`, and never
+  calls the `SessionDocument.captureStoredHistory` / `copyStoredHistory` /
+  `updateHistoryAndCursor` back-compat facades.
 - **The in-memory double** exists to prove async reads/writes and real consumer contracts;
   it is not a second copy of domain rules. Both backends run
   `tests/session-data-contract.ts`, and a real consumer runs against the double in

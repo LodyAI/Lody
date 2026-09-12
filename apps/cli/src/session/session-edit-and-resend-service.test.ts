@@ -10,6 +10,7 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
+import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
 import { SessionExecutionService } from './session-execution-service';
 
@@ -77,6 +78,8 @@ function createHarness(
     prepareError?: Error;
     persistError?: Error;
     beforeCommitFailure?: (doc: LoroDoc) => void;
+    /** Lands a concurrent history edit between the eligibility check and the commit. */
+    beforeReplace?: (doc: SessionDocument) => Promise<void> | void;
     history?: SessionHistoryInput[];
   } = {}
 ) {
@@ -117,21 +120,20 @@ function createHarness(
     getHistory: vi.fn(realDoc.getHistory.bind(realDoc)),
     sessionData: {
       commands: {
-        updateHistoryWithRollback: vi.fn(
-          async (update: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-            events.push('history');
-            const result = await realDoc.sessionData.commands.updateHistoryWithRollback(update);
-            if (result.status !== 'accepted') throw new Error('history write rejected');
-            history = await realDoc.getHistory();
-            return {
-              ...result,
-              rollback: () => {
-                result.rollback();
-                history = loro.getList('history').toJSON() as SessionHistoryInput[];
-              },
-            };
-          }
-        ),
+        replaceEditableTail: vi.fn(async (input: ReplaceEditableTailInput) => {
+          events.push('history');
+          await options.beforeReplace?.(realDoc);
+          const result = await realDoc.sessionData.commands.replaceEditableTail(input);
+          if (result.status !== 'accepted') return result;
+          history = await realDoc.getHistory();
+          return {
+            ...result,
+            rollback: () => {
+              result.rollback();
+              history = loro.getList('history').toJSON() as SessionHistoryInput[];
+            },
+          };
+        }),
       },
     },
   };
@@ -281,6 +283,32 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('refuses the commit when the editable tail moved after the eligibility check', async () => {
+    const harness = createHarness({
+      beforeReplace: async (doc) => {
+        await doc.sessionData.commands.appendTurn({
+          id: 'user-concurrent',
+          role: 'user',
+          timestamp: '2026-08-03T00:00:05.000Z',
+          items: [{ type: 'text', text: 'concurrent message' }],
+          fileDiff: [],
+        });
+      },
+    });
+
+    const result = await harness.service.editAndResend(spec);
+    expect(result).toMatchObject({ success: false, error: { code: 'STALE_USER_TURN' } });
+    // The concurrent user turn survives; the replacement was refused before any write.
+    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+      'user-concurrent',
+    ]);
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('leaves the active turn untouched when provider fork fails', async () => {

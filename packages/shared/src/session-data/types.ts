@@ -1,5 +1,6 @@
 import type { MessageContent, ModelInfo } from '../ai';
 import type { AcpSessionNotification } from '../acp/schema';
+import type { SessionGoalMessage } from '../goal';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
 import type { SessionHistoryInput } from '../schema';
@@ -87,7 +88,7 @@ export interface SessionWriteReceipt {
     | 'mark-seen'
     | 'respond-permission'
     | 'copy'
-    | 'rollback'
+    | 'replace-editable-tail'
     | 'import-history'
     | 'apply-agent-batch';
 }
@@ -155,20 +156,62 @@ export type SessionCommandResult =
   | { readonly status: 'indeterminate'; readonly cause: unknown };
 
 /**
- * A guarded whole-history update that carries its own compensation: an
- * accepted result includes the `rollback` closure that restores only the range
- * the update changed, and never a caller-supplied snapshot of it. Backends
- * without rollback support reject with `unsupported` instead of faking one.
+ * Domain reasons a tail replacement is refused before any write.
+ *  - `invalid_input` — the replacement is not a valid authored user turn.
+ *  - `active_goal`   — the session has an active goal; replacement would discard it.
+ *  - `stale_boundary`— the editable tail or its provider boundary changed since
+ *                      the caller resolved it.
+ *  - `unsupported`   — the backend cannot perform the guarded replacement.
  */
-export type SessionRollbackCommandResult =
+export type SessionEditableTailRejectionCode =
+  | 'invalid_input'
+  | 'active_goal'
+  | 'stale_boundary'
+  | 'unsupported';
+
+export type SessionEditableTailRejection = {
+  readonly code: SessionEditableTailRejectionCode;
+  readonly issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[];
+};
+
+/**
+ * Replace the editable tail user turn with `replacement`. The store re-locates
+ * the tail and re-checks the session goal inside its own commit, so a change
+ * that landed between the caller's eligibility check and this call is refused
+ * (`stale_boundary` / `active_goal`) rather than silently overwritten. The
+ * accepted result carries `previousUserTurnId` — the last user turn before the
+ * replaced tail — which the caller's meta commit needs, plus the `rollback`
+ * compensation that restores only the replaced range and retains rows appended
+ * afterwards. Backends without the guarded-write rules reject with `unsupported`.
+ */
+export type ReplaceEditableTailInput = {
+  /** The user turn that must still be the last editable user turn. */
+  readonly expectedUserTurnId: string;
+  /**
+   * The `acpTurnId` of the provider boundary preceding the tail. `undefined`
+   * means the tail must have no preceding boundary (first message).
+   */
+  readonly expectedForkTurnId: string | undefined;
+  /** The replacement user turn written at the tail position. */
+  readonly replacement: SessionTurn;
+  /**
+   * Latest goal from session meta, consulted only when the history itself
+   * carries no goal item. `null`/`undefined` means "no goal recorded".
+   */
+  readonly fallbackGoal?: SessionGoalMessage | null;
+};
+
+export type SessionEditableTailResult =
   | {
       readonly status: 'accepted';
       readonly receipt: SessionWriteReceipt;
-      /** Restore the changed range only; retains edits to untouched rows. */
+      /** Last user turn before the replaced tail; the meta commit needs it. */
+      readonly previousUserTurnId?: string;
+      /** Restore the replaced range only; retains rows appended afterwards. */
       readonly rollback: () => void;
       readonly postAcceptError?: unknown;
     }
-  | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
+  | { readonly status: 'rejected'; readonly reason: SessionEditableTailRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
 
 export const sessionTurnReadIsReady = (
@@ -290,14 +333,14 @@ export interface SessionHistoryCommands {
    */
   applyAgentBatch(input: ApplyAgentBatchInput): Promise<SessionCommandResult>;
   /**
-   * Apply a guarded whole-history update and return its compensation. The
-   * business callback decides and selects; it never writes storage. A throw
-   * from the callback (business abort) propagates unchanged and proves nothing
-   * was applied. Backends without rollback support reject with `unsupported`.
+   * Replace the editable tail user turn. The eligibility rule (last editable
+   * user turn, delivered non-steer, with its provider boundary) and the
+   * active-goal guard are applied once in `planner.ts` and re-checked here
+   * against the turns read at commit time, so a change that landed after the
+   * caller's own eligibility check is refused, not overwritten. Backends
+   * without guarded-write compensation reject with `unsupported`.
    */
-  updateHistoryWithRollback(
-    update: (history: SessionHistoryInput[]) => SessionHistoryInput[]
-  ): Promise<SessionRollbackCommandResult>;
+  replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   /**
    * One composed import operation: the guarded history write, the stored
    * snapshot read and the cursor creation happen in one synchronous block with

@@ -22,21 +22,24 @@ import {
   applyOpenAssistantTurn,
   applyResumeAssistant,
   createAssistantTurn,
+  EditableTailRefusedError,
   hasTaskProposal,
   markTurnSeenBlocked,
   parseTaskProposalResolution,
+  planEditableTailReplacement,
   resolveTaskProposalOnEntry,
+  type EditableTailPlan,
 } from './planner';
 import {
   SessionDurabilityError,
   type SessionCommandResult,
   type SessionData,
   type SessionDirectoryRow,
+  type SessionEditableTailResult,
   type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
   type SessionObservation,
-  type SessionRollbackCommandResult,
   type SessionTurn,
   type SessionTurnRead,
   type SessionTurnWritableValues,
@@ -593,20 +596,38 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
       return accepted('apply-agent-batch', touched);
     },
-    async updateHistoryWithRollback(update): Promise<SessionRollbackCommandResult> {
+    async replaceEditableTail(input): Promise<SessionEditableTailResult> {
+      let plan: EditableTailPlan | undefined;
       let rollback: () => void;
       try {
-        rollback = writer.updateWithRollback((turns) => update(turns));
+        // The shared planner runs inside the writer's conditional commit, so the
+        // eligibility/goal re-check and the write are one atomic step.
+        rollback = writer.updateWithRollback((turns) => {
+          const next = planEditableTailReplacement(
+            turns as unknown as readonly SessionTurn[],
+            input
+          );
+          plan = next;
+          return next.turns as unknown as SessionHistoryInput[];
+        });
       } catch (error) {
-        // A HistoryWriteError is a validated pre-write refusal. A business
-        // abort thrown by the callback proves nothing was applied either, but
-        // it is not an input rejection: it propagates unchanged, matching the
-        // storage facade the caller used before the port.
-        if (error instanceof HistoryWriteError)
-          return rejected('invalid_input', issuesOf(error)) as SessionRollbackCommandResult;
+        // A domain refusal proves nothing was written; a `HistoryWriteError` is a
+        // validated pre-write refusal. Both are safe to report as `rejected`.
+        if (error instanceof EditableTailRefusedError) {
+          return { status: 'rejected', reason: { code: error.code } };
+        }
+        if (error instanceof HistoryWriteError) {
+          return { status: 'rejected', reason: { code: 'invalid_input', issues: issuesOf(error) } };
+        }
         throw error;
       }
-      return { status: 'accepted', receipt: issueReceipt('rollback', []), rollback };
+      const previousUserTurnId = plan?.previousUserTurnId;
+      return {
+        status: 'accepted',
+        receipt: issueReceipt('replace-editable-tail', []),
+        rollback,
+        ...(previousUserTurnId !== undefined ? { previousUserTurnId } : {}),
+      };
     },
     async applyHistoryImport(input): Promise<SessionCommandResult> {
       const cursor = options.historyImportCursor?.read();

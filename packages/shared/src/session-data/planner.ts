@@ -1,7 +1,14 @@
 import { z } from 'zod';
+import { isSessionGoalActive, resolveLatestSessionGoalFromHistory } from '../goal';
 import { parseHistoryWrite } from '../history-write-schema';
 import type { PermissionOutcome } from '../message';
-import type { OpenAssistantTurnInput, TaskProposalResolution } from './types';
+import type {
+  OpenAssistantTurnInput,
+  ReplaceEditableTailInput,
+  SessionEditableTailRejectionCode,
+  SessionTurn,
+  TaskProposalResolution,
+} from './types';
 
 // # Shared session commands, single source
 //
@@ -148,4 +155,114 @@ const TaskProposalResolutionSchema = z
 /** Validate a caller-supplied decision before any write is attempted. */
 export function parseTaskProposalResolution(value: unknown): TaskProposalResolution {
   return parseHistoryWrite(TaskProposalResolutionSchema, value) as TaskProposalResolution;
+}
+
+// # Editable tail rules
+//
+// The eligibility rule for "the last user turn the user may still edit" and the
+// active-goal guard are stated here once. Both the CLI's pre-commit eligibility
+// check and the storage command's commit-time re-check call `resolveEditableTail`
+// and `planEditableTailReplacement`, so the pre-check and the commit can never
+// drift into accepting different tails.
+
+/** The fields the editable-tail rule inspects; structurally satisfied by turns. */
+export type EditableTailTurn = {
+  readonly id?: unknown;
+  readonly role?: unknown;
+  readonly status?: unknown;
+  readonly inputConfig?: unknown;
+  readonly finished?: unknown;
+  readonly acpTurnId?: unknown;
+};
+
+export type EditableTail<T extends EditableTailTurn = EditableTailTurn> = {
+  readonly userIndex: number;
+  readonly turn: T;
+  /** `acpTurnId` of the provider boundary preceding the tail, when there is one. */
+  readonly forkTurnId?: string;
+};
+
+/**
+ * Locate the editable tail: the last user turn, which must be `expectedUserTurnId`,
+ * not parked in `pending_apply` and not a steer delivery. A preceding user turn
+ * without an intervening finished provider boundary makes the tail uneditable.
+ */
+export function resolveEditableTail<T extends EditableTailTurn>(
+  turns: readonly T[],
+  expectedUserTurnId: string
+): EditableTail<T> | null {
+  let userIndex = -1;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index]?.role === 'user') {
+      userIndex = index;
+      break;
+    }
+  }
+  const turn = turns[userIndex];
+  if (userIndex < 0 || !turn || turn.id !== expectedUserTurnId || turn.role !== 'user') return null;
+  if (
+    turn.status === 'pending_apply' ||
+    asRecord(turn.inputConfig)?._lodyDeliveryKind === 'steer'
+  ) {
+    return null;
+  }
+
+  for (let index = userIndex - 1; index >= 0; index -= 1) {
+    const entry = turns[index];
+    if (!entry) continue;
+    if (entry.role === 'user') return null;
+    if (entry.role !== 'assistant') continue;
+    if (entry.finished !== true || typeof entry.acpTurnId !== 'string' || !entry.acpTurnId) {
+      return null;
+    }
+    return { userIndex, turn, forkTurnId: entry.acpTurnId };
+  }
+
+  return { userIndex, turn };
+}
+
+/** A domain refusal the storage adapter reports as `rejected`, never as a write. */
+export class EditableTailRefusedError extends Error {
+  constructor(readonly code: Exclude<SessionEditableTailRejectionCode, 'unsupported'>) {
+    super(`The editable tail replacement was refused: ${code}`);
+    this.name = 'EditableTailRefusedError';
+  }
+}
+
+export type EditableTailPlan = {
+  readonly turns: SessionTurn[];
+  readonly previousUserTurnId?: string;
+};
+
+/**
+ * Plan the replacement against the turns read at commit time. Throws
+ * `EditableTailRefusedError` before any write for an invalid replacement, an
+ * active goal, or a tail whose identity/boundary no longer matches.
+ */
+export function planEditableTailReplacement(
+  turns: readonly SessionTurn[],
+  input: ReplaceEditableTailInput
+): EditableTailPlan {
+  if (input.replacement.role !== 'user' || !input.replacement.id) {
+    throw new EditableTailRefusedError('invalid_input');
+  }
+  const goal = resolveLatestSessionGoalFromHistory(turns) ?? input.fallbackGoal ?? null;
+  if (isSessionGoalActive(goal)) throw new EditableTailRefusedError('active_goal');
+  const tail = resolveEditableTail(turns, input.expectedUserTurnId);
+  if (!tail || tail.forkTurnId !== input.expectedForkTurnId) {
+    throw new EditableTailRefusedError('stale_boundary');
+  }
+  const prefix = turns.slice(0, tail.userIndex);
+  let previousUserTurnId: string | undefined;
+  for (let index = prefix.length - 1; index >= 0; index -= 1) {
+    const entry = prefix[index];
+    if (entry?.role === 'user' && typeof entry.id === 'string') {
+      previousUserTurnId = entry.id;
+      break;
+    }
+  }
+  return {
+    turns: [...prefix, input.replacement],
+    ...(previousUserTurnId !== undefined ? { previousUserTurnId } : {}),
+  };
 }

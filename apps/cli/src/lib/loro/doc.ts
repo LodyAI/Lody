@@ -2636,12 +2636,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.sessionData.writer.copyFrom(snapshot, history);
   }
 
-  async updateHistoryWithRollback(
-    update: (history: SessionHistoryInput[]) => SessionHistoryInput[]
-  ): Promise<() => void> {
-    return this.sessionData.writer.updateWithRollback(update);
-  }
-
   async getPreviewState(): Promise<SessionPreviewDocState | undefined> {
     if (!this.mirror) {
       return undefined;

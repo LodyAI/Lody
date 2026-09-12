@@ -619,7 +619,7 @@ export function runSessionDataContract(
       expect(targetHarness.readStored().map((turn) => turn.id)).toEqual(['a', 'c']);
     });
 
-    it('returns honest unsupported results for stored copy, rollback and import', async () => {
+    it('returns honest unsupported results for stored copy, tail replacement and import', async () => {
       const harness = await create();
       const { data } = harness;
       const snapshots = data.snapshots;
@@ -639,9 +639,13 @@ export function runSessionDataContract(
         expect.objectContaining({ code: 'cross_store' })
       );
       // The double never fakes the writer-owned guarded operations either.
-      const rollback = await data.commands.updateHistoryWithRollback(() => [userTurn('b')]);
-      expect(rollback.status).toBe('rejected');
-      if (rollback.status === 'rejected') expect(rollback.reason.code).toBe('unsupported');
+      const replaced = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'a',
+        expectedForkTurnId: undefined,
+        replacement: userTurn('b'),
+      });
+      expect(replaced.status).toBe('rejected');
+      if (replaced.status === 'rejected') expect(replaced.reason.code).toBe('unsupported');
       const imported = await data.commands.applyHistoryImport({
         update: () => [userTurn('b')],
         createCursor: () => ({ importedTurnHashes: ['hash-b'] }),
@@ -652,21 +656,143 @@ export function runSessionDataContract(
       expect(harness.readStored().map((turn) => turn.id)).toEqual(['a']);
     });
 
-    it('applies a guarded whole-history update with a working rollback', async () => {
+    it('replaces the editable tail, reports the previous user and compensates the range only', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return; // rollback ships with stored copy
+      if (!data.snapshots?.capabilities.copy) return; // the guarded command ships with stored copy
 
-      await data.commands.appendTurn(userTurn('a'));
-      await data.commands.appendTurn(userTurn('b'));
+      await data.commands.appendTurn(userTurn('u1'));
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+      // Opaque stored content the current build never authored.
+      harness.injectStoredItem('u1', { type: 'text', text: 'legacy', legacyField: 7 });
+      harness.injectStoredItem('u2', { type: 'text', text: 'old', legacyField: 9 });
 
-      const applied = await data.commands.updateHistoryWithRollback(() => [userTurn('x')]);
+      const applied = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-1',
+        replacement: userTurn('u2-new', 'edited'),
+      });
       expect(applied.status).toBe('accepted');
       if (applied.status !== 'accepted') return;
-      expect(applied.receipt.kind).toBe('rollback');
-      expect(harness.readStored().map((turn) => turn.id)).toEqual(['x']);
+      expect(applied.receipt.kind).toBe('replace-editable-tail');
+      expect(applied.previousUserTurnId).toBe('u1');
+      expect(textOf(harness.readStored()[2])).toBe('edited');
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2-new']);
+      // The untouched prefix row keeps its opaque stored item.
+      expect(harness.readStored()[0]!.items).toContainEqual({
+        type: 'text',
+        text: 'legacy',
+        legacyField: 7,
+      });
+
+      // Compensation restores only the replaced range: a row appended after the
+      // replacement survives the rollback, and the replaced row's opaque items
+      // come back from the writer's captured stored values.
+      await data.commands.appendTurn(userTurn('u3'));
       applied.rollback();
-      expect(harness.readStored().map((turn) => turn.id)).toEqual(['a', 'b']);
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2', 'u3']);
+      expect(harness.readStored()[2]!.items).toContainEqual({
+        type: 'text',
+        text: 'old',
+        legacyField: 9,
+      });
+    });
+
+    it('refuses a tail replacement whose tail moved at commit time', async () => {
+      const harness = await create();
+      const { data } = harness;
+      if (!data.snapshots?.capabilities.copy) return;
+
+      await data.commands.appendTurn(userTurn('u1'));
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+      // A concurrent append lands before the command runs; the store re-locates
+      // the tail instead of trusting the caller's earlier resolution.
+      await data.commands.appendTurn(userTurn('u2-concurrent'));
+
+      const refused = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-1',
+        replacement: userTurn('u2-new', 'edited'),
+      });
+      expect(refused.status).toBe('rejected');
+      if (refused.status === 'rejected') expect(refused.reason.code).toBe('stale_boundary');
+      expect(harness.readStored().map((turn) => turn.id)).toEqual([
+        'u1',
+        'a1',
+        'u2',
+        'u2-concurrent',
+      ]);
+    });
+
+    it('refuses a tail replacement whose provider boundary no longer matches', async () => {
+      const harness = await create();
+      const { data } = harness;
+      if (!data.snapshots?.capabilities.copy) return;
+
+      await data.commands.appendTurn(userTurn('u1'));
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+
+      const refused = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-other',
+        replacement: userTurn('u2-new', 'edited'),
+      });
+      expect(refused.status).toBe('rejected');
+      if (refused.status === 'rejected') expect(refused.reason.code).toBe('stale_boundary');
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2']);
+    });
+
+    it('refuses a tail replacement while a session goal is active in history', async () => {
+      const harness = await create();
+      const { data } = harness;
+      if (!data.snapshots?.capabilities.copy) return;
+
+      await data.commands.appendTurn({
+        ...userTurn('u1'),
+        items: [
+          { type: 'text', text: 'hello' },
+          { type: 'goal', threadId: 'thread-1', objective: 'ship it', status: 'active' },
+        ],
+      });
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+
+      const refused = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-1',
+        replacement: userTurn('u2-new', 'edited'),
+      });
+      expect(refused.status).toBe('rejected');
+      if (refused.status === 'rejected') expect(refused.reason.code).toBe('active_goal');
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2']);
+    });
+
+    it('consults the meta goal fallback when the history carries no goal item', async () => {
+      const harness = await create();
+      const { data } = harness;
+      if (!data.snapshots?.capabilities.copy) return;
+
+      await data.commands.appendTurn(userTurn('u1'));
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+
+      const refused = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-1',
+        replacement: userTurn('u2-new', 'edited'),
+        fallbackGoal: {
+          type: 'goal',
+          threadId: 'thread-1',
+          objective: 'ship it',
+          status: 'active',
+        },
+      });
+      expect(refused.status).toBe('rejected');
+      if (refused.status === 'rejected') expect(refused.reason.code).toBe('active_goal');
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2']);
     });
 
     it('imports history in one bound block: write, stored baseline and cursor', async () => {
