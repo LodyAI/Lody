@@ -6,6 +6,7 @@ import { disclosure } from '../src/disclosure/disclosure.tokens.stylex';
 import { feedback } from '../src/feedback/feedback.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
+import { table } from '../src/table/table.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
 import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
@@ -219,6 +220,30 @@ describe('UiGallery', () => {
     expect(board).toContain('indeterminate');
     for (const name of tokenNames(feedback)) {
       expect(board, `feedback.${name} is missing from the board`).toContain(`feedback.${name}`);
+    }
+  });
+
+  test('shows the table and the pager, and every token the two share', () => {
+    // Nothing here is a stand-in: a table draws no surface and a pager is not
+    // portalled, so the board holds both of them for real.
+    expect(board).toContain('<table');
+    expect(board).toContain('<caption');
+    expect(board).toContain('<tfoot');
+    for (const legend of ['small \u00b7 28', 'medium \u00b7 32', 'large \u00b7 36']) {
+      expect(board, `table size ${legend} is missing from the board`).toContain(legend);
+    }
+    // The head row keeps its line and the last record does not, which is one
+    // class on the body rows and not on the head's.
+    expect(board).toContain('data-selected=""');
+    // A sortable column states its direction where a screen reader reads it,
+    // and a column with no way to take it says nothing about sorting at all.
+    expect(board).toContain('aria-sort="descending"');
+    // The pager: the page you are on says so twice, and the gaps name no page.
+    expect(board).toContain('aria-current="page"');
+    expect(board).toContain('aria-label="Page 20"');
+    expect(board).toContain('Page 4212 of 9214');
+    for (const name of tokenNames(table)) {
+      expect(board, `table.${name} is missing from the board`).toContain(`table.${name}`);
     }
   });
 

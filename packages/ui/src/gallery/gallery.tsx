@@ -1,5 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
-import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject } from 'react';
+import {
+  Fragment,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+} from 'react';
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Accordion } from '../disclosure/accordion';
@@ -38,9 +45,12 @@ import { Radio, RadioGroup } from '../field/radio';
 import { Select } from '../field/select';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { Pagination } from '../table/pagination';
 import { Popover } from '../popover/popover';
 import { popup } from '../popup/popup.tokens.stylex';
 import { surface } from '../popup/surface';
+import { Table, type TableSize, type TableSort } from '../table/table';
+import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
 import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
@@ -736,6 +746,39 @@ const FRUIT = [
 ];
 
 const LANGUAGES = ['TypeScript', 'Rust', 'Python', 'Ruby'];
+
+const TABLE_SIZES: { name: string; size: TableSize }[] = [
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
+
+const TABLE_COLORS = [
+  { name: 'table.value', value: tableTokens.value, note: 'what is in a cell' },
+  { name: 'table.head', value: tableTokens.head, note: "a column's name: about the column" },
+  {
+    name: 'table.headActive',
+    value: tableTokens.headActive,
+    note: 'the one column it is sorted by',
+  },
+  {
+    name: 'table.line',
+    value: tableTokens.line,
+    note: 'separator: the one edge a list is given',
+  },
+  { name: 'table.hover', value: tableTokens.hover, note: 'where the pointer is, if it matters' },
+  { name: 'table.selected', value: tableTokens.selected, note: 'the row that holds the value' },
+  { name: 'table.caption', value: tableTokens.caption, note: 'what the table is, under it' },
+  { name: 'table.ring', value: tableTokens.ring, note: 'the keyboard, on a sortable name' },
+];
+
+const PAGER_COLORS = [
+  {
+    name: 'table.pagerHint',
+    value: tableTokens.pagerHint,
+    note: 'the gap, and the count you are out of',
+  },
+];
 
 const CHOICE_COLORS = [
   { name: 'field.checkedFill', value: field.checkedFill, note: 'a control that holds a value' },
@@ -2177,6 +2220,224 @@ function WaitDimensions() {
   );
 }
 
+/** The records a board can show: short enough to read, long enough to be a table. */
+const SESSIONS = [
+  { name: 'Worktree setup', agent: 'Claude', turns: 12 },
+  { name: 'Review the diff', agent: 'Codex', turns: 4 },
+  { name: 'Rename the package', agent: 'Claude', turns: 31 },
+];
+
+/**
+ * A real table. Nothing here is a stand-in: a table draws no surface, has no
+ * open state and is not portalled, so the board holds the thing itself.
+ */
+function SessionTable({
+  size = 'medium',
+  interactive = false,
+  selected,
+}: {
+  size?: TableSize;
+  interactive?: boolean;
+  selected?: string;
+}) {
+  return (
+    <Table.Root size={size} interactive={interactive}>
+      <Table.Head>
+        <Table.Row>
+          <Table.ColumnHeader>Session</Table.ColumnHeader>
+          <Table.ColumnHeader>Agent</Table.ColumnHeader>
+          <Table.ColumnHeader numeric>Turns</Table.ColumnHeader>
+        </Table.Row>
+      </Table.Head>
+      <Table.Body>
+        {SESSIONS.map((session) => (
+          <Table.Row key={session.name} selected={session.name === selected}>
+            <Table.Cell>{session.name}</Table.Cell>
+            <Table.Cell>{session.agent}</Table.Cell>
+            <Table.Cell numeric>{session.turns}</Table.Cell>
+          </Table.Row>
+        ))}
+      </Table.Body>
+    </Table.Root>
+  );
+}
+
+function TableSizeRow({ name, size }: { name: string; size: TableSize }) {
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <SessionTable size={size} />
+      </div>
+    </Row>
+  );
+}
+
+function TableStatesRow() {
+  return (
+    <Row>
+      <LegendKey>hover · selected</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <SessionTable interactive selected="Review the diff" />
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        The pointer is answered only where pressing a row does something; the row that holds the
+        value keeps its fill while the pointer is elsewhere.
+      </span>
+    </Row>
+  );
+}
+
+function TableSortRow() {
+  const [sort, setSort] = useState<TableSort>('descending');
+  const ordered = [...SESSIONS].sort((left, right) =>
+    sort === 'ascending' ? left.turns - right.turns : right.turns - left.turns
+  );
+  return (
+    <Row>
+      <LegendKey>sorted · totalled</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table.Root>
+          <Table.Caption>Sessions this week</Table.Caption>
+          <Table.Head>
+            <Table.Row>
+              <Table.ColumnHeader>Session</Table.ColumnHeader>
+              <Table.ColumnHeader numeric sort={sort} onSortChange={setSort}>
+                Turns
+              </Table.ColumnHeader>
+            </Table.Row>
+          </Table.Head>
+          <Table.Body>
+            {ordered.map((session) => (
+              <Table.Row key={session.name}>
+                <Table.Cell>{session.name}</Table.Cell>
+                <Table.Cell numeric>{session.turns}</Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+          <Table.Foot>
+            <Table.Row>
+              <Table.Cell>Total</Table.Cell>
+              <Table.Cell numeric>47</Table.Cell>
+            </Table.Row>
+          </Table.Foot>
+        </Table.Root>
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        The arrow is the part's, and `aria-sort` on the cell is the same fact: what a screen reader
+        is told and what the arrow shows cannot disagree.
+      </span>
+    </Row>
+  );
+}
+
+function TableDimensions() {
+  const dimensions = [
+    { name: 'table.rowHeightSmall', value: tableTokens.rowHeightSmall },
+    { name: 'table.rowHeightMedium', value: tableTokens.rowHeightMedium },
+    { name: 'table.rowHeightLarge', value: tableTokens.rowHeightLarge },
+    { name: 'table.cellPaddingXSmall', value: tableTokens.cellPaddingXSmall },
+    { name: 'table.cellPaddingXMedium', value: tableTokens.cellPaddingXMedium },
+    { name: 'table.cellPaddingXLarge', value: tableTokens.cellPaddingXLarge },
+    { name: 'table.cellPaddingY', value: tableTokens.cellPaddingY },
+    { name: 'table.text', value: tableTokens.text },
+    { name: 'table.leading', value: tableTokens.leading },
+    { name: 'table.headText', value: tableTokens.headText },
+    { name: 'table.headLeading', value: tableTokens.headLeading },
+    { name: 'table.sortMarkSize', value: tableTokens.sortMarkSize },
+    { name: 'table.sortGap', value: tableTokens.sortGap },
+    { name: 'table.captionText', value: tableTokens.captionText },
+    { name: 'table.captionLeading', value: tableTokens.captionLeading },
+    { name: 'table.captionGap', value: tableTokens.captionGap },
+    { name: 'table.ringWidth', value: tableTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A pager that answers, so the board shows the window moving rather than one frame of it. */
+function PagerRow({
+  name,
+  pages,
+  start,
+  note,
+}: {
+  name: string;
+  pages: number;
+  start: number;
+  note?: string;
+}) {
+  const [page, setPage] = useState(start);
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Pagination page={page} pages={pages} onPageChange={setPage} />
+      </Cluster>
+      {note ? <span {...stylex.props(styles.rungUse)}>{note}</span> : null}
+    </Row>
+  );
+}
+
+function CompactPagerRow({ jump }: { jump?: boolean }) {
+  const [page, setPage] = useState(4212);
+  return (
+    <Row>
+      <LegendKey>{jump ? 'compact · jump' : 'compact'}</LegendKey>
+      <Cluster>
+        <Pagination layout="compact" jump={jump} page={page} pages={9214} onPageChange={setPage} />
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        {jump
+          ? 'What it commits on is Enter or leaving the field, not every keystroke: typing 4-5 through a pager that navigates as you type visits page 4 on the way to page 45.'
+          : 'Nine thousand pages are not a list. The position is said to a screen reader as a sentence, because "4212 / 9214" is read as a slash.'}
+      </span>
+    </Row>
+  );
+}
+
+function PagerSizeRow() {
+  const [page, setPage] = useState(2);
+  return (
+    <Row>
+      <LegendKey>small · 28</LegendKey>
+      <Cluster>
+        <Pagination size="small" page={page} pages={6} onPageChange={setPage} />
+      </Cluster>
+    </Row>
+  );
+}
+
+function PagerDimensions() {
+  const dimensions = [
+    { name: 'table.pagerGap', value: tableTokens.pagerGap },
+    { name: 'table.pagerPositionGap', value: tableTokens.pagerPositionGap },
+    { name: 'table.pagerJumpWidth', value: tableTokens.pagerJumpWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
 function ButtonFocusRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -3034,6 +3295,54 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               ink={false}
               note="the track, sunken"
             />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Table · rows on the page"
+        rule="The one part of this package with no surface of its own: no background, no shadow, no radius. A table is rows on whatever the surface around it already was, so the card holding one keeps owning its edges — and what it draws is the single edge the rules give a list, separator, between one row and the next. The head takes that line too: it is the row before the first record, and the rule against a line under a header is about a heading over a surface. The last record draws none, because there is no next row there. The two fills are the palette's own hoverFill and selectedFill rather than a mix of the surface — the rules name those two for a row on the page and card rungs, and this is that row; a popup derives its own only because on the floating rung they collapse into it. The pointer is answered only where pressing a row does something: a table of facts is read, not operated. A row is on the control ladder, and the size is stated once on the table, because a row's height and a cell's padding are one decision."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {TABLE_SIZES.map((entry) => (
+              <TableSizeRow key={entry.name} {...entry} />
+            ))}
+            <TableStatesRow />
+            <TableSortRow />
+            <TableDimensions />
+          </Rows>
+          <Grid>
+            {TABLE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Pagination · the way to the rows that did not fit"
+        rule="A pager belongs to the table for the reason a Drawer belongs to the Dialog: it exists because a table did not fit, it sits on the same rung, and it states the same size — though nothing here needs a table above it, and the first caller in this repository is a file too large to open at once. It is one control rather than a kit of parts, because the part a caller would otherwise assemble is the one that is easy to get wrong: which pages to list out of nine thousand, and where to admit the rest are missing. The window is one width from the first page to the last, so the buttons do not move out from under the pointer, and a gap is only drawn where it hides more than one page — a gap hiding a single page is wider than the page it hides. The page you are on says so twice, as a fill and as aria-current, because the fill reaches only the people who can see it. The steps are disabled at the ends rather than removed. Where the pages are too many to list, the pager says where you are instead — and lets a person type it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <PagerRow
+              name="all of them"
+              pages={5}
+              start={2}
+              note="Seven pages or fewer are listed in full: a gap that saves no room costs a press."
+            />
+            <PagerRow name="at the start" pages={40} start={1} />
+            <PagerRow name="in the middle" pages={40} start={20} />
+            <PagerRow name="at the end" pages={40} start={40} />
+            <PagerSizeRow />
+            <CompactPagerRow />
+            <CompactPagerRow jump />
+            <PagerDimensions />
+          </Rows>
+          <Grid>
+            {PAGER_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
           </Grid>
         </PaletteSplit>
       </Section>

@@ -174,6 +174,35 @@ controls is a button to the platform: the keyboard reaches it, a screen reader
 is told which kind of control it is and whether it holds a value, and a form
 receives that value under the name the field root gave it.
 
+A surface may also show records rather than one thing at a time. That is rows
+and columns, and it is the one part of this system with no surface of its own:
+no fill, no shadow, no rounded edge, because it is rows on whatever the surface
+around it already was, and a panel holding one keeps its own edges. The one
+edge it draws is the line a list is allowed, between one row and the next; the
+row of column names takes it too, because the row after it is the first record,
+and the last record draws none. The rows answer the pointer only where pressing
+one does something, so a table of facts is read rather than operated, and the
+row that holds a value keeps its mark while the pointer is elsewhere — a mark
+and nothing more, because what lets a person select rows is a control inside
+one, which is both what they press and what tells a screen reader what happened.
+A column can be one the records are ordered by, and then its name is a control,
+it carries the mark of which way round it is, and that direction is stated once
+where both a sighted person and a screen reader read the same fact.
+
+What a list that did not fit offers next belongs with it: a way to the records
+that are not on screen. It is one control rather than parts a surface
+assembles, because the decision that is easy to get wrong is which pages to
+offer out of thousands and where to admit the rest are missing — and it is made
+once here. What is offered stays one width from the first page to the last, so
+the choices do not move as a person walks through them, and the missing pages
+are admitted only where more than one is missing. The page a person is on is
+marked twice, once for the people who can see it and once for the people who
+cannot. Where there are too many pages to offer at all, it says where they are
+instead, and lets them type where they want to be — taking that when they have
+finished saying it rather than while they are still typing, since every
+half-typed number would otherwise be somewhere the surface had to go. Every
+word it says is the surface's, because this package carries no dictionary.
+
 Product surfaces own workflows, placement, responsive layout, and accessibility
 requirements. They may add layout or interaction classes when a local constraint
 cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
@@ -237,3 +266,10 @@ the migration of the Radix menus still owed to it are recorded in the
 The popover on that same surface, the modal rung the dialog family shares, the
 inverted tooltip, and the migration still owed to them are recorded in the
 [UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
+The three disclosures and the five parts that report are recorded in the
+[UI disclosure primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-disclosure-primitives.md)
+and the
+[UI feedback primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-feedback-primitives.md).
+The table with no surface of its own, the pager that shares its token group, and
+the two Radix files they replace are recorded in the
+[UI table and pagination note](../.agents/notes/implemented/feature/2026-09-12-ui-table-pagination.md).

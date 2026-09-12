@@ -32,27 +32,25 @@ into one component at a time. Source-consumed; consumers compile it through
   and the list shares its vocabulary with a menu rather than an input.
   `src/popup/surface.ts` holds the appearance the floating parts share, the way
   `src/field/well.ts` holds the controls' and `src/dialog/surface.ts` the modals'.
-- `Select.Value` resolves its text from `Select.Root items`, never from the rows.
-  A caller whose row text differs from its value states the list on the root as
-  well, or the trigger names the raw value; `test/select.test.tsx` pins both.
+- `Select.Value` resolves its text from `Select.Root items`, never the rows: a
+  caller whose row text differs from its value states the list on the root too,
+  or the trigger names the raw value (`test/select.test.tsx` pins both).
 - Every floating part's `Content` assembles Base UI's portal, positioner and
-  popup so a caller writes contents rather than plumbing, and takes the
-  positioning props outside. They mount into the nearest
+  popup, and takes the positioning props outside. They mount into the nearest
   `PopupContainerProvider`, switching to the absolute strategy when they do: a
   container centred with `translate` is the containing block for `fixed`
-  descendants, so a viewport-anchored popup inside one lands at its own offset.
+  descendants, so a popup inside one would land at its own offset.
 - `Menu` is the dropdown menu; `ContextMenu` and `Menubar` restate only the way
   in and re-export its rows. A menu reads `popup` and replaces exactly one of a
   list's declarations, `--anchor-width`; the surface and every row are shared
   through `src/popup/surface.ts`.
 - Whatever holds a glyph gives it a box, because this package's glyphs state
   100% and StyleX has no descendant selector: a menu row's leading box, a
-  Select's chevron, a message's mark, and an icon-only `Button`, which draws a
-  `button.iconSize` box around its children. A caller's icon states 100% rather
-  than its library's default. A checkbox or radio row's box holds its mark only.
-- Every trigger here is Base UI's, unstyled: a surface opens a menu, a popover or
-  a modal with whatever it already had there, through `render={<Button …/>}`.
-  Post-close focus is the product's policy, passed as `finalFocus`.
+  message's mark, an icon-only `Button`'s `button.iconSize` box. A caller's icon
+  states 100% too; a checkbox or radio row's box holds its mark only.
+- Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
+  modal with what it already had there, `render={<Button …/>}`. Post-close focus
+  is the product's policy, passed as `finalFocus`.
 - `Popover` reads `popup` too and replaces five of a list's declarations: the
   anchor width, the row inset, and the three that make type prose.
   `test/popover.test.tsx` pins that as a count.
@@ -79,6 +77,11 @@ into one component at a time. Source-consumed; consumers compile it through
   the part's, and `feedback/tone.ts` maps the four. The tint is mixed in
   `feedback/surface.ts` from each rung's own background, because an Alert is a
   card and a Toast floats. `disabled` from Base UI state, not `:disabled`.
+- `Table` and `Pagination` are one `table` family: the rows, and the way to the
+  rows that did not fit. A table draws no surface, so its only edge is the line
+  between rows — a border, because under `border-collapse: collapse` a row's
+  box-shadow is not painted. Hover is opt in through `interactive`; `selected`
+  is a fill, never `aria-selected`. Base UI ships neither part.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
@@ -98,9 +101,8 @@ into one component at a time. Source-consumed; consumers compile it through
   `src/theme/theme.tsx` so `ThemeRoot` applies it with every forced palette; a
   custom property declared only at the document root keeps the root palette
   inside a themed subtree. A family shares one group (`field` covers the label,
-  Input, Textarea, Checkbox, Radio, Switch, the Select and Combobox triggers,
-  help and error; `popup` covers the lists they open) rather than one group per
-  component.
+  every control and their messages; `popup` covers the lists those controls
+  open) rather than one group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a

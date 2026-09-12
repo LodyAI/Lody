@@ -3947,5 +3947,7 @@
   "sessions.fileViewer.previousPage": "上一页",
   "sessions.fileViewer.nextPage": "下一页",
   "sessions.fileViewer.page": "页码",
+  "sessions.fileViewer.pagination": "文件分页",
+  "sessions.fileViewer.position": "第 {{page}} 页，共 {{total}} 页",
   "sessions.fileViewer.pageUnavailable": "文件已更改或无法读取，请重新打开预览。"
 }

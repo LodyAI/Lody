@@ -388,6 +388,70 @@ reports nothing its own shape does not already say, which is also why it is
 hidden from a screen reader. A spinner keeps turning there, because it is the
 only thing saying the work has not stopped.
 
+## Tables
+
+Rows of records, and the way to the rows that did not fit. One group, `table`,
+covers both for the reason `dialog` covers three modals: a pager exists because
+a table did not fit, the two sit on the same rung and state the same size, and
+how dense a list of records is has one place to change rather than two.
+
+A table is the one part of this system with **no surface of its own**: no
+background, no shadow, no radius. It is rows on whatever the surface around it
+already was — a page, a card, a dialog — so the card that holds one keeps owning
+its edges, and a table inside a card is not a card inside a card. What it draws
+is the one edge the rules give a list: `separator`, between one row and the next.
+
+| part     | what it is                                                              |
+| -------- | ----------------------------------------------------------------------- |
+| row      | a `table.rowHeight*` row on the control ladder; the height is a floor   |
+| line     | `table.line` under a row, and none under the last one                   |
+| head     | a column's name, at the footnote step in `table.head`: about the column |
+| cell     | the value, at the control step in `table.value`                         |
+| numeric  | tabular digits, aligned to the end of the column                        |
+| sorted   | the one column at `table.headActive`, with the arrow the part draws     |
+| hover    | `table.hover`, and only where pressing a row does something             |
+| selected | `table.selected`, which stays while the pointer is elsewhere            |
+| caption  | what the table is, under it, at the footnote step in `table.caption`    |
+
+The head takes the line too. The rule against a line under a header is about a
+heading over a surface; a row of column names is the row before the first
+record, and the line under it is the divider to the next row that `separator` is
+for. The last record draws none, because there is no next row there.
+
+The two fills are the palette's own `hoverFill` and `selectedFill` rather than a
+mix of the surface, which is the opposite of what a popup row does. Those two
+were tuned against the page and card rungs, and a table row is exactly the row
+this table names them for; a popup derives its own only because on the floating
+rung they collapse into the surface.
+
+The pointer is answered **only where pressing a row does something**. A table of
+facts is read, not operated, and a row that lights up and does nothing when
+pressed is a promise the table cannot keep. Selection is a fill and nothing
+else: `aria-selected` belongs to a row in a grid, so a table that lets a person
+select rows puts a checkbox in one, which is what they press and what announces
+it.
+
+A column's name is a control only where the table can be ordered by it, and then
+it is a real button with the ring every control here takes. Which way it is
+sorted is on the cell as `aria-sort`, so what a screen reader is told and what
+the arrow shows are one fact. The arrow belongs to the part, the way a submenu's
+chevron belongs to its row.
+
+### The pager
+
+The window is one width from the first page to the last, so the buttons do not
+move out from under the pointer, and a gap is drawn only where it stands for
+more than one page — a gap hiding a single page is wider than the page it hides
+and costs the press that page would have taken. Against either end the gap that
+is not needed is spent listing more pages instead.
+
+The page a person is on says so twice: a secondary Button among ghosts, and
+`aria-current`, because the fill reaches only the people who can see it. The
+steps either way are disabled at the ends rather than removed, since a pager
+whose buttons come and go moves the ones beside them. Nine thousand pages are
+not a list, so a pager that long says where you are instead — `table.pagerHint`
+for the count, the label colour for the number — and lets a person type it.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback

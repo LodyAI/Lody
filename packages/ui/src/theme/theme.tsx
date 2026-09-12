@@ -6,6 +6,7 @@ import { disclosurePaletteTheme } from '../disclosure/disclosure.tokens.stylex';
 import { feedbackPaletteTheme } from '../feedback/feedback.tokens.stylex';
 import { fieldPaletteTheme } from '../field/field.tokens.stylex';
 import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
+import { tablePaletteTheme } from '../table/table.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
 import { darkShadowTheme, darkTheme, lightShadowTheme, lightTheme } from '../tokens/colors.stylex';
 
@@ -23,6 +24,7 @@ const componentPaletteThemes = [
   feedbackPaletteTheme,
   fieldPaletteTheme,
   popupPaletteTheme,
+  tablePaletteTheme,
   tooltipPaletteTheme,
 ];
 

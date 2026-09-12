@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Clock3, Loader2, Minus, RotateCcw, XCircle } from 'lucide-react';
 import type { ProviderSetupFailureCode } from '@lody/shared';
-import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
+import { Table } from '@lody/ui/table';
 import { Button } from '@lody/ui/button';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
@@ -84,8 +84,8 @@ export function SummaryScreen({
       }
     >
       <div className="overflow-hidden rounded-xl border border-border/60 bg-card/45">
-        <Table>
-          <TableBody>
+        <Table.Root size="large">
+          <Table.Body>
             <SummaryRow
               label={t('onboarding.summary.agent', 'Agent')}
               value={resolvedAgentName}
@@ -96,8 +96,8 @@ export function SummaryScreen({
               value={resolvedProjectName}
               status={projectName ? 'ready' : 'missing'}
             />
-          </TableBody>
-        </Table>
+          </Table.Body>
+        </Table.Root>
       </div>
       {agentState === 'failed' && onRetryAgent ? (
         <div className="mt-3 space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
@@ -205,10 +205,12 @@ function SummaryRow({
           : t('onboarding.summary.statusLater', 'Set up later');
 
   return (
-    <TableRow className="hover:bg-transparent">
-      <TableCell className="w-24 py-4 text-xs font-medium text-muted-foreground">{label}</TableCell>
-      <TableCell className="max-w-48 truncate py-4 font-medium">{value}</TableCell>
-      <TableCell className="py-4 text-right">
+    <Table.Row>
+      <Table.ColumnHeader scope="row" className="w-24">
+        {label}
+      </Table.ColumnHeader>
+      <Table.Cell className="max-w-48 truncate font-medium">{value}</Table.Cell>
+      <Table.Cell align="end">
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           {status === 'ready' ? (
             <Check className="size-3.5 text-primary" />
@@ -221,7 +223,7 @@ function SummaryRow({
           )}
           {statusLabel}
         </span>
-      </TableCell>
-    </TableRow>
+      </Table.Cell>
+    </Table.Row>
   );
 }
