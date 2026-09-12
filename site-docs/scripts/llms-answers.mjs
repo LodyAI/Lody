@@ -13,6 +13,7 @@ export const LLMS_ANSWERS = [
     ].join('\n\n'),
     links: [
       { title: 'Share a Coding Agent Session', sitePath: '/docs/session-handoff' },
+      { title: 'Share Link vs Live Handoff', sitePath: '/docs/compare/share-link-vs-live-handoff' },
       { title: 'Sessions', sitePath: '/docs/session' },
       { title: 'Team Features', sitePath: '/docs/team' },
     ],
@@ -40,6 +41,18 @@ export const LLMS_ANSWERS = [
       { title: 'Agent Config', sitePath: '/docs/agents' },
       { title: 'CLI Runtime Types', sitePath: '/docs/cli-runtimes' },
       { title: 'Team Features', sitePath: '/docs/team' },
+    ],
+  },
+  {
+    question: 'Is a share link the same as handing off a coding agent session?',
+    answer: [
+      'No. A screenshot, transcript, ChatGPT-style share link, or session archive is a viewable record. Someone can read it, and some flows can start a new agent run from that context. They do not join the original live session, and they do not get the original worktree.',
+      'A live handoff opens the existing Lody workspace session so a teammate continues the same conversation, diffs, and worktree. Copying a session URL does not grant that access.',
+    ].join('\n\n'),
+    links: [
+      { title: 'Share Link vs Live Handoff', sitePath: '/docs/compare/share-link-vs-live-handoff' },
+      { title: 'Share a Coding Agent Session', sitePath: '/docs/session-handoff' },
+      { title: 'Copy Conversations', sitePath: '/docs/copy-md' },
     ],
   },
 ];

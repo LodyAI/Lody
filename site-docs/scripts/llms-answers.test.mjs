@@ -16,6 +16,7 @@ await test('llms answer blocks cover the GEO questions and only link live docs',
   assert.ok(questions.some((question) => /hand off a coding agent session/iu.test(question)));
   assert.ok(questions.some((question) => /parallel/iu.test(question)));
   assert.ok(questions.some((question) => /Claude.*Kimi.*DeepSeek|ACP/iu.test(question)));
+  assert.ok(questions.some((question) => /share link.*hand/iu.test(question)));
 
   for (const block of LLMS_ANSWERS) {
     assert.ok(block.answer.length > 80, `answer too short: ${block.question}`);
@@ -48,7 +49,12 @@ await test('llms answer blocks cover the GEO questions and only link live docs',
     }
   }
 
-  const handoff = LLMS_ANSWERS.find((block) => /hand off/iu.test(block.question));
+  const handoff = LLMS_ANSWERS.find((block) => /hand off a coding agent session to a teammate/iu.test(block.question));
   assert.ok(handoff?.links.some((link) => link.sitePath === '/docs/session-handoff'));
+  assert.ok(handoff?.links.some((link) => link.sitePath === '/docs/compare/share-link-vs-live-handoff'));
   assert.ok(existsSync(path.join(docsEnRoot, '(features)', 'session-handoff.mdx')));
+
+  const shareVsHandoff = LLMS_ANSWERS.find((block) => /share link the same as handing off/iu.test(block.question));
+  assert.ok(shareVsHandoff?.links.some((link) => link.sitePath === '/docs/compare/share-link-vs-live-handoff'));
+  assert.ok(existsSync(path.join(docsEnRoot, 'compare', 'share-link-vs-live-handoff.mdx')));
 });

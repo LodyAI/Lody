@@ -86,9 +86,16 @@ function validateDocsMetadata() {
   }
 }
 
+function docsFilesForLlms(localeRoot) {
+  const ordered = orderedDocsFiles(localeRoot);
+  const seen = new Set(ordered.map((file) => path.resolve(file)));
+  const extras = listMdxFiles(localeRoot).filter((file) => !seen.has(path.resolve(file)));
+  return [...ordered, ...extras];
+}
+
 function docsEntries() {
   const localeRoot = path.join(docsRoot, 'en');
-  return orderedDocsFiles(localeRoot).map((file) => {
+  return docsFilesForLlms(localeRoot).map((file) => {
     const { frontmatter, body } = parseMdxFile(file);
     const title = requireString(frontmatter.title, 'title', file);
     const description = requireString(frontmatter.description, 'description', file);
