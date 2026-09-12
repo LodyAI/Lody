@@ -26,7 +26,9 @@ wildcard; provider deletion therefore fences every stale setup revision. The sam
 cancellation is the durable machine-local credential cleanup
 intent; after applying it durably, the CLI reconciles that config ID and removes the
 credential only when no custom config or setup remains. Restart resumes only
-non-interactive states.
+non-interactive states. Renderer callers apply cancellation only through the transactional
+`WorkspaceWriter` operation that reuses this shared precedence and returns the effective marker;
+they must not write the cancellation row directly.
 
 Credential-changing Codex replacements keep the old launch config published during
 the probe. The post-probe cross-store commit may retain the old and desired
@@ -37,8 +39,10 @@ setup revision into the desired config's Lody-owned provider state. This non-sec
 generation participates in the launch binding, so same-endpoint key rotation still
 publishes a distinct `agentConfig` identity and recovery can distinguish the keys.
 The credential store rejects a rotation without a fresh generation before replacing
-the active credential. The authentication slot becomes committed immediately before
-that Flock commit; Cancel or timeout wins before this boundary and is too late after it.
+the active credential. The final abort check runs immediately before the Flock commit, and the
+authentication slot becomes committed synchronously after that commit returns. A commit throw is
+a pre-commit failure that rolls back staged credentials; only a later flush failure is uncertain.
+Cancel or timeout wins before the commit boundary and is too late after it.
 
 The live provisioning probe does not update the shared capability cache. The manager
 publishes its result only after the exact setup wins durable AgentConfig publication,

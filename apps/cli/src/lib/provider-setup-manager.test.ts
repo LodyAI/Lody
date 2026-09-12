@@ -742,6 +742,42 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
+  it('rolls back credential staging when the Flock publication commit throws', async () => {
+    const harness = createHarness();
+    seedSetup(harness.flock, {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-commit-failure',
+      config: {
+        ...createSetup().config,
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://commit-failure.example.com/v1' }
+        ),
+      },
+    });
+    const committedSnapshotCount = harness.flock.commitSnapshots.length;
+    vi.spyOn(harness.flock, 'commit').mockImplementationOnce(() => {
+      throw new Error('Flock commit failed');
+    });
+    const markCommitted = vi.fn();
+
+    await expect(
+      harness.manager.commitCredentialSetup(
+        setupId,
+        'revision-commit-failure',
+        'new-key',
+        undefined,
+        markCommitted
+      )
+    ).rejects.toThrow('Flock commit failed');
+
+    expect(markCommitted).not.toHaveBeenCalled();
+    expect(harness.rollbackCredential).toHaveBeenCalledTimes(1);
+    expect(harness.finalizeCredential).not.toHaveBeenCalled();
+    expect(harness.flock.commitSnapshots).toHaveLength(committedSnapshotCount);
+    harness.manager.stop();
+  });
+
   it('does not prune either real credential binding on a later event drain after flush throws', async () => {
     const previousDataDir = process.env.LODY_DATA_DIR;
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-commit-'));

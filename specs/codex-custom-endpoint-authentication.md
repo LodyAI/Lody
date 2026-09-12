@@ -48,9 +48,11 @@ Lody-owned provider state as `credentialRevision`. Because provider state partic
 canonical launch binding, two API keys never share a credential identity even when every other
 launch field is unchanged. One authentication lifecycle and its abort signal cover setup
 synchronization, secret input, probe, credential staging, and config publication. The final abort
-check and transition to `committed` occur synchronously immediately before the Flock commit.
-Cancellation before that boundary wins and publishes nothing; cancellation or timeout after it is
-too late and cannot return `cancelled`. Probe failure writes no credential. A durable RPC success
+check occurs immediately before the Flock commit. The authentication lifecycle transitions to
+`committed` synchronously after that commit returns, with no asynchronous gap between the two
+operations. A synchronous commit failure remains pre-commit, rolls back the staged credential, and
+reports a normal failure. Cancellation before the boundary wins and publishes nothing;
+cancellation or timeout after it is too late and cannot return `cancelled`. Probe failure writes no credential. A durable RPC success
 means the final non-secret
 `AgentConfig` was published and the setup was removed. A post-commit flush failure instead reports
 uncertain publication durability, retains both credential bindings, and forces the renderer to
@@ -81,6 +83,8 @@ renderer uses its captured `AgentConfig` to perform the durable config deletion 
 it up again in the projected cache. That durable wildcard is both the barrier against any in-flight
 replacement and the cleanup intent. Cancellation precedence is `wildcard > exact`: delete upgrades
 an existing revision-specific marker, while a later exact cancellation cannot weaken a wildcard.
+Renderer cancellation uses the shared transactional merge primitive through `WorkspaceWriter`;
+raw row puts are not an allowed cancellation path.
 An explicitly new setup retracts it only in the same atomic
 Flock mutation that writes the fresh setup revision: durable state therefore contains either the
 wildcard barrier or the new replacement intent, never an empty interval in which an older setup can

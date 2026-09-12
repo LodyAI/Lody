@@ -1,8 +1,11 @@
 import {
+  applyProviderSetupCancellationToFlock,
+  getMachineFlockProviderSetupCancellations,
   applyPreviewVisualCommentMutation,
   getServerNow,
   getSessionRoomId,
   machineFlockKeys,
+  readMachineFlockRowsFromFlock,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
   type SessionDocMeta,
@@ -132,6 +135,21 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
         );
         handle.flock.delete(machineFlockKeys.providerSetupCancellation(setup.id));
       });
+    },
+
+    async applyProviderSetupCancellation(flockDocId, cancellation, capturedConfig) {
+      const handle = await deps.repo.openFlockDoc(flockDocId);
+      applyProviderSetupCancellationToFlock(
+        handle.flock,
+        cancellation,
+        cancellation.cancelledAt,
+        capturedConfig
+      );
+      return getMachineFlockProviderSetupCancellations(
+        readMachineFlockRowsFromFlock(handle.flock, {
+          prefixes: [machineFlockKeys.providerSetupCancellation(cancellation.id)],
+        })
+      )[cancellation.id];
     },
 
     async flockRowDelete(flockDocId, key) {

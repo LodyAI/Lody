@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import {
+  buildLodyCodexCustomProviderEnv,
   createPreviewVisualComment,
   createPreviewVisualCommentDoc,
   createSessionMirror,
@@ -18,6 +19,8 @@ import {
   type AgentConfigId,
   type AgentRole,
   type AcpCapabilityCacheEntry,
+  type MachineId,
+  type ProviderSetupCancellation,
   type ProviderSetupTask,
 } from '@lody/shared';
 
@@ -373,6 +376,63 @@ describe('createDirectWorkspaceWriter', () => {
     ).rejects.toThrow('setup write failed');
     expect(flock.get(cancellationKey)).toEqual(cancellation);
     expect(flock.get(setupKey)).toEqual(staleSetup);
+  });
+
+  it('does not let a stale exact cancellation downgrade a wildcard barrier', async () => {
+    const configId = 'provider-stale-cancel' as AgentConfigId;
+    const machineId = 'machine-stale-cancel' as MachineId;
+    const setupKey = machineFlockKeys.providerSetup(configId);
+    const cancellationKey = machineFlockKeys.providerSetupCancellation(configId);
+    const flock = new Flock('provider-stale-cancel');
+    const wildcardCancellation: ProviderSetupCancellation = {
+      v: 1,
+      id: configId,
+      machineId,
+      cancelledAt: 20,
+    };
+    const setup: ProviderSetupTask = {
+      v: 1,
+      id: configId,
+      machineId,
+      config: {
+        id: configId,
+        machineId,
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://stale-cancel.example.com/v1' }
+        ),
+        prompt: '',
+      },
+      status: 'awaiting-auth',
+      setupRevision: 'revision-1',
+      attempt: 1,
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    flock.set(cancellationKey, wildcardCancellation, 20);
+    flock.set(setupKey, setup, 10);
+    flock.commit();
+    const writer = createDirectWorkspaceWriter({
+      repo: {
+        openFlockDoc: vi.fn(async () => ({ flock })),
+      } as never,
+    } as never);
+
+    const effectiveCancellation = await writer.applyProviderSetupCancellation('machine-flock', {
+      v: 1,
+      id: configId,
+      machineId,
+      setupRevision: 'revision-1',
+      preservePublishedConfig: true,
+      cancelledAt: 30,
+    });
+
+    expect(effectiveCancellation).toEqual(wildcardCancellation);
+    expect(flock.get(cancellationKey)).toEqual(wildcardCancellation);
+    expect(flock.get(setupKey)).toBeUndefined();
   });
 
   it('applies the shared preview-comment mutation to the renderer store', async () => {

@@ -181,8 +181,8 @@ export class ProviderSetupManager {
         setupRevision,
         signal,
         () => {
-          markCommitted?.();
           publicationCommitted = true;
+          markCommitted?.();
         },
         verifiedConfig
       ).catch(async (error: unknown) => {
@@ -615,9 +615,16 @@ export class ProviderSetupManager {
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
     flock.delete(machineFlockKeys.providerSetupCancellation(setupId), now);
     signal?.throwIfAborted();
-    markCommitted?.();
     try {
       flock.commit();
+    } catch (error) {
+      this.logger.debug(
+        `[provider-setup] Publication commit failed for configId=${setupId} setupRevision=${expectedSetupRevision ?? 'none'}: ${formatErrorMessage(error)}`
+      );
+      throw error;
+    }
+    markCommitted?.();
+    try {
       await this.repo.flush();
     } catch (error) {
       this.logger.debug(

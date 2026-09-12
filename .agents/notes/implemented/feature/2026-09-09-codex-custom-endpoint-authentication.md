@@ -47,8 +47,10 @@ when the same endpoint already has a credential. The revision is fresh for every
 The daemon embeds it into the desired provider state immediately before credential staging and
 publishes that revisionized config only if the setup CAS wins. The existing authentication slot
 and abort signal remain live through setup synchronization, secret input, probe, credential
-staging, and config publication. The slot becomes committed in the synchronous boundary
-immediately before the Flock commit: cancellation wins before that point and is too late afterward.
+staging, and config publication. The final abort check runs immediately before the Flock commit,
+and the slot becomes committed synchronously after that commit returns. A synchronous commit
+failure remains pre-commit and rolls back the staged credential; only a later flush failure has
+uncertain durability. Cancellation wins before the commit boundary and is too late afterward.
 Remote HTTP endpoints are rejected; HTTPS and loopback HTTP are accepted.
 The verification probe itself does not mutate the shared capability cache. Its result is handed to
 the setup manager as a deferred publication and is cached only after the exact setup revision wins
@@ -87,7 +89,10 @@ republishing the custom provider and also owns machine-local credential cleanup;
 a later setup retracts it atomically with writing the fresh setup revision. A replica therefore
 cannot observe the wildcard removed while an older replacement remains the current setup. A
 wildcard cancellation also replaces an existing exact-revision marker, while exact cancellation
-cannot downgrade a wildcard, so deletion still fences a stale replacement from another replica. The
+cannot downgrade a wildcard, so deletion still fences a stale replacement from another replica.
+Renderer cancellation goes through one transactional `WorkspaceWriter` operation that reuses the
+shared merge rule and returns the effective marker for optimistic projection; raw cancellation row
+puts are not a supported path. The
 cancellation's optimistic projection may hide the config locally, so the following durable delete
 carries the previously captured config rather than looking it up in that cache. The UI never waits
 for the target machine. Its daemon reconciles the affected config ID after the cancellation is
@@ -104,15 +109,16 @@ older direct-delete clients.
 
 The branch review compared each removal with the existing behavioral suites:
 
-| Removal                                                                              | Observed result                                                                                                                                                  | Decision                                                                             |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Previous credential binding during staging                                           | Two real-store tests failed: the published endpoint lost its key during the commit window and after recovery to the old config.                                  | Retain both bindings until publication is durable.                                   |
-| Cached RPC response object and its `published` flag                                  | Only reference-identity assertions failed; all response fields and the single probe/publication remained equal.                                                  | Remove the cache and assert response values.                                         |
-| V1 credential reader and V2 envelope factory                                         | All seven real-store tests and setup recovery tests passed with the existing V2 writer.                                                                          | Keep one strict V2 schema; this unreleased feature has no V1 migration contract.     |
-| Recomputing an already-resolved launch snapshot and requiring unused identity fields | Session execution and manager suites, plus CLI typechecking, passed.                                                                                             | Reuse the snapshot and retain only the three launch fields consumed by the resolver. |
-| Requiring capability-cache success for an authenticated credential save              | New renderer tests reproduced both durable and uncertain saves being rejected; removing the condition made both pass, with uncertain results waiting for resync. | Let the committed authentication outcome own save success.                           |
-| Exact-case credential-key checks                                                      | Lowercase and mixed-case aliases crossed AgentConfig and binding filters even though Windows launch treats them as the reserved slot.                            | Use one case-insensitive shared predicate at every boundary.                          |
-| Same-binding key replacement                                                         | A crash after credential staging but before Flock commit lost the only copy of the previously published key.                                                    | Put the setup revision in provider state and make every credential generation a distinct launch binding. |
+| Removal                                                                              | Observed result                                                                                                                                                  | Decision                                                                                                 |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Previous credential binding during staging                                           | Two real-store tests failed: the published endpoint lost its key during the commit window and after recovery to the old config.                                  | Retain both bindings until publication is durable.                                                       |
+| Cached RPC response object and its `published` flag                                  | Only reference-identity assertions failed; all response fields and the single probe/publication remained equal.                                                  | Remove the cache and assert response values.                                                             |
+| V1 credential reader and V2 envelope factory                                         | All seven real-store tests and setup recovery tests passed with the existing V2 writer.                                                                          | Keep one strict V2 schema; this unreleased feature has no V1 migration contract.                         |
+| Recomputing an already-resolved launch snapshot and requiring unused identity fields | Session execution and manager suites, plus CLI typechecking, passed.                                                                                             | Reuse the snapshot and retain only the three launch fields consumed by the resolver.                     |
+| Requiring capability-cache success for an authenticated credential save              | New renderer tests reproduced both durable and uncertain saves being rejected; removing the condition made both pass, with uncertain results waiting for resync. | Let the committed authentication outcome own save success.                                               |
+| Exact-case credential-key checks                                                     | Lowercase and mixed-case aliases crossed AgentConfig and binding filters even though Windows launch treats them as the reserved slot.                            | Use one case-insensitive shared predicate at every boundary.                                             |
+| Same-binding key replacement                                                         | A crash after credential staging but before Flock commit lost the only copy of the previously published key.                                                     | Put the setup revision in provider state and make every credential generation a distinct launch binding. |
+| Renderer cancellation row puts                                                       | A stale exact cancellation could overwrite a wildcard deletion barrier by bypassing the shared precedence.                                                       | Route cancellation through one writer operation that reuses the shared merge primitive.                  |
 
 No endpoint, binding, cancellation, publication-order, or crash-recovery guarantee was removed.
 The V2 envelope remains unchanged. Older experimental V1 files are no longer read and require
@@ -128,7 +134,7 @@ configuration, setup revision parsing, wildcard cancellation, publication durabi
 of exact- and mixed-case forms of the protocol-owned one-shot secret at both setup and AgentConfig
 boundaries. CLI tests cover delayed setup
 visibility, forced key rotation, cancellation during a deferred live probe, the commit boundary,
-same-endpoint generation rotation with uncertain flush, pre-commit and post-commit crash cuts,
+same-endpoint generation rotation with uncertain flush, synchronous commit rollback, pre-commit and post-commit crash cuts,
 real-store publication uncertainty, dual-binding crash
 recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
 replay, legacy direct-delete orphan enumeration, binding mismatch, digest-only binding persistence,
@@ -140,7 +146,8 @@ per-attempt revisions, exact failure cancellation, the one-shot payload, and can
 offline config deletion through reload, plus non-dismissible submission and authenticated
 capability-cache degradation. A real two-replica Flock test covers atomic wildcard
 retraction and setup replacement, including a setup-authoring failure that retains the barrier. A
-controlled loopback relay run
+direct writer test proves that a stale exact cancellation preserves an existing wildcard marker.
+The controlled loopback relay run
 with bundled Codex 0.153.4 observed a streamed
 `POST /v1/responses` request with the configured model and matching bearer credential; the relay
 returned an intentional 401 after recording only the boolean credential match.

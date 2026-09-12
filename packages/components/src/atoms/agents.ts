@@ -121,27 +121,32 @@ async function cancelProviderSetupInMachineFlock(
   const setupKey = machineFlockKeys.providerSetup(cancellation.id);
   const configKey = machineFlockKeys.agentConfig(cancellation.id);
 
-  // The durable marker is the cancellation accept boundary. The target CLI applies
-  // the revision CAS and removes the affected rows; local projection only hides them.
-  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
+  const capturedConfig = getMachineFlockAgentConfigs(optimisticRows)[cancellation.id];
+  const effectiveCancellation = await runtime.writer.applyProviderSetupCancellation(
+    flockDocId,
+    cancellation,
+    capturedConfig
+  );
 
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = {
-    ...readMachineFlockRowsFromFlock(handle.flock),
     ...optimisticRows,
-    [serializeMachineFlockKey(cancellationKey)]: {
-      key: cancellationKey,
-      value: cancellation,
-    },
+    ...readMachineFlockRowsFromFlock(handle.flock),
+  };
+  if (!effectiveCancellation) return rows;
+  rows[serializeMachineFlockKey(cancellationKey)] = {
+    key: cancellationKey,
+    value: effectiveCancellation,
   };
   const currentSetup = getMachineFlockProviderSetups(rows)[cancellation.id];
   if (
     currentSetup &&
-    (!cancellation.setupRevision || currentSetup.setupRevision === cancellation.setupRevision)
+    (!effectiveCancellation.setupRevision ||
+      currentSetup.setupRevision === effectiveCancellation.setupRevision)
   ) {
     delete rows[serializeMachineFlockKey(setupKey)];
   }
-  if (!cancellation.preservePublishedConfig) {
+  if (!effectiveCancellation.preservePublishedConfig) {
     delete rows[serializeMachineFlockKey(configKey)];
   }
   return rows;
