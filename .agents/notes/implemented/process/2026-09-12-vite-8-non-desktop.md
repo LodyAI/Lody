@@ -35,3 +35,19 @@ runtime Storybook graph. Keep shared alias helpers structurally typed so their
 Vite 8 implementation types do not leak into the Electron Vite 7 config. Keep
 `apps/electron` on Vite 7 until electron-vite publishes a stable release whose
 peer contract includes Vite 8.
+
+The first macOS ARM CI run exposed an incomplete lockfile snapshot: the
+`rolldown@1.2.8` JavaScript wrapper had no matching optional native dependencies,
+so pnpm could only install the older 1.1.5 bindings retained elsewhere in the
+graph. The resulting hook-bit mismatch caused Rolldown to panic before module
+transforms began. Regenerate the lockfile with pnpm 10.20.0's fix-lockfile path so
+every supported 1.2.8 native binding is recorded alongside the wrapper. Treat
+wrapper/native version equality as an installation invariant for future Rolldown
+updates.
+
+## Validation
+
+- A frozen pnpm 10.20.0 install in a clean macOS ARM clone installed both
+  `rolldown` and `@rolldown/binding-darwin-arm64` at 1.2.8.
+- The previously failing review-helper standalone build transformed 2,334 modules
+  and produced the complete single-file artifact under Vite 8.3.0.
