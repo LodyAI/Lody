@@ -143,6 +143,9 @@ patchedDependencies:
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
+  file-stream-rotator@0.6.1:
+    hash: de69f1ad9098ea5f202a91956cbbbd6e5bda2a50ea8262397f2b55c2eced725f
+    path: patches/file-stream-rotator@0.6.1.patch
   loro-repo@0.20.0:
     hash: 74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357
     path: patches/loro-repo.patch
@@ -21408,7 +21411,7 @@ snapshots:
     dependencies:
       flat-cache: 4.0.1
 
-  file-stream-rotator@0.6.1:
+  file-stream-rotator@0.6.1(patch_hash=de69f1ad9098ea5f202a91956cbbbd6e5bda2a50ea8262397f2b55c2eced725f):
     dependencies:
       moment: 2.30.1
 
@@ -26859,7 +26862,7 @@ snapshots:
 
   winston-daily-rotate-file@5.0.0(winston@3.19.0):
     dependencies:
-      file-stream-rotator: 0.6.1
+      file-stream-rotator: 0.6.1(patch_hash=de69f1ad9098ea5f202a91956cbbbd6e5bda2a50ea8262397f2b55c2eced725f)
       object-hash: 3.0.0
       triple-beam: 1.4.1
       winston: 3.19.0

@@ -17,6 +17,10 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `name` stays `lody` in every composition.
 - Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
   adapter capabilities from a stale `dist/`.
+- Keep the `file-stream-rotator@0.6.1` pnpm patch while `winston-daily-rotate-file` pulls that
+  version: its CommonJS `require('moment')` must unwrap Rolldown's namespace-shaped result before
+  invoking it. Remove the patch only after a bundled CLI startup probe proves file logging
+  initializes under Vite's current interop.
 - `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
   `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
   segfaults on the SQLite binding instead of throwing.

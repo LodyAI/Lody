@@ -45,9 +45,26 @@ every supported 1.2.8 native binding is recorded alongside the wrapper. Treat
 wrapper/native version equality as an installation invariant for future Rolldown
 updates.
 
+The next macOS ARM desktop smoke exposed Vite 8's intentional CommonJS default
+interop change in the embedded CLI. `file-stream-rotator@0.6.1`, pulled by the
+current `winston-daily-rotate-file`, calls the result of `require('moment')` as a
+function; Rolldown's consistent interop produced a namespace-shaped value and the
+CLI exited during file logger initialization. Vite's documented legacy bridge is
+insufficient because it does not cover this nested `require()` shape. Patch the
+transitive dependency to accept either the callable CommonJS value or Rolldown's
+`.default` value until the logging dependency removes that ambiguous contract. The
+desktop artifact startup probe is the removal gate because importing the CLI with
+`--version` does not initialize its file transport.
+
 ## Validation
 
 - A frozen pnpm 10.20.0 install in a clean macOS ARM clone installed both
   `rolldown` and `@rolldown/binding-darwin-arm64` at 1.2.8.
 - The previously failing review-helper standalone build transformed 2,334 modules
   and produced the complete single-file artifact under Vite 8.3.0.
+- The patched Vite 8 CLI bundle initializes its hybrid file logger, then reaches
+  the expected supervisor-contract rejection. The published-bundle check now
+  runs that exact startup boundary without launching a daemon.
+- The rebuilt macOS ARM desktop artifact passed all four P0 smoke scenarios and
+  all 28 steps, including session startup, work creation, onboarding, and
+  shortcuts.
