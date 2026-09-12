@@ -3147,6 +3147,13 @@ export class MessageHandler {
       isRuntimeActive: (sessionId) =>
         this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
+      // Restore reattaches by `branchName`; a branch renamed in a terminal is
+      // only known to git, so the name archiving reports is written back.
+      recordArchivedBranch: async (sessionId, branchName) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          branchName,
+        } as Partial<SessionMeta>);
+      },
     });
     this.previewService = new PreviewService({
       logger: this.logger,

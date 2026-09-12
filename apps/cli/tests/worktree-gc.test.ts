@@ -93,6 +93,7 @@ describe('WorktreeGarbageCollector', () => {
     overrides: Partial<WorktreeGcDeps> = {}
   ) => {
     const runCleanupScript = vi.fn(async () => {});
+    const recordArchivedBranch = vi.fn(async () => {});
     const gc = new WorktreeGarbageCollector({
       reposDir,
       logger: createSilentLogger(),
@@ -100,9 +101,10 @@ describe('WorktreeGarbageCollector', () => {
       readOwnerState: async (sessionId) => states[sessionId] ?? { kind: 'unknown' },
       isRuntimeActive: () => false,
       runCleanupScript,
+      recordArchivedBranch,
       ...overrides,
     });
-    return { gc, runCleanupScript };
+    return { gc, runCleanupScript, recordArchivedBranch };
   };
 
   it('removes an archived local-project worktree, commits pending work, and keeps the branch', async () => {
@@ -192,24 +194,93 @@ describe('WorktreeGarbageCollector', () => {
     expect(fs.existsSync(worktree.hostPath)).toBe(false);
   });
 
-  it('removes a deleted worktree even when its repository is gone, and still removes when the cleanup script fails', async () => {
-    const sessionId = 'gc-deleted-orphan' as SessionId;
+  it('preserves a worktree whose repository can no longer be resolved', async () => {
+    const sessionId = 'gc-repo-gone' as SessionId;
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
+    fs.writeFileSync(path.join(worktree.hostPath, 'only-copy.txt'), 'keep me\n', 'utf8');
     fs.rmSync(rootPath, { recursive: true, force: true });
+    const { gc, runCleanupScript } = createGc({
+      [sessionId]: { kind: 'deleted', meta: undefined },
+    });
+
+    const result = await gc.sweep();
+
+    expect(result.removed).toEqual([]);
+    expect(result.failed).toEqual([sessionId]);
+    expect(fs.existsSync(path.join(worktree.hostPath, 'only-copy.txt'))).toBe(true);
+    expect(runCleanupScript).not.toHaveBeenCalled();
+  });
+
+  it('archives a worktree of a project registered as a subdirectory of its repository', async () => {
+    const sessionId = 'gc-nested-project' as SessionId;
+    const repoRoot = createLocalRepo(path.join(testDir, sessionId));
+    const projectRoot = path.join(repoRoot, 'packages', 'app');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'index.ts'), 'export {};\n', 'utf8');
+    runGit(repoRoot, ['add', '-A']);
+    runGit(repoRoot, [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-m',
+      'add package',
+    ]);
+    const manager = getWorktreeManager({
+      repoId: deriveRepoIdFromLocalProjectPath(projectRoot),
+      source: { kind: 'local-shared', originalRootPath: projectRoot },
+      logger: createSilentLogger(),
+    });
+    const worktree = await manager.createWorktree(sessionId);
+    fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'unsaved\n', 'utf8');
+    const { gc } = createGc({
+      [sessionId]: { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) },
+    });
+
+    const result = await gc.sweep();
+
+    expect(result.removed).toEqual([sessionId]);
+    expect(fs.existsSync(worktree.hostPath)).toBe(false);
+    expect(runGit(repoRoot, ['show', `${worktree.branch}:pending.txt`])).toBe('unsaved');
+  });
+
+  it('still removes the worktree when the cleanup script fails', async () => {
+    const sessionId = 'gc-script-fails' as SessionId;
+    const { worktree } = await createLocalWorktree(sessionId);
     const failingScript = vi.fn(async () => {
       throw new Error('script exploded');
     });
     const { gc } = createGc(
-      { [sessionId]: { kind: 'deleted', meta: undefined } },
+      { [sessionId]: { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) } },
       { runCleanupScript: failingScript }
     );
 
     const result = await gc.sweep();
 
     expect(result.removed).toEqual([sessionId]);
-    expect(result.failed).toEqual([]);
     expect(fs.existsSync(worktree.hostPath)).toBe(false);
     expect(failingScript).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the branch git reports when it differs from session metadata', async () => {
+    const sessionId = 'gc-renamed-branch' as SessionId;
+    const { rootPath, worktree } = await createLocalWorktree(sessionId);
+    const renamed = `${worktree.branch}-renamed`;
+    runGit(worktree.hostPath, ['branch', '-m', renamed]);
+    const { gc, recordArchivedBranch } = createGc({
+      [sessionId]: {
+        kind: 'archived',
+        meta: sessionMeta(sessionId, { isArchived: true, branchName: worktree.branch }),
+      },
+    });
+
+    await gc.sweep();
+
+    expect(recordArchivedBranch).toHaveBeenCalledWith(sessionId, renamed);
+    expect(runGit(rootPath, ['branch', '--list', renamed])).toContain(renamed);
   });
 
   it('retries a failed removal only after its backoff has elapsed', async () => {

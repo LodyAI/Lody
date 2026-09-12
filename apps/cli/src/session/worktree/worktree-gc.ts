@@ -1,5 +1,7 @@
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
 
@@ -7,6 +9,9 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 import { getWorktreeManager } from './worktree-manager';
+
+const execFileAsync = promisify(execFile);
+const GIT_PROBE_TIMEOUT_MS = 30_000;
 
 /**
  * What the workspace knows about the root Session that owns a worktree directory.
@@ -45,6 +50,12 @@ export type WorktreeGcDeps = {
     meta: SessionMeta | undefined;
     worktreePath: string;
   }) => Promise<void>;
+  /**
+   * Called after an archived Session's worktree is removed when the branch git
+   * reports differs from `meta.branchName` (renamed in a terminal, never
+   * written back). Restore reads `branchName`, so the real name must be kept.
+   */
+  recordArchivedBranch: (sessionId: SessionId, branchName: string) => Promise<void>;
   now?: () => number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
@@ -133,7 +144,19 @@ export class WorktreeGarbageCollector {
 
         this.inFlight.add(sessionId);
         try {
-          await this.remove({ repoId, sessionId, worktreePath, meta: state.meta });
+          const branchName = await this.remove({
+            repoId,
+            sessionId,
+            worktreePath,
+            meta: state.meta,
+          });
+          if (
+            state.kind === 'archived' &&
+            branchName &&
+            branchName !== state.meta.branchName?.trim()
+          ) {
+            await this.deps.recordArchivedBranch(sessionId, branchName);
+          }
           this.retryState.delete(sessionId);
           result.removed.push(sessionId);
           this.deps.logger.info(
@@ -153,13 +176,22 @@ export class WorktreeGarbageCollector {
     return result;
   }
 
+  /** Returns the branch the removed worktree was on, when git could tell. */
   private async remove(input: {
     repoId: RepoId;
     sessionId: SessionId;
     worktreePath: string;
     meta: SessionMeta | undefined;
-  }): Promise<void> {
+  }): Promise<string | null> {
     const { repoId, sessionId, worktreePath, meta } = input;
+    // Resolve the owning repository BEFORE anything destructive. A worktree
+    // whose repository cannot be found is preserved: the backup commit has
+    // nowhere to go, and the directory may hold the only copy of the work.
+    const source = await this.resolveRepoSource(repoId);
+    if (source === null) {
+      throw new Error(`Repository for ${repoId} could not be resolved; preserving ${worktreePath}`);
+    }
+
     try {
       await this.deps.runCleanupScript({ sessionId, meta, worktreePath });
     } catch (error) {
@@ -168,58 +200,63 @@ export class WorktreeGarbageCollector {
       );
     }
 
-    const source = this.readRepoSource(repoId);
-    if (source === null) {
-      // The repository that owned this worktree is gone; git cannot help, and
-      // there is no branch to protect from a plain directory removal.
-      this.deps.logger.debug(
-        `[worktree-gc] No usable repository for ${repoId}; removing ${worktreePath} directly`
-      );
-      fs.rmSync(worktreePath, { recursive: true, force: true });
-      return;
-    }
-
     const manager = getWorktreeManager({
       repoId,
       ...(source.kind === 'local-shared' ? { source } : {}),
       logger: this.deps.logger,
     });
-    await manager.archiveWorktree(sessionId);
+    const archived = await manager.archiveWorktree(sessionId);
+    return archived.branchName;
   }
 
-  private readRepoSource(repoId: RepoId): RepoSource | null {
+  /**
+   * Ownership comes from git, not from the presence of `<root>/.git`: a
+   * registered local project may be a subdirectory of a repository, and its
+   * `.git` lives at the repository root.
+   */
+  private async resolveRepoSource(repoId: RepoId): Promise<RepoSource | null> {
     const repoDir = path.join(this.deps.reposDir, repoId);
     const metaPath = path.join(repoDir, 'meta.json');
     if (fs.existsSync(metaPath)) {
+      let parsed: { kind?: unknown; originalRootPath?: unknown; sourceGitDir?: unknown };
       try {
-        const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as {
-          kind?: unknown;
-          originalRootPath?: unknown;
-          sourceGitDir?: unknown;
-        };
-        if (parsed.kind === 'local' && typeof parsed.originalRootPath === 'string') {
-          if (!fs.existsSync(path.join(parsed.originalRootPath, '.git'))) {
-            return null;
-          }
-          return {
-            kind: 'local-shared',
-            originalRootPath: parsed.originalRootPath,
-            ...(typeof parsed.sourceGitDir === 'string'
-              ? { sourceGitDir: parsed.sourceGitDir }
-              : {}),
-          };
-        }
+        parsed = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as typeof parsed;
       } catch (error) {
         this.deps.logger.debug(
           `[worktree-gc] Unreadable ${metaPath}: ${formatErrorMessage(error)}`
         );
         return null;
       }
+      if (parsed.kind !== 'local' || typeof parsed.originalRootPath !== 'string') {
+        return null;
+      }
+      if (!(await this.isInsideGitWorkTree(parsed.originalRootPath))) {
+        return null;
+      }
+      return {
+        kind: 'local-shared',
+        originalRootPath: parsed.originalRootPath,
+        ...(typeof parsed.sourceGitDir === 'string' ? { sourceGitDir: parsed.sourceGitDir } : {}),
+      };
     }
     if (fs.existsSync(path.join(repoDir, 'bare.git'))) {
       return { kind: 'github' };
     }
     return null;
+  }
+
+  private async isInsideGitWorkTree(dir: string): Promise<boolean> {
+    if (!fs.existsSync(dir)) return false;
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+        cwd: dir,
+        timeout: GIT_PROBE_TIMEOUT_MS,
+        encoding: 'utf8',
+      });
+      return stdout.trim() === 'true';
+    } catch {
+      return false;
+    }
   }
 
   private listRepoWorktreeDirs(): Array<{ repoId: RepoId; worktreesDir: string }> {

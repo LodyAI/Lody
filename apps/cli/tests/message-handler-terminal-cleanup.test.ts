@@ -294,13 +294,22 @@ describe('MessageHandler terminal cleanup', () => {
       const worktree = await manager.createWorktree(sessionId);
       // Project metadata is deliberately absent everywhere: reconciliation must
       // not depend on the local-project catalog (the gap behind #377).
-      const { handler } = createHarness({ sessionId, sessionMetas: [sessionMeta] });
+      const { handler, repo } = createHarness({ sessionId, sessionMetas: [sessionMeta] });
+
+      // A branch renamed in a terminal is known only to git until archive
+      // reports it; restore reattaches by `branchName`.
+      const renamed = `${worktree.branch}-renamed`;
+      runGit(worktree.hostPath, ['branch', '-m', renamed]);
 
       await handler.handleSessionArchived(sessionId);
       await handler.worktreeGc.schedule();
 
       expect(fs.existsSync(worktree.hostPath)).toBe(false);
-      expect(runGit(rootPath, ['branch', '--list', worktree.branch])).toContain(worktree.branch);
+      expect(runGit(rootPath, ['branch', '--list', renamed])).toContain(renamed);
+      expect(repo.upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(sessionId),
+        expect.objectContaining({ branchName: renamed })
+      );
     } finally {
       if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
       else process.env.LODY_DATA_DIR = originalDataDir;

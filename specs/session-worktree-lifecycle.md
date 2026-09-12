@@ -37,6 +37,12 @@ It reconciles the directory tree it created against Session state:
 - Removal preserves work. Uncommitted, non-ignored changes are committed to the
   Session branch first. The branch is never deleted by archive, restore, or delete.
   Ignored files (build output, local environment files) are discarded with the directory.
+  A worktree whose repository cannot be resolved through git (the project directory
+  is gone, or the repository is broken) is preserved and retried: there is nowhere to
+  commit the backup, and the directory may hold the only copy of the work. A project
+  registered as a subdirectory of a repository is owned by that repository.
+- The branch name git reports at removal is written back to the Session, so a branch
+  renamed in a terminal still restores.
 - A configured cleanup script runs once, before the directory is removed. Its failure is
   reported to the user through the Session history and the daemon log; it does not
   prevent removal, and it does not run again once the directory is gone.

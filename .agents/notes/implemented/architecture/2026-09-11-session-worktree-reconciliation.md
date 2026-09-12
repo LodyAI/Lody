@@ -38,8 +38,15 @@ acknowledged a cleanup that never ran.
   `archived` and `deleted` (loro-repo's soft-delete marker) remove; `active` and
   `unknown` skip. `unknown` is not evidence: one data directory serves every workspace
   the machine joins. The repository source is read from `<repoDir>/meta.json` (local)
-  or the presence of `bare.git` (GitHub); a worktree whose repository is gone is removed
-  with a plain directory delete.
+  or the presence of `bare.git` (GitHub); local ownership is confirmed by
+  `git rev-parse --is-inside-work-tree` in the project directory, because a registered
+  project may be a subdirectory whose `.git` lives at the repository root. A worktree
+  whose repository cannot be resolved is preserved and retried, never deleted outright:
+  review of the first revision showed that a `<root>/.git` check misclassified nested
+  projects and would have discarded uncommitted files without a backup commit.
+- The branch git reports at removal is written back to `SessionMeta.branchName` when it
+  differs; restore reattaches by that name, and a terminal rename is otherwise unknown
+  to the workspace (second review finding).
 - The sweep runs only once `hasCompletedInitialMetaSync()` is true (local mode is
   always complete), on archive and delete events, and every ten minutes. Failures back
   off per directory (30 s doubling to 1 h) and are never final.
@@ -68,10 +75,11 @@ acknowledged a cleanup that never ran.
 
 ## Evidence and limits
 
-`worktree-gc.test.ts` uses real git repositories (local-shared and bare GitHub layouts)
-and an injected clock to cover removal with backup commit and preserved branch, unknown
-and active owners, the metadata-complete gate, runtime-release deferral, a vanished
-repository, a failing cleanup script, retry backoff, and sweep coalescing.
+`worktree-gc.test.ts` uses real git repositories (local-shared, nested-subdirectory,
+and bare GitHub layouts) and an injected clock to cover removal with backup commit and
+preserved branch, unknown and active owners, the metadata-complete gate, runtime-release
+deferral, a vanished repository (preserved), a failing cleanup script, a renamed branch,
+retry backoff, and sweep coalescing.
 `message-handler-terminal-cleanup.test.ts` covers runtime release on archive, deletion
 barrier, legacy record discard, and an end-to-end archive of a local-project Session
 with no project catalog at all. UI and CLI suites assert that no machine command or
