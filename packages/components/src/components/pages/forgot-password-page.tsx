@@ -1,8 +1,8 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Loader2, Mail } from 'lucide-react';
+import { Loader2, Mail } from 'lucide-react';
 
-import { Alert, AlertDescription } from '@/ui/alert';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@lody/ui/input';
@@ -79,21 +79,20 @@ export function ForgotPasswordPage({
             </div>
 
             {sent ? (
-              <Alert>
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>
+              <Alert.Root tone="success">
+                <Alert.Description>
                   {t(
                     'forgotPassword.sent',
                     'If an account exists for this email, a reset link has been sent.'
                   )}
-                </AlertDescription>
-              </Alert>
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
 
             {submitError !== null && submitError.length > 0 ? (
-              <Alert variant="destructive">
-                <AlertDescription id="forgot-password-error">{submitError}</AlertDescription>
-              </Alert>
+              <Alert.Root tone="danger">
+                <Alert.Description id="forgot-password-error">{submitError}</Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <Button type="submit" className="w-full" disabled={submitting}>

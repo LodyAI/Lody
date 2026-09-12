@@ -42,7 +42,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
 import { SessionCommentMarkdown } from '@/ui/diff-viewer/session-comment-markdown';
 import { GitHubCommentThread } from '@/ui/diff-viewer/github-comment-thread';
@@ -965,10 +965,10 @@ function PrHeaderActionButton({
 function PrBodySkeleton() {
   return (
     <div className="space-y-3">
-      <Skeleton className="h-5 w-2/3" />
-      <Skeleton className="h-4 w-1/2" />
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-16 w-full" />
+      <Skeleton width="66%" height={20} />
+      <Skeleton width="50%" height={16} />
+      <Skeleton shape="block" width="100%" height={96} />
+      <Skeleton shape="block" width="100%" height={64} />
     </div>
   );
 }

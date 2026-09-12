@@ -11,7 +11,7 @@ import {
   CodexResetForecastUsageRow,
 } from '@/components/codex-reset/codex-reset-forecast-entry';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Progress } from '@/ui/progress';
+import { Progress } from '@lody/ui/progress';
 import { Separator } from '@/ui/separator';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -315,8 +315,9 @@ function UsageMeter({
       </div>
       <Progress
         value={value}
+        tone="neutral"
         aria-label={`${label}: ${valueLabel}`}
-        className="mt-1 h-1 bg-foreground/10 [&>div]:bg-foreground/55"
+        className="mt-1"
       />
       {detail ? (
         <div className="mt-1 truncate text-[10px] leading-3.5 text-muted-foreground/75">

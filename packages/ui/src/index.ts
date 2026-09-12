@@ -13,6 +13,13 @@ export type {
   AccordionRootProps,
   AccordionTriggerProps,
 } from './disclosure/accordion';
+export { Alert } from './feedback/alert';
+export type {
+  AlertActionsProps,
+  AlertDescriptionProps,
+  AlertProps,
+  AlertTitleProps,
+} from './feedback/alert';
 export { AlertDialog } from './dialog/alert-dialog';
 export type {
   AlertDialogContentProps,
@@ -83,6 +90,8 @@ export type {
 } from './menu/menu';
 export { Menubar } from './menu/menubar';
 export type { MenubarRootProps, MenubarTriggerProps } from './menu/menubar';
+export { Progress } from './feedback/progress';
+export type { ProgressProps, ProgressTone } from './feedback/progress';
 export { Popover } from './popover/popover';
 export type {
   PopoverContentProps,
@@ -106,6 +115,10 @@ export type {
   SelectTriggerProps,
   SelectValueProps,
 } from './field/select';
+export { Skeleton } from './feedback/skeleton';
+export type { SkeletonProps, SkeletonShape } from './feedback/skeleton';
+export { Spinner } from './feedback/spinner';
+export type { SpinnerProps, SpinnerSize } from './feedback/spinner';
 export { Switch } from './field/switch';
 export type { SwitchProps } from './field/switch';
 export { Tabs } from './disclosure/tabs';
@@ -118,6 +131,9 @@ export type {
 } from './disclosure/tabs';
 export { Textarea } from './field/textarea';
 export type { TextareaProps, TextareaResize } from './field/textarea';
+export { Toast } from './feedback/toast';
+export type { ToastProviderProps, ToastViewportProps } from './feedback/toast';
+export type { FeedbackTone } from './feedback/tone';
 export { ThemeRoot, forcedThemeClassNames } from './theme/theme';
 export type { ThemeMode } from './theme/theme';
 export { Tooltip } from './tooltip/tooltip';

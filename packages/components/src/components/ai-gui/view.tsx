@@ -194,7 +194,7 @@ import {
 } from '@/components/shared/agent-activity-indicator';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { getSessionImageBlobUrl, getSessionImageDataUrl } from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList } from './session-file-card';
 import {
@@ -4686,6 +4686,7 @@ const UserImageBlock = ({
     >
       {isThumbnailLoading && (
         <Skeleton
+          shape="block"
           className={cn(isThumbnail ? thumbnailFrameClass : `h-36 ${fullFrameWidthClass}`)}
         />
       )}

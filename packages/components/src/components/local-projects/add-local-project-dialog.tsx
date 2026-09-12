@@ -26,7 +26,7 @@ import type {
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import {
@@ -584,8 +584,8 @@ function DirectorySkeleton() {
     <div className="space-y-1 p-2">
       {Array.from({ length: 7 }).map((_, index) => (
         <div key={index} className="flex items-center gap-3 px-2 py-2">
-          <Skeleton className="h-5 w-5 rounded" />
-          <Skeleton className="h-4 flex-1 rounded" style={{ maxWidth: `${60 - index * 4}%` }} />
+          <Skeleton width={20} height={20} />
+          <Skeleton height={16} className="flex-1" style={{ maxWidth: `${60 - index * 4}%` }} />
         </div>
       ))}
     </div>

@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 
 // Skeleton rows mirror the real file-tree layout: 22px row height, 8px indent
 // per level, a 16px icon slot, then a filename bar. A fixed, deterministic shape
@@ -49,11 +49,8 @@ export function FileTreeSkeleton({ className }: { className?: string }) {
           className="flex h-[22px] items-center"
           style={{ paddingLeft: row.level * TREE_INDENT_PX + ROW_BASE_PADDING_PX }}
         >
-          <Skeleton className="mr-1.5 h-4 w-4 shrink-0 rounded-[4px] bg-muted-foreground/20" />
-          <Skeleton
-            className="h-2.5 rounded-sm bg-muted-foreground/20"
-            style={{ width: row.width }}
-          />
+          <Skeleton width={16} height={16} className="mr-1.5 shrink-0" />
+          <Skeleton width={row.width} height={10} />
         </div>
       ))}
     </div>

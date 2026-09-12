@@ -17,7 +17,7 @@ import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { ContextMenuItem, ContextMenuSeparator } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
@@ -834,10 +834,10 @@ export function SidebarListSkeleton({
           <div className="relative flex h-7 min-w-0 flex-1 items-center gap-1 rounded-md px-2">
             {showHeaderIcon ? (
               <span className="flex h-5 w-5 shrink-0 items-center">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+                <Skeleton width={14} height={14} />
               </span>
             ) : null}
-            <Skeleton className="h-3 w-24" />
+            <Skeleton width={96} height={12} />
           </div>
         </div>
         <div className="flex flex-col gap-px">
@@ -846,9 +846,9 @@ export function SidebarListSkeleton({
               key={index}
               className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2"
             >
-              <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
-              <Skeleton className={cn('h-3 min-w-0', width)} />
-              <Skeleton className="ml-auto h-3 w-8 shrink-0" />
+              <Skeleton shape="circle" width={14} height={14} className="shrink-0" />
+              <Skeleton height={12} className={cn('min-w-0', width)} />
+              <Skeleton width={32} height={12} className="ml-auto shrink-0" />
             </div>
           ))}
         </div>

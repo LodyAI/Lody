@@ -18,6 +18,7 @@ behavior.
 | `src/drawer`        | The same rung, arriving from an edge and draggable back out          |
 | `src/tooltip`       | The inverted chip that names what is under the pointer               |
 | `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows   |
+| `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -305,6 +306,75 @@ padding, so a padded panel is cropped by exactly its own padding under
 `border-box` and overshoots by it under `content-box`. `Accordion.Panel` already
 holds its prose in such a child; a caller migrating a panel that carried its own
 padding moves it inwards.
+
+`Alert`, `Toast`, `Progress`, `Skeleton` and `Spinner` are one family as well,
+and what they share is a sentence with two halves: what happened, and that it is
+not finished.
+
+An `Alert` and a `Toast` are **one message on two rungs**. An alert stays on the
+page it is about, so it takes the card rung; a toast arrives over that page, so
+it takes the floating one. Neither is on the modal rung: a message does not have
+to be answered.
+
+```tsx
+<Alert.Root tone="danger">
+  <Alert.Title>Sync failed</Alert.Title>
+  <Alert.Description>The machine did not answer in time.</Alert.Description>
+  <Alert.Actions>
+    <Button size="small" onClick={retry}>Retry</Button>
+  </Alert.Actions>
+</Alert.Root>
+```
+
+A tone — `neutral`, `success`, `warning`, `danger` — is a tint and a mark, never
+a fill, and **the mark is the tone's rather than the caller's**: the point of a
+tone is that a person knows what kind of message this is before reading it, and
+a glyph a caller chose can put a tick on a failure. The tone also decides how
+urgently a screen reader is told: a failure interrupts, a confirmation waits.
+
+A toast is that same message, reported from anywhere:
+
+```tsx
+export const toasts = Toast.createManager();
+
+<Toast.Provider manager={toasts} label={t('toast.region', 'Notifications')}>
+  <App />
+</Toast.Provider>;
+
+toasts.add({ title: 'Sync failed', description: 'No answer.', type: 'danger' });
+```
+
+`Toast.Provider` renders the viewport itself, so a surface wraps its app once
+rather than keeping a provider, a portal, a viewport and a list in step. The
+viewport takes no pointer, so the page under a toast stays usable; each toast
+takes it back for its own close button.
+
+The other half is the wait. A `Progress` is a well-rung track with `accent`
+running in it, because the rules give that colour to live state and name the
+running indicator by name; a bar with **no value** is not a bar at zero but the
+same track with a band crossing it. A bar that reports an outcome takes that
+tone, and one that measures rather than progresses takes `neutral`:
+
+```tsx
+<Progress value={used} max={limit} tone={nearLimit ? 'danger' : 'running'} />
+<Progress value={null} label="Indexing the worktree" />
+```
+
+A `Skeleton` takes a gray, which is what the rules reserve them for — a thing
+with no role yet — and it takes its room as props rather than classes, because a
+size passed as a class lands in a specificity fight with the shape's own height.
+A `Spinner` is drawn in `currentColor`, so the one inside a ghost button takes
+the button's ink; it is called a spinner rather than a loading, because it is the
+mark and not the state, and where it goes is the surface's decision.
+
+```tsx
+<Skeleton shape="circle" width={32} height={32} />
+<Skeleton width="60%" />
+<Button variant="secondary" size="small">
+  <Spinner size="small" label={null} />
+  Saving
+</Button>
+```
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in

@@ -1,8 +1,8 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
-import { Alert, AlertDescription } from '@/ui/alert';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@lody/ui/input';
@@ -45,12 +45,9 @@ export function DeviceAuthPage({
         <CardContent>
           {success ? (
             <div className="space-y-4">
-              <Alert className="border-status-success/30 bg-status-success/[0.08] text-status-success">
-                <CheckCircle2 className="h-4 w-4 text-status-success" aria-hidden="true" />
-                <AlertDescription className="text-status-success">
-                  {t('device.success')}
-                </AlertDescription>
-              </Alert>
+              <Alert.Root tone="success">
+                <Alert.Description>{t('device.success')}</Alert.Description>
+              </Alert.Root>
 
               <div className="text-center text-sm text-muted-foreground">
                 {t('device.windowHint')}
@@ -92,10 +89,9 @@ export function DeviceAuthPage({
                 </div>
 
                 {error ? (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription id="device-auth-error">{error}</AlertDescription>
-                  </Alert>
+                  <Alert.Root tone="danger">
+                    <Alert.Description id="device-auth-error">{error}</Alert.Description>
+                  </Alert.Root>
                 ) : null}
 
                 <Button type="submit" className="w-full" disabled={!canSubmit || isVerifying}>
