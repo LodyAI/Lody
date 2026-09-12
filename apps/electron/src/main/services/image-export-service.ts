@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu, clipboard, dialog, nativeImage } from 'electron'
+import { BrowserWindow, ClipboardItem, Menu, clipboard, dialog, nativeImage } from 'electron'
 import { promises as fs } from 'node:fs'
 import type {
   CopyImageToClipboardResult,
@@ -51,7 +51,9 @@ export async function showImagePreviewMenu(
   })
 }
 
-export function copyImageToClipboard(pngBytes: ArrayBuffer): CopyImageToClipboardResult {
+export async function copyImageToClipboard(
+  pngBytes: ArrayBuffer
+): Promise<CopyImageToClipboardResult> {
   try {
     const image = nativeImage.createFromBuffer(Buffer.from(pngBytes))
     if (image.isEmpty()) {
@@ -59,7 +61,10 @@ export function copyImageToClipboard(pngBytes: ArrayBuffer): CopyImageToClipboar
       // writing that clears the clipboard instead of failing.
       return { copied: false, error: 'unsupported_image' }
     }
-    clipboard.writeImage(image)
+    const item = new ClipboardItem({
+      'image/png': new Blob([pngBytes], { type: 'image/png' })
+    })
+    await clipboard.write([item])
     return { copied: true }
   } catch (error) {
     return { copied: false, error: formatUnknownError(error) }

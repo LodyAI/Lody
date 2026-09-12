@@ -99,6 +99,7 @@ export default defineConfig(({ mode }) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: viteEnvDefine,
       build: {
+        target: 'node24.20',
         externalizeDeps: {
           exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect']
         }
@@ -109,6 +110,7 @@ export default defineConfig(({ mode }) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: viteEnvDefine,
       build: {
+        target: 'node24.20',
         externalizeDeps: {
           exclude: ['@lody/shared']
         }
@@ -156,6 +158,7 @@ export default defineConfig(({ mode }) => {
         exclude: ['@loro-dev/streams-crdt', '@loro-dev/streams-crdt/zstd']
       },
       build: {
+        target: 'chrome152',
         minify: true,
         cssMinify: true,
         sourcemap: false,

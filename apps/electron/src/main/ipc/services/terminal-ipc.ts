@@ -38,6 +38,6 @@ export class TerminalIpc extends IpcService {
 
   @IpcMethod()
   async writeClipboardText(text: string) {
-    clipboard.writeText(text)
+    await clipboard.writeText(text)
   }
 }

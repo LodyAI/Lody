@@ -36,7 +36,7 @@ export class ImageIpc extends IpcService {
     if (!parsed.success) {
       return { copied: false, error: 'invalid_payload' }
     }
-    return copyImageToClipboard(parsed.data.pngBytes)
+    return await copyImageToClipboard(parsed.data.pngBytes)
   }
 
   @IpcMethod()

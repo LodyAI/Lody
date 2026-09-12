@@ -36,10 +36,15 @@ contracts, and window/renderer integration rules live in
 
 ## Build toolchain and window identity
 
-- Electron 39's Chromium supports native top-level await. Keep renderer and module
+- Electron 44's Chromium supports native top-level await. Keep renderer and module
   worker builds on native TLA; do not add `vite-plugin-top-level-await` or an
   equivalent full-bundle AST compatibility rewrite. Reprocessing Rollup's complete
   output graph materially increases production renderer peak memory.
+- Keep Electron Vite targets explicit and aligned with the runtime's embedded Node
+  and Chromium versions. Electron 44 is newer than electron-vite 5's target table,
+  whose fallback would otherwise emit for Node 16 and Chrome 108. The workspace
+  postinstall must run Electron's installer before electron-builder because
+  electron-vite requires `path.txt` during a cold start.
 - Linux window identity is one contract: the composition's packaged `desktopName`,
   electron-builder's `syncDesktopName`, the pre-ready `app.setDesktopName` value,
   and the AppImage runtime desktop entry must all resolve to the same desktop-file
