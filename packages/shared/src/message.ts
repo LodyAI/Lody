@@ -413,6 +413,8 @@ export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
         purpose?: 'authenticate' | 'provision-provider-credential';
         /** Exact staged setup generation required for credential provisioning. */
         setupRevision?: string;
+        /** Digest of the exact credential-bound launch config approved by the renderer. */
+        expectedBindingDigest?: string;
       }
     | {
         action: 'cancel';

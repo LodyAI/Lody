@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import {
-  getLodyCodexCredentialBinding,
+  getLodyCodexCredentialBindingDigest,
   getLodyCodexCustomProvider,
   isAllowedCredentialEndpoint,
   LODY_CODEX_API_KEY_ENV,
@@ -21,10 +20,7 @@ export type ProviderCredentialAdapter = {
 
 const codexCustomEndpointCredentialAdapter: ProviderCredentialAdapter = {
   kind: 'codex-custom-endpoint',
-  getBindingDigest: (config) => {
-    const binding = getLodyCodexCredentialBinding(config);
-    return binding ? createHash('sha256').update(binding).digest('hex') : null;
-  },
+  getBindingDigest: getLodyCodexCredentialBindingDigest,
   normalizeSecret: (config, secret) => {
     const provider = getLodyCodexCustomProvider(config.env);
     const normalizedSecret = secret.trim();
@@ -64,4 +60,10 @@ export function resolveProviderCredentialAdapter(
     resolved = { adapter, bindingDigest };
   }
   return resolved;
+}
+
+export function getProviderCredentialBindingDigest(
+  config: ProviderCredentialConfig
+): string | null {
+  return resolveProviderCredentialAdapter(config)?.bindingDigest ?? null;
 }

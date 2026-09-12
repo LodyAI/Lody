@@ -320,6 +320,7 @@ type RpcServerDeps = {
           configId: AgentConfigId;
           purpose?: 'authenticate' | 'provision-provider-credential';
           setupRevision?: string;
+          expectedBindingDigest?: string;
         }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
@@ -953,6 +954,7 @@ export class LoroStreamsMachineRpcServer {
                     configId: request.params.configId as AgentConfigId,
                     purpose: request.params.purpose,
                     setupRevision: request.params.setupRevision,
+                    expectedBindingDigest: request.params.expectedBindingDigest,
                     onProgress: appendProgress,
                   });
                 case 'cancel':

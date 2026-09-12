@@ -6,6 +6,8 @@ import {
   CODEX_API_KEY_ENV,
   CODEX_CONFIG_ENV,
   getLodyCodexCredentialBinding,
+  getLodyCodexCredentialBindingDigest,
+  getLodyCodexProvisioningBindingDigest,
   getLodyCodexCustomProvider,
   isAllowedCredentialEndpoint,
   isReservedCodexCredentialEnvKey,
@@ -108,6 +110,18 @@ describe('Lody Codex custom provider config', () => {
     expect(getLodyCodexCredentialBinding({ ...config, env: rebuilt })).toBe(
       getLodyCodexCredentialBinding({ ...config, env: revisionOne })
     );
+    expect(getLodyCodexCredentialBindingDigest({ ...config, env: revisionOne })).toMatch(
+      /^[0-9a-f]{64}$/u
+    );
+    expect(getLodyCodexProvisioningBindingDigest(config, 'revision-1')).toBe(
+      getLodyCodexCredentialBindingDigest({ ...config, env: revisionOne })
+    );
+    expect(
+      getLodyCodexProvisioningBindingDigest(
+        { ...config, name: 'Renamed provider', prompt: 'Changed display prompt' },
+        'revision-1'
+      )
+    ).toBe(getLodyCodexProvisioningBindingDigest(config, 'revision-1'));
   });
 
   it('restores the exact prior selector and existing API key', () => {

@@ -26,6 +26,7 @@ import type { LoroRepo } from 'loro-repo';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
+import { getProviderCredentialBindingDigest } from '@/agent/provider-credential-adapter';
 import {
   listProviderCredentialConfigIds,
   reconcileProviderCredential,
@@ -146,6 +147,7 @@ export class ProviderSetupManager {
   async commitCredentialSetup(
     setupId: AgentConfigId,
     setupRevision: string,
+    expectedBindingDigest: string,
     apiKey: string,
     signal?: AbortSignal,
     markCommitted?: () => void,
@@ -163,6 +165,9 @@ export class ProviderSetupManager {
         ...setup.config,
         env: withLodyCodexCredentialRevision(setup.config.env, setupRevision),
       };
+      if (getProviderCredentialBindingDigest(verifiedConfig) !== expectedBindingDigest) {
+        throw new Error('Provider setup no longer matches the confirmed credential target');
+      }
       const staged = await this.stageCredential(
         this.workspaceId,
         verifiedConfig,

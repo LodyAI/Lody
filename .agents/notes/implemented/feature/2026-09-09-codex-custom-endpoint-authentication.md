@@ -47,7 +47,10 @@ filtering because Windows treats differently cased environment names as the same
 The feature requires a negotiated `codexCustomEndpointCredentials` capability. A setup row names
 an expected non-secret setup revision and starts in `awaiting-auth`. The explicit
 credential-provisioning RPC waits for that exact row on the target daemon, so an asynchronous
-Flock upload cannot race config lookup. It always requests and replaces the submitted key, even
+Flock upload cannot race config lookup. The RPC also carries a non-secret SHA-256 digest of the
+renderer-confirmed launch binding with that revision applied. The daemon checks the current row
+against it before requesting the key and again immediately before staging, so another writer cannot
+retain the revision while redirecting the one-shot key to a different endpoint. It always requests and replaces the submitted key, even
 when the same endpoint already has a credential. The revision is fresh for every submit attempt.
 The daemon embeds it into the desired provider state immediately before credential staging and
 publishes that revisionized config only if the setup CAS wins. The existing authentication slot
@@ -57,6 +60,9 @@ and the slot becomes committed synchronously after that commit returns. A synchr
 failure remains pre-commit and rolls back the staged credential; only a later flush failure has
 uncertain durability. Cancellation wins before the commit boundary and is too late afterward.
 Remote HTTP endpoints are rejected; HTTPS and loopback HTTP are accepted.
+GitHub and other session-only environment is added after hydration against a captured canonical
+AgentConfig; those temporary values therefore reach the child process without changing the
+machine-local credential lookup identity in either cold or prepared session startup.
 The verification probe itself does not mutate the shared capability cache. Its result is handed to
 the setup manager as a deferred publication and is cached only after the exact setup revision wins
 durable AgentConfig publication inside the per-config credential mutation sequence. Cancelled,

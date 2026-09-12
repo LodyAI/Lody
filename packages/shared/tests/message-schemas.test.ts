@@ -409,8 +409,27 @@ describe('message-schemas machine ACP authentication', () => {
         content: { code: 'one-time-code', account: 'work' },
       }),
     };
+    const provision = {
+      ...request,
+      purpose: 'provision-provider-credential',
+      setupRevision: 'revision-1',
+      expectedBindingDigest: 'a'.repeat(64),
+    };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
+    expect(MachineAcpAuthenticateRequestSchema.safeParse(provision).success).toBe(true);
+    expect(
+      MachineAcpAuthenticateRequestSchema.safeParse({
+        ...provision,
+        expectedBindingDigest: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticateRequestSchema.safeParse({
+        ...request,
+        expectedBindingDigest: 'a'.repeat(64),
+      }).success
+    ).toBe(false);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitCode).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(submitInput).success).toBe(true);

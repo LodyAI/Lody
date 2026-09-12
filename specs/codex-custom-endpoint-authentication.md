@@ -18,8 +18,11 @@ and IP loopback. The shared builder enforces the same rule as the form.
 
 The API key is one-shot renderer state. It must never enter `AgentConfig.env`, a
 `ProviderSetupTask`, logs, or another workspace-readable document. The renderer submits it
-through the encrypted Machine ACP authentication-input path. During verification the target CLI
-keeps the candidate key in memory. After a successful live probe, it opens a short machine-local
+through the encrypted Machine ACP authentication-input path. The provisioning start request carries
+the SHA-256 digest of the renderer-confirmed launch binding, including the setup revision but not
+display metadata. The target CLI recomputes and checks that digest before requesting the secret and
+again before staging it, so a same-revision setup rewrite cannot redirect the key. During
+verification the target CLI keeps the candidate key in memory. After a successful live probe, it opens a short machine-local
 commit window that retains at most the currently published and desired credential bindings,
 publishes the desired config, and then prunes the old binding before acknowledging success.
 Either binding can still launch after a daemon crash on either side of publication; an
@@ -39,6 +42,9 @@ configuration hashes to the record's SHA-256 digest of the canonical launch bind
 binding is not persisted. A changed endpoint, proxy, runtime, agent type, custom launch command,
 or launch-relevant environment value fails closed. POSIX storage uses `0700` directories and
 `0600` files; Windows relies on the inherited ACL of Lody's per-user data directory.
+Session-specific environment such as GitHub tokens and credential-broker variables is merged only
+after hydration against the canonical persisted AgentConfig, so it does not alter provider
+credential identity.
 
 Creation, key rotation, and launch-binding changes use a non-secret durable setup draft with an
 exact setup revision. The credential RPC waits for that revision to become visible on the target

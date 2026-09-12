@@ -3257,6 +3257,7 @@ export class MessageHandler {
                   configId: args.configId,
                   purpose: args.purpose,
                   setupRevision: args.setupRevision,
+                  expectedBindingDigest: args.expectedBindingDigest,
                 };
               case 'cancel':
                 return {
@@ -8061,6 +8062,7 @@ export class MessageHandler {
             commitCodexProviderCredential: async ({
               configId,
               setupRevision,
+              expectedBindingDigest,
               apiKey,
               signal,
               markCommitted,
@@ -8069,6 +8071,7 @@ export class MessageHandler {
               publicationDurability: await this.providerSetupManager.commitCredentialSetup(
                 configId,
                 setupRevision,
+                expectedBindingDigest,
                 apiKey,
                 signal,
                 () => {

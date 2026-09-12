@@ -1,3 +1,5 @@
+import { sha256Hex } from './incremental-sha256';
+
 export const CODEX_API_KEY_ENV = 'CODEX_API_KEY';
 export const CODEX_CONFIG_ENV = 'CODEX_CONFIG';
 export const LODY_CODEX_API_KEY_ENV = 'LODY_CODEX_CUSTOM_ENDPOINT_API_KEY';
@@ -164,6 +166,23 @@ export function getLodyCodexCredentialBinding(config: CodexCredentialBoundConfig
         .filter(([key]) => !isReservedCodexCredentialEnvKey(key))
         .sort(([left], [right]) => left.localeCompare(right))
     ),
+  });
+}
+
+export function getLodyCodexCredentialBindingDigest(
+  config: CodexCredentialBoundConfig
+): string | null {
+  const binding = getLodyCodexCredentialBinding(config);
+  return binding ? sha256Hex(new TextEncoder().encode(binding)) : null;
+}
+
+export function getLodyCodexProvisioningBindingDigest(
+  config: CodexCredentialBoundConfig,
+  setupRevision: string
+): string | null {
+  return getLodyCodexCredentialBindingDigest({
+    ...config,
+    env: withLodyCodexCredentialRevision(config.env, setupRevision),
   });
 }
 

@@ -4,7 +4,14 @@ import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
+import {
+  buildLodyCodexCustomProviderEnv,
+  getLodyCodexProvisioningBindingDigest,
+  type AgentConfigId,
+  type AgentConfigMeta,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
 
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { useMachineAcpAuthentication } from '../src/hooks/use-machine-acp-authentication';
@@ -70,6 +77,14 @@ describe('useMachineAcpAuthentication', () => {
           capabilitiesRefreshed: false,
         }),
       } as unknown as WorkspaceRuntime;
+      const config: AgentConfigMeta = {
+        id: 'config-codex' as AgentConfigId,
+        machineId: 'machine-1' as MachineId,
+        name: 'Codex Relay',
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+      };
       let finishResync: () => void = () => {};
       const resync = new Promise<void>((resolve) => {
         finishResync = resolve;
@@ -95,8 +110,7 @@ describe('useMachineAcpAuthentication', () => {
       let result: Awaited<ReturnType<typeof provision>> | undefined;
       let failure: unknown;
       const completion = provision({
-        machineId: 'machine-1' as MachineId,
-        configId: 'config-codex' as AgentConfigId,
+        config,
         setupRevision: 'revision-1',
         apiKey: 'synthetic-key',
       }).then(
@@ -116,6 +130,13 @@ describe('useMachineAcpAuthentication', () => {
       await completion;
       expect(failure).toBeUndefined();
       expect(result).toEqual({ publicationDurability });
+      expect(runtime.sendControl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configId: config.id,
+          setupRevision: 'revision-1',
+          expectedBindingDigest: getLodyCodexProvisioningBindingDigest(config, 'revision-1'),
+        })
+      );
     }
   );
 

@@ -11,6 +11,7 @@ import {
   getMachineFlockProviderSetupCancellations,
   buildLodyCodexCustomProviderEnv,
   getLodyCodexCustomProvider,
+  getLodyCodexProvisioningBindingDigest,
   LODY_CODEX_API_KEY_ENV,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -103,6 +104,15 @@ function expectCredentialRevision(
   expect(getLodyCodexCustomProvider(config?.env)).toMatchObject({
     credentialRevision: revision,
   });
+}
+
+function getProvisioningBindingDigest(
+  config: ProviderSetupTask['config'],
+  setupRevision: string
+): string {
+  const digest = getLodyCodexProvisioningBindingDigest(config, setupRevision);
+  if (!digest) throw new Error('Expected a Codex provisioning binding');
+  return digest;
 }
 
 function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
@@ -468,6 +478,7 @@ describe('ProviderSetupManager', () => {
     const stalePublication = harness.manager.commitCredentialSetup(
       setupId,
       'revision-2',
+      getProvisioningBindingDigest(replacement.config, 'revision-2'),
       'stale-r2-key'
     );
     await stageStarted.promise;
@@ -532,6 +543,7 @@ describe('ProviderSetupManager', () => {
     await harness.manager.commitCredentialSetup(
       setupId,
       'revision-new',
+      getProvisioningBindingDigest(replacement.config, 'revision-new'),
       'new-key',
       undefined,
       undefined,
@@ -580,6 +592,7 @@ describe('ProviderSetupManager', () => {
       harness.manager.commitCredentialSetup(
         setupId,
         'revision-old',
+        'a'.repeat(64),
         'old-candidate-key',
         undefined,
         undefined,
@@ -591,6 +604,35 @@ describe('ProviderSetupManager', () => {
     expect(readState(harness.flock).setup).toEqual(replacement);
     expect(harness.stageCredential).not.toHaveBeenCalled();
     expect(publishCapabilities).not.toHaveBeenCalled();
+    harness.manager.stop();
+  });
+
+  it('rejects a same-revision config rewrite before staging the credential', async () => {
+    const harness = createHarness();
+    const confirmedConfig = {
+      ...createSetup().config,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://confirmed.example.com/v1' }),
+    };
+    const rewrittenSetup: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-new',
+      config: {
+        ...confirmedConfig,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://rewritten.example.com/v1' }),
+      },
+    };
+    seedSetup(harness.flock, rewrittenSetup);
+
+    await expect(
+      harness.manager.commitCredentialSetup(
+        setupId,
+        'revision-new',
+        getProvisioningBindingDigest(confirmedConfig, 'revision-new'),
+        'victim-key'
+      )
+    ).rejects.toThrow(/confirmed credential target/);
+    expect(harness.stageCredential).not.toHaveBeenCalled();
+    expect(readState(harness.flock).setup).toEqual(rewrittenSetup);
     harness.manager.stop();
   });
 
@@ -639,6 +681,7 @@ describe('ProviderSetupManager', () => {
     const stalePublication = harness.manager.commitCredentialSetup(
       setupId,
       'revision-1',
+      getProvisioningBindingDigest(staleSetup.config, 'revision-1'),
       'stale-key'
     );
     await staleStageStarted.promise;
@@ -681,7 +724,12 @@ describe('ProviderSetupManager', () => {
     expect(rollback).toHaveBeenCalledTimes(1);
 
     await expect(
-      harness.manager.commitCredentialSetup(setupId, 'revision-2', 'next-key')
+      harness.manager.commitCredentialSetup(
+        setupId,
+        'revision-2',
+        getProvisioningBindingDigest(nextSetup.config, 'revision-2'),
+        'next-key'
+      )
     ).resolves.toBe('durable');
     const nextState = readState(machineFlock);
     expect(nextState.setup).toBeUndefined();
@@ -722,6 +770,7 @@ describe('ProviderSetupManager', () => {
       harness.manager.commitCredentialSetup(
         setupId,
         'revision-new',
+        getProvisioningBindingDigest(replacement.config, 'revision-new'),
         'new-key',
         undefined,
         undefined,
@@ -744,7 +793,7 @@ describe('ProviderSetupManager', () => {
 
   it('rolls back credential staging when the Flock publication commit throws', async () => {
     const harness = createHarness();
-    seedSetup(harness.flock, {
+    const commitFailureSetup: ProviderSetupTask = {
       ...createSetup('awaiting-auth'),
       setupRevision: 'revision-commit-failure',
       config: {
@@ -754,7 +803,8 @@ describe('ProviderSetupManager', () => {
           { baseUrl: 'https://commit-failure.example.com/v1' }
         ),
       },
-    });
+    };
+    seedSetup(harness.flock, commitFailureSetup);
     const committedSnapshotCount = harness.flock.commitSnapshots.length;
     vi.spyOn(harness.flock, 'commit').mockImplementationOnce(() => {
       throw new Error('Flock commit failed');
@@ -765,6 +815,7 @@ describe('ProviderSetupManager', () => {
       harness.manager.commitCredentialSetup(
         setupId,
         'revision-commit-failure',
+        getProvisioningBindingDigest(commitFailureSetup.config, 'revision-commit-failure'),
         'new-key',
         undefined,
         markCommitted
@@ -809,7 +860,12 @@ describe('ProviderSetupManager', () => {
       harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
 
       await expect(
-        harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key')
+        harness.manager.commitCredentialSetup(
+          setupId,
+          'revision-new',
+          getProvisioningBindingDigest(replacement.config, 'revision-new'),
+          'new-key'
+        )
       ).resolves.toBe('uncertain');
 
       writeMachineFlockRowToFlock(flock, {
@@ -965,7 +1021,12 @@ describe('ProviderSetupManager', () => {
 
       seedSetup(flock, replacementB);
       await expect(
-        harness.manager.commitCredentialSetup(configBId, 'revision-b-new', 'b-new-key')
+        harness.manager.commitCredentialSetup(
+          configBId,
+          'revision-b-new',
+          getProvisioningBindingDigest(replacementB.config, 'revision-b-new'),
+          'b-new-key'
+        )
       ).resolves.toBe('durable');
 
       releaseA.resolve();
@@ -1015,7 +1076,12 @@ describe('ProviderSetupManager', () => {
       harness.flush.mockRejectedValueOnce(new Error('publish flush failed'));
 
       await expect(
-        harness.manager.commitCredentialSetup(setupId, 'revision-rotation', 'new-key')
+        harness.manager.commitCredentialSetup(
+          setupId,
+          'revision-rotation',
+          getProvisioningBindingDigest(replacement.config, 'revision-rotation'),
+          'new-key'
+        )
       ).resolves.toBe('uncertain');
 
       const uncertainConfig = readState(flock).config;
@@ -1137,7 +1203,12 @@ describe('ProviderSetupManager', () => {
       seedSetup(flock, replacement);
 
       await expect(
-        harness.manager.commitCredentialSetup(setupId, 'revision-rotation', 'new-key')
+        harness.manager.commitCredentialSetup(
+          setupId,
+          'revision-rotation',
+          getProvisioningBindingDigest(replacement.config, 'revision-rotation'),
+          'new-key'
+        )
       ).resolves.toBe('durable');
       const committedConfig = readState(flock).config;
       expectCredentialRevision(committedConfig, 'revision-rotation');
@@ -1194,7 +1265,12 @@ describe('ProviderSetupManager', () => {
     };
     seedSetup(harness.flock, replacement);
 
-    await harness.manager.commitCredentialSetup(setupId, 'revision-new', 'new-key');
+    await harness.manager.commitCredentialSetup(
+      setupId,
+      'revision-new',
+      getProvisioningBindingDigest(replacement.config, 'revision-new'),
+      'new-key'
+    );
 
     const published = readState(harness.flock).config;
     expectCredentialRevision(published, 'revision-new');

@@ -34,7 +34,10 @@ Credential-changing replacements use the provider-neutral machine-local credenti
 store owns staging, rollback, finalization, reconciliation, enumeration, and hydration; adapters
 own provider detection, binding identity, secret validation, and launch injection. Adding an
 adapter must not add a provider branch to session or Machine RPC launch resolution. The current
-Codex adapter keeps the old launch config published during the probe. The post-probe cross-store
+Codex adapter keeps the old launch config published during the probe. Credential provisioning
+carries the renderer-confirmed binding digest. The daemon recomputes it from the exact setup plus
+revision before exposing secret input and recomputes it from the current setup immediately before
+staging, closing same-revision rewrite windows on both sides of the probe. The post-probe cross-store
 commit may retain the old and desired machine-local credential bindings until publication chooses
 one. Publishing merges the current display metadata into the verified launch config, writes
 `agentConfig`, and deletes `providerSetup` in one Flock commit. Before staging, the daemon embeds
@@ -68,6 +71,9 @@ startup ID set. This lets recovery remove an orphan left by a legacy client that
 deleted an AgentConfig without writing a cancellation. The current generic
 `agent-config delete` writes the wildcard cancellation and deletes a custom Codex
 endpoint config in one Flock commit.
+Session launch captures the canonical provider config before adding GitHub or other
+session-specific environment. Hydration uses that snapshot, then merges the temporary environment
+into the hydrated launch, so per-session credentials never participate in the provider binding.
 
 ## When the queue may start
 

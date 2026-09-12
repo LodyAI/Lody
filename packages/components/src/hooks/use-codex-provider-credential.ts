@@ -1,5 +1,9 @@
 import { useCallback } from 'react';
-import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
+import {
+  getLodyCodexProvisioningBindingDigest,
+  type AgentConfigMeta,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { resyncMachineFlockRows } from './use-machine-flock-rows';
 import { useMachineAcpAuthentication } from './use-machine-acp-authentication';
@@ -17,21 +21,28 @@ export function useCodexProviderCredential(
 
   return useCallback(
     async (args: {
-      machineId: MachineId;
-      configId: AgentConfigId;
+      config: AgentConfigMeta;
       setupRevision: string;
       apiKey: string;
     }): Promise<CodexProviderCredentialProvisionResult> => {
+      const expectedBindingDigest = getLodyCodexProvisioningBindingDigest(
+        args.config,
+        args.setupRevision
+      );
+      if (!expectedBindingDigest) {
+        throw new Error('Invalid Codex provider credential binding');
+      }
       let inputSubmitted = false;
       let rejectInput: (error: unknown) => void = () => {};
       const inputFailure = new Promise<never>((_resolve, reject) => {
         rejectInput = reject;
       });
       const authentication = startAuthentication({
-        machineId: args.machineId,
-        configId: args.configId,
+        machineId: args.config.machineId,
+        configId: args.config.id,
         purpose: 'provision-provider-credential',
         setupRevision: args.setupRevision,
+        expectedBindingDigest,
         onProgress: (progress) => {
           if (
             progress.status !== 'input-required' ||
@@ -43,13 +54,13 @@ export function useCodexProviderCredential(
           }
           inputSubmitted = true;
           void submitAuthenticationInput({
-            machineId: args.machineId,
+            machineId: args.config.machineId,
             authenticationRequestId: progress.requestId,
             interactionId: progress.interactionId,
             input: { action: 'accept', content: { apiKey: args.apiKey } },
           }).catch((error: unknown) => {
             cancelAuthentication({
-              machineId: args.machineId,
+              machineId: args.config.machineId,
               authenticationRequestId: progress.requestId,
             });
             rejectInput(error);
@@ -62,7 +73,7 @@ export function useCodexProviderCredential(
       }
       const publicationDurability = response.publicationDurability ?? 'durable';
       if (publicationDurability === 'uncertain') {
-        await resyncMachineFlockRows(runtime, args.machineId);
+        await resyncMachineFlockRows(runtime, args.config.machineId);
       }
       return { publicationDurability };
     },

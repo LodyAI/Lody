@@ -12,6 +12,7 @@ import {
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   buildLodyCodexCustomProviderEnv,
+  getLodyCodexProvisioningBindingDigest,
   LODY_CODEX_API_KEY_ENV,
   getMachineRoomId,
   SessionStatusFactory,
@@ -71,6 +72,15 @@ const createLaunchConfig = (overrides: Partial<AgentConfigMeta> = {}): AgentConf
   env: { TOKEN: 'shared' },
   ...overrides,
 });
+
+const getProvisioningBindingDigest = (
+  config: AgentConfigMeta,
+  setupRevision = 'revision-new'
+): string => {
+  const digest = getLodyCodexProvisioningBindingDigest(config, setupRevision);
+  if (!digest) throw new Error('Expected a Codex provisioning binding');
+  return digest;
+};
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -6577,7 +6587,11 @@ describe('SessionExecutionService', () => {
         await options.prepare?.(new AbortController().signal);
         return { success: true, disposition: 'cancelled' };
       });
-    const config = createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {} });
+    const config = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+    });
     const waitForProviderSetupConfig = vi.fn(() => visibleSetup.promise);
     const service = new SessionExecutionService(
       createBaseDeps({
@@ -6597,6 +6611,7 @@ describe('SessionExecutionService', () => {
         configId: capabilityConfigId,
         purpose: 'provision-provider-credential',
         setupRevision: 'revision-new',
+        expectedBindingDigest: getProvisioningBindingDigest(config),
       });
       await Promise.resolve();
       expect(authenticate).toHaveBeenCalledOnce();
@@ -6615,6 +6630,76 @@ describe('SessionExecutionService', () => {
       expect(authenticate).toHaveBeenCalledWith(
         expect.objectContaining({ forceCodexApiKeyInput: true, prepare: expect.any(Function) })
       );
+    } finally {
+      authenticate.mockRestore();
+    }
+  });
+
+  it('rejects a same-revision setup rewrite before requesting the one-shot key', async () => {
+    const confirmedConfig = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://confirmed.example.test/v1' }),
+    });
+    const rewrittenConfig = {
+      ...confirmedConfig,
+      env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://rewritten.example.test/v1' }),
+    };
+    const onProgress = vi.fn();
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockImplementation(async (options) => {
+        try {
+          await options.prepare?.(new AbortController().signal);
+          options.onProgress?.({
+            type: 'machine/acp-authentication-progress',
+            machineId: 'machine-1' as MachineId,
+            requestId: 'same-revision-rewrite',
+            agentType: 'codex',
+            status: 'input-required',
+            interactionId: 'credential-input',
+          });
+          return { success: true, disposition: 'cancelled' };
+        } catch (error) {
+          return {
+            success: false,
+            disposition: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          waitForProviderSetupConfig: vi.fn(async () => rewrittenConfig),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    try {
+      await expect(
+        service.authenticateMachineAcp(
+          {
+            type: 'machine/acp-authenticate',
+            machineId: 'machine-1' as MachineId,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            requestId: 'same-revision-rewrite',
+            action: 'start',
+            configId: capabilityConfigId,
+            purpose: 'provision-provider-credential',
+            setupRevision: 'revision-new',
+            expectedBindingDigest: getProvisioningBindingDigest(confirmedConfig),
+          },
+          { onProgress }
+        )
+      ).resolves.toEqual(
+        expect.objectContaining({
+          success: false,
+          disposition: 'error',
+          error: expect.stringContaining('confirmed credential target'),
+        })
+      );
+      expect(onProgress).not.toHaveBeenCalled();
     } finally {
       authenticate.mockRestore();
     }
@@ -6656,6 +6741,7 @@ describe('SessionExecutionService', () => {
       configId: capabilityConfigId,
       purpose: 'provision-provider-credential',
       setupRevision: 'revision-new',
+      expectedBindingDigest: 'a'.repeat(64),
     });
 
     await setupWaitStarted.promise;
@@ -6724,6 +6810,7 @@ describe('SessionExecutionService', () => {
             configId: capabilityConfigId,
             purpose: 'provision-provider-credential',
             setupRevision: 'revision-new',
+            expectedBindingDigest: getProvisioningBindingDigest(config),
           },
           { commitCodexProviderCredential }
         )
@@ -6737,6 +6824,7 @@ describe('SessionExecutionService', () => {
       expect(commitCodexProviderCredential).toHaveBeenCalledWith({
         configId: capabilityConfigId,
         setupRevision: 'revision-new',
+        expectedBindingDigest: getProvisioningBindingDigest(config),
         apiKey: 'new-key',
         signal: expect.any(AbortSignal),
         markCommitted: undefined,
@@ -6802,6 +6890,7 @@ describe('SessionExecutionService', () => {
             configId: capabilityConfigId,
             purpose: 'provision-provider-credential',
             setupRevision: 'revision-new',
+            expectedBindingDigest: getProvisioningBindingDigest(config),
           },
           { commitCodexProviderCredential }
         )
@@ -6854,6 +6943,7 @@ describe('SessionExecutionService', () => {
         configId: capabilityConfigId,
         purpose: 'provision-provider-credential',
         setupRevision: 'revision-new',
+        expectedBindingDigest: getProvisioningBindingDigest(config),
       },
       {
         commitCodexProviderCredential,

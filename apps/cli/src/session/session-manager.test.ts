@@ -17,6 +17,7 @@ import {
   type SessionId,
   type SessionLaunchConfig,
   type SessionMeta,
+  type SessionPreparationSpec,
   type WorkspaceId,
 } from '@lody/shared';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
@@ -72,6 +73,7 @@ type FakeSessionDoc = {
   setBaseBranch: ReturnType<typeof vi.fn<(baseBranch: string) => Promise<void>>>;
   setBranchName: ReturnType<typeof vi.fn<(branchName: string) => Promise<void>>>;
   setIsWorktree: ReturnType<typeof vi.fn<(isWorktree: boolean) => Promise<void>>>;
+  setACPSessionId: ReturnType<typeof vi.fn<(acpSessionId: ACPSessionId) => Promise<void>>>;
 };
 
 const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
@@ -80,6 +82,7 @@ const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
   setBaseBranch: vi.fn(async () => undefined),
   setBranchName: vi.fn(async () => undefined),
   setIsWorktree: vi.fn(async () => undefined),
+  setACPSessionId: vi.fn(async () => undefined),
 });
 
 const createWorkspaceDocument = (docs: Map<SessionId, FakeSessionDoc>) =>
@@ -942,6 +945,141 @@ describe('SessionManager launch credential boundary', () => {
     } finally {
       vi.unstubAllEnvs();
       rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  const createGitHubCredentialHarness = async (suffix: string) => {
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), `lody-github-${suffix}-credential-`));
+    vi.stubEnv('HOME', dataDir);
+    vi.stubEnv('LODY_DATA_DIR', dataDir);
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const configId = `codex-github-${suffix}` as AgentConfigId;
+    const env = buildLodyCodexCustomProviderEnv(
+      { PROVIDER_FLAG: 'canonical' },
+      { baseUrl: 'https://relay.example.test/v1' }
+    );
+    const runtimeOverrides = { codexPath: process.execPath };
+    const agentConfig = {
+      id: configId,
+      machineId: 'machine-1' as MachineId,
+      name: 'Codex GitHub Relay',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      runtimeOverrides,
+      env,
+    };
+    const stagedCredential = await stageProviderCredential(
+      workspaceId,
+      agentConfig,
+      'github-launch-key'
+    );
+    await stagedCredential.finalize();
+    const workspaceDocument = createWorkspaceDocument(new Map());
+    Object.assign(workspaceDocument, {
+      getAgentConfigById: vi.fn(async () => agentConfig),
+    });
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      workspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const config = createSessionConfig({
+      sessionId: `github-${suffix}-launch` as SessionId,
+      agentConfigId: configId,
+      runtimeOverrides,
+      env,
+    });
+    const internals = manager as unknown as {
+      prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<boolean>;
+      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
+      createPreparedSessionRuntime(
+        spec: SessionPreparationSpec,
+        signal: AbortSignal
+      ): Promise<{
+        start(): void;
+        agentResult: Promise<string>;
+        dispose(): Promise<void>;
+      }>;
+    };
+    internals.prepareGitHubRepoSessionConfig = async (sessionConfig) => {
+      sessionConfig.env = {
+        ...sessionConfig.env,
+        GH_TOKEN: 'github-session-token',
+        LODY_GIT_CRED_BROKER_TOKEN: 'broker-session-token',
+      };
+      return true;
+    };
+    return { dataDir, manager, config, configId, internals };
+  };
+
+  const expectGitHubCredentialLaunch = (env: Record<string, string> | undefined): void => {
+    expect(env).toMatchObject({
+      [LODY_CODEX_API_KEY_ENV]: 'github-launch-key',
+      GH_TOKEN: 'github-session-token',
+      LODY_GIT_CRED_BROKER_TOKEN: 'broker-session-token',
+      PROVIDER_FLAG: 'canonical',
+    });
+  };
+
+  it('hydrates before GitHub env injection on the cold session path', async () => {
+    const harness = await createGitHubCredentialHarness('cold');
+    let childEnv: Record<string, string> | undefined;
+    const createAgent = vi
+      .spyOn(Session.prototype, 'createAgent')
+      .mockImplementation(async (input) => {
+        childEnv = input.env;
+        return 'cold-acp-session';
+      });
+
+    try {
+      await harness.internals.createSessionInnerWithAgent(harness.config);
+      expectGitHubCredentialLaunch(childEnv);
+      expect(harness.config.env?.[LODY_CODEX_API_KEY_ENV]).toBeUndefined();
+    } finally {
+      createAgent.mockRestore();
+      await harness.manager.cleanUp();
+      vi.unstubAllEnvs();
+      rmSync(harness.dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hydrates before GitHub env injection on the prepared session path', async () => {
+    const harness = await createGitHubCredentialHarness('prepared');
+    let childEnv: Record<string, string> | undefined;
+    const createAgent = vi
+      .spyOn(Session.prototype, 'createAgent')
+      .mockImplementation(async (input) => {
+        childEnv = input.env;
+        return 'prepared-acp-session';
+      });
+
+    try {
+      const runtime = await harness.internals.createPreparedSessionRuntime(
+        {
+          preparationId: 'github-credential-preparation',
+          sessionId: harness.config.sessionId!,
+          requestedByUserId: harness.config.requesterUserId,
+          agentConfigId: harness.configId,
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+        new AbortController().signal
+      );
+      runtime.start();
+      await runtime.agentResult;
+      expectGitHubCredentialLaunch(childEnv);
+      await runtime.dispose();
+    } finally {
+      createAgent.mockRestore();
+      await harness.manager.cleanUp();
+      vi.unstubAllEnvs();
+      rmSync(harness.dataDir, { recursive: true, force: true });
     }
   });
 });

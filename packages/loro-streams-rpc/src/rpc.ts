@@ -288,41 +288,63 @@ export const LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema = BaseRpcRe
 
 export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/acp-authenticate'),
-  params: z.discriminatedUnion('action', [
-    z
-      .object({
-        requestId: z.string().trim().min(1).max(1024),
-        action: z.literal('start'),
-        configId: AgentConfigIdSchema,
-        purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
-        setupRevision: z.string().trim().min(1).max(1024).optional(),
-      })
-      .strict(),
-    z
-      .object({
-        requestId: z.string().trim().min(1).max(1024),
-        action: z.literal('cancel'),
-        authenticationRequestId: z.string().trim().min(1).max(1024),
-      })
-      .strict(),
-    z
-      .object({
-        requestId: z.string().trim().min(1).max(1024),
-        action: z.literal('submit-code'),
-        authenticationRequestId: z.string().trim().min(1).max(1024),
-        authorizationCodeEnvelope: RpcSecretEnvelopeSchema,
-      })
-      .strict(),
-    z
-      .object({
-        requestId: z.string().trim().min(1).max(1024),
-        action: z.literal('submit-input'),
-        authenticationRequestId: z.string().trim().min(1).max(1024),
-        interactionId: z.string().trim().min(1).max(1024),
-        authenticationInputEnvelope: RpcSecretEnvelopeSchema,
-      })
-      .strict(),
-  ]),
+  params: z
+    .discriminatedUnion('action', [
+      z
+        .object({
+          requestId: z.string().trim().min(1).max(1024),
+          action: z.literal('start'),
+          configId: AgentConfigIdSchema,
+          purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
+          setupRevision: z.string().trim().min(1).max(1024).optional(),
+          expectedBindingDigest: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/u)
+            .optional(),
+        })
+        .strict(),
+      z
+        .object({
+          requestId: z.string().trim().min(1).max(1024),
+          action: z.literal('cancel'),
+          authenticationRequestId: z.string().trim().min(1).max(1024),
+        })
+        .strict(),
+      z
+        .object({
+          requestId: z.string().trim().min(1).max(1024),
+          action: z.literal('submit-code'),
+          authenticationRequestId: z.string().trim().min(1).max(1024),
+          authorizationCodeEnvelope: RpcSecretEnvelopeSchema,
+        })
+        .strict(),
+      z
+        .object({
+          requestId: z.string().trim().min(1).max(1024),
+          action: z.literal('submit-input'),
+          authenticationRequestId: z.string().trim().min(1).max(1024),
+          interactionId: z.string().trim().min(1).max(1024),
+          authenticationInputEnvelope: RpcSecretEnvelopeSchema,
+        })
+        .strict(),
+    ])
+    .superRefine((params, context) => {
+      if (params.action !== 'start') return;
+      const provisioning = params.purpose === 'provision-provider-credential';
+      if (
+        provisioning
+          ? Boolean(params.setupRevision && params.expectedBindingDigest)
+          : !params.setupRevision && !params.expectedBindingDigest
+      ) {
+        return;
+      }
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: provisioning
+          ? 'Credential provisioning requires an exact setup revision and binding'
+          : 'Credential binding fields require credential provisioning',
+      });
+    }),
 }).strict();
 
 export const LoroMachineAcpBinaryStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -2472,6 +2494,7 @@ export class LoroStreamsMachineRpcClient {
           configId: AgentConfigId;
           purpose?: 'authenticate' | 'provision-provider-credential';
           setupRevision?: string;
+          expectedBindingDigest?: string;
         }
       | { action: 'cancel'; authenticationRequestId: string }
       | {
@@ -2556,8 +2579,9 @@ export class LoroStreamsMachineRpcClient {
               action: options.action,
               configId: options.configId,
               ...(options.purpose ? { purpose: options.purpose } : {}),
-              ...(options.setupRevision
-                ? { setupRevision: options.setupRevision }
+              ...(options.setupRevision ? { setupRevision: options.setupRevision } : {}),
+              ...(options.expectedBindingDigest
+                ? { expectedBindingDigest: options.expectedBindingDigest }
                 : {}),
             } as const;
           case 'cancel':
@@ -3130,6 +3154,7 @@ export class LoroStreamsMachineRpcClient {
                 configId: AgentConfigId;
                 purpose?: 'authenticate' | 'provision-provider-credential';
                 setupRevision?: string;
+                expectedBindingDigest?: string;
               }
             | { requestId: string; action: 'cancel'; authenticationRequestId: string }
             | {

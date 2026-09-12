@@ -1978,6 +1978,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               configId: message.configId,
               purpose: message.purpose,
               setupRevision: message.setupRevision,
+              expectedBindingDigest: message.expectedBindingDigest,
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({

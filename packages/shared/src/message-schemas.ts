@@ -1397,29 +1397,51 @@ const MachineAcpAuthenticateRequestBaseSchema = z.object({
   requestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
 });
 
-export const MachineAcpAuthenticateRequestSchema = z.discriminatedUnion('action', [
-  MachineAcpAuthenticateRequestBaseSchema.extend({
-    action: z.literal('start'),
-    configId: AgentConfigIdSchema,
-    purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
-    setupRevision: z.string().trim().min(1).max(1024).optional(),
-  }).strict(),
-  MachineAcpAuthenticateRequestBaseSchema.extend({
-    action: z.literal('cancel'),
-    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
-  }).strict(),
-  MachineAcpAuthenticateRequestBaseSchema.extend({
-    action: z.literal('submit-code'),
-    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
-    authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
-  }).strict(),
-  MachineAcpAuthenticateRequestBaseSchema.extend({
-    action: z.literal('submit-input'),
-    authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
-    interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
-    authenticationInput: z.string().min(1).max(65536),
-  }).strict(),
-]);
+export const MachineAcpAuthenticateRequestSchema = z
+  .discriminatedUnion('action', [
+    MachineAcpAuthenticateRequestBaseSchema.extend({
+      action: z.literal('start'),
+      configId: AgentConfigIdSchema,
+      purpose: z.enum(['authenticate', 'provision-provider-credential']).optional(),
+      setupRevision: z.string().trim().min(1).max(1024).optional(),
+      expectedBindingDigest: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/u)
+        .optional(),
+    }).strict(),
+    MachineAcpAuthenticateRequestBaseSchema.extend({
+      action: z.literal('cancel'),
+      authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+    }).strict(),
+    MachineAcpAuthenticateRequestBaseSchema.extend({
+      action: z.literal('submit-code'),
+      authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      authorizationCode: z.string().trim().min(1).max(ACP_AUTH_LABEL_MAX_LENGTH),
+    }).strict(),
+    MachineAcpAuthenticateRequestBaseSchema.extend({
+      action: z.literal('submit-input'),
+      authenticationRequestId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      interactionId: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH),
+      authenticationInput: z.string().min(1).max(65536),
+    }).strict(),
+  ])
+  .superRefine((request, context) => {
+    if (request.action !== 'start') return;
+    const provisioning = request.purpose === 'provision-provider-credential';
+    if (
+      provisioning
+        ? Boolean(request.setupRevision && request.expectedBindingDigest)
+        : !request.setupRevision && !request.expectedBindingDigest
+    ) {
+      return;
+    }
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: provisioning
+        ? 'Credential provisioning requires an exact setup revision and binding'
+        : 'Credential binding fields require credential provisioning',
+    });
+  });
 
 export const MachineAcpAuthenticateResponseSchema = z
   .object({

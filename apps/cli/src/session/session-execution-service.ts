@@ -32,6 +32,7 @@ import {
   type ProjectRef,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  getLodyCodexProvisioningBindingDigest,
   getSessionRoomId,
   getServerNow,
   SessionCreateRequestValidated,
@@ -688,6 +689,7 @@ type AcpAuthenticationOptions = {
   commitCodexProviderCredential?: (input: {
     configId: AgentConfigId;
     setupRevision: string;
+    expectedBindingDigest: string;
     apiKey: string;
     signal: AbortSignal;
     markCommitted: () => void;
@@ -5659,12 +5661,15 @@ export class SessionExecutionService {
     }
 
     const provisioning = message.purpose === 'provision-provider-credential';
-    if (provisioning && !message.setupRevision?.trim()) {
+    if (
+      provisioning &&
+      (!message.setupRevision?.trim() || !message.expectedBindingDigest?.trim())
+    ) {
       return {
         ...base,
         success: false,
         disposition: 'error',
-        error: 'Credential provisioning requires an exact setup revision',
+        error: 'Credential provisioning requires an exact setup revision and binding',
       };
     }
     let config = provisioning
@@ -5797,6 +5802,13 @@ export class SessionExecutionService {
                 `Provider config not found or invalid on this machine: ${message.configId}`
               );
             }
+            const actualBindingDigest = getLodyCodexProvisioningBindingDigest(
+              stagedConfig,
+              message.setupRevision ?? ''
+            );
+            if (!actualBindingDigest || actualBindingDigest !== message.expectedBindingDigest) {
+              throw new Error('Provider setup no longer matches the confirmed credential target');
+            }
             config = stagedConfig;
             return {
               cliType: stagedConfig.cliType,
@@ -5830,6 +5842,7 @@ export class SessionExecutionService {
             return await options.commitCodexProviderCredential({
               configId: message.configId,
               setupRevision: message.setupRevision,
+              expectedBindingDigest: message.expectedBindingDigest ?? '',
               apiKey: candidateApiKey,
               signal,
               markCommitted,

@@ -919,8 +919,7 @@ export function MachineAgentSettings({
             if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
             try {
               const provision = await provisionCodexCredential({
-                machineId: config.machineId,
-                configId: config.id,
+                config,
                 setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
@@ -974,8 +973,7 @@ export function MachineAgentSettings({
             await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
             try {
               const provision = await provisionCodexCredential({
-                machineId: nextConfig.machineId,
-                configId: nextConfig.id,
+                config: nextConfig,
                 setupRevision: payload.setupRevision,
                 apiKey: payload.codexApiKey,
               });
