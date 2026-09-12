@@ -120,7 +120,10 @@ export function pickNextBatch(
     (a.workspaceId + a.repoFullName < b.workspaceId + b.repoFullName ? -1 : 1);
   const highs = batches.filter((batch) => batch.lane === 'high').sort(byOldest);
   const lows = batches.filter((batch) => batch.lane === 'low').sort(byOldest);
-  if (lows.length > 0 && (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)) {
+  if (
+    lows.length > 0 &&
+    (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)
+  ) {
     return lows[0] ?? null;
   }
   return highs[0] ?? lows[0] ?? null;

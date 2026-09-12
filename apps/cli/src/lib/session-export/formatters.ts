@@ -43,9 +43,7 @@ function sanitizeTranscriptItem(item: MessageContent): MessageContent {
   return {
     ...item,
     content: (item.content ?? []).filter(
-      (
-        content
-      ): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
+      (content): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
         content.type !== 'diff'
     ),
   };
