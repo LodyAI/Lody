@@ -1,38 +1,21 @@
-import { z } from 'zod';
+export * from './session-share-package';
+export * from './session-share-export';
+export * from './session-share-client';
 
-export const SESSION_SHARE_MAX_TARGETS = 32;
-export const SESSION_SHARE_MAX_TITLE_BYTES = 1024;
-/** Every response body, including active SSE and attachment downloads, is bounded. */
+/** Request intent only; no daemon API accepts approval or publication credentials. */
+export type SessionShareRequestInput = {
+  workspaceId: string;
+  requestId: string;
+  requesterUserId: string;
+  sourceSessionId: string;
+  sourceTurnId: string;
+  sessionIds: string[];
+};
+export type SessionShareRequestStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired';
+
+/** Every response body, including attachment downloads, is bounded. */
 export const SESSION_SHARE_READ_LIFETIME_MS = 120_000;
 export const SESSION_SHARE_READ_AUTH_PATH = '/api/sharing/read';
-/** Signed service-to-service observation endpoint; never a client registration API. */
-export const SESSION_SHARE_SOURCE_VERIFY_PATH = '/api/sharing/verify-sources';
-
-export type SessionShareVersions = {
-  scopeVersion: number;
-  credentialVersion: number;
-};
-
-export type SessionShareManifest = SessionShareVersions & {
-  shareId: string;
-  rootSessionId: string;
-  workspaceName: string;
-  targets: { sessionId: string; title: string }[];
-  /** Authorization must be revalidated by this time; not a stream JWT expiry. */
-  validUntil: number;
-};
-export const SessionShareManifestSchema = z.object({
-  shareId: z.string(),
-  rootSessionId: z.string(),
-  workspaceName: z.string(),
-  scopeVersion: z.number().int().positive(),
-  credentialVersion: z.number().int().positive(),
-  validUntil: z.number().finite(),
-  targets: z
-    .array(z.object({ sessionId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/), title: z.string() }))
-    .min(1)
-    .max(SESSION_SHARE_MAX_TARGETS),
-});
 
 export function isSessionShareSecret(value: string): boolean {
   // 32 random bytes encoded as lowercase hex. Deliberately versioned in the URL.

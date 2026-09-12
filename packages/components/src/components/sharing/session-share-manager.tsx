@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { SessionShareManagement, SessionShareManagementEntry } from '@lody/cloud-api';
-import { SESSION_SHARE_MAX_TARGETS } from '@lody/shared/session-sharing';
+import { SHARE_LIMITS } from '@lody/shared/session-sharing';
+import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
 import { Button } from '@/ui/button';
 import { Switch } from '@/ui/switch';
-import { cn } from '@/lib/utils';
+import { SessionSharePreview } from './session-share-preview';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -17,309 +17,266 @@ import {
 } from '@/ui/alert-dialog';
 
 export type ShareCandidate = { sessionId: string; title: string };
-export type SessionShareManagerProps = {
+export type SessionShareManagerProps = ReturnType<typeof useSessionShareManagement> & {
   sessionId: string;
-  state: SessionShareManagement | undefined;
   candidates: ShareCandidate[];
-  selected: string[];
-  copyableShareIds: string[];
-  now: number;
-  busy: boolean;
-  conflict: boolean;
-  error: string | null;
-  notice: string | null;
-  onSelect: (ids: string[]) => void;
-  onReload: () => void;
-  onCreate: () => void;
-  onSave: () => void;
-  onReset: () => void;
-  onCopy: (entry: SessionShareManagementEntry) => void;
-  onRevoke: (entry: SessionShareManagementEntry) => void;
+  selectionLocked?: boolean;
 };
-
-/**
- * Controlled, responsive management UI shared by Web, Electron and Mobile.
- *
- * One vertical read: what the link is and does, what it covers, then the
- * actions. Sub-conversations are one switch rather than a checklist, so the
- * author makes a single decision instead of auditing a list. The stored grant is
- * still an explicit id set, so the switch means "the sub-conversations that
- * exist and are ready now" — later ones are never added on their own, and the
- * copy says so. The action row sticks to the bottom of the dialog's scrolling
- * body so the primary action stays reachable on a phone.
- */
+/** Pure controls: only a human's final confirmation uploads the frozen package. */
 export function SessionShareManager(props: SessionShareManagerProps) {
   const { t } = useTranslation();
-  const [confirmation, setConfirmation] = useState<
-    | { kind: 'reset'; version: string }
-    | { kind: 'revoke'; entry: SessionShareManagementEntry }
-    | null
-  >(null);
-  const { state, selected, busy, now } = props;
-  const root = state?.root;
-  const rootVersion = root
-    ? `${root.shareId}:${root.scopeVersion}:${root.credentialVersion}`
-    : 'new';
-  const canManage = !root || root.canManage;
-  const rootLive = root?.status === 'active' && (root.validUntil ?? 0) > now;
-  const hasSecret = !!root && props.copyableShareIds.includes(root.shareId);
-  const eligible = (id: string) =>
-    state?.candidates.some(
-      (entry) => entry.sessionId === id && entry.available && (entry.validUntil ?? 0) > now
-    ) ?? false;
-  const qualified = selected.every(eligible) && selected.includes(props.sessionId);
-  const changed =
-    !!root &&
-    (selected.length !== root.sessionIds.length ||
-      selected.some((id, index) => id !== root.sessionIds[index]));
-  const mutationDisabled = busy || props.conflict || !qualified;
-  const candidateMap = new Map(props.candidates.map((entry) => [entry.sessionId, entry]));
-  // Discovery order is deterministic, so the capped set is stable across renders.
-  const children = [...new Set([...selected, ...candidateMap.keys()])].filter(
-    (id) => id !== props.sessionId
-  );
-  const readyChildren = children.filter(eligible);
-  const shareableChildren = readyChildren.slice(0, SESSION_SHARE_MAX_TARGETS - 1);
-  const truncatedChildren = readyChildren.length > shareableChildren.length;
-  // An existing grant may still list a target that has since become unavailable;
-  // the switch reads as on so turning it off is what repairs the selection.
-  const sharesChildren = selected.some((id) => id !== props.sessionId);
-  const rootReady = eligible(props.sessionId);
-  const status = rootLive
-    ? t('sharing.manager.active', 'Link active')
-    : root?.status === 'revoked'
-      ? t('sharing.manager.revoked', 'Link revoked')
-      : root
-        ? t('sharing.manager.unavailable', 'Link is currently unavailable')
-        : t('sharing.manager.noLink', 'No share link yet');
-  const messages = [
-    props.error !== null ? { role: 'alert' as const, text: props.error, bad: true } : null,
-    props.notice !== null ? { role: 'status' as const, text: props.notice, bad: false } : null,
-  ].flatMap((entry) => (entry ? [entry] : []));
-
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    kind: 'reset' | 'revoke';
+    revision: number;
+  } | null>(null);
+  const { entry, pending, busy } = props;
+  const children = props.candidates.filter((c) => c.sessionId !== props.sessionId);
+  const canPublish = entry === null || entry?.canManage || entry?.status === 'revoked';
   return (
-    <div className="text-sm" aria-busy={busy}>
-      {props.conflict && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/60 px-4 py-2.5 text-xs sm:px-5"
-        >
-          <p className="min-w-0 leading-5">
-            {t('sharing.manager.conflict', 'Sharing changed on another device.')}
-          </p>
-          <Button size="sm" variant="outline" disabled={busy} onClick={props.onReload}>
-            {t('sharing.manager.reload', 'Reload selection')}
-          </Button>
-        </div>
-      )}
-      <div className="space-y-5 px-4 py-4 sm:px-5">
-        {!state ? (
-          <p role="status" className="text-muted-foreground">
-            {t('sharing.manager.loading', 'Loading sharing settings…')}
-          </p>
-        ) : (
-          <>
-            <section className="rounded-lg border border-border px-3 py-2.5">
-              {/* Wraps rather than truncates: a narrow phone must never shorten
-                  the link's state to make room for its own buttons. */}
-              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                <p className="flex min-w-0 items-center gap-2 font-medium">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'size-1.5 shrink-0 rounded-full',
-                      rootLive ? 'bg-emerald-500' : 'bg-muted-foreground/50'
-                    )}
-                  />
-                  <span className="truncate">{status}</span>
-                </p>
-                {root && (rootLive || root.canRevoke) && (
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {rootLive && hasSecret && (
-                      <Button size="sm" disabled={busy} onClick={() => props.onCopy(root)}>
-                        {t('sharing.manager.copy', 'Copy share link')}
-                      </Button>
-                    )}
-                    {root.canRevoke && root.status === 'active' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-muted-foreground"
-                        disabled={busy}
-                        onClick={() => setConfirmation({ kind: 'revoke', entry: root })}
-                      >
-                        {t('sharing.manager.revoke', 'Revoke link')}
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+    <div className="space-y-4 px-4 py-4 sm:px-5">
+      <p className="text-sm text-muted-foreground">
+        {t(
+          'sharing.static.notice',
+          'Publish a static copy of all selected history, including thinking and tool inputs and outputs. Review sensitive content before publishing. Future messages are not included automatically.'
+        )}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {t(
+          'sharing.static.previewNotice',
+          'The title is public for link previews. The conversation and copied attachments require the full share link.'
+        )}
+      </p>
+      {entry === undefined ? (
+        <p role="status">{t('common.loading', 'Loading…')}</p>
+      ) : (
+        <>
+          {entry && (
+            <p className="text-sm">
+              {entry.status === 'active'
+                ? t('settings.shares.active', 'Active')
+                : entry.status === 'draft'
+                  ? t('sharing.static.draft', 'Upload not yet published')
+                  : t('settings.shares.revoked', 'Revoked')}
+            </p>
+          )}
+          {children.length > 0 && canPublish && !props.selectionLocked && (
+            <label className="flex items-center justify-between gap-4 text-sm">
+              <span>
                 {t(
-                  'sharing.manager.disclosure',
-                  'Anyone with the link reads the full conversation and its later updates. Links can be forwarded.'
+                  'sharing.static.includeChildren',
+                  'Include current sub-conversations and child Tabs'
+                )}
+              </span>
+              <Switch
+                checked={props.selected.some((id) => id !== props.sessionId)}
+                disabled={busy}
+                onCheckedChange={(checked) =>
+                  props.onSelect(
+                    checked
+                      ? [
+                          props.sessionId,
+                          ...children
+                            .slice(0, SHARE_LIMITS.conversations - 1)
+                            .map((c) => c.sessionId),
+                        ]
+                      : [props.sessionId]
+                  )
+                }
+              />
+            </label>
+          )}
+          {children.length >= SHARE_LIMITS.conversations && (
+            <p className="text-xs text-muted-foreground">
+              {t('sharing.static.limit', 'A share can contain at most {{count}} conversations.', {
+                count: SHARE_LIMITS.conversations,
+              })}
+            </p>
+          )}
+          {pending && (
+            <section className="rounded-md border p-3">
+              <h3 className="text-sm font-medium">
+                {t('sharing.static.confirmTitle', 'Confirm this static copy')}
+              </h3>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={previewOpen}
+                onClick={() => setPreviewOpen((value) => !value)}
+              >
+                {t('sharing.static.preview', 'Preview frozen copy')}
+              </Button>
+              {previewOpen && <SessionSharePreview key={pending.manifestHash} prepared={pending} />}
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {pending.manifest.conversations.map((c) => (
+                  <li key={c.id}>{c.title || t('sessions.untitled', 'Untitled session')}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t(
+                  'sharing.static.summary',
+                  '{{conversations}} conversations · {{attachments}} copied attachments',
+                  {
+                    conversations: pending.manifest.conversations.length,
+                    attachments: pending.manifest.attachments.length,
+                  }
                 )}
               </p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {t(
-                  'sharing.manager.publicPreview',
-                  'Link previews publicly display the conversation title.'
+                  'sharing.static.confirmNotice',
+                  'Publishing uploads the readable history to share storage. Anyone with the full link can read and copy it.'
                 )}
               </p>
-              {root?.status === 'active' && root.canManage && !hasSecret && (
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {pending.uncopiedResourceCount > 0 && (
+                <p role="status" className="mt-2 text-xs text-muted-foreground">
                   {t(
-                    'sharing.manager.missingSecret',
-                    'No link secret on this device. Reset to copy a new link.'
+                    'sharing.static.uncopiedResources',
+                    '{{count}} embedded resource links are not copied. Their text is preserved, but the share cannot load resources from the original workspace or remote image URLs.',
+                    { count: pending.uncopiedResourceCount }
                   )}
                 </p>
               )}
             </section>
-            {canManage && children.length > 0 && (
-              <section className="rounded-lg border border-border px-3 py-2.5">
-                <label className="flex cursor-pointer items-center justify-between gap-3">
-                  <span className="font-medium">
-                    {t('sharing.manager.includeChildren', 'Include sub-conversations')}
-                  </span>
-                  <Switch
-                    className="shrink-0"
-                    checked={sharesChildren}
-                    disabled={busy || props.conflict || shareableChildren.length === 0}
-                    onCheckedChange={(value) =>
-                      props.onSelect(
-                        value ? [props.sessionId, ...shareableChildren] : [props.sessionId]
-                      )
-                    }
-                  />
-                </label>
-                <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                  {shareableChildren.length === 0
-                    ? t('sharing.manager.childrenNotReady', 'None are synced to the cloud yet.')
-                    : t(
-                        'sharing.manager.childrenReady',
-                        '{{count}} ready now · new ones are not added automatically',
-                        { count: shareableChildren.length }
-                      )}
-                </p>
-                {truncatedChildren && (
-                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                    {t(
-                      'sharing.manager.childrenLimit',
-                      'Limited to {{count}} (max {{max}} per link).',
-                      { max: SESSION_SHARE_MAX_TARGETS, count: shareableChildren.length }
-                    )}
-                  </p>
-                )}
-              </section>
-            )}
-          </>
-        )}
-      </div>
-      {/* Results and actions stay pinned to the body's bottom so neither is
-          scrolled out of reach on a phone. */}
-      {state && (canManage || messages.length > 0) && (
-        <div className="sticky bottom-0 space-y-3 border-t border-border bg-background px-4 py-3 sm:px-5">
-          {canManage && !rootReady && (
-            <p className="text-xs leading-5 text-muted-foreground">
+          )}
+          {!props.canCapture && canPublish && (
+            <p className="text-sm text-muted-foreground">
               {t(
-                'sharing.manager.rootNotReady',
-                'Not synced to the cloud yet, so it cannot be shared.'
+                'sharing.static.sourceUnavailable',
+                'The selected source conversations are unavailable. The published copy is unchanged.'
               )}
             </p>
           )}
-          {messages.map((message) => (
-            <p
-              key={message.role}
-              role={message.role}
-              className={cn(
-                'text-xs leading-5',
-                message.bad ? 'text-destructive' : 'text-muted-foreground'
+          {entry?.status === 'active' && entry.canManage && !props.hasSecret && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'settings.shares.secretMissing',
+                'The link credential is not saved on this device.'
               )}
-            >
-              {message.text}
             </p>
-          ))}
-          {canManage && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              {!root ? (
-                <Button disabled={mutationDisabled} onClick={props.onCreate}>
-                  {t('sharing.manager.create', 'Create share link')}
+          )}
+          {props.conflict && (
+            <p role="alert" className="text-sm">
+              {t(
+                'sharing.static.conflict',
+                'This share changed elsewhere. Discard this preview and prepare it again.'
+              )}
+            </p>
+          )}
+          {props.error && (
+            <p role="alert" className="text-sm text-destructive">
+              {props.error}
+            </p>
+          )}
+          {props.notice && (
+            <p role="status" className="text-sm">
+              {props.notice}
+            </p>
+          )}
+          {busy && (
+            <p role="status" className="text-xs text-muted-foreground">
+              {t('sharing.static.progress', 'Preparing / publishing… {{progress}}%', {
+                progress: props.progress,
+              })}
+            </p>
+          )}
+          <div className="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t bg-background px-4 pt-3 sm:-mx-5 sm:px-5">
+            {pending ? (
+              <>
+                <Button
+                  size="sm"
+                  disabled={busy || props.conflict}
+                  onClick={() => void props.onConfirm()}
+                >
+                  {t('sharing.static.publish', 'Confirm publication')}
                 </Button>
-              ) : (
-                <>
-                  <Button
-                    variant="outline"
-                    disabled={mutationDisabled}
-                    onClick={() => setConfirmation({ kind: 'reset', version: rootVersion })}
-                  >
-                    {t('sharing.manager.reset', 'Reset link')}
-                  </Button>
-                  {/* Only appears once the switch has actually changed something,
-                      so a conversation with nothing to change shows no dead control. */}
-                  {root.status === 'active' && changed && (
-                    <Button
-                      disabled={mutationDisabled || !rootLive || !hasSecret}
-                      onClick={props.onSave}
-                    >
-                      {t('sharing.manager.save', 'Save changes')}
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      {confirmation && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setConfirmation(null);
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {confirmation.kind === 'reset'
-                  ? t('sharing.manager.reset', 'Reset link')
-                  : t('sharing.manager.revoke', 'Revoke link')}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {confirmation.kind === 'reset'
-                  ? t(
-                      'sharing.manager.confirmReset',
-                      'The old link stops working and a new one replaces it.'
-                    )
-                  : t(
-                      'sharing.manager.confirmRevoke',
-                      'The link stops working. Already downloaded content is unaffected.'
-                    )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={busy}>
-                {t('sharing.manager.cancel', 'Cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                disabled={
-                  busy ||
-                  props.conflict ||
-                  (confirmation.kind === 'reset' &&
-                    (mutationDisabled || confirmation.version !== rootVersion))
-                }
-                onClick={() => {
-                  const action = confirmation;
-                  setConfirmation(null);
-                  if (action.kind === 'reset') props.onReset();
-                  else props.onRevoke(action.entry);
-                }}
+                <Button size="sm" variant="outline" disabled={busy} onClick={props.onDiscard}>
+                  {t('sharing.static.discard', 'Discard preview')}
+                </Button>
+              </>
+            ) : (
+              canPublish && (
+                <Button
+                  size="sm"
+                  disabled={busy || !props.canCapture || entry?.status === 'draft'}
+                  onClick={() => void props.onPrepare()}
+                >
+                  {entry?.status === 'active'
+                    ? t('sharing.static.update', 'Update deployment')
+                    : t('sharing.static.prepare', 'Prepare share')}
+                </Button>
+              )
+            )}
+            {props.hasSecret && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void props.onCopy()}
               >
-                {t('sharing.manager.confirm', 'Confirm')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+                {t('settings.shares.copy', 'Copy link')}
+              </Button>
+            )}
+            {entry?.canManage && entry.status === 'active' && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setConfirmation({ kind: 'reset', revision: entry.revision })}
+              >
+                {t('sharing.static.reset', 'Reset link')}
+              </Button>
+            )}
+            {entry?.canRevoke && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setConfirmation({ kind: 'revoke', revision: entry.revision })}
+              >
+                {t('sharing.static.revoke', 'Revoke')}
+              </Button>
+            )}
+          </div>
+        </>
       )}
+      <AlertDialog
+        open={confirmation !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmation(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmation?.kind === 'reset'
+                ? t('sharing.static.reset', 'Reset link')
+                : t('sharing.static.revoke', 'Revoke')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'sharing.static.invalidateNotice',
+                'The previous link will stop working. Already downloaded copies cannot be recalled.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy || confirmation?.revision !== entry?.revision}
+              onClick={() => {
+                if (confirmation?.revision !== entry?.revision) return;
+                if (confirmation?.kind === 'reset') void props.onReset();
+                else void props.onRevoke();
+                setConfirmation(null);
+              }}
+            >
+              {t('common.confirm', 'Confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

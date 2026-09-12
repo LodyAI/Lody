@@ -6,12 +6,7 @@ import { ZoomableImageViewer } from '../shared/zoomable-image-viewer';
 import { SessionFileCard } from '../ai-gui/session-file-card';
 
 export type ShareAttachmentAccess = {
-  read: (
-    resource: string,
-    signal?: AbortSignal,
-    range?: string,
-    storageSessionId?: string
-  ) => Promise<Response>;
+  read: (attachmentId: string, signal?: AbortSignal) => Promise<Blob>;
 };
 
 export function SharedAttachmentUnavailable() {
@@ -40,8 +35,7 @@ export function SharedImage({
     setUrl(undefined);
     setFailed(false);
     void access
-      .read(`images/${encodeURIComponent(entry.imageId)}`, abort.signal, undefined, entry.sessionId)
-      .then((response) => response.blob())
+      .read(entry.imageId, abort.signal)
       .then((blob) => {
         if (abort.signal.aborted) return;
         blobUrl = URL.createObjectURL(blob);
@@ -54,7 +48,7 @@ export function SharedImage({
       abort.abort();
       if (blobUrl !== undefined) URL.revokeObjectURL(blobUrl);
     };
-  }, [access, entry.imageId, entry.sessionId]);
+  }, [access, entry.imageId]);
   const images = useMemo(
     () => [{ key: entry.key, src: url, fileName: entry.fileName }],
     [entry.key, entry.fileName, url]
@@ -107,20 +101,14 @@ export function SharedFile({
       abort.abort();
       if (lifetime.current === abort) lifetime.current = null;
     };
-  }, [access, file.fileId, file.storageSessionId]);
+  }, [access, file.fileId]);
   const download = async () => {
     const abort = lifetime.current;
     if (!abort) return;
     setBusy(true);
     setFailed(false);
     try {
-      const response = await access.read(
-        `files/${encodeURIComponent(file.fileId)}`,
-        abort.signal,
-        undefined,
-        file.storageSessionId
-      );
-      const blob = await response.blob();
+      const blob = await access.read(file.fileId, abort.signal);
       if (abort.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -142,13 +130,9 @@ export function SharedFile({
     setBusy(true);
     setFailed(false);
     try {
-      const response = await access.read(
-        `files/${encodeURIComponent(file.fileId)}/preview`,
-        abort.signal,
-        'bytes=0-65535',
-        file.storageSessionId
-      );
-      const body = await response.text();
+      // Verify the complete immutable object before presenting a bounded text preview.
+      const blob = await access.read(file.fileId, abort.signal);
+      const body = await blob.slice(0, 65536).text();
       if (abort.signal.aborted) return;
       setPreview(body);
     } catch {
@@ -161,6 +145,7 @@ export function SharedFile({
     <div>
       <SessionFileCard
         file={file}
+        retention="publication"
         isDownloading={busy}
         onDownload={() => {
           void download();

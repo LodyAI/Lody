@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Monitor, Moon, Sun } from 'lucide-react';
-import type { SessionId } from '@lody/shared';
+import { Copy, Monitor, Moon, Sun, PanelLeft, PanelRight } from 'lucide-react';
 import {
-  SessionShareManifestSchema,
-  type SessionShareManifest,
+  SessionRowLeadingSlot,
+  buildSessionRowOpenedByTreeSlot,
+} from '../session-row-leading-slot';
+import { toast } from 'sonner';
+import { buildConversationMarkdown, type SessionId } from '@lody/shared';
+import {
+  openStaticShare,
+  type StaticShare,
+  type SharePackageManifest,
 } from '@lody/shared/session-sharing';
 import {
   createSessionShareReader,
   type SessionShareReaderSnapshot,
 } from '@/lib/session-share-reader';
-import { fetchSessionShare } from '@/lib/session-share-fetch';
 import {
   getSessionShareSearch,
   navigateSessionShareTab,
   resolveSessionShareTab,
+  resolveSharePanes,
   subscribeSessionShareNavigation,
 } from '@/lib/session-share-navigation';
+import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
+import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionChatStreamView, MessageRowView } from '../ai-gui/view';
 import {
   buildChatStreamItems,
@@ -33,13 +42,6 @@ import { SessionShareErrorBoundary } from './session-share-error-boundary';
 import { Button } from '@/ui/button';
 import { nextCycledTheme, useTheme } from '@/theme-provider';
 
-/**
- * The reader's only control. It reuses the app's ThemeProvider — the same
- * light/dark/system cycle, resolution and cached selection — instead of a
- * reader-specific mode, so a visitor who already chose a theme on this origin
- * keeps it. localStorage is per-origin: a choice made on the app's domain
- * cannot be read from the share domain, and each origin remembers its own.
- */
 function ShareThemeToggle() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
@@ -71,32 +73,35 @@ function ShareThemeToggle() {
   );
 }
 
-export function SessionShareSurface(props: {
-  manifest: SessionShareManifest | null;
-  sessionId: string | null;
-  status: 'loading' | 'unavailable' | 'paused' | 'ready';
+function ShareConversationPane({
+  conversationId,
+  title,
+  snapshot,
+  attachmentAccess,
+}: {
+  conversationId: string;
+  title: string;
   snapshot: SessionShareReaderSnapshot;
-  onSelect: (sessionId: string) => void;
   attachmentAccess: ShareAttachmentAccess;
 }) {
   const { t } = useTranslation();
-  const { manifest, sessionId, status, snapshot } = props;
+  const [copying, setCopying] = useState(false);
   const cacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
   const stream = useMemo(
-    () => buildChatStreamItems(snapshot.history, (sessionId ?? '') as SessionId, cacheRef.current),
-    [snapshot.history, sessionId]
+    () => buildChatStreamItems(snapshot.history, conversationId as SessionId, cacheRef.current),
+    [snapshot.history, conversationId]
   );
   cacheRef.current = stream.cache;
   const attachments = useMemo(
     () => ({
       renderImage: (entry: Parameters<typeof SharedImage>[0]['entry']) => (
-        <SharedImage key={entry.key} entry={entry} access={props.attachmentAccess} />
+        <SharedImage key={entry.key} entry={entry} access={attachmentAccess} />
       ),
       renderFiles: (files: Parameters<typeof SharedFile>[0]['file'][]) => (
         <div className="space-y-2">
           {files.map((file) =>
             file.transport === 'r2' ? (
-              <SharedFile key={file.fileId} file={file} access={props.attachmentAccess} />
+              <SharedFile key={file.fileId} file={file} access={attachmentAccess} />
             ) : (
               <SharedAttachmentUnavailable key={file.fileId} />
             )
@@ -104,7 +109,7 @@ export function SessionShareSurface(props: {
         </div>
       ),
     }),
-    [props.attachmentAccess]
+    [attachmentAccess]
   );
   const renderRow = useCallback(
     (
@@ -114,6 +119,111 @@ export function SessionShareSurface(props: {
     ) => <MessageRowView {...args} user={null} />,
     []
   );
+  const copy = async () => {
+    if (copying || snapshot.status !== 'ready') return;
+    setCopying(true);
+    try {
+      const history = conversationCopyRange(snapshot.history);
+      const last = history.at(-1);
+      const { markdown, stats } = buildConversationMarkdown({
+        history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+        title,
+        incompleteFinalResponse:
+          last?.role === 'assistant' && !last.finished
+            ? t(
+                'sessions.copyContextIncomplete',
+                'The last response was still generating when copied.'
+              )
+            : undefined,
+      });
+      await navigator.clipboard.writeText(markdown);
+      toast.success(describeCopiedConversation(stats, t));
+    } catch {
+      toast.error(
+        t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
+      );
+    } finally {
+      setCopying(false);
+    }
+  };
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={title}>
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          disabled={copying || snapshot.status !== 'ready'}
+          onClick={() => void copy()}
+          aria-label={t('sessions.copyConversationHistory', 'Copy as Markdown')}
+        >
+          <Copy className="h-4 w-4" />
+        </Button>
+      </div>
+      {snapshot.status === 'unavailable' ? (
+        <p role="status" className="p-8 text-sm text-muted-foreground">
+          {t('sharing.unavailable', 'This share is unavailable')}
+        </p>
+      ) : (
+        <SessionReadonlyContext.Provider value={attachments}>
+          <SessionChatStreamView
+            key={conversationId}
+            sessionId={conversationId as SessionId}
+            items={stream.items}
+            className="min-h-0 flex-1"
+            renderMessageRow={renderRow}
+            lastAssistantMessageId={stream.lastAssistantMessageId}
+            lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+            emptyState={
+              <p role="status" className="p-8 text-center text-sm text-muted-foreground">
+                {snapshot.status === 'loading'
+                  ? t('sharing.loading', 'Loading shared conversation…')
+                  : t('sharing.empty', 'No messages yet')}
+              </p>
+            }
+          />
+        </SessionReadonlyContext.Provider>
+      )}
+    </section>
+  );
+}
+
+const loadingSnapshot: SessionShareReaderSnapshot = { status: 'loading', history: [] };
+
+export function SessionShareSurface(props: {
+  manifest: SharePackageManifest | null;
+  sessionId: string | null;
+  sideId?: string | null;
+  status: 'loading' | 'unavailable' | 'ready';
+  snapshot: SessionShareReaderSnapshot;
+  sideSnapshot?: SessionShareReaderSnapshot;
+  onSelect: (conversationId: string) => void;
+  attachmentAccess: ShareAttachmentAccess;
+}) {
+  const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [treeVisible, setTreeVisible] = useState(true);
+  const [sideVisible, setSideVisible] = useState(true);
+  const { manifest, sessionId, status } = props;
+  const tree = useMemo(() => {
+    if (!manifest) return [];
+    const byId = new Map(manifest.conversations.map((entry) => [entry.id, entry]));
+    return buildOpenedBySessionTree(
+      manifest.conversations.filter((entry) => !entry.parentConversationId),
+      {
+        getId: (entry) => entry.id,
+        getOpenedBySessionId: (entry) => {
+          const opener = entry.openedByConversationId
+            ? byId.get(entry.openedByConversationId)
+            : undefined;
+          return opener?.parentConversationId ?? opener?.id;
+        },
+        isCollapsed: (id) => collapsed.has(id),
+      }
+    );
+  }, [manifest, collapsed]);
   if (status === 'unavailable')
     return (
       <main className="flex min-h-dvh items-center justify-center p-8 text-center">
@@ -127,91 +237,129 @@ export function SessionShareSurface(props: {
         </div>
       </main>
     );
-  if (!manifest || sessionId === null || sessionId === '')
+  if (!manifest || !sessionId)
     return (
       <main
-        className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground"
         role="status"
+        className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground"
       >
-        {status === 'paused'
-          ? t('sharing.paused', 'Updates paused · Reconnecting…')
-          : t('sharing.loading', 'Loading shared conversation…')}
+        {t('sharing.loading', 'Loading shared conversation…')}
       </main>
     );
-  const storedTitle =
-    manifest.targets.find((target) => target.sessionId === sessionId)?.title ?? '';
-  const title =
-    storedTitle.length > 0 ? storedTitle : t('sharing.defaultTitle', 'Shared conversation');
+  const panes = resolveSharePanes(manifest, sessionId, props.sideId);
+  const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
+  const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
+  const tabStrip = (entries: typeof manifest.conversations, current: string) => (
+    <nav
+      className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-2 pt-2"
+      aria-label={t('sharing.conversations', 'Shared conversations')}
+    >
+      {entries.map((entry) => (
+        <button
+          type="button"
+          key={entry.id}
+          aria-current={entry.id === current ? 'page' : undefined}
+          onClick={() => props.onSelect(entry.id)}
+          className={`max-w-64 shrink-0 truncate rounded-t-lg px-3 py-2 text-sm ${entry.id === current ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}
+        >
+          {title(entry.title)}
+        </button>
+      ))}
+    </nav>
+  );
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
-      <header className="shrink-0 border-b border-border px-4 pb-2.5 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
-        <div className="mx-auto max-w-5xl">
-          {/* Visitor context sits on the workspace line so the conversation title
-              always owns a full-width line, including on a narrow phone. */}
-          <div className="flex items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {manifest.workspaceName}
-            </p>
-            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-              {t('sharing.anonymous', 'Anonymous visitor')}
-            </span>
-            <ShareThemeToggle />
-          </div>
-          <h1 className="truncate text-[0.9375rem] font-medium leading-6">{title}</h1>
-          {/* Only interruptions are announced. A steady live read-only view is the
-              page's normal state and says so through its own absence of controls. */}
-          <div
-            className="text-xs text-muted-foreground empty:hidden [&:not(:empty)]:mt-1.5"
-            role="status"
-          >
-            {status === 'paused' || snapshot.status === 'paused'
-              ? t('sharing.paused', 'Updates paused · Reconnecting…')
-              : snapshot.status === 'loading'
-                ? t('sharing.loading', 'Loading shared conversation…')
-                : ''}
-          </div>
-          {manifest.targets.length > 1 && (
-            <nav
-              // Negative inset lets the first target's label sit on the same
-              // optical line as the title above it.
-              className="-mx-2.5 -mb-0.5 mt-1.5 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              aria-label={t('sharing.conversations', 'Shared conversations')}
+      <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+        <div className="flex items-center gap-2">
+          {hasTree && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              aria-expanded={treeVisible}
+              aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+              onClick={() => setTreeVisible((value) => !value)}
             >
-              {manifest.targets.map((target) => (
-                <button
-                  type="button"
-                  key={target.sessionId}
-                  aria-current={target.sessionId === sessionId ? 'page' : undefined}
-                  onClick={() => props.onSelect(target.sessionId)}
-                  // Capped so a second target always peeks in: the row has to read
-                  // as navigation, not as a repeat of the heading above it.
-                  className={`max-w-[45%] shrink-0 truncate rounded-md px-2.5 py-1 text-[0.8125rem] sm:max-w-[16rem] ${target.sessionId === sessionId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}
-                >
-                  {target.title || t('sharing.defaultTitle', 'Shared conversation')}
-                </button>
-              ))}
-            </nav>
+              <PanelLeft className="h-4 w-4" />
+            </Button>
           )}
+          <span className="text-xs text-muted-foreground">
+            {t('sharing.anonymous', 'Anonymous visitor')}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {panes.sides.length > 0 && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              aria-expanded={sideVisible}
+              aria-label={t('sharing.toggleSide', 'Toggle side conversation')}
+              onClick={() => setSideVisible((value) => !value)}
+            >
+              <PanelRight className="h-4 w-4" />
+            </Button>
+          )}
+          <ShareThemeToggle />
         </div>
       </header>
-      <SessionReadonlyContext.Provider value={attachments}>
-        <SessionChatStreamView
-          key={sessionId}
-          sessionId={sessionId as SessionId}
-          items={stream.items}
-          className="min-h-0 flex-1"
-          renderMessageRow={renderRow}
-          lastAssistantMessageId={stream.lastAssistantMessageId}
-          lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
-          emptyState={
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              {snapshot.status === 'loading'
-                ? t('sharing.loading', 'Loading shared conversation…')
-                : t('sharing.empty', 'No messages yet')}
-            </p>
-          }
-        />
-      </SessionReadonlyContext.Provider>
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        {hasTree && treeVisible && (
+          <nav
+            aria-label={t('sharing.conversationTree', 'Conversation tree')}
+            className="max-h-40 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 sm:max-h-none sm:w-56 sm:border-b-0 sm:border-r"
+          >
+            {tree.map((node) => (
+              <div
+                key={node.id}
+                className={`flex items-center rounded-md ${node.id === panes.root.id ? 'bg-accent' : 'hover:bg-accent/50'}`}
+              >
+                <SessionRowLeadingSlot
+                  menuLabel=""
+                  openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
+                    setCollapsed((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(node.id)) next.delete(node.id);
+                      else next.add(node.id);
+                      return next;
+                    })
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={() => props.onSelect(node.id)}
+                  aria-current={node.id === panes.root.id ? 'page' : undefined}
+                  className="min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]"
+                >
+                  {title(node.item.title)}
+                </button>
+              </div>
+            ))}
+          </nav>
+        )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {panes.tabs.length > 1 && tabStrip(panes.tabs, panes.main.id)}
+          <ShareConversationPane
+            key={panes.main.id}
+            conversationId={panes.main.id}
+            title={title(panes.main.title)}
+            snapshot={props.snapshot}
+            attachmentAccess={props.attachmentAccess}
+          />
+        </div>
+        {panes.side && sideVisible && (
+          <aside className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border sm:max-w-[45%] sm:border-l sm:border-t-0">
+            {tabStrip(panes.sides, panes.side.id)}
+            <ShareConversationPane
+              key={panes.side.id}
+              conversationId={panes.side.id}
+              title={title(panes.side.title)}
+              snapshot={props.sideSnapshot ?? loadingSnapshot}
+              attachmentAccess={props.attachmentAccess}
+            />
+          </aside>
+        )}
+      </div>
     </main>
   );
 }
@@ -219,170 +367,94 @@ export function SessionShareSurface(props: {
 type SessionSharePageProps = { apiOrigin: string; shareId: string; secret: string | null };
 
 export function SessionSharePage(props: SessionSharePageProps) {
+  const [identity, setIdentity] = useState({ ...props, epoch: 0 });
+  if (
+    identity.apiOrigin !== props.apiOrigin ||
+    identity.shareId !== props.shareId ||
+    identity.secret !== props.secret
+  ) {
+    setIdentity({ ...props, epoch: identity.epoch + 1 });
+  }
+  // An identity/credential change immediately unmounts old transcripts and aborts reads.
   return (
-    <SessionShareErrorBoundary>
+    <SessionShareErrorBoundary key={identity.epoch}>
       <SessionShareReaderPage {...props} />
     </SessionShareErrorBoundary>
   );
 }
 
+function useShareConversation(share: StaticShare | null, conversationId: string | undefined) {
+  const [state, setState] = useState<{
+    share: StaticShare;
+    id: string;
+    snapshot: SessionShareReaderSnapshot;
+  } | null>(null);
+  useEffect(() => {
+    if (!share || !conversationId) return undefined;
+    const reader = createSessionShareReader({
+      share,
+      conversationId,
+      onChange: (snapshot) => setState({ share, id: conversationId, snapshot }),
+    });
+    void reader.start();
+    return () => reader.close();
+  }, [share, conversationId]);
+  return state?.share === share && state?.id === conversationId ? state.snapshot : loadingSnapshot;
+}
+
 function SessionShareReaderPage({ apiOrigin, shareId, secret }: SessionSharePageProps) {
-  const [manifest, setManifest] = useState<SessionShareManifest | null>(null);
+  const [share, setShare] = useState<StaticShare | null>(null);
+  const [failed, setFailed] = useState(!secret);
   const search = useSyncExternalStore(
     subscribeSessionShareNavigation,
     getSessionShareSearch,
     () => ''
   );
-  const sessionId = resolveSessionShareTab(manifest, search);
-  const rootSessionId = manifest?.rootSessionId ?? null;
-  const [status, setStatus] = useState<'loading' | 'unavailable' | 'paused' | 'ready'>(
-    secret !== null && secret.length > 0 ? 'loading' : 'unavailable'
-  );
-  const [readerState, setReaderState] = useState<{
-    sessionId: string;
-    snapshot: SessionShareReaderSnapshot;
-  } | null>(null);
-  // A tab switch is visible before passive effect cleanup. Never render the
-  // previous transcript or attachment references under the new target's title.
-  const snapshot: SessionShareReaderSnapshot =
-    readerState?.sessionId === sessionId
-      ? readerState.snapshot
-      : { status: 'loading', history: [] };
-  const [refreshKey, setRefreshKey] = useState(0);
-  const unavailable = status === 'unavailable';
-  const base = `${apiOrigin.replace(/\/$/, '')}/api/shares/${encodeURIComponent(shareId)}`;
   useEffect(() => {
-    if (secret === null || secret === '') return undefined;
-    const abort = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const refresh = async () => {
-      try {
-        const response = await fetchSessionShare(
-          base,
-          {
-            headers: { Authorization: `Bearer ${secret}` },
-            credentials: 'omit',
-            redirect: 'error',
-            cache: 'no-store',
-            signal: AbortSignal.timeout(15_000),
-          },
-          abort.signal
-        );
-        if (abort.signal.aborted) return;
-        if ([401, 403, 404].includes(response.status)) {
-          setStatus('unavailable');
-          setManifest(null);
-          setReaderState(null);
-          return;
-        }
-        if (!response.ok) throw new Error('Unavailable');
-        const value = SessionShareManifestSchema.parse(await response.json());
-        if (
-          value.shareId !== shareId ||
-          value.validUntil <= Date.now() ||
-          !value.targets.some((target) => target.sessionId === value.rootSessionId)
-        )
-          throw new Error('Invalid manifest');
-        if (abort.signal.aborted) return;
-        setManifest(value);
-        setStatus('ready');
-      } catch {
-        if (!abort.signal.aborted) setStatus('paused');
-      }
-      if (!abort.signal.aborted)
-        timer = setTimeout(() => {
-          void refresh();
-        }, 30_000);
-    };
-    void refresh();
-    return () => {
-      abort.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [base, secret, shareId, refreshKey]);
-  useEffect(() => {
-    if (sessionId === null || sessionId === '' || secret === null || secret === '' || unavailable)
-      return undefined;
-    let active = true;
-    setReaderState({ sessionId, snapshot: { status: 'loading', history: [] } });
-    const reader = createSessionShareReader({
-      streamUrl: `${base}/sessions/${encodeURIComponent(sessionId)}/stream`,
-      secret,
-      onChange(value) {
-        if (!active) return;
-        setReaderState({ sessionId, snapshot: value });
-        if (value.status === 'unavailable') {
-          setReaderState(null);
-          if (sessionId === rootSessionId) {
-            setStatus('unavailable');
-            setManifest(null);
-          } else if (rootSessionId !== null) {
-            // An individual child may have lost access while the root survives.
-            navigateSessionShareTab(rootSessionId, true);
-            setRefreshKey((key) => key + 1);
-          }
-        }
-      },
-    });
-    void reader.start().catch(() => {
-      if (active)
-        setReaderState((value) => ({
-          sessionId,
-          snapshot: {
-            history: value?.sessionId === sessionId ? value.snapshot.history : [],
-            status: 'paused',
-          },
-        }));
-    });
-    return () => {
-      active = false;
-      void reader.close();
-    };
-  }, [base, secret, sessionId, unavailable, rootSessionId]);
-  const targetAvailable =
-    status !== 'unavailable' &&
-    (manifest?.targets.some((target) => target.sessionId === sessionId) ?? false);
+    if (!secret) return undefined;
+    const lifetime = new AbortController();
+    void openStaticShare({ origin: apiOrigin, shareId, secret, signal: lifetime.signal })
+      .then((value) => {
+        if (!lifetime.signal.aborted) setShare(value);
+      })
+      .catch(() => {
+        if (!lifetime.signal.aborted) setFailed(true);
+      });
+    return () => lifetime.abort();
+  }, [apiOrigin, shareId, secret]);
+  const sessionId = resolveSessionShareTab(share?.manifest ?? null, search);
+  const sideId = new URLSearchParams(search).get('side');
+  const panes = share && sessionId ? resolveSharePanes(share.manifest, sessionId, sideId) : null;
+  const snapshot = useShareConversation(share, panes?.main.id);
+  const sideSnapshot = useShareConversation(share, panes?.side?.id);
   const access = useMemo<ShareAttachmentAccess>(
     () => ({
-      async read(resource, signal, range, storageSessionId) {
-        if (
-          secret === null ||
-          secret === '' ||
-          sessionId === null ||
-          sessionId === '' ||
-          !targetAvailable
-        )
-          throw new Error('Unavailable');
-        const url = new URL(`${base}/sessions/${encodeURIComponent(sessionId)}/${resource}`);
-        if (storageSessionId !== undefined && storageSessionId !== sessionId)
-          url.searchParams.set('storageSessionId', storageSessionId);
-        const response = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${secret}`,
-            ...(range !== undefined && range.length > 0 ? { Range: range } : {}),
-          },
-          signal,
-          credentials: 'omit',
-          cache: 'no-store',
-          redirect: 'error',
-        });
-        if (!response.ok) throw new Error('Attachment unavailable');
-        return response;
+      async read(id, signal) {
+        if (!share) throw new Error('Share unavailable');
+        const attachment = await share.readAttachment(id, signal);
+        return new Blob([attachment.bytes.slice().buffer], { type: attachment.mediaType });
       },
     }),
-    [base, secret, sessionId, targetAvailable]
+    [share]
   );
   return (
     <SessionShareSurface
-      manifest={manifest}
+      manifest={share?.manifest ?? null}
       sessionId={sessionId}
-      status={status}
+      sideId={sideId}
+      status={failed ? 'unavailable' : share ? 'ready' : 'loading'}
       snapshot={snapshot}
-      onSelect={(target) => {
-        if (manifest?.targets.some((entry) => entry.sessionId === target) === true)
-          navigateSessionShareTab(target);
-      }}
+      sideSnapshot={sideSnapshot}
       attachmentAccess={access}
+      onSelect={(id) => {
+        const target = share?.manifest.conversations.find((entry) => entry.id === id);
+        if (target)
+          navigateSessionShareTab(
+            id,
+            false,
+            target.childSessionPlacement === 'side-panel' ? 'side' : 'main'
+          );
+      }}
     />
   );
 }

@@ -13,6 +13,16 @@ import type {
   createLoroStreamsTokenProvider,
 } from '@lody/shared';
 import type { PlatformKind, WorkspaceSummary } from './provider';
+import type {
+  SessionShareRequestInput,
+  SessionShareRequestStatus,
+} from '@lody/shared/session-sharing';
+
+export interface CloudSessionSharingPort {
+  request(
+    input: SessionShareRequestInput
+  ): Promise<{ requestId: string; status: SessionShareRequestStatus }>;
+}
 
 /**
  * CloudPort is the CLI-side seam: every cloud service the daemon talks to is
@@ -41,6 +51,8 @@ export interface CloudPort {
   githubTokens: CloudGithubTokenPort | null;
   /** `null` ⇒ no in-app bug report upload. */
   bugReports: CloudBugReportPort | null;
+  /** Proposals only. Human approval and publication have no daemon port. */
+  sessionSharing: CloudSessionSharingPort | null;
   /** `null` ⇒ no PR association / status reconciliation. */
   prAssociation: CloudPrAssociationPort | null;
   /**

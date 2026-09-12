@@ -42,6 +42,8 @@ const KIND_ICON: Record<SessionFileKind, typeof FileIcon> = {
 
 export type SessionFileCardProps = {
   file: SessionFilePayload;
+  /** Static publications own their retention independently of the source upload. */
+  retention?: 'workspace' | 'publication';
   /** Resolved display name of the machine holding the bytes (transport='local'). */
   pendingMachineName?: string;
   /** Click opens the in-app preview (text-previewable, available files only). */
@@ -110,11 +112,12 @@ const buildActionIcon = ({
 
 /**
  * Pure file-attachment card. The action (preview vs download vs nothing) is
- * derived from the block's transport + retention state, never from props the
- * caller has to keep in sync — so a single card type renders every variant.
+ * derived from the block and its storage owner's retention policy. Publication
+ * copies never inherit the original workspace upload's expiration.
  */
 export function SessionFileCard({
   file,
+  retention = 'workspace',
   pendingMachineName,
   onPreview,
   onDownload,
@@ -122,7 +125,12 @@ export function SessionFileCard({
   className,
 }: SessionFileCardProps) {
   const { t } = useTranslation();
-  const state = getSessionFileDisplayState(file);
+  const state =
+    retention === 'publication'
+      ? file.textPreview
+        ? 'previewable'
+        : 'downloadable'
+      : getSessionFileDisplayState(file);
   const kind = getSessionFileKind(file.fileName, file.mimeType);
   const Icon = KIND_ICON[kind];
 

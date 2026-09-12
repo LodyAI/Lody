@@ -91,6 +91,7 @@ import {
   resolveWorkspaceOrThrow,
   syncWorkspaceMetaForRead,
   withWorkspaceManager,
+  getCommandSessionSharingPort,
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
@@ -1844,7 +1845,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
       execution: SessionExecutionSnapshot;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
-    for (let offset = 0; offset < candidates.length && matches.length <= limit; ) {
+    for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
       const chunk = candidates.slice(offset, offset + readChunkSize);
       offset += chunk.length;
       const liveStatuses = await readSessionLiveStatusesMany({
@@ -4102,6 +4103,45 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
             source: 'mcp',
             feedback: args.feedback,
             cliVersion,
+          })
+        );
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    'lody_session_share',
+    {
+      title: 'Request a conversation share',
+      description:
+        'Request a static share of this conversation only when the user asks to share. A confirmation card appears in the current Lody conversation. The user must review and confirm in the app before any content is uploaded or a link is created. Supply a stable requestId and reuse it after an ambiguous response. sessionIds may explicitly include related conversations; the current conversation is always included. This tool cannot approve, upload, update, reset or revoke a share and never returns a link credential.',
+      inputSchema: z
+        .object({
+          requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+          sessionIds: z
+            .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
+            .max(31)
+            .optional(),
+        })
+        .strict(),
+    },
+    async (args) => {
+      try {
+        const port = getCommandSessionSharingPort();
+        if (!port) throw new Error('Sharing is unavailable on this platform');
+        const ctx = getSessionContext();
+        const source = await resolveInvokingTurnSource();
+        const identity = buildInvocationIdentity(source);
+        return jsonTextResult(
+          await port.request({
+            workspaceId: getMcpWorkspaceId(ctx),
+            requestId: args.requestId,
+            sourceSessionId: ctx.sessionId,
+            sourceTurnId: identity.sourceTurnId,
+            requesterUserId: identity.userId,
+            sessionIds: [...new Set([ctx.sessionId, ...(args.sessionIds ?? [])])],
           })
         );
       } catch (error) {

@@ -1,4 +1,6 @@
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
+import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
 import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
@@ -86,7 +88,6 @@ import type {
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
-  ConversationMarkdownStats,
   GitHubCheckRun,
   GitHubMergeMethod,
   VisualAnnotationReferencePayload,
@@ -323,54 +324,6 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);
-}
-
-/**
- * Copy-as-Markdown never trims message text and never drops thinking, so it can
- * still trim tool output, cap thinking, or nothing at all — and it can land over
- * budget. Silent truncation reads as "I copied everything", so the toast always
- * names what happened.
- */
-function describeCopiedConversation(
-  stats: ConversationMarkdownStats,
-  t: (key: string, fallback: string, options?: Record<string, unknown>) => string
-): string {
-  if (stats.overBudget) {
-    return t(
-      'sessions.copyConversationHistoryCopiedOverBudget',
-      'Conversation copied as Markdown (~{{tokens}}k tokens — message text alone exceeds the target)',
-      { tokens: Math.round(stats.estimatedTokens / 1000) }
-    );
-  }
-
-  const trimmed: string[] = [];
-  if (stats.toolCallsCollapsed) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimToolCalls', 'tool call details'));
-  }
-  if (stats.thinkingTruncated) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimThinking', 'thinking'));
-  }
-  if (stats.terminalOutputOmitted || stats.terminalOutputTruncated) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimTerminal', 'terminal output'));
-  }
-  if (stats.toolResultsTruncated > 0) {
-    trimmed.push(
-      // `value`, not `count`: `count` would send i18next down its plural-key
-      // lookup (`..._one` / `..._other`), which these strings do not define.
-      t('sessions.copyConversationHistoryTrimToolResults', '{{value}} tool results', {
-        value: stats.toolResultsTruncated,
-      })
-    );
-  }
-
-  if (trimmed.length === 0) {
-    return t('sessions.copyConversationHistoryCopied', 'Conversation copied as Markdown');
-  }
-  return t(
-    'sessions.copyConversationHistoryCopiedTrimmed',
-    'Conversation copied as Markdown (trimmed: {{omitted}})',
-    { omitted: trimmed.join(', ') }
-  );
 }
 
 function mapGitHubCheckRunToInfoBar(run: GitHubCheckRun): PrCiRun {
@@ -4663,18 +4616,17 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      const openedBy =
-        openerSessionId
-          ? {
-              sessionId: openerSessionId,
-              title:
-                (openerSessionMeta?.title ?? '').trim() ||
-                (docMetaCacheReady
-                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
-                  : t('sessions.untitled', 'Untitled session')),
-              target: openerNavigationTarget,
-            }
-          : null;
+      const openedBy = openerSessionId
+        ? {
+            sessionId: openerSessionId,
+            title:
+              (openerSessionMeta?.title ?? '').trim() ||
+              (docMetaCacheReady
+                ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                : t('sessions.untitled', 'Untitled session')),
+            target: openerNavigationTarget,
+          }
+        : null;
       if (!openedBy && opened.length === 0) return undefined;
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
@@ -6026,7 +5978,18 @@ export const SessionChatInterface = memo(
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}
                             className="h-full"
-                            leadingContent={openedByConversationStart}
+                            leadingContent={
+                              <>
+                                {openedByConversationStart}
+                                {workspaceId && (
+                                  <SessionShareRequestCards
+                                    workspaceId={workspaceId}
+                                    session={session}
+                                    isVisible={isVisible}
+                                  />
+                                )}
+                              </>
+                            }
                             emptyState={chatStreamEmptyState}
                             agentActivityLabel={agentActivityLabel}
                             agentActivityTone={agentActivityTone}

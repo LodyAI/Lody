@@ -1,31 +1,61 @@
-import type { SessionShareVersions } from '@lody/shared/session-sharing';
+import type { SharePackageManifest } from '@lody/shared/session-sharing';
 
-/** Authenticated management DTOs. Credentials and their hashes are never returned. */
-export type SessionShareView = SessionShareVersions & {
-  shareId: string;
-  rootSessionId: string;
-  authorUserId: string;
-  status: 'active' | 'revoked';
+import type { SessionShareRequestStatus } from '@lody/shared/session-sharing';
+export type {
+  SessionShareRequestInput,
+  SessionShareRequestStatus,
+} from '@lody/shared/session-sharing';
+export type SessionShareRequest = {
+  requestId: string;
+  sourceSessionId: string;
+  sessionIds: string[];
+  createdAt: number;
+  expiresAt: number;
+  status: SessionShareRequestStatus | 'published';
+  shareId?: string;
 };
 
+/** Authenticated control-plane DTOs never return a credential or its hash. */
+export type SessionShareView = {
+  shareId: string;
+  rootSessionId: string;
+  publisherUserId: string;
+  status: 'draft' | 'active' | 'revoked';
+  revision: number;
+  credentialVersion: number;
+  currentDeploymentId?: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+};
 export type SessionShareManagementEntry = SessionShareView & {
-  title: string | null;
-  sessionIds: string[];
-  readableSessionIds: string[];
-  validUntil: number | null;
+  sourceIds: { sourceId: string; conversationId: string }[];
+  selectedSourceIds: string[];
   canManage: boolean;
   canRevoke: boolean;
 };
-
-export type SessionShareManagement = {
-  root: SessionShareManagementEntry | null;
-  /** All independent grants containing this session, including its own entry. */
-  sources: SessionShareManagementEntry[];
-  candidates: {
-    sessionId: string;
-    /** Only verified source metadata is returned. Local labels are display hints. */
-    title: string | null;
-    available: boolean;
-    validUntil: number | null;
-  }[];
+export type SessionShareManagement = SessionShareManagementEntry | null;
+export type PublishedSessionShare = Omit<SessionShareView, 'status'> & {
+  status: 'active' | 'revoked';
+  totalBytes: number;
+  conversationCount: number;
+  canManage: boolean;
+  canRevoke: boolean;
+};
+export type PublishedSessionSharePage = {
+  page: PublishedSessionShare[];
+  isDone: boolean;
+  continueCursor: string;
+};
+export type BeginShareDeployment = {
+  workspaceId: string;
+  rootSessionId: string;
+  shareId?: string;
+  expectedRevision?: number;
+  credentialHash?: string;
+  uploadCredentialHash: string;
+  requestId: string;
+  manifest: SharePackageManifest;
+  sourceIds: { sourceId: string; conversationId: string }[];
+  confirmationRequestId?: string;
 };

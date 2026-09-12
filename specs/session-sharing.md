@@ -1,82 +1,119 @@
-# Read-only live session sharing
+# Static conversation sharing
 
 Status: draft
 Translation: pending
 
-A conversation owner can explicitly publish a link that lets its holders read
-the selected conversations and their future updates without joining a workspace.
-The disclosure must explain that the complete original document and history are
-readable, including fields the current view does not display. This is bearer
-access, not end-to-end encryption; a recipient can forward the complete link.
+A workspace writer publishes a selected conversation and related conversations
+as an independent readable copy. Later source edits do not change that copy.
+"Update deployment" captures a new copy and atomically replaces the current
+deployment without changing the complete share link. A failed or competing
+deployment must leave the current copy intact.
 
-## Responsibilities and access
+## Publication boundary
 
-The shared client supplies management UI and a separate read-only reader. An
-optional cloud service authorizes sharing; the standalone local composition
-does not expose management or start authenticated cloud requests. Deployment
-origins are supplied by the host, with no hosted default in public packages.
+The readable client hydrates all selected conversations, then synchronously
+detaches their stored history before attachment I/O. It preserves the existing
+history JSON, including thinking, tool inputs/outputs, system entries and unknown
+fields. It does not export Loro operation history or the surrounding document's
+runtime configuration, queued messages, agent sessions or workspace credentials.
+History itself can contain sensitive text: publication is disclosure, not
+automatic sanitization.
 
-Each root has one active link, with reset and revocation controls. The owner
-selects the root and each eligible related conversation explicitly, up to 32
-targets. New child conversations are never added automatically. A selected
-child may also have its own independent link; revoking either link does not
-revoke the other. Administrative access permits revocation, not taking over an
-owner's credential or changing their selection.
+A versioned manifest describes conversations, their relationships, immutable
+history objects and copied attachments. Every object has an exact ID, byte length
+and SHA-256 checksum. Sharing never authorizes access to a source workspace,
+inherited attachment namespace, original Stream or agent runtime. Unavailable
+attachments must block capture or be explicitly disclosed as unavailable; they
+must never silently fall back to source access.
 
-The link uses `/s/<shareId>#access=v1.<secret>`, with a random 32-byte secret
-encoded as lowercase hexadecimal. The fragment is read by the client and sent
-to the sharing API in an Authorization header. It is not an encryption key and
-does reach that API. Neither workspace credentials nor upstream stream tokens
-belong in the recipient's protocol. Credentials stay out of request URLs,
-telemetry, and error payloads.
+Workspace Stream encryption is a separate future feature. The publishing client
+will decrypt before preparing the same plaintext sharing package. The share
+bearer is an access credential, not a decryption key. No sharing E2EE format,
+encryption envelope, or key escrow is part of this version.
 
-Only synchronized, unencrypted source conversations are eligible. Sharing must
-not silently convert a local-only or encrypted conversation into a public one.
+## Permissions and management
 
-Management updates carry separate expected scope and credential versions.
-Conflicting edits require a reload. Successful creation or reset saves the
-secret on the current device, scoped to user, workspace, link, and credential
-version. A device without that secret must reset before copying the link;
-ordinary cache clearing preserves it, while a full local reset removes it.
+A workspace writer may publish content they can read, under their authenticated
+publisher identity. A publisher can update, reset or revoke their own share.
+Administrators and owners can inspect the workspace's share inventory and revoke
+others' shares, but cannot obtain others' link secrets or take over publication.
+Source metadata is not an author-identity certificate.
 
-## Reader behavior
+Settings → Share management lists successfully published shares, not unfinished
+uploads. Ordinary members see their own shares; administrators see the workspace
+inventory. The list is paginated and shows title, status, conversation count and
+last update. Source removal does not remove the published copy or its management
+entry. Updating requires the sources to remain readable; reset and revoke do not.
 
-Link previews publicly display the main shared conversation title by default.
-The management dialog states this next to the link disclosure without another
-confirmation. The host may serve that title, the Lody mark and fixed explanatory
-copy without the access fragment; no body, summary, workspace name or attachment
-content belongs in the preview. Title updates are eventually consistent.
-Preview HTML and image routes must enforce the active grant lifecycle. Reset
-invalidates old image versions; because the persistent share ID stays the same,
-the fragment-free page can show the current preview after reset even to a holder
-of an old link. The old fragment still cannot read content. Revocation stops new
-preview delivery; copies already cached by external services cannot be recalled.
+Shares remain readable after source deletion. Removing the publisher's membership
+or deleting their account or workspace disables access. A replacement membership
+does not revive an old share. Reset does not rebind ownership or membership.
 
-The authorized manifest supplies titles and the only navigable target set.
-Selecting a target opens its original Loro stream in memory, including existing
-history and live updates. Transient connection failures pause updates and allow
-recovery; access denial or target removal clears the affected view and stops
-its reads. Navigating to an unselected target cannot expand authorization.
-The reader has no workspace runtime, durable document cache, composer, editing,
-comment, fork, or agent-control action.
+The link is `/s/<shareId>#access=v1.<secret>`, using a random 32-byte bearer.
+Only its hash belongs in the control plane; the raw secret stays device-local and
+travels to the share API only in an Authorization header. An update preserves it.
+Reset rotates it; revoke disables every deployment. Neither operation can recall
+bytes already downloaded.
 
-Eligible remote images and files are readable through the sharing API, including
-references inherited from another storage session when authorized by the
-service. Storage references never authorize navigation to that other session.
-Local-only and expired attachments remain unavailable. Sharing neither uploads
-local attachments nor extends their retention.
+## Deployment consistency
 
-Reset and revocation stop subsequent authorized reads. Responses already in
-flight have a bounded lifetime, currently at most 120 seconds; previously
-delivered content cannot be recalled. End-to-end encryption, writable sharing,
-comments, fork, and configurable link expiry are outside this phase.
+A client confirms the frozen package before upload. Upload authority is limited
+to one immutable inventory and cannot publish. Only the authenticated app commits
+a sealed deployment. Publication uses the expected share revision; begin retries
+bind the complete request identity, including credentials and confirmation
+request, rather than silently accepting changed parameters.
 
-## Evidence and limits
+Readers resolve the current deployment once, then pin all history and attachments
+to that deployment. A retired deployment has a bounded grace interval; no read
+mixes object versions. Reset and revoke override that grace interval.
+Conversation identity assignments survive removal and old-object collection:
+an old child link must never open a different conversation.
 
-[Sharing invariants](../packages/components/src/components/sharing/AGENTS.md),
-[public protocol](../packages/shared/src/session-sharing.ts),
-[management DTOs](../packages/cloud-api/src/session-sharing.ts), and
-[reader tests](../packages/components/tests/session-share-reader.test.ts)
-describe the implemented client. Service authorization and deployment acceptance
-cannot be established by this public repository alone. This draft has not
-received linked human approval of this revision.
+Private object storage has no public bucket URLs. Every object read is authorized.
+HTTP responses are no-store and have a bounded lifetime. Old deployments and
+abandoned uploads require quota-accounted, fenced garbage collection.
+
+## Reader and agent interactions
+
+The share page preserves the application's layout: independent child conversations
+appear in the left conversation tree, child Tabs in the main tab bar, and
+side-panel children in the right pane. Relationships come from the manifest,
+not hidden references in history. Navigation never expands the manifest.
+
+Markdown is generated only when requested, using the existing conversation-copy
+builder, range selection, budget rules and result notices. It is a readable
+export, not a lossless serialization of every stored tool field. It does not
+include original workspace or agent identities in added export metadata.
+
+MCP may request publication but may not approve it. A pending card in the
+authenticated app requires human confirmation before the client prepares and
+publishes the copy. A tool-return flag or history text is not approval.
+
+Fork is out of scope for version one. A future fork may import displayable history
+and attachments into the visitor's workspace; a new agent receives Markdown in a
+new context, never a restored source agent thread or runtime session.
+
+## Implementation status and evidence
+
+This is an in-progress breaking cutover, not a released or fully verified feature.
+The portable package/export/client and management surfaces are implemented locally.
+The anonymous reader now pins a deployment, reads JSON without a Loro subscription,
+and presents the opened-by tree, child Tabs and side conversations. Markdown uses
+the existing copy builder on demand; the app and reader share omission notices.
+Raw remote images do not load in the reader. Typed attachments use the manifest;
+unmapped resource references are inert rather than source download authority.
+MCP confirmation is wired through a nullable cloud port: the CLI submits intent,
+the app displays canonical requests, and final confirmation locks the selected
+set. Confirmed unfinished deployments remain visible and can be abandoned.
+Typed resources are copied; arbitrary Markdown/ACP resource URIs remain text and
+are disclosed before confirmation, never fetched with workspace authority.
+Reader production-build browser checks cover layout, pinned deployments,
+credential changes, revocation and inert media. Service integration is validated
+separately; no hosted deployment or native-device acceptance is asserted here.
+
+[Package](../packages/shared/src/session-share-package.ts),
+[exporter](../packages/shared/src/session-share-export.ts),
+[management DTOs](../packages/cloud-api/src/session-sharing.ts),
+[Settings surface](../packages/components/src/components/settings/share-management-setting.tsx).
+Service authorization and deployment acceptance cannot be established by this
+public repository alone. This revision has no linked human spec approval.

@@ -116,6 +116,7 @@ export function createLocalCloudPort(options: LocalCloudPortOptions): CloudPort 
     billing: null,
     githubTokens: null,
     bugReports: null,
+    sessionSharing: null,
     prAssociation: null,
     attachmentUpload: null,
     remotePreview: null,

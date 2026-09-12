@@ -1,10 +1,22 @@
 import { anyApi, type FunctionReference } from 'convex/server';
-import type { SessionShareVersions } from '@lody/shared/session-sharing';
-import type { SessionShareManagement, SessionShareView } from './session-sharing';
+import type {
+  BeginShareDeployment,
+  SessionShareManagement,
+  SessionShareView,
+  PublishedSessionSharePage,
+  SessionShareRequestInput,
+  SessionShareRequestStatus,
+  SessionShareRequest,
+} from './session-sharing';
 export type {
+  PublishedSessionShare,
+  PublishedSessionSharePage,
   SessionShareView,
   SessionShareManagementEntry,
   SessionShareManagement,
+  SessionShareRequestInput,
+  SessionShareRequestStatus,
+  SessionShareRequest,
 } from './session-sharing';
 import type { ModelUsage } from 'acp-extension-core';
 import type {
@@ -345,32 +357,27 @@ export type CloudApi = {
     >;
   };
   sessionSharing: {
-    requestVerification: Mutation<
-      { workspaceId: string; sessionIds: string[] },
-      { retryAt: number }
+    requestFromCli: Mutation<
+      SessionShareRequestInput & { cliToken: string },
+      { requestId: string; status: SessionShareRequestStatus }
+    >;
+    listRequests: Query<{ workspaceId: string; sourceSessionId: string }, SessionShareRequest[]>;
+    cancelRequest: Mutation<{ requestId: string }, void>;
+    list: Query<
+      { workspaceId: string; paginationOpts: { numItems: number; cursor: string | null } },
+      PublishedSessionSharePage
     >;
     getManagement: Query<
-      { workspaceId: string; sessionId: string; candidateSessionIds: string[] },
+      { workspaceId: string; rootSessionId: string; shareId?: string },
       SessionShareManagement
     >;
-    create: Mutation<
-      { workspaceId: string; rootSessionId: string; sessionIds: string[]; credentialHash: string },
+    beginDeployment: Mutation<BeginShareDeployment, SessionShareView & { deploymentId: string }>;
+    publishDeployment: Mutation<{ deploymentId: string }, SessionShareView>;
+    resetCredential: Mutation<
+      { shareId: string; expectedRevision: number; credentialHash: string },
       SessionShareView
     >;
-    updateTargets: Mutation<
-      { shareId: string; expected: SessionShareVersions; sessionIds: string[] },
-      SessionShareView
-    >;
-    reset: Mutation<
-      {
-        shareId: string;
-        expected: SessionShareVersions;
-        sessionIds: string[];
-        credentialHash: string;
-      },
-      SessionShareView
-    >;
-    revoke: Mutation<{ shareId: string; expected: SessionShareVersions }, SessionShareView>;
+    revoke: Mutation<{ shareId: string; expectedRevision: number }, SessionShareView>;
   };
   activity: {
     recordMyWorkspaceDailyActiveUser: Mutation<
