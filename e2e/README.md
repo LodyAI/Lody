@@ -26,6 +26,14 @@ its bundled CLI cannot attach to the normal local daemon. Teardown first asks
 Electron to quit through its production shutdown barrier, then verifies the
 port can be rebound before deleting temporary state.
 
+The harness keeps E2E windows hidden and disables Chromium background throttling,
+so regression and CI runs do not activate or focus Lody while preserving renderer
+timers and performance instrumentation. Use headed mode only for visual debugging:
+
+```bash
+LODY_E2E_SHOW_WINDOW=1 pnpm e2e:full
+```
+
 ## Commands
 
 ```bash
