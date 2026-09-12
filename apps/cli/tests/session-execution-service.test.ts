@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { RequestError, type ContentBlock } from '@agentclientprotocol/sdk';
+import { Effect, Fiber } from 'effect';
+import {
+  RequestError,
+  type ContentBlock,
+  type PromptRequest,
+  type PromptResponse,
+} from '@agentclientprotocol/sdk';
 import type { Logger } from '../src/utils/logger';
 import {
   SessionExecutionService,
@@ -30,6 +36,7 @@ import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   AcpAuthenticationRequiredError,
+  AgentClient,
   AgentSteerNotDeliveredError,
 } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
@@ -810,98 +817,106 @@ describe('SessionExecutionService', () => {
     ).toEqual(['user-2', 'user-3']);
   });
 
-  it('queues a steer the agent refused as the next ordinary turn', async () => {
-    let history: SessionHistoryInput[] = [
-      { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
-      {
-        id: 'user-2',
-        role: 'user',
-        status: 'pending_apply',
-        read: false,
-        inputConfig: { prompt: 'do it differently' },
-      } as SessionHistoryInput,
-    ];
-    const sessionDoc = {
-      updateHistory: vi.fn(
-        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-          history = update(history);
-        }
-      ),
-    };
-    const upsertDocMeta = vi.fn(async () => {});
-    const deps = createBaseDeps({
-      workspaceDocument: {
-        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-      } as unknown as LoroDocumentManager,
-    });
-    const service = new SessionExecutionService(deps);
-    const sessionId = 'session-steer-refused' as SessionId;
-    // The agent answered the acknowledged steer request with a refusal, which
-    // is proof the prompt never joined the live turn.
-    const steerPrompt = vi.fn(() => ({
-      completion: new Promise(() => {}),
-      applied: Promise.reject(
-        new AgentSteerNotDeliveredError(
-          'Agent refused the acknowledged steer request _session/steering: No active Codex turn to steer'
-        )
-      ),
-    }));
-    const runtime = {
-      sessionId,
-      turnId: 'assistant:user-1',
-      userTurnId: 'user-1',
-      session: {
-        agentClient: {
-          getAcknowledgedSteerCapability: vi.fn(() => ({
-            provider: 'codex',
-            appliedNotificationMethod: 'codex/steerApplied',
-            upstreamTurn: 'same',
-            configPolicy: 'active',
-          })),
-          findSteerConfigMismatch: vi.fn(() => null),
-          steerPrompt,
-        },
-        acpSessionId: 'acp-steer-refused' as ACPSessionId,
-      },
-      promptInFlight: true,
-      activePromptRun: { turnId: 'assistant:user-1' },
-    };
-    (
-      service as unknown as {
-        turnRuntimeBySession: Map<SessionId, typeof runtime>;
-      }
-    ).turnRuntimeBySession.set(sessionId, runtime);
-
-    await expect(
-      service.steerSession({
+  it.each(['none', 'before', 'during-build'] as const)(
+    'queues an undelivered steer as the next ordinary turn (Stop: %s)',
+    async (cancelStage) => {
+      let history: SessionHistoryInput[] = [
+        { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
+        {
+          id: 'user-2',
+          role: 'user',
+          status: 'pending_apply',
+          read: false,
+          inputConfig: { prompt: 'do it differently' },
+        } as SessionHistoryInput,
+      ];
+      const sessionDoc = {
+        updateHistory: vi.fn(
+          async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+            history = update(history);
+          }
+        ),
+      };
+      const upsertDocMeta = vi.fn(async () => {});
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      });
+      const service = new SessionExecutionService(deps);
+      const sessionId = 'session-steer-refused' as SessionId;
+      // The agent answered the acknowledged steer request with a refusal, which
+      // is proof the prompt never joined the live turn.
+      const steerPrompt = vi.fn(() => ({
+        completion: new Promise(() => {}),
+        applied: Promise.reject(
+          new AgentSteerNotDeliveredError(
+            'Agent refused the acknowledged steer request _session/steering: No active Codex turn to steer'
+          )
+        ),
+      }));
+      const runtime = {
         sessionId,
-        expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-2',
-        userId: 'user-1',
-        timestamp: '2026-07-19T00:00:00.000Z',
-        inputConfig: { prompt: 'do it differently' },
-      })
-    ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+        turnId: 'assistant:user-1',
+        userTurnId: 'user-1',
+        session: {
+          agentClient: {
+            getAcknowledgedSteerCapability: vi.fn(() => ({
+              provider: 'codex',
+              appliedNotificationMethod: 'codex/steerApplied',
+              upstreamTurn: 'same',
+              configPolicy: 'active',
+            })),
+            findSteerConfigMismatch: vi.fn(() => null),
+            steerPrompt,
+          },
+          acpSessionId: 'acp-steer-refused' as ACPSessionId,
+        },
+        promptInFlight: true,
+        activePromptRun: { turnId: 'assistant:user-1' },
+        cancelRequested: cancelStage === 'before',
+      };
+      vi.mocked(deps.buildAcpPromptBlocks).mockImplementation(async () => {
+        if (cancelStage === 'during-build') runtime.cancelRequested = true;
+        return [{ type: 'text', text: 'do it differently' }];
+      });
+      (
+        service as unknown as {
+          turnRuntimeBySession: Map<SessionId, typeof runtime>;
+        }
+      ).turnRuntimeBySession.set(sessionId, runtime);
 
-    expect(steerPrompt).toHaveBeenCalledOnce();
-    // Durable source: the entry becomes dispatchable, so the watcher runs it
-    // once the active turn ends (and again after a daemon restart).
-    expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
-      status: 'pending',
-      read: false,
-    });
-    expect(history.find((entry) => entry.id === 'user-1')).toMatchObject({ status: 'handled' });
-    // The load-bearing half: `sessionNeedsActiveWatch` reads meta only, so a
-    // history-only entry would be dropped the moment the session goes idle.
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ latestUserMsgId: 'user-2' })
-    );
-    // Ownership never moved: the refused steer must not seal the running turn.
-    expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
-    expect(deps.beginConversationTurn).not.toHaveBeenCalled();
-  });
+      await expect(
+        service.steerSession({
+          sessionId,
+          expectedTurnId: 'assistant:user-1',
+          userTurnId: 'user-2',
+          userId: 'user-1',
+          timestamp: '2026-07-19T00:00:00.000Z',
+          inputConfig: { prompt: 'do it differently' },
+        })
+      ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+
+      expect(steerPrompt).toHaveBeenCalledTimes(cancelStage === 'none' ? 1 : 0);
+      // Durable source: the entry becomes dispatchable, so the watcher runs it
+      // once the active turn ends (and again after a daemon restart).
+      expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+        status: 'pending',
+        read: false,
+      });
+      expect(history.find((entry) => entry.id === 'user-1')).toMatchObject({ status: 'handled' });
+      // The load-bearing half: `sessionNeedsActiveWatch` reads meta only, so a
+      // history-only entry would be dropped the moment the session goes idle.
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ latestUserMsgId: 'user-2' })
+      );
+      // Ownership never moved: the refused steer must not seal the running turn.
+      expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
+      expect(deps.beginConversationTurn).not.toHaveBeenCalled();
+    }
+  );
 
   it('does not requeue an undelivered steer whose turn already left the pending state', async () => {
     let history: SessionHistoryInput[] = [
@@ -5272,13 +5287,13 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
   });
 
-  it('routes prompt-in-flight cancellation through the turn owner finalizer', async () => {
+  it('retains the compact owner after cancel ACK until ACP terminal before admitting another prompt', async () => {
     let meta: Record<string, unknown> = {};
     let history: Array<Record<string, unknown>> = [
       {
         id: 'turn-prompt-cancel',
         role: 'user',
-        items: [{ type: 'text', text: 'hello' }],
+        items: [{ type: 'text', text: '/compact' }],
         status: 'pending',
         read: false,
       },
@@ -5311,23 +5326,46 @@ describe('SessionExecutionService', () => {
       }),
     };
     let activeTurnId: string | undefined;
-    let service: SessionExecutionService;
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => {
-        const result = await service.cancelSession({
-          type: 'session/cancel',
-          sessionId: 'session-prompt-cancel' as SessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          turnId: 'assistant-prompt-cancel',
-        });
-        expect(result).toEqual({ success: true });
-        throw new Error('agent cancelled prompt');
-      }),
-      currentModel: undefined,
+    const promptStarted = createDeferred();
+    const cancelSubmitted = createDeferred();
+    const cancelAck = createDeferred();
+    const nativeTerminal = createDeferred<PromptResponse>();
+    let nativePending = false;
+    let promptSignal: AbortSignal | undefined;
+    const delivered: ContentBlock[][] = [];
+    const agentClient = new AgentClient({
+      sessionId: 'session-prompt-cancel' as SessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'codex' },
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    // Keep the real AgentClient's local abort and raw ACP tracking behavior.
+    // @ts-expect-error - inject an already-created ACP session at the transport boundary
+    agentClient.acpSessionId = 'acp-prompt-cancel' as ACPSessionId;
+    // @ts-expect-error - only prompt and cancel transport methods are needed here
+    agentClient.connection = {
+      cancel: async () => {
+        cancelSubmitted.resolve();
+        await cancelAck.promise;
+      },
+      prompt: async ({ prompt }: PromptRequest): Promise<PromptResponse> => {
+        if (nativePending) throw new RequestError(-32600, 'A Codex prompt is already active');
+        delivered.push(prompt);
+        if (delivered.length > 1) return { stopReason: 'end_turn' };
+        nativePending = true;
+        promptStarted.resolve();
+        const terminal = await nativeTerminal.promise;
+        nativePending = false;
+        return terminal;
+      },
     };
+    const sendPrompt = agentClient.prompt.bind(agentClient);
+    vi.spyOn(agentClient, 'prompt').mockImplementation((id, blocks, options) => {
+      promptSignal = options?.signal;
+      return sendPrompt(id, blocks, options);
+    });
     const session = {
       sessionId: 'session-prompt-cancel' as SessionId,
       acpSessionId: 'acp-prompt-cancel' as ACPSessionId,
@@ -5352,8 +5390,11 @@ describe('SessionExecutionService', () => {
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
-      beginConversationTurn: vi.fn(() => {
-        activeTurnId = 'assistant-prompt-cancel';
+      beginConversationTurn: vi.fn((_id, userTurnId) => {
+        activeTurnId =
+          userTurnId === 'turn-prompt-cancel'
+            ? 'assistant-prompt-cancel'
+            : `assistant:${userTurnId}`;
         return activeTurnId;
       }),
       getActiveTurnId: vi.fn(() => activeTurnId),
@@ -5372,7 +5413,7 @@ describe('SessionExecutionService', () => {
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
         updateAcpCapabilities: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
+      buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
       processMessageQueue: vi.fn(async () => {}),
     });
     vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
@@ -5387,25 +5428,70 @@ describe('SessionExecutionService', () => {
     );
 
     const onTurnSettled = vi.fn(async () => {});
-    service = new SessionExecutionService(deps);
-    await service.continueSession(
-      {
-        type: 'session/chat',
-        sessionId: 'session-prompt-cancel' as SessionId,
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-        userTurnId: 'turn-prompt-cancel',
-        userId: 'user-1',
-        userName: 'User',
-        userEmail: 'user@example.com',
-      },
-      { onTurnSettled }
-    );
+    const service = new SessionExecutionService(deps);
+    const message: Parameters<SessionExecutionService['continueSession']>[0] = {
+      type: 'session/chat',
+      sessionId: 'session-prompt-cancel' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: { prompt: '/compact', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-prompt-cancel',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    };
+    const nextMessage = {
+      ...message,
+      userTurnId: 'next-user-turn',
+      acpSessionConfig: { ...message.acpSessionConfig, prompt: 'continue' },
+    };
+    const running = service.continueSession(message, { onTurnSettled });
+    try {
+      await promptStarted.promise;
+      await expect(
+        service.cancelSession({
+          type: 'session/cancel',
+          sessionId: message.sessionId,
+          machineId: message.machineId,
+          workspaceId: message.workspaceId,
+          turnId: 'assistant-prompt-cancel',
+        })
+      ).resolves.toEqual({ success: true });
+      await cancelSubmitted.promise;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      cancelAck.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(agentClient.pendingPromptCompletion).not.toBeNull();
+      expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
+        hasActiveTurn: true,
+        activeTurnId: 'assistant-prompt-cancel',
+      });
+      expect(promptSignal?.aborted).toBe(false);
+      expect(history[0]).toMatchObject({ status: 'processing' });
+      expect(history[1]).not.toHaveProperty('finished', true);
+      history.push({
+        id: nextMessage.userTurnId,
+        role: 'user',
+        status: 'pending',
+        items: [{ type: 'text', text: 'continue' }],
+      });
+      meta.latestUserMsgId = nextMessage.userTurnId;
+      await service.continueSession(nextMessage);
+      expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
+      expect(history[2]).toMatchObject({ status: 'pending' });
+      expect(deps.recordChatFailure).not.toHaveBeenCalled();
+      nativeTerminal.resolve({ stopReason: 'cancelled' });
+      await running;
+    } finally {
+      cancelAck.resolve();
+      nativeTerminal.resolve({ stopReason: 'cancelled' });
+      await running;
+      vi.useRealTimers();
+    }
 
-    expect(agentClient.cancel).toHaveBeenCalledWith('acp-prompt-cancel');
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
+    expect(agentClient.pendingPromptCompletion).toBeNull();
+    expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({ hasActiveTurn: false });
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
@@ -5424,10 +5510,22 @@ describe('SessionExecutionService', () => {
       processingUserMsgId: undefined,
     });
     expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
+    await service.continueSession(nextMessage);
+    expect(delivered).toEqual([
+      [{ type: 'text', text: '/compact' }],
+      [{ type: 'text', text: 'continue' }],
+    ]);
+    expect(history[2]).toMatchObject({ id: nextMessage.userTurnId, status: 'handled' });
+    expect(meta).toMatchObject({
+      latestUserMsgId: nextMessage.userTurnId,
+      lastHandledUserMsgId: nextMessage.userTurnId,
+    });
+    expect(deps.recordChatFailure).not.toHaveBeenCalled();
+    expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({ hasActiveTurn: false });
   });
 
   it.each(['resolved', 'rejected', 'timeout', 'termination-failed'] as const)(
-    'keeps cancelled prompt ownership until raw ACP completion or termination (%s)',
+    'keeps ownership through raw ACP drain after external owner interruption (%s)',
     async (completion) => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const rawPrompt = createDeferred();
@@ -5606,6 +5704,14 @@ describe('SessionExecutionService', () => {
             turnId: `assistant:${userTurnId}`,
           })
         ).resolves.toEqual({ success: true });
+        const owner = (
+          service as unknown as {
+            turnRuntimeBySession: Map<SessionId, { fiber?: Fiber.RuntimeFiber<unknown, unknown> }>;
+          }
+        ).turnRuntimeBySession.get(sessionId);
+        if (!owner?.fiber) throw new Error('Expected the running turn owner');
+        // External teardown can still interrupt the owner; normal Stop no longer does.
+        void Effect.runPromise(Fiber.interrupt(owner.fiber));
         await Promise.race([drainStarted.promise, running]);
         expect(promptSignal?.aborted).toBe(true);
         expect(status).toEqual(SessionStatusFactory.idle());

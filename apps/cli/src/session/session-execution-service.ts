@@ -1463,7 +1463,7 @@ export class SessionExecutionService {
     if (runtime.turnId !== options.expectedTurnId) {
       return await rejectUndelivered('stale-turn');
     }
-    if (!runtime.promptInFlight) {
+    if (!runtime.promptInFlight || runtime.cancelRequested) {
       return await rejectUndelivered('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
@@ -1498,7 +1498,7 @@ export class SessionExecutionService {
       }
       // No provider request has been submitted yet, so this guide is still
       // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight) {
+      if (!runtime.promptInFlight || runtime.cancelRequested) {
         return await rejectUndelivered('no-active-turn');
       }
       return null;
@@ -1535,10 +1535,10 @@ export class SessionExecutionService {
         return preSubmitRejection;
       }
       const ownedPromptRun = runtime.activePromptRun;
-      if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
+      if (runtime.cancelRequested || !ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
         return await rejectUndelivered(
           'busy',
-          'Prompt owner was transitioning between logical turns'
+          'Prompt owner is cancelling or transitioning between logical turns'
         );
       }
 
@@ -5402,7 +5402,7 @@ export class SessionExecutionService {
           this.requestTurnInterrupt(runtime);
           return { success: true };
         }
-        this.requestTurnInterrupt(runtime);
+        // Keep the owner alive until ACP returns; cancel acknowledgement is not prompt completion.
         this.requestAgentCancelInBackground(runtime, 'active');
         return { success: true };
       }

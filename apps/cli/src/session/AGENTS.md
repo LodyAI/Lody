@@ -47,15 +47,15 @@ Contract: specs/session-orchestration.md.
 - Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
   never gate status or meta writes.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
-  second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
-  owns source Turn, requester and config; steer replaces it before tools.
+- In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
+  completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
+  `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- INVARIANT: a steer the agent never accepted must not stay parked in `pending_apply`. Requeue it
+- Never steer a cancelling turn or strand unaccepted steer in `pending_apply`. Requeue it
   through the pointer, not the entry status, only for pre-submission rejections or
   `AgentSteerNotDeliveredError`; skip active or already-handled entries.
 - Resume must REOPEN the in-progress assistant entry, clearing

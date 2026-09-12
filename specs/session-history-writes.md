@@ -48,8 +48,12 @@ That tolerance must not authorize creating new malformed items locally.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
 - Manual Codex compaction owns its native turn through completion. Stop interrupts
   that turn and retains the ACP prompt until `turn/completed` confirms its outcome
-  or the provider connection closes. A start acknowledgement or compaction-item
-  completion alone does not release execution ownership. The CLI persists unresolved
+  or the provider connection closes. For an in-flight prompt with a ready ACP session,
+  Lody records cancellation and sends provider cancel without interrupting its owner
+  fiber. The owner and unfinished history remain until ACP returns; new dispatch and
+  undelivered steer stay pending. Start and interrupt
+  acknowledgements, like compaction-item completion, do not release execution ownership.
+  The CLI persists unresolved
   compaction as failed after confirmed cancellation, before accepting another turn.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
 - Accepted steer provenance survives both writing and read normalization. Editing and
