@@ -79,7 +79,7 @@
     "cross-spawn": "^7.0.6",
     "diff": "^7.0.0",
     "effect": "catalog:",
-    "esbuild": "^0.24.2",
+    "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.1",
     "globby": "^16.1.0",
     "https-proxy-agent": "^7.0.6",
