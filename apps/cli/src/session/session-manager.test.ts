@@ -263,6 +263,93 @@ describe('SessionManager cleanup phases', () => {
   });
 });
 
+// Git runs a `!` credential helper through a shell, so Windows paths reach it with
+// forward slashes.
+const toShellPath = (value: string): string =>
+  process.platform === 'win32' ? value.replace(/\\/g, '/') : value;
+
+describe('SessionManager GitHub session git credentials', () => {
+  let tempDataDir: string;
+
+  beforeEach(() => {
+    tempDataDir = mkdtempSync(path.join(os.tmpdir(), 'lody-session-git-cred-'));
+    vi.stubEnv('LODY_DATA_DIR', tempDataDir);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(tempDataDir, { recursive: true, force: true });
+  });
+
+  const prepareGitHubSessionEnv = async (): Promise<Record<string, string>> => {
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const internals = manager as unknown as {
+      githubTokenManager: unknown;
+      gitCredentialBroker: unknown;
+      prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<boolean>;
+    };
+    // The local cloud port exposes no GitHub tokens, so stand in for the hosted
+    // token manager and an already-started broker.
+    internals.githubTokenManager = {
+      retainRepoOwner: vi.fn(),
+      getAppTokenForRepo: vi.fn(async () => 'ghs_app'),
+      getWriteTokenInfoForRepo: vi.fn(async () => ({ token: 'ghs_write', tokenSource: 'app' })),
+      startAutoRefresh: vi.fn(),
+    };
+    internals.gitCredentialBroker = {
+      ensureStarted: vi.fn(async () => ({
+        url: 'http://127.0.0.1:33215',
+        port: 33215,
+        token: 'broker-token',
+      })),
+      activateSessionContext: vi.fn(() => 'context-token'),
+      getStateFilePath: vi.fn(() => path.join(tempDataDir, 'broker-workspace-1.json')),
+    };
+
+    const config = createSessionConfig({
+      sessionId: 'github-session' as SessionId,
+      githubRepo: 'owner/repo',
+      env: {},
+    });
+    await internals.prepareGitHubRepoSessionConfig(config);
+    return (config.env ?? {}) as Record<string, string>;
+  };
+
+  // ACP git children get the helper through GIT_CONFIG_VALUE_1. A `!node` helper
+  // cannot start when the desktop was launched from the Dock without node on PATH.
+  it('installs the helper under the CLI runtime, not a PATH `node`', async () => {
+    const env = await prepareGitHubSessionEnv();
+
+    const helperPath = path.join(
+      tempDataDir,
+      'repos',
+      'github---owner---repo',
+      'lody-git-credential-helper.cjs'
+    );
+    expect(env.GIT_CONFIG_KEY_1).toBe('credential.helper');
+    expect(env.GIT_CONFIG_VALUE_1).toBe(
+      `!"${toShellPath(process.execPath)}" "${toShellPath(helperPath)}"`
+    );
+    expect(existsSync(helperPath)).toBe(true);
+  });
+
+  it('forces ELECTRON_RUN_AS_NODE for ACP git children under Electron', async () => {
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1');
+
+    expect((await prepareGitHubSessionEnv()).ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+});
+
 describe('SessionManager child session workdir resolution', () => {
   let tempHome: string;
 

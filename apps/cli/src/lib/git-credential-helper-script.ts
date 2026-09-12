@@ -338,12 +338,51 @@ export const ensureCredentialHelperScript = (repoId: RepoId): void => {
 
 const escapeForGitHelper = (value: string): string => value.replace(/"/g, '\\"');
 
-export const buildCredentialHelperValueForHost = (repoId: RepoId): string => {
-  const helperPath = escapeForGitHelper(getCredentialHelperHostPath(repoId));
-  return `!node "${helperPath}"`;
+/**
+ * Quote one word of a `credential.helper = !<shell command>` value.
+ *
+ * Git runs the `!` form through a shell — `sh` on POSIX, the bundled MinGW bash on
+ * Windows — so every path must be quoted (installation directories contain spaces:
+ * `Lody Helper`, `Program Files`) and Windows separators must be forward slashes,
+ * because backslashes are escape characters to that shell rather than separators.
+ */
+const quoteForGitHelper = (value: string, platform: NodeJS.Platform): string => {
+  const normalized = platform === 'win32' ? value.replace(/\\/g, '/') : value;
+  return `"${escapeForGitHelper(normalized)}"`;
 };
 
+export const formatCredentialHelperCommand = (
+  nodePath: string,
+  helperPath: string,
+  platform: NodeJS.Platform = process.platform
+): string => `!${quoteForGitHelper(nodePath, platform)} ${quoteForGitHelper(helperPath, platform)}`;
+
+/**
+ * Host-side helpers run under the CLI's own runtime (`process.execPath`), never a bare
+ * `node`. A desktop launched from the macOS Dock (or a Windows shortcut) inherits the
+ * GUI PATH, which usually has no `node` at all: git would then fail to start the helper,
+ * find no username with `GIT_TERMINAL_PROMPT=0`, and abort the clone. This mirrors what
+ * the CLI/MCP/watch-worker spawns already do.
+ */
+export const buildCredentialHelperValueForHost = (repoId: RepoId): string =>
+  formatCredentialHelperCommand(process.execPath, getCredentialHelperHostPath(repoId));
+
+/**
+ * Container helpers run inside the devcontainer image, where `node` is on PATH and the
+ * host's `process.execPath` does not exist.
+ */
 export const buildCredentialHelperValueForContainer = (repoId: RepoId): string => {
   const helperPath = escapeForGitHelper(getCredentialHelperContainerPath(repoId));
   return `!node "${helperPath}"`;
 };
+
+/**
+ * Extra environment every git child (and the diagnostic helper probe) needs so that
+ * running `process.execPath` starts a Node process. In the packaged desktop the CLI is
+ * the Electron binary; without this flag the helper invocation launches a second GUI
+ * app instead of executing the helper script.
+ */
+export const buildCredentialHelperRuntimeEnv = (
+  source: NodeJS.ProcessEnv = process.env
+): Record<string, string> =>
+  process.versions.electron || source.ELECTRON_RUN_AS_NODE ? { ELECTRON_RUN_AS_NODE: '1' } : {};
