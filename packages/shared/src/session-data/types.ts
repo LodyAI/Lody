@@ -180,9 +180,10 @@ export type SessionEditableTailRejection = {
  * that landed between the caller's eligibility check and this call is refused
  * (`stale_boundary` / `active_goal`) rather than silently overwritten. The
  * accepted result carries `previousUserTurnId` — the last user turn before the
- * replaced tail — which the caller's meta commit needs, plus the `rollback`
- * compensation that restores only the replaced range and retains rows appended
- * afterwards. Backends without the guarded-write rules reject with `unsupported`.
+ * replaced tail — which the caller's meta commit needs, plus the awaitable
+ * `rollback` compensation that restores only the replaced range and retains rows
+ * appended afterwards. Backends without the guarded-write rules reject with
+ * `unsupported`.
  */
 export type ReplaceEditableTailInput = {
   /** The user turn that must still be the last editable user turn. */
@@ -207,8 +208,13 @@ export type SessionEditableTailResult =
       readonly receipt: SessionWriteReceipt;
       /** Last user turn before the replaced tail; the meta commit needs it. */
       readonly previousUserTurnId?: string;
-      /** Restore the replaced range only; retains rows appended afterwards. */
-      readonly rollback: () => void;
+      /**
+       * Restore the replaced range only; retains rows appended afterwards.
+       * Awaitable because a backend's compensation may need to reach durable
+       * storage: the caller MUST `await` it (and handle a rejection) before it
+       * persists its own follow-up state, or the two can interleave.
+       */
+      readonly rollback: () => Promise<void>;
       readonly postAcceptError?: unknown;
     }
   | { readonly status: 'rejected'; readonly reason: SessionEditableTailRejection }
@@ -337,8 +343,10 @@ export interface SessionHistoryCommands {
    * user turn, delivered non-steer, with its provider boundary) and the
    * active-goal guard are applied once in `planner.ts` and re-checked here
    * against the turns read at commit time, so a change that landed after the
-   * caller's own eligibility check is refused, not overwritten. Backends
-   * without guarded-write compensation reject with `unsupported`.
+   * caller's own eligibility check is refused, not overwritten. On acceptance
+   * the caller MUST `await` the returned compensation before persisting its own
+   * follow-up state. Backends without guarded-write compensation reject with
+   * `unsupported`.
    */
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   /**

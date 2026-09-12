@@ -381,7 +381,10 @@ export class SessionEditAndResendService {
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
         } catch (error) {
           try {
-            rollbackHistory();
+            // Await the compensation before restoring meta and persisting the
+            // rollback: a compensation that is still in flight must not race the
+            // follow-up state it is undoing.
+            await rollbackHistory();
           } catch (rollbackError) {
             this.deps.logger.error(
               `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`

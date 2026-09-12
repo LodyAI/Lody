@@ -598,11 +598,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
     async replaceEditableTail(input): Promise<SessionEditableTailResult> {
       let plan: EditableTailPlan | undefined;
-      let rollback: () => void;
+      let restoreRange: () => void;
       try {
         // The shared planner runs inside the writer's conditional commit, so the
         // eligibility/goal re-check and the write are one atomic step.
-        rollback = writer.updateWithRollback((turns) => {
+        restoreRange = writer.updateWithRollback((turns) => {
           const next = planEditableTailReplacement(
             turns as unknown as readonly SessionTurn[],
             input
@@ -625,7 +625,12 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       return {
         status: 'accepted',
         receipt: issueReceipt('replace-editable-tail', []),
-        rollback,
+        // The writer's rule is still one synchronous conditional restore. It is
+        // exposed as awaitable so a caller cannot persist follow-up state before
+        // the compensation finished; a synchronous throw rejects the promise.
+        rollback: async () => {
+          restoreRange();
+        },
         ...(previousUserTurnId !== undefined ? { previousUserTurnId } : {}),
       };
     },

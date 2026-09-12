@@ -64,7 +64,9 @@ storage offset.
   against the history read inside the store's commit, so a tail that moved after the caller's
   own check is `rejected('stale_boundary'|'active_goal')`, never overwritten. The accepted
   result carries `previousUserTurnId` (the caller's meta commit needs it) and a range-scoped
-  `rollback` that retains rows appended after the replacement. `commands.applyHistoryImport`
+  `rollback` that is `() => Promise<void>` and retains rows appended after the replacement;
+  the caller MUST `await` it (and handle rejection) before persisting its own follow-up
+  state, because the compensation may reach durable storage. `commands.applyHistoryImport`
   (imported history write + stored snapshot read + cursor creation in ONE synchronous block,
   no await gap; the cursor setter arrives as a construction-time control-plane accessor) is
   still a caller-supplied update/cursor callback. Both are port commands over the one shared

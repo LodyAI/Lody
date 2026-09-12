@@ -82,8 +82,12 @@ expectedForkTurnId, replacement, fallbackGoal })`，把 `rejected` 结果映射�
   （`active_goal`/`stale_boundary`/`invalid_input`），调用方无需按消息文本匹配。这取代了
   更早的任意 `updateHistoryWithRollback(update)` 回调入口——那时业务异常只能靠文本携带
   原因。
-- 回执 kind 联合新增 `'copy'`、`'rollback'`、`'import-history'`；没有消费方对它做穷举
-  匹配。
+- `replaceEditableTail` 的 `rollback` 是 `() => Promise<void>`，不再是同步闭包。补偿要撤销
+  一个调用方已视为提交的写入，后端可能需要先落到持久存储，调用方才能恢复 meta 并持久化
+  回滚；更早的同步签名会让两者交错。Loro 适配器仍在 async 函数体内同步完成条件恢复；补偿
+  被拒会进入调用方既有的恢复错误路径，而不是被当作成功。
+- 回执 kind 联合新增 `'copy'`、`'replace-editable-tail'`、`'import-history'`；没有消费方对
+  它做穷举匹配。
 
 ## 验证
 

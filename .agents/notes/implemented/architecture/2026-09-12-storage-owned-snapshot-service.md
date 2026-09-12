@@ -102,8 +102,15 @@ delegates to the port command, reconstructing a `HistoryWriteError` on rejection
   without message matching. This replaced the earlier arbitrary
   `updateHistoryWithRollback(update)` callback entry, whose business throw carried the
   reason as text.
-- The receipt kind union gained `'copy'`, `'rollback'` and `'import-history'`; no
-  consumer switches exhaustively on it.
+- `replaceEditableTail`'s `rollback` is `() => Promise<void>`, not a synchronous closure.
+  The compensation undoes a write the caller already treated as committed, so a backend may
+  need to reach durable storage before the caller restores its meta and persists the
+  rollback; an earlier synchronous signature let those two interleave. The Loro adapter
+  keeps its conditional restore synchronous inside the async body, and a rejecting
+  compensation surfaces to the caller's existing restore-error path instead of being
+  reported as success.
+- The receipt kind union gained `'copy'`, `'replace-editable-tail'` and `'import-history'`;
+  no consumer switches exhaustively on it.
 
 ## Verification
 

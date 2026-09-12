@@ -690,13 +690,37 @@ export function runSessionDataContract(
       // replacement survives the rollback, and the replaced row's opaque items
       // come back from the writer's captured stored values.
       await data.commands.appendTurn(userTurn('u3'));
-      applied.rollback();
+      await applied.rollback();
       expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2', 'u3']);
       expect(harness.readStored()[2]!.items).toContainEqual({
         type: 'text',
         text: 'old',
         legacyField: 9,
       });
+    });
+
+    it('rejects the compensation when the replaced range was edited by a peer', async () => {
+      const harness = await create();
+      const { data } = harness;
+      if (!data.snapshots?.capabilities.copy) return;
+
+      await data.commands.appendTurn(userTurn('u1'));
+      await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
+      await data.commands.appendTurn(userTurn('u2'));
+
+      const applied = await data.commands.replaceEditableTail({
+        expectedUserTurnId: 'u2',
+        expectedForkTurnId: 'provider-1',
+        replacement: userTurn('u2-new', 'edited'),
+      });
+      if (applied.status !== 'accepted') throw new Error('expected an accepted replacement');
+
+      // A peer edit inside the replaced range invalidates the compensation: it
+      // rejects instead of fabricating a restore over the peer's change.
+      harness.peerSetField('u2-new', 'status', 'handled');
+      await expect(applied.rollback()).rejects.toThrow();
+      expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2-new']);
+      expect(harness.readStored()[2]!.status).toBe('handled');
     });
 
     it('refuses a tail replacement whose tail moved at commit time', async () => {

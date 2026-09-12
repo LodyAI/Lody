@@ -80,6 +80,10 @@ function createHarness(
     beforeCommitFailure?: (doc: LoroDoc) => void;
     /** Lands a concurrent history edit between the eligibility check and the commit. */
     beforeReplace?: (doc: SessionDocument) => Promise<void> | void;
+    /** Delays the asynchronous compensation; use a deferred to hold the gate open. */
+    beforeRollback?: () => Promise<void>;
+    /** A compensation whose follow-up step rejects after restoring the range. */
+    rollbackError?: Error;
     history?: SessionHistoryInput[];
   } = {}
 ) {
@@ -128,9 +132,11 @@ function createHarness(
           history = await realDoc.getHistory();
           return {
             ...result,
-            rollback: () => {
-              result.rollback();
+            rollback: async () => {
+              await options.beforeRollback?.();
+              await result.rollback();
               history = loro.getList('history').toJSON() as SessionHistoryInput[];
+              if (options.rollbackError) throw options.rollbackError;
             },
           };
         }),
@@ -182,6 +188,7 @@ function createHarness(
       events.push('wait-release');
     }),
   };
+  const logger = { error: vi.fn(), debug: vi.fn() };
   const service = new SessionEditAndResendService({
     workspaceDocument: {
       repo,
@@ -199,7 +206,7 @@ function createHarness(
     } as never,
     executionService: executionService as never,
     userResolver: {} as never,
-    logger: { error: vi.fn(), debug: vi.fn() } as never,
+    logger: logger as never,
     workspaceId: 'workspace-1',
     machineId,
     enqueueDispatch: () => events.push('dispatch'),
@@ -212,6 +219,7 @@ function createHarness(
     // Read the real doc so an async auto-read write is observable, not a snapshot
     // captured at the last explicit history write.
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
+    logger,
     realDoc,
     repo,
     service,
@@ -309,6 +317,74 @@ describe('SessionEditAndResendService', () => {
       'user-concurrent',
     ]);
     expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('waits for the asynchronous compensation before restoring meta and persisting the rollback', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const harness = createHarness({
+      persistError: new Error('commit failed'),
+      beforeRollback: async () => {
+        entered();
+        await gate;
+      },
+    });
+
+    const pending = harness.service.editAndResend(spec);
+    await started;
+    // Drain scheduled continuations without relying on elapsed time.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    try {
+      // The compensation is still gated, so neither the follow-up persist nor the
+      // barrier release may have happened yet.
+      expect(harness.events).not.toContain('persist-rollback');
+      expect(harness.events).not.toContain('barrier-release');
+    } finally {
+      release();
+    }
+
+    await expect(pending).resolves.toMatchObject({
+      success: false,
+      error: { code: 'HISTORY_WRITE_FAILED' },
+    });
+    expect(harness.events).toContain('persist-rollback');
+    expect(harness.events).toContain('barrier-release');
+    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
+  });
+
+  it('catches a rejected compensation, restores meta and reports the commit failure', async () => {
+    const harness = createHarness({
+      persistError: new Error('commit failed'),
+      // The range is restored, but the compensation's own awaitable step fails.
+      rollbackError: new Error('compensation follow-up failed'),
+    });
+
+    await expect(harness.service.editAndResend(spec)).resolves.toMatchObject({
+      success: false,
+      error: { code: 'HISTORY_WRITE_FAILED' },
+    });
+    expect(harness.events).toContain('persist-rollback');
+    expect(harness.events).toContain('barrier-release');
+    expect(harness.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to restore history after commit failure')
+    );
+    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
   });
 
   it('leaves the active turn untouched when provider fork fails', async () => {
