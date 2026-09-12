@@ -1,11 +1,9 @@
 // Export all UI components
-export * from './accordion';
 export * from './badge';
 export { Button } from '@lody/ui/button';
 export type { ButtonProps } from '@lody/ui/button';
 export * from './calendar';
 export * from './card';
-export * from './collapsible';
 export * from './command';
 export * from './dialog';
 export * from './dropdown-menu';

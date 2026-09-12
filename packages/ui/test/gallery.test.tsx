@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { dialog } from '../src/dialog/dialog.tokens.stylex';
+import { disclosure } from '../src/disclosure/disclosure.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
@@ -172,6 +173,27 @@ describe('UiGallery', () => {
     }
     for (const name of tokenNames(dialog)) {
       expect(board, `dialog.${name} is missing from the board`).toContain(`dialog.${name}`);
+    }
+  });
+
+  test('shows the three disclosures, and names every token they share', () => {
+    // None of the three is portalled, so what the board renders is the real
+    // thing in both states rather than a stand-in: a strip with its pill, a
+    // stack with one row open and two closed, and a lone collapsible.
+    expect(board).toContain('role="tablist"');
+    expect(board).toContain('role="tabpanel"');
+    // The pill is the list's own doing rather than a caller's, and the board
+    // does not add one: its presence here is the part assembling it.
+    expect(board).toContain('role="presentation"');
+    for (const legend of ['small \u00b7 28', 'medium \u00b7 32', 'large \u00b7 36']) {
+      expect(board, `strip size ${legend} is missing from the board`).toContain(legend);
+    }
+    // A stack states both states at once: one row open, the rest closed.
+    expect(board).toContain('aria-expanded="true"');
+    expect(board).toContain('aria-expanded="false"');
+    expect(board).toContain('What a session is');
+    for (const name of tokenNames(disclosure)) {
+      expect(board, `disclosure.${name} is missing from the board`).toContain(`disclosure.${name}`);
     }
   });
 

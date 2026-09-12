@@ -5,7 +5,7 @@ import { Check, Copy, Download, FileWarning, Loader2, X } from 'lucide-react';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog, DialogClose, DialogContentWithoutClose, DialogTitle } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
 
@@ -82,20 +82,18 @@ export function SessionFilePreviewPanel({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {markdown ? (
-            <Tabs
+            <Tabs.Root
               value={showRaw ? 'raw' : 'rendered'}
-              onValueChange={(v) => setShowRaw(v === 'raw')}
+              onValueChange={(value) => setShowRaw(value === 'raw')}
               className="mr-1"
             >
-              <TabsList className="h-7 p-0.5">
-                <TabsTrigger value="rendered" className="h-6 px-2.5 text-xs">
+              <Tabs.List size="small">
+                <Tabs.Tab value="rendered">
                   {t('sessions.filePreviewRendered', 'Rendered')}
-                </TabsTrigger>
-                <TabsTrigger value="raw" className="h-6 px-2.5 text-xs">
-                  {t('sessions.filePreviewRaw', 'Raw')}
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+                </Tabs.Tab>
+                <Tabs.Tab value="raw">{t('sessions.filePreviewRaw', 'Raw')}</Tabs.Tab>
+              </Tabs.List>
+            </Tabs.Root>
           ) : null}
           <Button
             type="button"

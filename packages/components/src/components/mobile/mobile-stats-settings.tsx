@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import {
   UsageStackedAreaChart,
   type StackedAreaBucket,
@@ -124,28 +124,19 @@ export function MobileStatsSettings() {
     <div className="pb-6 pt-1">
       <MobileSettingsSection title={activeOrganization?.name || t('workspace.usage.title')}>
         <div className="px-3 py-3">
-          <Tabs
+          <Tabs.Root
             value={range}
             onValueChange={(nextValue) => {
               setRange(nextValue as SettingsUsageRange);
             }}
-            className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="day" className="h-full">
-                {t('workspace.usage.tabs.day')}
-              </TabsTrigger>
-              <TabsTrigger value="week" className="h-full">
-                {t('workspace.usage.tabs.week')}
-              </TabsTrigger>
-              <TabsTrigger value="month" className="h-full">
-                {t('workspace.usage.tabs.month')}
-              </TabsTrigger>
-              <TabsTrigger value="total" className="h-full">
-                {t('workspace.usage.tabs.total')}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+            <Tabs.List size="large" stretch>
+              <Tabs.Tab value="day">{t('workspace.usage.tabs.day')}</Tabs.Tab>
+              <Tabs.Tab value="week">{t('workspace.usage.tabs.week')}</Tabs.Tab>
+              <Tabs.Tab value="month">{t('workspace.usage.tabs.month')}</Tabs.Tab>
+              <Tabs.Tab value="total">{t('workspace.usage.tabs.total')}</Tabs.Tab>
+            </Tabs.List>
+          </Tabs.Root>
         </div>
       </MobileSettingsSection>
 

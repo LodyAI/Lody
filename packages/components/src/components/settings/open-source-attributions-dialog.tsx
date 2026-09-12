@@ -4,10 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
   Badge,
   Button,
   Dialog,
@@ -18,6 +14,7 @@ import {
   DialogTrigger,
   ScrollArea,
 } from '@/ui';
+import { Accordion } from '@lody/ui/accordion';
 import { Select } from '@lody/ui/select';
 
 const allEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries;
@@ -219,9 +216,9 @@ export function OpenSourceAttributionsDialog({
 
         <ScrollArea className="max-h-[70vh]">
           <div className="px-4 py-4 sm:px-6">
-            <Accordion type="multiple" defaultValue={['bundled-assets']} className="w-full">
-              <AccordionItem value="bundled-assets">
-                <AccordionTrigger className="py-3 text-sm">
+            <Accordion.Root multiple defaultValue={['bundled-assets']}>
+              <Accordion.Item value="bundled-assets">
+                <Accordion.Trigger>
                   <span className="flex items-center gap-2">
                     <Palette className="h-4 w-4 text-muted-foreground" />
                     {t('settings.about.bundledAssets', 'Bundled assets')}
@@ -229,18 +226,18 @@ export function OpenSourceAttributionsDialog({
                       {bundledEntries.length}
                     </Badge>
                   </span>
-                </AccordionTrigger>
-                <AccordionContent>
+                </Accordion.Trigger>
+                <Accordion.Panel>
                   <div className="space-y-3">
                     {bundledEntries.map((entry) => (
                       <AttributionItem key={entry.id} entry={entry} />
                     ))}
                   </div>
-                </AccordionContent>
-              </AccordionItem>
+                </Accordion.Panel>
+              </Accordion.Item>
 
-              <AccordionItem value="dependencies">
-                <AccordionTrigger className="py-3 text-sm">
+              <Accordion.Item value="dependencies">
+                <Accordion.Trigger>
                   <span className="flex items-center gap-2">
                     <FileCode2 className="h-4 w-4 text-muted-foreground" />
                     {t('settings.about.dependencies', 'Dependencies')}
@@ -248,8 +245,8 @@ export function OpenSourceAttributionsDialog({
                       {dependencyEntries.length}
                     </Badge>
                   </span>
-                </AccordionTrigger>
-                <AccordionContent>
+                </Accordion.Trigger>
+                <Accordion.Panel>
                   <div className="space-y-3">
                     <div className="flex flex-col gap-2 rounded-md border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
@@ -286,9 +283,9 @@ export function OpenSourceAttributionsDialog({
                       <AttributionItem key={entry.id} entry={entry} />
                     ))}
                   </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+                </Accordion.Panel>
+              </Accordion.Item>
+            </Accordion.Root>
           </div>
         </ScrollArea>
       </DialogContent>

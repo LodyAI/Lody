@@ -2,6 +2,10 @@ import * as stylex from '@stylexjs/stylex';
 import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject } from 'react';
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
+import { Accordion } from '../disclosure/accordion';
+import { Collapsible } from '../disclosure/collapsible';
+import { disclosure as disclosureTokens } from '../disclosure/disclosure.tokens.stylex';
+import { Tabs, type TabsSize } from '../disclosure/tabs';
 import { Checkbox } from '../field/checkbox';
 import { AlertDialog } from '../dialog/alert-dialog';
 import { Dialog } from '../dialog/dialog';
@@ -336,6 +340,15 @@ const styles = stylex.create({
   // row is a flex item, so it reports the width the row let it have rather than
   // the width the token declares. Measured in flow, `dialog.width` read back as
   // 167.5px.
+  /** A disclosure takes the width of what it is in; the board gives it one. */
+  disclosureBlock: { flexGrow: 1, flexShrink: 1, minWidth: '260px' },
+  collapsibleBody: {
+    margin: 0,
+    paddingBlockStart: space[2],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
   widthProbe: {
     position: 'absolute',
     visibility: 'hidden',
@@ -612,6 +625,46 @@ const TOOLTIP_COLORS = [
 ];
 
 const DRAWER_SIDES: DrawerSide[] = ['top', 'end', 'bottom', 'start'];
+
+const STRIP_COLORS = [
+  {
+    name: 'disclosure.trackBackground',
+    value: disclosureTokens.trackBackground,
+    note: 'the well the strip sits in',
+  },
+  {
+    name: 'disclosure.indicator',
+    value: disclosureTokens.indicator,
+    note: 'the one tab raised out of it',
+  },
+  { name: 'disclosure.tabLabel', value: disclosureTokens.tabLabel, note: 'a tab you are not on' },
+  {
+    name: 'disclosure.tabActiveLabel',
+    value: disclosureTokens.tabActiveLabel,
+    note: 'the one you are, and every hover',
+  },
+  { name: 'disclosure.ring', value: disclosureTokens.ring, note: 'where the keyboard is' },
+];
+
+const STACK_COLORS = [
+  { name: 'disclosure.label', value: disclosureTokens.label, note: "a row's own text" },
+  {
+    name: 'disclosure.chevron',
+    value: disclosureTokens.chevron,
+    note: 'the hint that there is more under it',
+  },
+  {
+    name: 'disclosure.separator',
+    value: disclosureTokens.separator,
+    note: 'the line to the next row, and nothing else',
+  },
+];
+
+const STRIP_SIZES: { name: string; size: TabsSize }[] = [
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
 
 const SELECT_SIZES = [
   { name: 'small · 28', size: 'small' as const },
@@ -1694,6 +1747,179 @@ function TooltipRow() {
   );
 }
 
+function StripRow({ name, size }: { name: string; size: TabsSize }) {
+  const { ref, value } = useMeasured<HTMLDivElement>('height');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Tabs.Root defaultValue="rendered">
+          <Tabs.List ref={ref} size={size}>
+            <Tabs.Tab value="rendered">Rendered</Tabs.Tab>
+            <Tabs.Tab value="raw">Raw</Tabs.Tab>
+            <Tabs.Tab value="diff">Diff</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+/** A tab nobody can take, reporting the one opacity the family dims with. */
+function StripDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>disabled</LegendKey>
+      <Cluster>
+        <Tabs.Root defaultValue="rendered">
+          <Tabs.List>
+            <Tabs.Tab value="rendered">Rendered</Tabs.Tab>
+            <Tabs.Tab ref={ref} value="raw" disabled>
+              Raw
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>disclosure.disabledOpacity {value}</span>
+    </Row>
+  );
+}
+
+/** The strip taking the width it is given, with the tabs splitting it. */
+function StripStretchRow() {
+  return (
+    <Row>
+      <LegendKey>stretch</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Tabs.Root defaultValue="local">
+          <Tabs.List stretch>
+            <Tabs.Tab value="local">Local</Tabs.Tab>
+            <Tabs.Tab value="github">GitHub</Tabs.Tab>
+            <Tabs.Tab value="chat">Chat</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** The strip with what it swaps, so the gap between the two is on the board. */
+function StripPanelRow() {
+  return (
+    <Row>
+      <LegendKey>panel</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Tabs.Root defaultValue="sync">
+          <Tabs.List size="small">
+            <Tabs.Tab value="sync">Conversation sync</Tabs.Tab>
+            <Tabs.Tab value="worktree">Worktree setup</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="sync">Sessions on this project sync their history.</Tabs.Panel>
+          <Tabs.Panel value="worktree">Each session gets a worktree of its own.</Tabs.Panel>
+        </Tabs.Root>
+      </div>
+    </Row>
+  );
+}
+
+function StripDimensions() {
+  const dimensions = [
+    { name: 'disclosure.trackInset', value: disclosureTokens.trackInset },
+    { name: 'disclosure.trackRadiusSmall', value: disclosureTokens.trackRadiusSmall },
+    { name: 'disclosure.trackRadiusMedium', value: disclosureTokens.trackRadiusMedium },
+    { name: 'disclosure.tabPaddingX', value: disclosureTokens.tabPaddingX },
+    { name: 'disclosure.tabGap', value: disclosureTokens.tabGap },
+    { name: 'disclosure.tabText', value: disclosureTokens.tabText },
+    { name: 'disclosure.panelGap', value: disclosureTokens.panelGap },
+    { name: 'disclosure.ringWidth', value: disclosureTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The stack, with its first row already open so both states are on the board. */
+function StackRow() {
+  return (
+    <Row>
+      <LegendKey>accordion</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Accordion.Root defaultValue={['session']}>
+          <Accordion.Item value="session">
+            <Accordion.Trigger>What a session is</Accordion.Trigger>
+            <Accordion.Panel>One agent, one worktree, and every turn between them.</Accordion.Panel>
+          </Accordion.Item>
+          <Accordion.Item value="machine">
+            <Accordion.Trigger>What a machine is</Accordion.Trigger>
+            <Accordion.Panel>The computer a session runs its work on.</Accordion.Panel>
+          </Accordion.Item>
+          <Accordion.Item value="project">
+            <Accordion.Trigger>What a project is</Accordion.Trigger>
+            <Accordion.Panel>A repository, and the sessions opened against it.</Accordion.Panel>
+          </Accordion.Item>
+        </Accordion.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** A lone disclosure, opened by a control the surface already had. */
+function CollapsibleRow() {
+  return (
+    <Row>
+      <LegendKey>collapsible</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Collapsible.Root defaultOpen>
+          <Collapsible.Trigger render={<Button variant="secondary" size="small" />}>
+            3 files changed
+          </Collapsible.Trigger>
+          <Collapsible.Panel>
+            <p {...stylex.props(styles.collapsibleBody)}>
+              The panel is all this primitive owns: the height Base UI measured, the transition
+              between that and nothing, and the overflow that hides what is arriving.
+            </p>
+          </Collapsible.Panel>
+        </Collapsible.Root>
+      </div>
+    </Row>
+  );
+}
+
+function StackDimensions() {
+  const dimensions = [
+    { name: 'disclosure.rowPaddingY', value: disclosureTokens.rowPaddingY },
+    { name: 'disclosure.rowGap', value: disclosureTokens.rowGap },
+    { name: 'disclosure.rowText', value: disclosureTokens.rowText },
+    { name: 'disclosure.chevronSize', value: disclosureTokens.chevronSize },
+    { name: 'disclosure.panelText', value: disclosureTokens.panelText },
+    { name: 'disclosure.panelLeading', value: disclosureTokens.panelLeading },
+    { name: 'disclosure.panelPaddingBottom', value: disclosureTokens.panelPaddingBottom },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
 function ButtonFocusRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -2427,6 +2653,59 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               ink={false}
               note="tight, because it sits on what it names"
             />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Tabs · the choices side by side"
+        rule="A tab strip is the elevation ladder read twice over: a well-rung track with one thing raised out of it, which is the same pair a Switch takes and says the same thing — the track is where something sits, and the thing sitting in it is the one you can press. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less its inset, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {STRIP_SIZES.map((entry) => (
+              <StripRow key={entry.name} {...entry} />
+            ))}
+            <StripDisabledRow />
+            <StripStretchRow />
+            <StripPanelRow />
+            <StripDimensions />
+          </Rows>
+          <Grid>
+            {STRIP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="disclosure.trackWell"
+              box={disclosureTokens.trackWell}
+              fill={disclosureTokens.trackBackground}
+              ink={false}
+              note="the track, sunken"
+            />
+            <ShadowChip
+              name="disclosure.indicatorShadow"
+              box={disclosureTokens.indicatorShadow}
+              fill={disclosureTokens.indicator}
+              ink={false}
+              note="the selected tab, raised"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Accordion and Collapsible · the choices stacked"
+        rule="The same family laid out down the page instead of across it: a row, and what opens under it in place. A row has no fill in any state — it is a line of a list rather than a control on a surface — so the line to the next row is the separator the rules give a list, and what moves when it opens is the chevron the part draws. One row is open at a time unless the stack says otherwise, because an accordion's point is that a long page stays short. A Collapsible is one of those rows with no list around it, so it takes no line and no row: its trigger is whatever the surface already had there, and the panel is all the primitive owns. What a panel holds is prose, and its padding rides on a child of it — the panel's own height is what the reveal animates, and Base UI measures that height with scrollHeight, which counts padding."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <StackRow />
+            <CollapsibleRow />
+            <StackDimensions />
+          </Rows>
+          <Grid>
+            {STACK_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
           </Grid>
         </PaletteSplit>
       </Section>

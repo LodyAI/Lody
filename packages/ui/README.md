@@ -17,6 +17,7 @@ behavior.
 | `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens               |
 | `src/drawer`        | The same rung, arriving from an edge and draggable back out          |
 | `src/tooltip`       | The inverted chip that names what is under the pointer               |
+| `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows   |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -237,6 +238,73 @@ A tooltip is visual only. Base UI gives the chip no role and wires no
 reader, so **the trigger states its own `aria-label`** — a control whose only name
 was its tooltip has no name at all. `Tooltip.Provider` groups them, so once one
 has opened the next opens without its delay.
+
+`Tabs`, `Accordion` and `Collapsible` are one family too, and what they share is
+the question rather than the shape: a trigger, and the thing it shows. A tab
+strip lays the choices side by side and swaps the panel under them; an accordion
+stacks them and opens one in place; a collapsible is a single one of those rows
+with no list around it.
+
+A strip is the elevation ladder read twice over — a well-rung track with one
+thing raised out of it, the same pair a `Switch` takes. The pill under the
+selected tab is one element that slides rather than a fill on each tab, because
+the strip is one control, and `Tabs.List` draws it rather than the caller, the
+way a submenu's chevron is drawn by its row.
+
+```tsx
+<Tabs.Root defaultValue="sync">
+  <Tabs.List>
+    <Tabs.Tab value="sync">Conversation sync</Tabs.Tab>
+    <Tabs.Tab value="worktree">Worktree setup</Tabs.Tab>
+  </Tabs.List>
+  <Tabs.Panel value="sync">…</Tabs.Panel>
+  <Tabs.Panel value="worktree">…</Tabs.Panel>
+</Tabs.Root>
+```
+
+The size is stated once, on the strip: a tab's height, its corner and its share
+of the width all follow from the track's. A strip that should take the width on
+offer says `stretch`, which stretches the track *and* splits it between the tabs
+— stating only the first would leave a full-width groove with the choices
+huddled at its start. Arrow keys move between tabs without taking one, because a
+tab swaps a panel that may be expensive to build; a surface whose panels are
+cheap says `activateOnFocus`.
+
+An accordion is that same family stacked. A row has no fill in any state — it is
+a line of a list rather than a control on a surface — so the mark between rows is
+the separator the rules give a list, and what moves when a row opens is the
+chevron the part draws. One row is open at a time unless the root says
+`multiple`.
+
+```tsx
+<Accordion.Root multiple defaultValue={['bundled']}>
+  <Accordion.Item value="bundled">
+    <Accordion.Trigger>Bundled assets</Accordion.Trigger>
+    <Accordion.Panel>…</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+A `Collapsible` is one of those rows with no list around it, so it takes neither
+the line nor the row: its trigger is Base UI's, unstyled, because a lone
+disclosure is opened by whatever the surface already had there — a card header, a
+row of a table, a button that also says how many things are under it.
+
+```tsx
+<Collapsible.Root>
+  <Collapsible.Trigger render={<Button variant="secondary" size="small" />}>
+    3 files changed
+  </Collapsible.Trigger>
+  <Collapsible.Panel>…</Collapsible.Panel>
+</Collapsible.Root>
+```
+
+**A revealed panel's padding goes on a child of it.** Base UI animates the
+panel's height from a size it measures with `scrollHeight`, which counts
+padding, so a padded panel is cropped by exactly its own padding under
+`border-box` and overshoots by it under `content-box`. `Accordion.Panel` already
+holds its prose in such a child; a caller migrating a panel that carried its own
+padding moves it inwards.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in

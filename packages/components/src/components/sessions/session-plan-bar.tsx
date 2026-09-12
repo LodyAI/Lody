@@ -6,7 +6,7 @@ import type { SessionPlanEntry } from '@lody/shared';
 
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { cn } from '@/lib/utils';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
+import { Collapsible } from '@lody/ui/collapsible';
 
 type SessionPlanBarProps = {
   entries?: SessionPlanEntry[] | null;
@@ -67,32 +67,37 @@ export const SessionPlanBar = ({
   const summaryText = summary ? summary.content : t('codexMessage.plan.empty', 'Plan cleared');
 
   return (
-    <Collapsible defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
+    <Collapsible.Root defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
       <div className={cn('rounded-lg border bg-muted/30 px-3 py-2', className)}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'group flex w-full items-center justify-between gap-3 text-left',
-              'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-            )}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <PlanStatusIcon status={summary?.status ?? 'pending'} />
-              <span className="min-w-0 truncate text-sm font-medium">
-                {statusLabel}: {summaryText}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                {completedCount}/{totalCount}
-              </span>
-              <ChevronRight className="h-4 w-4 transition-transform group-data-[state=open]:rotate-90" />
-            </div>
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2 border-t border-border/60 pt-2">
-          <ul className="space-y-1">
+        <Collapsible.Trigger
+          render={
+            <button
+              type="button"
+              className={cn(
+                'group flex w-full items-center justify-between gap-3 text-left',
+                'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+              )}
+            />
+          }
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <PlanStatusIcon status={summary?.status ?? 'pending'} />
+            <span className="min-w-0 truncate text-sm font-medium">
+              {statusLabel}: {summaryText}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {completedCount}/{totalCount}
+            </span>
+            <ChevronRight className="h-4 w-4 transition-transform group-data-[panel-open]:rotate-90" />
+          </div>
+        </Collapsible.Trigger>
+        <Collapsible.Panel className="mt-2">
+          {/* The rule and the space above the list ride on a child: the panel's
+              own height is what the reveal animates, and Base UI measures it
+              with `scrollHeight`, which counts padding. */}
+          <ul className="space-y-1 border-t border-border/60 pt-2">
             {safeEntries.map((entry, index) => (
               <li
                 key={`${index}-${entry.content}`}
@@ -105,9 +110,9 @@ export const SessionPlanBar = ({
               </li>
             ))}
           </ul>
-        </CollapsibleContent>
+        </Collapsible.Panel>
       </div>
-    </Collapsible>
+    </Collapsible.Root>
   );
 };
 
