@@ -1,6 +1,6 @@
 # Feature index
 
-The active suite contains 15 scenarios: 4 `@P0` smoke journeys and 11 `@P1` deeper journeys.
+The active suite contains 16 scenarios: 4 `@P0` smoke journeys and 12 `@P1` deeper journeys.
 
 | Feature                       | Scope                                                                             |
 | ----------------------------- | --------------------------------------------------------------------------------- |
@@ -12,7 +12,7 @@ The active suite contains 15 scenarios: 4 `@P0` smoke journeys and 11 `@P1` deep
 | `project-lifecycle.feature`   | Local project add, selection, removal, and original-directory safety              |
 | `project-reopen.feature`      | Cross-surface project switching and duplicate-folder identity preservation        |
 | `session-queue.feature`       | Queued follow-up removal and ordered dispatch through a scripted ACP              |
-| `session-management.feature`  | Session rename, pin, archive, restore, history, and permanent deletion            |
+| `session-management.feature`  | Session metadata plus containment/provenance archive and deletion isolation       |
 | `session-read-state.feature`  | Session unread marking, navigation-based read clearing, and permanent deletion    |
 | `session-fork.feature`        | Completed Session fork, origin, independent worktree, and deletion isolation      |
 | `settings-appearance.feature` | Theme commit, preview isolation, cancellation, and settings-reopen persistence    |

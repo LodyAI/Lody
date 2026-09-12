@@ -289,6 +289,7 @@ export function ChatComposer({
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
+  const shortcutsEnabled = variant !== 'dialog';
   const intlLocale = useMemo(
     () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
@@ -883,6 +884,7 @@ export function ChatComposer({
               ) : null}
 
               <CombinedMentionTextarea
+                enablePromptShortcuts={shortcutsEnabled}
                 id={promptId}
                 ref={promptRef}
                 mentionSource={mentionSource}
@@ -985,6 +987,7 @@ export function ChatComposer({
         ) : (
           <>
             <CombinedMentionTextarea
+              enablePromptShortcuts={shortcutsEnabled}
               id={promptId}
               ref={promptRef}
               mentionSource={mentionSource}

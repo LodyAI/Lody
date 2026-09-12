@@ -501,8 +501,9 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   );
 
   const onCompositionStart = React.useCallback(() => {
+    context.cancelMentionPreparation();
     isComposingRef.current = true;
-  }, []);
+  }, [context]);
 
   const onCompositionEnd = React.useCallback(
     (event: React.CompositionEvent<InputElement>) => {
@@ -702,7 +703,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         if (!registered?.navigateText) return false;
         const span = getTriggerSpan();
         if (!span) return false;
-        context.onMentionAdd(registered.value, span.triggerIndex);
+        void context.onMentionAdd(registered.value, span.triggerIndex);
         return true;
       }
 
@@ -735,7 +736,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         const shouldCommit =
           Boolean(registeredItem.navigateText) && registeredItem.label === searchText;
 
-        context.onMentionAdd(selectedItem.value, span.triggerIndex, {
+        void context.onMentionAdd(selectedItem.value, span.triggerIndex, {
           commit: shouldCommit,
         });
         return true;
@@ -821,7 +822,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       const input = event.currentTarget;
       const cursorPosition = input.selectionStart ?? 0;
 
-      if (event.inputType === 'deleteContentBackward') {
+      const inputType = event.inputType ?? (event.nativeEvent as InputEvent).inputType;
+      if (inputType === 'deleteContentBackward') {
         const mentionAtCursor = context.mentions.find(
           (mention) => cursorPosition > mention.start && cursorPosition <= mention.end
         );

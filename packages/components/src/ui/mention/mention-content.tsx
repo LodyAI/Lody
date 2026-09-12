@@ -116,7 +116,9 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
         return undefined;
       }
 
+      const modal = input.closest<HTMLElement>('[data-lody-dialog-content], [data-vaul-drawer]');
       const measure = () => {
+        const modalRect = modal?.getBoundingClientRect();
         const inputRect = (input.parentElement ?? input).getBoundingClientRect();
         const viewport = window.visualViewport;
         const viewportLeft = viewport?.offsetLeft ?? 0;
@@ -124,15 +126,19 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
         const viewportWidth = viewport?.width ?? window.innerWidth;
         const viewportHeight = viewport?.height ?? window.innerHeight;
         const viewportRight = viewportLeft + viewportWidth;
+        // The modal is the portal owner and can clip its descendants. Flip/shift
+        // within that visible layer rather than placing rows behind its footer.
+        const top = Math.max(viewportTop, modalRect?.top ?? viewportTop);
+        const bottom = Math.min(viewportTop + viewportHeight, modalRect?.bottom ?? Infinity);
         const left = Math.max(inputRect.left, viewportLeft + MENTION_VIEWPORT_PADDING_PX);
         const right = Math.min(inputRect.right, viewportRight - MENTION_VIEWPORT_PADDING_PX);
         const next =
           right > left
             ? {
                 x: left,
-                y: viewportTop,
+                y: top,
                 width: right - left,
-                height: viewportHeight,
+                height: Math.max(0, bottom - top),
               }
             : null;
 
@@ -170,6 +176,9 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       measure();
 
       const cleanupResizeObserver = observeResizeOnAnimationFrame(input, () => measure());
+      const cleanupModalObserver = modal
+        ? observeResizeOnAnimationFrame(modal, measure)
+        : undefined;
       window.addEventListener('resize', measure);
       window.addEventListener('scroll', measure, true);
       window.visualViewport?.addEventListener('resize', measure);
@@ -177,6 +186,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
 
       return () => {
         cleanupResizeObserver();
+        cleanupModalObserver?.();
         window.removeEventListener('resize', measure);
         window.removeEventListener('scroll', measure, true);
         window.visualViewport?.removeEventListener('resize', measure);

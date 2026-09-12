@@ -3,6 +3,10 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./share": {
+      "import": "./src/components/sharing/session-share-page.tsx",
+      "types": "./src/components/sharing/session-share-page.tsx"
+    },
     ".": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"

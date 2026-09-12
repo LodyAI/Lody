@@ -45,6 +45,7 @@ import {
   Play,
   Plus,
   Search,
+  Share2,
   Trash2,
   UserRoundCog,
   Users,
@@ -54,7 +55,7 @@ import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
-import { isSessionContextCompacting } from '@/lib/session-context-compaction';
+import { isSessionContextCompacting, canStopAgentEnabled } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
@@ -125,6 +126,8 @@ import {
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useAppCapability } from '@/lib/app-platform';
+import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
@@ -982,6 +985,7 @@ export function SessionHeaderMenu({
   machineName,
   onCopyConversationHistory,
   onCopyUrl,
+  publicShareWorkspaceId,
   sharing,
   onShareWithTeam,
   onShareAsImage,
@@ -1008,6 +1012,7 @@ export function SessionHeaderMenu({
   machineName?: string | null;
   onCopyConversationHistory?: () => void | Promise<void>;
   onCopyUrl: () => void | Promise<void>;
+  publicShareWorkspaceId?: import('@lody/shared').WorkspaceId;
   sharing?: SessionSharingState;
   onShareWithTeam?: () => void | Promise<void>;
   /** Opens the share-as-image preview dialog. Pure local feature; no gating. */
@@ -1057,6 +1062,7 @@ export function SessionHeaderMenu({
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
+  const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1263,6 +1269,13 @@ export function SessionHeaderMenu({
           ) : null}
 
           {openedByRelationRows}
+
+          {publicShareWorkspaceId && (
+            <DropdownMenuItem onClick={() => setPublicShareSessionId(session.id)}>
+              <Share2 className="h-3.5 w-3.5 shrink-0" />
+              {t('sharing.manager.title', 'Share conversation')}
+            </DropdownMenuItem>
+          )}
 
           {onOpenSearch && (
             <DropdownMenuItem
@@ -1537,6 +1550,13 @@ export function SessionHeaderMenu({
               )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {publicShareWorkspaceId && publicShareSessionId === session.id && (
+        <SessionShareDialog
+          workspaceId={publicShareWorkspaceId}
+          session={session}
+          onClose={() => setPublicShareSessionId(null)}
+        />
+      )}
       <ReviewAgentSetupDialog
         open={reviewSetupOpen}
         onOpenChange={setReviewSetupOpen}
@@ -1974,6 +1994,7 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+    const publicSharingAvailable = useAppCapability('teamSharing');
     const currentUser = useAtomValue(userAtom);
     const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
@@ -3466,8 +3487,13 @@ export const SessionChatInterface = memo(
       isSessionWorking,
       isGoalActive,
     });
-    const canStopAgent =
-      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
+    const canStopAgent = canStopAgentEnabled({
+      isContextCompacting,
+      isSessionActive,
+      activeAssistantTurnId: activeAssistantTurnId ?? null,
+      isGoalActive,
+      canPauseGoal,
+    });
     const latestCompletedProposedPlan = useMemo(
       () => latestProposedPlanFromFacts(turnFacts.ordered),
       [turnFacts.ordered]
@@ -5809,6 +5835,8 @@ export const SessionChatInterface = memo(
     );
     const headerMenuNode = (
       <SessionHeaderMenu
+        key={`${workspaceId}:${session.id}`}
+        publicShareWorkspaceId={publicSharingAvailable && workspaceId ? workspaceId : undefined}
         session={session}
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}

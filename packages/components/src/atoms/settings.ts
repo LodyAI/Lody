@@ -4,10 +4,7 @@ import { CONVERSATION_VIEW_STORAGE_KEY } from '@/lib/conversation-view/feature-f
 import type { MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
-import {
-  SETTINGS_DEFAULT_TAB,
-  type SettingsTabId,
-} from '@/components/settings/settings-tabs';
+import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
@@ -132,10 +129,7 @@ export const electronSessionCompletionNotificationsEnabledAtom = atomWithStorage
 // (e.g. an unwrapped Markdown paragraph) stays readable without horizontal
 // scrolling — especially on mobile. Shared by every SessionMonacoTextViewer
 // mount via the viewer reading this atom directly.
-export const fileViewerWordWrapAtom = atomWithStorage<boolean>(
-  'lody-file-viewer-word-wrap',
-  true
-);
+export const fileViewerWordWrapAtom = atomWithStorage<boolean>('lody-file-viewer-word-wrap', true);
 
 // Mobile composer keyboard return key behavior.
 export const mobileKeyboardActionAtom = atomWithStorage<MobileKeyboardAction>(
@@ -202,9 +196,7 @@ export function readTasksFeatureEnabledFromStorage(): boolean {
     return false;
   }
   try {
-    const developerMode = JSON.parse(
-      localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false'
-    );
+    const developerMode = JSON.parse(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false');
     const tasksBeta = JSON.parse(localStorage.getItem(TASKS_BETA_STORAGE_KEY) ?? 'false');
     return developerMode === true && tasksBeta === true;
   } catch {
@@ -256,6 +248,19 @@ export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
 /** The single gate for showing the unfinished mobile Inbox entry. */
 export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
+);
+
+// Developer-only opt-in. Turning Developer mode off retains the local choice.
+export const promptShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-prompt-shortcuts-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/** Shared gate for Shortcut settings, discovery and the workspace runtime. */
+export const promptShortcutsFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(promptShortcutsBetaEnabledAtom)
 );
 
 /** localStorage keys for the experimental features gate. */

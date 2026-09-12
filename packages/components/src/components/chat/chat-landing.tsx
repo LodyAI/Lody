@@ -956,16 +956,11 @@ function WorkspaceChatLanding({
   const analyticsProjectKind = contextType === 'chat' ? null : contextType;
 
   // ── Prompt state (shared across contexts) ──
-  const chatLandingStateKey = userId ?? null;
+  const chatLandingStateOwnerKey = userId ?? null;
+  const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateOwnerKey, workspaceSlug);
   const [sessionState, setSessionState] = useAtom(
-    chatLandingSessionStateAtomFamily(chatLandingStateKey)
+    chatLandingSessionStateAtomFamily(chatLandingDraftKey)
   );
-  /**
-   * Scope for the attachment draft and the reserved session id. Unlike the
-   * prompt text this is workspace-scoped, because an uploaded image/file is
-   * addressable only inside the workspace it was uploaded to.
-   */
-  const chatLandingDraftKey = buildChatLandingDraftKey(chatLandingStateKey, workspaceSlug);
   const prompt = sessionState.prompt;
   const [draftActivityRevision, setDraftActivityRevision] = useState(0);
   const pastedTextDrafts = useMemo(
@@ -1338,7 +1333,7 @@ function WorkspaceChatLanding({
       return;
     }
 
-    const scopedResetKey = `${chatLandingStateKey ?? 'anonymous'}:${resetDraftKey}`;
+    const scopedResetKey = `${chatLandingDraftKey}:${resetDraftKey}`;
     if (draftStore.get(appliedResetKeyAtom) === scopedResetKey) {
       return;
     }
@@ -1352,7 +1347,7 @@ function WorkspaceChatLanding({
     resetDraftSessionId();
   }, [
     appliedResetKeyAtom,
-    chatLandingStateKey,
+    chatLandingDraftKey,
     clearPendingFiles,
     clearPendingImages,
     draftStore,

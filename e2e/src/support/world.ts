@@ -16,6 +16,10 @@ import { SessionReadStateFixture } from './fixtures/session-read-state-fixture.j
 import { SessionReadStatePage } from './pages/session-read-state-page.js';
 import { SessionForkFixture } from './fixtures/session-fork-fixture.js';
 import { SessionForkPage, type SessionForkResources } from './pages/session-fork-page.js';
+import {
+  SessionRelationLifecyclePage,
+  type SessionRelationLifecycleResources,
+} from './pages/session-relation-lifecycle-page.js';
 import { ProjectLifecyclePage } from './pages/project-lifecycle-page.js';
 import { ProjectReopenFixture } from './fixtures/project-reopen-fixture.js';
 import { ProjectReopenPage } from './pages/project-reopen-page.js';
@@ -37,6 +41,7 @@ export class LodyWorld extends World {
   sessionManagementPage: SessionManagementPage | null = null;
   sessionReadStatePage: SessionReadStatePage | null = null;
   sessionForkPage: SessionForkPage | null = null;
+  sessionRelationLifecyclePage: SessionRelationLifecyclePage | null = null;
   projectLifecyclePage: ProjectLifecyclePage | null = null;
   projectReopenPage: ProjectReopenPage | null = null;
   agentRolePage: AgentRolePage | null = null;
@@ -55,6 +60,7 @@ export class LodyWorld extends World {
   mcpSessionEvent: McpCatalogAcpEvent | null = null;
   workResources: WorkSessionResources | null = null;
   sessionForkResources: SessionForkResources | null = null;
+  sessionRelationLifecycleResources: SessionRelationLifecycleResources | null = null;
   agentRoleResources: AgentRoleResources | null = null;
 
   prepare(tags: readonly string[]): void {
@@ -151,6 +157,7 @@ export class LodyWorld extends World {
     await this.onboarding.waitForLocalBootstrap();
     this.sessionForkFixture = await SessionForkFixture.create();
     this.sessionForkPage = new SessionForkPage(this.harness.page, this.sessionForkFixture);
+    this.sessionRelationLifecyclePage = new SessionRelationLifecyclePage(this.harness.page);
     await this.onboarding.skipConfigurationAndEnterProduct();
     await this.sessionForkPage.configureAgentFromSettings();
   }

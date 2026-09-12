@@ -19,8 +19,9 @@ interface MentionItemContext extends ItemData {}
 const [MentionItemProvider, useMentionItemContext] =
   createContext<MentionItemContext>(ITEM_NAME);
 
-interface MentionItemProps
-  extends React.ComponentPropsWithoutRef<typeof Primitive.div> {
+interface MentionItemProps extends React.ComponentPropsWithoutRef<
+  typeof Primitive.div
+> {
   /**
    * The value of the item.
    *
@@ -40,6 +41,7 @@ interface MentionItemProps
 
   /** Called when this item is committed as a mention by mouse or keyboard. */
   onMentionSelect?: () => void;
+  onMentionPrepare?: ItemData["onMentionPrepare"];
 
   /** Called when this item navigates to another mention-menu level. */
   onMentionNavigate?: () => void;
@@ -68,6 +70,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
       label: labelProp,
       disabled = false,
       onMentionSelect,
+      onMentionPrepare,
       onMentionNavigate,
       insertText,
       navigateText,
@@ -126,6 +129,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
         label,
         disabled: isDisabled,
         onMentionSelect: handleMentionSelect,
+        onMentionPrepare,
         onMentionNavigate: handleMentionNavigate,
         insertText,
         navigateText,
@@ -136,6 +140,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
       value,
       isDisabled,
       handleMentionSelect,
+      onMentionPrepare,
       handleMentionNavigate,
       context.onItemRegister,
       insertText,
@@ -153,6 +158,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
           role="option"
           id={id}
           aria-selected={isSelected}
+          aria-disabled={isDisabled || undefined}
           {...{ [DATA_ITEM_ATTR]: "" }}
           data-selected={isSelected ? "" : undefined}
           data-highlighted={
@@ -169,11 +175,11 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
             const selectionStart = inputElement.selectionStart ?? 0;
             const lastTriggerIndex = inputElement.value.lastIndexOf(
               context.trigger,
-              selectionStart,
+              selectionStart
             );
 
             if (lastTriggerIndex !== -1) {
-              context.onMentionAdd(value, lastTriggerIndex);
+              void context.onMentionAdd(value, lastTriggerIndex);
             }
 
             inputElement.focus();
@@ -194,7 +200,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
                 // prevent item from stealing focus from the input for both mouse and touch
                 event.preventDefault();
               }
-            },
+            }
           )}
           onPointerMove={composeEventHandlers(itemProps.onPointerMove, () => {
             if (isDisabled || !itemNode) return;
@@ -208,7 +214,7 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
         />
       </MentionItemProvider>
     );
-  },
+  }
 );
 
 MentionItem.displayName = ITEM_NAME;

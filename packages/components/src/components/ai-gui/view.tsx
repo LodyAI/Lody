@@ -149,6 +149,7 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
+import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
 import { resolvePermissionRecord } from './permission-record';
 import {
@@ -4699,7 +4700,16 @@ const ImagePreviewDialog = ({
   );
 };
 
-const UserImageBlock = ({
+const UserImageBlock = (props: Parameters<typeof WorkspaceUserImageBlock>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderImage(props.entry)}</>
+  ) : (
+    <WorkspaceUserImageBlock {...props} />
+  );
+};
+
+const WorkspaceUserImageBlock = ({
   entry,
   onPreviewRequest,
   variant = 'full',
@@ -4982,7 +4992,16 @@ export const ImageGroupBubble = ({
  * one list (decision #3) at the call site; this component handles however many
  * it is handed.
  */
-export const SessionFileGroup = ({
+export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderFiles(props.files, props.sessionId)}</>
+  ) : (
+    <WorkspaceSessionFileGroup {...props} />
+  );
+};
+
+const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -6510,6 +6529,7 @@ const PermissionRequestBlock = ({
   /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
   collapseByDefault?: boolean;
 }) => {
+  const readonly = useContext(SessionReadonlyContext);
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
   const { respondToPermission, isReady } = usePermissionResponse();
@@ -6529,6 +6549,14 @@ const PermissionRequestBlock = ({
 
   if (!permission) {
     return null;
+  }
+
+  if (readonly && !permission.outcome) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        {t('sharing.permissionPending', 'Waiting for the author')}
+      </div>
+    );
   }
 
   if (askQuestionMeta && readonlyAnswers) {
