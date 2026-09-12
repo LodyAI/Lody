@@ -43,6 +43,7 @@ import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mo
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Switch } from '@lody/ui/switch';
+import { Table, type TableColumn } from '@lody/ui/table';
 import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CompactRow, CompactSection } from './compact-layout';
@@ -75,23 +76,22 @@ type ReviewerMachineConfigTableProps = {
   onOpenAgentSettings: () => void;
 };
 
-type ReviewerMachineRowProps = Omit<
+type ReviewerAgentCellProps = Omit<
   ReviewerMachineConfigTableProps,
-  'machines' | 'reviewerConfigs' | 'loading' | 'standalone'
+  'machines' | 'reviewerConfigs' | 'loading' | 'standalone' | 'onlineMachineIds'
 > & {
   machine: MachineViewMeta;
   reviewerConfig: MachineReviewerConfig | undefined;
 };
 
-function ReviewerMachineRow({
+function ReviewerAgentCell({
   machine,
   agentConfigs,
   reviewerConfig,
-  onlineMachineIds,
   onChange,
   onDelete,
   onOpenAgentSettings,
-}: ReviewerMachineRowProps) {
+}: ReviewerAgentCellProps) {
   const { t } = useTranslation();
   const machineAgentConfigs = useMemo(
     () =>
@@ -127,7 +127,6 @@ function ReviewerMachineRow({
   const selectedModeId = reviewerConfig?.reviewer.modeId ?? safeDefaultModeId;
   const selectedModelId = reviewerConfig?.reviewer.modelId ?? selectorOptions.defaultModelId;
   const configured = isMachineReviewerConfigUsable(reviewerConfig, machine.id, machineAgentConfigs);
-  const online = onlineMachineIds.has(machine.id);
 
   const commitReviewer = useCallback(
     (reviewer: MachineReviewerConfig['reviewer']) => {
@@ -175,146 +174,147 @@ function ReviewerMachineRow({
     : null;
 
   return (
-    <div
-      role="row"
-      className="flex flex-col gap-2 px-3 py-2.5 sm:grid sm:grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] sm:items-center sm:gap-4"
-    >
-      <div role="cell" className="flex min-w-0 items-center gap-2.5">
-        <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <div className="min-w-0">
-          <p className="truncate font-medium leading-tight text-foreground">{machine.name}</p>
-          <p className="truncate text-[11px] leading-tight text-muted-foreground">
-            {online
-              ? t('settings.review.machineOnline', 'Online')
-              : t('settings.review.machineOffline', 'Offline')}
-            {machine.os ? ` · ${machine.os}` : ''}
-          </p>
-        </div>
-      </div>
-
-      <div role="cell" className="min-w-0 sm:pl-4">
-        {machineAgentConfigs.length === 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">
-              {t('settings.review.noAgentsOnMachine', 'No agents are configured on this machine.')}
-            </span>
-            <div className="flex items-center gap-1">
-              <Button variant="secondary" size="small" onClick={onOpenAgentSettings}>
-                {t('settings.review.configureAgents', 'Configure agents')}
+    <div className="min-w-0">
+      {machineAgentConfigs.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            {t('settings.review.noAgentsOnMachine', 'No agents are configured on this machine.')}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button variant="secondary" size="small" onClick={onOpenAgentSettings}>
+              {t('settings.review.configureAgents', 'Configure agents')}
+            </Button>
+            {reviewerConfig ? (
+              <Button
+                type="button"
+                variant="ghost"
+                title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
+                aria-label={t(
+                  'settings.review.removeConfiguration',
+                  'Remove reviewer configuration'
+                )}
+                size="small"
+                icon
+                onClick={() => onDelete(machine.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
-              {reviewerConfig ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
-                  aria-label={t(
-                    'settings.review.removeConfiguration',
-                    'Remove reviewer configuration'
-                  )}
-                  size="small"
-                  icon
-                  onClick={() => onDelete(machine.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-        ) : (
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <DesktopRunConfigMenu
-              agentSelection={selection}
-              allowedMachineIds={[machine.id]}
-              availableAgentConfigs={machineAgentConfigs}
-              showAgentNameInTrigger
-              emptyAgentLabel={
-                reviewerConfig
-                  ? t('settings.review.agentUnavailable', 'Choose another reviewer')
-                  : t('settings.review.chooseReviewer', 'Choose reviewer')
-              }
-              onAgentConfigChange={handleAgentChange}
-              modelOptions={selectorOptions.modelOptions}
-              selectedModelId={selectedModelId}
-              onModelChange={
-                reviewerConfig
-                  ? (modelId) => commitReviewer({ ...reviewerConfig.reviewer, modelId })
-                  : undefined
-              }
-              configOptionSelectors={selectorOptions.configOptionSelectors}
-              configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-              onConfigOptionChange={
-                reviewerConfig
-                  ? (configId: string, value: AcpConfigOptionValue) =>
-                      commitReviewer({
-                        ...reviewerConfig.reviewer,
-                        configOptionValues: {
-                          ...reviewerConfig.reviewer.configOptionValues,
-                          [configId]: value,
-                        },
-                      })
-                  : undefined
-              }
-            />
-
-            {selectedAgent ? (
-              <DesktopPermissionModeButton
-                modeOptions={selectorOptions.modeOptions}
-                selectedModeId={selectedModeId}
-                onModeChange={(modeId) => {
-                  if (reviewerConfig) {
-                    commitReviewer({ ...reviewerConfig.reviewer, modeId });
-                  }
-                }}
-                configOptionSelectors={selectorOptions.configOptionSelectors}
-                configOptionValues={reviewerConfig?.reviewer.configOptionValues}
-                onConfigOptionChange={(configId, value) => {
-                  if (reviewerConfig) {
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <DesktopRunConfigMenu
+            agentSelection={selection}
+            allowedMachineIds={[machine.id]}
+            availableAgentConfigs={machineAgentConfigs}
+            showAgentNameInTrigger
+            emptyAgentLabel={
+              reviewerConfig
+                ? t('settings.review.agentUnavailable', 'Choose another reviewer')
+                : t('settings.review.chooseReviewer', 'Choose reviewer')
+            }
+            onAgentConfigChange={handleAgentChange}
+            modelOptions={selectorOptions.modelOptions}
+            selectedModelId={selectedModelId}
+            onModelChange={
+              reviewerConfig
+                ? (modelId) => commitReviewer({ ...reviewerConfig.reviewer, modelId })
+                : undefined
+            }
+            configOptionSelectors={selectorOptions.configOptionSelectors}
+            configOptionValues={reviewerConfig?.reviewer.configOptionValues}
+            onConfigOptionChange={
+              reviewerConfig
+                ? (configId: string, value: AcpConfigOptionValue) =>
                     commitReviewer({
                       ...reviewerConfig.reviewer,
                       configOptionValues: {
                         ...reviewerConfig.reviewer.configOptionValues,
                         [configId]: value,
                       },
-                    });
-                  }
-                }}
-              />
-            ) : null}
+                    })
+                : undefined
+            }
+          />
 
-            <div className="ml-auto flex items-center gap-1">
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1 text-[11px]',
-                  configured ? 'text-muted-foreground' : 'text-status-warning'
+          {selectedAgent ? (
+            <DesktopPermissionModeButton
+              modeOptions={selectorOptions.modeOptions}
+              selectedModeId={selectedModeId}
+              onModeChange={(modeId) => {
+                if (reviewerConfig) {
+                  commitReviewer({ ...reviewerConfig.reviewer, modeId });
+                }
+              }}
+              configOptionSelectors={selectorOptions.configOptionSelectors}
+              configOptionValues={reviewerConfig?.reviewer.configOptionValues}
+              onConfigOptionChange={(configId, value) => {
+                if (reviewerConfig) {
+                  commitReviewer({
+                    ...reviewerConfig.reviewer,
+                    configOptionValues: {
+                      ...reviewerConfig.reviewer.configOptionValues,
+                      [configId]: value,
+                    },
+                  });
+                }
+              }}
+            />
+          ) : null}
+
+          <div className="ml-auto flex items-center gap-1">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 text-[11px]',
+                configured ? 'text-muted-foreground' : 'text-status-warning'
+              )}
+            >
+              {configured ? <Check className="h-3 w-3" aria-hidden="true" /> : null}
+              {configured
+                ? t('settings.review.configured', 'Configured')
+                : reviewerConfig
+                  ? t('settings.review.agentRemoved', 'Reviewer unavailable')
+                  : t('settings.review.notConfigured', 'Not configured')}
+            </span>
+
+            {reviewerConfig ? (
+              <Button
+                type="button"
+                variant="ghost"
+                title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
+                aria-label={t(
+                  'settings.review.removeConfiguration',
+                  'Remove reviewer configuration'
                 )}
+                size="small"
+                icon
+                onClick={() => onDelete(machine.id)}
               >
-                {configured ? <Check className="h-3 w-3" aria-hidden="true" /> : null}
-                {configured
-                  ? t('settings.review.configured', 'Configured')
-                  : reviewerConfig
-                    ? t('settings.review.agentRemoved', 'Reviewer unavailable')
-                    : t('settings.review.notConfigured', 'Not configured')}
-              </span>
-
-              {reviewerConfig ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  title={t('settings.review.removeConfiguration', 'Remove reviewer configuration')}
-                  aria-label={t(
-                    'settings.review.removeConfiguration',
-                    'Remove reviewer configuration'
-                  )}
-                  size="small"
-                  icon
-                  onClick={() => onDelete(machine.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              ) : null}
-            </div>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
           </div>
-        )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One machine, and whether it is reachable — the column the records are named by. */
+function ReviewerMachineCell({ machine, online }: { machine: MachineViewMeta; online: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="truncate font-medium leading-tight text-foreground">{machine.name}</p>
+        <p className="truncate text-[11px] leading-tight text-muted-foreground">
+          {online
+            ? t('settings.review.machineOnline', 'Online')
+            : t('settings.review.machineOffline', 'Offline')}
+          {machine.os ? ` · ${machine.os}` : ''}
+        </p>
       </div>
     </div>
   );
@@ -334,48 +334,48 @@ export function ReviewerMachineConfigTable({
 }: ReviewerMachineConfigTableProps) {
   const { t } = useTranslation();
 
-  return (
-    <div
-      role="table"
-      aria-label={t('settings.review.machineTableLabel', 'Reviewer configuration by machine')}
-      className={cn(
-        'divide-y divide-border/60 overflow-hidden',
-        standalone && 'mx-3 rounded-2xl border border-border/40 bg-card'
-      )}
-    >
-      <div
-        role="row"
-        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid"
-      >
-        <div role="columnheader">{t('settings.review.machineColumn', 'Machine')}</div>
-        <div role="columnheader" className="pl-4">
-          {t('settings.review.reviewerColumn', 'Reviewer agent')}
-        </div>
-      </div>
+  const columns: TableColumn<MachineViewMeta>[] = [
+    {
+      key: 'machine',
+      header: t('settings.review.machineColumn', 'Machine'),
+      width: '32%',
+      wrap: true,
+      cell: (machine) => (
+        <ReviewerMachineCell machine={machine} online={onlineMachineIds.has(machine.id)} />
+      ),
+    },
+    {
+      key: 'reviewer',
+      header: t('settings.review.reviewerColumn', 'Reviewer agent'),
+      wrap: true,
+      cell: (machine) => (
+        <ReviewerAgentCell
+          machine={machine}
+          agentConfigs={agentConfigs}
+          reviewerConfig={reviewerConfigs.get(machine.id)}
+          onChange={onChange}
+          onDelete={onDelete}
+          onOpenAgentSettings={onOpenAgentSettings}
+        />
+      ),
+    },
+  ];
 
-      {loading ? (
-        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-          {t('settings.review.loadingMachines', 'Loading reviewer configurations…')}
-        </div>
-      ) : machines.length === 0 ? (
-        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-          {t('settings.review.noMachines', 'No machines are available in this workspace.')}
-        </div>
-      ) : (
-        machines.map((machine) => (
-          <ReviewerMachineRow
-            key={machine.id}
-            machine={machine}
-            agentConfigs={agentConfigs}
-            reviewerConfig={reviewerConfigs.get(machine.id)}
-            onlineMachineIds={onlineMachineIds}
-            onChange={onChange}
-            onDelete={onDelete}
-            onOpenAgentSettings={onOpenAgentSettings}
-          />
-        ))
+  return (
+    <Table
+      aria-label={t('settings.review.machineTableLabel', 'Reviewer configuration by machine')}
+      columns={columns}
+      rows={loading ? [] : machines}
+      rowKey={(machine) => machine.id}
+      containerClassName={cn(
+        standalone && 'mx-3 rounded-2xl border border-border/40 bg-card overflow-hidden'
       )}
-    </div>
+      empty={
+        loading
+          ? t('settings.review.loadingMachines', 'Loading reviewer configurations…')
+          : t('settings.review.noMachines', 'No machines are available in this workspace.')
+      }
+    />
   );
 }
 

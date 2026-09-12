@@ -177,17 +177,42 @@ receives that value under the name the field root gave it.
 A surface may also show records rather than one thing at a time. That is rows
 and columns, and it is the one part of this system with no surface of its own:
 no fill, no shadow, no rounded edge, because it is rows on whatever the surface
-around it already was, and a panel holding one keeps its own edges. The one
-edge it draws is the line a list is allowed, between one row and the next; the
-row of column names takes it too, because the row after it is the first record,
-and the last record draws none. The rows answer the pointer only where pressing
-one does something, so a table of facts is read rather than operated, and the
-row that holds a value keeps its mark while the pointer is elsewhere — a mark
-and nothing more, because what lets a person select rows is a control inside
-one, which is both what they press and what tells a screen reader what happened.
-A column can be one the records are ordered by, and then its name is a control,
-it carries the mark of which way round it is, and that direction is stated once
-where both a sighted person and a screen reader read the same fact.
+around it already was, and a panel holding one keeps its own edges. The one edge
+it draws is the line a list is allowed, between one row and the next; the row of
+column names takes it too, because the row after it is the first record, and the
+last record draws none.
+
+A column is stated once. What a column is — its name, what it holds for one
+record, how much room it takes, whether its values are figures, whether the
+records can be ordered by it, what a total under it would say — is one
+description, and the row of names and the cells beneath it are two readings of
+it rather than two things a surface keeps in step. That is what lets the
+composition answer for the rest of a table: it can give a column a width the
+surface never writes a cell for, admit across every column at once that there is
+nothing to show, and say which column the records are ordered by in one place,
+so two columns claiming that at once is not a state that can be described. It
+does not reorder the records themselves — a surface that had already ordered
+them, on a server or across pages, would be overruled — so what it owns is the
+control, the mark of which way round it is, and the one place that fact is
+stated for a person who cannot see the mark.
+
+The rows answer the pointer only where pressing one does something, so a table
+of facts is read rather than operated; a row that can be pressed is reachable
+and usable from the keyboard as well, and says where the keyboard is. Records a
+surface would act on together are picked with a control inside the row, which is
+both what a person presses and what tells a screen reader what happened, with
+the row marked so they can be found again; the control over that column reports
+none, some, or all of them without being told which, and picking them all keeps
+the records a person took on pages that are not on screen.
+
+A table may be told how tall it is allowed to be, and then the row of column
+names stays while the records move under it. That row is no longer a row but a
+band over them, so it takes the surface a band over the page takes: without one,
+the records are drawn through the names. And a table narrower than its columns
+need is not a table with a bar to drag: it is a list of records, each one a
+stack of names and values, with each value carrying the name from the row that
+is no longer above it. Narrow means the table's own width rather than the
+window's, because the same table is narrow in a side panel on a wide screen.
 
 What a list that did not fit offers next belongs with it: a way to the records
 that are not on screen. It is one control rather than parts a surface

@@ -133,12 +133,16 @@ export type {
   TableAlign,
   TableCaptionProps,
   TableCellProps,
+  TableColumn,
   TableColumnHeaderProps,
+  TableLabels,
+  TableProps,
   TableRootProps,
   TableRowProps,
   TableSectionProps,
   TableSize,
   TableSort,
+  TableSorting,
 } from './table/table';
 export { Tabs } from './disclosure/tabs';
 export type {

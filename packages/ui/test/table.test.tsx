@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Pagination, pageWindow } from '../src/table/pagination';
 import { tableSurface as surface } from '../src/table/surface';
-import { Table } from '../src/table/table';
+import { Table, type TableColumn, type TableSorting } from '../src/table/table';
 import { all, classesOf, click, mount, one, press, step, typeInto, type Mounted } from './dom';
 
 /** See `menu.test.tsx`: the same loosened call the primitives make. */
@@ -22,123 +22,68 @@ afterEach(async () => {
   mounted = undefined;
 });
 
-function Records({ interactive = false }: { interactive?: boolean } = {}) {
-  return (
-    <Table.Root interactive={interactive}>
-      <Table.Head>
-        <Table.Row>
-          <Table.ColumnHeader>Session</Table.ColumnHeader>
-          <Table.ColumnHeader numeric>Turns</Table.ColumnHeader>
-        </Table.Row>
-      </Table.Head>
-      <Table.Body>
-        <Table.Row>
-          <Table.Cell>Worktree setup</Table.Cell>
-          <Table.Cell numeric>12</Table.Cell>
-        </Table.Row>
-        <Table.Row selected>
-          <Table.Cell>Review the diff</Table.Cell>
-          <Table.Cell numeric>4</Table.Cell>
-        </Table.Row>
-      </Table.Body>
-    </Table.Root>
-  );
+interface Session {
+  id: string;
+  name: string;
+  agent: string;
+  turns: number;
 }
 
+const SESSIONS: Session[] = [
+  { id: 'a', name: 'Worktree setup', agent: 'Claude', turns: 12 },
+  { id: 'b', name: 'Review the diff', agent: 'Codex', turns: 4 },
+  { id: 'c', name: 'Rename the package', agent: 'Claude', turns: 31 },
+];
+
+const COLUMNS: TableColumn<Session>[] = [
+  { key: 'name', header: 'Session', cell: (row) => row.name, width: 220 },
+  { key: 'agent', header: 'Agent', cell: (row) => row.agent },
+  { key: 'turns', header: 'Turns', cell: (row) => row.turns, numeric: true, sortable: true },
+];
+
+const key = (row: Session) => row.id;
+
 describe('Table', () => {
-  test('a head row keeps its line and the last record does not', async () => {
-    // The line is the one edge the rules give a list, and it goes to the *next*
-    // row: under the head that is the first record, and under the last record
-    // there is none. Only the body rows take the reading that can end.
-    mounted = await mount(<Records />);
-    const head = one('thead tr');
-    const body = all('tbody tr');
-    expect(carries(head, surface.row)).toBe(true);
-    expect(carries(head, surface.bodyRow)).toBe(false);
-    for (const row of body) expect(carries(row, surface.bodyRow)).toBe(true);
+  test('states each column once, so a head and a row cannot drift', async () => {
+    // The whole of the design: a column is one object, and the name in the head
+    // and the cell under it are two readings of it. The two surfaces in this
+    // repository that draw a table today write their column template twice, by
+    // hand, and one of them writes every cell a second time.
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    const headers = all('th').map((cell) => cell.textContent);
+    expect(headers).toEqual(['Session', 'Agent', 'Turns']);
+    for (const row of all('tbody tr')) {
+      expect(row.querySelectorAll('td')).toHaveLength(COLUMNS.length);
+    }
+    // A width is stated on a `<col>`, so the name and every cell under it take
+    // it from one place — the cells being ones the caller never writes.
+    expect(all('col')).toHaveLength(COLUMNS.length);
+    expect(one('col').getAttribute('style')).toContain('220px');
   });
 
-  test('the pointer is answered only where pressing a row does something', async () => {
-    // The package's first table lit every row on hover, and its one caller had
-    // to turn that off again with a class. A table of facts is read, not
-    // operated, so the hover is the table's decision and its default is off.
-    mounted = await mount(<Records />);
-    expect(carries(one('tbody tr'), surface.interactiveRow)).toBe(false);
-    await mounted.unmount();
-
-    mounted = await mount(<Records interactive />);
-    expect(carries(one('tbody tr'), surface.interactiveRow)).toBe(true);
-    // A head row is not a record, so it does not light up with them.
-    expect(carries(one('thead tr'), surface.interactiveRow)).toBe(false);
-  });
-
-  test('a selected row is a fill and nothing it claims to a screen reader', async () => {
-    // `aria-selected` belongs to a row in a grid. A table that lets a person
-    // select rows puts a Checkbox in one, and that is what announces it.
-    mounted = await mount(<Records interactive />);
-    const selected = all('tbody tr')[1];
-    expect(carries(selected, surface.selectedRow)).toBe(true);
-    expect(selected.getAttribute('data-selected')).toBe('');
-    expect(selected.hasAttribute('aria-selected')).toBe(false);
-  });
-
-  test('the size is stated once on the table and reaches every cell', async () => {
-    // A row's height and a cell's padding are one decision. Stated per cell,
-    // two of them could disagree inside one row.
+  test('is ordered by one column at a time, and never reorders the rows itself', async () => {
+    const taken: TableSorting[] = [];
+    const sort: TableSorting = { column: 'turns', direction: 'ascending' };
     mounted = await mount(
-      <Table.Root size="large">
-        <Table.Body>
-          <Table.Row>
-            <Table.Cell>Worktree setup</Table.Cell>
-          </Table.Row>
-        </Table.Body>
-      </Table.Root>
+      <Table
+        columns={[...COLUMNS, { key: 'age', header: 'Age', cell: () => '2d', sortable: true }]}
+        rows={SESSIONS}
+        rowKey={key}
+        sort={sort}
+        onSortChange={(next) => taken.push(next)}
+        // Stacking is what puts a column's name inside its own cells; this test
+        // is about the order of the rows, so it reads them as plain columns.
+        stack={false}
+      />
     );
-    expect(one('table').getAttribute('data-size')).toBe('large');
-    expect(carries(one('td'), surface.cellLarge)).toBe(true);
-    expect(carries(one('td'), surface.cellMedium)).toBe(false);
-  });
-
-  test('figures are aligned to the end of their column without being told twice', async () => {
-    // Numbers are read down a column rather than across a line, so a numeric
-    // column takes tabular digits and the end of the column at once — and a
-    // caller who wants one of those without the other still says so.
-    mounted = await mount(<Records />);
-    const [, turns] = all('tbody tr')[0].querySelectorAll('td');
-    expect(carries(turns, surface.numeric, surface.alignEnd)).toBe(true);
-    expect(carries(all('tbody tr')[0].querySelectorAll('td')[0], surface.alignStart)).toBe(true);
-  });
-
-  test('a column is only a control where the table can be ordered by it', async () => {
-    const taken: string[] = [];
-    mounted = await mount(
-      <Table.Root>
-        <Table.Head>
-          <Table.Row>
-            <Table.ColumnHeader>Session</Table.ColumnHeader>
-            <Table.ColumnHeader
-              sort="ascending"
-              onSortChange={(next) => taken.push(`turns:${next}`)}
-            >
-              Turns
-            </Table.ColumnHeader>
-            <Table.ColumnHeader onSortChange={(next) => taken.push(`age:${next}`)}>
-              Age
-            </Table.ColumnHeader>
-          </Table.Row>
-        </Table.Head>
-        <Table.Body />
-      </Table.Root>
-    );
-    const [session, turns, age] = all('th');
+    const [name, agent, turns, age] = all('th');
     // A column with no way to take it says nothing about sorting at all; a
-    // sortable one states the direction where a screen reader reads it.
-    expect(session.hasAttribute('aria-sort')).toBe(false);
-    expect(session.querySelector('button')).toBeNull();
+    // sortable one states the direction where a screen reader reads it, and
+    // only one column can be the one wearing the arrow.
+    expect(name.hasAttribute('aria-sort')).toBe(false);
+    expect(agent.hasAttribute('aria-sort')).toBe(false);
     expect(turns.getAttribute('aria-sort')).toBe('ascending');
     expect(age.getAttribute('aria-sort')).toBe('none');
-    // The arrow is the part's, so a sortable header cannot be assembled without
-    // one — and the column that is not taken carries no arrow to misread.
     expect(turns.querySelector('svg')).not.toBeNull();
     expect(age.querySelector('svg')).toBeNull();
 
@@ -146,7 +91,249 @@ describe('Table', () => {
     // starts ascending, because a person sorting by a name means A first.
     await click(turns.querySelector('button')!);
     await click(age.querySelector('button')!);
-    expect(taken).toEqual(['turns:descending', 'age:ascending']);
+    expect(taken).toEqual([
+      { column: 'turns', direction: 'descending' },
+      { column: 'age', direction: 'ascending' },
+    ]);
+
+    // The rows are the surface's: a server sorts, a comparator breaks ties, a
+    // page is one slice of many. The table owns the control, not the data.
+    expect(all('tbody tr').map((row) => row.querySelector('td')?.textContent)).toEqual([
+      'Worktree setup',
+      'Review the diff',
+      'Rename the package',
+    ]);
+  });
+
+  test('derives the box that takes every row, mixed state and all', async () => {
+    const taken: string[][] = [];
+    const render = (selected: string[]) => (
+      <Table
+        columns={COLUMNS}
+        rows={SESSIONS}
+        rowKey={key}
+        selected={selected}
+        onSelectedChange={(next) => taken.push(next)}
+        rowLabel={(row) => `Select ${row.name}`}
+      />
+    );
+
+    mounted = await mount(render([]));
+    const head = () => one('thead [role="checkbox"]');
+    expect(head().getAttribute('aria-checked')).toBe('false');
+    // A table that lets a person pick rows puts a box in one, because that is
+    // both what they press and what a screen reader is told about.
+    expect(all('tbody [role="checkbox"]')).toHaveLength(3);
+    expect(all('tbody [role="checkbox"]')[0].getAttribute('aria-label')).toBe(
+      'Select Worktree setup'
+    );
+    await click(head());
+    expect(taken).toEqual([['a', 'b', 'c']]);
+    await mounted.unmount();
+
+    mounted = await mount(render(['b']));
+    // Some, not all: the head says mixed rather than picking a side.
+    expect(head().getAttribute('aria-checked')).toBe('mixed');
+    expect(carries(all('tbody tr')[1], surface.selectedRow)).toBe(true);
+    expect(carries(all('tbody tr')[0], surface.selectedRow)).toBe(false);
+    await mounted.unmount();
+
+    mounted = await mount(render(['a', 'b', 'c']));
+    expect(head().getAttribute('aria-checked')).toBe('true');
+    await click(head());
+    // All of them held, so pressing it clears them.
+    expect(taken.at(-1)).toEqual([]);
+  });
+
+  test('a selection reaching past the rows on screen survives a select-all', async () => {
+    // The box in the head answers for the rows it is showing. A table holding
+    // one page of a long selection must not drop the pages already taken.
+    const taken: string[][] = [];
+    mounted = await mount(
+      <Table
+        columns={COLUMNS}
+        rows={SESSIONS.slice(0, 2)}
+        rowKey={key}
+        selected={['z']}
+        onSelectedChange={(next) => taken.push(next)}
+      />
+    );
+    await click(one('thead [role="checkbox"]'));
+    expect(taken).toEqual([['z', 'a', 'b']]);
+  });
+
+  test('says there is nothing across every column, and keeps the names', async () => {
+    mounted = await mount(
+      <Table
+        columns={COLUMNS}
+        rows={[]}
+        rowKey={key}
+        selected={[]}
+        onSelectedChange={() => {}}
+        empty="No sessions yet"
+      />
+    );
+    // Only the table knows how many columns to cross, and the selection column
+    // is one of them. The head stays, so a person can read what was coming.
+    expect(one('tbody td').getAttribute('colspan')).toBe('4');
+    expect(one('tbody td').textContent).toBe('No sessions yet');
+    expect(all('th')).toHaveLength(3);
+  });
+
+  test('a head stays only where the table owns a box to stay in', async () => {
+    // A head that scrolls out of its own box is not a thing a surface asks for,
+    // so the height and the sticky head are one decision rather than two props.
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    expect(carries(one('thead'), surface.headSticky)).toBe(false);
+    await mounted.unmount();
+
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} maxHeight={240} />);
+    expect(carries(one('thead'), surface.headSticky)).toBe(true);
+    // A head that stays is a band over the rows, so it takes a rung: without a
+    // fill the records are painted through the column names.
+    expect(carries(one('thead tr'), surface.headStickyRow)).toBe(true);
+    expect(one('table').parentElement?.getAttribute('style')).toContain('240px');
+  });
+
+  test('a row that can be pressed takes the keyboard, and the box in it keeps its own press', async () => {
+    const opened: string[] = [];
+    const picked: string[][] = [];
+    mounted = await mount(
+      <Table
+        columns={COLUMNS}
+        rows={SESSIONS}
+        rowKey={key}
+        selected={[]}
+        onSelectedChange={(next) => picked.push(next)}
+        onRowPress={(row) => opened.push(row.id)}
+      />
+    );
+    const rows = all('tbody tr');
+    expect(rows[0].getAttribute('tabindex')).toBe('0');
+    await click(rows[0]);
+    expect(opened).toEqual(['a']);
+
+    // Enter and Space press the row the way they press the button it stands for.
+    await step(() => rows[1].focus());
+    await press('Enter');
+    await step(() => rows[2].focus());
+    await press(' ');
+    expect(opened).toEqual(['a', 'b', 'c']);
+
+    // Opening a record and picking it are two actions in one row.
+    await click(all('tbody [role="checkbox"]')[0]);
+    expect(picked).toEqual([['a']]);
+    expect(opened).toEqual(['a', 'b', 'c']);
+  });
+
+  test('a table of facts takes no pointer and no tab stop', async () => {
+    // The package's first table lit every row on hover, and its one caller had
+    // to turn that off again with a class. A table is read, not operated,
+    // unless pressing a row does something.
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    const row = one('tbody tr');
+    expect(row.hasAttribute('tabindex')).toBe(false);
+    expect(carries(row, surface.hoverRow)).toBe(false);
+    expect(carries(row, surface.pressableRow)).toBe(false);
+  });
+
+  test('the last record draws no line to a next row there is none of', async () => {
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    const rows = all('tbody tr');
+    expect(carries(rows.at(-1)!, surface.bodyRowLast)).toBe(true);
+    // And every row before it draws one. A table that renders its own rows says
+    // which is last instead of reading `:last-child`, so the line it draws has
+    // to be stated too — the board caught this one as three rows with no line.
+    expect(carries(rows[0], surface.bodyRowLined)).toBe(true);
+    expect(carries(rows.at(-1)!, surface.bodyRowLined)).toBe(false);
+    // The head keeps its line: the row after it is the first record.
+    expect(carries(one('thead tr'), surface.headRow)).toBe(true);
+  });
+
+  test('draws a totals row only where a column says what goes in it', async () => {
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    expect(document.querySelector('tfoot')).toBeNull();
+    await mounted.unmount();
+
+    mounted = await mount(
+      <Table
+        columns={COLUMNS.map((column) =>
+          column.key === 'turns' ? { ...column, footer: 47 } : column
+        )}
+        rows={SESSIONS}
+        rowKey={key}
+      />
+    );
+    expect(one('tfoot').textContent).toContain('47');
+  });
+
+  test('a table too narrow for its columns becomes a stack of records', async () => {
+    // Every surface in this repository that draws a table today collapses on a
+    // narrow window by hand, and one of them renders every cell a second time
+    // to do it. The labels here are the head's own words, which is only
+    // reachable because the columns were stated — and the question is about the
+    // table's own box rather than the window, so a table in a narrow panel
+    // stacks on a wide screen.
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    expect(carries(one('thead'), surface.stackedHead)).toBe(true);
+    expect(carries(one('tbody tr'), surface.stackedRow)).toBe(true);
+    const labelled = one('tbody td');
+    expect(carries(labelled, surface.stackedCell)).toBe(true);
+    expect(labelled.textContent).toBe('SessionWorktree setup');
+    await mounted.unmount();
+
+    // A table whose columns must stay a grid says so, and keeps the scrollbar.
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} stack={false} />);
+    expect(carries(one('thead'), surface.stackedHead)).toBe(false);
+    expect(carries(one('tbody tr'), surface.stackedRow)).toBe(false);
+    expect(one('tbody td').textContent).toBe('Worktree setup');
+  });
+
+  test('the parts are there for a table that is not a list of records', async () => {
+    // A two-column list of facts is not a list of records, and the elements are
+    // exported for exactly that: the onboarding summary reads its labels as row
+    // headers rather than as a column with a name of its own.
+    mounted = await mount(
+      <Table.Root size="large">
+        <Table.Body>
+          <Table.Row>
+            <Table.ColumnHeader scope="row">Agent</Table.ColumnHeader>
+            <Table.Cell>Claude</Table.Cell>
+          </Table.Row>
+        </Table.Body>
+      </Table.Root>
+    );
+    expect(one('th').getAttribute('scope')).toBe('row');
+    expect(carries(one('td'), surface.cellLarge)).toBe(true);
+    // A row a caller assembled reads its own position, because it has no table
+    // above it counting the rows.
+    expect(carries(one('tbody tr'), surface.bodyRow)).toBe(true);
+  });
+
+  test('figures are aligned to the end of their column without being told twice', async () => {
+    mounted = await mount(<Table columns={COLUMNS} rows={SESSIONS} rowKey={key} />);
+    const cells = all('tbody tr')[0].querySelectorAll('td');
+    expect(carries(cells[2], surface.numeric, surface.alignEnd)).toBe(true);
+    expect(carries(cells[0], surface.alignStart)).toBe(true);
+    // And the name of a numeric column goes with them, which is the thing a
+    // caller writing the head and the body separately forgets.
+    expect(carries(all('th')[2], surface.numeric, surface.alignEnd)).toBe(true);
+  });
+
+  test('a value is one line unless the column holds sentences', async () => {
+    mounted = await mount(
+      <Table
+        columns={[
+          COLUMNS[0],
+          { key: 'note', header: 'Note', cell: () => 'a sentence', wrap: true },
+        ]}
+        rows={SESSIONS}
+        rowKey={key}
+      />
+    );
+    const cells = all('tbody tr')[0].querySelectorAll('td');
+    expect(carries(cells[0], surface.cellWrap)).toBe(false);
+    expect(carries(cells[1], surface.cellWrap)).toBe(true);
   });
 });
 

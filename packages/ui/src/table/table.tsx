@@ -1,322 +1,352 @@
 import * as stylex from '@stylexjs/stylex';
+import { useMemo, type ComponentProps, type ReactNode } from 'react';
+import { Checkbox } from '../field/checkbox';
+import { columnWidth, tableSurface as surface } from './surface';
 import {
-  createContext,
-  forwardRef,
-  useContext,
-  useMemo,
-  type ComponentProps,
-  type ReactNode,
-} from 'react';
-import { appendClassName } from '../internal/class-name';
-import { ChevronDownGlyph, ChevronUpGlyph } from '../internal/glyphs';
-import { tableSurface as surface } from './surface';
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableColumnHeader,
+  TableFoot,
+  TableHead,
+  TableRoot,
+  TableRow,
+  type TableAlign,
+  type TableCaptionProps,
+  type TableCellProps,
+  type TableColumnHeaderProps,
+  type TableRootProps,
+  type TableRowProps,
+  type TableSectionProps,
+  type TableSize,
+  type TableSort,
+} from './parts';
 
-/** The control ladder a row is on: 28, 32 and 36. */
-export type TableSize = 'small' | 'medium' | 'large';
+export type {
+  TableAlign,
+  TableCaptionProps,
+  TableCellProps,
+  TableColumnHeaderProps,
+  TableRootProps,
+  TableRowProps,
+  TableSectionProps,
+  TableSize,
+  TableSort,
+};
 
-/** Which way a sorted column is sorted, and `null` for a column that is not. */
-export type TableSort = 'ascending' | 'descending';
+/**
+ * One column, stated once.
+ *
+ * This is the whole of the design. A table's hard parts — how wide a column is,
+ * which way its values align, whether they are figures, whether the table can
+ * be ordered by it, what a totals row holds under it — are facts about a
+ * *column*, and a column that exists twice (a name in the head, a cell in every
+ * row) is a fact the caller has to keep in two places. Both surfaces in this
+ * repository that draw a table today write their column template as a literal
+ * `grid-cols-[…]` string in the header and again in the row, by hand; one of
+ * them writes every cell a second time for a narrow window. Stated here, the
+ * two cannot drift — and the table can answer for the rest: the width, the
+ * ordering, the selection, the row that says there is nothing.
+ */
+export interface TableColumn<Row> {
+  /** Identity. It is what a sort reports, not something a person reads. */
+  key: string;
+  /** The column's name, in the head. */
+  header: ReactNode;
+  /** What this column holds for one record. */
+  cell: (row: Row) => ReactNode;
+  align?: TableAlign;
+  /** Figures: tabular digits, and the end of the column unless told otherwise. */
+  numeric?: boolean;
+  /** How much room it takes. A number is pixels; a string is a CSS length. */
+  width?: string | number;
+  /** The table can be ordered by this column. */
+  sortable?: boolean;
+  /** Its values are sentences, so they wrap rather than ending in an ellipsis. */
+  wrap?: boolean;
+  /** What a totals row holds under it. A table with none draws no totals row. */
+  footer?: ReactNode;
+}
 
-/** Where a cell's content sits in its column. */
-export type TableAlign = 'start' | 'center' | 'end';
+/** Which column the records are ordered by, and which way. One at a time. */
+export interface TableSorting {
+  column: string;
+  direction: TableSort;
+}
 
-export interface TableRootProps extends Omit<ComponentProps<'table'>, 'className'> {
-  /** The height of every row in it, and the padding in every cell. Medium by default. */
+/** The two things a table says that are words rather than values. */
+export interface TableLabels {
+  /** The name of the box that takes every row at once. */
+  selectAll: string;
+  /** The name of a row's own box, where the table cannot name the record. */
+  select: string;
+}
+
+const DEFAULT_LABELS: TableLabels = { selectAll: 'Select all', select: 'Select row' };
+
+export interface TableProps<Row> extends Omit<
+  ComponentProps<'table'>,
+  'className' | 'children' | 'onSelect'
+> {
+  columns: readonly TableColumn<Row>[];
+  rows: readonly Row[];
+  /** What makes a record itself, for React and for the selection. */
+  rowKey: (row: Row) => string;
   size?: TableSize;
-  /**
-   * Something happens when a row is pressed, so the rows answer the pointer. A
-   * table of facts takes nothing: a row that lights up under the pointer and
-   * does nothing when pressed is a promise the table cannot keep.
-   */
-  interactive?: boolean;
-  /** Columns share the width equally instead of following their contents. */
   layout?: 'auto' | 'fixed';
-  /** Carried by the scroller around the table rather than by the table. */
+  /** How tall the table may be. It scrolls in a box that tall, and its head stays. */
+  maxHeight?: string | number;
+  /** What the table is, under it. */
+  caption?: ReactNode;
+  /**
+   * Which column the records are ordered by. One column at a time, because two
+   * columns wearing the arrow is a state a table cannot be in — and it is
+   * stated on the table rather than on each column so a caller cannot put it in
+   * one and forget to take it out of the other.
+   */
+  sort?: TableSorting | null;
+  onSortChange?: (sort: TableSorting) => void;
+  /**
+   * The records a bulk action would act on. Passing it draws the column of
+   * boxes and the one in the head, whose mixed state the table derives.
+   */
+  selected?: readonly string[];
+  onSelectedChange?: (selected: string[]) => void;
+  /** What to call a record, for the box that picks it. */
+  rowLabel?: (row: Row) => string;
+  /** Pressing a record does something. The row takes the keyboard with it. */
+  onRowPress?: (row: Row) => void;
+  /**
+   * Where the table's own box is too narrow for its columns, each record
+   * becomes a stack of label-and-value lines instead. It is on by default and
+   * asks about the table's width rather than the window's, so a table in a
+   * narrow side panel stacks on a wide screen — which is the case every surface
+   * in this repository hand-rolls today. A table whose columns must stay a grid
+   * says `stack={false}` and keeps the scrollbar.
+   */
+  stack?: boolean;
+  /** What the table says while it is holding nothing. */
+  empty?: ReactNode;
+  labels?: Partial<TableLabels>;
+  className?: string;
   containerClassName?: string;
-  className?: string;
-}
-
-export interface TableSectionProps extends Omit<ComponentProps<'tbody'>, 'className'> {
-  className?: string;
-}
-
-export interface TableRowProps extends Omit<ComponentProps<'tr'>, 'className'> {
-  /**
-   * This row holds the value, and stays marked while the pointer is elsewhere.
-   * It is a fill and nothing else: `aria-selected` belongs to a row in a grid,
-   * and a table that lets a person select rows puts a `Checkbox` in one — which
-   * is the part that announces it, and the part they can press.
-   */
-  selected?: boolean;
-  className?: string;
-}
-
-export interface TableCellProps extends Omit<ComponentProps<'td'>, 'className' | 'align'> {
-  /** Where the content sits. The token step, not the deprecated HTML attribute. */
-  align?: TableAlign;
-  /** Figures read down the column: tabular digits, and aligned to the end unless said otherwise. */
-  numeric?: boolean;
-  className?: string;
-}
-
-export interface TableColumnHeaderProps extends Omit<ComponentProps<'th'>, 'className' | 'align'> {
-  align?: TableAlign;
-  numeric?: boolean;
-  /**
-   * Which way this column is sorted, or `null` when the table is sorted by
-   * another one. Passing `onSortChange` is what makes the name a control; the
-   * direction on its own only says which column the table is ordered by.
-   */
-  sort?: TableSort | null;
-  /** Take this column. The part works out which way round, and draws the arrow. */
-  onSortChange?: (sort: TableSort) => void;
-  className?: string;
-}
-
-export interface TableCaptionProps extends Omit<ComponentProps<'caption'>, 'className'> {
-  className?: string;
 }
 
 /**
- * What the table was told, for the parts inside it. A row's height and a cell's
- * padding both follow from the size, and whether a row answers the pointer is a
- * fact about the table rather than about one row, so both are stated once on
- * the root — where two of them cannot disagree.
- */
-const TableContext = createContext<{ size: TableSize; interactive: boolean }>({
-  size: 'medium',
-  interactive: false,
-});
-
-/** Which section a row is in, which is what decides where its line goes. */
-const TableSection = createContext<'head' | 'body' | 'foot'>('body');
-
-const CELL_SIZES = {
-  small: surface.cellSmall,
-  medium: surface.cellMedium,
-  large: surface.cellLarge,
-} as const;
-
-const ALIGNMENTS = {
-  start: surface.alignStart,
-  center: surface.alignCenter,
-  end: surface.alignEnd,
-} as const;
-
-/**
- * Rows of records, and no surface of their own.
+ * A list of records, and everything that follows from stating its columns.
  *
- * A table is the one part of this package that draws no background, no shadow
- * and no radius: it is rows on whatever the surface around it already was, so a
- * card holding one keeps owning its own edges. What it draws is the single edge
- * the rules give a list — `separator`, between one row and the next.
+ * The parts hanging off it are the elements a table is made of, and they are
+ * there for a table that is not a list of records — a two-column list of facts,
+ * or markup produced from a Markdown document. Reach for this one otherwise:
+ * what it owns is what a caller assembling those parts has to get right every
+ * time, and what neither a head nor a row can work out alone.
  *
- * The scroller around it is the primitive's, because a table is as wide as its
- * columns need and the column holding it rarely is; without one a wide table
- * pushes the whole page sideways.
+ * It does **not reorder the rows**. Which records are shown and in what order
+ * is the surface's — a server sorts, a comparator breaks ties, a page is one
+ * slice of many — so the table owns the control, the arrow, `aria-sort` and the
+ * shape of the state, and the caller owns the data. A table that quietly sorted
+ * what it was handed would be wrong exactly once: on the surface that had
+ * already sorted it.
  */
-export const TableRoot = forwardRef<HTMLTableElement, TableRootProps>(function TableRoot(
-  { size = 'medium', interactive = false, layout = 'auto', containerClassName, className, ...rest },
-  ref
-) {
-  const scroller = stylex.props(surface.scroller);
-  const sx = stylex.props(surface.root, layout === 'fixed' && surface.fixed);
-  const value = useMemo(() => ({ size, interactive }), [size, interactive]);
-  return (
-    <div className={appendClassName(scroller.className, containerClassName)} style={scroller.style}>
-      <TableContext.Provider value={value}>
-        <table
-          ref={ref}
-          data-size={size}
-          {...rest}
-          className={appendClassName(sx.className, className)}
-          style={sx.style}
-        />
-      </TableContext.Provider>
-    </div>
-  );
-});
-
-/** The row of column names. */
-export const TableHead = forwardRef<HTMLTableSectionElement, TableSectionProps>(function TableHead(
-  { className, ...rest },
-  ref
-) {
-  return (
-    <TableSection.Provider value="head">
-      <thead ref={ref} {...rest} className={className} />
-    </TableSection.Provider>
-  );
-});
-
-/** The records. */
-export const TableBody = forwardRef<HTMLTableSectionElement, TableSectionProps>(function TableBody(
-  { className, ...rest },
-  ref
-) {
-  return (
-    <TableSection.Provider value="body">
-      <tbody ref={ref} {...rest} className={className} />
-    </TableSection.Provider>
-  );
-});
-
-/** What the records add up to, under a line of its own. */
-export const TableFoot = forwardRef<HTMLTableSectionElement, TableSectionProps>(function TableFoot(
-  { className, ...rest },
-  ref
-) {
-  return (
-    <TableSection.Provider value="foot">
-      <tfoot ref={ref} {...rest} className={className} />
-    </TableSection.Provider>
-  );
-});
-
-/**
- * One record, and the line to the next one.
- *
- * The last row in the body draws no line, because there is no next row there —
- * the same reading a disclosure row makes of its own position. A head row keeps
- * its line: the row after it is the first record.
- */
-export const TableRow = forwardRef<HTMLTableRowElement, TableRowProps>(function TableRow(
-  { selected = false, className, ...rest },
-  ref
-) {
-  const { interactive } = useContext(TableContext);
-  const section = useContext(TableSection);
-  const sx = stylex.props(
-    surface.row,
-    section === 'body' && surface.bodyRow,
-    section === 'foot' && surface.footRow,
-    section === 'body' && interactive && surface.interactiveRow,
-    selected && surface.selectedRow
-  );
-  return (
-    <tr
-      ref={ref}
-      data-selected={selected ? '' : undefined}
-      {...rest}
-      className={appendClassName(sx.className, className)}
-      style={sx.style}
-    />
-  );
-});
-
-/** One value. */
-export const TableCell = forwardRef<HTMLTableCellElement, TableCellProps>(function TableCell(
-  { align, numeric = false, className, ...rest },
-  ref
-) {
-  const { size } = useContext(TableContext);
-  const sx = stylex.props(
-    surface.cell,
-    CELL_SIZES[size],
-    ALIGNMENTS[align ?? (numeric ? 'end' : 'start')],
-    numeric && surface.numeric
-  );
-  return (
-    <td ref={ref} {...rest} className={appendClassName(sx.className, className)} style={sx.style} />
-  );
-});
-
-/**
- * A column's name, and — when the table can be ordered by it — the control that
- * takes it.
- *
- * The arrow is drawn by the part rather than passed to it, the way a submenu's
- * chevron is drawn by its row: a sortable header assembled without one is a
- * column whose order a person cannot see. `aria-sort` is the same fact on the
- * cell, so what a screen reader is told and what the arrow shows cannot
- * disagree, and the direction is the caller's state rather than the part's —
- * only the caller knows what the rows are actually sorted by.
- */
-export const TableColumnHeader = forwardRef<HTMLTableCellElement, TableColumnHeaderProps>(
-  function TableColumnHeader(
-    { align, numeric = false, sort = null, onSortChange, className, children, ...rest },
-    ref
-  ) {
-    const { size } = useContext(TableContext);
-    const sx = stylex.props(
-      surface.cell,
-      CELL_SIZES[size],
-      surface.headCell,
-      ALIGNMENTS[align ?? (numeric ? 'end' : 'start')],
-      numeric && surface.numeric,
-      sort != null && surface.headCellSorted
-    );
-    return (
-      <th
-        ref={ref}
-        scope="col"
-        aria-sort={onSortChange ? (sort ?? 'none') : undefined}
-        {...rest}
-        className={appendClassName(sx.className, className)}
-        style={sx.style}
-      >
-        {onSortChange ? (
-          <SortButton sort={sort} onSortChange={onSortChange}>
-            {children}
-          </SortButton>
-        ) : (
-          children
-        )}
-      </th>
-    );
-  }
-);
-
-/**
- * The name as a control. Taking a column that is already taken turns it over,
- * and taking a new one starts ascending: a person asking to sort by a name
- * means A first, and the part not the caller is where that is decided so two
- * tables cannot answer the same press differently.
- */
-function SortButton({
-  sort,
+function TableView<Row>({
+  columns,
+  rows,
+  rowKey,
+  size = 'medium',
+  layout = 'auto',
+  maxHeight,
+  caption,
+  sort = null,
   onSortChange,
-  children,
-}: {
-  sort: TableSort | null;
-  onSortChange: (sort: TableSort) => void;
-  children: ReactNode;
-}) {
-  const sx = stylex.props(surface.sortButton);
-  const mark = stylex.props(surface.sortMark);
+  selected,
+  onSelectedChange,
+  rowLabel,
+  onRowPress,
+  stack = true,
+  empty,
+  labels,
+  className,
+  containerClassName,
+  ...rest
+}: TableProps<Row>) {
+  const words = { ...DEFAULT_LABELS, ...labels };
+  const selectable = selected != null && onSelectedChange != null;
+  const picked = useMemo(() => new Set(selected ?? []), [selected]);
+  const keys = rows.map((row) => rowKey(row));
+  const held = keys.filter((key) => picked.has(key)).length;
+  const all = held > 0 && held === keys.length;
+  const some = held > 0 && !all;
+  const totals = columns.some((column) => column.footer !== undefined);
+  const span = columns.length + (selectable ? 1 : 0);
+
+  const toggleAll = () => {
+    if (!onSelectedChange) return;
+    // The box in the head answers for the rows on screen. A table showing one
+    // page of a long selection therefore never drops the pages a person
+    // already took, and never reports a key it is not showing.
+    const shown = new Set(keys);
+    const elsewhere = (selected ?? []).filter((key) => !shown.has(key));
+    onSelectedChange(all ? elsewhere : [...elsewhere, ...keys]);
+  };
+  const toggleRow = (key: string) => {
+    if (!onSelectedChange) return;
+    const without = (selected ?? []).filter((current) => current !== key);
+    onSelectedChange(picked.has(key) ? without : [...without, key]);
+  };
+
   return (
-    <button
-      type="button"
-      className={sx.className}
-      style={sx.style}
-      onClick={() => onSortChange(sort === 'ascending' ? 'descending' : 'ascending')}
+    <TableRoot
+      size={size}
+      layout={layout}
+      maxHeight={maxHeight}
+      className={className}
+      containerClassName={containerClassName}
+      {...rest}
     >
-      {children}
-      {sort ? (
-        <span className={mark.className} style={mark.style}>
-          {sort === 'ascending' ? <ChevronUpGlyph /> : <ChevronDownGlyph />}
+      {caption ? <TableCaption>{caption}</TableCaption> : null}
+      {/*
+        A column's width is stated on a `<col>`, so the name and every cell
+        under it take it from one place. It is also the only way to give a width
+        to cells the caller never writes.
+      */}
+      <colgroup>
+        {selectable ? <col {...stylex.props(columnWidth.width(undefined))} /> : null}
+        {columns.map((column) => (
+          <col key={column.key} {...stylex.props(columnWidth.width(column.width))} />
+        ))}
+      </colgroup>
+      <TableHead stacked={stack}>
+        <TableRow>
+          {selectable ? (
+            <SelectCell>
+              <Checkbox
+                aria-label={words.selectAll}
+                checked={all}
+                indeterminate={some}
+                onCheckedChange={toggleAll}
+              />
+            </SelectCell>
+          ) : null}
+          {columns.map((column) => (
+            <TableColumnHeader
+              key={column.key}
+              align={column.align}
+              numeric={column.numeric}
+              wrap={column.wrap}
+              sort={sort?.column === column.key ? sort.direction : null}
+              onSortChange={
+                column.sortable && onSortChange
+                  ? (direction) => onSortChange({ column: column.key, direction })
+                  : undefined
+              }
+            >
+              {column.header}
+            </TableColumnHeader>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {rows.length === 0 && empty !== undefined ? (
+          <TableRow last>
+            <EmptyCell span={span}>{empty}</EmptyCell>
+          </TableRow>
+        ) : (
+          rows.map((row, index) => {
+            const key = keys[index];
+            return (
+              <TableRow
+                key={key}
+                last={index === rows.length - 1}
+                stacked={stack}
+                selected={picked.has(key)}
+                pressable={onRowPress != null}
+                onClick={onRowPress ? () => onRowPress(row) : undefined}
+              >
+                {selectable ? (
+                  <SelectCell stacked={stack}>
+                    <Checkbox
+                      aria-label={rowLabel ? rowLabel(row) : words.select}
+                      checked={picked.has(key)}
+                      onCheckedChange={() => toggleRow(key)}
+                      // Opening a record and picking it are two actions in one
+                      // row, so the box keeps the press that lands on it.
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </SelectCell>
+                ) : null}
+                {columns.map((column) => (
+                  <TableCell
+                    key={column.key}
+                    align={column.align}
+                    numeric={column.numeric}
+                    wrap={column.wrap}
+                    label={stack ? column.header : undefined}
+                  >
+                    {column.cell(row)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            );
+          })
+        )}
+      </TableBody>
+      {totals ? (
+        <TableFoot>
+          <TableRow stacked={stack}>
+            {selectable ? <SelectCell stacked={stack} /> : null}
+            {columns.map((column) => (
+              <TableCell
+                key={column.key}
+                align={column.align}
+                numeric={column.numeric}
+                // Only a column that holds a total is named in a stacked record:
+                // the others would be a column's name with nothing after it.
+                label={stack && column.footer !== undefined ? column.header : undefined}
+              >
+                {column.footer}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableFoot>
+      ) : null}
+    </TableRoot>
+  );
+}
+
+/** The column that holds nothing but the box that picks a row. */
+function SelectCell({ children, stacked = false }: { children?: ReactNode; stacked?: boolean }) {
+  // A stacked record is a run of block lines, and a cell left as a table cell
+  // among them is wrapped in an anonymous table by the browser and lands on a
+  // line of its own. The box takes the same line the values take.
+  const sx = stylex.props(surface.cell, surface.selectCell, stacked && surface.stackedCell);
+  const box = stylex.props(surface.selectBox);
+  return (
+    <td className={sx.className} style={sx.style}>
+      {children ? (
+        <span className={box.className} style={box.style}>
+          {children}
         </span>
       ) : null}
-    </button>
+    </td>
   );
 }
 
-/** What the table is, under it. */
-export const TableCaption = forwardRef<HTMLTableCaptionElement, TableCaptionProps>(
-  function TableCaption({ className, ...rest }, ref) {
-    const sx = stylex.props(surface.caption);
-    return (
-      <caption
-        ref={ref}
-        {...rest}
-        className={appendClassName(sx.className, className)}
-        style={sx.style}
-      />
-    );
-  }
-);
+/**
+ * Nothing to show. It is a row of the table rather than a panel over it, so the
+ * column names stay where they are and a person can still read what was going
+ * to be here. Only the table knows how many columns to cross, which is one more
+ * thing a caller assembling the parts would have to work out.
+ */
+function EmptyCell({ span, children }: { span: number; children: ReactNode }) {
+  const sx = stylex.props(surface.empty);
+  return (
+    <td colSpan={span} className={sx.className} style={sx.style}>
+      {children}
+    </td>
+  );
+}
 
-export const Table = {
+export const Table = Object.assign(TableView, {
   Root: TableRoot,
   Head: TableHead,
   Body: TableBody,
@@ -325,4 +355,4 @@ export const Table = {
   ColumnHeader: TableColumnHeader,
   Cell: TableCell,
   Caption: TableCaption,
-};
+});

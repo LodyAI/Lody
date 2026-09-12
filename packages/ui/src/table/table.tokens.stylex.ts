@@ -12,11 +12,15 @@ import { control, space, text } from '../tokens/scales.stylex';
  * about how dense a list of records is. A pager that took a group of its own
  * would let a table go quiet while its pager stayed loud.
  *
- * A table is the one part of this package that has no surface of its own. It
- * has no background, no shadow and no radius: it is rows on whatever the
- * surface around it already was — a page, a card, a dialog — so the card that
- * holds it keeps owning its own edges. What the rules give a table is the one
- * edge a list is allowed, `separator` between one row and the next.
+ * A table has no surface of its own. It has no background, no shadow and no
+ * radius: it is rows on whatever the surface around it already was — a page, a
+ * card, a dialog — so the card that holds it keeps owning its own edges. What
+ * the rules give a table is the one edge a list is allowed, `separator`
+ * between one row and the next.
+ *
+ * The one exception is a head that stays while its rows scroll under it, which
+ * is no longer a row: it is a band over them, and the ladder already has a rung
+ * for a band over the page. Anything else on it would show through.
  *
  * The two fills are the palette's own `hoverFill` and `selectedFill` rather
  * than a mix of the surface, which is the opposite of what a popup row does.
@@ -27,7 +31,7 @@ import { control, space, text } from '../tokens/scales.stylex';
 export const table = stylex.defineVars({
   // A row is a control-height row that happens to hold values, so it takes the
   // control ladder the rest of the package takes: 28, 32 and 36. The height is
-  // a minimum rather than a cap — a cell whose content wraps grows the row.
+  // a minimum rather than a cap — a cell whose column wraps grows the row.
   rowHeightSmall: control.small,
   rowHeightMedium: control.medium,
   rowHeightLarge: control.large,
@@ -45,10 +49,24 @@ export const table = stylex.defineVars({
   // step the rules give a label — and the colour they give one.
   headText: text.footnoteSize,
   headLeading: text.footnoteLeading,
+  // A head that stays while the rows scroll under it. It is the region rung,
+  // because a head that stops being a row becomes a band over the page — and
+  // because a transparent one is not a design choice but a bug: the rows show
+  // through it.
+  headStickyBackground: colors.secondaryBackground,
   // The arrow on the column a table is sorted by, and the room between it and
   // the column's name.
   sortMarkSize: '12px',
   sortGap: space[1],
+  // The column that holds nothing but a checkbox: a 16px box with a cell's
+  // padding either side of it, stated once so every table's first column lines
+  // up with every other's.
+  selectWidth: '44px',
+  // Nothing to show. It is a row of the table rather than a panel over it, so
+  // it takes a few rows' worth of height and the colour of a sentence about
+  // the table rather than one in it.
+  emptyHeight: '96px',
+  empty: colors.secondaryLabel,
   captionText: text.footnoteSize,
   captionLeading: text.footnoteLeading,
   captionGap: space[2],
@@ -82,6 +100,8 @@ export const table = stylex.defineVars({
  * root keeps the root palette inside a themed subtree.
  */
 export const tablePaletteTheme = stylex.createTheme(table, {
+  headStickyBackground: colors.secondaryBackground,
+  empty: colors.secondaryLabel,
   value: colors.label,
   head: colors.secondaryLabel,
   headActive: colors.label,

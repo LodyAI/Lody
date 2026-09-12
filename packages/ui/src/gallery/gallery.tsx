@@ -49,7 +49,7 @@ import { Pagination } from '../table/pagination';
 import { Popover } from '../popover/popover';
 import { popup } from '../popup/popup.tokens.stylex';
 import { surface } from '../popup/surface';
-import { Table, type TableSize, type TableSort } from '../table/table';
+import { Table, type TableColumn, type TableSize, type TableSorting } from '../table/table';
 import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
@@ -362,6 +362,7 @@ const styles = stylex.create({
   disclosureBlock: { flexGrow: 1, flexShrink: 1, minWidth: '260px' },
   /** The toast stand-in is out of its viewport, so it takes no fixed width. */
   toastReplica: { position: 'static', maxWidth: '100%' },
+  narrowTable: { width: '320px', maxWidth: '100%' },
   skeletonBlock: { display: 'flex', alignItems: 'center', gap: space[3], flexGrow: 1 },
   skeletonLines: { display: 'flex', flexDirection: 'column', gap: space[2], flexGrow: 1 },
   collapsibleBody: {
@@ -769,7 +770,13 @@ const TABLE_COLORS = [
   { name: 'table.hover', value: tableTokens.hover, note: 'where the pointer is, if it matters' },
   { name: 'table.selected', value: tableTokens.selected, note: 'the row that holds the value' },
   { name: 'table.caption', value: tableTokens.caption, note: 'what the table is, under it' },
-  { name: 'table.ring', value: tableTokens.ring, note: 'the keyboard, on a sortable name' },
+  { name: 'table.ring', value: tableTokens.ring, note: 'the keyboard, on a row or a name' },
+  {
+    name: 'table.headStickyBackground',
+    value: tableTokens.headStickyBackground,
+    note: 'a head that stays: the region rung',
+  },
+  { name: 'table.empty', value: tableTokens.empty, note: 'the row that says there is nothing' },
 ];
 
 const PAGER_COLORS = [
@@ -2221,111 +2228,239 @@ function WaitDimensions() {
 }
 
 /** The records a board can show: short enough to read, long enough to be a table. */
-const SESSIONS = [
-  { name: 'Worktree setup', agent: 'Claude', turns: 12 },
-  { name: 'Review the diff', agent: 'Codex', turns: 4 },
-  { name: 'Rename the package', agent: 'Claude', turns: 31 },
+interface BoardSession {
+  id: string;
+  name: string;
+  agent: string;
+  turns: number;
+}
+
+const SESSIONS: BoardSession[] = [
+  { id: 'a', name: 'Worktree setup', agent: 'Claude', turns: 12 },
+  { id: 'b', name: 'Review the diff', agent: 'Codex', turns: 4 },
+  { id: 'c', name: 'Rename the package', agent: 'Claude', turns: 31 },
 ];
+
+const BOARD_COLUMNS: TableColumn<BoardSession>[] = [
+  { key: 'name', header: 'Session', cell: (row) => row.name, width: 180 },
+  { key: 'agent', header: 'Agent', cell: (row) => row.agent, width: 100 },
+  { key: 'turns', header: 'Turns', cell: (row) => row.turns, numeric: true },
+];
+
+const sessionKey = (row: BoardSession) => row.id;
 
 /**
  * A real table. Nothing here is a stand-in: a table draws no surface, has no
  * open state and is not portalled, so the board holds the thing itself.
  */
-function SessionTable({
-  size = 'medium',
-  interactive = false,
-  selected,
-}: {
-  size?: TableSize;
-  interactive?: boolean;
-  selected?: string;
-}) {
-  return (
-    <Table.Root size={size} interactive={interactive}>
-      <Table.Head>
-        <Table.Row>
-          <Table.ColumnHeader>Session</Table.ColumnHeader>
-          <Table.ColumnHeader>Agent</Table.ColumnHeader>
-          <Table.ColumnHeader numeric>Turns</Table.ColumnHeader>
-        </Table.Row>
-      </Table.Head>
-      <Table.Body>
-        {SESSIONS.map((session) => (
-          <Table.Row key={session.name} selected={session.name === selected}>
-            <Table.Cell>{session.name}</Table.Cell>
-            <Table.Cell>{session.agent}</Table.Cell>
-            <Table.Cell numeric>{session.turns}</Table.Cell>
-          </Table.Row>
-        ))}
-      </Table.Body>
-    </Table.Root>
-  );
-}
-
 function TableSizeRow({ name, size }: { name: string; size: TableSize }) {
   return (
     <Row>
       <LegendKey>{name}</LegendKey>
       <div {...stylex.props(styles.disclosureBlock)}>
-        <SessionTable size={size} />
+        <Table columns={BOARD_COLUMNS} rows={SESSIONS} rowKey={sessionKey} size={size} />
       </div>
     </Row>
   );
 }
 
-function TableStatesRow() {
+/** Pressing a row does something, so the rows answer the pointer and the keyboard. */
+function TablePressRow() {
+  const [opened, setOpened] = useState<string | null>(null);
   return (
     <Row>
-      <LegendKey>hover · selected</LegendKey>
+      <LegendKey>pressable</LegendKey>
       <div {...stylex.props(styles.disclosureBlock)}>
-        <SessionTable interactive selected="Review the diff" />
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={SESSIONS}
+          rowKey={sessionKey}
+          onRowPress={(row) => setOpened(row.name)}
+        />
       </div>
       <span {...stylex.props(styles.rungUse)}>
-        The pointer is answered only where pressing a row does something; the row that holds the
-        value keeps its fill while the pointer is elsewhere.
+        The pointer is answered only where pressing a row does something, and a row that can be
+        pressed is reachable by the keyboard and rings where the keyboard is.{' '}
+        {opened ? `Opened ${opened}.` : 'Nothing opened yet.'}
       </span>
     </Row>
   );
 }
 
-function TableSortRow() {
-  const [sort, setSort] = useState<TableSort>('descending');
-  const ordered = [...SESSIONS].sort((left, right) =>
-    sort === 'ascending' ? left.turns - right.turns : right.turns - left.turns
+/** The rows a bulk action would act on, and the box that takes them all. */
+function TableSelectRow() {
+  const [selected, setSelected] = useState<string[]>(['b']);
+  return (
+    <Row>
+      <LegendKey>selectable</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={SESSIONS}
+          rowKey={sessionKey}
+          selected={selected}
+          onSelectedChange={setSelected}
+          rowLabel={(row) => `Select ${row.name}`}
+        />
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        The box in the head is derived, never passed: none, some — which is mixed — or all. The tick
+        is what says a row is taken; the fill is so a person can find them again.
+      </span>
+    </Row>
   );
+}
+
+/** One column at a time, with the arrow and `aria-sort` drawn by the part. */
+function TableSortRow() {
+  const [sort, setSort] = useState<TableSorting>({ column: 'turns', direction: 'descending' });
+  const ordered = [...SESSIONS].sort((left, right) => {
+    const way = sort.direction === 'ascending' ? 1 : -1;
+    return sort.column === 'turns'
+      ? (left.turns - right.turns) * way
+      : left.name.localeCompare(right.name) * way;
+  });
   return (
     <Row>
       <LegendKey>sorted · totalled</LegendKey>
       <div {...stylex.props(styles.disclosureBlock)}>
-        <Table.Root>
-          <Table.Caption>Sessions this week</Table.Caption>
-          <Table.Head>
-            <Table.Row>
-              <Table.ColumnHeader>Session</Table.ColumnHeader>
-              <Table.ColumnHeader numeric sort={sort} onSortChange={setSort}>
-                Turns
-              </Table.ColumnHeader>
-            </Table.Row>
-          </Table.Head>
+        <Table
+          caption="Sessions this week"
+          columns={[
+            { ...BOARD_COLUMNS[0], sortable: true },
+            BOARD_COLUMNS[1],
+            { ...BOARD_COLUMNS[2], sortable: true, footer: 47 },
+          ]}
+          rows={ordered}
+          rowKey={sessionKey}
+          sort={sort}
+          onSortChange={setSort}
+        />
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        One column wears the arrow, because two is a state a table cannot be in. The table never
+        reorders the rows — the order is the surface's, and here the board sorts its own.
+      </span>
+    </Row>
+  );
+}
+
+/** A head that stays, which is a band over the rows rather than a row. */
+function TableStickyRow() {
+  const many = Array.from({ length: 12 }, (_, index) => ({
+    id: `s${index}`,
+    name: `Session ${index + 1}`,
+    agent: index % 2 ? 'Codex' : 'Claude',
+    turns: (index * 7) % 40,
+  }));
+  return (
+    <Row>
+      <LegendKey>a head that stays</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table columns={BOARD_COLUMNS} rows={many} rowKey={sessionKey} maxHeight={168} />
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        A table told how tall it may be owns a scroll box, and its head stays in it. A head that
+        stays is no longer a row: it takes the region rung, because a transparent one is not a
+        quieter design — the records are painted through the column names.
+      </span>
+    </Row>
+  );
+}
+
+/** Nothing to show, said across every column with the names still standing. */
+function TableEmptyRow() {
+  return (
+    <Row>
+      <LegendKey>nothing to show</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={[]}
+          rowKey={sessionKey}
+          selected={[]}
+          onSelectedChange={() => {}}
+          empty="No sessions on this machine"
+        />
+      </div>
+    </Row>
+  );
+}
+
+/** A value is one line; a column of sentences says so and wraps. */
+function TableWrapRow() {
+  return (
+    <Row>
+      <LegendKey>one line · wrapped</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          layout="fixed"
+          columns={[
+            { key: 'name', header: 'Session', cell: (row) => row.name, width: 120 },
+            {
+              key: 'clipped',
+              header: 'One line',
+              width: 140,
+              cell: () => 'A value long enough to need the ellipsis it gets',
+            },
+            {
+              key: 'wrapped',
+              header: 'Sentences',
+              wrap: true,
+              cell: () => 'A column of sentences says wrap, and takes the room it needs.',
+            },
+          ]}
+          rows={SESSIONS.slice(0, 2)}
+          rowKey={sessionKey}
+        />
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The same table, in a box too narrow for its columns. Nothing here is a
+ * second copy: it is the markup above, asked about its own width.
+ */
+function TableStackRow() {
+  return (
+    <Row>
+      <LegendKey>too narrow for columns</LegendKey>
+      <div {...stylex.props(styles.narrowTable)}>
+        <Table columns={BOARD_COLUMNS} rows={SESSIONS.slice(0, 2)} rowKey={sessionKey} />
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        A table narrower than its columns need is not a table with a scrollbar: it is a list of
+        records, each a stack of label-and-value lines. It asks about its own box rather than the
+        window, so a table in a narrow side panel stacks on a wide screen — and the labels are the
+        head's own words, which only a table that was told its columns can reach.
+      </span>
+    </Row>
+  );
+}
+
+/** The elements, for a table that is not a list of records. */
+function TablePartsRow() {
+  return (
+    <Row>
+      <LegendKey>the parts</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table.Root size="large">
           <Table.Body>
-            {ordered.map((session) => (
-              <Table.Row key={session.name}>
-                <Table.Cell>{session.name}</Table.Cell>
-                <Table.Cell numeric>{session.turns}</Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-          <Table.Foot>
             <Table.Row>
-              <Table.Cell>Total</Table.Cell>
-              <Table.Cell numeric>47</Table.Cell>
+              <Table.ColumnHeader scope="row">Agent</Table.ColumnHeader>
+              <Table.Cell>Claude</Table.Cell>
             </Table.Row>
-          </Table.Foot>
+            <Table.Row>
+              <Table.ColumnHeader scope="row">Project</Table.ColumnHeader>
+              <Table.Cell>Lody</Table.Cell>
+            </Table.Row>
+          </Table.Body>
         </Table.Root>
       </div>
       <span {...stylex.props(styles.rungUse)}>
-        The arrow is the part's, and `aria-sort` on the cell is the same fact: what a screen reader
-        is told and what the arrow shows cannot disagree.
+        A two-column list of facts is not a list of records, so it reads its labels as row headers
+        and assembles the elements itself.
       </span>
     </Row>
   );
@@ -2340,6 +2475,8 @@ function TableDimensions() {
     { name: 'table.cellPaddingXMedium', value: tableTokens.cellPaddingXMedium },
     { name: 'table.cellPaddingXLarge', value: tableTokens.cellPaddingXLarge },
     { name: 'table.cellPaddingY', value: tableTokens.cellPaddingY },
+    { name: 'table.selectWidth', value: tableTokens.selectWidth },
+    { name: 'table.emptyHeight', value: tableTokens.emptyHeight },
     { name: 'table.text', value: tableTokens.text },
     { name: 'table.leading', value: tableTokens.leading },
     { name: 'table.headText', value: tableTokens.headText },
@@ -2365,7 +2502,6 @@ function TableDimensions() {
   );
 }
 
-/** A pager that answers, so the board shows the window moving rather than one frame of it. */
 function PagerRow({
   name,
   pages,
@@ -3307,8 +3443,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {TABLE_SIZES.map((entry) => (
               <TableSizeRow key={entry.name} {...entry} />
             ))}
-            <TableStatesRow />
             <TableSortRow />
+            <TableSelectRow />
+            <TablePressRow />
+            <TableStickyRow />
+            <TableStackRow />
+            <TableWrapRow />
+            <TableEmptyRow />
+            <TablePartsRow />
             <TableDimensions />
           </Rows>
           <Grid>

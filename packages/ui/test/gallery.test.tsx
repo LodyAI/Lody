@@ -232,12 +232,21 @@ describe('UiGallery', () => {
     for (const legend of ['small \u00b7 28', 'medium \u00b7 32', 'large \u00b7 36']) {
       expect(board, `table size ${legend} is missing from the board`).toContain(legend);
     }
-    // The head row keeps its line and the last record does not, which is one
-    // class on the body rows and not on the head's.
+    // A row that is taken, a row that can be pressed, and a head that stays.
     expect(board).toContain('data-selected=""');
+    expect(board).toContain('tabindex="0"');
+    // The box in the head is derived rather than passed: some of the rows are
+    // taken, so it is mixed.
+    expect(board).toContain('aria-checked="mixed"');
+    expect(board).toContain('aria-label="Select all"');
+    // Nothing to show is a row of the table rather than a panel over it, so the
+    // column names are still standing beside it. What it crosses is pinned in
+    // `table.test.tsx`, against a real DOM rather than this markup.
+    expect(board).toContain('No sessions on this machine');
     // A sortable column states its direction where a screen reader reads it,
     // and a column with no way to take it says nothing about sorting at all.
     expect(board).toContain('aria-sort="descending"');
+    expect(board).toContain('aria-sort="none"');
     // The pager: the page you are on says so twice, and the gaps name no page.
     expect(board).toContain('aria-current="page"');
     expect(board).toContain('aria-label="Page 20"');

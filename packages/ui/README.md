@@ -381,49 +381,82 @@ did not fit: the rows, and the way to the rows that are not on screen.
 
 A table is **the one part of this package with no surface of its own** — no
 background, no shadow, no radius. It is rows on whatever the surface around it
-already was, so a card holding one keeps owning its edges. What it draws is the
-one edge the rules give a list: `separator`, between one row and the next. The
-head takes that line too, because the row after it is the first record; the last
-record draws none.
+already was, so a card holding one keeps owning its edges, and the one thing it
+draws is the edge the rules give a list: `separator`, between one row and the
+next. The head takes that line too, because the row after it is the first
+record; the last record draws none.
+
+**A column is stated once.** That is the whole design:
 
 ```tsx
-<Table.Root size="large" interactive>
-  <Table.Head>
-    <Table.Row>
-      <Table.ColumnHeader>Session</Table.ColumnHeader>
-      <Table.ColumnHeader numeric sort={sort} onSortChange={setSort}>
-        Turns
-      </Table.ColumnHeader>
-    </Table.Row>
-  </Table.Head>
+const columns: TableColumn<Session>[] = [
+  { key: 'name', header: t('sessions.name'), cell: (s) => s.name, width: 220 },
+  { key: 'agent', header: t('sessions.agent'), cell: (s) => s.agent },
+  { key: 'turns', header: t('sessions.turns'), cell: (s) => s.turns, numeric: true, sortable: true },
+];
+
+<Table
+  columns={columns}
+  rows={sessions}
+  rowKey={(session) => session.id}
+  sort={sort}
+  onSortChange={setSort}
+  selected={selected}
+  onSelectedChange={setSelected}
+  onRowPress={(session) => open(session.id)}
+  maxHeight={320}
+  empty={t('sessions.none')}
+/>
+```
+
+How wide a column is, which way it aligns, whether it holds figures, whether the
+table can be ordered by it, what a totals row holds under it — all facts about a
+*column*, and a column written twice (a name in the head, a cell in every row) is
+a fact that can drift. Both surfaces in this repository that drew a table before
+this wrote their column template as a literal `grid-cols-[…]` string in the
+header and again in the row, by hand.
+
+Everything else follows from having them in one place:
+
+- **Ordering** is one column at a time, on the root rather than per column, so
+  two columns wearing the arrow is a state that cannot be expressed. The arrow
+  and `aria-sort` are the part's; the **rows are never reordered** — a server
+  sorts, a comparator breaks ties, a page is one slice of many.
+- **Selection** is a tick first. `aria-selected` belongs to a row in a grid, so
+  the table puts a `Checkbox` in the row — what a person presses and what a
+  screen reader is told — and derives the box over that column: none, some
+  (`mixed`), or all. A selection reaching past the rows on screen survives a
+  select-all.
+- **`maxHeight` and a head that stays are one decision**, because a head that
+  scrolls out of its own box is not something a surface would ask for. A head
+  that stays is no longer a row but a band over them, so it takes the region
+  rung; a transparent one has the records painted through the column names.
+- **The pointer is answered only where `onRowPress` says something happens.**
+  The Radix table this replaces lit every row, and its one caller had to turn
+  that off with a class. A pressable row takes the keyboard with it: Enter and
+  Space press it, and it rings where the keyboard is.
+- **`empty` crosses every column**, including the one the boxes are in — a count
+  only the table knows.
+
+**A table too narrow for its columns becomes a list of records**, each a stack of
+label-and-value lines, with the label being the head's own words. It asks about
+*its own* width rather than the window's — a table in a 360px side panel on a
+27-inch screen is narrow — so it is a container query, and a table whose columns
+must stay a grid says `stack={false}`.
+
+The parts are exported for a table that is **not** a list of records — a
+two-column list of facts, or markup produced from a Markdown document:
+
+```tsx
+<Table.Root size="large">
   <Table.Body>
-    {sessions.map((session) => (
-      <Table.Row key={session.id} selected={session.id === current}>
-        <Table.Cell>{session.name}</Table.Cell>
-        <Table.Cell numeric>{session.turns}</Table.Cell>
-      </Table.Row>
-    ))}
+    <Table.Row>
+      <Table.ColumnHeader scope="row">{t('summary.agent')}</Table.ColumnHeader>
+      <Table.Cell>{agentName}</Table.Cell>
+    </Table.Row>
   </Table.Body>
 </Table.Root>
 ```
-
-The **pointer is answered only where pressing a row does something**. The Radix
-table this replaces lit every row on hover, and its one caller had to turn that
-off again with a class; a table of facts is read, not operated, so `interactive`
-is the table's decision and its default is off. `selected` is a fill and nothing
-else — `aria-selected` belongs to a row in a grid, so a table that lets a person
-select rows puts a `Checkbox` in one, which is both what they press and what
-announces it.
-
-A column's name is a control only where `onSortChange` says the table can be
-ordered by it: then it is a real button, the arrow is the part's, and `aria-sort`
-on the cell is the same fact, so what a screen reader is told and what the arrow
-shows cannot disagree. `numeric` gives a column tabular digits and the end of the
-column at once. The size is stated once on the root, because a row's height and a
-cell's padding are one decision.
-
-There is no sticky head: one needs an opaque fill and a table does not own its
-rung, so the surface that scrolls it states that.
 
 `Pagination` is one control rather than a kit of parts, because the part a caller
 would otherwise assemble is the one that is easy to get wrong — which pages to

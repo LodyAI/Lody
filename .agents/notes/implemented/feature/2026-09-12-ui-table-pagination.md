@@ -5,19 +5,22 @@ Translation: pending
 
 ## Abstract
 
-`@lody/ui` had no way to show records. `packages/components/src/ui/table.tsx`
-was a Radix-era file that lit every row on hover — its one caller turned that
-off again with `hover:bg-transparent` — and `pagination.tsx` was 90 lines with
-no caller at all, left behind when the surface that used it was rewritten. This
-note records why `Table` and `Pagination` are one `table` family; why a table is
-the only part of this package with no surface of its own, so its single edge is
-the `separator` between rows and that edge is a **border** rather than the inset
-shadow every other row in the package uses; why the two row fills are the
-palette's `hoverFill` and `selectedFill` rather than a mix of the surface, which
-is the opposite of the call the popup family made; and why `Pagination` is one
-control with a windowing rule inside it rather than a kit of parts. Base UI
-ships neither component, so this family is the package's own the way `Skeleton`
-and `Spinner` are. Both Radix files are deleted and their two callers migrated.
+`@lody/ui` had no way to show records, and the first attempt at one was a styled
+`<table>`: parts mirroring the HTML elements, with the design work all in the
+skin. It was rejected on review as conventional, and this note records the
+design that replaced it. **A column is stated once** — `Table` takes
+`columns: TableColumn<Row>[]`, and from that one fact it owns the width, the
+ordering, the selection, the empty row's span, the head that stays, and the
+stack a table becomes when its own container is too narrow. The evidence for
+that shape is in the repository: every surface here that draws a table writes
+its column template as a literal `grid-cols-[…]` string in the header and again
+in the row, by hand, and one of them renders every cell a second time for a
+narrow window. This note also records why a table is the only part of this
+package with no surface of its own; why `border-collapse: separate` is what lets
+its line, its sticky head and a row's focus ring all be box-shadows; why the two
+row fills are the palette's `hoverFill` and `selectedFill`; and why `Pagination`
+is one control with the windowing rule inside it. Base UI ships neither
+component. Both Radix files are deleted and three callers migrated.
 
 ## Problem
 
@@ -45,6 +48,18 @@ Neither file could state any of this in tokens: `@lody/ui` had no token for a
 row's height, the line between rows, the colour of a column's name, or the two
 fills a row takes.
 
+### And the first attempt was not a design
+
+The first version of this work shipped `Root / Head / Body / Foot / Row /
+ColumnHeader / Cell / Caption` — the HTML element list with React casing — and
+put every decision into the skin. Reviewed, it was "very standard, and very
+ordinary", and that was right. A caller assembling those parts still has to keep
+the head and the body in step, still has to work out which pages of a column's
+width belong where, still has to count the columns an empty row must cross, and
+still has to hand-roll the narrow layout. The parts are kept, because a table
+that is *not* a list of records needs them, but they are no longer the thing a
+caller reaches for.
+
 ## Decision
 
 **One group, `table`, for both.** A pager exists because a table did not fit,
@@ -53,58 +68,77 @@ records is has one place to change rather than two. This is the call `dialog`
 makes over the Drawer — a drawer is not a dialog either, it shares the rung and
 the construction. The pager's own tokens are prefixed inside the group
 (`pagerGap`, `pagerHint`, `pagerJumpWidth`) the way `feedback` carries
-`toastWidth` beside `spinnerSmall`. A three-token group of its own was the
-alternative, and it would have let a table go quiet while its pager stayed loud.
+`toastWidth` beside `spinnerSmall`.
+
+**A column is stated once, and everything follows from it.** This is the design.
+A table's hard parts are facts about a *column* — how wide it is, which way it
+aligns, whether it holds figures, whether the table can be ordered by it, what a
+totals row holds under it — and a column written twice can drift. The evidence
+is not hypothetical: `device-resource-monitor.tsx` and
+`account-machines-overview.tsx` each write
+`grid-cols-[minmax(160px,40%)_minmax(0,1fr)…]` in the header and again in the
+row; `review-policy-setting.tsx` hand-rolls `role="table"`, `role="row"` and
+`role="columnheader"` around a template written twice. What the table can do
+once the columns are stated, and a caller cannot:
+
+| it owns | because |
+| --- | --- |
+| the widths | a `<colgroup>` reaches cells the caller never writes |
+| the ordering | one column at a time is unrepresentable per column |
+| the selection | the head's box is *derived* from the rows, mixed and all |
+| the empty row | only the table knows how many columns to cross |
+| the head that stays | it is the root that knows there is a box to stay in |
+| the stacked layout | a cell can carry its column's name when the head is gone |
+
+**The rows are never reordered.** The table owns the control, the arrow,
+`aria-sort` and the shape of the state; the surface owns the data, because a
+server sorts, a comparator breaks ties and a page is one slice of many. A table
+that quietly sorted what it was handed would be wrong exactly once — on the
+surface that had already sorted it.
+
+**Selection is a tick, and the fill is second.** `aria-selected` on a `<tr>`
+inside a `<table>` is an ARIA violation, so the table puts a `Checkbox` in the
+row: the thing a person presses and the thing a screen reader is told are then
+the same thing. The box over that column is derived rather than passed — none,
+some (`mixed`), or all — and a select-all keeps keys the table is not currently
+showing, so one page of a long selection does not drop the other pages.
 
 **A table has no surface.** No background, no shadow, no radius. Every other
 part in this package names a rung; a table deliberately names none, because it
-is rows on whatever was already there — a page, a card, a dialog — and a table
-that drew a card inside a card would be the same fill twice, which is exactly
-the defect the feedback family's neutral tint had to fix. The consequence is
-stated in the README and the rules: the surface around a table owns its edges.
+is rows on whatever was already there, and a table that drew a card inside a
+card is the same fill twice — the defect the feedback family's neutral tint had
+to fix. The one exception is a head that *stays*: that is no longer a row but a
+band over the rows moving under it, and the ladder already has a rung for a band
+over the page. A transparent one is not a quieter design — the records are
+painted through the column names, which is legible in a screenshot.
 
-**The head keeps the line.** The rules say `separator` is "dividers between list
-and table rows only. Never around a surface, never under a header." The reading
-taken here is that the header in that sentence is a heading over a surface, not
-a row of column names: a head row is the row before the first record, and the
-line under it is the divider to the next row, which is what the token is for. A
-head separated from its records by nothing reads as the first record. This is
-the one place in this change where the rules could be read the other way, and it
-is written down so it can be argued rather than discovered.
+**`border-collapse: separate`, and the border exception is gone.** The first
+version claimed a table had to draw its line as a border, "the one place in the
+package where it has to be". That was wrong, and a Chromium probe of six cases
+showed why: the inset shadow had been hidden by an opaque cell background in the
+test, not by the table model. Under `separate` a row's inset shadow paints, a
+row can carry an outer focus ring, and a sticky head keeps its line — while
+under `collapse` a sticky head's border does **not** travel with it, which is a
+real defect rather than a preference. So the table went back to the
+`inset 0 -1px 0` every other row in this package draws, and a row keeps one
+`box-shadow` in which its line and its ring compose.
 
-**That line is a border, and only here.** Every other row in the package —
-menu, accordion — draws its line with `inset 0 -1px 0`, because a `div` can.
-A table is laid out by the CSS table model, where the two modes each forbid one
-of the options: under `border-collapse: collapse` a row's own box-shadow is not
-painted, and under `separate` a row's border is ignored. Collapse is the mode
-that lets the line ride on the **row**, where `:last-child` can take it away
-again, instead of on every cell in it. The package rule that "no border token
-exists" is about a token and about outlining a surface, not about the mechanism
-a row divider uses.
+**The pointer is answered only where pressing a row does something.** `interactive`
+on the root became `onRowPress`, which is the same default made honest: the hover
+now arrives with the thing that justifies it, and the row takes the keyboard with
+it (Enter and Space press it, and the ring says where the keyboard is).
 
-**The two fills are the palette's own.** `hoverFill` and `selectedFill` were
-tuned against the page and card rungs, which is where a table sits — the rules
-name them "for a row" in the same breath. The popup family derives its own from
-the rung instead, and this is not an inconsistency: on the floating rung those
-two collapse into the surface (`hoverFill` lands 2/255 from `raisedBackground`
-in the light palette), and on the page rung they do not. This change is the
-first consumer of either token.
-
-**Hover is opt in.** `interactive` on the root, default off, is the fix for the
-defect above: a table of facts is read, not operated, and a row that lights up
-under the pointer and does nothing when pressed is a promise the table cannot
-keep. `selected` stays a fill and nothing more — `aria-selected` belongs to a
-row in a grid, and putting it on a `<tr>` inside a `<table>` is an ARIA
-violation, so a table that lets a person select rows puts a `Checkbox` in one:
-the thing they press and the thing that announces it are then the same thing.
-
-**Sorting belongs to the part.** `Table.ColumnHeader` takes `sort` and
-`onSortChange`; the direction is the caller's state, because only the caller
-knows what the rows are actually ordered by, but the arrow, the toggle rule
-(turn over the column you are on, start a new one ascending) and `aria-sort`
-are the part's. Without it, two tables answer the same press differently and a
-sortable header can be assembled with no mark at all — the same argument that
-makes `Tabs.List` draw its own indicator.
+**A table too narrow for its columns becomes a list of records.** This was
+deliberately not done in the first version, on the argument that a breakpoint is
+the wrong unit — a table in a 360px side panel on a 27-inch screen is narrow, and
+a media query calls it wide. That argument was right and the conclusion was
+wrong: the correct unit exists. StyleX supports `@container`, so the table asks
+about **its own** width. Each record becomes a stack of label-and-value lines
+where the label is the head's own words — only reachable because the columns were
+stated. The width belongs to the system rather than a caller: a caller choosing
+it is a caller deciding how wide a record may be. Without this the primitive
+could migrate nothing: all three of the repository's real tables collapse on a
+narrow window today, by hand.
 
 **`Pagination` is one control, not parts.** The window is what a caller would
 otherwise get wrong, so `pageWindow(page, pages, siblings, boundaries)` is a
@@ -138,17 +172,16 @@ one row.
 
 ## Deliberately not done
 
-**No sticky head.** A head that stays while the rows scroll needs an opaque
-fill, and a table does not know its own rung — it has no background by design,
-and `background: inherit` does not reach a `<thead>`. The surface that gives the
-table a scrolling box is the one that knows what colour is behind it, so that is
-where a sticky head belongs. Adding a `table.headBackground` token would have
-given every table the wrong fill inside a card.
+**No virtualisation.** The table owns the row loop now, and the row height is a
+token, so a windowed body is implementable — but it needs a caller with enough
+rows to prove it, and none of the three migrated here has one. The shape it
+would take is recorded rather than guessed at.
 
-**No `Table.Empty`.** `Combobox.Empty` exists because a popup that opens on
-nothing is still a popup; a table with no records is usually replaced by an
-empty state that is not a table at all, and a row spanning columns the part
-cannot count is a `colSpan` the caller has to pass anyway.
+**No `Table.Empty` part, and no loading state.** The empty row is a prop because
+only the table can count the columns; a *loading* table is the same row with
+different words, which is what `review-policy-setting.tsx` passes. A spinner
+inside a table would be this package deciding what waiting looks like in a place
+`Spinner` already answers.
 
 **The markdown renderer's table is not migrated.** `markdown-renderer.tsx`
 renders `<table>` through Streamdown's component map, where the rows and cells
@@ -157,65 +190,95 @@ package could supply. Migrating it means replacing the `td`/`th`/`tr` handlers
 as well, which is a change to how agent output is rendered rather than to a UI
 primitive, and it belongs with whoever owns that surface.
 
+**`device-resource-monitor.tsx` and `account-machines-overview.tsx` are not
+migrated here.** They are the two biggest wins — ~115 and ~100 lines of row
+markup, a duplicated column template each, and a duplicated mobile cell block in
+the first — and that is exactly why they are not being folded into the PR that
+introduces the primitive. They are recorded as the next callers.
+
 ## Migrated
 
-Two callers, and both Radix files deleted.
+Three callers, and both Radix files deleted.
 
-- **`summary-screen.tsx`** — the onboarding summary's two-column list. It loses
-  `hover:bg-transparent` on every row, which the new default makes unnecessary,
-  and the three classes that were reproducing the head's type
-  (`text-xs font-medium text-muted-foreground`) by becoming a real
-  `Table.ColumnHeader scope="row"`; `text-right` becomes `align="end"` and the
-  `py-4` on all three cells becomes `size="large"` on the table. The width and
-  truncation classes stay: those are the caller's layout, which the package's
-  rules allow.
+- **`review-policy-setting.tsx`** — `ReviewerMachineConfigTable` was a
+  hand-rolled `role="table"` / `role="row"` / `role="columnheader"` over a
+  `grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)]` template written twice,
+  with `hidden … sm:grid` on the header and `flex flex-col … sm:grid` on the row
+  to collapse it on a narrow window. All of that is now two `TableColumn`
+  entries; the roles are the elements' own, the collapse is the container query,
+  and the loading and empty branches became one `empty` prop. The row component
+  split into the two cells it always was.
+- **`summary-screen.tsx`** — the onboarding summary's two-column list of facts.
+  It is *not* a list of records, so it is the demonstration of why the parts are
+  still exported: it reads its labels as `scope="row"` headers. It loses
+  `hover:bg-transparent` on every row, the three classes that were reproducing
+  the head's type, and `py-4` on all three cells (`size="large"` now).
 - **`paged-file-viewer.tsx`** — two ghost buttons and a number field become one
   `Pagination layout="compact" jump size="small"`. The words stay the product's
-  through `labels`, and two keys are added for the two sentences the pager needs
-  that the viewer did not have (`sessions.fileViewer.pagination` names the
-  landmark, `sessions.fileViewer.position` replaces "4212 / 9214" for a screen
-  reader). The keystroke-navigation defect goes with it.
+  through `labels`, with two keys added for the sentences the pager needs. The
+  keystroke-navigation defect goes with it.
 
 ## Verification limits
 
-The same limit the menu, overlay and feedback notes record: jsdom applies none
-of StyleX's compiled CSS, so `getComputedStyle` returns nothing there and every
-visual assertion in `test/table.test.tsx` is made against the classes a style
-compiles to. What the board in Chromium is for is the other half, and this
-change needed it — the first measurement run read the wrong `<table>` in the
-document and reported a head with no line at all.
+jsdom applies none of StyleX's compiled CSS, so `getComputedStyle` returns
+nothing there and every visual assertion in `test/table.test.tsx` is made
+against the classes a style compiles to. What the board in Chromium is for is
+the other half, and this change needed it twice: the first measurement run read
+the wrong `<table>` in the document and reported a head with no line at all, and
+the board then caught a **real** defect the tests had not — a table that renders
+its own rows applies `last` explicitly, so the `:last-child` style no longer
+applied and *no* body row drew a line. Both are now pinned in tests.
+
+The container query is also beyond jsdom: the tests pin that the stacked classes
+are applied and that `stack={false}` withholds them, and Chromium is where the
+layout itself was read, at 320px and 640px, against the same markup.
+
+`ReviewerMachineConfigTable`'s own story cannot render in Storybook — it reaches
+`useCloudQuery` through the run-config menu and the story carries no
+`PlatformContext`, which is true of it before this change as well — so that
+migration was verified by the type checker and the suite rather than on screen.
+What was read in a browser is the primitive it now uses.
 
 `pageWindow` is pure and is tested as one: every page of a 40-page pager is
 checked for a constant width, for containing the page you are on and both ends,
-and for never hiding a single page behind a gap. What is not tested is a
-person's finger — the pager's buttons are `Button`s, and Base UI's press
-behaviour is theirs.
+and for never hiding a single page behind a gap.
 
 ## Evidence
 
 Intended behavior: [Shared UI primitives](../../../../specs/ui-primitives.md),
 which stays `draft` with the records and the pager stated.
 
-Inspected implementation: `packages/ui/src/table`, the two new glyphs in
-`packages/ui/src/internal/glyphs.tsx`, the deleted
-`packages/components/src/ui/{table,pagination}.tsx`, and the two migrated
-surfaces.
+Inspected implementation: `packages/ui/src/table` (`table.tsx` for the columns,
+`parts.tsx` for the elements, `surface.ts`, `pagination.tsx`), the two new
+glyphs in `packages/ui/src/internal/glyphs.tsx`, the deleted
+`packages/components/src/ui/{table,pagination}.tsx`, and the three migrated
+surfaces. The table-shaped surfaces this repository holds were surveyed before
+the API was chosen; the survey is what the `columns` decision rests on.
 
 Executed validation: `pnpm --filter @lody/ui typecheck` and
-`pnpm --filter @lody/ui test` (201 tests, 18 of them new in `test/table.test.tsx`
-plus one new board assertion in `test/gallery.test.tsx`);
+`pnpm --filter @lody/ui test` (209 tests, 26 of them new in `test/table.test.tsx`
+plus a new board assertion in `test/gallery.test.tsx`);
 `pnpm --filter @lody/components typecheck`;
-`NODE_ENV=development pnpm --filter @lody/components test`; and
+`NODE_ENV=development pnpm --filter @lody/components test`; `pnpm lint`; and
 `pnpm run docs check`.
 
-The board was opened in Chromium under both palettes and read back off the
-rendered nodes: the three row sizes measured 28 / 32 / 36 with 8 / 10 / 12px of
-inline padding and 4px above and below; the head row measured a 1px
-`rgb(230, 232, 237)` line and the last record `rgba(0, 0, 0, 0)`, which is the
-`:last-child` reading; a head cell measured 12px at weight 500 in
-`rgb(107, 114, 128)` against a cell's 13px in `rgb(26, 27, 30)`; a numeric
-column measured `text-align: end` with `font-variant-numeric: tabular-nums`; the
-selected row measured `rgb(232, 234, 239)`, which is `selectedFill`; the sorted
-column's name measured the label colour. The pager was read at the start, the
-middle and the end of a 40-page run and listed seven items in each, with the
-current page a 32px square on `rgb(238, 240, 243)` and the jump field 72px wide.
+Two Chromium passes, both load-bearing. A six-case CSS probe settled the
+mechanism before any of it was written: a row's inset box-shadow paints under
+`border-collapse: separate` and is hidden only by an opaque cell background; a
+row carries an outer focus ring; a sticky head keeps a shadow line and **loses a
+border** under `collapse`; and a transparent sticky head has the rows painted
+through it. A second probe read the stacked layout at 320px and 640px from one
+markup.
+
+The board was then opened under both palettes and read back off the rendered
+nodes: the three row sizes measured 28 / 32 / 36 with 8 / 10 / 12px of inline
+padding; a body row's line measured
+`rgb(230, 232, 237) 0px -1px 0px 0px inset` and the last record `none`; the
+sticky head measured `position: sticky`, `z-index: 1` and a
+`rgb(247, 248, 250)` fill, which is the region rung; the head's box measured
+`mixed` with one row taken and the row's fill `rgb(232, 234, 239)`; the scroller
+measured `container-type: inline-size`, and at 320px the head measured
+`display: none` while a cell measured `display: flex` with its label visible at
+12px in `rgb(107, 114, 128)` — the same cell measuring `display: none` on its
+label in the wide table. The pager was read at the start, the middle and the end
+of a 40-page run and listed seven items in each.
