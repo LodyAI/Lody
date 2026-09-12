@@ -95,4 +95,5 @@ Not verified here: a live agent that sends an unsplit line (the reporter's
 branch is covered only through the injected platform, and the real-process cases
 skip on Windows.
 
-Issue: [#469](https://github.com/LodyAI/Lody/issues/469).
+PR: [#645](https://github.com/LodyAI/Lody/pull/645), closing
+[#469](https://github.com/LodyAI/Lody/issues/469).
