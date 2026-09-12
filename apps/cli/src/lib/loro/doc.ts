@@ -1830,7 +1830,8 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
         doc,
         // Reuse the Mirror's writer: one writer instance owns local history writes.
         writer: this.mirror.historyWriter,
-        flushLocal: () => this.repo.flush(),
+        // A real local durability barrier; `repo.flush()` persists the repo.
+        durable: () => this.repo.flush(),
       });
     }
     return this.sessionDataInstance;

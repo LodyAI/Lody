@@ -19,6 +19,7 @@ import {
   historyUnionCandidates,
 } from './history-write-schema';
 import { diffHistoryContainer, populateContainer } from './history-materializer';
+import { applyRespondPermission } from './session-data/planner';
 
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -596,11 +597,11 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           if (storedScalar(storedField(item, 'type')) !== 'tool_call') continue;
           const request = storedField(item, 'permissionRequest');
           if (storedScalar(storedField(request, 'requestId')) !== requestId) continue;
-          // Only the matching turn enters the validated local-update path.
+          // Only the matching turn enters the validated local-update path. The
+          // "write the outcome" rule itself is the shared planner, so the Loro
+          // and in-memory backends cannot drift.
           return writer.updateEntry(id, (turn) => {
-            const tool = turn.items?.[at];
-            if (tool?.type === 'tool_call' && tool.permissionRequest)
-              tool.permissionRequest.outcome = outcome;
+            applyRespondPermission(turn as unknown as Record<string, unknown>, requestId, outcome);
             return turn;
           });
         }

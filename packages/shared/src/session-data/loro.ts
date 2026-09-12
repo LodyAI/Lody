@@ -1,34 +1,48 @@
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
+import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
-import { HistoryWriteError, parseHistoryWrite } from '../history-write-schema';
+import {
+  HistoryEntryWriteSchema,
+  HistoryWriteError,
+  parseHistoryWrite,
+} from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
-import { resolveTaskProposalOnEntry } from './task-proposal';
-import type {
-  SessionCommandResult,
-  SessionData,
-  SessionFieldChange,
-  SessionHistoryCommands,
-  SessionHistoryReader,
-  SessionTurnRead,
-  SessionVisiblePage,
-  SessionVisiblePageRequest,
-  SessionWritableField,
-  SessionWriteReceipt,
+import {
+  applyOpenAssistantTurn,
+  applyResumeAssistant,
+  createAssistantTurn,
+  hasTaskProposal,
+  parseTaskProposalResolution,
+  resolveTaskProposalOnEntry,
+} from './planner';
+import {
+  SessionDurabilityError,
+  type SessionCommandResult,
+  type SessionData,
+  type SessionFieldChange,
+  type SessionHistoryCommands,
+  type SessionHistoryReader,
+  type SessionTurnRead,
+  type SessionVisiblePage,
+  type SessionVisiblePageRequest,
+  type SessionWritableField,
+  type SessionWriteReceipt,
 } from './types';
 
 // # Loro-backed SessionData
 //
 // The one place that knows the `history` root list is a Loro list and that a
-// turn is a Loro map. Commands delegate to the *same* shared `HistoryWriter`
-// used by the renderer; this adapter never re-implements parsing, container
-// diffing, rollback or stored-copy rules. Reads answer from storage directly so
-// a bounded query does not materialize the whole document.
+// turn is a Loro map. Commands apply the shared planners (`./planner`) inside
+// the shared `HistoryWriter`'s conditional commit, so no business rule is
+// restated here and the write path stays the single writer used by the renderer.
 //
-// Acceptance is synchronous in Loro, so a command can never be
-// `indeterminate` here; it is either applied (`accepted`) or pre-write rejected.
-// Local durability is a separate step exposed through `waitDurable`.
+// Phase discipline: input is validated and the target located *before* any
+// mutation, so a `rejected` result proves nothing was applied. Once the writer
+// is invoked, a throw is reported as `indeterminate` (a partial write cannot be
+// ruled out) rather than as a pre-write rejection. `postAcceptError` reports an
+// accepted write whose post-accept side effect failed.
 
 const HISTORY_ROOT_KEY = 'history';
 
@@ -41,8 +55,12 @@ export type LoroSessionDataOptions = {
    * history writes; omit it only in tests that build a standalone adapter.
    */
   writer?: HistoryWriter;
-  /** Awaited by `waitDurable`; e.g. `repo.persistPendingChanges`. */
-  flushLocal?: () => Promise<void>;
+  /**
+   * Local durability barrier (e.g. `repo.flush`). When omitted, `waitDurable`
+   * rejects with `SessionDurabilityError('unavailable')` instead of pretending
+   * the accepted change is persisted.
+   */
+  durable?: () => Promise<void>;
   /** Awaited after a change is accepted, before the command resolves. */
   afterAccept?: (receipt: SessionWriteReceipt) => void | Promise<void>;
 };
@@ -81,13 +99,16 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   const writer = options.writer ?? createHistoryWriter(doc);
   const list = doc.getList(HISTORY_ROOT_KEY);
 
-  const finish = async (
+  // Receipts are capabilities this store issued, not caller-shaped objects.
+  const issuedReceipts = new WeakSet<object>();
+
+  const issueReceipt = (
     kind: SessionWriteReceipt['kind'],
     turnIds: readonly string[]
-  ): Promise<SessionCommandResult> => {
-    const receipt: SessionWriteReceipt = { sessionId, kind, turnIds };
-    await options.afterAccept?.(receipt);
-    return { status: 'accepted', receipt };
+  ): SessionWriteReceipt => {
+    const receipt = { sessionId, kind, turnIds } as unknown as SessionWriteReceipt;
+    issuedReceipts.add(receipt);
+    return receipt;
   };
 
   const rejected = (
@@ -97,14 +118,53 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     status: 'rejected',
     reason: { code, ...(issues ? { issues } : {}) },
   });
+  const indeterminate = (cause: unknown): SessionCommandResult => ({
+    status: 'indeterminate',
+    cause,
+  });
+  const issuesOf = (error: unknown) =>
+    (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
+
+  const accepted = async (
+    kind: SessionWriteReceipt['kind'],
+    turnIds: readonly string[]
+  ): Promise<SessionCommandResult> => {
+    const receipt = issueReceipt(kind, turnIds);
+    try {
+      await options.afterAccept?.(receipt);
+    } catch (postAcceptError) {
+      // The change is applied; only its side effect failed. Never report this as
+      // a pre-write rejection, which would invite a duplicate append.
+      return { status: 'accepted', receipt, postAcceptError };
+    }
+    return { status: 'accepted', receipt };
+  };
 
   const history: SessionHistoryReader = {
     count: () => list.length,
     async readTurn(turnId) {
       for (let index = list.length - 1; index >= 0; index -= 1) {
-        const read = readSlot(list, index);
-        if (read.state === 'missing') break;
-        if (read.state === 'ready' && read.turn.id === turnId) return read;
+        const value = list.get(index);
+        if (isContainer(value)) {
+          if (value.kind() !== 'Map') continue;
+          const map = value as LoroMap;
+          // Identity is a scalar. Read it shallowly so finding a turn never
+          // materializes an unrelated turn's body on the way to the target.
+          if (map.get('id') !== turnId) continue;
+          const json = map.toJSON();
+          return json && typeof json === 'object'
+            ? { state: 'ready', turn: json as SessionHistory }
+            : { state: 'invalid' };
+        }
+        // Legacy plain-JSON rows are already detached and cheap to inspect.
+        if (
+          value &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          (value as { id?: unknown }).id === turnId
+        ) {
+          return { state: 'ready', turn: value as SessionHistory };
+        }
       }
       return { state: 'missing' };
     },
@@ -143,126 +203,146 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
 
   const commands: SessionHistoryCommands = {
     async appendTurn(turn) {
-      // The shared writer parses before it touches a container, so invalid input
-      // is rejected here with no partial write.
+      try {
+        parseHistoryWrite(HistoryEntryWriteSchema, turn);
+      } catch (error) {
+        return rejected('invalid_input', issuesOf(error));
+      }
       try {
         writer.append(turn);
-      } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+      } catch (cause) {
+        return indeterminate(cause);
       }
-      return finish('append', [turn.id]);
+      return accepted('append', [turn.id]);
     },
     async replaceTurn(turnId, turn) {
       if (turn.id !== turnId)
         return rejected('invalid_input', [{ path: ['id'], code: 'immutable_id' }]);
+      if (!writer.read(turnId)) return rejected('not_found');
       try {
-        const replaced = writer.replace(turnId, turn);
-        if (!replaced) return rejected('not_found');
+        parseHistoryWrite(HistoryEntryWriteSchema, turn);
       } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+        return rejected('invalid_input', issuesOf(error));
       }
-      return finish('replace', [turnId]);
+      try {
+        writer.replace(turnId, turn);
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      return accepted('replace', [turnId]);
     },
     async setTurnField<K extends SessionWritableField>(
       turnId: string,
       key: K,
       change: SessionFieldChange<SessionHistoryInput[K]>
     ) {
-      try {
-        // `set` validates the field in the writer before diffing; `clear` is an
-        // explicit delete, never an implicit `undefined` contract.
-        const updated = writer.setField(
-          turnId,
-          key,
-          change.kind === 'set' ? change.value : undefined
-        );
-        if (!updated) return rejected('not_found');
-      } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+      if (!writer.read(turnId)) return rejected('not_found');
+      if (change.kind === 'set') {
+        try {
+          parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
+        } catch (error) {
+          return rejected('invalid_input', issuesOf(error));
+        }
       }
-      return finish('set-field', [turnId]);
+      try {
+        writer.setField(turnId, key, change.kind === 'set' ? change.value : undefined);
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      return accepted('set-field', [turnId]);
     },
     async resumeAssistant(turnId) {
       const target = writer.read(turnId);
       if (!target) return rejected('not_found');
       if (target.role !== 'assistant') return rejected('invalid_input');
-      // One conditional commit: the target is re-located inside `updateEntry`.
-      // Reopen sets an explicit non-terminal `finished` and removes the two end
-      // markers; unknown fields survive because the draft starts from storage.
-      writer.updateEntry(turnId, (turn) => {
-        turn.finished = false;
-        delete turn.endedAt;
-        delete turn.permissionWaitMs;
-        return turn;
-      });
-      return finish('resume-assistant', [turnId]);
+      try {
+        writer.updateEntry(turnId, (turn) => {
+          applyResumeAssistant(turn as unknown as Record<string, unknown>);
+          return turn;
+        });
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      return accepted('resume-assistant', [turnId]);
     },
     async openAssistantTurn(input) {
       const existing = writer.read(input.turnId);
       if (existing) {
         if (existing.role !== 'assistant') return rejected('invalid_input');
         try {
-          // One conditional commit: reopen sets an explicit non-terminal
-          // `finished`, removes the end markers, and fills provenance only where
-          // the stored turn has none.
           writer.updateEntry(input.turnId, (turn) => {
-            turn.finished = false;
-            delete turn.endedAt;
-            delete turn.permissionWaitMs;
-            if (turn.userTurnId === undefined && input.userTurnId !== undefined)
-              turn.userTurnId = input.userTurnId;
-            if (input.modelInfo !== undefined) turn.modelInfo = input.modelInfo;
+            applyOpenAssistantTurn(turn as unknown as Record<string, unknown>, input);
             return turn;
           });
-        } catch (error) {
-          return rejected('invalid_input', (error as HistoryWriteError).issues);
+        } catch (cause) {
+          return indeterminate(cause);
         }
-        return finish('open-assistant-turn', [input.turnId]);
+        return accepted('open-assistant-turn', [input.turnId]);
+      }
+      const entry = createAssistantTurn(input);
+      try {
+        parseHistoryWrite(HistoryEntryWriteSchema, entry);
+      } catch (error) {
+        return rejected('invalid_input', issuesOf(error));
       }
       try {
-        writer.append({
-          id: input.turnId,
-          role: 'assistant',
-          timestamp: input.timestamp,
-          ...(input.userTurnId !== undefined ? { userTurnId: input.userTurnId } : {}),
-          ...(input.modelInfo !== undefined ? { modelInfo: input.modelInfo } : {}),
-          items: [] as unknown as SessionHistoryInput['items'],
-          fileDiff: [],
-        });
-      } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+        writer.append(entry as unknown as SessionHistory);
+      } catch (cause) {
+        return indeterminate(cause);
       }
-      return finish('open-assistant-turn', [input.turnId]);
+      return accepted('open-assistant-turn', [input.turnId]);
     },
     async resolveTaskProposal(entryId, proposalId, resolution) {
-      let found = false;
       try {
-        const updated = writer.updateEntry(entryId, (entry) => {
-          found = resolveTaskProposalOnEntry(entry, proposalId, resolution);
+        parseTaskProposalResolution(resolution);
+      } catch (error) {
+        return rejected('invalid_input', issuesOf(error));
+      }
+      const target = writer.read(entryId);
+      if (!target) return rejected('not_found');
+      if (!hasTaskProposal(target, proposalId)) return rejected('not_found');
+      try {
+        writer.updateEntry(entryId, (entry) => {
+          resolveTaskProposalOnEntry(entry, proposalId, resolution);
           return entry;
         });
-        if (!updated) return rejected('not_found');
-      } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+      } catch (cause) {
+        return indeterminate(cause);
       }
-      if (!found) return rejected('not_found');
-      return finish('resolve-task-proposal', [entryId]);
+      return accepted('resolve-task-proposal', [entryId]);
     },
     async respondPermission(requestId, outcome, respondOptions) {
       try {
         parseHistoryWrite(PermissionOutcomeSchema, outcome);
       } catch (error) {
-        return rejected('invalid_input', (error as HistoryWriteError).issues);
+        return rejected('invalid_input', issuesOf(error));
       }
-      const answered = writer.respondPermission(requestId, outcome, respondOptions);
+      let answered: boolean;
+      try {
+        answered = writer.respondPermission(requestId, outcome, respondOptions);
+      } catch (cause) {
+        return indeterminate(cause);
+      }
       if (!answered) return rejected('not_found');
-      return finish('respond-permission', respondOptions?.turnId ? [respondOptions.turnId] : []);
+      return accepted('respond-permission', respondOptions?.turnId ? [respondOptions.turnId] : []);
     },
   };
 
   const durability = {
-    async waitDurable() {
-      await options.flushLocal?.();
+    async waitDurable(receipt?: SessionWriteReceipt) {
+      if (receipt !== undefined && !issuedReceipts.has(receipt)) {
+        throw new SessionDurabilityError(
+          'invalid_receipt',
+          'The receipt was not issued by this session store.'
+        );
+      }
+      if (!options.durable) {
+        throw new SessionDurabilityError(
+          'unavailable',
+          'This session store has no local durability barrier.'
+        );
+      }
+      await options.durable();
     },
   };
 

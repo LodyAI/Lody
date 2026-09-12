@@ -45,8 +45,16 @@ export type SessionCommandRejection = {
   readonly issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[];
 };
 
-/** Identifies a locally accepted change so a caller can await its durability. */
-export type SessionWriteReceipt = {
+declare const sessionWriteReceiptBrand: unique symbol;
+
+/**
+ * An accepted change's receipt. It is a capability issued by the store that
+ * applied the change: the brand is not exported, and each store keeps its own
+ * issued set, so a caller cannot fabricate a receipt for a different store or a
+ * change that was never applied.
+ */
+export interface SessionWriteReceipt {
+  readonly [sessionWriteReceiptBrand]: true;
   readonly sessionId: SessionId;
   /** Business turn ids touched by the accepted change, in the order applied. */
   readonly turnIds: readonly string[];
@@ -58,7 +66,7 @@ export type SessionWriteReceipt = {
     | 'open-assistant-turn'
     | 'resolve-task-proposal'
     | 'respond-permission';
-};
+}
 
 /** A user's decision on a task proposal, resolved against the live notice. */
 export type TaskProposalResolution = Pick<TaskProposalMeta, 'taskId'> & {
@@ -85,13 +93,20 @@ export type OpenAssistantTurnInput = {
 /**
  * Three phases, deliberately distinct:
  *  - `accepted`   — the store holds the change; retrying would duplicate it.
- *  - `rejected`   — nothing was applied (invalid input, missing target, failed
- *                   precondition); the caller may fix and retry.
+ *                   `postAcceptError` reports an accepted write whose *side
+ *                   effect* (cache notification, evidence) then failed; the
+ *                   change itself is applied and must not be re-issued.
+ *  - `rejected`   — validated and refused before touching storage; the caller
+ *                   may fix and retry.
  *  - `indeterminate` — the implementation cannot say whether the change
  *                   committed. Never auto-retry; surface it.
  */
 export type SessionCommandResult =
-  | { readonly status: 'accepted'; readonly receipt: SessionWriteReceipt }
+  | {
+      readonly status: 'accepted';
+      readonly receipt: SessionWriteReceipt;
+      readonly postAcceptError?: unknown;
+    }
   | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
 
@@ -184,11 +199,25 @@ export interface SessionHistoryCommands {
 /**
  * Local persistence, separate from local acceptance and from remote sync.
  * Resolving proves the accepted change is in local durable storage, not that a
- * peer has seen it.
+ * peer has seen it. An implementation that cannot prove local durability MUST
+ * reject with `SessionDurabilityError` instead of resolving: a public promise
+ * must never silently stand in for a persistence barrier it did not perform.
  */
 export interface SessionDurability {
   /** Await local durability of changes accepted at or before `receipt`. */
   waitDurable(receipt?: SessionWriteReceipt): Promise<void>;
+}
+
+export type SessionDurabilityErrorCode = 'unavailable' | 'invalid_receipt';
+
+export class SessionDurabilityError extends Error {
+  constructor(
+    readonly code: SessionDurabilityErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = 'SessionDurabilityError';
+  }
 }
 
 export interface SessionData {

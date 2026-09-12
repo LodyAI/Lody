@@ -7,32 +7,42 @@ import {
   type HistoryWriteError,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
-import { resolveTaskProposalOnEntry } from './task-proposal';
-import type {
-  SessionCommandResult,
-  SessionData,
-  SessionFieldChange,
-  SessionHistoryCommands,
-  SessionHistoryReader,
-  SessionTurnRead,
-  SessionVisiblePage,
-  SessionVisiblePageRequest,
-  SessionWritableField,
-  SessionWriteReceipt,
+import {
+  applyOpenAssistantTurn,
+  applyRespondPermission,
+  applyResumeAssistant,
+  createAssistantTurn,
+  hasTaskProposal,
+  parseTaskProposalResolution,
+  resolveTaskProposalOnEntry,
+} from './planner';
+import {
+  SessionDurabilityError,
+  type SessionCommandResult,
+  type SessionData,
+  type SessionFieldChange,
+  type SessionHistoryCommands,
+  type SessionHistoryReader,
+  type SessionTurnRead,
+  type SessionVisiblePage,
+  type SessionVisiblePageRequest,
+  type SessionWritableField,
+  type SessionWriteReceipt,
 } from './types';
 
 // # Independent in-memory SessionData
 //
 // Proves the consumer contracts do not depend on Loro, Mirror, CIDs or storage
-// offsets: a plain array of detached JSON turns plus a Map index. It uses the
-// same *pure* shared validator (`history-write-schema`) as the Loro adapter, so
-// input rejection is a shared rule, not a re-implementation.
+// offsets: a plain array of detached JSON turns. Business rules are NOT restated
+// here; every command applies the same shared planner as the Loro adapter, and
+// input validation uses the same pure shared validator, so the two backends can
+// only differ in how they persist.
 //
 // Test-only control (never a product seam):
-//  - `beforeCommit` / `afterCommit` let a test pin the exact interleaving of a
-//    peer edit against an in-flight command.
-//  - `failDurability` makes `waitDurable` reject, modelling "accepted locally
-//    but not yet persisted" without turning that into a write rejection.
+//  - `beforeCommit` / `afterCommit` pin the exact interleaving of a peer edit or
+//    a post-accept failure against an in-flight command.
+//  - `failDurability` makes `waitDurable` reject, modelling a local durability
+//    barrier that failed without turning that into a write rejection.
 
 export type MemoryCommitPlan = {
   readonly kind: SessionWriteReceipt['kind'];
@@ -85,11 +95,13 @@ const rejected = (
   reason: { code, ...(issues ? { issues } : {}) },
 });
 
-const toRejection = (error: HistoryWriteError): SessionCommandResult =>
-  rejected(
-    'invalid_input',
-    error.issues.map(({ path, code }) => ({ path, code }))
-  );
+const issuesOf = (
+  error: unknown
+): readonly { readonly path: readonly PropertyKey[]; readonly code: string }[] =>
+  (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
+
+const toRejection = (error: unknown): SessionCommandResult =>
+  rejected('invalid_input', issuesOf(error));
 
 const cursorToIndex = (cursor: string | undefined, length: number): number => {
   if (cursor === undefined) return length;
@@ -103,7 +115,8 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   let turns: SessionHistory[] = (options.initialTurns ?? []).map(clone);
   let acceptedSerial = 0;
   let durableSerial = 0;
-  const receiptSerial = new WeakMap<SessionWriteReceipt, number>();
+  const issuedReceipts = new WeakSet<object>();
+  const receiptSerial = new WeakMap<object, number>();
   const durableWaiters = new Set<() => void>();
 
   const storedTurns = () => turns.map((turn) => withoutUndefined({ ...turn }));
@@ -116,6 +129,18 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     return -1;
   };
 
+  const issueReceipt = (
+    kind: SessionWriteReceipt['kind'],
+    turnIds: readonly string[]
+  ): SessionWriteReceipt => {
+    const receipt = { sessionId, kind, turnIds } as unknown as SessionWriteReceipt;
+    acceptedSerial += 1;
+    issuedReceipts.add(receipt);
+    receiptSerial.set(receipt, acceptedSerial);
+    if (!options.manualDurability) durableSerial = acceptedSerial;
+    return receipt;
+  };
+
   const mutating = async (
     kind: SessionWriteReceipt['kind'],
     turnIds: readonly string[],
@@ -124,12 +149,13 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     const plan: MemoryCommitPlan = { kind, turnIds };
     await options.beforeCommit?.(plan);
     const applied = mutation(plan);
-    await options.afterCommit?.(plan);
     if (!applied) return rejected('conflict');
-    acceptedSerial += 1;
-    if (!options.manualDurability) durableSerial = acceptedSerial;
-    const receipt: SessionWriteReceipt = { sessionId, kind, turnIds: plan.turnIds.slice() };
-    receiptSerial.set(receipt, acceptedSerial);
+    const receipt = issueReceipt(kind, plan.turnIds.slice());
+    try {
+      await options.afterCommit?.(plan);
+    } catch (postAcceptError) {
+      return { status: 'accepted', receipt, postAcceptError };
+    }
     return { status: 'accepted', receipt };
   };
 
@@ -180,7 +206,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       try {
         parseHistoryWrite(HistoryEntryWriteSchema, turn);
       } catch (error) {
-        return toRejection(error as HistoryWriteError);
+        return toRejection(error);
       }
       return mutating('append', [turn.id], () => {
         turns = [...turns, withoutUndefined({ ...turn }) as SessionHistory];
@@ -193,7 +219,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       try {
         parseHistoryWrite(HistoryEntryWriteSchema, turn);
       } catch (error) {
-        return toRejection(error as HistoryWriteError);
+        return toRejection(error);
       }
       if (findIndex(turnId) < 0) return rejected('not_found');
       return mutating('replace', [turnId], () => {
@@ -218,7 +244,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         try {
           value = parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
         } catch (error) {
-          return toRejection(error as HistoryWriteError);
+          return toRejection(error);
         }
       }
       return mutating('set-field', [turnId], () => {
@@ -239,41 +265,24 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       if (turns[initial]!.role !== 'assistant') return rejected('invalid_input');
       return mutating('resume-assistant', [turnId], () => {
         const index = findIndex(turnId);
-        if (index < 0) return false;
-        if (turns[index]!.role !== 'assistant') return false;
+        if (index < 0 || turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
-        const updated = { ...next[index]! } as Record<string, unknown>;
-        // Reopen: explicitly non-terminal, and the two end markers are removed
-        // rather than passed as `undefined`. Every unknown stored field rides
-        // along untouched.
-        updated.finished = false;
-        delete updated.endedAt;
-        delete updated.permissionWaitMs;
+        const updated = clone(next[index]!) as Record<string, unknown>;
+        applyResumeAssistant(updated);
         next[index] = withoutUndefined(updated) as SessionHistory;
         turns = next;
         return true;
       });
     },
     async openAssistantTurn(input) {
-      try {
-        if (input.userTurnId !== undefined)
-          parseHistoryWrite(HistoryEntryWriteSchema.shape.userTurnId, input.userTurnId);
-        if (input.modelInfo !== undefined)
-          parseHistoryWrite(HistoryEntryWriteSchema.shape.modelInfo, input.modelInfo);
-      } catch (error) {
-        return toRejection(error as HistoryWriteError);
-      }
       const initial = findIndex(input.turnId);
       if (initial < 0) {
-        const entry = withoutUndefined({
-          id: input.turnId,
-          role: 'assistant' as const,
-          timestamp: input.timestamp,
-          userTurnId: input.userTurnId,
-          modelInfo: input.modelInfo,
-          items: [],
-          fileDiff: [],
-        }) as unknown as SessionHistory;
+        const entry = withoutUndefined(createAssistantTurn(input)) as unknown as SessionHistory;
+        try {
+          parseHistoryWrite(HistoryEntryWriteSchema, entry);
+        } catch (error) {
+          return toRejection(error);
+        }
         return mutating('open-assistant-turn', [input.turnId], () => {
           turns = [...turns, entry];
           return true;
@@ -284,31 +293,29 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const index = findIndex(input.turnId);
         if (index < 0 || turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
-        const updated = { ...next[index]! } as Record<string, unknown>;
-        updated.finished = false;
-        delete updated.endedAt;
-        delete updated.permissionWaitMs;
-        // Never overwrite provenance the stored turn already has.
-        if (updated.userTurnId === undefined && input.userTurnId !== undefined)
-          updated.userTurnId = input.userTurnId;
-        if (input.modelInfo !== undefined) updated.modelInfo = input.modelInfo;
+        const updated = clone(next[index]!) as Record<string, unknown>;
+        applyOpenAssistantTurn(updated, input);
         next[index] = withoutUndefined(updated) as SessionHistory;
         turns = next;
         return true;
       });
     },
     async resolveTaskProposal(entryId, proposalId, resolution) {
+      try {
+        parseTaskProposalResolution(resolution);
+      } catch (error) {
+        return toRejection(error);
+      }
       const initial = findIndex(entryId);
       if (initial < 0) return rejected('not_found');
-      const probe = structuredClone(turns[initial]!) as { items?: unknown };
-      if (!resolveTaskProposalOnEntry(probe, proposalId, resolution)) return rejected('not_found');
+      if (!hasTaskProposal(turns[initial]!, proposalId)) return rejected('not_found');
       return mutating('resolve-task-proposal', [entryId], () => {
         const index = findIndex(entryId);
         if (index < 0) return false;
-        const entry = structuredClone(turns[index]!) as { items?: unknown };
-        if (!resolveTaskProposalOnEntry(entry, proposalId, resolution)) return false;
+        const updated = clone(turns[index]!) as Record<string, unknown>;
+        if (!resolveTaskProposalOnEntry(updated, proposalId, resolution)) return false;
         const next = turns.slice();
-        next[index] = withoutUndefined(entry as Record<string, unknown>) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionHistory;
         turns = next;
         return true;
       });
@@ -317,45 +324,28 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       try {
         parseHistoryWrite(PermissionOutcomeSchema, outcome);
       } catch (error) {
-        return toRejection(error as HistoryWriteError);
+        return toRejection(error);
       }
-      const locateIn = (index: number) => {
-        const turn = turns[index];
-        if (!turn) return undefined;
-        const items = Array.isArray(turn.items) ? turn.items : [];
-        const at = items.findIndex(
-          (item) => item?.type === 'tool_call' && item.permissionRequest?.requestId === requestId
-        );
-        return at >= 0 ? { index, at } : undefined;
-      };
-      const locate = () => {
-        // A supplied turn id restricts the lookup to that turn, never a scan
-        // back through older turns.
-        if (permissionOptions?.turnId) return locateIn(findIndex(permissionOptions.turnId));
-        for (let index = turns.length - 1; index >= 0; index -= 1) {
-          const found = locateIn(index);
-          if (found) return found;
+      const locate = (): number | undefined => {
+        const candidates = permissionOptions?.turnId
+          ? [findIndex(permissionOptions.turnId)]
+          : Array.from({ length: turns.length }, (_unused, offset) => turns.length - 1 - offset);
+        for (const index of candidates) {
+          if (index < 0 || !turns[index]) continue;
+          if (applyRespondPermission(clone(turns[index]!) as never, requestId, outcome))
+            return index;
         }
         return undefined;
       };
       const found = locate();
-      if (!found) return rejected('not_found');
-      return mutating('respond-permission', [turns[found.index]!.id], () => {
-        const current = locate();
-        if (!current) return false;
+      if (found === undefined) return rejected('not_found');
+      return mutating('respond-permission', [turns[found]!.id], () => {
+        const index = locate();
+        if (index === undefined) return false;
+        const updated = clone(turns[index]!) as Record<string, unknown>;
+        if (!applyRespondPermission(updated, requestId, outcome)) return false;
         const next = turns.slice();
-        const updated = { ...next[current.index]! };
-        const nextItems = Array.isArray(updated.items) ? updated.items.slice() : [];
-        const item = { ...(nextItems[current.at] as Record<string, unknown>) } as Record<
-          string,
-          unknown
-        >;
-        const request = { ...(item.permissionRequest as Record<string, unknown>) };
-        request.outcome = outcome;
-        item.permissionRequest = request;
-        nextItems[current.at] = item as (typeof nextItems)[number];
-        updated.items = nextItems;
-        next[current.index] = updated;
+        next[index] = withoutUndefined(updated) as SessionHistory;
         turns = next;
         return true;
       });
@@ -364,6 +354,18 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
 
   const durability = {
     async waitDurable(receipt?: SessionWriteReceipt) {
+      if (receipt !== undefined && !issuedReceipts.has(receipt)) {
+        throw new SessionDurabilityError(
+          'invalid_receipt',
+          'The receipt was not issued by this session store.'
+        );
+      }
+      if (acceptedSerial === 0) {
+        throw new SessionDurabilityError(
+          'invalid_receipt',
+          'No accepted change exists to await durability for.'
+        );
+      }
       if (options.failDurability !== undefined) throw options.failDurability;
       const serial = receipt ? (receiptSerial.get(receipt) ?? acceptedSerial) : acceptedSerial;
       if (serial <= durableSerial) return;

@@ -144,6 +144,12 @@ import {
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
 import { publishTaskProposal } from '@/mcp/task-proposal';
+import {
+  buildSessionHistoryPage,
+  parseSessionHistoryCursor,
+  truncateSessionHistoryText as truncateUtf8HeadTail,
+  type SessionHistoryPageEntry,
+} from '@/mcp/session-history-page';
 import { version as cliVersion } from '@/pkg';
 import { uploadTaskImages } from '@/lib/task-image-upload';
 import {
@@ -1977,70 +1983,6 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   });
 };
 
-type SessionHistoryCursor = { v: 1; sessionId: string; beforeIndex: number };
-
-const parseSessionHistoryCursor = (
-  cursor: string | undefined,
-  sessionId: string,
-  newestBeforeIndex: number
-): number => {
-  if (!cursor) return newestBeforeIndex;
-  try {
-    const value = JSON.parse(
-      Buffer.from(cursor, 'base64url').toString('utf8')
-    ) as SessionHistoryCursor;
-    if (
-      value.v !== 1 ||
-      value.sessionId !== sessionId ||
-      !Number.isInteger(value.beforeIndex) ||
-      value.beforeIndex < 0
-    ) {
-      throw new Error('cursor mismatch');
-    }
-    return value.beforeIndex;
-  } catch {
-    throw new LodyOperationStoreError(
-      'CURSOR_INVALID',
-      'History cursor is malformed or belongs to a different Session.',
-      false
-    );
-  }
-};
-
-const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
-
-const truncateUtf8HeadTail = (text: string, maxBytes: number) => {
-  const originalBytes = Buffer.byteLength(text, 'utf8');
-  if (originalBytes <= maxBytes) return { text };
-  const marker = maxBytes >= 5 ? '\n…\n' : '';
-  const characters = Array.from(text);
-  const split = (keptCharacters: number) => {
-    const headCount = Math.ceil(keptCharacters / 2);
-    const tailCount = keptCharacters - headCount;
-    const head = characters.slice(0, headCount).join('');
-    const tail = characters.slice(characters.length - tailCount).join('');
-    return { head, tail, text: `${head}${marker}${tail}` };
-  };
-  let low = 0;
-  let high = characters.length;
-  let best = split(0);
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const candidate = split(middle);
-    if (Buffer.byteLength(candidate.text, 'utf8') <= maxBytes) {
-      best = candidate;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-  return {
-    text: best.text,
-    truncated: true as const,
-    omittedBytes: originalBytes - Buffer.byteLength(best.head + best.tail, 'utf8'),
-  };
-};
-
 const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unknown> => {
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
@@ -2065,51 +2007,17 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       ...(beforeIndex < Number.MAX_SAFE_INTEGER ? { cursor: String(beforeIndex) } : {}),
       isVisible: isVisibleTranscriptTurn,
     });
-    let items: Array<Record<string, unknown>> = [];
+    const entries: SessionHistoryPageEntry[] = [];
     page.turns.forEach((turn, offset) => {
       const formatted = toSessionTranscriptEntry(page.positions[offset] ?? 0, turn);
-      if (formatted) items.push({ ...formatted });
+      if (formatted) entries.push(formatted);
     });
-    const hasOlder = page.hasMore;
-    const makeResponse = () => {
-      const firstIndex = typeof items[0]?.index === 'number' ? items[0].index : undefined;
-      return {
-        sessionId,
-        items,
-        ...(hasOlder && firstIndex !== undefined
-          ? {
-              nextCursor: encodeCursor({
-                v: 1,
-                sessionId,
-                beforeIndex: firstIndex,
-              } satisfies SessionHistoryCursor),
-            }
-          : {}),
-      };
-    };
-    while (items.length > 1 && jsonBytes(makeResponse()) > MAX_MCP_SESSION_HISTORY_BYTES) {
-      items.shift();
-    }
-    if (items.length === 1 && jsonBytes(makeResponse()) > MAX_MCP_SESSION_HISTORY_BYTES) {
-      const entry = items[0]!;
-      const originalText = typeof entry.text === 'string' ? entry.text : '';
-      let low = 0;
-      let high = Buffer.byteLength(originalText, 'utf8');
-      let best = truncateUtf8HeadTail(originalText, 0);
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2);
-        const candidate = truncateUtf8HeadTail(originalText, middle);
-        items = [{ ...entry, ...candidate }];
-        if (jsonBytes(makeResponse()) <= MAX_MCP_SESSION_HISTORY_BYTES) {
-          best = candidate;
-          low = middle + 1;
-        } else {
-          high = middle - 1;
-        }
-      }
-      items = [{ ...entry, ...best }];
-    }
-    return makeResponse();
+    return buildSessionHistoryPage({
+      sessionId,
+      entries,
+      hasOlder: page.hasMore,
+      maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+    });
   });
 };
 

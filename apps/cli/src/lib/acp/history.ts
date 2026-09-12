@@ -1336,12 +1336,29 @@ export const updatePermissionOutcomeInHistory = async (
     outcome as PermissionOutcome
   );
   if (result.status === 'rejected') {
-    // A missing request was a silent no-op before; preserve that, but never
-    // report a rejected write as applied.
-    logger.debug(`Permission outcome for ${requestId} not applied: ${result.reason.code}`);
-    return;
+    // A missing request was a silent no-op before; preserve that. A genuinely
+    // malformed outcome still throws, so the caller keeps its cancel fallback.
+    if (result.reason.code === 'not_found') {
+      logger.debug(`Permission outcome for ${requestId} not applied: ${result.reason.code}`);
+      return;
+    }
+    throw new HistoryWriteError(
+      result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+    );
   }
   if (result.status === 'indeterminate') throw result.cause;
+  if (result.postAcceptError !== undefined) {
+    // The outcome is persisted. A post-accept side-effect failure must not be
+    // reported as "the write failed", or the caller would re-answer a request
+    // that already has an outcome.
+    logger.warn(
+      `Permission outcome for ${requestId} persisted, but its side effect failed: ${
+        result.postAcceptError instanceof Error
+          ? result.postAcceptError.message
+          : String(result.postAcceptError)
+      }`
+    );
+  }
 };
 
 const mergeToolCallWithPermission = (

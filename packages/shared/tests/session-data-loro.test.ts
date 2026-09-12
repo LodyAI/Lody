@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { Loro, isContainer, type LoroMap } from 'loro-crdt';
+import { describe, expect, it, vi } from 'vitest';
+import { Loro, isContainer, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '../src/schema';
 import { createHistoryWriter } from '../src/history-writer';
 import { createLoroSessionData } from '../src/session-data';
@@ -10,7 +10,11 @@ import {
 } from './session-data-contract';
 
 const makeHarness = (doc = new Loro()): SessionDataHarness => {
-  const data = createLoroSessionData({ sessionId: contractSessionId, doc });
+  const data = createLoroSessionData({
+    sessionId: contractSessionId,
+    doc,
+    durable: async () => {},
+  });
   const writer = createHistoryWriter(doc);
   const findMap = (turnId: string): LoroMap | undefined => {
     const list = doc.getList('history');
@@ -138,5 +142,78 @@ describe('loro session data adapter', () => {
     });
     expect(page.turns.map((turn) => turn.id)).toEqual(['valid']);
     expect(page.hasMore).toBe(false);
+  });
+
+  it('refuses to claim durability when no barrier exists, and rejects a forged receipt', async () => {
+    const doc = new Loro();
+    const data = createLoroSessionData({ sessionId: contractSessionId, doc });
+    const result = await data.commands.appendTurn({
+      id: 'turn',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      items: [{ type: 'text', text: 'x' }],
+      fileDiff: [],
+    });
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') return;
+    // No barrier was provided: the public promise must not silently succeed.
+    await expect(data.durability.waitDurable(result.receipt)).rejects.toMatchObject({
+      code: 'unavailable',
+    });
+    // A caller-shaped object is not a capability this store issued.
+    await expect(
+      data.durability.waitDurable({
+        sessionId: contractSessionId,
+        kind: 'append',
+        turnIds: ['turn'],
+      } as never)
+    ).rejects.toMatchObject({ code: 'invalid_receipt' });
+  });
+
+  it('reports an accepted write whose post-accept side effect failed', async () => {
+    const doc = new Loro();
+    const data = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc,
+      durable: async () => {},
+      afterAccept: () => {
+        throw new Error('notification failed');
+      },
+    });
+    const result = await data.commands.appendTurn({
+      id: 'turn',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      items: [{ type: 'text', text: 'x' }],
+      fileDiff: [],
+    });
+    // Applied, but its side effect failed: never a pre-write rejection.
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') return;
+    expect(result.postAcceptError).toBeInstanceOf(Error);
+    expect((await data.history.readTurn('turn')).state).toBe('ready');
+  });
+
+  it('reads one turn by shallow identity without materializing unrelated bodies', async () => {
+    const doc = new Loro();
+    const harness = makeHarness(doc);
+    for (let index = 0; index < 5; index += 1) {
+      await harness.data.commands.appendTurn({
+        id: `turn-${index}`,
+        role: 'user',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        items: [{ type: 'text', text: `body ${index}` }],
+        fileDiff: [],
+      });
+    }
+    const toJSON = vi.spyOn(LoroMap.prototype, 'toJSON');
+    try {
+      const read = await harness.data.history.readTurn('turn-1');
+      expect(read.state).toBe('ready');
+      // Exactly the target body is materialized; identity checks are shallow.
+      expect(toJSON).toHaveBeenCalledTimes(1);
+    } finally {
+      toJSON.mockRestore();
+    }
   });
 });

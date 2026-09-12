@@ -15,7 +15,16 @@ export type {
   TaskProposalResolution,
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
-export { resolveTaskProposalOnEntry } from './task-proposal';
+export { SessionDurabilityError, type SessionDurabilityErrorCode } from './types';
+export {
+  applyOpenAssistantTurn,
+  applyRespondPermission,
+  applyResumeAssistant,
+  createAssistantTurn,
+  hasTaskProposal,
+  parseTaskProposalResolution,
+  resolveTaskProposalOnEntry,
+} from './planner';
 export {
   createMemorySessionData,
   type MemoryCommitPlan,
