@@ -5337,19 +5337,23 @@ export class SessionExecutionService {
         // a stale no-op while the work continues.
         if (this.deps.isEngineTurnActive(sessionId)) {
           const session = this.deps.sessionManager.getSession(sessionId);
-          this.deps.clearEngineTurnActivity(sessionId);
-          if (session?.agentClient?.isCreated() && session.acpSessionId) {
-            try {
-              await session.agentClient.cancel(session.acpSessionId);
-              this.deps.logger.debug(
-                `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
-              );
-            } catch (error) {
-              this.deps.logger.warn(
-                `[${sessionId}] Failed to cancel engine-opened turn: ${formatErrorMessage(error)}`
-              );
-            }
+          if (!session?.agentClient?.isCreated() || !session.acpSessionId) {
+            // Cannot deliver a cancel to the engine turn. Keep the activity
+            // marker so status and the GC guard still see the work (process
+            // exit releases it) instead of reporting a phantom stop.
+            return { success: false, error: 'The agent is no longer connected.' };
           }
+          try {
+            await session.agentClient.cancel(session.acpSessionId);
+            this.deps.logger.debug(
+              `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
+            );
+          } catch (error) {
+            // The turn may still be running: keep the marker and report the
+            // failure rather than releasing status/GC and claiming a stop.
+            return { success: false, error: formatErrorMessage(error) };
+          }
+          this.deps.clearEngineTurnActivity(sessionId);
           this.deps.clearSessionActivePresence(sessionId);
           await this.clearCancelRequest(sessionId);
           this.clearTurnCancellation(sessionId, turnId);

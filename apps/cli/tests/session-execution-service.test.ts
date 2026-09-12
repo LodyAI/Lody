@@ -320,6 +320,62 @@ describe('SessionExecutionService', () => {
     expect(result).toEqual({ success: true });
     expect(deps.sessionManager.getSession).not.toHaveBeenCalled();
   });
+
+  it('keeps the engine-turn marker and reports failure when the ACP cancel fails', async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error('connection lost');
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes an undeliverable cancel from a cancelled engine turn', async () => {
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toMatchObject({ success: false, error: 'The agent is no longer connected.' });
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),

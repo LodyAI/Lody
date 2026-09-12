@@ -4358,16 +4358,18 @@ export class MessageHandler {
       );
       return;
     }
-    if (this.store.recordSuppressedAcpReplay(sessionId)) {
-      return;
-    }
     // Updates from a turn the engine opened itself always take an autonomous
     // target — never the active/finalized client turn's — so their content
     // (including rich content, which bypasses turn-aware regrouping at write
-    // time) lands in that turn's own entry from the start.
-    const target =
-      this.autonomousACPUpdateTarget(sessionId, update) ??
-      this.store.getCurrentACPUpdateTarget(sessionId);
+    // time) lands in that turn's own entry from the start. Resolve this FIRST:
+    // a live engine turn firing during the loadSession replay-suppression
+    // window carries its own identity (replay carries no autonomous marker)
+    // and must never be swallowed as replay.
+    const autonomousTarget = this.autonomousACPUpdateTarget(sessionId, update);
+    if (autonomousTarget === undefined && this.store.recordSuppressedAcpReplay(sessionId)) {
+      return;
+    }
+    const target = autonomousTarget ?? this.store.getCurrentACPUpdateTarget(sessionId);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
