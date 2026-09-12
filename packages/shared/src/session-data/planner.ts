@@ -49,6 +49,17 @@ export function createAssistantTurn(input: OpenAssistantTurnInput): Draft {
 }
 
 /**
+ * Mark a turn seen. Returns whether it changed anything; the legacy `read` flag
+ * is derived from the same mapping the storage layer uses for `seen`.
+ */
+export function applyMarkTurnSeen(draft: Draft): boolean {
+  if (draft.status === 'seen' && draft.read === true) return false;
+  draft.status = 'seen';
+  draft.read = true;
+  return true;
+}
+
+/**
  * Write a permission outcome onto the first matching tool call in one turn.
  * Returns whether a request matched.
  */

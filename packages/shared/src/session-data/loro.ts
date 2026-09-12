@@ -10,6 +10,7 @@ import {
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import {
+  applyMarkTurnSeen,
   applyOpenAssistantTurn,
   applyResumeAssistant,
   createAssistantTurn,
@@ -281,6 +282,18 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return indeterminate(cause);
       }
       return accepted('resume-assistant', [turnId]);
+    },
+    async markTurnSeen(turnId) {
+      if (!writer.read(turnId)) return rejected('not_found');
+      try {
+        writer.updateEntry(turnId, (turn) => {
+          applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
+          return turn;
+        });
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      return accepted('mark-seen', [turnId]);
     },
     async openAssistantTurn(input) {
       const existing = writer.read(input.turnId);

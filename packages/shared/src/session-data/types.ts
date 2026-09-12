@@ -78,6 +78,7 @@ export interface SessionWriteReceipt {
     | 'resume-assistant'
     | 'open-assistant-turn'
     | 'resolve-task-proposal'
+    | 'mark-seen'
     | 'respond-permission';
 }
 
@@ -191,6 +192,11 @@ export interface SessionHistoryCommands {
    * unknown stored field.
    */
   resumeAssistant(turnId: string): Promise<SessionCommandResult>;
+  /**
+   * Mark a turn seen: `status = 'seen'` and the legacy `read = true`. Idempotent;
+   * the adapter re-locates the turn at commit time.
+   */
+  markTurnSeen(turnId: string): Promise<SessionCommandResult>;
   /** Reopen an existing assistant turn or create it, as one business operation. */
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<SessionCommandResult>;
   /**

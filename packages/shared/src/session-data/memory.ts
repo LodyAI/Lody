@@ -3,6 +3,7 @@ import type { SessionId } from '../ids';
 import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import {
+  applyMarkTurnSeen,
   applyOpenAssistantTurn,
   applyRespondPermission,
   applyResumeAssistant,
@@ -288,6 +289,20 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const next = turns.slice();
         const updated = { ...(next[index] as Record<string, unknown>) };
         applyResumeAssistant(updated);
+        next[index] = withoutUndefined(updated) as SessionTurn;
+        turns = next;
+        return true;
+      });
+    },
+    async markTurnSeen(turnId) {
+      if (findIndex(turnId) < 0) return rejected('not_found');
+      return mutating('mark-seen', [turnId], () => {
+        const index = findIndex(turnId);
+        if (index < 0) return false;
+        const next = turns.slice();
+        const updated = { ...(next[index] as Record<string, unknown>) };
+        const changed = applyMarkTurnSeen(updated);
+        if (!changed) return true;
         next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;

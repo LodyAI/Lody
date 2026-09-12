@@ -26,6 +26,7 @@ export type {
   SessionUnavailableReason,
 } from './domain';
 export {
+  applyMarkTurnSeen,
   applyOpenAssistantTurn,
   applyRespondPermission,
   applyResumeAssistant,

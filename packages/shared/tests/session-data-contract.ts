@@ -131,6 +131,22 @@ export function runSessionDataContract(
       expect(roundTripped.legacyFlag).toBe(true);
     });
 
+    it('marks a turn seen idempotently with the legacy read flag', async () => {
+      const harness = await create();
+      const { data } = harness;
+      await data.commands.appendTurn(userTurn('a'));
+
+      const first = await data.commands.markTurnSeen('a');
+      expect(first.status).toBe('accepted');
+      const stored = harness.readStored().find((turn) => turn.id === 'a')!;
+      expect(stored.status).toBe('seen');
+      expect(stored.read).toBe(true);
+
+      // Idempotent, and a missing target is a validated rejection.
+      expect((await data.commands.markTurnSeen('a')).status).toBe('accepted');
+      expect((await data.commands.markTurnSeen('missing')).status).toBe('rejected');
+    });
+
     it('resumes an assistant turn by clearing only its terminal footprint', async () => {
       const harness = await create();
       const { data } = harness;
