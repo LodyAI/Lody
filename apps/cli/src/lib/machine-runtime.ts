@@ -97,6 +97,9 @@ export class MachineRuntime {
       machineId,
       () => this.resourceMonitor?.sample() ?? Promise.reject(new Error('Resource monitor stopped'))
     );
+    // A dying ACP process ends any engine-opened turn it hosted: drop the
+    // activity marker so busy status and the idle-GC guard release the session.
+    this.onSessionTerminated((sessionId) => this.handler?.clearEngineTurnActivity(sessionId));
     this.initializeGCManager();
     this.initialized = true;
 

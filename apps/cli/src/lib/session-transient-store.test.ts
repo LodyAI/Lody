@@ -1,10 +1,83 @@
 import { describe, it, expect, vi } from 'vitest';
-import { SessionTransientStore } from './session-transient-store';
+import { SessionTransientStore, autonomousACPUpdateTargetFrom } from './session-transient-store';
+import { parseSessionNotification, type AcpSessionNotification } from '@lody/shared';
 import type { SessionId } from '@lody/shared';
 
 const sid = (id: string) => id as SessionId;
 
+const acpUpdate = (meta: Record<string, unknown> | undefined): AcpSessionNotification =>
+  parseSessionNotification({
+    sessionId: 's1',
+    update: {
+      sessionUpdate: 'agent_message_chunk',
+      messageId: 'msg-1',
+      content: { type: 'text', text: 'chunk' },
+      ...(meta ? { _meta: meta } : {}),
+    },
+  });
+
+describe('autonomousACPUpdateTargetFrom', () => {
+  it('synthesizes an autonomous target for engine-opened turn updates', () => {
+    const target = autonomousACPUpdateTargetFrom(
+      acpUpdate({ lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } })
+    );
+    expect(target).toEqual({
+      kind: 'assistant_entry',
+      assistantEntryId: 'assistant:autonomous-auto:41',
+      turnId: 'auto:41',
+      turnEpoch: 0,
+      source: 'autonomous_turn',
+    });
+  });
+
+  it('returns undefined without an origin marker (client-dispatched turn)', () => {
+    expect(autonomousACPUpdateTargetFrom(acpUpdate({ lody: { turnId: '40' } }))).toBeUndefined();
+  });
+
+  it('also qualifies on the auto: prefix alone', () => {
+    expect(autonomousACPUpdateTargetFrom(acpUpdate({ lody: { turnId: 'auto:41' } }))).toMatchObject(
+      { assistantEntryId: 'assistant:autonomous-auto:41', source: 'autonomous_turn' }
+    );
+  });
+
+  it('returns undefined without a turn id', () => {
+    expect(
+      autonomousACPUpdateTargetFrom(acpUpdate({ lody: { turnOrigin: 'cron_job' } }))
+    ).toBeUndefined();
+    expect(autonomousACPUpdateTargetFrom(acpUpdate(undefined))).toBeUndefined();
+  });
+});
+
 describe('SessionTransientStore', () => {
+  describe('engine-turn activity', () => {
+    it('notes, reports, and clears engine-turn activity', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+      expect(store.isEngineTurnActive(id)).toBe(false);
+
+      store.noteEngineTurnActivity(id, 'auto:41');
+      expect(store.isEngineTurnActive(id)).toBe(true);
+      expect(store.get(id).engineTurn).toMatchObject({ acpTurnId: 'auto:41' });
+
+      // A mismatched end marker belongs to an older, replaced turn.
+      store.noteEngineTurnActivity(id, 'auto:42');
+      store.clearEngineTurnActivity(id, 'auto:41');
+      expect(store.isEngineTurnActive(id)).toBe(true);
+
+      store.clearEngineTurnActivity(id, 'auto:42');
+      expect(store.isEngineTurnActive(id)).toBe(false);
+      expect(store.get(id).engineTurn).toBeUndefined();
+    });
+
+    it('clears unconditionally on process termination', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+      store.noteEngineTurnActivity(id, 'auto:41');
+      store.clearEngineTurnActivity(id);
+      expect(store.isEngineTurnActive(id)).toBe(false);
+    });
+  });
+
   describe('get / has', () => {
     it('creates state lazily on first access', () => {
       const store = new SessionTransientStore();
