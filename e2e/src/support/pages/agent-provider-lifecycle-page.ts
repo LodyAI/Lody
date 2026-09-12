@@ -354,6 +354,14 @@ export class AgentProviderLifecyclePage {
     const option = this.providerOption(name);
     await expect(option).toBeVisible();
     await expect(option).toBeEnabled();
+
+    const bounds = await option.boundingBox();
+    if (!bounds) throw new Error(`Provider option is not rendered: ${name}`);
+    // Emit the intermediate pointer events a user produces while crossing the submenu gap.
+    await this.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, {
+      steps: 8,
+    });
+    await expect(this.agentSubmenuTrigger()).toHaveAttribute('aria-expanded', 'true');
     await option.click();
     await expect(option).toHaveAttribute('aria-checked', 'true');
     await this.closeAgentMenu();

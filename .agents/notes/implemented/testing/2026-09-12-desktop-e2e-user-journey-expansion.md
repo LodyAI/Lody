@@ -55,9 +55,13 @@ scenarios and 223 steps in 199.995 seconds with no failures. Deterministic ACP p
 product integration and protocol behavior without making external model or network availability a
 merge condition.
 
-Two macOS PR runs at heads `299d06f7` and `396b379c` exposed the same Agent menu race: the selected,
-enabled Provider item detached while Playwright attempted to click it. The menu had been dismissed
-with one unobserved `Escape`, so the next trigger click could overlap Radix's nested-menu teardown.
-After adding observable open and close postconditions, three fresh focused `LODY-AGENT-001` runs
-each passed all 18 steps, and `pnpm --filter @lody/e2e check` passed. The full Electron suite was not
-rerun for this correction by explicit request.
+Three macOS PR runs at heads `299d06f7`, `396b379c`, and `723237b2` exposed the Agent menu race. The
+first correction made nested-menu opening and dismissal observable and passed three fresh focused
+runs locally, but the next remote trace showed the remaining cause: Playwright moved the pointer in
+one jump from the Agent trigger to a left-opening submenu. The submenu closed during hit testing,
+leaving the root page to intercept the click and detaching the Provider option. Provider selection
+now moves the real pointer through intermediate positions, reasserts the visible submenu state, and
+then performs the semantic option click. It does not force clicks, dispatch selection through
+renderer internals, retry the workflow, or depend on a delay. Three fresh focused runs each passed
+all 18 steps, and `pnpm --filter @lody/e2e check` passed. The full Electron suite was not rerun
+locally for this correction by explicit request.

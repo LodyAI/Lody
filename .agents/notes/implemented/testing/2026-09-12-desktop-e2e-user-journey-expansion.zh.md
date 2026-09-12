@@ -47,8 +47,11 @@ P0、17 条 P1。Cucumber 静态解析覆盖 223 个步骤。一次组合真实 
 没有失败。确定性 ACP provider 可以证明本地产品集成和协议行为，而不把外部模型或网络
 可用性变成合并条件。
 
-两个 macOS PR run 在 head `299d06f7` 和 `396b379c` 上暴露了同一 Agent 菜单竞态：已选择且
-可用的 Provider 项在 Playwright 尝试点击时从 DOM 脱离。测试此前只发送一次未观察结果的
-`Escape`；下一次 trigger 点击可能与 Radix 嵌套菜单卸载重叠。加入可观察的打开和关闭后置
-条件后，三轮全新的 focused `LODY-AGENT-001` 运行均通过全部 18 个步骤，且
-`pnpm --filter @lody/e2e check` 通过。按明确要求，本次修正未重跑完整 Electron suite。
+三个 macOS PR run 在 head `299d06f7`、`396b379c` 和 `723237b2` 上暴露了 Agent 菜单竞态。
+第一次修正让嵌套菜单的打开和关闭变得可观察，并在本地通过三轮全新的 focused 运行，但下一次
+远端 trace 显示了剩余原因：Playwright 将指针从 Agent trigger 一次性跳到向左展开的子菜单。
+子菜单在命中测试期间关闭，根页面因而拦截点击，Provider 项也随之从 DOM 脱离。Provider 选择
+现在让真实指针经过中间位置、再次断言可见的子菜单状态，再执行语义化的选项点击。它不强制
+点击、不通过 renderer 内部状态派发选择、不重试工作流，也不依赖延时。三轮全新的 focused
+运行均通过全部 18 个步骤，且 `pnpm --filter @lody/e2e check` 通过。按明确要求，本次修正未在
+本地重跑完整 Electron suite。
