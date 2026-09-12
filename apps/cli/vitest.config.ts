@@ -13,9 +13,12 @@ export default defineConfig({
     },
   },
   test: {
-    include: process.env.LODY_E2E === '1'
-      ? ['tests/**/*.e2e.test.ts']
-      : ['src/__tests__/**/*.ts', 'src/**/*.{test,spec}.ts', 'tests/**/*.test.ts'],
+    clearMocks: false,
+    execArgv: ['--experimental-wasm-modules'],
+    include:
+      process.env.LODY_E2E === '1'
+        ? ['tests/**/*.e2e.test.ts']
+        : ['src/__tests__/**/*.ts', 'src/**/*.{test,spec}.ts', 'tests/**/*.test.ts'],
     exclude: process.env.LODY_E2E === '1' ? [] : ['tests/**/*.e2e.test.ts'],
     // Passing tests intentionally exercise noisy runtime paths. Preserve their
     // output on failure without streaming it during every successful run.
@@ -25,14 +28,6 @@ export default defineConfig({
         inline: ['loro-mirror', '@loro-dev/flock-wasm'],
       },
     },
-    poolOptions: {
-      forks: {
-        execArgv: ['--experimental-wasm-modules'],
-      },
-      threads: {
-        execArgv: ['--experimental-wasm-modules'],
-      },
-    },
     environment: 'node',
     testTimeout: 30000,
     coverage: {
@@ -40,12 +35,7 @@ export default defineConfig({
       reportsDirectory: 'coverage',
       reporter: ['text', 'lcov', 'html'],
       include: ['src/**/*.ts'],
-      exclude: [
-        'src/**/*.d.ts',
-        'src/**/*.test.ts',
-        'src/**/*.spec.ts',
-        'src/index.ts',
-      ],
+      exclude: ['src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts', 'src/index.ts'],
     },
   },
 });

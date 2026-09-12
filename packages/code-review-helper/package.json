@@ -79,7 +79,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "catalog:",
     "vite-plugin-singlefile": "^2.3.0",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.0"
   },
   "license": "Apache-2.0"
 }
