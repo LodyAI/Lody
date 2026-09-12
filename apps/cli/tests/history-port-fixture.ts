@@ -63,14 +63,12 @@ export function withHistoryPort<T extends object>(fixture: T): T & { sessionData
         return turn ? { state: 'ready', turn } : { state: 'missing' };
       },
       readDirectory: async (from: number, to: number) =>
-        (await read())
-          .slice(from, to)
-          .map((t, i) => ({
-            position: from + i,
-            turnId: t.id,
-            state: 'ready',
-            scalars: { ...t, items: undefined },
-          })),
+        (await read()).slice(from, to).map((t, i) => ({
+          position: from + i,
+          turnId: t.id,
+          state: 'ready',
+          scalars: { ...t, items: undefined },
+        })),
       observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
       ...storage.sessionData?.history,
       readAll: read,

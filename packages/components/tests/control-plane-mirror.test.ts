@@ -163,7 +163,6 @@ describe('control-plane Mirror (history: Ignore)', () => {
   });
 });
 
-
 describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
   it('preserves opaque history while appending and updating known fields', () => {
     const doc = new LoroDoc();
@@ -178,7 +177,9 @@ describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
     const before = map.toJSON();
     const idle = createManualIdle();
     const session = createConversationSession(doc, {
-      sessionId: FIXTURE_SESSION_ID, windowed, scheduleIdle: idle.scheduleIdle,
+      sessionId: FIXTURE_SESSION_ID,
+      windowed,
+      scheduleIdle: idle.scheduleIdle,
     });
     session.historyWriter.append({ ...entry, id: 'new-turn' });
     session.historyWriter.setField(entry.id, 'finished', true);
@@ -190,3 +191,18 @@ describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
     session.mirror.dispose();
   });
 });
+
+it.each([true, false])(
+  'closing the composed store invalidates snapshots in windowed=%s',
+  async (windowed) => {
+    const doc = new LoroDoc();
+    const store = createConversationSession(doc, { sessionId: FIXTURE_SESSION_ID, windowed });
+    const snapshot = await store.sessionData.snapshots.capture();
+    store.dispose();
+    store.dispose();
+    await expect(snapshot.read()).rejects.toMatchObject({ code: 'source_closed' });
+    await expect(store.sessionData.snapshots.capture()).rejects.toMatchObject({
+      code: 'source_closed',
+    });
+  }
+);

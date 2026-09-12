@@ -3668,7 +3668,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const persistedDoc = await repo.openPersistedDoc(roomId);
     const sessionDoc = persistedDoc.doc as LoroDoc;
 
-    const { mirror, history, sessionData } = createConversationSession(sessionDoc, {
+    const {
+      mirror,
+      history,
+      sessionData,
+      dispose: disposeConversation,
+    } = createConversationSession(sessionDoc, {
       sessionId,
       windowed: isConversationViewEnabled(),
       // Local IndexedDB durability barrier. Remote convergence is `waitUntilSynced`.
@@ -3814,8 +3819,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         disposed = true;
         stopSyncNow();
         syncTracker.dispose();
-        history.dispose();
-        mirror.dispose();
+        disposeConversation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
         await transportReady.promise;

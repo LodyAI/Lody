@@ -34,7 +34,9 @@ storage offset.
   change; a content-only change omits it so a consumer fences the affected turn without
   cancelling unrelated in-flight reads. Read states distinguish
   missing/invalid/unavailable (`incomplete`/`unsupported`/`failed`). Identity lookups
-  read `id` shallowly and materialize only the target body.
+  read `id` shallowly and materialize only the target body. The Loro reader keeps
+  an ID index, invalidated by structural/id changes; content tokens do not rescan it.
+  Store teardown closes snapshot handles and removes the identity subscription.
 - **Display paging is business logic.** `pageVisibleTranscript` scans raw rows through the
   reader, counts displayable turns, keeps the cursor a raw position and never reports an
   empty tail as the end. A caller-supplied visibility predicate stays on this side of the
@@ -77,7 +79,9 @@ storage offset.
   Business code never passes a raw writer callback. The old SessionDocument history
   facades are removed; read through `history`, write through `commands`.
   `applyHistoryAction` accepts a discriminated domain action, never a draft callback
-  or arbitrary property patch. Targeted actions read only the located turn.
+  or arbitrary property patch. Targeted actions read only the located turn. Legacy inline JSON rows remain
+  writable in their existing representation; only the changed row is replaced,
+  and validation finishes before removing its old slot.
   UI steer fallback rechecks `pending_apply` at commit time; it cannot requeue an
   already executing turn. Field deletion is explicit `clear`.
   `readSessionHistory` preserves legacy business input-config normalization and skips

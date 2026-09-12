@@ -40,16 +40,22 @@ export function createConversationSession(
       getHistory: () => mirror.getState().history as unknown as SessionHistory[],
       subscribe: (listener) => mirror.subscribe(() => listener()),
     });
+    const sessionData = createLoroSessionData({
+      sessionId: options.sessionId,
+      doc,
+      writer: mirror.historyWriter,
+      ...durability,
+    });
     return {
       mirror,
       history,
       historyWriter: mirror.historyWriter,
-      sessionData: createLoroSessionData({
-        sessionId: options.sessionId,
-        doc,
-        writer: mirror.historyWriter,
-        ...durability,
-      }),
+      sessionData,
+      dispose: () => {
+        sessionData.snapshots.closeSource();
+        history.dispose();
+        mirror.dispose();
+      },
     };
   }
   const mirror = new Mirror({
@@ -76,5 +82,10 @@ export function createConversationSession(
     history,
     historyWriter,
     sessionData,
+    dispose: () => {
+      sessionData.snapshots.closeSource();
+      history.dispose();
+      mirror.dispose();
+    },
   };
 }

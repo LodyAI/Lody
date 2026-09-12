@@ -355,7 +355,9 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     for (let index = list.length - 1; index >= 0; index--) {
       const map = list.get(index);
       if (isContainer(map) && map.kind() === 'Map' && (map as LoroMap).get('id') === id)
-        return { map: map as LoroMap, index };
+        return { map: map as LoroMap, inline: undefined, index };
+      if (!isContainer(map) && record(map) && map.id === id)
+        return { map: undefined, inline: map as unknown as SessionHistoryInput, index };
     }
     return undefined;
   };
@@ -393,6 +395,8 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       used.add(index);
       if (historyValuesEqual(previous[index], entry)) return { index };
       const map = list.get(index);
+      if (!isContainer(map) && record(map))
+        return { index, inline: true, value: prepareValue(previous[index], entry) };
       if (!isContainer(map) || map.kind() !== 'Map')
         throw new HistoryWriteError([{ path: ['history', index], code: 'invalid_stored_turn' }]);
       return { index, map, value: prepareValue(previous[index], entry) };
@@ -407,7 +411,10 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
             op.value,
             undefined
           );
-        else if (op.value !== undefined && isContainer(op.map))
+        else if ('inline' in op && op.inline) {
+          list.delete(i, 1);
+          list.insert(i, op.value as Parameters<LoroList['insert']>[1]);
+        } else if (op.value !== undefined && isContainer(op.map))
           diffHistoryContainer(
             op.map,
             sessionHistorySchema,
@@ -534,19 +541,24 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     prepareReplace(id, entry) {
       const target = locate(id);
       if (!target) return undefined;
-      const { map } = target;
+      const { map, inline, index } = target;
       if (entry.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
       // Validate only changed fields/items and retain unchanged opaque stored
       // content; this runs before any CRDT mutation.
-      const previous = map.toJSON() as SessionHistoryInput;
+      const previous = map ? (map.toJSON() as SessionHistoryInput) : inline!;
       const value = prepareReplacement(previous, entry);
       return () => {
-        diffHistoryContainer(map, sessionHistorySchema, previous, value, undefined);
+        if (map) diffHistoryContainer(map, sessionHistorySchema, previous, value, undefined);
+        else {
+          list.delete(index, 1);
+          list.insert(index, value as Parameters<LoroList['insert']>[1]);
+        }
         doc.commit();
       };
     },
     read(id) {
-      return locate(id)?.map.toJSON() as SessionHistory | undefined;
+      const target = locate(id);
+      return (target?.map ? target.map.toJSON() : target?.inline) as SessionHistory | undefined;
     },
     update(updater) {
       const previous = readAll();
@@ -570,8 +582,9 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     updateEntry(id, updater) {
       const target = locate(id);
       if (!target) return false;
-      const { map, index } = target;
-      const previous = readHistory?.()[index] ?? (map.toJSON() as SessionHistoryInput);
+      const { map, inline, index } = target;
+      const previous =
+        readHistory?.()[index] ?? (map ? (map.toJSON() as SessionHistoryInput) : inline!);
       const next = immer.produce(previous, (draft) => {
         // Same normalization as `update`: a caller may rewrite the draft's
         // fields, return a replacement entry, or both.
@@ -586,7 +599,11 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       if (next.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
       if (historyValuesEqual(previous, next)) return true;
       const prepared = prepareReplacement(previous, next);
-      diffHistoryContainer(map, sessionHistorySchema, previous, prepared, undefined);
+      if (map) diffHistoryContainer(map, sessionHistorySchema, previous, prepared, undefined);
+      else {
+        list.delete(index, 1);
+        list.insert(index, prepared as Parameters<LoroList['insert']>[1]);
+      }
       doc.commit();
       return true;
     },
@@ -601,6 +618,13 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
         key === ('items' as string)
       )
         throw new HistoryWriteError([{ path: [key], code: 'invalid_field' }]);
+      if (!map)
+        return writer.updateEntry(id, (entry) => {
+          const next = { ...entry };
+          if (value === undefined) delete next[key];
+          else Object.assign(next, { [key]: value });
+          return next;
+        });
       const stored = map.get(key);
       const previous = isContainer(stored) ? stored.toJSON() : stored;
       if (historyValuesEqual(previous, value)) return true;

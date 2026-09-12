@@ -198,7 +198,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     status: 'rejected',
     reason: { code, ...(issues ? { issues } : {}) },
   });
-  const indeterminate = (cause: unknown): SessionCommandResult => ({
+  const indeterminate = (
+    cause: unknown
+  ): Extract<SessionCommandResult, { status: 'indeterminate' }> => ({
     status: 'indeterminate',
     cause,
   });
@@ -340,6 +342,34 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     };
   };
 
+  // One shallow identity scan per structural/identity change, never per body.
+  const positions = new Map<string, number>();
+  let identityDirty = true;
+  let indexedLength = -1;
+  const unsubscribeIdentity = doc.subscribe((batch) => {
+    if (
+      batch.events.some(
+        (event) =>
+          (event.target === list.id && event.diff.type === 'list') ||
+          (event.path[0] === HISTORY_ROOT_KEY &&
+            event.path.length === 2 &&
+            event.diff.type === 'map' &&
+            Object.hasOwn(event.diff.updated, 'id'))
+      )
+    )
+      identityDirty = true;
+  });
+  const ensureIdentityIndex = () => {
+    if (!identityDirty && indexedLength === list.length && doc.getPendingTxnLength() === 0) return;
+    positions.clear();
+    for (let i = 0; i < list.length; i++) {
+      const id = readIdentity(list.get(i))?.turnId;
+      if (id !== undefined) positions.set(id, i); // newest duplicate wins, like writer.locate
+    }
+    indexedLength = list.length;
+    identityDirty = false;
+  };
+
   const history: SessionHistoryReader = {
     async count() {
       return list.length;
@@ -348,14 +378,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       return readSlot(list, position);
     },
     async readTurn(turnId) {
-      for (let position = list.length - 1; position >= 0; position -= 1) {
-        const value = list.get(position);
-        const identity = readIdentity(value);
-        if (identity?.turnId !== turnId) continue;
-        const turn = asStoredTurn(value);
-        return turn ? { state: 'ready', turn } : { state: 'invalid' };
-      }
-      return { state: 'missing' };
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      return position === undefined ? { state: 'missing' } : readSlot(list, position);
     },
     async readRange(from, to) {
       const lo = Math.max(0, Math.min(from, list.length));
@@ -673,7 +698,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         if (error instanceof HistoryWriteError) {
           return { status: 'rejected', reason: { code: 'invalid_input', issues: issuesOf(error) } };
         }
-        throw error;
+        return { status: 'indeterminate', cause: error };
       }
       const previousUserTurnId = plan?.previousUserTurnId;
       return {
@@ -864,6 +889,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
     closeSource() {
       snapshotSourceClosed = true;
+      unsubscribeIdentity();
+      positions.clear();
+      identityDirty = true;
     },
   };
 
