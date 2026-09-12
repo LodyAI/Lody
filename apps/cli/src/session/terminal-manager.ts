@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import { stat } from 'fs/promises';
+import { resolve } from 'path';
 
 import type { Logger } from '@/utils/logger';
 import { decodeBuffer } from '@/utils/encoding';
@@ -291,7 +293,26 @@ export class ShellTerminalManager
   ): Promise<ShellTerminalHandle> {
     const workdir = this.resolveWorkdir(params.cwd);
     const env = this.buildEnv(params.env);
-    const processHandle = await this.sandbox.spawn(params.command, params.args, {
+
+    // Some agents send an unsplit shell line in `command` (whitespace, no args);
+    // running it literally as an executable fails with ENOENT. A real file path is
+    // spawned directly; only a non-file line falls back to a shell.
+    const command = params.command.trim();
+    let spawnTarget: { command: string; args: string[] };
+    if (/\s/.test(command) && params.args.length === 0) {
+      const isFile = await stat(resolve(workdir, command))
+        .then((stats) => stats.isFile())
+        .catch(() => false);
+      spawnTarget = isFile
+        ? { command, args: params.args }
+        : process.platform === 'win32'
+          ? { command: 'cmd.exe', args: ['/c', command] }
+          : { command: '/bin/sh', args: ['-c', command] };
+    } else {
+      spawnTarget = { command, args: params.args };
+    }
+
+    const processHandle = await this.sandbox.spawn(spawnTarget.command, spawnTarget.args, {
       cwd: workdir,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
