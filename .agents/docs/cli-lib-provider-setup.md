@@ -30,19 +30,22 @@ non-interactive states. Renderer callers apply cancellation only through the tra
 `WorkspaceWriter` operation that reuses this shared precedence and returns the effective marker;
 they must not write the cancellation row directly.
 
-Credential-changing Codex replacements keep the old launch config published during
-the probe. The post-probe cross-store commit may retain the old and desired
-machine-local credential bindings until publication chooses one. Publishing merges
-the current display metadata into the verified launch config, writes `agentConfig`,
-and deletes `providerSetup` in one Flock commit. Before staging, the daemon embeds the
-setup revision into the desired config's Lody-owned provider state. This non-secret
-generation participates in the launch binding, so same-endpoint key rotation still
-publishes a distinct `agentConfig` identity and recovery can distinguish the keys.
-The credential store rejects a rotation without a fresh generation before replacing
-the active credential. The final abort check runs immediately before the Flock commit, and the
-authentication slot becomes committed synchronously after that commit returns. A commit throw is
-a pre-commit failure that rolls back staged credentials; only a later flush failure is uncertain.
-Cancel or timeout wins before the commit boundary and is too late after it.
+Credential-changing replacements use the provider-neutral machine-local credential store. The
+store owns staging, rollback, finalization, reconciliation, enumeration, and hydration; adapters
+own provider detection, binding identity, secret validation, and launch injection. Adding an
+adapter must not add a provider branch to session or Machine RPC launch resolution. The current
+Codex adapter keeps the old launch config published during the probe. The post-probe cross-store
+commit may retain the old and desired machine-local credential bindings until publication chooses
+one. Publishing merges the current display metadata into the verified launch config, writes
+`agentConfig`, and deletes `providerSetup` in one Flock commit. Before staging, the daemon embeds
+the setup revision into the desired config's Lody-owned provider state. This non-secret generation
+participates in the launch binding, so same-endpoint key rotation still publishes a distinct
+`agentConfig` identity and recovery can distinguish the keys. The credential store rejects a
+rotation without a fresh generation before replacing the active credential. The final abort check
+runs immediately before the Flock commit, and the authentication slot becomes committed
+synchronously after that commit returns. A commit throw is a pre-commit failure that rolls back
+staged credentials; only a later flush failure is uncertain. Cancel or timeout wins before the
+commit boundary and is too late after it.
 
 The live provisioning probe does not update the shared capability cache. The manager
 publishes its result only after the exact setup wins durable AgentConfig publication,

@@ -7,7 +7,6 @@ import {
   getMachineFlockProviderSetups,
   findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
-  getLodyCodexCustomProvider,
   getServerNow,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -28,9 +27,9 @@ import type { SessionExecutionService } from '@/session/session-execution-servic
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import {
-  listCodexProviderCredentialConfigIds,
-  reconcileCodexProviderCredential,
-  stageCodexProviderCredential,
+  listProviderCredentialConfigIds,
+  reconcileProviderCredential,
+  stageProviderCredential,
 } from '@/agent/provider-credential-store';
 
 type ProviderSetupExecution = Pick<
@@ -51,9 +50,9 @@ export type ProviderSetupManagerOptions = {
   execution: ProviderSetupExecution;
   sync: ProviderSetupSyncScheduler;
   logger: Logger;
-  listCredentialConfigIds?: typeof listCodexProviderCredentialConfigIds;
-  reconcileCredential?: typeof reconcileCodexProviderCredential;
-  stageCredential?: typeof stageCodexProviderCredential;
+  listCredentialConfigIds?: typeof listProviderCredentialConfigIds;
+  reconcileCredential?: typeof reconcileProviderCredential;
+  stageCredential?: typeof stageProviderCredential;
 };
 
 export type ProviderSetupPublicationDurability = 'durable' | 'uncertain';
@@ -81,9 +80,9 @@ export class ProviderSetupManager {
   private readonly execution: ProviderSetupExecution;
   private readonly sync: ProviderSetupSyncScheduler;
   private readonly logger: Logger;
-  private readonly listCredentialConfigIds: typeof listCodexProviderCredentialConfigIds;
-  private readonly reconcileCredential: typeof reconcileCodexProviderCredential;
-  private readonly stageCredential: typeof stageCodexProviderCredential;
+  private readonly listCredentialConfigIds: typeof listProviderCredentialConfigIds;
+  private readonly reconcileCredential: typeof reconcileProviderCredential;
+  private readonly stageCredential: typeof stageProviderCredential;
   private readonly credentialMutationChains = new Map<AgentConfigId, Promise<void>>();
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
@@ -99,9 +98,9 @@ export class ProviderSetupManager {
     this.sync = options.sync;
     this.logger = options.logger;
     this.listCredentialConfigIds =
-      options.listCredentialConfigIds ?? listCodexProviderCredentialConfigIds;
-    this.reconcileCredential = options.reconcileCredential ?? reconcileCodexProviderCredential;
-    this.stageCredential = options.stageCredential ?? stageCodexProviderCredential;
+      options.listCredentialConfigIds ?? listProviderCredentialConfigIds;
+    this.reconcileCredential = options.reconcileCredential ?? reconcileProviderCredential;
+    this.stageCredential = options.stageCredential ?? stageProviderCredential;
   }
 
   kick(options: { recoverCredentials?: boolean } = {}): Promise<void> {
@@ -430,8 +429,7 @@ export class ProviderSetupManager {
       const config = getMachineFlockAgentConfigs(rows)[configId];
       const setup = getMachineFlockProviderSetups(rows)[configId];
       const referencedConfigs = [setup?.config, config].filter(
-        (entry): entry is NonNullable<typeof entry> =>
-          Boolean(entry && getLodyCodexCustomProvider(entry.env))
+        (entry): entry is NonNullable<typeof entry> => Boolean(entry)
       );
       await this.reconcileCredential(this.workspaceId, configId, referencedConfigs);
     });

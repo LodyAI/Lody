@@ -64,7 +64,7 @@ import {
   type ManagedRuntimeName,
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
-import { hydrateCodexProviderCredential } from '@/agent/provider-credential-store';
+import { hydrateProviderCredential } from '@/agent/provider-credential-store';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
 import {
   GitCredentialBroker,
@@ -1326,7 +1326,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     options: { onManagedRuntimeProgress?: (event: ManagedRuntimeProgressEvent) => void } = {}
   ): Promise<ResolvedAcpProcessLaunch> {
     const launchConfig = config.agentConfigId
-      ? await hydrateCodexProviderCredential(this.workspaceId, {
+      ? await hydrateProviderCredential(this.workspaceId, {
           id: config.agentConfigId,
           cliType: config.agentCliType,
           agentType: config.agentType,

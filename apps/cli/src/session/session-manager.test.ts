@@ -36,7 +36,7 @@ import {
   type SessionPreparationResource,
 } from './session-preparation-service';
 import { createLocalCloudPort } from '@lody/platform';
-import { stageCodexProviderCredential } from '../agent/provider-credential-store';
+import { stageProviderCredential } from '../agent/provider-credential-store';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -895,7 +895,7 @@ describe('SessionManager launch credential boundary', () => {
         baseUrl: 'https://relay.example.test/v1',
       }
     );
-    const stagedCredential = await stageCodexProviderCredential(
+    const stagedCredential = await stageProviderCredential(
       workspaceId,
       {
         id: configId,

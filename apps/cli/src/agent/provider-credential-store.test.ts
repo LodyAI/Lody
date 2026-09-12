@@ -10,10 +10,10 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import {
-  hydrateCodexProviderCredential,
-  listCodexProviderCredentialConfigIds,
-  reconcileCodexProviderCredential,
-  stageCodexProviderCredential,
+  hydrateProviderCredential,
+  listProviderCredentialConfigIds,
+  reconcileProviderCredential,
+  stageProviderCredential,
 } from './provider-credential-store';
 
 const workspaceId = 'workspace-test' as WorkspaceId;
@@ -21,7 +21,7 @@ let dataDir = '';
 let previousDataDir: string | undefined;
 
 async function seedCredential(agentConfig: AgentConfigMeta, apiKey: string): Promise<void> {
-  const staged = await stageCodexProviderCredential(workspaceId, agentConfig, apiKey);
+  const staged = await stageProviderCredential(workspaceId, agentConfig, apiKey);
   await staged.finalize();
 }
 
@@ -54,31 +54,40 @@ afterEach(async () => {
 });
 
 describe('provider credential store', () => {
+  it('leaves configs without a credential adapter unchanged', async () => {
+    const unsupported = {
+      ...config(),
+      agentType: 'claude',
+      env: {},
+    };
+
+    expect(await hydrateProviderCredential(workspaceId, unsupported)).toBe(unsupported);
+    await expect(stageProviderCredential(workspaceId, unsupported, 'secret')).rejects.toThrow(
+      /Unsupported machine-local provider credential/
+    );
+  });
+
   it('injects only for the exact persisted launch environment', async () => {
     const original = config();
     await seedCredential(original, ' sk-local ');
-    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, original)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'sk-local',
     });
 
     const changedEndpoint = config('https://attacker.example.com/v1');
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, changedEndpoint)).env[
-        LODY_CODEX_API_KEY_ENV
-      ]
+      (await hydrateProviderCredential(workspaceId, changedEndpoint)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
     const changedProxy = {
       ...original,
       env: { ...original.env, HTTPS_PROXY: 'https://evil.test' },
     };
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, changedProxy)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, changedProxy)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
     const changedRuntime = { ...original, agentType: 'custom-codex-wrapper' };
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, changedRuntime)).env[
-        LODY_CODEX_API_KEY_ENV
-      ]
+      (await hydrateProviderCredential(workspaceId, changedRuntime)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
   });
 
@@ -110,11 +119,11 @@ describe('provider credential store', () => {
     await seedCredential(config(), 'sk-local');
     await seedCredential({ ...config(), id: 'codex-other' }, 'sk-other');
 
-    await expect(listCodexProviderCredentialConfigIds(workspaceId)).resolves.toEqual(
+    await expect(listProviderCredentialConfigIds(workspaceId)).resolves.toEqual(
       expect.arrayContaining(['codex-test', 'codex-other'])
     );
     await expect(
-      listCodexProviderCredentialConfigIds('different-workspace' as WorkspaceId)
+      listProviderCredentialConfigIds('different-workspace' as WorkspaceId)
     ).resolves.toEqual([]);
   });
 
@@ -122,21 +131,21 @@ describe('provider credential store', () => {
     const original = config();
     await seedCredential(original, 'old-key');
     const changed = config('https://new.example.com/v1');
-    const staged = await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+    const staged = await stageProviderCredential(workspaceId, changed, 'new-key', original);
 
-    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, original)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
-    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, changed)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'new-key',
     });
 
     await staged.finalize();
 
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
-    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, changed)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'new-key',
     });
   });
@@ -145,14 +154,14 @@ describe('provider credential store', () => {
     const original = config();
     await seedCredential(original, 'old-key');
     const changed = config('https://new.example.com/v1');
-    const staged = await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+    const staged = await stageProviderCredential(workspaceId, changed, 'new-key', original);
     await staged.rollback();
 
-    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, original)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
   });
 
@@ -160,24 +169,24 @@ describe('provider credential store', () => {
     const original = config();
     const changed = config('https://new.example.com/v1');
     await seedCredential(original, 'old-key');
-    await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
+    await stageProviderCredential(workspaceId, changed, 'new-key', original);
 
-    await reconcileCodexProviderCredential(workspaceId, original.id, [changed]);
-    expect((await hydrateCodexProviderCredential(workspaceId, changed)).env).toMatchObject({
+    await reconcileProviderCredential(workspaceId, original.id, [changed]);
+    expect((await hydrateProviderCredential(workspaceId, changed)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'new-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, original)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
 
     await seedCredential(original, 'old-key');
-    await stageCodexProviderCredential(workspaceId, changed, 'new-key', original);
-    await reconcileCodexProviderCredential(workspaceId, original.id, [original]);
-    expect((await hydrateCodexProviderCredential(workspaceId, original)).env).toMatchObject({
+    await stageProviderCredential(workspaceId, changed, 'new-key', original);
+    await reconcileProviderCredential(workspaceId, original.id, [original]);
+    expect((await hydrateProviderCredential(workspaceId, original)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, changed)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
   });
 
@@ -185,26 +194,26 @@ describe('provider credential store', () => {
     const published = config('https://relay.example.com/v1', 'revision-1');
     const desired = config('https://relay.example.com/v1', 'revision-2');
     await seedCredential(published, 'old-key');
-    await stageCodexProviderCredential(workspaceId, desired, 'new-key', published);
+    await stageProviderCredential(workspaceId, desired, 'new-key', published);
 
     // The pending setup still carries the published generation; only Flock commit
     // publishes the desired generation. Startup therefore restores the old key.
-    await reconcileCodexProviderCredential(workspaceId, published.id, [published, published]);
-    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+    await reconcileProviderCredential(workspaceId, published.id, [published, published]);
+    expect((await hydrateProviderCredential(workspaceId, published)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
 
     // Cancelling the pending setup leaves the same published generation authoritative.
-    await reconcileCodexProviderCredential(workspaceId, published.id, [published]);
+    await reconcileProviderCredential(workspaceId, published.id, [published]);
 
-    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, published)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, desired)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
   });
 
@@ -212,15 +221,15 @@ describe('provider credential store', () => {
     const published = config('https://relay.example.com/v1', 'revision-1');
     const desired = config('https://relay.example.com/v1', 'revision-2');
     await seedCredential(published, 'old-key');
-    await stageCodexProviderCredential(workspaceId, desired, 'new-key', published);
+    await stageProviderCredential(workspaceId, desired, 'new-key', published);
 
-    await reconcileCodexProviderCredential(workspaceId, published.id, [desired]);
+    await reconcileProviderCredential(workspaceId, published.id, [desired]);
 
-    expect((await hydrateCodexProviderCredential(workspaceId, desired)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, desired)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'new-key',
     });
     expect(
-      (await hydrateCodexProviderCredential(workspaceId, published)).env[LODY_CODEX_API_KEY_ENV]
+      (await hydrateProviderCredential(workspaceId, published)).env[LODY_CODEX_API_KEY_ENV]
     ).toBeUndefined();
   });
 
@@ -229,9 +238,9 @@ describe('provider credential store', () => {
     await seedCredential(published, 'old-key');
 
     await expect(
-      stageCodexProviderCredential(workspaceId, published, 'new-key', published)
+      stageProviderCredential(workspaceId, published, 'new-key', published)
     ).rejects.toThrow(/fresh credential revision/);
-    expect((await hydrateCodexProviderCredential(workspaceId, published)).env).toMatchObject({
+    expect((await hydrateProviderCredential(workspaceId, published)).env).toMatchObject({
       [LODY_CODEX_API_KEY_ENV]: 'old-key',
     });
   });

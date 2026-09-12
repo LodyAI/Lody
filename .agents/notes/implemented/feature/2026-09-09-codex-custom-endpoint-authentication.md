@@ -26,8 +26,13 @@ Its versioned envelope also stores non-secret workspace/config identity so start
 enumerate an orphan after a legacy client deletes the only workspace row.
 POSIX directories/files are hardened to `0700`/`0600`. Windows inherits the ACL of Lody's
 per-user data directory. Every session spawn, including cold fork and edit-and-resend recovery,
-injects the key at the shared `SessionManager` process-launch boundary only on an exact binding
-match.
+hydrates through a provider-neutral process-launch boundary. The machine-local store owns the
+cross-store transaction and recovery algorithm; a small adapter owns Codex detection, binding
+identity, secret validation, and environment injection. Adding another machine-local provider
+credential therefore extends the adapter registry instead of adding another provider branch to
+session or Machine RPC launch resolution. The V2 disk codec remains unchanged, including its
+legacy `apiKey` field, while the transaction core handles an opaque string secret. Codex injects
+the key only on an exact binding match.
 
 The provider uses a Lody-owned environment key and a separate ownership marker. The marker records
 the previous `model_provider` selector so switching back to ChatGPT is reversible without

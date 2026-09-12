@@ -28,10 +28,10 @@ import type { LoroRepo } from 'loro-repo';
 
 import type { Logger } from '@/utils/logger';
 import {
-  hydrateCodexProviderCredential,
-  listCodexProviderCredentialConfigIds,
-  reconcileCodexProviderCredential,
-  stageCodexProviderCredential,
+  hydrateProviderCredential,
+  listProviderCredentialConfigIds,
+  reconcileProviderCredential,
+  stageProviderCredential,
 } from '@/agent/provider-credential-store';
 import { ProviderSetupManager, type ProviderSetupManagerOptions } from './provider-setup-manager';
 
@@ -214,7 +214,7 @@ function deferredProbe<T>(response: T) {
 }
 
 async function seedCredential(config: ProviderSetupTask['config'], apiKey: string): Promise<void> {
-  const staged = await stageCodexProviderCredential(workspaceId, config, apiKey);
+  const staged = await stageProviderCredential(workspaceId, config, apiKey);
   await staged.finalize();
 }
 
@@ -783,11 +783,7 @@ describe('ProviderSetupManager', () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-commit-'));
     process.env.LODY_DATA_DIR = dataDir;
     const flock = new FakeMachineFlock();
-    const harness = createHarnessForFlock(
-      flock,
-      {},
-      { stageCredential: stageCodexProviderCredential }
-    );
+    const harness = createHarnessForFlock(flock, {}, { stageCredential: stageProviderCredential });
     const oldConfig = {
       ...createSetup().config,
       env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://old.example.com/v1' }),
@@ -829,14 +825,12 @@ describe('ProviderSetupManager', () => {
       });
       await harness.manager.kick({ recoverCredentials: true });
 
-      expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
+      expect((await hydrateProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'old-key',
       });
       const uncertainConfig = readState(flock).config;
       expectCredentialRevision(uncertainConfig, 'revision-new');
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, uncertainConfig)).env
-      ).toMatchObject({
+      expect((await hydrateProviderCredential(workspaceId, uncertainConfig)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'new-key',
       });
 
@@ -849,12 +843,12 @@ describe('ProviderSetupManager', () => {
         recoveredFlock,
         {},
         {
-          reconcileCredential: reconcileCodexProviderCredential,
+          reconcileCredential: reconcileProviderCredential,
         }
       );
       try {
         await recoveredHarness.manager.kick({ recoverCredentials: true });
-        expect((await hydrateCodexProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
+        expect((await hydrateProviderCredential(workspaceId, oldConfig)).env).toMatchObject({
           [LODY_CODEX_API_KEY_ENV]: 'old-key',
         });
       } finally {
@@ -881,20 +875,20 @@ describe('ProviderSetupManager', () => {
       new FakeMachineFlock(),
       {},
       {
-        listCredentialConfigIds: listCodexProviderCredentialConfigIds,
-        reconcileCredential: reconcileCodexProviderCredential,
+        listCredentialConfigIds: listProviderCredentialConfigIds,
+        reconcileCredential: reconcileProviderCredential,
       }
     );
 
     try {
       await seedCredential(orphanConfig, 'orphan-key');
-      expect((await hydrateCodexProviderCredential(workspaceId, orphanConfig)).env).toMatchObject({
+      expect((await hydrateProviderCredential(workspaceId, orphanConfig)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'orphan-key',
       });
 
       await harness.manager.kick({ recoverCredentials: true });
 
-      expect(await hydrateCodexProviderCredential(workspaceId, orphanConfig)).toEqual(orphanConfig);
+      expect(await hydrateProviderCredential(workspaceId, orphanConfig)).toEqual(orphanConfig);
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
@@ -912,7 +906,7 @@ describe('ProviderSetupManager', () => {
     const recoveryReachedA = createDeferred<void>();
     const releaseA = createDeferred<void>();
     const flock = new FakeMachineFlock();
-    const reconcileCredential: typeof reconcileCodexProviderCredential = async (
+    const reconcileCredential: typeof reconcileProviderCredential = async (
       currentWorkspaceId,
       configId,
       referencedConfigs
@@ -921,13 +915,13 @@ describe('ProviderSetupManager', () => {
         recoveryReachedA.resolve();
         await releaseA.promise;
       }
-      await reconcileCodexProviderCredential(currentWorkspaceId, configId, referencedConfigs);
+      await reconcileProviderCredential(currentWorkspaceId, configId, referencedConfigs);
     };
     const harness = createHarnessForFlock(
       flock,
       {},
       {
-        stageCredential: stageCodexProviderCredential,
+        stageCredential: stageProviderCredential,
         reconcileCredential,
       }
     );
@@ -981,9 +975,7 @@ describe('ProviderSetupManager', () => {
         configBId
       ];
       expectCredentialRevision(publishedConfigB, 'revision-b-new');
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, publishedConfigB)).env
-      ).toMatchObject({
+      expect((await hydrateProviderCredential(workspaceId, publishedConfigB)).env).toMatchObject({
         [LODY_CODEX_API_KEY_ENV]: 'b-new-key',
       });
     } finally {
@@ -1001,11 +993,7 @@ describe('ProviderSetupManager', () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-rotation-'));
     process.env.LODY_DATA_DIR = dataDir;
     const flock = new FakeMachineFlock();
-    const harness = createHarnessForFlock(
-      flock,
-      {},
-      { stageCredential: stageCodexProviderCredential }
-    );
+    const harness = createHarnessForFlock(flock, {}, { stageCredential: stageProviderCredential });
     const publishedConfig = {
       ...createSetup().config,
       env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.com/v1' }),
@@ -1033,12 +1021,12 @@ describe('ProviderSetupManager', () => {
       const uncertainConfig = readState(flock).config;
       expectCredentialRevision(uncertainConfig, 'revision-rotation');
       expect(readState(flock).setup).toBeUndefined();
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, uncertainConfig)).env
-      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env
-      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'old-key' });
+      expect((await hydrateProviderCredential(workspaceId, uncertainConfig)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'new-key',
+      });
+      expect((await hydrateProviderCredential(workspaceId, publishedConfig)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'old-key',
+      });
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
@@ -1072,7 +1060,7 @@ describe('ProviderSetupManager', () => {
     const harness = createHarnessForFlock(
       flock,
       {},
-      { reconcileCredential: reconcileCodexProviderCredential }
+      { reconcileCredential: reconcileProviderCredential }
     );
 
     try {
@@ -1082,7 +1070,7 @@ describe('ProviderSetupManager', () => {
         value: publishedConfig,
       });
       seedSetup(flock, pendingSetup);
-      await stageCodexProviderCredential(workspaceId, desiredConfig, 'new-key', publishedConfig);
+      await stageProviderCredential(workspaceId, desiredConfig, 'new-key', publishedConfig);
 
       await harness.manager.kick({ recoverCredentials: true });
       writeMachineFlockRowToFlock(flock, {
@@ -1100,13 +1088,11 @@ describe('ProviderSetupManager', () => {
 
       expect(readState(flock).config).toEqual(publishedConfig);
       expect(readState(flock).setup).toBeUndefined();
+      expect((await hydrateProviderCredential(workspaceId, publishedConfig)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'old-key',
+      });
       expect(
-        (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env
-      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'old-key' });
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, desiredConfig)).env[
-          LODY_CODEX_API_KEY_ENV
-        ]
+        (await hydrateProviderCredential(workspaceId, desiredConfig)).env[LODY_CODEX_API_KEY_ENV]
       ).toBeUndefined();
     } finally {
       harness.manager.stop();
@@ -1121,8 +1107,8 @@ describe('ProviderSetupManager', () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'lody-provider-finalize-crash-'));
     process.env.LODY_DATA_DIR = dataDir;
     const flock = new FakeMachineFlock();
-    const stageWithoutFinalize: typeof stageCodexProviderCredential = async (...args) => {
-      const staged = await stageCodexProviderCredential(...args);
+    const stageWithoutFinalize: typeof stageProviderCredential = async (...args) => {
+      const staged = await stageProviderCredential(...args);
       return {
         rollback: staged.rollback,
         finalize: async () => {
@@ -1160,15 +1146,15 @@ describe('ProviderSetupManager', () => {
       const recoveredHarness = createHarnessForFlock(
         flock,
         {},
-        { reconcileCredential: reconcileCodexProviderCredential }
+        { reconcileCredential: reconcileProviderCredential }
       );
       try {
         await recoveredHarness.manager.kick({ recoverCredentials: true });
+        expect((await hydrateProviderCredential(workspaceId, committedConfig)).env).toMatchObject({
+          [LODY_CODEX_API_KEY_ENV]: 'new-key',
+        });
         expect(
-          (await hydrateCodexProviderCredential(workspaceId, committedConfig)).env
-        ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
-        expect(
-          (await hydrateCodexProviderCredential(workspaceId, publishedConfig)).env[
+          (await hydrateProviderCredential(workspaceId, publishedConfig)).env[
             LODY_CODEX_API_KEY_ENV
           ]
         ).toBeUndefined();
@@ -1232,7 +1218,7 @@ describe('ProviderSetupManager', () => {
       new FakeMachineFlock(),
       {},
       {
-        reconcileCredential: reconcileCodexProviderCredential,
+        reconcileCredential: reconcileProviderCredential,
       }
     );
 
@@ -1246,9 +1232,7 @@ describe('ProviderSetupManager', () => {
       await harness.manager.kick();
 
       expect(
-        (await hydrateCodexProviderCredential(workspaceId, customConfig)).env[
-          LODY_CODEX_API_KEY_ENV
-        ]
+        (await hydrateProviderCredential(workspaceId, customConfig)).env[LODY_CODEX_API_KEY_ENV]
       ).toBeUndefined();
     } finally {
       harness.manager.stop();
@@ -1270,7 +1254,7 @@ describe('ProviderSetupManager', () => {
       new FakeMachineFlock(),
       {},
       {
-        reconcileCredential: reconcileCodexProviderCredential,
+        reconcileCredential: reconcileProviderCredential,
       }
     );
 
@@ -1288,9 +1272,7 @@ describe('ProviderSetupManager', () => {
       await harness.manager.kick();
 
       expect(
-        (await hydrateCodexProviderCredential(workspaceId, customConfig)).env[
-          LODY_CODEX_API_KEY_ENV
-        ]
+        (await hydrateProviderCredential(workspaceId, customConfig)).env[LODY_CODEX_API_KEY_ENV]
       ).toBeUndefined();
     } finally {
       harness.manager.stop();
@@ -1316,7 +1298,7 @@ describe('ProviderSetupManager', () => {
       new FakeMachineFlock(),
       {},
       {
-        reconcileCredential: reconcileCodexProviderCredential,
+        reconcileCredential: reconcileProviderCredential,
       }
     );
 
@@ -1334,9 +1316,9 @@ describe('ProviderSetupManager', () => {
 
       await harness.manager.kick({ recoverCredentials: true });
 
-      expect(
-        (await hydrateCodexProviderCredential(workspaceId, nextSetup.config)).env
-      ).toMatchObject({ [LODY_CODEX_API_KEY_ENV]: 'new-key' });
+      expect((await hydrateProviderCredential(workspaceId, nextSetup.config)).env).toMatchObject({
+        [LODY_CODEX_API_KEY_ENV]: 'new-key',
+      });
     } finally {
       harness.manager.stop();
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;

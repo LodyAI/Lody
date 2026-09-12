@@ -108,6 +108,7 @@ runtime binary override.
 ## Evidence
 
 - [Shared provider configuration](../packages/shared/src/codex-provider-config.ts)
+- [Provider credential adapter](../apps/cli/src/agent/provider-credential-adapter.ts)
 - [Machine-local credential store](../apps/cli/src/agent/provider-credential-store.ts)
 - [Provider form](../packages/components/src/components/settings/agent-config-dialog.tsx)
 - [CLI authentication lifecycle](../apps/cli/src/agent/README.md#authentication)
