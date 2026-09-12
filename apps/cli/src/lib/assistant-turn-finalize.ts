@@ -1,30 +1,5 @@
 import type { SessionHistoryInput } from '@lody/shared';
 
-export const settleContextCompactionItemAsFailed = (
-  history: SessionHistoryInput[],
-  options: { turnId: string; toolCallId: string }
-): boolean => {
-  const entry = history.find(
-    (candidate) => candidate.role === 'assistant' && candidate.id === options.turnId
-  );
-  if (!entry?.items) return false;
-
-  let changed = false;
-  entry.items = entry.items.map((item) => {
-    if (
-      item.type !== 'tool_call' ||
-      item.activityKind !== 'context_compaction' ||
-      item.toolCallId !== options.toolCallId ||
-      (item.status !== 'pending' && item.status !== 'in_progress')
-    ) {
-      return item;
-    }
-    changed = true;
-    return { ...item, status: 'failed' as const };
-  });
-  return changed;
-};
-
 /**
  * Stamp the terminal footprint (`finished`/`endedAt`/`permissionWaitMs`) on the
  * assistant entry a finalize call owns. Extracted from `finalizeACPState` so the

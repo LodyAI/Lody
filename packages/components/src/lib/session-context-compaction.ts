@@ -1,35 +1,18 @@
 import type { SessionHistory } from '@lody/shared';
 
-export type ActiveSessionContextCompaction = {
-  turnId: string;
-  toolCallId: string;
-  turnFinished: boolean;
-};
-
-export const findActiveSessionContextCompaction = (
-  history: readonly Pick<SessionHistory, 'id' | 'role' | 'items' | 'finished'>[]
-): ActiveSessionContextCompaction | null => {
+export const isSessionContextCompacting = (
+  history: readonly Pick<SessionHistory, 'items'>[]
+): boolean => {
   for (let entryIndex = history.length - 1; entryIndex >= 0; entryIndex -= 1) {
-    const entry = history[entryIndex];
-    if (!entry || entry.role !== 'assistant') continue;
-    const items = entry.items ?? [];
+    const items = history[entryIndex]?.items ?? [];
     for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
       const item = items[itemIndex];
       if (item?.type !== 'tool_call' || item.activityKind !== 'context_compaction') continue;
-      if (item.status !== 'pending' && item.status !== 'in_progress') return null;
-      return {
-        turnId: entry.id,
-        toolCallId: item.toolCallId,
-        turnFinished: entry.finished === true,
-      };
+      return item.status === 'pending' || item.status === 'in_progress';
     }
   }
-  return null;
+  return false;
 };
-
-export const isSessionContextCompacting = (
-  history: readonly Pick<SessionHistory, 'id' | 'role' | 'items' | 'finished'>[]
-): boolean => findActiveSessionContextCompaction(history) !== null;
 
 export type CanStopAgentOptions = {
   isContextCompacting: boolean;

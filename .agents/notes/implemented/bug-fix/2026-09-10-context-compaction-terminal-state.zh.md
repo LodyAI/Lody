@@ -32,9 +32,7 @@ raw completion。只有 drain 完成以后，host 才收敛未完成 compaction�
 
 该设计修复未来的 error path，并处理之后再次经过 failure-aware finalization 的历史。
 它不会迁移已经持久化的陈旧历史，因为这些历史里没有 durable evidence 能区分 #570 和
-“已中断但 provider prompt 仍活跃”的情况。后续的独立决策通过
-[owner 证据协调](2026-09-11-stale-context-compaction-reconciliation.zh.md)补上旧历史修复，
-但不放宽这一约束。
+“已中断但 provider prompt 仍活跃”的情况。
 
 ## 范围与验证
 

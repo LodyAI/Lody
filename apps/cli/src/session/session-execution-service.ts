@@ -1152,7 +1152,7 @@ export class SessionExecutionService {
 
   /**
    * Claims a short operation that must not overlap a durable history rewrite:
-   * visible-turn ownership, acknowledged steer transfer, or queue promotion.
+   * visible-turn ownership, acknowledged steer transfer, stale repair, or queue promotion.
    */
   tryAcquireSessionRewriteConflictLease(sessionId: SessionId): (() => void) | null {
     if (

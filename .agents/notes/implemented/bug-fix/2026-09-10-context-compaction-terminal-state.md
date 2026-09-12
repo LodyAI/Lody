@@ -39,9 +39,7 @@ provider terminal states remain unchanged, and a late provider update for the sa
 This fixes future error paths and histories that receive a later failure-aware
 finalization. It does not migrate already persisted stale histories, because those
 histories contain no durable evidence that distinguishes #570 from an interrupted
-but still-active provider prompt. A later, separate decision adds
-[owner-evidence reconciliation](2026-09-11-stale-context-compaction-reconciliation.md)
-without weakening that constraint.
+but still-active provider prompt.
 
 ## Scope and verification
 

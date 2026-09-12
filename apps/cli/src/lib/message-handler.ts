@@ -61,7 +61,6 @@ import {
   getCodeCollabFileIndexSignalFlockDocId,
   type SessionContextWindowUsage,
   type SessionHistoryInput,
-  type SessionContextCompactionReconcileResponse,
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
@@ -265,10 +264,7 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
-import {
-  markAssistantTurnFinished,
-  settleContextCompactionItemAsFailed,
-} from './assistant-turn-finalize';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import {
   AgentClient,
@@ -3405,8 +3401,6 @@ export class MessageHandler {
             observedAtMs: getServerNow(),
           };
         },
-        reconcileSessionContextCompaction: async (args) =>
-          await this.reconcileSessionContextCompaction(args),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -6675,8 +6669,6 @@ export class MessageHandler {
           error: result.error,
         };
       }
-      case 'session/reconcile-context-compaction':
-        return await this.reconcileSessionContextCompaction(request.params);
       case 'session/dispatch-turn': {
         // Mirrors the Loro Streams Machine RPC path: normalize the opaque
         // transport-level input config, then offer the turn to the dispatch
@@ -6780,81 +6772,6 @@ export class MessageHandler {
         success: false,
         error: formatErrorMessage(error),
       };
-    }
-  }
-
-  private async reconcileSessionContextCompaction(args: {
-    sessionId: SessionId;
-    turnId: string;
-    toolCallId: string;
-  }): Promise<SessionContextCompactionReconcileResponse> {
-    const response = (
-      outcome: SessionContextCompactionReconcileResponse['outcome'],
-      options: { error?: string } = {}
-    ): SessionContextCompactionReconcileResponse => ({
-      type: 'session/reconcile-context-compaction_response',
-      ...args,
-      outcome,
-      ...options,
-    });
-
-    try {
-      const verifyOwnership = async (): Promise<boolean> => {
-        const metaRecord = await this.workspaceDocument.repo.getDocMeta(
-          getSessionRoomId(args.sessionId)
-        );
-        const meta =
-          metaRecord?.meta && !isLoroRepoDocDeleted(metaRecord)
-            ? (metaRecord.meta as SessionMeta)
-            : undefined;
-        return meta?.machineId === this.machineId;
-      };
-      const hasLiveSessionWork = (): boolean => {
-        const execution = this.executionService.getExecutionSnapshot(args.sessionId);
-        return (
-          execution.hasActiveTurn ||
-          execution.hasBlockingPendingCreate ||
-          execution.hasActiveAutomation ||
-          this.sessionActivePresence.has(args.sessionId) ||
-          this.sessionDispatchWatcher.hasPendingDispatch(args.sessionId)
-        );
-      };
-
-      if (!(await verifyOwnership())) {
-        return response('retry', { error: 'The target daemon does not own this Session.' });
-      }
-
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
-      await sessionDoc.ensureDocRoomJoined();
-      if (!(await sessionDoc.waitUntilSynced())) {
-        return response('retry', { error: 'Session history is not synced with its owner.' });
-      }
-
-      if (hasLiveSessionWork()) {
-        return response('retry', { error: 'The daemon still has live Session work.' });
-      }
-
-      if (!(await verifyOwnership())) {
-        return response('retry', { error: 'The target daemon no longer owns this Session.' });
-      }
-
-      let reconciled = false;
-      await sessionDoc.updateHistory(
-        (history) => {
-          reconciled = settleContextCompactionItemAsFailed(history, args);
-          return history;
-        },
-        { onlyEntryId: args.turnId }
-      );
-
-      if (reconciled && !(await sessionDoc.waitUntilSynced())) {
-        return response('retry', {
-          error: 'The reconciled Session history was not confirmed by its owner.',
-        });
-      }
-      return response(reconciled ? 'reconciled' : 'retry');
-    } catch (error) {
-      return response('retry', { error: formatErrorMessage(error) });
     }
   }
 

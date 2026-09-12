@@ -1,7 +1,7 @@
 # Session history writes
 
 Status: draft
-Translation: current
+Translation: stale
 
 [中文](session-history-writes.zh.md)
 
@@ -46,21 +46,12 @@ That tolerance must not authorize creating new malformed items locally.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
   stored history. Steer config and same-identity task-proposal edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
-- A finished assistant turn may contain a legacy context-compaction activity whose
-  provider terminal state was never persisted. Opening that Session may request a
-  repair, but only its owning daemon may change the exact addressed turn and tool
-  item, and only after live execution ownership proves that turn is no longer
-  active. Turn `finished`, durable Session status, elapsed time, daemon restart,
-  or missing live evidence is insufficient. The renderer requests repair only while
-  the Session is inactive, browser connectivity is online, and the Session room is
-  synced. An offline, reconnecting, unsupported,
-  non-owning, active, or indeterminate daemon leaves history unchanged. Repair must
-  inspect a remotely synced Session document, reject any live Session work, recheck
-  ownership, and update only the named entry through `onlyEntryId`; a concurrent new
-  turn has a different identity and remains untouched. Report `reconciled` only after
-  the write is confirmed; every other result is `retry`. Retry evidence is bounded by
-  the exact candidate, daemon generation, browser and Session-room connectivity, and
-  stable Session activity transitions; presence heartbeats must not become polling.
+- Manual Codex compaction owns its native turn through completion. Stop interrupts
+  that turn and retains the ACP prompt until `turn/completed` confirms its outcome
+  or the provider connection closes. A start acknowledgement or compaction-item
+  completion alone does not release execution ownership. The CLI persists unresolved
+  compaction as failed after confirmed cancellation, before accepting another turn.
+  Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned
@@ -92,10 +83,7 @@ Non-history control-field validation remains outside this HistoryWriter contract
 
 - `packages/shared/src/{history-writer,history-write-schema,session-mirror}.ts`
 - `packages/shared/tests/history-writer.test.ts` and `history-writer.contract.ts`
-- `apps/cli/src/lib/assistant-turn-finalize.ts` and the capability-gated
-  `session/reconcile-context-compaction` Machine RPC
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
-- [Legacy compaction repair decision](../.agents/notes/implemented/bug-fix/2026-09-11-stale-context-compaction-reconciliation.md)
 - [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 

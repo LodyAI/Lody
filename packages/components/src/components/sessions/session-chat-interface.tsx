@@ -55,10 +55,7 @@ import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
-import {
-  canStopAgentEnabled,
-  findActiveSessionContextCompaction,
-} from '@/lib/session-context-compaction';
+import { isSessionContextCompacting, canStopAgentEnabled } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
@@ -117,7 +114,6 @@ import {
   hasReportedPreviewTarget,
   isSessionGoalCleared,
   isSessionGoalActive,
-  machineSupportsContextCompactionReconciliationProtocol,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
@@ -149,12 +145,8 @@ import {
   openedSessionsAtomFamily,
   sessionMetaAtomFamily,
 } from '@/atoms/doc-meta';
-import {
-  useMachineOnlineStatus,
-  useMachinePresenceInstanceId,
-} from '@/hooks/use-machine-online-status';
+import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useDelayedFlag } from '@/hooks/use-delayed-flag';
-import { useSessionContextCompactionReconciliation } from './use-session-context-compaction-reconciliation';
 import { resolveSessionStatusStripState } from './session-status-strip';
 import { isSyncingRoomSyncState } from '@/lib/room-sync-state';
 import {
@@ -2116,7 +2108,6 @@ export const SessionChatInterface = memo(
     const localHomeDir = useAtomValue(localHomeDirAtom);
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
-    const isSessionActive = liveSessionStatus != null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
     const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
     const {
@@ -2255,7 +2246,6 @@ export const SessionChatInterface = memo(
     const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
     const isMachineRemoved = !sessionMachine && docMetaCacheReady;
     const sessionMachineOnlineStatus = useMachineOnlineStatus(session.machineId);
-    const sessionMachinePresenceInstanceId = useMachinePresenceInstanceId(session.machineId);
     const browserOnline = useAtomValue(browserOnlineAtom);
     const externalHistorySyncLabel = isExternalHistoryRefreshing
       ? t('sessions.externalHistorySyncing', {
@@ -2404,6 +2394,7 @@ export const SessionChatInterface = memo(
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
     const lastSearchAnalyticsKeyRef = useRef<string | null>(null);
+
     const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
     const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
     const {
@@ -2708,25 +2699,10 @@ export const SessionChatInterface = memo(
     const canForkFromMenu = Boolean(
       onForkSessionExternal || (lastCompletedAssistantMessageId && onForkLastAssistant)
     );
-    const activeContextCompaction = useMemo(
-      () => findActiveSessionContextCompaction(sessionHistory),
+    const isContextCompacting = useMemo(
+      () => isSessionContextCompacting(sessionHistory),
       [sessionHistory]
     );
-    const isContextCompacting = activeContextCompaction !== null;
-    const canReconcileContextCompaction =
-      sessionMachineOnlineStatus === 'online' &&
-      machineSupportsContextCompactionReconciliationProtocol(sessionMachine);
-    useSessionContextCompactionReconciliation({
-      activeCompaction: activeContextCompaction,
-      canReconcile: canReconcileContextCompaction,
-      isConnectivityOnline: browserOnline,
-      isSessionRoomSynced: sessionDocSyncState === 'synced',
-      isSessionActive,
-      machineId: session.machineId,
-      ownerInstanceId: sessionMachinePresenceInstanceId,
-      runtime,
-      sessionId: session.id,
-    });
     // Pending scheduled tasks (cron / wakeup) are derived on the fly from the
     // Cron*/ScheduleWakeup tool_call items already in history — nothing extra is
     // persisted. Serialize to a key so the input area only re-renders when the
@@ -2802,6 +2778,7 @@ export const SessionChatInterface = memo(
       return () => clearTimeout(timer);
     }, [pendingGoalCommand]);
 
+    const isSessionActive = liveSessionStatus != null;
     // CLI-reported presence is the fact source for "working now". The only
     // frontend-derived state is the dispatched-but-not-started window, read
     // from the trailing pending user turn in history — never from meta

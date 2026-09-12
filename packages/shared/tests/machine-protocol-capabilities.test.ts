@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
-  CONTEXT_COMPACTION_RECONCILIATION_PROTOCOL_VERSION,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsAcpAuthenticationInteractionsProtocol,
-  machineSupportsContextCompactionReconciliationProtocol,
   machineSupportsLocalFileResourcesProtocol,
 } from '../src/machine-protocol-capabilities';
 
@@ -35,20 +33,6 @@ describe('ACP authentication interaction protocol capability', () => {
       })
     ).toBe(false);
   });
-});
-
-it('binds legacy compaction reconciliation to its advertised protocol version', () => {
-  expect(
-    CURRENT_MACHINE_PROTOCOL_CAPABILITIES[
-      MACHINE_PROTOCOL_CAPABILITIES.contextCompactionReconciliation
-    ]
-  ).toBe(CONTEXT_COMPACTION_RECONCILIATION_PROTOCOL_VERSION);
-  expect(machineSupportsContextCompactionReconciliationProtocol(undefined)).toBe(false);
-  expect(
-    machineSupportsContextCompactionReconciliationProtocol({
-      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-    })
-  ).toBe(true);
 });
 
 it('requires an advertised local file resource protocol, independent of release version', () => {

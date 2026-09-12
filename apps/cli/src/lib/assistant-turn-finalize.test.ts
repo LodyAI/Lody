@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistoryInput } from '@lody/shared';
 
-import {
-  markAssistantTurnFinished,
-  settleContextCompactionItemAsFailed,
-} from './assistant-turn-finalize';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 
 const OPENED_AT = Date.parse('2026-01-01T00:00:00.000Z');
 const TURN_ENDED_AT = OPENED_AT + 12_000;
@@ -137,76 +134,5 @@ describe('markAssistantTurnFinished', () => {
 
     expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
     expect(history[1]?.finished).toBeUndefined();
-  });
-});
-
-describe('settleContextCompactionItemAsFailed', () => {
-  it('settles only the exact unresolved activity owned by the requested turn', () => {
-    const history = [
-      assistantEntry({
-        id: 'assistant:u1',
-        items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-old',
-            title: 'Context compacting',
-            status: 'in_progress',
-            activityKind: 'context_compaction',
-          },
-        ],
-      }),
-      assistantEntry({
-        id: 'assistant:u2',
-        items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-current',
-            title: 'Context compacting',
-            status: 'in_progress',
-            activityKind: 'context_compaction',
-          },
-        ],
-      }),
-    ];
-
-    expect(
-      settleContextCompactionItemAsFailed(history, {
-        turnId: 'assistant:u1',
-        toolCallId: 'compact-old',
-      })
-    ).toBe(true);
-    expect(history[0]?.items?.[0]).toMatchObject({ status: 'failed' });
-    expect(history[1]?.items?.[0]).toMatchObject({ status: 'in_progress' });
-  });
-
-  it('preserves terminal and mismatched activities', () => {
-    const history = [
-      assistantEntry({
-        id: 'assistant:u1',
-        items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-1',
-            title: 'Context compacting',
-            status: 'completed',
-            activityKind: 'context_compaction',
-          },
-        ],
-      }),
-    ];
-
-    expect(
-      settleContextCompactionItemAsFailed(history, {
-        turnId: 'assistant:u1',
-        toolCallId: 'compact-other',
-      })
-    ).toBe(false);
-    expect(
-      settleContextCompactionItemAsFailed(history, {
-        turnId: 'assistant:u1',
-        toolCallId: 'compact-1',
-      })
-    ).toBe(false);
-    expect(history[0]?.items?.[0]).toMatchObject({ status: 'completed' });
   });
 });

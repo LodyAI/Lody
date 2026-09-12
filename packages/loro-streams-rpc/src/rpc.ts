@@ -45,7 +45,6 @@ import type {
   MachineStatusResponse,
   MachineUpgradeResponse,
   SessionCancelResponse,
-  SessionContextCompactionReconcileResponse,
   SessionGoalAction,
   SessionGoalResponse,
   SessionPreparationCancelSpec,
@@ -95,7 +94,6 @@ import {
   MachineStatusResponseSchema,
   MachineUpgradeResponseSchema,
   SessionCancelResponseSchema,
-  SessionContextCompactionReconcileResponseSchema,
   SessionPreparationCancelSpecSchema,
   SessionPreparationSpecSchema,
   SessionPrepareCancelResponseSchema,
@@ -194,7 +192,6 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'file/preview',
   'session/cancel',
   'session/live-status',
-  'session/reconcile-context-compaction',
   'session/steer',
   'session/goal',
   'session/terminate',
@@ -448,17 +445,6 @@ export const LoroSessionLiveStatusRpcRequestSchema = BaseRpcRequestSchema.extend
     .strict(),
 }).strict();
 
-export const LoroSessionContextCompactionReconcileRpcRequestSchema = BaseRpcRequestSchema.extend({
-  method: z.literal('session/reconcile-context-compaction'),
-  params: z
-    .object({
-      sessionId: SessionIdSchema,
-      turnId: z.string().trim().min(1),
-      toolCallId: z.string().trim().min(1),
-    })
-    .strict(),
-}).strict();
-
 export const LoroSessionGoalRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/goal'),
   params: z
@@ -612,7 +598,6 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroFilePreviewRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
-  LoroSessionContextCompactionReconcileRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
   LoroSessionGoalRpcRequestSchema,
   LoroSessionTerminateRpcRequestSchema,
@@ -750,9 +735,6 @@ export type LoroCodeCollabV2LspReferencesRpcRequest = z.infer<
 export type LoroFilePreviewRpcRequest = z.infer<typeof LoroFilePreviewRpcRequestSchema>;
 export type LoroSessionCancelRpcRequest = z.infer<typeof LoroSessionCancelRpcRequestSchema>;
 export type LoroSessionLiveStatusRpcRequest = z.infer<typeof LoroSessionLiveStatusRpcRequestSchema>;
-export type LoroSessionContextCompactionReconcileRpcRequest = z.infer<
-  typeof LoroSessionContextCompactionReconcileRpcRequestSchema
->;
 export type LoroSessionTerminateRpcRequest = z.infer<typeof LoroSessionTerminateRpcRequestSchema>;
 export type LoroSessionForkRpcRequest = z.infer<typeof LoroSessionForkRpcRequestSchema>;
 export type LoroSessionEditAndResendRpcRequest = z.infer<
@@ -1459,7 +1441,6 @@ export type LoroMachineRpcResult =
   | MachineBugReportResponse
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
-  | SessionContextCompactionReconcileResponse
   | SessionSteerResponse
   | SessionGoalResponse
   | SessionTerminateResponse
@@ -1485,7 +1466,7 @@ const toLegacyRpcErrorResponse = (
   pingContext?: { requestId: string },
   lifecycleContext?: { requestId: string; targetVersion?: string },
   binaryContext?: { agentType: string; requestId?: string },
-  cancelContext?: { sessionId: string; turnId?: string; toolCallId?: string },
+  cancelContext?: { sessionId: string },
   forkContext?: { sourceSessionId: string; targetSessionId: string },
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string },
   steerContext?: { sessionId: string; userTurnId: string },
@@ -1613,17 +1594,6 @@ const toLegacyRpcErrorResponse = (
       sessionId: cancelContext?.sessionId ?? '',
       success: false,
       state: 'unknown',
-      error: `${error.code}: ${error.message}`,
-    };
-  }
-
-  if (method === 'session/reconcile-context-compaction') {
-    return {
-      type: 'session/reconcile-context-compaction_response',
-      sessionId: (cancelContext?.sessionId ?? '') as SessionId,
-      turnId: cancelContext?.turnId ?? '',
-      toolCallId: cancelContext?.toolCallId ?? '',
-      outcome: 'retry',
       error: `${error.code}: ${error.message}`,
     };
   }
@@ -1845,10 +1815,6 @@ const parseRpcSuccessResult = async (
     const parsed = LoroSessionLiveStatusRpcResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
-  if (response.method === 'session/reconcile-context-compaction') {
-    const parsed = SessionContextCompactionReconcileResponseSchema.safeParse(response.result);
-    return parsed.success ? (parsed.data as SessionContextCompactionReconcileResponse) : null;
-  }
   if (response.method === 'session/steer') {
     const parsed = SessionSteerResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionSteerResponse) : null;
@@ -1926,7 +1892,7 @@ export type LoroStreamsRpcPendingRegistration = {
   pingContext?: { requestId: string };
   lifecycleContext?: { requestId: string; targetVersion?: string };
   binaryContext?: { agentType: string; requestId?: string };
-  cancelContext?: { sessionId: string; turnId?: string; toolCallId?: string };
+  cancelContext?: { sessionId: string };
   forkContext?: { sourceSessionId: string; targetSessionId: string };
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string };
   steerContext?: { sessionId: string; userTurnId: string };
@@ -2700,23 +2666,6 @@ export class LoroStreamsMachineRpcClient {
     })) as LoroSessionLiveStatusRpcResponse | null;
   }
 
-  async requestSessionContextCompactionReconciliation(options: {
-    sessionId: SessionId;
-    turnId: string;
-    toolCallId: string;
-    timeoutMs?: number;
-  }): Promise<SessionContextCompactionReconcileResponse | null> {
-    return (await this.sendRequest({
-      method: 'session/reconcile-context-compaction',
-      timeoutMs: options.timeoutMs ?? 10_000,
-      params: {
-        sessionId: options.sessionId,
-        turnId: options.turnId,
-        toolCallId: options.toolCallId,
-      },
-    })) as SessionContextCompactionReconcileResponse | null;
-  }
-
   async requestSessionSteer(options: {
     sessionId: string;
     expectedTurnId: string;
@@ -3217,15 +3166,6 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
-          method: 'session/reconcile-context-compaction';
-          timeoutMs: number;
-          params: {
-            sessionId: SessionId;
-            turnId: string;
-            toolCallId: string;
-          };
-        }
-      | {
           method: 'session/steer';
           timeoutMs: number;
           params: {
@@ -3440,9 +3380,7 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/live-status' ||
         args.method === 'session/terminate'
           ? { sessionId: args.params.sessionId }
-          : args.method === 'session/reconcile-context-compaction'
-            ? args.params
-            : undefined,
+          : undefined,
       forkContext:
         args.method === 'session/fork'
           ? {
@@ -3568,9 +3506,6 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/live-status':
-          request = { ...envelope, method: args.method, params: args.params };
-          break;
-        case 'session/reconcile-context-compaction':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/steer':

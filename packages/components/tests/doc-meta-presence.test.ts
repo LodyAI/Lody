@@ -28,7 +28,6 @@ import {
 import {
   lodyPresenceStatesAtom,
   lodyPresenceSyncStateAtom,
-  machineLivePresenceAtomFamily,
   machineOnlineStatusAtomFamily,
   onlineMachineIdsAtom,
   sessionLiveStatusAtomFamily,
@@ -105,7 +104,6 @@ describe('doc meta presence overlay', () => {
     // liveness is exposed through the presence atoms instead.
     expect(store.get(machineMetaAtomFamily(machineRoomId))?.lastSeen).toBe(now - 240_000);
     expect(store.get(onlineMachineIdsAtom).has(machineId)).toBe(true);
-    expect(store.get(machineLivePresenceAtomFamily(machineId))?.instanceId).toBe(instanceId);
     store.set(lodyPresenceSyncStateAtom, 'synced');
     expect(store.get(machineOnlineStatusAtomFamily(machineId))).toBe('online');
     expect(store.get(machineOnlineStatusAtomFamily('missing-machine' as MachineId))).toBe(

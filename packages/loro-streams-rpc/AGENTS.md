@@ -55,10 +55,11 @@ and the `file/preview` namespace are in
   dispatch watcher — never run the agent turn inside the handler. Its `expiresAt`
   is deliberately short (== client timeout, ~15s) because a server restart replays
   the request stream from offset `'-1'`.
-- Session RPC authorization is source-side because workspace RPC cannot authenticate
-  a claimed requester. Live status and compaction repair use target-daemon runtime,
-  never durable meta, to judge liveness. Repair is capability-gated and may change
-  only the exact inactive turn/tool ids supplied by the client.
+- Session orchestration authorization is checked source-side with the source CLI
+  token because workspace RPC cannot authenticate a claimed requester identity.
+  `session/live-status` reads the target
+  daemon's active-presence controller and must not infer liveness from durable
+  `SessionMeta.status` or message pointers.
 - Remote lifecycle: [ACK contract](../../specs/machine-lifecycle-ack.md).
   RPC handlers never run installers inline. Accepted work exits via the CLI process
   boundary after a bounded ACK attempt, including delivery failure or timeout.

@@ -5,7 +5,6 @@ import type {
 } from '@lody/loro-streams-rpc';
 import {
   getServerNow,
-  machineSupportsContextCompactionReconciliationProtocol,
   machineSupportsLocalFileResourcesProtocol,
   type MachineProtocolCapabilities,
   type CodeCollabV2Error,
@@ -39,7 +38,6 @@ import {
   type MachineId,
   type SendLocalMachineRpcResult,
   type SessionCancelResponse,
-  type SessionContextCompactionReconcileResponse,
   type SessionDispatchTurnResponse,
   type SessionId,
   type SessionPreparationCancelSpec,
@@ -535,42 +533,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
-    }
-  };
-
-  const requestSessionContextCompactionReconciliation = async (
-    machineId: MachineId,
-    args: { sessionId: SessionId; turnId: string; toolCallId: string },
-    options?: { timeoutMs?: number }
-  ): Promise<SessionContextCompactionReconcileResponse | null> => {
-    try {
-      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
-      if (
-        !machineSupportsContextCompactionReconciliationProtocol({ protocolCapabilities })
-      ) {
-        return null;
-      }
-      if (await canUseLocalMachineRpc(machineId)) {
-        const response = await getLocalMachineRpcSender()?.({
-          method: 'session/reconcile-context-compaction',
-          machineId,
-          workspaceId,
-          params: args,
-          timeoutMs: options?.timeoutMs ?? 10_000,
-        });
-        if (response?.ok) {
-          return response.result as SessionContextCompactionReconcileResponse;
-        }
-        return null;
-      }
-      return await (
-        await getMachineRpcClient(machineId)
-      ).requestSessionContextCompactionReconciliation({
-        ...args,
-        timeoutMs: options?.timeoutMs ?? 10_000,
-      });
-    } catch {
-      return null;
     }
   };
 
@@ -1201,7 +1163,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   return {
     requestSessionCancel,
-    requestSessionContextCompactionReconciliation,
     requestSessionSteer,
     requestSessionGoal,
     requestSessionTerminate,

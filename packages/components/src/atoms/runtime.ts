@@ -290,11 +290,6 @@ export type WorkspaceRuntime = {
     turnId: string,
     options?: { timeoutMs?: number }
   ) => Promise<SessionCancelResponse | null>;
-  requestSessionContextCompactionReconciliation: (
-    machineId: MachineId,
-    args: { sessionId: SessionId; turnId: string; toolCallId: string },
-    options?: { timeoutMs?: number }
-  ) => Promise<import('@lody/shared').SessionContextCompactionReconcileResponse | null>;
   requestSessionSteer: (
     machineId: MachineId,
     args: {
