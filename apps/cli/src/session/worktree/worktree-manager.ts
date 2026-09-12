@@ -7,6 +7,7 @@ import { Logger } from '@/utils/logger';
 import { withFileLock } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import {
+  buildCredentialHelperRuntimeEnv,
   buildCredentialHelperValueForHost,
   ensureCredentialHelperScript,
   getCredentialHelperHostPath,
@@ -314,6 +315,9 @@ export class WorktreeManager {
     const mergedEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...env,
+      // The credential helper runs `process.execPath`; under Electron that binary only
+      // behaves as Node with this flag set.
+      ...buildCredentialHelperRuntimeEnv(),
       GIT_TERMINAL_PROMPT: '0',
     };
     this.logger.debug(`[${this.repoId}] Running git ${args.join(' ')}`);
@@ -565,6 +569,7 @@ export class WorktreeManager {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         ...buildBrokerAuthEnv(options.brokerAuth),
+        ...buildCredentialHelperRuntimeEnv(),
         LODY_GIT_CRED_HELPER_DEBUG: 'true',
         LODY_GIT_CRED_HELPER_DEBUG_FILE: debugFile,
       };
@@ -603,7 +608,11 @@ export class WorktreeManager {
   }): Promise<{ exitCode: number | null; returnedCredentials: boolean; stderrNonEmpty: boolean }> {
     const input = `protocol=https\nhost=${options.host}\npath=/${options.repoFullName}.git\n\n`;
     return await new Promise((resolve, reject) => {
-      const child = spawn('node', [options.helperPath, 'get'], {
+      // Probe with the SAME runtime git uses for the helper (`process.execPath`).
+      // Spawning a bare `node` would make the probe fail with ENOENT on a desktop
+      // launched from the Dock — exactly the failure being diagnosed — or, worse,
+      // succeed against an unrelated PATH Node and hide it.
+      const child = spawn(process.execPath, [options.helperPath, 'get'], {
         env: options.env,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
