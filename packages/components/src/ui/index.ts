@@ -1,9 +1,7 @@
 // Export all UI components
-export * from './accordion';
 export * from './badge';
 export * from './button';
 export * from './card';
-export * from './collapsible';
 export * from './command';
 export * from './dialog';
 export * from './dropdown-menu';

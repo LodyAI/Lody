@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { buttonPaletteTheme } from '../button/button.tokens.stylex';
 import { dialogPaletteTheme } from '../dialog/dialog.tokens.stylex';
+import { disclosurePaletteTheme } from '../disclosure/disclosure.tokens.stylex';
 import { fieldPaletteTheme } from '../field/field.tokens.stylex';
 import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
@@ -17,6 +18,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 const componentPaletteThemes = [
   buttonPaletteTheme,
   dialogPaletteTheme,
+  disclosurePaletteTheme,
   fieldPaletteTheme,
   popupPaletteTheme,
   tooltipPaletteTheme,

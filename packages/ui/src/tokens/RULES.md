@@ -252,6 +252,71 @@ again. It sits above every popup, because what it names may be inside one.
 A tooltip is visual only — it reaches neither touch nor a screen reader — so it
 is never a control's name. Every trigger states its own.
 
+## Disclosure
+
+Three layouts of one idea: a trigger, and the thing it shows. `Tabs` lays the
+choices side by side and swaps the panel under them; `Accordion` stacks them and
+opens one in place; `Collapsible` is a single one of those with no list around
+it. One group, `disclosure`, serves all three for the reason `field` serves the
+control family — what differs is the arrangement, not what either is made of, so
+the colour a closed row's label takes and the colour a tab you are not on takes
+cannot become two decisions.
+
+None of the three holds a value. A tab picks what is shown rather than what is
+stored, so it takes no name, answers to no `Field.Root` and has no invalid
+state; it borrows the well the controls sit in because the ladder puts it there,
+not because it is one of them.
+
+### The strip
+
+| part      | what it is                                                                       |
+| --------- | -------------------------------------------------------------------------------- |
+| track     | `disclosure.trackBackground` under `disclosure.trackWell`, inset by `trackInset` |
+| indicator | the one thing raised out of it: `disclosure.indicator` under `indicatorShadow`   |
+| tab       | the track's height less the inset on both sides, at the control type rule        |
+| panel     | what the strip swaps, `disclosure.panelGap` under it                             |
+
+The strip is the ladder read twice over — a well with one raised thing in it,
+the same pair a Switch takes — and it says the same thing: the track is where
+something sits, and the thing sitting in it is the one you can press. Nested
+radius applies: a 28px track at `radius.small` holds a 4px tab, a 32 or 36px one
+at `radius.medium` holds a 6px tab, and neither is a token of its own.
+
+The indicator is one element that moves rather than a fill on each tab, because
+the strip is one control and a pill sliding across it says so. It is drawn by
+`Tabs.List` rather than by a caller, the way a submenu's chevron is drawn by its
+row: a strip assembled without one is a segmented control with nothing
+segmented. A tab therefore carries no fill in any state — what changes when you
+take one is its colour, from `tabLabel` to `tabActiveLabel`, which is also where
+a hover lands.
+
+The size is stated once, on the strip. A tab's height, corner and share of the
+width all follow from the track's, so a strip that takes the width on offer says
+`stretch` and both facts move together — a track that stretched while its tabs
+did not would be a full-width groove with the choices huddled at its start.
+
+Arrow keys move without taking. A tab swaps a panel that may be expensive to
+build, and arrowing to the fourth tab should not build the second and third on
+the way; a surface whose panels are cheap says `activateOnFocus`.
+
+### The stack, and the reveal
+
+A row has no fill in any state: it is a line of a list rather than a control on
+a surface, so what marks it is the `separator` the rules give a list, and what
+moves when it opens is the chevron the part draws. One row is open at a time
+unless the stack says `multiple`, because an accordion exists to keep a long
+page short. A Collapsible has no list around it, so it takes neither the line
+nor the row: its trigger is whatever the surface already had there, and the
+panel is all the primitive owns.
+
+What a panel holds is prose, so it takes the prose step rather than the control
+step its trigger takes, and its padding rides on a **child** of the panel. That
+is not a preference: Base UI animates the panel's height from a size it measures
+with `scrollHeight`, which counts padding, so a padded panel is cropped by
+exactly its own padding under `border-box` and overshoots by it under
+`content-box`. A caller migrating a panel that carried its own padding moves it
+inwards.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
