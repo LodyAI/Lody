@@ -135,8 +135,12 @@ describe('PathLaunchersSettings', () => {
 
     const sheet = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(sheet).not.toBeNull();
-    expect(sheet?.className).toContain('bottom-0');
-    expect(sheet?.className).toContain('slide-in-from-bottom');
+    // The edge a sheet came in on is what it states for itself; `@lody/ui`'s
+    // Sheet renders it as `data-side` and derives the pinning, the radius and
+    // the direction it slides from there. The classes this used to assert were
+    // the deleted Tailwind `cva`'s, which is the component rather than what a
+    // person sees.
+    expect(sheet?.getAttribute('data-side')).toBe('bottom');
     expect(sheet?.textContent).toContain('Edit launcher');
   });
 

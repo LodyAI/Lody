@@ -6,6 +6,12 @@ export type {
   ButtonTone,
   ButtonVariant,
 } from './button/button';
+export { AlertDialog } from './dialog/alert-dialog';
+export type {
+  AlertDialogContentProps,
+  AlertDialogDescriptionProps,
+  AlertDialogTitleProps,
+} from './dialog/alert-dialog';
 export { Checkbox } from './field/checkbox';
 export type { CheckboxProps } from './field/checkbox';
 export { Combobox } from './field/combobox';
@@ -24,6 +30,15 @@ export type {
 } from './field/combobox';
 export { ContextMenu } from './menu/context-menu';
 export type { ContextMenuContentProps, ContextMenuTriggerProps } from './menu/context-menu';
+export { Dialog } from './dialog/dialog';
+export type {
+  DialogBackdropProps,
+  DialogContentProps,
+  DialogDescriptionProps,
+  DialogTitleProps,
+  ModalContentProps,
+} from './dialog/dialog';
+export type { DialogSectionProps } from './dialog/parts';
 export { Field } from './field/field';
 export type {
   FieldDescriptionProps,
@@ -51,6 +66,14 @@ export type {
 } from './menu/menu';
 export { Menubar } from './menu/menubar';
 export type { MenubarRootProps, MenubarTriggerProps } from './menu/menubar';
+export { Popover } from './popover/popover';
+export type {
+  PopoverContentProps,
+  PopoverDescriptionProps,
+  PopoverHeaderProps,
+  PopoverTitleProps,
+  PopoverTriggerProps,
+} from './popover/popover';
 export { PopupContainerProvider, usePopupContainer } from './popup/portal-container';
 export type { PopupContainer } from './popup/portal-container';
 export { Radio, RadioGroup } from './field/radio';
@@ -66,9 +89,13 @@ export type {
   SelectTriggerProps,
   SelectValueProps,
 } from './field/select';
+export { Sheet } from './dialog/sheet';
+export type { SheetContentProps, SheetSide } from './dialog/sheet';
 export { Switch } from './field/switch';
 export type { SwitchProps } from './field/switch';
 export { Textarea } from './field/textarea';
 export type { TextareaProps, TextareaResize } from './field/textarea';
 export { ThemeRoot, forcedThemeClassNames } from './theme/theme';
 export type { ThemeMode } from './theme/theme';
+export { Tooltip } from './tooltip/tooltip';
+export type { TooltipContentProps, TooltipTriggerProps } from './tooltip/tooltip';

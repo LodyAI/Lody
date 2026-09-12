@@ -39,6 +39,11 @@ export function TickGlyph() {
   return <Glyph d="M3.2 8.4 6.4 11.6 12.8 4.4" />;
 }
 
+/** The cross on a dialog's own close button: this goes away. */
+export function CrossGlyph() {
+  return <Glyph d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5" />;
+}
+
 /** The chevron on a menu row that opens a submenu: there is more this way. */
 export function ChevronRightGlyph() {
   return <Glyph d="M6.5 4 10.5 8 6.5 12" />;

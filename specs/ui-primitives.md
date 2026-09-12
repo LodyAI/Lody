@@ -65,6 +65,33 @@ closes is a product decision — a surface may want the composer rather than the
 control that opened the menu — so the surface states it and the primitive does
 not choose for it.
 
+That same floating surface also carries content rather than rows or commands: a
+small panel a control opens, with a heading, a sentence about it, and whatever
+the surface puts under them. It is one surface with three things on it rather
+than three surfaces, so a panel and the menu beside it cannot open at two radii
+over two shadows. What it holds is prose, so its text follows the prose rule
+rather than the rule a row's label follows.
+
+A surface that must be answered before a person carries on is a panel over the
+whole window, with the page receding behind it. There are three, and they are
+one thing arriving three ways: one a person may dismiss, and which shows that it
+can be; one that must be answered, where a press beside it is not an answer,
+although the key that cancels still is; and one that arrives from an edge of the
+window rather than its middle. All three share one appearance, so a padding or a
+heading has one place to change. Each states its own panel as the place the
+lists and menus inside it belong, so a surface that opens one never has to.
+Which answer in such a panel is the affirmative one, and what it is about, is
+the surface's decision rather than the panel's.
+
+A person may also be told what a control is without acting on it. That label is
+not a surface a person visits: it is a mark over the thing it names, so it reads
+inverted rather than raised, it never takes the pointer, and it sits above every
+other floating thing because what it names may itself be on one. It is offered
+to sighted people using a pointer or a keyboard and reaches neither touch nor a
+screen reader, so it never carries a control's name — every control it describes
+states its own name, and a surface that groups several of them lets the second
+appear without the wait the first had.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is
@@ -140,3 +167,6 @@ container a modal names for them are recorded in the
 The menu family that shares that surface, the one declaration it replaces, and
 the migration of the Radix menus still owed to it are recorded in the
 [UI menu primitives note](../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).
+The popover on that same surface, the modal rung the dialog family shares, the
+inverted tooltip, and the migration still owed to them are recorded in the
+[UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).

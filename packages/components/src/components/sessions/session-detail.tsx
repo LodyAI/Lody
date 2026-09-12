@@ -181,7 +181,7 @@ import {
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
 import { SessionNotFound } from './session-not-found';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/ui/sheet';
+import { Sheet } from '@lody/ui/sheet';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import {
@@ -5243,16 +5243,16 @@ const SessionDetail = ({
         </div>
 
         {/* Mobile diff sheet */}
-        <Sheet
+        <Sheet.Root
           open={mobileDiffState !== null}
           onOpenChange={(open) => !open && handleCloseMobileDiff()}
         >
-          <SheetContent side="bottom" className="h-[85vh] flex flex-col p-0">
-            <SheetHeader className="shrink-0 border-b border-border px-4 py-3">
-              <SheetTitle className="text-sm font-medium">
+          <Sheet.Content side="bottom" className="h-[85vh] flex flex-col p-0">
+            <Sheet.Header className="shrink-0 border-b border-border px-4 py-3">
+              <Sheet.Title className="text-sm font-medium">
                 {t('sessions.diffTab', 'Changes')}
-              </SheetTitle>
-            </SheetHeader>
+              </Sheet.Title>
+            </Sheet.Header>
             <div className="flex-1 min-h-0 overflow-hidden">
               {mobileDiffState && (
                 <SessionConversationDiffPanel
@@ -5297,8 +5297,8 @@ const SessionDetail = ({
                 />
               )}
             </div>
-          </SheetContent>
-        </Sheet>
+          </Sheet.Content>
+        </Sheet.Root>
         {viewerTabs
           .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
           .map((tab) => {

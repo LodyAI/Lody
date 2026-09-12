@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Separator } from '@/ui/separator';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/ui/sheet';
+import { Sheet } from '@lody/ui/sheet';
 import { Skeleton } from '@/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 
@@ -159,26 +159,30 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-        <SheetContent
+      <Sheet.Root open={openMobile} onOpenChange={setOpenMobile} {...props}>
+        <Sheet.Content
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          // The sidebar is its own surface with its own fill and its own
+          // scrolling column, so it takes the panel without the panel's padding
+          // and without the cross: the way out is the overlay or the trigger.
+          closeButton={false}
+          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0"
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
             } as React.CSSProperties
           }
-          side={side}
+          side={side === 'left' ? 'start' : 'end'}
         >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-          </SheetHeader>
+          <Sheet.Header className="sr-only">
+            <Sheet.Title>Sidebar</Sheet.Title>
+            <Sheet.Description>Displays the mobile sidebar.</Sheet.Description>
+          </Sheet.Header>
           <div className="flex h-full w-full flex-col">{children}</div>
-        </SheetContent>
-      </Sheet>
+        </Sheet.Content>
+      </Sheet.Root>
     );
   }
 

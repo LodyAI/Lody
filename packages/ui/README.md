@@ -11,8 +11,11 @@ behavior.
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
 | `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
-| `src/popup`         | The floating surface a list or a menu opens on, and its tokens      |
+| `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface             |
+| `src/popover`       | The same surface holding content rather than rows                   |
+| `src/dialog`        | Dialog, AlertDialog and Sheet: the modal rung, and its tokens        |
+| `src/tooltip`       | The inverted chip that names what is under the pointer               |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -119,11 +122,85 @@ at its icon library's default, because this package has no descendant selector t
 reach it with. A row with no icon takes no box, so an icon-less menu is not
 indented for nothing; a row in a mixed list asks for one with `inset`.
 
-A popup mounts on the document by default. A surface that owns a focus scope and
-a scroll lock — a modal — states its panel once with `PopupContainerProvider`,
-and every Select, Combobox and Menu under it mounts inside the panel instead of
-being treated as outside it. `@lody/components`' `DialogContent` already does
-this.
+A `Popover` is that same floating surface holding content instead of rows. It
+reads the popup group too, and replaces five of a list's declarations: the width
+a list takes from the control that shows its value, the 4px inset that lets a row
+bleed to the surface's edge, and the three that make the type a control's rather
+than prose.
+
+```tsx
+<Popover.Root>
+  <Popover.Trigger render={<Button variant="secondary" />}>Filter</Popover.Trigger>
+  <Popover.Content>
+    <Popover.Header>
+      <Popover.Title>Filter sessions</Popover.Title>
+      <Popover.Description>Applies to the list under it.</Popover.Description>
+    </Popover.Header>
+    <Field.Root>
+      <Field.Label>Name contains</Field.Label>
+      <Input size="small" />
+    </Field.Root>
+    <Popover.Close render={<Button size="small" />}>Apply</Popover.Close>
+  </Popover.Content>
+</Popover.Root>
+```
+
+`Dialog`, `AlertDialog` and `Sheet` are one family on the modal rung — the
+elevated background under the large shadow, over an overlay. They share one token
+group and one surface, and differ only in how they arrive and in what may dismiss
+them. A dialog carries a cross and says so; an alert dialog is answered rather
+than dismissed, so a press beside it is not an answer, though Escape still is; a
+sheet is the same panel arriving from an edge of the window.
+
+```tsx
+<Dialog.Root>
+  <Dialog.Trigger render={<Button variant="secondary" />}>Rename</Dialog.Trigger>
+  <Dialog.Content>
+    <Dialog.Header>
+      <Dialog.Title>Rename session</Dialog.Title>
+      <Dialog.Description>The name shows in the sidebar.</Dialog.Description>
+    </Dialog.Header>
+    <Input placeholder="Describe the task" />
+    <Dialog.Footer>
+      <Dialog.Close render={<Button variant="secondary" />}>Cancel</Dialog.Close>
+      <Dialog.Close render={<Button onClick={save} />}>Save</Dialog.Close>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+```
+
+An alert dialog's answers are Buttons rather than parts of the component: which
+variant an answer takes is the surface's decision, so a footer writes them with
+`AlertDialog.Close render={<Button variant="destructive" />}`.
+
+A popup mounts on the document by default, and a modal panel is the exception. A
+surface that owns a focus scope and a scroll lock states its panel once with
+`PopupContainerProvider`, and every Select, Combobox, Menu and Popover under it
+mounts inside the panel instead of being treated as outside it. `Dialog.Content`,
+`AlertDialog.Content` and `Sheet.Content` do this for their own panel, so a
+product surface never has to.
+
+A `Tooltip` is the one floating part that does not read the popup group. The
+elevation ladder puts a menu, a popover and a list on the raised background under
+the popover shadow, and names the tooltip apart: `label` with `shadow.medium`, an
+inversion, because a tooltip is not a place to act but a label over one.
+
+```tsx
+<Tooltip.Provider>
+  <Tooltip.Root>
+    <Tooltip.Trigger render={<Button variant="ghost" icon aria-label="Rerun" />}>
+      <RerunIcon />
+    </Tooltip.Trigger>
+    <Tooltip.Content>Rerun this turn</Tooltip.Content>
+  </Tooltip.Root>
+</Tooltip.Provider>
+```
+
+A tooltip is visual only. Base UI gives the chip no role and wires no
+`aria-describedby`, because a tooltip is reachable by neither touch nor a screen
+reader, so **the trigger states its own `aria-label`** — a control whose only name
+was its tooltip has no name at all. `Tooltip.Provider` groups them, so once one
+has opened the next opens without its delay.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in
@@ -135,7 +212,10 @@ The integration decision is recorded in the
 the field family and the Tailwind field concepts it replaces are recorded in the
 [UI field primitives note](../../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md);
 the menu family and the migration still owed to it are recorded in the
-[UI menu primitives note](../../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).
+[UI menu primitives note](../../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md);
+the popover, the modal rung, the tooltip and the migration still owed to them are
+recorded in the
+[UI overlay primitives note](../../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

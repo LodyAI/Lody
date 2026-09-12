@@ -3,10 +3,21 @@ import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Checkbox } from '../field/checkbox';
+import { AlertDialog } from '../dialog/alert-dialog';
+import { Dialog } from '../dialog/dialog';
+import { dialog as dialogTokens } from '../dialog/dialog.tokens.stylex';
+import { Sheet, type SheetSide } from '../dialog/sheet';
+import { modal } from '../dialog/surface';
 import { Combobox } from '../field/combobox';
 import { Field } from '../field/field';
 import { field } from '../field/field.tokens.stylex';
-import { ChevronDownGlyph, ChevronRightGlyph, DotGlyph, TickGlyph } from '../internal/glyphs';
+import {
+  ChevronDownGlyph,
+  ChevronRightGlyph,
+  CrossGlyph as CloseGlyph,
+  DotGlyph,
+  TickGlyph,
+} from '../internal/glyphs';
 import { ContextMenu } from '../menu/context-menu';
 import { Menu } from '../menu/menu';
 import { Menubar } from '../menu/menubar';
@@ -15,8 +26,12 @@ import { Radio, RadioGroup } from '../field/radio';
 import { Select } from '../field/select';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { Popover } from '../popover/popover';
 import { popup } from '../popup/popup.tokens.stylex';
 import { surface } from '../popup/surface';
+import { chip } from '../tooltip/chip';
+import { Tooltip } from '../tooltip/tooltip';
+import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
 import { colors, shadow } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
@@ -267,6 +282,92 @@ const styles = stylex.create({
   // A row is picked, not pressed, so the board shows the two fills side by side
   // rather than asking the reader to hover one.
   replicaRow: { cursor: 'default' },
+  // A popover stand-in, for the same reason the list has one: the real popover
+  // above it covers whatever the reader was comparing it against. It keeps every
+  // declaration the popover states for itself — the panel padding and gap are
+  // the two it replaces on the shared surface — and only stops floating.
+  popoverReplica: { position: 'static', width: '260px', maxHeight: 'none', zIndex: 'auto' },
+  // The dialog stand-in drops what makes the panel own the window — the fixed
+  // position, the centring transform and the 512px width, which would overflow
+  // this board — and keeps the padding, the radius, the gap and the type, which
+  // are what a reader is here to see. `dialog.width`, `dialog.sheetSize` and
+  // `dialog.inset` are reported by probes instead, because a panel scaled to fit
+  // a board can no longer report its own width.
+  dialogReplica: {
+    // `relative` rather than `static`: the cross is pinned to the panel's own
+    // padding box, so the stand-in has to stay the containing block for it.
+    // A positioned box also starts honouring the panel's own insets, and the
+    // panel centres itself with `inset-inline-start: 50%`, so all four are
+    // cleared here or the stand-in sits half a column to the right of itself.
+    position: 'relative',
+    insetInlineStart: 'auto',
+    insetInlineEnd: 'auto',
+    insetBlockStart: 'auto',
+    insetBlockEnd: 'auto',
+    // Not `width: 100%`: the stand-in is a flex item beside a legend and a
+    // caption, and a percentage width resolves against the whole row rather
+    // than the room left in it, so the panel ran off the end of the board. A
+    // `100%` flex-basis in a wrapping row means "a line of your own", which is
+    // what a 512px panel needs in a 340px column.
+    width: 'auto',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '100%',
+    minWidth: 0,
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transform: 'none',
+    zIndex: 'auto',
+  },
+  // The overlay, at its real colour, over something to see it against.
+  overlaySwatch: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    height: '46px',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  overlayFill: { position: 'absolute', inset: 0, backgroundColor: dialogTokens.overlay },
+  // A dimension a stand-in cannot state — the panel is 512px and this board's
+  // columns are 340 — is reported by a probe carrying the token, the way the
+  // rise is. It is out of flow and hidden: a probe laid out inside the metrics
+  // row is a flex item, so it reports the width the row let it have rather than
+  // the width the token declares. Measured in flow, `dialog.width` read back as
+  // 167.5px.
+  widthProbe: {
+    position: 'absolute',
+    visibility: 'hidden',
+    height: '1px',
+    pointerEvents: 'none',
+  },
+  // The tooltip stand-in: the chip alone, with nothing to hover.
+  tooltipReplica: { position: 'static', zIndex: 'auto', pointerEvents: 'auto' },
+  // Something to point at, so the real tooltips above have an anchor that is not
+  // a control with opinions of its own.
+  tooltipAnchor: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    height: control.small,
+    paddingInline: space[2],
+    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    userSelect: 'none',
+  },
+  // A dialog's body, so the stand-in shows what the panel's gap separates.
+  dialogBody: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+  },
+  // The cross, as the real panel draws it: a ghost icon button in the corner.
+  replicaCloseGlyph: { display: 'block', width: '16px', height: '16px' },
   // A board cannot hold focus while it is read, so each focus ring is drawn once
   // on a non-interactive stand-in built from the same tokens the control uses.
   buttonFocusReplica: {
@@ -498,6 +599,19 @@ const POPUP_COLORS = [
     note: 'the keyboard on one',
   },
 ];
+
+const DIALOG_COLORS = [
+  { name: 'dialog.background', value: dialogTokens.background, note: 'the modal rung' },
+  { name: 'dialog.title', value: dialogTokens.title, note: 'the heading, and the panel text' },
+  { name: 'dialog.description', value: dialogTokens.description, note: 'the sentence under it' },
+];
+
+const TOOLTIP_COLORS = [
+  { name: 'tooltip.background', value: tooltipTokens.background, note: 'inverted: the label ink' },
+  { name: 'tooltip.label', value: tooltipTokens.label, note: 'the page background, as ink' },
+];
+
+const SHEET_SIDES: SheetSide[] = ['top', 'end', 'bottom', 'start'];
 
 const SELECT_SIZES = [
   { name: 'small · 28', size: 'small' as const },
@@ -1149,6 +1263,420 @@ function SessionMenu() {
         </Menu.Item>
       </Menu.Content>
     </Menu.Root>
+  );
+}
+
+/**
+ * The popover surface, drawn from `popup/surface.ts` on a stand-in. The real
+ * popover above it opens over whatever is under it, which a board cannot hold
+ * still, so the two declarations a popover replaces on the shared surface —
+ * its padding and its gap — are read back off this one.
+ */
+function PopoverReplica() {
+  const padding = useMeasured<HTMLDivElement>('padding-top');
+  const gap = useMeasured<HTMLDivElement>('row-gap');
+  const titleSize = useMeasured<HTMLHeadingElement>('font-size');
+  const descriptionSize = useMeasured<HTMLParagraphElement>('font-size');
+
+  const metrics = [
+    { name: 'popup.panelPadding', value: padding.value },
+    { name: 'popup.panelGap', value: gap.value },
+    { name: 'the panel title', value: titleSize.value },
+    { name: 'popup.description', value: descriptionSize.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'popover · stand-in'}</LegendKey>
+      <div
+        ref={(node) => {
+          padding.ref.current = node;
+          gap.ref.current = node;
+        }}
+        {...stylex.props(surface.popup, surface.popupPanel, styles.popoverReplica)}
+      >
+        <div {...stylex.props(surface.panelHeader)}>
+          <h3 ref={titleSize.ref} {...stylex.props(surface.panelTitle)}>
+            Filter sessions
+          </h3>
+          <p ref={descriptionSize.ref} {...stylex.props(surface.panelDescription)}>
+            Applies to the list under it.
+          </p>
+        </div>
+        <Field.Root>
+          <Field.Label>Name contains</Field.Label>
+          <Input size="small" placeholder="Search" />
+        </Field.Root>
+        <Cluster>
+          <Button size="small" variant="ghost">
+            Reset
+          </Button>
+          <Button size="small">Apply</Button>
+        </Cluster>
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The same surface a Select list and a Menu open, holding content instead of rows. It
+          replaces five of a list&apos;s declarations: the width it takes from its control, the 4px
+          inset that lets a row reach the surface&apos;s edge, and the three that make its type a
+          control&apos;s rather than prose.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A popover a reader can actually open, written the way a surface writes one. */
+function FilterPopover() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger render={<Button variant="secondary" />}>Filter</Popover.Trigger>
+      <Popover.Content>
+        <Popover.Header>
+          <Popover.Title>Filter sessions</Popover.Title>
+          <Popover.Description>Applies to the list under it.</Popover.Description>
+        </Popover.Header>
+        <Field.Root>
+          <Field.Label>Name contains</Field.Label>
+          <Input size="small" placeholder="Search" />
+        </Field.Root>
+        <Cluster>
+          <Popover.Close render={<Button size="small" variant="ghost" />}>Reset</Popover.Close>
+          <Popover.Close render={<Button size="small" />}>Apply</Popover.Close>
+        </Cluster>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+/**
+ * The modal panel, drawn from `dialog/surface.ts` on a stand-in: a dialog is
+ * portalled and unmounted while it is closed, and opening one would cover the
+ * board it is meant to be compared against.
+ *
+ * The stand-in keeps the padding, the radius, the gap and the type — what a
+ * reader is here to see — and drops what makes the panel own a window: the
+ * fixed position, the centring transform and the 512px width. Those are
+ * reported by probes below instead, by a bar as wide as the token, because a
+ * panel shrunk to fit a board can no longer state its own width.
+ */
+function DialogReplica() {
+  const padding = useMeasured<HTMLDivElement>('padding-top');
+  const gap = useMeasured<HTMLDivElement>('row-gap');
+  const panelRadius = useMeasured<HTMLDivElement>('border-radius');
+  const panelShadow = useMeasured<HTMLDivElement>('box-shadow');
+  const headerGap = useMeasured<HTMLDivElement>('row-gap');
+  const titleSize = useMeasured<HTMLHeadingElement>('font-size');
+  const titleLeading = useMeasured<HTMLHeadingElement>('line-height');
+  const descriptionSize = useMeasured<HTMLParagraphElement>('font-size');
+  const descriptionLeading = useMeasured<HTMLParagraphElement>('line-height');
+  const footerGap = useMeasured<HTMLDivElement>('column-gap');
+
+  const metrics = [
+    { name: 'dialog.shadow', value: panelShadow.value },
+    { name: 'dialog.radius', value: panelRadius.value },
+    { name: 'dialog.padding', value: padding.value },
+    { name: 'dialog.gap', value: gap.value },
+    { name: 'dialog.headerGap', value: headerGap.value },
+    { name: 'dialog.footerGap', value: footerGap.value },
+    { name: 'dialog.titleSize', value: titleSize.value },
+    { name: 'dialog.titleLeading', value: titleLeading.value },
+    { name: 'dialog.descriptionSize', value: descriptionSize.value },
+    { name: 'dialog.descriptionLeading', value: descriptionLeading.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'dialog · stand-in'}</LegendKey>
+      <div
+        ref={(node) => {
+          padding.ref.current = node;
+          gap.ref.current = node;
+          panelRadius.ref.current = node;
+          panelShadow.ref.current = node;
+        }}
+        {...stylex.props(modal.popup, styles.dialogReplica)}
+      >
+        <div ref={headerGap.ref} {...stylex.props(modal.header)}>
+          <h3
+            ref={(node) => {
+              titleSize.ref.current = node;
+              titleLeading.ref.current = node;
+            }}
+            {...stylex.props(modal.title)}
+          >
+            Delete this session?
+          </h3>
+          <p
+            ref={(node) => {
+              descriptionSize.ref.current = node;
+              descriptionLeading.ref.current = node;
+            }}
+            {...stylex.props(modal.description)}
+          >
+            Its transcript and every file it wrote go with it.
+          </p>
+        </div>
+        <p {...stylex.props(styles.dialogBody)}>
+          The body is whatever the surface writes; the panel states only the room around it.
+        </p>
+        <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
+          <Button variant="secondary" size="small">
+            Keep
+          </Button>
+          <Button variant="destructive" size="small">
+            Delete
+          </Button>
+        </div>
+        <Button variant="ghost" size="small" icon aria-label="Close" {...stylex.props(modal.close)}>
+          <span {...stylex.props(styles.replicaCloseGlyph)}>
+            <CloseGlyph />
+          </span>
+        </Button>
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The modal rung states three things at once: the elevated background, the large shadow, and
+          an overlay over the page. A Dialog, an AlertDialog and a Sheet are this one panel — they
+          differ in how they arrive and in what may dismiss them, not in what they are made of.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A dimension has no appearance, so a bar as wide as it reports what it is. */
+function WidthProbeRow({ name, value }: { name: string; value: string }) {
+  const { ref, value: measured } = useMeasured<HTMLDivElement>('width');
+  return (
+    <div {...stylex.props(styles.constRow)}>
+      <dt {...stylex.props(styles.constName)}>{name}</dt>
+      <dd {...stylex.props(styles.constValue)}>{measured}</dd>
+      <div ref={ref} aria-hidden="true" {...stylex.props(styles.widthProbe, dyn.width(value))} />
+    </div>
+  );
+}
+
+/** The dimensions a stand-in cannot state, because stating them hides the board. */
+function ModalDimensions() {
+  const dimensions = [
+    { name: 'dialog.width', value: dialogTokens.width },
+    { name: 'dialog.sheetSize', value: dialogTokens.sheetSize },
+    { name: 'dialog.inset', value: dialogTokens.inset },
+    { name: 'dialog.rise', value: dialogTokens.rise },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A sheet on one edge. A sheet arrives from somewhere, so the edge it came in on
+ * is the one thing it states for itself, and all four belong on the board: each
+ * pins to a different pair of sides and slides along a different axis.
+ */
+function FilterSheet({ side }: { side: SheetSide }) {
+  return (
+    <Sheet.Root>
+      <Sheet.Trigger render={<Button variant="secondary" size="small" />}>{side}</Sheet.Trigger>
+      <Sheet.Content side={side}>
+        <Sheet.Header>
+          <Sheet.Title>Filters</Sheet.Title>
+          <Sheet.Description>They apply to the session list.</Sheet.Description>
+        </Sheet.Header>
+        <Field.Label>
+          <Checkbox name="running" defaultChecked />
+          Running only
+        </Field.Label>
+        <Sheet.Footer>
+          <Sheet.Close render={<Button variant="secondary" size="small" />}>Reset</Sheet.Close>
+          <Sheet.Close render={<Button size="small" />}>Apply</Sheet.Close>
+        </Sheet.Footer>
+      </Sheet.Content>
+    </Sheet.Root>
+  );
+}
+
+/** The three ways onto the modal rung, each one a reader can actually open. */
+function ModalTriggers() {
+  return (
+    <Rows>
+      <Row>
+        <LegendKey>dialog</LegendKey>
+        <Cluster>
+          <Dialog.Root>
+            <Dialog.Trigger render={<Button variant="secondary" />}>Rename session</Dialog.Trigger>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Rename session</Dialog.Title>
+                <Dialog.Description>The name shows in the sidebar.</Dialog.Description>
+              </Dialog.Header>
+              <Field.Root>
+                <Field.Label>Name</Field.Label>
+                <Input placeholder="Describe the task" />
+              </Field.Root>
+              <Dialog.Footer>
+                <Dialog.Close render={<Button variant="secondary" />}>Cancel</Dialog.Close>
+                <Dialog.Close render={<Button />}>Save</Dialog.Close>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>alert dialog</LegendKey>
+        <Cluster>
+          <AlertDialog.Root>
+            <AlertDialog.Trigger render={<Button variant="secondary" tone="destructive" />}>
+              Delete session
+            </AlertDialog.Trigger>
+            <AlertDialog.Content>
+              <AlertDialog.Header>
+                <AlertDialog.Title>Delete this session?</AlertDialog.Title>
+                <AlertDialog.Description>
+                  Its transcript and every file it wrote go with it.
+                </AlertDialog.Description>
+              </AlertDialog.Header>
+              <AlertDialog.Footer>
+                <AlertDialog.Close render={<Button variant="secondary" />}>Keep</AlertDialog.Close>
+                <AlertDialog.Close render={<Button variant="destructive" />}>
+                  Delete
+                </AlertDialog.Close>
+              </AlertDialog.Footer>
+            </AlertDialog.Content>
+          </AlertDialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>sheet · each edge</LegendKey>
+        <Cluster>
+          {SHEET_SIDES.map((side) => (
+            <FilterSheet key={side} side={side} />
+          ))}
+        </Cluster>
+      </Row>
+    </Rows>
+  );
+}
+
+/**
+ * The tooltip chip, drawn on a stand-in. A tooltip is portalled, unmounted
+ * while it is closed and opens on a delay, so the board shows the chip itself
+ * beside triggers a reader can point at.
+ */
+function TooltipReplica() {
+  const chipRadius = useMeasured<HTMLDivElement>('border-radius');
+  const chipPaddingX = useMeasured<HTMLDivElement>('padding-left');
+  const chipPaddingY = useMeasured<HTMLDivElement>('padding-top');
+  const chipText = useMeasured<HTMLDivElement>('font-size');
+  const chipLeading = useMeasured<HTMLDivElement>('line-height');
+  const chipShadow = useMeasured<HTMLDivElement>('box-shadow');
+
+  const metrics = [
+    { name: 'tooltip.shadow', value: chipShadow.value },
+    { name: 'tooltip.radius', value: chipRadius.value },
+    { name: 'tooltip.paddingX', value: chipPaddingX.value },
+    { name: 'tooltip.paddingY', value: chipPaddingY.value },
+    { name: 'tooltip.text', value: chipText.value },
+    { name: 'tooltip.leading', value: chipLeading.value },
+  ];
+
+  const dimensions = [
+    { name: 'tooltip.maxWidth', value: tooltipTokens.maxWidth },
+    { name: 'tooltip.rise', value: tooltipTokens.rise },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'tooltip · stand-in'}</LegendKey>
+      <Cluster>
+        <div
+          ref={(node) => {
+            chipRadius.ref.current = node;
+            chipPaddingX.ref.current = node;
+            chipPaddingY.ref.current = node;
+            chipText.ref.current = node;
+            chipLeading.ref.current = node;
+            chipShadow.ref.current = node;
+          }}
+          {...stylex.props(chip.popup, styles.tooltipReplica)}
+        >
+          Rerun this turn
+        </div>
+      </Cluster>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The one floating thing that inverts rather than rising off the page: the ladder puts a
+          menu, a popover and a list on the raised background under the popover shadow, and names
+          the tooltip apart as label with shadow.medium. It is a label over a control rather than a
+          place to act, so it never takes the pointer.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** Tooltips a reader can point at; one provider, so the second opens instantly. */
+function TooltipRow() {
+  return (
+    <Row>
+      <LegendKey>tooltips</LegendKey>
+      <Tooltip.Provider>
+        <Cluster>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<Button variant="ghost" icon aria-label="Rerun" />}>
+              <ChevronRightGlyph />
+            </Tooltip.Trigger>
+            <Tooltip.Content>Rerun this turn</Tooltip.Content>
+          </Tooltip.Root>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<span {...stylex.props(styles.tooltipAnchor)} />}>
+              Point at this
+            </Tooltip.Trigger>
+            <Tooltip.Content side="right">
+              A tooltip names what is under the pointer, and wraps at its own width rather than
+              trailing off into an ellipsis nobody can open.
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </Cluster>
+      </Tooltip.Provider>
+    </Row>
   );
 }
 
@@ -1805,6 +2333,84 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             </Row>
             <MenuReplica />
           </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Popover · a surface with content on it"
+        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>popover</LegendKey>
+              <Cluster>
+                <FilterPopover />
+              </Cluster>
+            </Row>
+            <PopoverReplica />
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Dialog · AlertDialog and Sheet"
+        rule="The modal rung is the one that states three things at once: the elevated background, the large shadow, and an overlay over the page — a panel that covers what a person was doing while still showing it. The three are one family reading one token group. A Dialog is dismissable and says so with a cross; an AlertDialog is answered rather than dismissed, so it has no cross and a press beside it is not an answer — Escape still is, because it is the platform's cancel; a Sheet is that panel arriving from an edge, which is the only thing it restates. Each one names its own panel as the container every Select, Combobox and Menu inside it mounts into, so a list opened in a modal is inside the focus scope holding it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ModalTriggers />
+            <DialogReplica />
+            <ModalDimensions />
+            <Row>
+              <LegendKey>dialog.overlay</LegendKey>
+              <Cluster>
+                <div {...stylex.props(styles.overlaySwatch)}>
+                  <div {...stylex.props(styles.overlayFill)} />
+                </div>
+              </Cluster>
+              <span {...stylex.props(styles.rungUse)}>
+                The page, receding under the panel. It is the rung's third declaration rather than a
+                colour a surface picks.
+              </span>
+            </Row>
+          </Rows>
+          <Grid>
+            {DIALOG_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="dialog.shadow"
+              box={dialogTokens.shadow}
+              fill={dialogTokens.background}
+              ink={false}
+              note="the modal rung, over everything"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Tooltip · the name of the thing under the pointer"
+        rule="The one floating part that does not read the popup group. The ladder puts a menu, a popover and a list on the raised background under the popover shadow, and then names the tooltip apart: label with shadow.medium. That is a deliberate inversion — a popup is a place to act, a tooltip only names one — so a tooltip carries the page's text colour as its fill and the page's background as its ink, the same pair a primary button and a checked box take. It never takes the pointer, and one that names a control inside a popup still sits above it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <TooltipRow />
+            <TooltipReplica />
+          </Rows>
+          <Grid>
+            {TOOLTIP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="tooltip.shadow"
+              box={tooltipTokens.shadow}
+              fill={tooltipTokens.background}
+              ink={false}
+              note="tight, because it sits on what it names"
+            />
+          </Grid>
         </PaletteSplit>
       </Section>
     </Board>
