@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "*": ["./*"],
+      "@/*": ["./src/*"],
+      "@/lib/*": ["./src/lib/*"],
+      "@/ui/*": ["./src/ui/*"],
+      "@/hooks/*": ["./src/hooks/*"],
+      "@/atoms/*": ["./src/atoms/*"],
+      "@/components/*": ["./src/components/*"],
+      "@pkg": ["../../package.json"],
+      "@lody/api": ["../../api/src/index.ts"]
+    }
+  }
+}
