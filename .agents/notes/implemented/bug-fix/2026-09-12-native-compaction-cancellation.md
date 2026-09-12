@@ -10,8 +10,9 @@ could return an ACP cancellation while Codex kept compacting. The adapter now
 captures the native turn and interrupts it through the ordinary cancellation
 path, retaining ownership until terminal confirmation. Lody sends provider cancel
 without interrupting an in-flight prompt's owner fiber, so normal cancellation
-finalizes history only after ACP returns. PR #618 removes its automatic historical
-reconciliation protocol and fixes these execution boundaries.
+finalizes history only after ACP returns. A shared five-second drain terminates
+an unresponsive provider; failed termination keeps ownership. PR #618 removes its
+automatic historical reconciliation protocol and fixes these execution boundaries.
 Existing stale histories are not migrated by opening a conversation.
 
 ## Decision
@@ -39,10 +40,15 @@ before prompt submission and finalization teardown retain their existing paths.
 The earlier CLI code already retained the runtime through `pendingPromptCompletion`
 inside its scope finalizer; it did not unconditionally release ownership at Stop.
 It nevertheless interrupted the owner fiber and finalized history before draining
-the provider. Normal Stop now waits in the prompt itself. External owner interruption
-still uses that existing raw-request drain and termination fallback. A provider
-that never completes after normal Stop keeps ownership; this change adds no timer
-or forced-termination policy to that path.
+the provider. Normal Stop now waits in the prompt itself and starts the existing
+five-second raw-request drain independently of the cancel acknowledgement. If the
+prompt remains pending at the deadline, Lody terminates that session; connection
+closure rejects the prompt and lets the owner enter its finalizer naturally.
+Failed termination waits for raw ACP completion without releasing ownership.
+Stop and external-interruption finalization share one drain promise on the runtime,
+so repeated cancellation neither resets the deadline nor terminates twice.
+This restores #571's recovery policy, which the earlier in-flight Stop change had
+unintentionally restricted to external interruption.
 
 After ACP completion, the existing CLI finalization from
 [provider-failure settlement](2026-09-10-context-compaction-terminal-state.md)
@@ -66,8 +72,10 @@ neither hiding progress nor rewriting history can interrupt native execution.
 - The Lody execution suite uses the real `AgentClient` with a controlled ACP
   transport: cancel ACK leaves the prompt signal live and history unfinished,
   a second dispatch stays pending, and native terminal evidence enables the next
-  prompt. External-interruption coverage retains raw completion, process termination,
-  and failed-termination cases.
+  prompt. Fake timers cover normal Stop's five-second termination, a withheld cancel
+  acknowledgement, repeated Stop without deadline reset, and failed termination
+  retaining unfinished history and ownership until ACP ends. External-interruption
+  coverage retains raw completion, process termination, and failed-termination cases.
 - Steer coverage retains undelivered history and its dispatch pointer when Stop
   precedes the request or arrives while prompt blocks are being built.
 - Contract: [Session history writes](../../../../specs/session-history-writes.md).
@@ -80,7 +88,7 @@ compaction normally and confirmed that Stop produces native `interrupted` before
 the ACP prompt returns `cancelled`.
 
 Root typechecks, lint, formatting, i18n, documentation and boundary checks passed.
-The targeted Lody execution, dispatch-watcher and AgentClient suites pass 203 tests.
+The targeted Lody execution, dispatch-watcher and AgentClient suites pass 206 tests.
 The full `pnpm check` reached Electron tests: 103 passed, while the relay suite
 could not load because this checkout lacks the installed Electron binary. All
 preceding workspace test suites passed. Documentation translation remains pending.

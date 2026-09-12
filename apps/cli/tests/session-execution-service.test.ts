@@ -5287,7 +5287,14 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
   });
 
-  it('retains the compact owner after cancel ACK until ACP terminal before admitting another prompt', async () => {
+  const cancelCompletions = [
+    'native-terminal',
+    'terminated',
+    'termination-failed',
+    'cancel-unacknowledged',
+  ] as const;
+  it.each(cancelCompletions)('retains cancelled ownership (%s)', async (completion) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     let meta: Record<string, unknown> = {};
     let history: Array<Record<string, unknown>> = [
       {
@@ -5330,6 +5337,8 @@ describe('SessionExecutionService', () => {
     const cancelSubmitted = createDeferred();
     const cancelAck = createDeferred();
     const nativeTerminal = createDeferred<PromptResponse>();
+    const termination = createDeferred();
+    let terminationRequested = false;
     let nativePending = false;
     let promptSignal: AbortSignal | undefined;
     const delivered: ContentBlock[][] = [];
@@ -5356,9 +5365,11 @@ describe('SessionExecutionService', () => {
         if (delivered.length > 1) return { stopReason: 'end_turn' };
         nativePending = true;
         promptStarted.resolve();
-        const terminal = await nativeTerminal.promise;
-        nativePending = false;
-        return terminal;
+        try {
+          return await nativeTerminal.promise;
+        } finally {
+          nativePending = false;
+        }
       },
     };
     const sendPrompt = agentClient.prompt.bind(agentClient);
@@ -5375,7 +5386,12 @@ describe('SessionExecutionService', () => {
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
       exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
+      terminate: vi.fn(async () => {
+        terminationRequested = true;
+        await termination.promise;
+        if (completion === 'termination-failed') throw new Error('Synthetic termination failure');
+        nativeTerminal.reject(new Error('Synthetic ACP connection closed'));
+      }),
       updateGitIdentity: vi.fn(),
       createAgent: vi.fn(async () => 'acp-prompt-cancel'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
@@ -5459,8 +5475,7 @@ describe('SessionExecutionService', () => {
         })
       ).resolves.toEqual({ success: true });
       await cancelSubmitted.promise;
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      cancelAck.resolve();
+      if (completion !== 'cancel-unacknowledged') cancelAck.resolve();
       await vi.advanceTimersByTimeAsync(0);
       expect(agentClient.pendingPromptCompletion).not.toBeNull();
       expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
@@ -5481,10 +5496,49 @@ describe('SessionExecutionService', () => {
       expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
       expect(history[2]).toMatchObject({ status: 'pending' });
       expect(deps.recordChatFailure).not.toHaveBeenCalled();
-      nativeTerminal.resolve({ stopReason: 'cancelled' });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(terminationRequested).toBe(false);
+      // A repeated Stop must neither abort the owner nor restart its deadline.
+      await service.cancelSession({
+        type: 'session/cancel',
+        sessionId: message.sessionId,
+        machineId: message.machineId,
+        workspaceId: message.workspaceId,
+        turnId: 'assistant-prompt-cancel',
+      });
+      if (completion === 'native-terminal') {
+        nativeTerminal.resolve({ stopReason: 'cancelled' });
+      } else {
+        await vi.advanceTimersByTimeAsync(1);
+        expect(terminationRequested).toBe(true);
+        expect(promptSignal?.aborted).toBe(false);
+        expect(history[1]).not.toHaveProperty('finished', true);
+        expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
+          hasActiveTurn: true,
+        });
+        await service.continueSession(nextMessage);
+        expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
+        termination.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        if (completion === 'termination-failed') {
+          await vi.advanceTimersByTimeAsync(5_000);
+          expect(agentClient.pendingPromptCompletion).not.toBeNull();
+          expect(promptSignal?.aborted).toBe(false);
+          expect(history[1]).not.toHaveProperty('finished', true);
+          expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
+            hasActiveTurn: true,
+          });
+          await service.continueSession(nextMessage);
+          expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
+          nativeTerminal.resolve({ stopReason: 'cancelled' });
+        }
+      }
       await running;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(terminationRequested).toBe(completion !== 'native-terminal');
     } finally {
       cancelAck.resolve();
+      termination.resolve();
       nativeTerminal.resolve({ stopReason: 'cancelled' });
       await running;
       vi.useRealTimers();
@@ -5713,6 +5767,7 @@ describe('SessionExecutionService', () => {
         // External teardown can still interrupt the owner; normal Stop no longer does.
         void Effect.runPromise(Fiber.interrupt(owner.fiber));
         await Promise.race([drainStarted.promise, running]);
+        await vi.advanceTimersByTimeAsync(0);
         expect(promptSignal?.aborted).toBe(true);
         expect(status).toEqual(SessionStatusFactory.idle());
         expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });

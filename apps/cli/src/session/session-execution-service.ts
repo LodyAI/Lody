@@ -278,6 +278,8 @@ type TurnRuntimeState = {
   prePromptFailureRecorded: boolean;
   cancelRequested: boolean;
   cancelFinalized: boolean;
+  /** One drain deadline shared by Stop and the cancellation finalizer. */
+  cancellationDrain?: Promise<void>;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
   settlement?: {
@@ -2028,6 +2030,34 @@ export class SessionExecutionService {
       });
   }
 
+  private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
+    if (runtime?.cancellationDrain) return runtime.cancellationDrain;
+    const pendingPrompt = session.agentClient?.pendingPromptCompletion;
+    if (!pendingPrompt) return Promise.resolve();
+
+    const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
+      async () => {
+        // A terminal response may have won just after the timeout fired.
+        if (!session.agentClient?.pendingPromptCompletion) return;
+        if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
+        this.deps.logger.warn(
+          `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+        );
+        try {
+          await session.terminate(true);
+        } catch (error) {
+          this.deps.logger.warn(
+            `[${session.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+          );
+          // Failed termination is not permission to reuse a busy agent.
+          await pendingPrompt;
+        }
+      }
+    );
+    if (runtime) runtime.cancellationDrain = drain;
+    return drain;
+  }
+
   private createAcpReplaySuppressionResource(sessionId: SessionId): {
     acquire: Effect.Effect<void, never, Scope.Scope>;
     release: Effect.Effect<void, never, never>;
@@ -2155,30 +2185,10 @@ export class SessionExecutionService {
       );
 
       const sessionToDrain = options.session;
-      const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
-      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+      if (sessionToDrain && !options.terminateSession) {
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
-        yield* self
-          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
-          .pipe(
-            Effect.catchAll(() =>
-              self.tryPromise(async () => {
-                self.deps.logger.warn(
-                  `[${options.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
-                );
-                try {
-                  await sessionToDrain.terminate(true);
-                } catch (error) {
-                  self.deps.logger.warn(
-                    `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
-                  );
-                  // Failed termination is not permission to reuse a busy agent.
-                  await pendingPrompt;
-                }
-              })
-            )
-          );
+        yield* self.tryPromise(() => self.drainCancelledPrompt(sessionToDrain, runtime));
       }
 
       if (runtime?.promptStarted) {
@@ -5404,6 +5414,11 @@ export class SessionExecutionService {
         }
         // Keep the owner alive until ACP returns; cancel acknowledgement is not prompt completion.
         this.requestAgentCancelInBackground(runtime, 'active');
+        void this.drainCancelledPrompt(runtimeSession, runtime).catch((error: unknown) => {
+          this.deps.logger.warn(
+            `[${sessionId}] Failed to drain cancelled prompt: ${formatErrorMessage(error)}`
+          );
+        });
         return { success: true };
       }
 

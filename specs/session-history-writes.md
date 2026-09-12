@@ -51,10 +51,13 @@ That tolerance must not authorize creating new malformed items locally.
   or the provider connection closes. For an in-flight prompt with a ready ACP session,
   Lody records cancellation and sends provider cancel without interrupting its owner
   fiber. The owner and unfinished history remain until ACP returns; new dispatch and
-  undelivered steer stay pending. Start and interrupt
+  undelivered steer stay pending. If the raw prompt remains pending five seconds after
+  Stop, Lody terminates the old session so connection closure can end the prompt.
+  This deadline does not wait for cancel acknowledgement or restart on repeated Stop.
+  Failed termination retains ownership until ACP ends. Start and interrupt
   acknowledgements, like compaction-item completion, do not release execution ownership.
-  The CLI persists unresolved
-  compaction as failed after confirmed cancellation, before accepting another turn.
+  The CLI persists unresolved compaction as failed after confirmed cancellation,
+  before accepting another turn.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
