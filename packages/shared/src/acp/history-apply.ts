@@ -144,6 +144,55 @@ const canAppendAssistantDeltas = (
   entry?.role === 'assistant' && entry.finished !== true && typeof entry.endedAt !== 'number';
 
 /**
+ * Read the agent-minted turn id off a `session/update` (`_meta.lody.turnId`).
+ * Present on turn-scoped updates from agents that declare the fork-at-turn
+ * contract; engine-opened turns (cron fires, deferred wakes) carry a
+ * non-numeric id so they can never be confused with a fork position.
+ */
+export const readLodyTurnId = (update: { _meta?: unknown }): string | undefined => {
+  const lody = asRecordOrUndefined(update._meta)?.lody;
+  const turnId = asRecordOrUndefined(lody)?.turnId;
+  return typeof turnId === 'string' && turnId.length > 0 ? turnId : undefined;
+};
+
+/**
+ * Read the engine-opened turn's origin kind off a `session/update`
+ * (`_meta.lody.turnOrigin`, e.g. `cron_job`). Only present on turns the agent
+ * opened itself; client-dispatched turns carry no origin marker. Its presence
+ * is the routing signal that the update may start an autonomous assistant
+ * entry when no client turn owns the session.
+ */
+export const readLodyTurnOrigin = (update: { _meta?: unknown }): string | undefined => {
+  const lody = asRecordOrUndefined(update._meta)?.lody;
+  const origin = asRecordOrUndefined(lody)?.turnOrigin;
+  return typeof origin === 'string' && origin.length > 0 ? origin : undefined;
+};
+
+/** Autonomous id prefix stamped on engine-opened turns (`auto:<engineTurnId>`). */
+const AUTONOMOUS_TURN_ID_PREFIX = 'auto:';
+
+/**
+ * Whether a `_meta.lody.turnId` names a turn the agent engine opened itself
+ * rather than a client-dispatched turn. Such ids are non-numeric on purpose:
+ * `session/fork` parses the published id back into a fork position, and an
+ * engine turn must never resolve into one.
+ */
+export const isAutonomousTurnId = (turnId: string): boolean =>
+  turnId.startsWith(AUTONOMOUS_TURN_ID_PREFIX);
+
+/**
+ * Whether a `session/update` is the end marker of an engine-opened turn
+ * (`_meta.lody.turnEnded === true`). The client owns finalization for turns it
+ * dispatches, but it never learns when an engine-opened turn ends without this
+ * marker — and an assistant entry that never finalizes renders as perpetually
+ * streaming (`message.finished` is the renderer's only streaming verdict).
+ */
+export const readLodyTurnEnded = (update: { _meta?: unknown }): boolean => {
+  const lody = asRecordOrUndefined(update._meta)?.lody;
+  return asRecordOrUndefined(lody)?.turnEnded === true;
+};
+
+/**
  * Keep a valid UTF-8 tail without splitting a Unicode code point.
  *
  * `TextEncoder` is used rather than `String#length`: Loro stores strings as
@@ -1311,6 +1360,12 @@ class NotificationOnHistoryApplier {
   // where the task first appeared (keyed by `taskId`).
   private readonly subagentTaskEntryIndexById = new Map<string, number>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
+  // Assistant entry owning each `_meta.lody.turnId` seen so far. Built lazily by
+  // scanning history once, then kept current as entries are stamped/created.
+  private entryIndexByAcpTurnId: Map<string, number> | undefined;
+  // Per-notification override: updates stamped with a turn id always land in the
+  // entry that owns that turn, never in whatever entry happens to be current.
+  private turnEntryIndexOverride: number | undefined;
   private changed = false;
 
   constructor(
@@ -1335,35 +1390,54 @@ class NotificationOnHistoryApplier {
     for (const notification of notifications) {
       const { update } = notification;
 
-      const turnId =
-        update._meta?.lody &&
-        typeof update._meta.lody === 'object' &&
-        typeof (update._meta.lody as Record<string, unknown>).turnId === 'string'
-          ? ((update._meta.lody as Record<string, unknown>).turnId as string)
-          : undefined;
+      // Only an engine-opened turn (kimi stamps those with an `auto:` id plus
+      // `turnOrigin`) gets turn-aware routing: its updates land in their own
+      // entry instead of merging into the client turn that ran last. Every
+      // other stamped id keeps the legacy last-wins stamping on the current
+      // entry — claude's per-message boundary uuids and codex collab child
+      // turns label boundaries inside one client turn, not turns the client
+      // failed to dispatch, and must not splinter that turn's rendering.
+      const turnId = readLodyTurnId(update);
       if (turnId) {
-        const entryIndex = this.ensureActiveAssistantEntry();
-        const entry = this.history[entryIndex];
-        if (entry && entry.acpTurnId !== turnId) {
-          entry.acpTurnId = turnId;
-          this.changed = true;
+        if (isAutonomousTurnId(turnId) || readLodyTurnOrigin(update) !== undefined) {
+          const entryIndex = this.ensureEntryForAcpTurn(turnId);
+          const turnOrigin = readLodyTurnOrigin(update);
+          const entry = this.history[entryIndex];
+          if (turnOrigin !== undefined && entry && entry.acpTurnOrigin === undefined) {
+            entry.acpTurnOrigin = turnOrigin;
+            this.changed = true;
+          }
+          if (readLodyTurnEnded(update)) {
+            this.finalizeEntryOnce(entryIndex);
+          }
+          this.turnEntryIndexOverride = entryIndex;
+        } else {
+          const entryIndex = this.ensureActiveAssistantEntry();
+          const entry = this.history[entryIndex];
+          if (entry && entry.acpTurnId !== turnId) {
+            entry.acpTurnId = turnId;
+            this.changed = true;
+          }
         }
       }
+      try {
+        // Checklist plans go to entry.plan, not entry.items. ACP 1.0 called this
+        // update `plan`; ACP 1.3 carries the same entries in `plan_update`.
+        if (update.sessionUpdate === 'plan') {
+          this.updateEntryPlan(update.entries);
+          continue;
+        }
+        if (update.sessionUpdate === 'plan_update' && update.plan.type === 'items') {
+          this.updateEntryPlan(update.plan.entries);
+          continue;
+        }
 
-      // Checklist plans go to entry.plan, not entry.items. ACP 1.0 called this
-      // update `plan`; ACP 1.3 carries the same entries in `plan_update`.
-      if (update.sessionUpdate === 'plan') {
-        this.updateEntryPlan(update.entries);
-        continue;
-      }
-      if (update.sessionUpdate === 'plan_update' && update.plan.type === 'items') {
-        this.updateEntryPlan(update.plan.entries);
-        continue;
-      }
-
-      const contents = buildMessageContentFromNotification(notification);
-      for (const message of contents) {
-        this.applyMessageContent(message);
+        const contents = buildMessageContentFromNotification(notification);
+        for (const message of contents) {
+          this.applyMessageContent(message);
+        }
+      } finally {
+        this.turnEntryIndexOverride = undefined;
       }
     }
 
@@ -1480,7 +1554,95 @@ class NotificationOnHistoryApplier {
     return items;
   }
 
+  /**
+   * Resolve the assistant entry that owns an engine-opened turn. The current
+   * target entry may adopt the turn only while it still accepts deltas — a
+   * finalized but unstamped entry (a turn that died before producing output)
+   * must not adopt an interrupting turn, or the two merge exactly like the
+   * unrouted bug this fixes. Anything else gets its own entry so the two turns
+   * render separately.
+   */
+  private ensureEntryForAcpTurn(turnId: string): number {
+    const byTurn = this.getAcpTurnEntryIndex();
+    const known = byTurn.get(turnId);
+    if (known !== undefined) {
+      return known;
+    }
+
+    const currentIndex = this.ensureActiveAssistantEntry();
+    const current = this.history[currentIndex];
+    if (current && current.acpTurnId === undefined && canAppendAssistantDeltas(current)) {
+      current.acpTurnId = turnId;
+      this.changed = true;
+      byTurn.set(turnId, currentIndex);
+      return currentIndex;
+    }
+    if (current && current.acpTurnId === turnId) {
+      byTurn.set(turnId, currentIndex);
+      return currentIndex;
+    }
+
+    const autonomousIndex = this.pushAssistantEntry(`assistant:autonomous-${turnId}`);
+    const autonomous = this.history[autonomousIndex];
+    if (autonomous) {
+      autonomous.acpTurnId = turnId;
+      this.changed = true;
+    }
+    byTurn.set(turnId, autonomousIndex);
+    return autonomousIndex;
+  }
+
+  private getAcpTurnEntryIndex(): Map<string, number> {
+    if (this.entryIndexByAcpTurnId === undefined) {
+      const map = new Map<string, number>();
+      for (const [index, entry] of this.history.entries()) {
+        if (entry.role === 'assistant' && typeof entry.acpTurnId === 'string') {
+          if (!map.has(entry.acpTurnId)) {
+            map.set(entry.acpTurnId, index);
+          }
+        }
+      }
+      this.entryIndexByAcpTurnId = map;
+    }
+    return this.entryIndexByAcpTurnId;
+  }
+
+  /**
+   * Stamp the terminal footprint (`finished`/`endedAt`) on an engine-opened
+   * turn's entry, once. An already-finished entry keeps its first terminal
+   * timing — the renderer derives the turn's duration from `endedAt`, so a
+   * duplicate end marker must not inflate it.
+   */
+  private finalizeEntryOnce(entryIndex: number): void {
+    const entry = this.history[entryIndex];
+    if (!entry || entry.finished === true) {
+      return;
+    }
+    entry.finished = true;
+    entry.endedAt = Date.parse(this.now());
+    this.changed = true;
+  }
+
+  private pushAssistantEntry(id: string): number {
+    this.history.push({
+      id,
+      role: 'assistant',
+      items: [] as unknown as SessionHistoryInput['items'],
+      timestamp: this.now(),
+      userId: undefined,
+      read: undefined,
+      modelInfo: this.model,
+      fileDiff: [],
+    });
+    this.parsedItemsByEntryIndex.push([]);
+    this.changed = true;
+    return this.history.length - 1;
+  }
+
   private ensureActiveAssistantEntry(): number {
+    if (this.turnEntryIndexOverride !== undefined) {
+      return this.turnEntryIndexOverride;
+    }
     if (this.targetAssistantEntryId) {
       const targetIndex = this.history.findIndex(
         (entry) => entry.role === 'assistant' && entry.id === this.targetAssistantEntryId

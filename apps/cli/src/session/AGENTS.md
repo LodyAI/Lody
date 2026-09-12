@@ -65,8 +65,8 @@ Contract: specs/session-orchestration.md.
 - Continue-session recovery may restore the ACP session and retry the same prompt once, only
   while that turn has no ACP output.
 - INVARIANT: a resolved prompt is not proof of success. A turn that emitted no ACP update takes
-  `recordSilentTurnFailure`, not `setDispatchHandled` (read `turnProducedVisibleOutput` before
-  `finalizeTurn` clears it); it still finalizes, still ADVANCES the pointer, and fails open.
+  `recordSilentTurnFailure`, not `setDispatchHandled` (read `turnProducedVisibleOutput` first); it
+  still finalizes, still ADVANCES the pointer, and fails open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 
@@ -90,24 +90,25 @@ Contract: specs/session-orchestration.md.
   append history, or publish events before adoption.
 - Dispatch and claim rescan the current row and reject changed compatibility under canonical
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
-- Nested child Sessions are rejected: ownership resolves one parent hop only.
+- Nested child Sessions rejected: ownership is one parent hop only.
 - Fork commits at `LoroDocumentManager.persistPendingChanges()`; cloud `waitUntilSynced()` is
   never a success condition. Persist the target placeholder before ACP; a failed final commit
   terminates the fork and durably deletes the target.
 - Fork an active source turn only on an advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
   the adapter's `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
-  identity only on an exact requester match. New-worktree forks also require native fork support,
-  persist a target-doc `forkOperation` before returning, publish no target meta before the final
-  commit, clean up ACP and the worktree/branch with a durable failed receipt, and stay idempotent
-  on retry.
-- Fork recovery fail-closes interrupted operations and finds them ONLY in the machine-local marker
-  store under `withForkOperationLock`. Never enumerate rooms or open docs to find candidates, and
-  never `cleanSessionDoc` a doc you do not own.
+  identity only on an exact requester match. New-worktree forks need native fork support, a
+  target-doc `forkOperation` before returning, no target meta before the final commit, durable
+  failed-receipt cleanup, idempotent retry. Engine turns carry `auto:<n>` + `turnOrigin`, not
+  fork positions; updates get `assistant:autonomous-<turnId>` entries
+  ([README](README.md#engine-turns)).
+- Fork recovery fail-closes interrupted operations, found ONLY in machine-local marker store
+  under `withForkOperationLock`; never enumerate rooms or open docs, never `cleanSessionDoc`
+  a doc you do not own.
 - Edit-and-resend prepares provider `forkAtTurn` (`session/new` for the first User), cancels the
   exact active turn, waits for ownership release, then one durable history/meta commit.
   Its rewrite barrier excludes queue promotion and blocks dispatch and steer; the queue is never
-  rewritten. Keep the original User attribution, config, and attachments, use new turn ids and ACP
-  identity, and never replay transcript or roll back files.
+  rewritten. Keep original User attribution, config, attachments; new turn ids and ACP identity;
+  never replay transcript or roll back files.
 
 ## Access
 
@@ -115,7 +116,7 @@ Contract: specs/session-orchestration.md.
   resume and dispatch resolve from agent config/project, and the legacy row is fallback only.
 - Dispatch access is local policy first, optional-cloud three-state second: owner-cached policy
   may allow offline, `remote_missing` and a definitive `denied` fail the turn, `indeterminate`
-  leaves it pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
+  stays pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
   denial.
 - Every owner-allowed dispatch fires `fireOwnerAccessRecheck` with `forceBackendVerification`; a
   confirmed online allow is the ONLY writer of the access snapshot and `verifiedAt`, a deny clears

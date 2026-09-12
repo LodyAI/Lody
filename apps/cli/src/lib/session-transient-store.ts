@@ -39,6 +39,9 @@
 
 import {
   getServerNow,
+  isAutonomousTurnId,
+  readLodyTurnId,
+  readLodyTurnOrigin,
   type AcpSessionNotification,
   type MessageContent,
   type SessionContextWindowUsage,
@@ -47,7 +50,7 @@ import {
 import type { Logger } from '@/utils/logger';
 import type { TurnHistoryGate } from '@/session/turn-history-gate';
 
-type AssistantTurnACPUpdateTargetSource = 'active_turn' | 'finalized_turn';
+type AssistantTurnACPUpdateTargetSource = 'active_turn' | 'finalized_turn' | 'autonomous_turn';
 
 export type AssistantTurnACPUpdateTarget = {
   kind: 'assistant_entry';
@@ -60,6 +63,37 @@ export type AssistantTurnACPUpdateTarget = {
 };
 
 export type ACPUpdateTarget = AssistantTurnACPUpdateTarget;
+
+/**
+ * Synthesize a routing target for an update from a turn the agent engine
+ * opened itself (a cron fire, a task wake). Two markers qualify, either
+ * sufficient: `_meta.lody.turnOrigin`, or a non-numeric `auto:`-prefixed
+ * `_meta.lody.turnId`. Both mean the engine owns the turn, so its output gets
+ * its own assistant entry instead of merging into whichever client turn ran
+ * last (or being dropped when no client turn exists in memory, e.g. right
+ * after a daemon restart). Stamped updates WITHOUT either marker belong to
+ * user-visible turns whose entry lifecycle is owned by the turn dispatcher;
+ * those keep the active/finalized routing, or the drop-plus-invariant behavior
+ * when no target exists.
+ */
+export function autonomousACPUpdateTargetFrom(
+  notification: AcpSessionNotification
+): ACPUpdateTarget | undefined {
+  const turnId = readLodyTurnId(notification.update);
+  if (
+    !turnId ||
+    (!isAutonomousTurnId(turnId) && readLodyTurnOrigin(notification.update) === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: 'assistant_entry',
+    assistantEntryId: `assistant:autonomous-${turnId}`,
+    turnId,
+    turnEpoch: 0,
+    source: 'autonomous_turn',
+  };
+}
 
 export type BufferedACPUpdate = {
   notification: AcpSessionNotification;
@@ -151,6 +185,15 @@ export interface SessionState {
 
   // ── Session-scoped (survives turn boundaries) ───────────────────────────
   lastActivityMs: number;
+  /**
+   * The engine-opened turn (a cron fire, a task wake) currently producing
+   * updates, if any. Set on the first update carrying its stamped id, cleared
+   * on its `turnEnded` marker or on ACP process termination — liveness is
+   * bounded by the process, never by a wall clock. Feeds busy status and the
+   * idle-GC guard so an engine turn neither reads as "completed" nor gets its
+   * agent process killed mid-flight.
+   */
+  engineTurn: { acpTurnId: string; lastUpdateMs: number } | undefined;
   logger: Logger | null;
 }
 
@@ -185,6 +228,7 @@ function createSessionState(): SessionState {
     permissionWaitMs: 0,
     pendingUnread: false,
     lastActivityMs: Date.now(),
+    engineTurn: undefined,
     logger: null,
   };
 }
@@ -323,6 +367,32 @@ export class SessionTransientStore {
     return this.getFreshLateACPUpdateTarget(state);
   }
 
+  /**
+   * Record an update from the engine-opened turn `acpTurnId`: it is running
+   * now. A newer turn replaces the marker (engine turns serialize on the main
+   * agent, so a stale entry means its end marker was lost).
+   */
+  noteEngineTurnActivity(sessionId: SessionId, acpTurnId: string): void {
+    this.get(sessionId).engineTurn = { acpTurnId, lastUpdateMs: getServerNow() };
+  }
+
+  /**
+   * Clear the engine-turn marker — on the turn's end marker (matched by id) or
+   * on ACP process termination (unconditional). A mismatched id belongs to an
+   * older, already-replaced turn and is ignored.
+   */
+  clearEngineTurnActivity(sessionId: SessionId, acpTurnId?: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state?.engineTurn) return;
+    if (acpTurnId !== undefined && state.engineTurn.acpTurnId !== acpTurnId) return;
+    state.engineTurn = undefined;
+  }
+
+  /** Whether an engine-opened turn is currently producing updates. */
+  isEngineTurnActive(sessionId: SessionId): boolean {
+    return this.sessions.get(sessionId)?.engineTurn !== undefined;
+  }
+
   private getFreshLateACPUpdateTarget(
     state: SessionState
   ): AssistantTurnACPUpdateTarget | undefined {
@@ -330,8 +400,12 @@ export class SessionTransientStore {
     // sessions can stay alive and emit events long after a turn's stopReason (cron
     // jobs, ScheduleWakeup, other deferred/background work). Those late updates must
     // still be routed to the owning assistant entry and written to the Loro doc.
-    // The target is only cleared when a new turn starts (beginTurn) or when ACP
-    // replay suppression begins — never on a wall-clock deadline.
+    // Updates stamped with a DIFFERENT `_meta.lody.turnId` belong to a turn the
+    // engine opened itself; they are retargeted to that turn's own entry at apply
+    // time (see `ensureEntryForAcpTurn` in @lody/shared) rather than merging into
+    // this finalized turn. The target is only cleared when a new turn starts
+    // (beginTurn) or when ACP replay suppression begins — never on a wall-clock
+    // deadline.
     return state.lateACPUpdateTarget;
   }
 

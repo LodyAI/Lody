@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import {
   getServerNow,
   getSessionRoomId,
+  isAutonomousTurnId,
   isLoroRepoDocDeleted,
   SessionId,
   sessionForkFailure,
@@ -107,6 +108,9 @@ export function cloneHistoryThroughTurn(
   const sourceTurn = history[sourceIndex];
   if (!sourceTurn) return null;
   if (sourceTurn.role !== 'assistant' || sourceTurn.finished !== true) return null;
+  // An engine-opened turn's `auto:` id is deliberately not a fork position;
+  // reject the branch here instead of forwarding it to `session/fork`.
+  if (sourceTurn.acpTurnId && isAutonomousTurnId(sourceTurn.acpTurnId)) return null;
   // A persisted provider turn id makes an older completed assistant turn an exact
   // boundary. Without one, retain the legacy latest-completed-only rule.
   if (
