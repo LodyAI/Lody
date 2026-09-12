@@ -644,7 +644,7 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
-  const lastAckedExternalTextRef = useRef<{ text: string; snapshotText: string } | undefined>(
+  const lastAckedExternalTextRef = useRef<{ text: string; snapshot: object } | undefined>(
     undefined
   );
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
@@ -684,15 +684,16 @@ function SessionFileContentViewImpl({
     hasAcceptedLocalContentChangeRef.current = false;
   }, [liveFileId]);
 
-  const openedLiveText =
+  const openedLiveSnapshot =
     shouldUseProviderFileContent && data.status === 'ready' && data.snapshot.kind === 'text'
-      ? data.snapshot.text
+      ? data.snapshot
       : undefined;
+  const openedLiveText = openedLiveSnapshot?.text;
 
   useEffect(() => {
-    if (openedLiveText === undefined) return;
-    latestEditorTextRef.current = openedLiveText;
-  }, [liveFileId, openedLiveText]);
+    if (openedLiveSnapshot === undefined) return;
+    latestEditorTextRef.current = openedLiveSnapshot.text;
+  }, [liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -770,10 +771,7 @@ function SessionFileContentViewImpl({
           latestEditorTextRef.current = externalTextUpdate.text;
           lastAckedExternalTextRef.current = {
             text: externalTextUpdate.text,
-            snapshotText:
-              data.status === 'ready' && data.snapshot.kind === 'text'
-                ? data.snapshot.text
-                : externalTextUpdate.text,
+            snapshot: data.snapshot,
           };
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
@@ -789,10 +787,7 @@ function SessionFileContentViewImpl({
           latestEditorTextRef.current = externalTextUpdate.text;
           lastAckedExternalTextRef.current = {
             text: externalTextUpdate.text,
-            snapshotText:
-              data.status === 'ready' && data.snapshot.kind === 'text'
-                ? data.snapshot.text
-                : externalTextUpdate.text,
+            snapshot: data.snapshot,
           };
         }
         return;
@@ -892,15 +887,15 @@ function SessionFileContentViewImpl({
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
-  const resolveProviderEditorMountText = (snapshotText: string): string => {
+  const resolveProviderEditorMountText = (snapshot: { text: string }): string => {
     if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
-      return latestEditorTextRef.current ?? snapshotText;
+      return latestEditorTextRef.current ?? snapshot.text;
     }
     const acked = lastAckedExternalTextRef.current;
-    if (acked && acked.snapshotText === snapshotText) {
+    if (acked && acked.snapshot === snapshot) {
       return acked.text;
     }
-    return snapshotText;
+    return snapshot.text;
   };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
@@ -1285,7 +1280,7 @@ function SessionFileContentViewImpl({
             {isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={resolveProviderEditorMountText(data.snapshot.text)}
+                text={resolveProviderEditorMountText(data.snapshot)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1302,7 +1297,7 @@ function SessionFileContentViewImpl({
             ) : (
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={resolveProviderEditorMountText(data.snapshot.text)}
+                text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(normalizedPath)}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}

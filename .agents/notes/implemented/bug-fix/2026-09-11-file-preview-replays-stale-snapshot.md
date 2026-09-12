@@ -14,7 +14,7 @@ After an explicit Refresh, Code Collab kept the applied `externalTextUpdate` in 
 - Consume the snapshot on both `applied` and `no-op` acknowledgements. Same-text Refresh is a no-op and would otherwise replay after remount.
 - Compare seq in a state updater so a newer update that arrived before the ack is not dropped.
 - Keep the last acknowledged external text as the remount source for a clean editor. `subscribeText` does not advance `data.snapshot`; without that source, Preview then Hide preview rolls back to the open snapshot.
-- Bind each ack to the snapshot text it was applied against. Remount uses the ack only while that snapshot is unchanged; a later openFile/Refresh that advances the snapshot drops the stale ack.
+- Bind each ack to the snapshot object it was applied against, not string equality. A later openFile that returns the original text still replaces the snapshot object, so remount and preview follow that open instead of a stale live ack.
 - Dirty remounts still use the local draft (`hasAcceptedLocalContentChange` / dirty), not the acked snapshot.
 - Do not change save APIs, disk writes, or conflict `preservePending` handling. `load_with_conflicts` still keeps the pending buffer after apply.
 
