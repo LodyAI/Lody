@@ -611,6 +611,8 @@ export function ChatComposer({
 
   const sessionContainerClassName = cn(
     'flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150',
+    // Desktop session spacing belongs to the clickable card, not an inert strip below it.
+    !isMobile && 'pb-3.5',
     'border border-foreground/[0.10] bg-background focus-within:border-ring/40',
     'dark:border-input-border/70 dark:bg-input/90',
     mentionSurfaceClassName
