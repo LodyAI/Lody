@@ -31,7 +31,9 @@ sequence so a concurrent publication cannot be reconciled against stale bindings
 Every shared Machine Flock AgentConfig writer rejects the reserved credential key, including an
 empty value, and AgentConfig readers discard legacy or externally authored rows that contain it.
 Generic `agent-config create`, `update`, and `show` therefore cannot persist or reveal the key by
-bypassing the provider setup flow.
+bypassing the provider setup flow. Reserved-key comparison, generated-environment cleanup,
+credential binding, and Settings filtering are ASCII case-insensitive because Windows process
+environments treat differently cased names as the same slot.
 The credential is injected under the generated provider's `env_key` only when the current launch
 configuration hashes to the record's SHA-256 digest of the canonical launch binding. The raw
 binding is not persisted. A changed endpoint, proxy, runtime, agent type, custom launch command,
@@ -54,8 +56,11 @@ success. A provisioning probe is side-effect-free with respect to the shared cap
 Its result is published to that cache only after the exact setup revision wins a durable config
 publication, inside the same per-config mutation sequence. Cancellation, supersession, probe
 failure, and uncertain publication leave the cache unchanged. Each submit attempt has a fresh
-setup revision, and automatic failure compensation may
-cancel only that exact revision. During an edit, the previous published launch config remains live
+setup revision. Once config publication succeeds, a later capability-cache write failure is
+degraded derived state rather than credential failure; the authenticated result still completes
+the save. While the save is running, the provider Dialog cannot be dismissed by its close button,
+Escape, or outside interaction. Automatic failure compensation may cancel only that exact
+revision. During an edit, the previous published launch config remains live
 until publication. Display metadata, prompt, title-generation, and other non-binding edits update
 the published config directly and do not request the API key or run a probe. A replacement
 publication merges the latest published metadata instead of overwriting it with the setup snapshot.
@@ -68,7 +73,9 @@ marker. Switching modes and deleting a provider writes a revision-independent se
 before changing or deleting the config. After projecting that cancellation optimistically, the
 renderer uses its captured `AgentConfig` to perform the durable config deletion instead of looking
 it up again in the projected cache. That durable wildcard is both the barrier against any in-flight
-replacement and the cleanup intent. An explicitly new setup retracts it only in the same atomic
+replacement and the cleanup intent. Cancellation precedence is `wildcard > exact`: delete upgrades
+an existing revision-specific marker, while a later exact cancellation cannot weaken a wildcard.
+An explicitly new setup retracts it only in the same atomic
 Flock mutation that writes the fresh setup revision: durable state therefore contains either the
 wildcard barrier or the new replacement intent, never an empty interval in which an older setup can
 publish. Once the target daemon has durably applied the cancellation, it reconciles that config ID

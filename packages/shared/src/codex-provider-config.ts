@@ -19,6 +19,7 @@ type AgentConfigEnvironment = {
 };
 
 export function isReservedCodexCredentialEnvKey(key: string): boolean {
+  // Windows treats environment variable names case-insensitively at process launch.
   return key.toUpperCase() === LODY_CODEX_API_KEY_ENV;
 }
 

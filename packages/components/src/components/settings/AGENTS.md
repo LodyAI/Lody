@@ -24,8 +24,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   revision, and merge current display metadata when publishing. Delete and ChatGPT
   transitions write a revision-independent setup cancellation as the durable cleanup
   intent, then delete with the captured config even after optimistic projection hides it;
-  neither waits for the machine. Additional env cannot override managed keys, and arbitrary user-authored
-  `CODEX_CONFIG` remains untouched.
+  neither waits for the machine. Additional env cannot override managed keys, including
+  differently cased aliases of the machine-local credential key. A provider Dialog cannot
+  be dismissed while its submit owns provisioning. Arbitrary user-authored `CODEX_CONFIG`
+  remains untouched.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
   `https://api.deepseek.com`) and never a new AgentConfigMeta field. Model ids come from

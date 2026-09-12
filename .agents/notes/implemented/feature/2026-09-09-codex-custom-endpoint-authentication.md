@@ -32,7 +32,9 @@ copying an existing `CODEX_API_KEY` or reserved provider into Lody state. Invali
 namespace collisions fail rather than being normalized or overwritten.
 The reserved one-shot credential key is rejected at shared AgentConfig write boundaries, not only
 by ProviderSetup parsing. Read normalization also drops credential-bearing AgentConfig rows, so
-generic create/update/show paths cannot persist or disclose the secret.
+generic create/update/show paths cannot persist or disclose the secret. One case-insensitive
+predicate owns this boundary, binding exclusion, generated-environment cleanup, and Settings
+filtering because Windows treats differently cased environment names as the same process slot.
 
 The feature requires a negotiated `codexCustomEndpointCredentials` capability. A setup row names
 an expected non-secret setup revision and starts in `awaiting-auth`. The explicit
@@ -50,7 +52,8 @@ durable AgentConfig publication inside the per-config credential mutation sequen
 superseded, failed, and durability-uncertain attempts publish no capabilities.
 Authenticated provisioning and background setup share the same deferred probe result. The probe
 retains one publication promise to deduplicate cache writes; RPC responses are ordinary values
-and do not require shared object identity.
+and do not require shared object identity. The provider Dialog remains mounted and non-dismissible
+while its submit promise owns provisioning, so close affordances cannot leave hidden work running.
 
 ## Failure and cleanup
 
@@ -77,7 +80,9 @@ Switching to ChatGPT or deleting a provider first writes a revision-independent 
 before changing the config. The durable wildcard prevents an in-flight replacement from
 republishing the custom provider and also owns machine-local credential cleanup; explicitly adding
 a later setup retracts it atomically with writing the fresh setup revision. A replica therefore
-cannot observe the wildcard removed while an older replacement remains the current setup. The
+cannot observe the wildcard removed while an older replacement remains the current setup. A
+wildcard cancellation also replaces an existing exact-revision marker, while exact cancellation
+cannot downgrade a wildcard, so deletion still fences a stale replacement from another replica. The
 cancellation's optimistic projection may hide the config locally, so the following durable delete
 carries the previously captured config rather than looking it up in that cache. The UI never waits
 for the target machine. Its daemon reconciles the affected config ID after the cancellation is
@@ -101,6 +106,7 @@ The branch review compared each removal with the existing behavioral suites:
 | V1 credential reader and V2 envelope factory                                         | All seven real-store tests and setup recovery tests passed with the existing V2 writer.                                                                          | Keep one strict V2 schema; this unreleased feature has no V1 migration contract.     |
 | Recomputing an already-resolved launch snapshot and requiring unused identity fields | Session execution and manager suites, plus CLI typechecking, passed.                                                                                             | Reuse the snapshot and retain only the three launch fields consumed by the resolver. |
 | Requiring capability-cache success for an authenticated credential save              | New renderer tests reproduced both durable and uncertain saves being rejected; removing the condition made both pass, with uncertain results waiting for resync. | Let the committed authentication outcome own save success.                           |
+| Exact-case credential-key checks                                                      | Lowercase and mixed-case aliases crossed AgentConfig and binding filters even though Windows launch treats them as the reserved slot.                            | Use one case-insensitive shared predicate at every boundary.                          |
 
 No endpoint, binding, cancellation, publication-order, or crash-recovery guarantee was removed.
 The V2 envelope remains unchanged. Older experimental V1 files are no longer read and require
@@ -113,16 +119,19 @@ exposes an unavailable global `localStorage` to the test environment.
 The [draft specification](../../../../specs/codex-custom-endpoint-authentication.md) owns the
 behavior. Shared tests cover endpoint policy, reversible overlays, collision rejection, malformed
 configuration, setup revision parsing, wildcard cancellation, publication durability, and rejection
-of the protocol-owned one-shot secret at both setup and AgentConfig boundaries. CLI tests cover delayed setup
+of exact- and mixed-case forms of the protocol-owned one-shot secret at both setup and AgentConfig
+boundaries. CLI tests cover delayed setup
 visibility, forced key rotation, cancellation during a deferred live probe, the commit boundary,
 same-binding rotation with uncertain flush, real-store publication uncertainty, dual-binding crash
 recovery after another drain, two-config recovery concurrent with publication, wildcard cleanup
 replay, legacy direct-delete orphan enumeration, binding mismatch, digest-only binding persistence,
 deferred capability publication, and credential injection at the common
 session launch boundary. CLI coverage also holds an R1 credential stage across the atomic R2 merge,
-rejects R1 publication, and then publishes R2. Component tests cover metadata-only edits,
+rejects R1 publication, and then publishes R2; another two-replica test upgrades an exact marker
+to wildcard while R2 is staged and proves R2 cannot publish. Component tests cover metadata-only edits,
 per-attempt revisions, exact failure cancellation, the one-shot payload, and cancellation-first
-offline config deletion through reload. A real two-replica Flock test covers atomic wildcard
+offline config deletion through reload, plus non-dismissible submission and authenticated
+capability-cache degradation. A real two-replica Flock test covers atomic wildcard
 retraction and setup replacement, including a setup-authoring failure that retains the barrier. A
 controlled loopback relay run
 with bundled Codex 0.153.4 observed a streamed

@@ -21,7 +21,9 @@ explicit setup retracts it in the same Flock transaction that writes the fresh s
 revision. Peers therefore observe either the wildcard barrier or the new replacement
 intent, never a retraction-only state that could admit an older setup. After a merge the
 owning CLI causally applies the marker, so a cancellation that raced publication still
-wins. The same wildcard cancellation is the durable machine-local credential cleanup
+wins. A wildcard replaces an existing exact marker, and an exact marker never replaces a
+wildcard; provider deletion therefore fences every stale setup revision. The same wildcard
+cancellation is the durable machine-local credential cleanup
 intent; after applying it durably, the CLI reconciles that config ID and removes the
 credential only when no custom config or setup remains. Restart resumes only
 non-interactive states.
@@ -74,4 +76,5 @@ Never add authorization URLs, codes, tokens, or raw provider output to a setup r
 never publish a row from caller-supplied auth RPC fields. A setup row is workspace
 state that reaches every member's client. The shared AgentConfig write and read
 boundaries reject the reserved Codex credential environment key, including empty
-values, so generic config commands cannot bypass the machine-local store.
+values and differently cased Windows aliases, so generic config commands cannot bypass
+the machine-local store.
