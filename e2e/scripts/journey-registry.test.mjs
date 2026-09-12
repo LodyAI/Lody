@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  coverageMatchesRegistry,
   journeyFingerprint,
   ownerPathMatches,
   renderCoverage,
@@ -166,6 +167,32 @@ void describe('journey registry', () => {
     ]);
   });
 
+  void it('keeps blocked reasons aligned with executable state', () => {
+    const active = journey({
+      state: 'active',
+      feature: 'src/features/test.feature',
+      blockedReason: 'Waiting for a selector.',
+    });
+    const blankBacklog = journey({
+      id: 'LODY-TEST-002',
+      actions: [{ id: 'blank.open' }],
+      blockedReason: '   ',
+    });
+    const quarantined = journey({
+      id: 'LODY-TEST-003',
+      state: 'quarantined',
+      actions: [{ id: 'quarantined.open' }],
+    });
+    const failures = validateRegistry({
+      schemaVersion: 1,
+      scoring,
+      journeys: [active, blankBacklog, quarantined],
+    });
+    assert.ok(failures.some((failure) => failure.includes('must be null while')));
+    assert.ok(failures.some((failure) => failure.includes('null or a non-empty string')));
+    assert.ok(failures.some((failure) => failure.includes('why the journey is quarantined')));
+  });
+
   void it('renders active and backlog rows in deterministic id order', () => {
     const active = journey({
       id: 'LODY-ACTIVE-002',
@@ -182,5 +209,16 @@ void describe('journey registry', () => {
     });
     assert.ok(markdown.indexOf('LODY-BACKLOG-001') < markdown.indexOf('LODY-BACKLOG-002'));
     assert.match(markdown, /This file is generated from/u);
+  });
+
+  void it('accepts CRLF checkout line endings in generated coverage', () => {
+    const registry = {
+      schemaVersion: 1,
+      scoring,
+      journeys: [journey()],
+    };
+    const coverage = renderCoverage(registry);
+    assert.equal(coverageMatchesRegistry(coverage.replaceAll('\n', '\r\n'), registry), true);
+    assert.equal(coverageMatchesRegistry(`${coverage}stale`, registry), false);
   });
 });

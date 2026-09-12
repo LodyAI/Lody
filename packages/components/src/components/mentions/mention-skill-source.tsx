@@ -183,7 +183,7 @@ export function getAllowedSkillMentionDirs(
   ]);
 }
 
-function getSkillMentionReferencePath(item: SkillMentionItem): string {
+export function getSkillMentionReferencePath(item: SkillMentionItem): string {
   // Home-scoped skills (global + system) expand to their absolute SKILL.md path;
   // project skills use the project-relative path.
   if (item.scope !== 'project') {
@@ -194,6 +194,11 @@ function getSkillMentionReferencePath(item: SkillMentionItem): string {
 
 function formatSkillPathMarkdownDestination(path: string): string {
   return path.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');
+}
+
+/** Stable-target form, shared by ordinary skill mentions and frozen Shortcut semantics. */
+export function formatSkillMentionPrompt(token: string, path: string): string {
+  return `use ${SKILL_MENTION_PROMPT_PREFIX}${token} [${SKILL_MENTION_PATH_LABEL}](${formatSkillPathMarkdownDestination(path)})`;
 }
 
 function buildSkillMentionPathByToken(
@@ -269,7 +274,7 @@ export function buildSkillMentionRewrites(
     rewrites.push({
       start,
       end: tokenEnd,
-      replacement: `use ${SKILL_MENTION_PROMPT_PREFIX}${token} [${SKILL_MENTION_PATH_LABEL}](${formatSkillPathMarkdownDestination(path)})`,
+      replacement: formatSkillMentionPrompt(token, path),
       span: { kind: 'skill', label: `${SKILL_MENTION_TRIGGER}${token}`, target: token },
     });
     return true;

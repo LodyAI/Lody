@@ -1,15 +1,11 @@
 import {
   getLegacyReadForSessionHistoryStatus,
   resolveSessionHistoryStatus,
-  type SessionDoc,
+  type SessionMirror,
   type SessionHistoryInput,
 } from '@lody/shared';
 
-type SessionDocMirror = {
-  subscribe: (listener: (next: SessionDoc) => void) => () => void;
-  getState: () => SessionDoc;
-  setState: (updater: (prev: SessionDoc) => SessionDoc) => void;
-};
+type SessionDocMirror = Pick<SessionMirror, 'subscribe' | 'getState' | 'setState'>;
 
 export type AutoMarkLatestUserHistoryAsReadHandle = {
   dispose: () => void;
@@ -47,7 +43,7 @@ export const attachAutoMarkLatestUserHistoryAsRead = (
       return;
     }
 
-    const history = next.history as SessionHistoryInput[] ?? [];
+    const history = (next.history as SessionHistoryInput[]) ?? [];
     const latestUserEntry = findLatestUserHistoryEntry(history);
     if (!latestUserEntry || resolveSessionHistoryStatus(latestUserEntry) !== 'pending') {
       return;

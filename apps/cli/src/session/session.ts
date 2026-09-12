@@ -369,13 +369,20 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
    */
-  updateGitIdentity(userName: string, userEmail: string, userId?: string): void {
+  updateGitIdentity(
+    userName: string,
+    userEmail: string,
+    userId: string | undefined,
+    options: { preferMachineIdentity: boolean }
+  ): void {
     const configEnv = this.config.env ?? {};
     // Set git identity using Git's recognized environment variables directly
     const { name, email } = resolveSessionGitIdentity(
       { name: userName, email: userEmail },
-      undefined,
-      this.getWorkdir()
+      {
+        preferMachineIdentity: options.preferMachineIdentity,
+        cwd: this.getWorkdir(),
+      }
     );
     configEnv.GIT_AUTHOR_NAME = name;
     configEnv.GIT_COMMITTER_NAME = name;
@@ -618,6 +625,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         const started = await createAcpClient({
           stream,
           workdir: this.getWorkdir(),
+          resolveWorktreeProject: callbacks.resolveWorktreeProject,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {
@@ -658,6 +666,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
+          goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {

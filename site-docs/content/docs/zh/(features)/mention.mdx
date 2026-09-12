@@ -1,11 +1,19 @@
 ---
 title: 提及功能
-description: '使用 @ 文件提及、# Issue 或 Pull Request 提及和 $ Skill 提及，将精确上下文注入 Lody Prompt。'
+description: '使用 @ 对话与文件提及、# Issue 或 Pull Request 提及和 $ Skill 提及，将精确上下文注入 Lody Prompt。'
 ---
 
 # 提及
 
 Lody 对输入框进行了增强，可以使用 `@`、`#` 或 `$` 来使用提及功能。
+
+## 对话提及
+
+在对话中输入 `@` 并选择另一条对话，即可引用它。你可以让当前 Agent 联系该会话、读取相关上下文、交流调查结果，或请求审查。例如，提及实现会话，让当前 Agent 审查它的最新提交，并把发现的问题发回去。
+
+被引用的会话可以使用其他 Agent，也可以运行在另一台已连接的机器上。访问仍遵循工作区权限，目标机器需要在线才能执行任务。会话引用明确了对象，请在指令中说明需要交换什么上下文或完成什么工作。
+
+可用操作见 [Agent 对话控制](/zh/docs/session-orchestration/)。要通过会话引用交流上下文、请求审查，并跨 Agent 和机器协调任务，参见[多 Agent 协作指南](/zh/docs/agent-collaboration/)。
 
 ## 文件提及
 

@@ -13,9 +13,8 @@ Starting several sessions yourself — isolated worktrees, mixed models, team vi
 in [Parallel Coding Agents](/docs/parallel-agents). This page is the control path: one Agent
 coordinates the others.
 
-These tools are available when **Developer mode** and the **Tasks** beta are on
-(**Settings** -> **About**). Without that gate, a normal conversation cannot create or drive other
-sessions this way.
+For a walkthrough with Claude Code, Kimi, Codex, and Grok—including conversation mentions and
+cross-machine work—see [Agent Collaboration Workflows](/docs/agent-collaboration/).
 
 ## Use it in a conversation
 
@@ -37,6 +36,51 @@ for example:
 ```text
 Create a review session with Codex using the high reasoning setting, then summarize the findings here.
 ```
+
+## Coordinate PRs, issues, and cross-repository fixes
+
+### Use Claude Code as the coordinator
+
+Ask Claude Code to inspect a set of PRs or issues, identify dependencies, then assign focused work
+to other Agents such as Kimi, Codex, or Grok. Each Agent works in its own conversation, and the coordinator
+can follow up and collect the results. Repository access uses the tools and credentials available
+to the Agents.
+
+```text
+Go through these PRs and issues, group related work, and identify dependencies.
+Delegate independent fixes to Kimi and reviews to Codex in separate conversations.
+Collect their findings and report which changes are ready for my review.
+```
+
+### Fix a bug across repositories
+
+When a bug spans a client, SDK, and server, create a conversation for each affected repository.
+The Agents can investigate and implement independent changes in parallel, exchange findings about
+the shared contract, and coordinate dependent changes.
+
+```text
+Investigate this bug across the client, SDK, and server repositories.
+Start a focused Agent conversation for each repository. Have them exchange findings
+and agree on the interface changes before implementing dependent fixes.
+Collect the patches and verification results here.
+```
+
+### Run a review and fix loop between Agents
+
+Agents can send messages and delegate work to other accessible Lody conversations. You can also
+ask one Agent to message another directly: have a reviewer inspect a specific commit, send findings
+to the implementing Agent, then review the updated commit after the fix.
+
+```text
+Ask the review Agent to inspect the implementing Agent's current commit without editing it.
+Send actionable findings to the implementing Agent and ask it to fix them.
+Have the reviewer check the updated commit. Stop after two rounds, or earlier if no findings remain,
+and summarize the result for me.
+```
+
+These examples describe workflows you can request, not preconfigured pipelines. Make the target
+repositories, scope, completion criteria, and review limit explicit. Parallel work still needs
+integration checks before its changes are ready to merge.
 
 ## What to expect
 

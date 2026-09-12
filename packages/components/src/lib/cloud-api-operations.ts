@@ -90,6 +90,7 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 }
 
 function capabilityForOperation(name: string): PlatformCapability {
+  if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
   if (name.startsWith('github:')) return 'githubIntegration';
@@ -101,7 +102,7 @@ function capabilityForOperation(name: string): PlatformCapability {
   }
   if (name === 'machines:setMachineSharedWithTeam') return 'teamSharing';
   if (name.startsWith('machines:')) return 'remoteMachines';
-  if (name.startsWith('localProjects:')) return 'teamSharing';
+  if (name.startsWith('localProjects:') || name.startsWith('sessionSharing:')) return 'teamSharing';
   throw new Error(`Cloud operation ${JSON.stringify(name)} has no capability assignment`);
 }
 
@@ -135,12 +136,49 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  promptShortcuts: {
+    stageDocument: mutation<ConvexApi['promptShortcuts']['stageDocument']>(
+      'promptShortcuts:stageDocument'
+    ),
+    activateDocument: mutation<ConvexApi['promptShortcuts']['activateDocument']>(
+      'promptShortcuts:activateDocument'
+    ),
+    revokeShortcut: mutation<ConvexApi['promptShortcuts']['revokeShortcut']>(
+      'promptShortcuts:revokeShortcut'
+    ),
+    settleDocument: mutation<ConvexApi['promptShortcuts']['settleDocument']>(
+      'promptShortcuts:settleDocument'
+    ),
+    listAccessibleDocuments: query<ConvexApi['promptShortcuts']['listAccessibleDocuments']>(
+      'promptShortcuts:listAccessibleDocuments'
+    ),
+    getStreamToken: action<ConvexApi['promptShortcuts']['getStreamToken']>(
+      'promptShortcuts:getStreamToken'
+    ),
+  },
+  sessionSharing: {
+    requestVerification: mutation<ConvexApi['sessionSharing']['requestVerification']>(
+      'sessionSharing:requestVerification'
+    ),
+    getManagement: query<ConvexApi['sessionSharing']['getManagement']>(
+      'sessionSharing:getManagement'
+    ),
+    create: mutation<ConvexApi['sessionSharing']['create']>('sessionSharing:create'),
+    updateTargets: mutation<ConvexApi['sessionSharing']['updateTargets']>(
+      'sessionSharing:updateTargets'
+    ),
+    reset: mutation<ConvexApi['sessionSharing']['reset']>('sessionSharing:reset'),
+    revoke: mutation<ConvexApi['sessionSharing']['revoke']>('sessionSharing:revoke'),
+  },
   activity: {
     recordMyWorkspaceDailyActiveUser: mutation<
       ConvexApi['activity']['recordMyWorkspaceDailyActiveUser']
     >('activity:recordMyWorkspaceDailyActiveUser'),
   },
   auth: {
+    transferWorkspaceOwnership: mutation<ConvexApi['auth']['transferWorkspaceOwnership']>(
+      'auth:transferWorkspaceOwnership'
+    ),
     getInvitationPreview: definePublicCloudQuery<{ invitationId: string }, InvitationPreview>(
       'multiWorkspace',
       'auth:getInvitationPreview'
@@ -190,6 +228,9 @@ export const cloudOperations = {
     ),
   },
   billing: {
+    createBillingPortalSession: action<ConvexApi['billing']['createBillingPortalSession']>(
+      'billing:createBillingPortalSession'
+    ),
     createCheckoutSession: action<ConvexApi['billing']['createCheckoutSession']>(
       'billing:createCheckoutSession'
     ),

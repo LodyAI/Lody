@@ -24,6 +24,7 @@ import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
+import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -85,6 +86,9 @@ function knownWorkspaceDatabaseNames(): string[] {
  * added cache key that is missing here merely survives one clear (safe),
  * whereas a preference key missing from an allowlist would be wiped (unsafe).
  * When adding a `lody:*` localStorage cache, add its key or prefix here.
+ * `lody:session-share-secret:v1:*` is deliberately excluded: these are device-local
+ * credentials that cannot be recovered from the server. Only a hard reset clears
+ * them; an ordinary cache repair must not force every share link to be reset.
  */
 const LOCAL_STORAGE_CACHE_KEYS = [
   // slug → workspaceId/name map (`local-storage-cache.ts`). Read by
@@ -188,7 +192,13 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       // `indexedDB.databases()` is unsupported (e.g. Firefox) — fall back to the
       // known static names plus any per-workspace names the caller passed.
     }
-    await Promise.all([...names].map(deleteDatabaseBestEffort));
+    // A Shortcut outbox may contain the only copy of an offline save. Only the
+    // explicitly destructive hard reset below may remove these databases.
+    await Promise.all(
+      [...names]
+        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .map(deleteDatabaseBestEffort)
+    );
   }
 
   if (typeof caches !== 'undefined') {
@@ -390,6 +400,7 @@ let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   const mode = readPendingLocalClearMode();
   if (!mode) return null;
+  await getIpcServices()?.app.prepareCacheClear();
 
   try {
     if (mode === 'hard') {
@@ -422,7 +433,11 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
-  await Promise.all(extraNames.map(deleteDatabaseBestEffort));
+  await Promise.all(
+    extraNames
+      .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+      .map(deleteDatabaseBestEffort)
+  );
 }
 
 /** Test-only: forget the per-page-load memo so each case starts clean. */

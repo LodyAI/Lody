@@ -1,3 +1,4 @@
+import { MentionPreparation } from './mention-preparation';
 import {
   type CollectionItem,
   composeRefs,
@@ -41,6 +42,8 @@ interface ItemData {
   value: string;
   disabled: boolean;
   onMentionSelect?: () => void;
+  /** Resolve an opaque payload before changing any text or range. Null cancels. */
+  onMentionPrepare?: MentionPrepare;
   /** Called synchronously when this item is used as a navigation step. */
   onMentionNavigate?: () => void;
 
@@ -81,6 +84,19 @@ interface Mention extends Omit<ItemData, 'label' | 'disabled'> {
   end: number;
   kind?: MentionKind;
 }
+
+export type PreparedMention = {
+  text: string;
+  /** Ordinary ranges relative to the inserted text; no range wraps the whole result. */
+  mentions: Mention[];
+};
+export type MentionPrepare = (request: {
+  signal: AbortSignal;
+  generation: number;
+  text: string;
+  start: number;
+  end: number;
+}) => Promise<PreparedMention | null>;
 
 /**
  * A chip decoration for a committed mention range.
@@ -169,6 +185,7 @@ interface MentionContextValue {
   onOpenChange: (open: boolean) => void;
   inputValue: string;
   onInputValueChange: (value: string) => void;
+  cancelMentionPreparation: () => void;
   virtualAnchor: VirtualElement | null;
   onVirtualAnchorChange: (element: VirtualElement | null) => void;
   triggers: string[];
@@ -191,13 +208,14 @@ interface MentionContextValue {
   onMentionsChange: React.Dispatch<React.SetStateAction<Mention[]>>;
   onMentionAdd: (value: string, triggerIndex: number, options?: { commit?: boolean }) => void;
   /**
-   * Write a mention the menu did not produce, and take focus.
+   * Write one or a batch of mentions outside the menu, and take focus.
+   * Batch insertion indices refer to the text after preceding entries.
    *
    * Product-neutral by construction: the caller supplies the text, the payload,
    * and the kind, so reaching this from a new mention category does not touch
    * this package.
    */
-  onMentionInsert: (request: MentionInsertRequest) => void;
+  onMentionInsert: (request: MentionInsertRequest | MentionInsertRequest[]) => void;
   /**
    * Pop the text between the trigger and the caret back to the bare trigger,
    * undoing one drill-down step. Returns false when there is no trigger to pop
@@ -436,11 +454,29 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     onChange: onValueChange,
   });
   const setValue = useFlushConsistentState<string[] | undefined>(value, setValueState);
-  const [inputValue = '', setInputValue] = useControllableState({
+  const preparation = React.useRef(new MentionPreparation()).current;
+  React.useEffect(() => () => preparation.cancel(), [preparation]);
+  const observedInput = React.useRef({ inputValueProp, disabled, readonly });
+  if (
+    observedInput.current.inputValueProp !== inputValueProp ||
+    observedInput.current.disabled !== disabled ||
+    observedInput.current.readonly !== readonly
+  ) {
+    preparation.cancel();
+    observedInput.current = { inputValueProp, disabled, readonly };
+  }
+  const [inputValue = '', setInputValueState] = useControllableState({
     prop: inputValueProp,
     defaultProp: '',
     onChange: onInputValueChange,
   });
+  const setInputValue = React.useCallback(
+    (next: string) => {
+      preparation.cancel();
+      setInputValueState(next);
+    },
+    [preparation, setInputValueState]
+  );
   const triggers = React.useMemo(() => {
     const provided = triggersProp ?? [triggerProp];
     const unique = Array.from(new Set((provided ?? []).filter(Boolean)));
@@ -474,7 +510,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     defaultProp: defaultMentions,
     onChange: onMentionsChangeProp,
   });
-  const mentions = mentionsState ?? [];
+  const mentions = mentionsState ?? EMPTY_MENTIONS;
   const setMentions = useFlushConsistentState(mentions, setMentionsState);
   const [pendingSelection, setPendingSelection] = React.useState<MentionSelectionRange | null>(
     null
@@ -507,6 +543,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
 
   const onOpenChange = React.useCallback(
     (nextOpen: boolean) => {
+      if (!nextOpen) preparation.cancel();
       if (nextOpen && filterStore.search && filterStore.itemCount === 0) {
         return;
       }
@@ -522,7 +559,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
         setVirtualAnchor(null);
       }
     },
-    [setOpen, getEnabledItems, filterStore]
+    [setOpen, getEnabledItems, filterStore, preparation]
   );
 
   const { onHighlightMove } = useListHighlighting({
@@ -539,7 +576,9 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
     (payloadValue: string, triggerIndex: number, options?: { commit?: boolean }) => {
       const input = inputRef.current;
 
-      const selectedItem = getEnabledItems().find((item) => item.value === payloadValue);
+      const selectedItem = getItems().find((item) => item.value === payloadValue);
+      // A disabled registered item must not fall through to free-form insertion.
+      if (selectedItem?.disabled) return;
       // A navigation item rewrites the trigger span and keeps the menu open
       // instead of committing. `commit` overrides it, so pressing Enter on a
       // candidate the user already typed out inserts it for real.
@@ -554,101 +593,145 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
         `${trigger}${selectedItem?.label ?? payloadValue}`;
       const sourceValue = input?.value ?? inputValue;
       const insertionPoint = input?.selectionStart ?? triggerIndex;
-      const splice: MentionSplice = {
-        replaceStart: triggerIndex,
-        replaceEnd: insertionPoint,
-        text: mentionText,
-        suffix: isNavigating ? '' : ' ',
-        value: payloadValue,
-        kind: selectedItem?.kind,
-        commitRange: !isNavigating,
-      };
+      const commit = (prepared: PreparedMention | null = null) => {
+        const committedValue = payloadValue;
+        const splice: MentionSplice = {
+          replaceStart: triggerIndex,
+          replaceEnd: insertionPoint,
+          text: prepared?.text ?? mentionText,
+          suffix: isNavigating || prepared ? '' : ' ',
+          value: committedValue,
+          kind: selectedItem?.kind,
+          commitRange: !isNavigating && !prepared,
+          mentions: prepared?.mentions,
+        };
 
-      // The text and caret do not depend on the existing ranges, so they are
-      // read from a range-less run rather than smuggled out of the updater —
-      // the updater stays pure, and `setMentions` keeps the functional form its
-      // flush-consistency contract requires.
-      const { value: newValue, caret: newCursorPosition } = applyMentionSplice(
-        sourceValue,
-        EMPTY_MENTIONS,
-        splice
-      );
-      setMentions((prev) => applyMentionSplice(sourceValue, prev, splice).mentions);
+        // The text and caret do not depend on the existing ranges, so they are
+        // read from a range-less run rather than smuggled out of the updater —
+        // the updater stays pure, and `setMentions` keeps the functional form its
+        // flush-consistency contract requires.
+        const { value: newValue, caret: newCursorPosition } = applyMentionSplice(
+          sourceValue,
+          EMPTY_MENTIONS,
+          splice
+        );
+        setMentions((prev) => applyMentionSplice(sourceValue, prev, splice).mentions);
 
-      setInputValue(newValue);
-      if (isNavigating) {
-        // Start work required by the destination before React commits the
-        // rewritten trigger text. View-derived activation remains as a fallback
-        // for typed/pasted navigation prefixes and direct triggers.
-        selectedItem?.onMentionNavigate?.();
-      } else {
-        selectedItem?.onMentionSelect?.();
-        setValue((prev) => {
-          const next = [...(prev ?? [])];
-          if (!next.includes(payloadValue)) next.push(payloadValue);
-          return next;
+        setInputValue(newValue);
+        if (isNavigating) {
+          // Start work required by the destination before React commits the
+          // rewritten trigger text. View-derived activation remains as a fallback
+          // for typed/pasted navigation prefixes and direct triggers.
+          selectedItem?.onMentionNavigate?.();
+        } else {
+          selectedItem?.onMentionSelect?.();
+          setValue((prev) => {
+            const next = [...(prev ?? [])];
+            for (const insertedValue of prepared
+              ? prepared.mentions.map((mention) => mention.value)
+              : [committedValue]) {
+              if (!next.includes(insertedValue)) next.push(insertedValue);
+            }
+            return next;
+          });
+        }
+
+        // Request cursor restoration through context instead of mutating input DOM
+        // directly. MentionInput applies this in a layout effect after controlled
+        // value is committed, which avoids timing races on mobile IME flows.
+        setPendingSelection({
+          start: newCursorPosition,
+          end: newCursorPosition,
+          expectedValue: newValue,
         });
-      }
 
-      // Request cursor restoration through context instead of mutating input DOM
-      // directly. MentionInput applies this in a layout effect after controlled
-      // value is committed, which avoids timing races on mobile IME flows.
-      setPendingSelection({
-        start: newCursorPosition,
-        end: newCursorPosition,
-        expectedValue: newValue,
-      });
-
-      if (isNavigating) {
-        // Keep the filter in step with what now sits between the trigger and the
-        // caret, so the menu re-filters for the level we just descended into.
-        filterStore.search = mentionText.startsWith(trigger)
-          ? mentionText.slice(trigger.length)
-          : mentionText;
-        setOpen(true);
-        setHighlightedItem(null);
-        requestAnimationFrame(() => onItemsFilter());
-      } else {
-        setOpen(false);
-        setHighlightedItem(null);
-        filterStore.search = '';
+        if (isNavigating) {
+          // Keep the filter in step with what now sits between the trigger and the
+          // caret, so the menu re-filters for the level we just descended into.
+          filterStore.search = mentionText.startsWith(trigger)
+            ? mentionText.slice(trigger.length)
+            : mentionText;
+          setOpen(true);
+          setHighlightedItem(null);
+          requestAnimationFrame(() => onItemsFilter());
+        } else {
+          setOpen(false);
+          setHighlightedItem(null);
+          filterStore.search = '';
+        }
+      };
+      if (!isNavigating && selectedItem?.onMentionPrepare) {
+        if (disabled || readonly) return;
+        const ticket = preparation.begin();
+        void selectedItem
+          .onMentionPrepare({
+            signal: ticket.signal,
+            generation: ticket.generation,
+            text: sourceValue,
+            start: triggerIndex,
+            end: insertionPoint,
+          })
+          .then((prepared) => {
+            if (ticket.isCurrent() && prepared) commit(prepared);
+          })
+          .catch(() => {
+            // The source owns error/retry presentation. Failure never inserts a range.
+          });
+        return;
       }
+      commit();
+      return;
     },
     [
       trigger,
+      preparation,
+      disabled,
+      readonly,
       setInputValue,
       setMentions,
       setValue,
       setOpen,
       inputValue,
-      getEnabledItems,
+      getItems,
       filterStore,
       onItemsFilter,
     ]
   );
 
   const onMentionInsert = React.useCallback(
-    (request: MentionInsertRequest) => {
+    (request: MentionInsertRequest | MentionInsertRequest[]) => {
+      const requests = Array.isArray(request) ? request : [request];
+      if (requests.length === 0) return;
       const input = inputRef.current;
       const sourceValue = input?.value ?? inputValue;
-      const at = Math.max(0, Math.min(sourceValue.length, request.at ?? sourceValue.length));
-      const splice: MentionSplice = {
-        replaceStart: at,
-        replaceEnd: at,
-        prefix: resolveMentionInsertPrefix(sourceValue, at, request.separate),
-        text: request.text,
-        suffix: request.suffix,
-        value: request.value,
-        kind: request.kind,
-        commitRange: true,
+      // Every insert reads the result of the previous one, then the controlled
+      // text and ranges are published once for the entire gesture.
+      const applyRequests = (initialMentions: Mention[]) => {
+        let result = { value: sourceValue, mentions: initialMentions, caret: sourceValue.length };
+        for (const entry of requests) {
+          const at = Math.max(0, Math.min(result.value.length, entry.at ?? result.value.length));
+          result = applyMentionSplice(result.value, result.mentions, {
+            replaceStart: at,
+            replaceEnd: at,
+            prefix: resolveMentionInsertPrefix(result.value, at, entry.separate),
+            text: entry.text,
+            suffix: entry.suffix,
+            value: entry.value,
+            kind: entry.kind,
+            commitRange: true,
+          });
+        }
+        return result;
       };
 
-      const { value: newValue, caret } = applyMentionSplice(sourceValue, EMPTY_MENTIONS, splice);
-      setMentions((prev) => applyMentionSplice(sourceValue, prev, splice).mentions);
+      const { value: newValue, caret } = applyRequests(EMPTY_MENTIONS);
+      setMentions((prev) => applyRequests(prev).mentions);
       setInputValue(newValue);
       setValue((prev) => {
         const next = [...(prev ?? [])];
-        if (!next.includes(request.value)) next.push(request.value);
+        for (const entry of requests) {
+          if (!next.includes(entry.value)) next.push(entry.value);
+        }
         return next;
       });
       setPendingSelection({ start: caret, end: caret, expectedValue: newValue });
@@ -737,6 +820,7 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       onOpenChange={onOpenChange}
       inputValue={inputValue}
       onInputValueChange={setInputValue}
+      cancelMentionPreparation={preparation.cancel}
       value={value}
       onValueChange={setValue}
       virtualAnchor={virtualAnchor}

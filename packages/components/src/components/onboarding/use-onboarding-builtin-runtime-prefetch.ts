@@ -6,7 +6,12 @@ import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { localCliStartingAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
 
-const BUILTIN_BACKGROUND_PREFETCH_AGENT_TYPES = [
+/**
+ * The managed runtimes warmed in the background. Exported because the provider
+ * step reads readiness for exactly this set: a mark may only light up for an
+ * agent something is actually preparing.
+ */
+export const BUILTIN_BACKGROUND_PREFETCH_AGENT_TYPES = [
   'kimi',
   'codex',
   'claude',
@@ -29,8 +34,7 @@ type PrefetchErrorHandler = (agentType: ManagedBuiltinAgentType, error: unknown)
 
 type PrefetchScopeState = {
   readonly completed: Set<ManagedBuiltinAgentType>;
-  pending: ManagedBuiltinAgentType[];
-  running: ManagedBuiltinAgentType | null;
+  readonly running: Set<ManagedBuiltinAgentType>;
   owner: symbol | null;
   task: PrefetchTask | null;
   onError: PrefetchErrorHandler | null;
@@ -47,8 +51,7 @@ class OnboardingBuiltinRuntimePrefetchScheduler {
   ): { dispose: () => void } {
     const state = this.scopes.get(scopeKey) ?? {
       completed: new Set<ManagedBuiltinAgentType>(),
-      pending: [],
-      running: null,
+      running: new Set<ManagedBuiltinAgentType>(),
       owner: null,
       task: null,
       onError: null,
@@ -58,10 +61,7 @@ class OnboardingBuiltinRuntimePrefetchScheduler {
     state.owner = owner;
     state.task = task;
     state.onError = onError ?? null;
-    state.pending = order.filter(
-      (agentType) => agentType !== state.running && !state.completed.has(agentType)
-    );
-    this.runNext(scopeKey, state);
+    this.launchPending(scopeKey, state, order);
 
     return {
       dispose: () => {
@@ -69,7 +69,6 @@ class OnboardingBuiltinRuntimePrefetchScheduler {
         state.owner = null;
         state.task = null;
         state.onError = null;
-        state.pending = [];
       },
     };
   }
@@ -78,26 +77,35 @@ class OnboardingBuiltinRuntimePrefetchScheduler {
     this.scopes.clear();
   }
 
-  private runNext(scopeKey: string, state: PrefetchScopeState): void {
-    if (state.running || !state.owner || !state.task) return;
-    const agentType = state.pending.shift();
-    if (!agentType) return;
+  /**
+   * Every runtime that is not already running or finished starts now. `order`
+   * still decides which request reaches the wire first, so a selected provider
+   * gets the connection ahead of the rest without waiting behind it.
+   */
+  private launchPending(
+    scopeKey: string,
+    state: PrefetchScopeState,
+    order: readonly ManagedBuiltinAgentType[]
+  ): void {
+    if (!state.owner || !state.task) return;
     const task = state.task;
     const onError = state.onError;
-    state.running = agentType;
-    void Promise.resolve()
-      .then(() => task(agentType))
-      .then(() => {
-        state.completed.add(agentType);
-      })
-      .catch((error) => {
-        onError?.(agentType, error);
-      })
-      .finally(() => {
-        if (this.scopes.get(scopeKey) !== state) return;
-        state.running = null;
-        this.runNext(scopeKey, state);
-      });
+    for (const agentType of order) {
+      if (state.running.has(agentType) || state.completed.has(agentType)) continue;
+      state.running.add(agentType);
+      void Promise.resolve()
+        .then(() => task(agentType))
+        .then(() => {
+          state.completed.add(agentType);
+        })
+        .catch((error) => {
+          onError?.(agentType, error);
+        })
+        .finally(() => {
+          if (this.scopes.get(scopeKey) !== state) return;
+          state.running.delete(agentType);
+        });
+    }
   }
 }
 
@@ -113,9 +121,13 @@ export const __onboardingBuiltinRuntimePrefetchForTests = {
 
 /**
  * Onboarding should not wait for a user to reach or interact with the provider
- * step before managed built-in runtimes begin downloading. Background work is
- * serial across effect restarts. Selecting a provider reorders work that has
- * not started; the current download is allowed to finish first.
+ * step before managed built-in runtimes begin downloading. The runtimes are
+ * downloaded CONCURRENTLY: the wait a user actually feels is wall-clock, and
+ * running them one at a time made it the sum of three downloads instead of the
+ * longest one. They are independent artifacts keyed by agent type, and
+ * `useMachineAcpBinaryActions` already dedupes installs per machine and agent,
+ * so nothing is duplicated by starting them together. Selecting a provider only
+ * moves it to the front of the launch order; work already in flight continues.
  */
 export function useOnboardingBuiltinRuntimePrefetch(
   preferredAgentType: ManagedBuiltinAgentType | null

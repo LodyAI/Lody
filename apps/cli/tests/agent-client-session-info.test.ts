@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ACPSessionId, SessionId } from '@lody/shared';
-import type { SessionNotification } from '@agentclientprotocol/sdk';
+import type { PromptRequest, SessionNotification } from '@agentclientprotocol/sdk';
 
 import { AgentClient } from '../src/agent/agent-client';
 import type { Logger } from '../src/utils/logger';
@@ -40,6 +40,50 @@ const sessionInfoNotification = (update: Record<string, unknown>): SessionNotifi
     sessionId: 'acp-test',
     update: { sessionUpdate: 'session_info_update', ...update },
   }) as unknown as SessionNotification;
+
+describe('AgentClient goal prompt transport', () => {
+  it.each(['pause', 'clear'] as const)(
+    'sends cold %s through the advertised prompt transport',
+    async (action) => {
+      const { client } = createTestClient('codex');
+      const requests: PromptRequest[] = [];
+      Object.assign(client, {
+        lodyExtensionCapabilities: {
+          goal: {
+            version: 1,
+            actions: ['set', 'pause', 'resume', 'clear'],
+            controlActions: ['pause', 'clear'],
+            promptActions: ['set', 'pause', 'resume', 'clear'],
+          },
+        },
+        connection: {
+          prompt: async (request: PromptRequest) => {
+            requests.push(request);
+            return { stopReason: 'end_turn' as const };
+          },
+        },
+      });
+      expect(client.resolveGoalActionTransport(action)).toBe('request');
+      await expect(
+        client.prompt('acp-test' as ACPSessionId, [], { goalControl: { action } })
+      ).resolves.toEqual({ stopReason: 'end_turn' });
+      expect(requests).toEqual([
+        {
+          sessionId: 'acp-test',
+          prompt: [],
+          _meta: { lody: { goalControl: { version: 1, action } } },
+        },
+      ]);
+
+      // Manual commands are still ordinary prompts, not rewritten as button metadata.
+      await client.prompt('acp-test' as ACPSessionId, [{ type: 'text', text: '/goal Ship it' }]);
+      expect(requests[1]).toEqual({
+        sessionId: 'acp-test',
+        prompt: [{ type: 'text', text: '/goal Ship it' }],
+      });
+    }
+  );
+});
 
 describe('AgentClient session title updates', () => {
   it('forwards Claude session_info_update titles', async () => {

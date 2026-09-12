@@ -26,8 +26,8 @@ Then('关闭 Session 后 Agent 进程被释放', async function (this: LodyWorld
 
 Given('已注册包含大型变更的合成项目', async function (this: LodyWorld) {
   this.reviewFixture = createSyntheticReviewRepository();
-  const project = await this.reviewPage!.registerLocalProject(this.reviewFixture.rootPath);
-  await this.workPage!.selectLocalProject(project.name);
+  await this.workPage!.addLocalProject(this.reviewFixture.rootPath, this.reviewFixture.name);
+  await this.workPage!.selectLocalProject(this.reviewFixture.name);
 });
 
 When('用户创建 Session 并打开全部变更', async function (this: LodyWorld) {

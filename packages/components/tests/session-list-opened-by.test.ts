@@ -267,6 +267,26 @@ describe('SessionList opened-by rendering', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
+  it('lets the disclosure toggle own keyboard activation without navigating', () => {
+    const { onSelectSession } = renderList(makeOpenerGroupRows());
+    const toggle = container?.querySelector<HTMLButtonElement>('[data-session-opened-by-toggle]');
+    expect(toggle).not.toBeNull();
+
+    const keydown = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
+    flushSync(() => {
+      toggle?.dispatchEvent(keydown);
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(keydown.defaultPrevented).toBe(false);
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(container?.querySelector('[data-sidebar-session-id="opened-1"]')).toBeNull();
+  });
+
   it('offers the same collapse action from the opener context menu', () => {
     renderList(makeOpenerGroupRows());
     const opener = container?.querySelector('[data-sidebar-session-id="opener"]');

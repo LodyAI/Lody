@@ -26,6 +26,7 @@ import grokBuildSvg from './registry-assets/grok-build.svg?raw';
 import harnSvg from './registry-assets/harn.svg?raw';
 import junieSvg from './registry-assets/junie.svg?raw';
 import kiloSvg from './registry-assets/kilo.svg?raw';
+import kimchiSvg from './registry-assets/kimchi.svg?raw';
 import kimiSvg from './registry-assets/kimi.svg?raw';
 import minionCodeSvg from './registry-assets/minion-code.svg?raw';
 import mistralVibeSvg from './registry-assets/mistral-vibe.svg?raw';
@@ -66,6 +67,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   harn: harnSvg,
   junie: junieSvg,
   kilo: kiloSvg,
+  kimchi: kimchiSvg,
   kimi: kimiSvg,
   'kimi-code': kimiSvg,
   'minion-code': minionCodeSvg,

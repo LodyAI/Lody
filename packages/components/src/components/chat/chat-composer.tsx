@@ -56,7 +56,7 @@ import {
 } from '@/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
-import { getFilesFromDataTransfer, hasFileTransfer } from '@/lib/file-drop';
+import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   getChatComposerPromptPlaceholderKey,
   getChatComposerMobilePromptPlaceholderKey,
@@ -141,6 +141,11 @@ export interface ChatComposerProps {
   onAttachmentAddClick?: () => void;
   imageDropDisabled?: boolean;
   onImageDrop?: (files: File[]) => void;
+  /**
+   * Folders in the same drop. They are never attachments: the owner turns
+   * each into a `@path` mention (see `lib/dropped-local-path.ts`).
+   */
+  onDirectoryDrop?: (directories: File[]) => void;
   onImageRemove?: (id: string) => void;
   onImageRetry?: (id: string) => void;
   /** Pending file attachments (non-image), rendered as a chip strip. */
@@ -256,6 +261,7 @@ export function ChatComposer({
   onAttachmentAddClick,
   imageDropDisabled = attachmentAddDisabled,
   onImageDrop,
+  onDirectoryDrop,
   onImageRemove,
   onImageRetry,
   fileItems = [],
@@ -283,6 +289,7 @@ export function ChatComposer({
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
+  const shortcutsEnabled = variant !== 'dialog';
   const intlLocale = useMemo(
     () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
@@ -494,12 +501,15 @@ export function ChatComposer({
       event.preventDefault();
       event.stopPropagation();
       resetImageDragState();
-      const files = getFilesFromDataTransfer(event.dataTransfer);
+      const { files, directories } = readDroppedTransfer(event.dataTransfer);
       if (files.length > 0) {
         onImageDrop?.(files);
       }
+      if (directories.length > 0) {
+        onDirectoryDrop?.(directories);
+      }
     },
-    [canHandleImageDrop, onImageDrop, resetImageDragState]
+    [canHandleImageDrop, onDirectoryDrop, onImageDrop, resetImageDragState]
   );
 
   // Auto-resize effect: adjust textarea height based on content
@@ -874,6 +884,7 @@ export function ChatComposer({
               ) : null}
 
               <CombinedMentionTextarea
+                enablePromptShortcuts={shortcutsEnabled}
                 id={promptId}
                 ref={promptRef}
                 mentionSource={mentionSource}
@@ -976,6 +987,7 @@ export function ChatComposer({
         ) : (
           <>
             <CombinedMentionTextarea
+              enablePromptShortcuts={shortcutsEnabled}
               id={promptId}
               ref={promptRef}
               mentionSource={mentionSource}

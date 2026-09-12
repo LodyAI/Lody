@@ -29,12 +29,20 @@ normalized to `Closes #123` by the PR policy workflow.
 
 <!-- What changed in response to that pressure. Keep this about the change set, not the motivation. -->
 
+## Visual explanation
+
 <!--
-Optional: a diagram, tree, or structural diff often explains a change faster than
-prose. Put it directly in Summary or Before / after. Examples and the rules for
-choosing a view: .agents/docs/visual-explanations.md
+Required. Agents: invoke `$show-me` and place its smallest useful view here.
+
+Complex changes must include a structural view: Mermaid, pseudocode/call tree,
+component/file tree, structural diff, image, or a linked reviewable HTML artifact.
+A change is complex when it crosses component/runtime/authority boundaries, changes
+multi-step control or data flow, or exceeds 200 changed lines. The automated policy
+enforces the 200-line floor; reviewers enforce the semantic cases.
+
+For a simple change, write `Simple change: <why a visual would not help review>`.
+Examples and selection rules: .agents/docs/visual-explanations.md
 Any supporting artifact must be reachable by reviewers; a local HTML file is not.
-Small fixes need no visual. Do not add one for ceremony.
 -->
 
 ## Before / after
@@ -81,5 +89,27 @@ characters. Include only the highest-value files, decisions, risks, and gaps.
 - **Destructive or irreversible behavior:** <!-- Include cleanup, overwrite, migration, rollback, and failure recovery. -->
 - **Deliberately not done or tested:** <!-- Intentional omissions and why they are acceptable. -->
 - **Unknowns / confidence:** <!-- Residual risk and confidence in the change. -->
+
+### Original user prompt
+
+<!--
+Required only for fork-based/external pull requests. Same-repository maintainer
+branches do not need to provide an original user prompt.
+
+For external PRs, preserve the triggering user's prompt as source evidence for
+review. Paste it verbatim: do not summarize, rewrite, clean up, or translate it.
+If the prompt contains secrets or private material that cannot be published,
+redact only those spans and leave an explicit marker in their place. Do not append
+unrelated transcript turns, tool logs, or attachment bytes.
+-->
+
+<details>
+<summary>Show original prompt</summary>
+
+````text
+<!-- Paste the triggering user's original prompt here, verbatim. -->
+````
+
+</details>
 
 <!-- context-handoff:end -->

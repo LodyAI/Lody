@@ -38,7 +38,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`
   workspaces, or return `remote` to preserve the existing Convex three-state path. Catalog read
   failures degrade to `remote`, never to an error.
-- `session-access-retry.ts` — remote machine access verification with transient retry.
+- `session-access-retry.ts` — remote machine access verification: bounded retries at command
+  validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
   ([AGENTS.md](worktree/AGENTS.md)).
@@ -163,13 +164,17 @@ fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
 
 ### Commit identity
 
-The turn's `userName`/`userEmail` become `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env
-(`session.ts` `updateGitIdentity`, re-applied per turn via the execution service's
-`bindReadySession`), so a session started by user A commits as A. The cloud composition root
-owns the hosted user-resolution operation because the daemon does not own an end-user browser
-session; the local access port resolves only its synthetic owner and never performs network
-I/O. PR and push identity itself comes from the requester-bound GitHub token, not from git
-config.
+The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
+`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
+the turn requester is the machine owner, the repository/machine Git identity wins and the
+resolved Lody/GitHub identity is its fallback. A non-owner requester always uses their resolved
+Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
+identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
+user resolution because the daemon does not own an end-user browser session; the local access
+port resolves only its synthetic owner and never performs network I/O. PR and push identity
+itself comes from the requester-bound GitHub token, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
+including adopted preparations. Existing ACP children retain their launch environment; live
+identity propagation into adapter-owned Git commands remains unresolved.
 
 ### Speculative preparation
 

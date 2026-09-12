@@ -1,3 +1,6 @@
+import { isElectronRenderer } from '@/lib/electron';
+import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { SessionWindowMenuItem } from './session-window-menu-item';
 import {
   memo,
   useCallback,
@@ -703,6 +706,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       : null;
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
+        if (openSessionOnModifiedClick(event, item.id)) return;
         if (
           event.metaKey ||
           event.ctrlKey ||
@@ -828,8 +832,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       onClick={
         useAnchor
           ? undefined
-          : () => {
+          : (event) => {
               if (!onSelect) return;
+              if (openSessionOnModifiedClick(event, item.id)) return;
               onSelect(item.id);
             }
       }
@@ -970,37 +975,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       <ContextMenuContent className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
-          goToOpener={
-            canGoToOpener && openerSessionId
-              ? () => onSelect?.(openerRootSessionId ?? openerSessionId, openerSessionId)
-              : undefined
-          }
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
-        {handlePrOpen ? (
-          <ContextMenuItem
-            onSelect={() => {
-              handlePrOpen();
-            }}
-          >
-            <GitPullRequest />
-            {contextMenuLabels.openPr}
-          </ContextMenuItem>
-        ) : null}
-        {handlePrOpen &&
-        (canRename || canTogglePin || canArchive || canMarkUnread || canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
-        ) : null}
-        {canRename ? (
-          <ContextMenuItem
-            onSelect={() => {
-              onBeginRename(item.id, item.title);
-            }}
-          >
-            <Pencil />
-            {contextMenuLabels.rename}
-          </ContextMenuItem>
-        ) : null}
         {canTogglePin ? (
           <ContextMenuItem
             onSelect={() => {
@@ -1021,18 +997,18 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {contextMenuLabels.markUnread}
           </ContextMenuItem>
         ) : null}
-        {canArchive ? (
+        {canRename ? (
           <ContextMenuItem
             onSelect={() => {
-              onArchive?.(item.id);
+              onBeginRename(item.id, item.title);
             }}
           >
-            <Archive />
-            {contextMenuLabels.archive}
+            <Pencil />
+            {contextMenuLabels.rename}
           </ContextMenuItem>
         ) : null}
-        {(canRename || canTogglePin || canArchive || canMarkUnread) &&
-        (canCopyUrl || branchName) ? (
+        {(openedByOpener || canTogglePin || canMarkUnread || canRename) &&
+        (canCopyUrl || branchName || shareMenuState) ? (
           <ContextMenuSeparator />
         ) : null}
         {canCopyUrl ? (
@@ -1043,6 +1019,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             <Link2 />
             {contextMenuLabels.copyUrl}
+          </ContextMenuItem>
+        ) : null}
+        {branchName ? (
+          <ContextMenuItem
+            onSelect={() => {
+              void navigator.clipboard.writeText(branchName).catch(() => {});
+            }}
+          >
+            <GitBranch />
+            {contextMenuLabels.copyBranch}
           </ContextMenuItem>
         ) : null}
         {shareMenuState ? (
@@ -1068,14 +1054,56 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
-        {branchName ? (
+        {(openedByOpener ||
+          canTogglePin ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          branchName ||
+          shareMenuState) &&
+        (handlePrOpen || (canGoToOpener && openerSessionId) || isElectronRenderer()) ? (
+          <ContextMenuSeparator />
+        ) : null}
+        {handlePrOpen ? (
           <ContextMenuItem
             onSelect={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+              handlePrOpen();
             }}
           >
-            <GitBranch />
-            {contextMenuLabels.copyBranch}
+            <GitPullRequest />
+            {contextMenuLabels.openPr}
+          </ContextMenuItem>
+        ) : null}
+        <SessionRowOpenedByMenuItems
+          goToOpener={
+            canGoToOpener && openerSessionId
+              ? () => onSelect?.(openerRootSessionId ?? openerSessionId, openerSessionId)
+              : undefined
+          }
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
+        <SessionWindowMenuItem sessionId={item.id} />
+        {(openedByOpener ||
+          canTogglePin ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          branchName ||
+          shareMenuState ||
+          handlePrOpen ||
+          (canGoToOpener && openerSessionId) ||
+          isElectronRenderer()) &&
+        canArchive ? (
+          <ContextMenuSeparator />
+        ) : null}
+        {canArchive ? (
+          <ContextMenuItem
+            onSelect={() => {
+              onArchive?.(item.id);
+            }}
+          >
+            <Archive />
+            {contextMenuLabels.archive}
           </ContextMenuItem>
         ) : null}
       </ContextMenuContent>

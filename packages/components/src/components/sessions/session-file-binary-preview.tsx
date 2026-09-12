@@ -1,23 +1,26 @@
+import type { SessionFileErrorActions } from '@/lib/session-file-actions';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { SessionFileImagePreview } from './session-file-image-preview';
+import { SessionFileNoticeCard } from './session-file-error-state';
 
 interface SessionFileBinaryPreviewProps {
   readonly path: string;
   readonly bytes?: Uint8Array;
   readonly url?: string;
+  readonly fileActions?: SessionFileErrorActions;
 }
 
 /**
  * Renders a binary Code Collab file. Image types (png/jpeg/gif/webp/…) are
- * previewed inline; everything else falls back to the "can't be diffed yet"
- * notice. Render-only: bytes are provided by the file-content snapshot.
+ * previewed inline; everything else offers local system actions when available. Render-only: bytes are provided by the file-content snapshot.
  */
 export const SessionFileBinaryPreview = memo(function SessionFileBinaryPreview({
   path,
   bytes,
   url,
+  fileActions,
 }: SessionFileBinaryPreviewProps) {
   const { t } = useTranslation();
 
@@ -26,13 +29,15 @@ export const SessionFileBinaryPreview = memo(function SessionFileBinaryPreview({
   }
 
   return (
-    <div className="h-full space-y-2 p-3">
-      <div className="text-sm font-medium text-foreground">
-        {t('sessions.fileDiff.binary.title', 'Binary file')}
-      </div>
-      <div className="text-xs text-muted-foreground">
-        {t('sessions.fileDiff.binary.message', "This file is binary and can't be diffed yet.")}
-      </div>
-    </div>
+    <SessionFileNoticeCard
+      presentation={{
+        title: t('sessions.fileDiff.binary.title', 'Binary file'),
+        description: t(
+          'sessions.fileViewer.binary.message',
+          'This binary file cannot be previewed.'
+        ),
+      }}
+      fileActions={fileActions}
+    />
   );
 });

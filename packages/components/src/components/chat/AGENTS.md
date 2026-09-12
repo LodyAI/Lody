@@ -5,73 +5,62 @@ Index and rationale: [README.md](README.md).
 
 ## Composer and selectors
 
-- `attachment-add-menu.tsx` is the composer's single "+" menu and owns the
-  per-turn MCP selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), never the
-  footer selector row. MCP is always a second level: a desktop hover submenu, and
-  on touch a panel pushed onto the same surface with a back row. Toggling never
-  closes the menu, and the entry hides itself when the catalog is empty.
-- Desktop project pickers use the standard DropdownMenu, mixing local/GitHub projects by
-  recency. Pin no-project/add-local/connect-GitHub actions; mount at most 20 rows
-  (most recent when empty, first matches across all options when searching).
-  Scope order: machine → project → worktree/branch. Direct local sessions never
-  render/pass a branch; explicit local worktrees and GitHub sessions keep theirs.
-  GitHub projects are machine-independent. Machine selection filters local projects
-  and agent configs; changing machines clears an incompatible local project without
-  selecting a replacement. Keep mobile pickers independent.
-- A single-member workspace never passes project-sharing state. In multi-member
-  workspaces, local project options and the selected desktop trigger show only an
-  effective `Private` status — Team and unresolved states stay hidden — where
-  effective access is `machine.sharedWithTeam && project.sharedWithTeam`, never
-  the raw project bit. The selected Private segment opens `ProjectShareDialog`,
-  confirmed through the project share mutation, which also shares its machine
-  atomically. Route share failures through `useConvexErrorMessage` so expired auth
-  requests recovery and raw Convex details never reach the toast. GitHub options
-  carry no local-project access badge. The desktop machine selector marks an
-  option local only when its value exactly matches `visibleLocalMachineId`;
-  ownership and Private access never stand in for that local probe.
+- `attachment-add-menu.tsx` owns the single composer "+" menu and per-turn MCP
+  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), never the footer row.
+  MCP uses a desktop hover submenu or a touch panel on the same surface with a
+  back row. Toggling keeps it open; an empty catalog hides the entry.
+- Desktop project pickers use DropdownMenu with local/GitHub projects by recency.
+  Pin no-project/add-local/connect-GitHub actions; mount at most 20 rows (most
+  recent if empty, first matches from all options if searching). Scope order:
+  machine → project → worktree/branch. Direct local sessions neither render nor
+  pass a branch; local worktrees and GitHub sessions keep theirs. GitHub projects
+  are machine-independent. Machine changes filter local projects/configs and clear
+  incompatible local projects without replacement. Keep mobile pickers independent.
+- Single-member workspaces pass no project-sharing state. Otherwise local project
+  options and the selected desktop trigger show only effective `Private`; hide Team
+  and unresolved states. Effective access is `machine.sharedWithTeam &&
+  project.sharedWithTeam`. The selected Private segment opens `ProjectShareDialog`;
+  its project share mutation also shares the machine atomically. Use
+  `useConvexErrorMessage` for failures (auth recovery, no raw Convex toast).
+  GitHub options have no access badge. A desktop machine option is local only when
+  its value equals `visibleLocalMachineId`, never by ownership or Private access.
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
-- The landing composer footer is ordered run config → permission → usage on
-  desktop. Provider interaction mode is a row inside run config; the standalone
-  button is reserved for explicit permission mode, with legacy ACP modes as the
-  fallback. Mobile new-chat uses the same consolidated `MobileSessionRunConfig`
-  face + sheet as the in-session composer, with usage beside it — see
-  `../mobile/AGENTS.md`. Do not reintroduce separate
-  model/thinking chips or a below-composer agent/permission row. Usage reads
-  subscription rate limits from the selected agent's Machine Flock metadata and
-  stays hidden for custom or environment-overridden providers.
-- The desktop run config menu's "Recently used" group (`lib/recent-run-configs.ts`)
-  is device-local localStorage history keyed per workspace, recorded only when a
-  chat is actually STARTED — never when a knob moves. A row offers a whole
-  combination (agent + model + every config option) and is filtered to agents on
-  the selected machine; the current combination never appears. Applying one sets
-  the agent first and must wait until `appliedTargetKey`
-  (`use-acp-session-config-selection.ts`) names that agent before writing
-  model/options.
+- Desktop footer order: run config → permission → usage. Provider interaction mode
+  belongs inside run config; the standalone button is explicit permission mode,
+  falling back to legacy ACP modes. Mobile new-chat and in-session composers share
+  `MobileSessionRunConfig` face + sheet, with adjacent usage; see
+  [mobile rules](../mobile/AGENTS.md). Never restore separate model/thinking chips
+  or below-composer agent/permission rows. Usage reads the selected agent's Machine
+  Flock subscription limits; hide it for custom or environment-overridden providers.
+- Desktop "Recently used" (`lib/recent-run-configs.ts`) is device-local localStorage
+  history per workspace, recorded only on chat START, never on setting changes.
+  Rows offer the entire agent/model/config combination, filter by selected machine,
+  and exclude the current combination. Apply the agent first; wait for
+  `appliedTargetKey` in `use-acp-session-config-selection.ts` to name it before
+  applying model/options.
 - Every landing branch exposes ONE unfiltered hidden file input and one
   `onAttachmentAddClick`; selected files are split by MIME into the image and file
   draft hooks, exactly like paste and drop.
 
 ## Invariants
 
-- The chat-route URL declares the composer's selection and never carries one-shot
-  event nonces. Once the URL names a selection, the landing mirrors composer
-  steering back into it via the desktop route's `onSelectionUrlSync` (replace,
-  incomplete selections map to an empty search). A plain `/chat` URL stays plain:
-  restored defaults and auto-selection never rewrite it. Mobile keeps its
-  base-context model and passes no sync callback.
+- The chat-route URL declares selection, never one-shot event nonces. Once it names
+  a selection, mirror composer steering through desktop `onSelectionUrlSync` using
+  replace (incomplete selection → empty search). Plain `/chat` stays plain; restored
+  defaults/auto-selection never rewrite it. Mobile keeps base context with no callback.
 - `use-chat-landing-draft-session.ts` owns the landing's reserved session id, and
   images, files, ACP preparation, and `startSession({ sessionId }, firstTurn)`
   MUST consume that same identity. Attachment hooks never reset it independently;
   reset only after a full draft clear. Submit blocks while `hasBlockingImages` or
   `hasBlockingFiles`.
-- Keep reserved session id and attachments in module-level atoms
-  (`atoms/chat-landing-draft.ts`, `buildChatLandingDraftKey`), keyed by workspace
-  SLUG, not the initially unresolved workspace id. Drafts survive route unmount:
-  never revoke preview URLs or abort uploads on unmount; uploads settle into the
-  atom. Revoke/abort only on attachment removal or full draft clear. Never persist
-  these atoms to localStorage; losing attachments on app restart is expected.
+- Key the whole landing draft with `buildChatLandingDraftKey` using the workspace SLUG,
+  not its initially unresolved id. Persist prompt/pasted text/mentions through
+  localStorage; workspace windows are peers and MUST NOT select draft persistence by
+  window launch relationship. Keep the reserved session id and attachments
+  in module-level atoms. Route unmount neither revokes previews nor aborts uploads;
+  revoke/abort only on removal/full draft clear. App restart may lose attachments.
 - Submit immediately hides and disables the visible landing draft but preserves
   its controlled text, attachment resources, and reserved session id until
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance
@@ -84,24 +73,19 @@ Index and rationale: [README.md](README.md).
   user turn is locally accepted, submit MUST hand the lease to the durable session
   before clearing the draft or navigating; a successful handoff must not send
   `session/prepare-cancel`.
-- `chat-landing-view.tsx` is the render-only landing layout around
-  `ChatComposer`: keep stateful data loading in `chat-landing.tsx` and the
-  session-mention drop target local to the view. `ConversationDropOverlay` paints
-  the page-level mask as soon as the sidebar drag starts, not only after
-  `dragenter`. Desktop only — touch has no HTML5 drag, so the mobile branch passes
-  the handle but installs no drop target.
-- Composer dropdown/toggle chrome must disable browser text selection with
-  `select-none`: top selector, footer selector, bottom bar, ACP boolean toggles,
-  Workdir/agent/model/branch picker triggers, mobile inline picker triggers, and
-  picker option rows. Text-entry surfaces stay selectable/editable: the main
-  prompt textarea, pasted text editor, and picker search inputs must not inherit
-  a broad `select-none`.
-- After a desktop composer/landing menu selection (mode, model/agent run-config,
-  project, branch, machine, …), focus must return to the prompt
-  (`[data-keyboard-nav="composer"]`), never the menu trigger. Shared policy lives
-  in `lib/menu-focus.ts` and is wired through `ui/dropdown-menu` +
-  `OptionSelector`. Keep-open run-config picks (`event.preventDefault` on select)
-  still count as a selection.
+- `chat-landing-view.tsx` renders `ChatComposer`; stateful loading stays in
+  `chat-landing.tsx`, session-mention drop handling in the view. Paint the page-level
+  `ConversationDropOverlay` when sidebar drag starts, before `dragenter`. Desktop
+  only: mobile passes the handle but installs no HTML5 drop target. A dropped folder
+  takes the same handle and becomes a `@<absolute path>` mention, never an upload.
+- Apply `select-none` to composer dropdown/toggle chrome: top/footer selectors,
+  bottom bar, ACP booleans, Workdir/agent/model/branch triggers, mobile inline
+  triggers, and option rows. Keep prompt, pasted-text editor, and picker search
+  selectable/editable; they must not inherit broad `select-none`.
+- Desktop composer/landing menu selections return focus to the prompt
+  (`[data-keyboard-nav="composer"]`), never the trigger. Use `lib/menu-focus.ts`
+  through `ui/dropdown-menu` and `OptionSelector`, including keep-open run-config
+  selections (`event.preventDefault`).
 - Desktop landing's machine/project/branch menus always open upward with collision
   flipping disabled. Their top-row labels and glyphs, including disabled branch
   state, share the same neutral foreground level.
@@ -110,10 +94,9 @@ Index and rationale: [README.md](README.md).
 - Mobile composer pickers rely on `MobileInlinePicker` plus
   `MobileInlinePickerRowSlot` so dropdown panels project to a full-row slot,
   never resizing a narrow footer chip.
-- Never render raw local Git, Machine RPC, or Streams failures as landing composer
-  status text. Keep them in state for submit blocking, telemetry, logging, and the
-  scoped retry control; composer status is for actionable validation and
-  selected-machine project guidance.
+- Keep raw local Git, Machine RPC, and Streams failures out of landing status copy;
+  retain them for submit blocking, telemetry, logging, and scoped retry. Status copy
+  is for actionable validation and selected-machine project guidance.
 - Chat Landing must not initiate ACP capability probes: startup refresh lives in
   the workspace runtime and explicit probes in settings/onboarding. Do not render
   their spinner, download progress, or ready state in the landing composer.

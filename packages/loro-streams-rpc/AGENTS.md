@@ -60,9 +60,9 @@ and the `file/preview` namespace are in
   `session/live-status` reads the target
   daemon's active-presence controller and must not infer liveness from durable
   `SessionMeta.status` or message pointers.
-- Remote daemon lifecycle details live in
-  context/machine-lifecycle.md. RPC handlers
-  must not run installers inline; they ACK and let the CLI process boundary exit.
+- Remote lifecycle: [ACK contract](../../specs/machine-lifecycle-ack.md).
+  RPC handlers never run installers inline. Accepted work exits via the CLI process
+  boundary after a bounded ACK attempt, including delivery failure or timeout.
 - `machine/acp-capabilities-refresh` and `machine/acp-binary-install` may append
   `machine/acp-binary-progress` result envelopes before the final response. The
   response dispatcher must call the progress callback and keep the pending request

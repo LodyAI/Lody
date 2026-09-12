@@ -34,19 +34,14 @@ describe('builtin Grok shared contract', () => {
       { modelId: 'grok-4.5', name: 'Grok 4.5' },
     ]);
     expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
-      'interaction_mode',
+      'plan_mode',
       'permission_mode',
       'model',
       'reasoning_effort',
     ]);
-    expect(capabilities?.configOptions[0]?.currentValue).toBe('agent');
-    expect(capabilities?.configOptions[0]?.options.map((option) => option.value)).toEqual([
-      'agent',
-      'plan',
-    ]);
+    expect(capabilities?.configOptions[0]).toMatchObject({ type: 'boolean', currentValue: false });
     expect(capabilities?.configOptions[1]?.options.map((option) => option.value)).toEqual([
       'ask',
-      'auto',
       'always-approve',
     ]);
     expect(capabilities?.configOptions[2]?.currentValue).toBe('grok-4.6');
@@ -61,7 +56,7 @@ describe('builtin Grok shared contract', () => {
       'medium',
       'low',
     ]);
-    expect(getBuiltinDefaultModeId('builtin', 'grok')).toBe('agent');
+    expect(getBuiltinDefaultModeId('builtin', 'grok')).toBe('default');
     expect(classifyPermissionModeFace('always-approve')).toEqual({
       kind: 'full-access',
       tone: 'warning',

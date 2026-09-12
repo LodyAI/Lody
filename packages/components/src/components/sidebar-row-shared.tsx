@@ -16,7 +16,7 @@ import {
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { ContextMenuItem, ContextMenuSeparator } from '@/ui/context-menu';
+import { ContextMenuItem } from '@/ui/context-menu';
 import { Skeleton } from '@/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
@@ -377,36 +377,27 @@ export function SessionRowOpenedByMenuItems({
   opener,
   goToOpener,
   goToOpenerLabel,
-  separateToggle = true,
 }: {
   opener?: Extract<SessionRowOpenedByTreeSlot, { kind: 'opener' }> | null;
   /** Omitted when this row has no opener, or the surface cannot navigate. */
   goToOpener?: () => void;
   goToOpenerLabel: string;
-  /** False when nothing follows the toggle in this menu. */
-  separateToggle?: boolean;
 }) {
   return (
     <>
-      {opener ? (
-        <>
-          <ContextMenuItem onSelect={opener.onToggle}>
-            <ChevronDown
-              className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
-            />
-            {opener.label}
-          </ContextMenuItem>
-          {separateToggle ? <ContextMenuSeparator /> : null}
-        </>
-      ) : null}
       {goToOpener ? (
-        <>
-          <ContextMenuItem onSelect={goToOpener}>
-            <CornerLeftUp />
-            {goToOpenerLabel}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
+        <ContextMenuItem onSelect={goToOpener}>
+          <CornerLeftUp />
+          {goToOpenerLabel}
+        </ContextMenuItem>
+      ) : null}
+      {opener ? (
+        <ContextMenuItem onSelect={opener.onToggle}>
+          <ChevronDown
+            className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
+          />
+          {opener.label}
+        </ContextMenuItem>
       ) : null}
     </>
   );
@@ -842,10 +833,7 @@ export function SidebarListSkeleton({
         </div>
         <div className="flex flex-col gap-px">
           {SIDEBAR_SKELETON_ROW_WIDTHS.map((width, index) => (
-            <div
-              key={index}
-              className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2"
-            >
+            <div key={index} className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2">
               <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
               <Skeleton className={cn('h-3 min-w-0', width)} />
               <Skeleton className="ml-auto h-3 w-8 shrink-0" />

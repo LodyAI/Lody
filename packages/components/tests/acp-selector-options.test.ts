@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { orderAcpConfigOptionSelectors } from '../src/lib/acp-selector-order';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   type AcpConfigOptionSummary,
@@ -111,6 +112,44 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gpt-5.6-sol',
+              options: [
+                { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+                { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+              ],
+            },
+          ],
+          fetchedAt: 1,
+        },
+      }),
+    });
+
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.modelOptions.map((option) => option.value)).toEqual([
+      'gpt-6-astra',
+      'gpt-5.6-sol',
+    ]);
+  });
+
   it('synthesizes registry model selectors when a stale cache stores empty config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
@@ -219,7 +258,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.defaultModeId).toBe('auto');
   });
 
-  it('uses auto as the static builtin Kimi default mode', () => {
+  it('uses auto as the static builtin Kimi permission default', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -227,7 +266,10 @@ describe('buildAcpSelectorOptions', () => {
       machine: machineWithCapabilities({}),
     });
 
-    expect(options.defaultModeId).toBe('auto');
+    expect(options.defaultModeId).toBeNull();
+    expect(
+      orderAcpConfigOptionSelectors(options.configOptionSelectors).permissionModeSelectors
+    ).toMatchObject([{ configId: 'permission_mode', currentValue: 'auto' }]);
   });
 
   it('does not relabel Codex auto mode', () => {
@@ -286,7 +328,7 @@ describe('buildAcpSelectorOptions', () => {
     ]);
   });
 
-  it('keeps latest Codex fast and plan config options', () => {
+  it('keeps legacy Codex fast and plan config options', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'builtin',
@@ -487,7 +529,11 @@ describe('buildAcpSelectorOptions', () => {
     });
   });
 
-  it('ignores stale registry capability cache entries', () => {
+  it.each([
+    ['legacy entries without a version', undefined],
+    ['older-version entries', ACP_CAPABILITY_CACHE_VERSION - 1],
+    ['newer-version entries with understood fields', ACP_CAPABILITY_CACHE_VERSION + 1],
+  ])('keeps %s readable while the cache converges', (_label, cacheVersion) => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,
       cliType: 'registry',
@@ -496,7 +542,8 @@ describe('buildAcpSelectorOptions', () => {
         [agentConfigId]: {
           cliType: 'registry',
           agentType: 'codex',
-          cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1,
+          cacheVersion,
+          provenance: 'runtime',
           modes: [],
           models: [],
           configOptions: [
@@ -513,7 +560,18 @@ describe('buildAcpSelectorOptions', () => {
       }),
     });
 
-    expect(options.configOptionSelectors).toEqual([]);
+    expect(options.capabilityAuthority).toBe('authoritative');
+    expect(options.configOptionSelectors).toEqual([
+      {
+        configId: 'safe_mode',
+        label: 'Safe Mode',
+        description: undefined,
+        category: undefined,
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      },
+    ]);
   });
 
   it('provides no mode options before registry capabilities have loaded', () => {
@@ -559,7 +617,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.configOptionSelectors.map((selector) => selector.configId)).toEqual([
       'reasoning_effort',
       'fast-mode',
-      'collaboration_mode',
+      'plan_mode',
     ]);
     expect(options.capabilityAuthority).toBe('provisional');
     expect(options.defaultModelId).toBe('gpt-5.6-sol');
@@ -627,25 +685,30 @@ describe('buildAcpSelectorOptions', () => {
     expect(options.modeOptions.length).toBeGreaterThan(0);
   });
 
-  it('keeps builtin Grok interaction mode in the run-config selectors', () => {
-    const options = buildAcpSelectorOptions({
-      configId: agentConfigId,
-      cliType: 'builtin',
-      agentType: 'grok',
-      machine: machineWithCapabilities({}),
-    });
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'offers independent Plan before the first %s probe',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType,
+        machine: machineWithCapabilities({}),
+      });
 
-    expect(options.capabilityAuthority).toBe('provisional');
-    expect(options.modeOptions).toEqual([]);
-    expect(options.defaultModeId).toBeNull();
-    expect(
-      options.configOptionSelectors.find((selector) => selector.configId === 'interaction_mode')
-    ).toMatchObject({
-      label: 'Interaction Mode',
-      currentValue: 'agent',
-      options: [{ value: 'agent' }, { value: 'plan' }],
-    });
-  });
+      expect(options.capabilityAuthority).toBe('provisional');
+      const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+      expect(ordered.planModeSelectors).toMatchObject([
+        { configId: 'plan_mode', type: 'boolean', currentValue: false },
+      ]);
+      expect(ordered.interactionModeSelectors).toEqual([]);
+      expect(options.modeOptions.some((option) => option.value === 'plan')).toBe(false);
+      expect(
+        ordered.permissionModeSelectors
+          .flatMap((selector) => selector.options)
+          .some((option) => option.value === 'plan')
+      ).toBe(false);
+    }
+  );
 
   it('rebuilds the Grok thought-level ladder for the selected model, not the probed one', () => {
     /* The capability probe measured the thought-level list while a model with
@@ -1053,9 +1116,63 @@ describe('buildAcpSelectorOptions', () => {
 });
 
 describe('plan mode selector value semantics', () => {
-  /* Codex is the only agent that carries plan mode as a config option, and it
-     publishes exactly one shape: a `collaboration_mode` select over
-     `default` / `plan` — never the `on` / `off` pair the fast toggle uses. */
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'does not reintroduce static Plan when the %s runtime omits it',
+    (agentType) => {
+      const options = buildAcpSelectorOptions({
+        cliType: 'builtin',
+        agentType,
+        configId: agentConfigId,
+        machine: machineWithCapabilities({
+          [agentConfigId]: {
+            cliType: 'builtin',
+            agentType,
+            provenance: 'runtime',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            fetchedAt: 1,
+            models: [],
+            modes: [],
+            configOptions: [
+              {
+                id: 'permission_mode',
+                name: 'Permission',
+                category: '_permission',
+                type: 'select',
+                currentValue: 'ask',
+                options: [{ value: 'ask', name: 'Ask' }],
+              },
+            ],
+          },
+        }),
+      });
+      expect(options.capabilityAuthority).toBe('authoritative');
+      expect(
+        orderAcpConfigOptionSelectors(options.configOptionSelectors).planModeSelectors
+      ).toEqual([]);
+    }
+  );
+
+  it('projects runtime Core options into the Plan group and toggles boolean values', () => {
+    const options = buildAcpSelectorOptions({
+      cliType: 'builtin',
+      agentType: 'codex',
+      configId: agentConfigId,
+      machine: codexMachineWithConfigOptions([
+        { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
+      ]),
+    });
+    const ordered = orderAcpConfigOptionSelectors(options.configOptionSelectors);
+    expect(ordered.booleanSelectors).toEqual([]);
+    expect(ordered.planModeSelectors).toHaveLength(1);
+    const selector = ordered.planModeSelectors[0]!;
+    const enabled = togglePlanModeSelectorValue(selector, undefined);
+    expect(enabled).toBe(true);
+    expect(resolvePlanModeSelectorEnabled(selector, enabled)).toBe(true);
+    expect(togglePlanModeSelectorValue(selector, enabled)).toBe(false);
+    expect(resolvePlanModeSelectorEnabled(selector, false)).toBe(false);
+  });
+
+  // Older adapters and caches still use the default/plan select.
   const collaborationModeSelector: AcpConfigOptionSelector = {
     configId: 'collaboration_mode',
     label: 'Collaboration mode',

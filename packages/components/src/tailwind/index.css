@@ -10,7 +10,7 @@
 @source "../../node_modules/konsta/shared";
 @source "../../node_modules/konsta/styles";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
 
 @theme inline {
   --font-ios: var(--font-sans);
@@ -487,8 +487,8 @@ pre,
     overflow-y: visible !important;
     overscroll-behavior-x: contain;
     padding: 1rem;
-    /* Overrides Streamdown's own grab cursor: the block does not pan in place,
-       it opens `MermaidDiagramViewer` (markdown-renderer.tsx tags it
+    /* Overrides Streamdown's own grab cursor: an inactive preview does not pan,
+       it activates on click (`use-mermaid-diagram-canvas.tsx` tags it
        `role="button"` once the diagram renders). */
     cursor: zoom-in !important;
     scrollbar-gutter: stable;
@@ -500,6 +500,18 @@ pre,
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
     border-radius: 0.375rem;
+  }
+
+  /* The activated canvas stops promising a zoom it has already performed. Its
+     ring cannot live here: activating focuses the diagram, and the global
+     `*:focus { outline: none !important }` below outranks any rule of ours, so
+     `use-mermaid-diagram-canvas.tsx` writes it inline with `important`. */
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div {
+    cursor: grab !important;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div:active {
+    cursor: grabbing !important;
   }
 
   .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar {
@@ -1961,6 +1973,27 @@ pre,
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
   .mobile-drill-out {
+    animation: none;
+  }
+}
+
+/* An agent runtime whose wait has no denominator (the ACP handshake) gets the
+   same ring as a download, on an orbit instead of a fill. Transform-only and
+   CSS-driven, so React stays idle while it spins. */
+@keyframes agent-readiness-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agent-readiness-orbit {
+  animation: agent-readiness-orbit 1.4s linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-readiness-orbit {
     animation: none;
   }
 }

@@ -9,14 +9,27 @@ const REQUIRED_HEADINGS = [
   '## Related issue',
   '## Problem / pressure',
   '## Summary',
+  '## Visual explanation',
   '## Test plan',
   '## Context handoff',
 ];
+export const COMPLEX_CHANGE_LINE_THRESHOLD = 200;
+const STRUCTURAL_VIEW_LANGUAGES = new Set([
+  'diff',
+  'javascript',
+  'jsx',
+  'mermaid',
+  'text',
+  'ts',
+  'tsx',
+  'typescript',
+]);
 const CONTEXT_HANDOFF_BEGIN = '<!-- context-handoff:begin -->';
 const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
 const REQUIRED_CONTEXT_HEADINGS = [
   '### Instructions for reviewing agents',
   '### Authoring context',
+  '### Original user prompt',
 ];
 const REVIEW_INSTRUCTION_FIELDS = [
   'Review focus',
@@ -39,6 +52,7 @@ function parseArgs(argv) {
   const options = {
     body: process.env.PR_BODY ?? '',
     bodyFile: null,
+    changedLines: null,
     eventFile: null,
   };
 
@@ -48,6 +62,12 @@ function parseArgs(argv) {
       options.body = argv[++index] ?? '';
     } else if (argument === '--body-file') {
       options.bodyFile = argv[++index] ?? null;
+    } else if (argument === '--changed-lines') {
+      const value = Number(argv[++index]);
+      if (!Number.isInteger(value) || value < 0) {
+        throw new Error('--changed-lines must be a non-negative integer.');
+      }
+      options.changedLines = value;
     } else if (argument === '--event-file') {
       options.eventFile = argv[++index] ?? null;
     } else if (argument === '--help' || argument === '-h') {
@@ -60,22 +80,72 @@ function parseArgs(argv) {
   return options;
 }
 
+/**
+ * Return line indexes that match `predicate` while ignoring fenced code payloads.
+ *
+ * Markdown headings inside the original-prompt fence are source text, not PR
+ * structure. Track CommonMark-style backtick/tilde fences so section discovery
+ * and duplicate-heading checks agree on the same structural lines.
+ */
+function lineIndexesOutsideFences(lines, predicate) {
+  const indexes = [];
+  let fence = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
+      if (
+        closing &&
+        closing[1][0] === fence.marker &&
+        closing[1].length >= fence.length
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (opening) {
+      const marker = opening[1];
+      const info = opening[2] ?? '';
+      // CommonMark does not allow a backtick in a backtick fence's info string.
+      if (marker[0] !== '`' || !info.includes('`')) {
+        fence = { marker: marker[0], length: marker.length };
+        continue;
+      }
+    }
+
+    if (predicate(line, index)) {
+      indexes.push(index);
+    }
+  }
+
+  return indexes;
+}
+
 function headingCount(markdown, heading) {
-  return markdown.split('\n').filter((line) => line.trimEnd() === heading).length;
+  const lines = markdown.split('\n');
+  return lineIndexesOutsideFences(lines, (line) => line.trimEnd() === heading).length;
 }
 
 function sectionBody(markdown, heading) {
   const lines = markdown.split('\n');
-  const start = lines.findIndex((line) => line.trimEnd() === heading);
+  const starts = lineIndexesOutsideFences(lines, (line) => line.trimEnd() === heading);
+  const start = starts[0] ?? -1;
   if (start === -1) {
     return null;
   }
 
   const level = heading.startsWith('### ') ? 3 : 2;
   const nextHeading = level === 3 ? /^#{2,3}(?:\s|$)/ : /^##(?:\s|$)/;
-  const next = lines.findIndex((line, index) => index > start && nextHeading.test(line));
+  const next = lineIndexesOutsideFences(
+    lines,
+    (line, index) => index > start && nextHeading.test(line)
+  )[0];
   return lines
-    .slice(start + 1, next === -1 ? undefined : next)
+    .slice(start + 1, next === undefined ? undefined : next)
     .join('\n')
     .trim();
 }
@@ -108,11 +178,41 @@ function isCompleteContext(value) {
   return isFilledSection(normalized) && !WITHHELD_CONTEXT.test(normalized);
 }
 
+function extractOriginalUserPrompt(section) {
+  if (!section) {
+    return '';
+  }
+
+  for (const match of section.matchAll(/(`{3,}|~{3,})(?:text)?[^\n]*\n([\s\S]*?)\n\1/g)) {
+    const prompt = match[2].replace(/<!--[\s\S]*?-->/g, '').trim();
+    if (prompt) {
+      return prompt;
+    }
+  }
+  return '';
+}
+
+function hasStructuralView(section) {
+  if (!section) {
+    return false;
+  }
+  for (const match of section.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)) {
+    const language = match[1].trim().toLowerCase();
+    if (STRUCTURAL_VIEW_LANGUAGES.has(language) && match[2].trim()) {
+      return true;
+    }
+  }
+  if (/!\[[^\]]*\]\([^\s)]+\)/.test(section)) {
+    return true;
+  }
+  return /\[[^\]]+\]\([^\s)]+\.html(?:[?#][^\s)]*)?\)/i.test(section);
+}
+
 export function hasRelatedIssueReference(body) {
   return hasRelatedIssueLink(body);
 }
 
-export function checkPullRequestBody(body) {
+export function checkPullRequestBody(body, { changedLines = null } = {}) {
   const text = (body ?? '').replace(/\r\n/g, '\n');
   const findings = [];
 
@@ -142,12 +242,28 @@ export function checkPullRequestBody(body) {
     );
   }
 
-  for (const heading of ['## Problem / pressure', '## Summary', '## Test plan']) {
+  for (const heading of [
+    '## Problem / pressure',
+    '## Summary',
+    '## Visual explanation',
+    '## Test plan',
+  ]) {
     if (requiredHeadingCounts.get(heading) === 1 && !isFilledSection(sectionBody(text, heading))) {
       findings.push(
         `${heading} must contain meaningful content, not only comments or placeholders.`
       );
     }
+  }
+
+  const visualExplanation = sectionBody(text, '## Visual explanation');
+  if (
+    Number.isInteger(changedLines) &&
+    changedLines > COMPLEX_CHANGE_LINE_THRESHOLD &&
+    !hasStructuralView(visualExplanation)
+  ) {
+    findings.push(
+      `## Visual explanation must include a structural view because this PR changes ${changedLines} lines, above the ${COMPLEX_CHANGE_LINE_THRESHOLD}-line complexity floor.`
+    );
   }
 
   const contextHeadingCounts = new Map();
@@ -178,6 +294,15 @@ export function checkPullRequestBody(body) {
     }
   }
 
+  if (contextHeadingCounts.get('### Original user prompt') === 1) {
+    const originalPrompt = extractOriginalUserPrompt(sectionBody(text, '### Original user prompt'));
+    if (!originalPrompt) {
+      findings.push(
+        'Original user prompt must contain the triggering prompt inside a fenced code block; the template placeholder does not count.'
+      );
+    }
+  }
+
   if (contextHeadingCounts.get('### Instructions for reviewing agents') === 1) {
     const instructions = sectionBody(text, '### Instructions for reviewing agents');
     for (const field of REVIEW_INSTRUCTION_FIELDS) {
@@ -198,15 +323,21 @@ export function checkPullRequestBody(body) {
   return { ok: findings.length === 0, findings };
 }
 
-function bodyFromOptions(options) {
+function inputFromOptions(options) {
   if (options.eventFile) {
     const event = JSON.parse(readFileSync(options.eventFile, 'utf8'));
-    return event.pull_request?.body ?? '';
+    const pullRequest = event.pull_request ?? {};
+    return {
+      body: pullRequest.body ?? '',
+      changedLines:
+        options.changedLines ??
+        Number(pullRequest.additions ?? 0) + Number(pullRequest.deletions ?? 0),
+    };
   }
   if (options.bodyFile) {
-    return readFileSync(options.bodyFile, 'utf8');
+    return { body: readFileSync(options.bodyFile, 'utf8'), changedLines: options.changedLines };
   }
-  return options.body;
+  return { body: options.body, changedLines: options.changedLines };
 }
 
 function main() {
@@ -220,12 +351,13 @@ function main() {
 
   if (options.help) {
     console.log(
-      'Usage: node .github/scripts/check-pr-body.mjs [--event-file event.json | --body-file body.md | --body text]'
+      'Usage: node .github/scripts/check-pr-body.mjs [--event-file event.json | --body-file body.md | --body text] [--changed-lines count]'
     );
     return;
   }
 
-  const result = checkPullRequestBody(bodyFromOptions(options));
+  const input = inputFromOptions(options);
+  const result = checkPullRequestBody(input.body, { changedLines: input.changedLines });
   if (result.ok) {
     console.log('PR body format OK');
     return;

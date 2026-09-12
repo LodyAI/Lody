@@ -1,5 +1,5 @@
-import { matchesKeyboardEvent, parseBinding } from './key-matcher';
-import { getPlatform, getRuntime, isMac } from './platform';
+import { canonicalizeBinding } from './key-matcher';
+import { getPlatform, getRuntime } from './platform';
 import {
   createShortcutUsagePayload,
   type ShortcutUsageAnalyticsHandler,
@@ -10,7 +10,6 @@ import { loadUserBindings, saveUserBindings, type UserBindingsMap } from './user
 
 type ResolvedBinding = {
   raw: string;
-  parsed: ReturnType<typeof parseBinding>;
   canonical: string;
   preventDefault: boolean;
   when?: KeyBinding['when'];
@@ -24,17 +23,17 @@ type CommandRegistration = {
 
 type ScopeRegistration = {
   scope: KeyScope;
-  /** Parsed once at registration; `undefined` means "claims everything". */
-  parsedClaims: ReturnType<typeof parseBinding>[] | undefined;
+  /** Canonicalized once at registration; `undefined` means "claims everything". */
+  canonicalClaims: Set<string> | undefined;
 };
 
 /**
  * Central command + key-binding registry.
  *
  * Design tradeoffs:
- *   - Single capture-phase `keydown` listener: gives the registry first crack at events
- *     for `preventDefault`. Rejected per-binding listeners (overhead, ordering) and
- *     bubble-phase (loses to Radix focus traps and similar component-local handlers).
+ *   - DOM listener ownership stays in `CommandShortcutHost`, which uses TanStack Hotkeys for
+ *     parsing and matching behind one capture-phase listener. The registry only decides which
+ *     matching command may run.
  *   - Stack duplicate ids so stable built-in definitions stay visible/customizable while
  *     route-scoped components temporarily provide the live handler. Rejected replace-only:
  *     unmounting a session page would remove its shortcut from Settings entirely.
@@ -61,8 +60,6 @@ class CommandRegistry {
   private commandByCanonical = new Map<string, string>();
   private snapshot: Command[] = [];
   private listeners = new Set<() => void>();
-  private target: Window | HTMLElement | null = null;
-  private boundHandler: ((e: KeyboardEvent) => void) | null = null;
   private paused = false;
   // Innermost-last, like the command stacks: a scope registered later wins.
   private scopes: ScopeRegistration[] = [];
@@ -98,33 +95,6 @@ class CommandRegistry {
 
   setShortcutAnalyticsHandler(handler: ShortcutUsageAnalyticsHandler | null): void {
     this.shortcutAnalyticsHandler = handler;
-  }
-
-  /**
-   * Start listening on the target. Must be called once at app startup. Calling again is a
-   * no-op unless detach() ran first.
-   */
-  attach(target: Window | HTMLElement = typeof window !== 'undefined' ? window : null!): void {
-    if (this.target) return;
-    if (!target) return;
-    this.ensureUserOverridesLoaded();
-    this.target = target;
-    this.boundHandler = (e) => this.handleKeyDown(e);
-    target.addEventListener('keydown', this.boundHandler as EventListener, { capture: true });
-  }
-
-  detach(): void {
-    if (this.target && this.boundHandler) {
-      this.target.removeEventListener(
-        'keydown',
-        this.boundHandler as EventListener,
-        {
-          capture: true,
-        } as EventListenerOptions
-      );
-    }
-    this.target = null;
-    this.boundHandler = null;
   }
 
   /**
@@ -166,7 +136,9 @@ class CommandRegistry {
   registerKeyScope(scope: KeyScope): () => void {
     const registration: ScopeRegistration = {
       scope,
-      parsedClaims: scope.claims?.map((claim) => parseBinding(claim)),
+      canonicalClaims: scope.claims
+        ? new Set(scope.claims.map(canonicalizeBinding).filter((claim) => claim !== null))
+        : undefined,
     };
     this.scopes.push(registration);
     return () => {
@@ -238,6 +210,23 @@ class CommandRegistry {
   }
 
   /**
+   * Dispatch a keybinding already matched by the renderer shortcut host. The hotkey engine
+   * owns DOM matching; this method owns command precedence, scopes, guards, and analytics.
+   */
+  dispatchKeybinding(binding: string, event: KeyboardEvent): void {
+    const canonical = canonicalizeBinding(binding);
+    if (canonical) this.handleKeyDown(canonical, event);
+  }
+
+  /** Refresh persisted overrides after this renderer mounts or another window changes them. */
+  reloadUserKeybindings(): void {
+    this.userOverrides = loadUserBindings();
+    this.userOverridesLoaded = true;
+    this.rebuildBindings();
+    this.publishSnapshot();
+  }
+
+  /**
    * The command's declared defaults — what user overrides REPLACE. Returns the raw binding
    * strings, ignoring overrides while respecting platform/runtime filters for this device.
    */
@@ -287,13 +276,9 @@ class CommandRegistry {
 
   /** Find the command id currently bound to a given binding string, if any. */
   findCommandBoundTo(binding: string, excludeId?: string): string | null {
-    let parsed: ReturnType<typeof parseBinding>;
-    try {
-      parsed = parseBinding(binding);
-    } catch {
-      return null;
-    }
-    const hit = this.commandByCanonical.get(canonicalKey(parsed));
+    const canonical = canonicalizeBinding(binding);
+    if (!canonical) return null;
+    const hit = this.commandByCanonical.get(canonical);
     if (!hit || hit === excludeId) return null;
     return hit;
   }
@@ -352,15 +337,11 @@ class CommandRegistry {
           );
         }
 
-        let parsed: ReturnType<typeof parseBinding>;
-        try {
-          parsed = parseBinding(binding.key);
-        } catch (error) {
-          console.error(`[commands] invalid binding for "${cmd.id}":`, error);
+        const canonical = canonicalizeBinding(binding.key);
+        if (!canonical) {
+          console.error(`[commands] invalid binding for "${cmd.id}": "${binding.key}"`);
           continue;
         }
-
-        const canonical = canonicalKey(parsed);
         const prior = byCanonical.get(canonical);
         if (prior && prior !== cmd.id && import.meta.env?.DEV) {
           console.warn(
@@ -371,7 +352,6 @@ class CommandRegistry {
 
         next.push({
           raw: binding.key,
-          parsed,
           canonical,
           preventDefault: binding.preventDefault ?? true,
           when: binding.when,
@@ -388,12 +368,10 @@ class CommandRegistry {
     this.commandByCanonical = byCanonical;
   }
 
-  private handleKeyDown(event: KeyboardEvent): void {
+  private handleKeyDown(canonical: string, event: KeyboardEvent): void {
     if (this.paused) return;
     if (this.bindings.length === 0) return;
     if (event.defaultPrevented) return;
-    const mac = isMac();
-
     // A focused text-editing surface gets the key first. Checked per event
     // rather than per binding, so it holds for user-rebound keys too — the
     // whole reason this is not a `when` on the default binding.
@@ -402,7 +380,7 @@ class CommandRegistry {
     // Iterate in reverse so most-recently-registered wins on collisions.
     for (let i = this.bindings.length - 1; i >= 0; i--) {
       const b = this.bindings[i]!;
-      if (!matchesKeyboardEvent(b.parsed, event, mac)) continue;
+      if (b.canonical !== canonical) continue;
       if (b.when && !b.when(event)) continue;
       const cmd = this.activeCommands.get(b.commandId)?.command;
       if (!cmd) continue;
@@ -410,8 +388,8 @@ class CommandRegistry {
         // Claimed keys (or every key, when the scope claims broadly) belong to
         // the editor. Leave the event alone — no preventDefault — so its own
         // keymap still sees it.
-        const claims = scope.parsedClaims;
-        if (!claims || claims.some((claim) => matchesKeyboardEvent(claim, event, mac))) {
+        const claims = scope.canonicalClaims;
+        if (!claims || claims.has(canonical)) {
           return;
         }
       }
@@ -452,17 +430,6 @@ class CommandRegistry {
       .map((registration) => registration.command);
     for (const listener of this.listeners) listener();
   }
-}
-
-function canonicalKey(parsed: ReturnType<typeof parseBinding>): string {
-  return [
-    parsed.mod ? '$mod' : '',
-    parsed.ctrl ? 'ctrl' : '',
-    parsed.meta ? 'meta' : '',
-    parsed.alt ? 'alt' : '',
-    parsed.shift ? 'shift' : '',
-    parsed.key,
-  ].join(':');
 }
 
 export const commands = new CommandRegistry();

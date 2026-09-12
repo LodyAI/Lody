@@ -4,6 +4,11 @@ Background for `apps/cli`. Binding rules stay in [apps/cli/AGENTS.md](../../apps
 and the scoped files under it; this page explains why those rules exist and how the pieces fit
 together.
 
+Session/Task MCP tool contracts are owned by
+[src/mcp/AGENTS.md](../../apps/cli/src/mcp/AGENTS.md), including callers outside that
+directory. Cross-entry model validation, Session provenance, and feedback privacy
+remain in the CLI parent rules.
+
 ## Development build
 
 `pnpm dev` bundles with esbuild (`scripts/dev-build.mjs`, ~3s) into `dist-dev/`, then runs
@@ -92,3 +97,7 @@ after a submodule update, which is why `prepare:acp-adapters` runs before both
 `scripts/dev-build.mjs` in the CLI `dev` script and Vite in the CLI `build` chain. The
 `src/claude-acp-entry.ts` and `src/codex-acp-entry.ts` entries import the adapters' package roots,
 whose runtime exports point at adapter `dist/`.
+
+`packages/acp-extension-core` is the exception: it builds its own `dist/` through its `prepare`
+script on every install, because `packages/shared` (and every other workspace consumer) imports
+its runtime export directly. `prepare:acp-adapters` therefore only compiles the four adapters.

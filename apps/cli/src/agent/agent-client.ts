@@ -1,3 +1,4 @@
+import type { LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -10,6 +11,7 @@ import {
   LODY_TOOL_NAMES,
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
+  type LodyGoalCapability,
   type LodySubagentTask,
   type RateLimit,
   type RateLimitsGetRequest,
@@ -23,10 +25,11 @@ import {
   type AcpConfigOptionValue,
   type AcpSessionNotification,
   type AgentConfigCliType,
+  type SessionGoalAction,
   type SessionGoalContent,
   type SessionTurnInputConfig,
   sanitizeGoalObjective,
-  usesAcpProvidedSessionTitle,
+  trustsUntaggedAcpSessionTitle,
   parseSessionNotification,
   SessionContextWindowUsage,
   SessionId,
@@ -36,6 +39,8 @@ import {
   buildAskUserQuestionElicitationResponse,
   formatMcpResolutionProblem,
   getServerNow,
+  ACP_INIT_TIMEOUT_MS as DEFAULT_ACP_INIT_TIMEOUT_MS,
+  ACP_NEW_SESSION_TIMEOUT_MS as DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -78,6 +83,13 @@ import {
   parseLodyExtensionMessage,
   parseRateLimitsSnapshot,
 } from './lody-acp-extension';
+import {
+  buildGoalPromptMeta,
+  buildGoalSlashCommandText,
+  resolveGoalActionTransport,
+  type GoalActionTransport,
+  type GoalPromptControl,
+} from './goal-control';
 
 /**
  * Checks if an error is a transport-related error that may be transient.
@@ -572,6 +584,8 @@ function extractImageGenerationContentFields(content: unknown): {
  * Synchronous: everything that needs I/O already happened in the load phase.
  */
 export interface AgentClientOptions {
+  /** Resolve logical project identity only after worktreeProject capability negotiation. */
+  resolveWorktreeProject?: () => Promise<LodyWorktreeProject>;
   sessionId: SessionId;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
@@ -636,12 +650,14 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
   private acknowledgedSteerCapability: AcknowledgedSteerCapability | null = null;
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
+  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -1355,6 +1371,81 @@ export class AgentClient implements acp.Client {
     return z.string().parse(result.output);
   }
 
+  getGoalCapability(): LodyGoalCapability | undefined {
+    return this.lodyExtensionCapabilities.goal;
+  }
+
+  resolveGoalActionTransport(action: SessionGoalAction): GoalActionTransport | null {
+    return resolveGoalActionTransport(this.lodyExtensionCapabilities.goal, action);
+  }
+
+  /**
+   * Move durable goal state without a turn.
+   *
+   * An active goal holds this session's single ACP prompt open across the
+   * agent's own continuations, so a pause or clear that had to wait for a free
+   * prompt slot would wait for the very thing it is trying to stop. The agent
+   * publishes the resulting snapshot on its own session update; this response is
+   * only the acknowledgement that the action landed.
+   */
+  async controlGoal(action: SessionGoalAction): Promise<void> {
+    if (this.resolveGoalActionTransport(action) !== 'request') {
+      throw new Error(
+        `[ACP_GOAL_UNSUPPORTED] Agent did not advertise out-of-band goal control for ${action}`
+      );
+    }
+    const sessionId = this.acpSessionId;
+    const connection = this.connection;
+    if (!sessionId || !connection) {
+      throw new Error('[ACP_GOAL_UNAVAILABLE] ACP session is not connected');
+    }
+    const response = await connection.request<unknown, { sessionId: string; action: string }>(
+      LODY_EXTENSION_METHODS.sessionGoal,
+      { sessionId, action }
+    );
+    const parsed = z
+      .object({ goal: LodyGoalSnapshotSchema.nullable().optional() })
+      .safeParse(response);
+    if (!parsed.success) {
+      throw new Error(
+        `[ACP_GOAL_INVALID_RESPONSE] Agent returned an invalid goal control response: ${parsed.error.message}`
+      );
+    }
+    this.logger.debug(
+      `[${this.options.sessionId}] Goal ${action} applied (status=${parsed.data.goal?.status ?? 'none'})`
+    );
+  }
+
+  /**
+   * Shape a prompt that carries a goal action.
+   *
+   * Metadata keeps the action off the transcript. A runtime that never
+   * advertised the metadata transport would ignore it and run the fallback
+   * blocks as an ordinary message, so those runtimes get the slash bridge that
+   * they do understand.
+   */
+  private buildGoalControlPrompt(
+    prompt: acp.ContentBlock[],
+    control: GoalPromptControl
+  ): { prompt: acp.ContentBlock[]; _meta?: acp.PromptRequest['_meta'] } {
+    // This path already owns a prompt (including cold-session restoration).
+    // Prefer the advertised prompt transport, not a live-session request.
+    const transport = resolveGoalActionTransport(
+      this.lodyExtensionCapabilities.goal,
+      control.action,
+      'prompt'
+    );
+    if (transport === 'promptMeta') {
+      return { prompt, _meta: buildGoalPromptMeta(control) };
+    }
+    if (transport === 'slashCommand') {
+      return { prompt: [{ type: 'text', text: buildGoalSlashCommandText(control) }] };
+    }
+    throw new Error(
+      `[ACP_GOAL_UNSUPPORTED] Agent cannot run goal action ${control.action} inside a prompt`
+    );
+  }
+
   private async requestSubagentExtension<T extends Record<string, unknown>>(
     method: string,
     params: Record<string, unknown>
@@ -1540,7 +1631,7 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    const ownsTitleGeneration = usesAcpProvidedSessionTitle(
+    const trustsUntaggedTitle = trustsUntaggedAcpSessionTitle(
       this.options.agentConfig?.cliType,
       this.options.agentConfig?.agentType
     );
@@ -1554,7 +1645,7 @@ export class AgentClient implements acp.Client {
       (lodyTitleMeta.success && lodyTitleMeta.data.titleSource === 'explicit') ||
       (legacyCodexTitleMeta?.success === true &&
         legacyCodexTitleMeta.data.titleSource === 'explicit');
-    if (!ownsTitleGeneration && !isExplicitProviderTitle) {
+    if (!trustsUntaggedTitle && !isExplicitProviderTitle) {
       return;
     }
 
@@ -1580,6 +1671,7 @@ export class AgentClient implements acp.Client {
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
+      ...(this.worktreeProject ? { worktreeProject: this.worktreeProject } : {}),
       ...(forkSessionTurnId !== undefined
         ? { forkAtTurn: { version: 1 as const, turnId: forkSessionTurnId } }
         : {}),
@@ -1681,7 +1773,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
-    const sessionStartMeta = this.getSessionStartMeta();
+    this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
         resumeSessionId ?? 'none'
@@ -1722,7 +1814,10 @@ export class AgentClient implements acp.Client {
     // connection.initialize() internally spawns the CLI process and waits for it to respond.
     // Missing dependencies or local runtime issues can hang this operation indefinitely.
     // Apply a hard timeout so startup fails fast.
-    const ACP_INIT_TIMEOUT_MS = Math.max(0, timeoutOptions.initTimeoutMs ?? 120_000); // 2 minutes default
+    const ACP_INIT_TIMEOUT_MS = Math.max(
+      0,
+      timeoutOptions.initTimeoutMs ?? DEFAULT_ACP_INIT_TIMEOUT_MS
+    );
 
     let initResponse: acp.InitializeResponse;
     try {
@@ -1823,6 +1918,14 @@ export class AgentClient implements acp.Client {
       workdir = target.workdir;
       resumeSessionId = target.resumeSessionId;
     }
+
+    if (
+      this.lodyExtensionCapabilities.worktreeProject?.version === 1 &&
+      this.options.resolveWorktreeProject
+    ) {
+      this.worktreeProject = await withAbort(this.options.resolveWorktreeProject(), startupAbort);
+    }
+    const sessionStartMeta = this.getSessionStartMeta();
 
     this.logger.debug(`[${this.options.sessionId}] About to establish ACP session`);
     const newSessionStart = performance.now();
@@ -2071,7 +2174,10 @@ export class AgentClient implements acp.Client {
       // 2. Start the internal query system which spawns another subprocess
       // 3. Call query.supportedModels() and query.supportedCommands()
       // Any of these can hang due to runtime/environment issues. Apply a hard timeout.
-      const ACP_NEW_SESSION_TIMEOUT_MS = Math.max(0, timeoutOptions.newSessionTimeoutMs ?? 120_000); // 2 minutes default
+      const ACP_NEW_SESSION_TIMEOUT_MS = Math.max(
+        0,
+        timeoutOptions.newSessionTimeoutMs ?? DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS
+      );
 
       try {
         sessionResponse = await withTimeout(
@@ -2365,15 +2471,38 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  /** Includes raw ACP requests whose local caller has already been cancelled. */
+  get pendingPromptCompletion(): Promise<void> | null {
+    return this.pendingPrompts.size > 0
+      ? Promise.allSettled([...this.pendingPrompts]).then(() => undefined)
+      : null;
+  }
+
   async prompt(
     sessionId: ACPSessionId,
     prompt: acp.ContentBlock[],
-    options?: { signal?: AbortSignal; _meta?: acp.PromptRequest['_meta'] }
+    options?: {
+      signal?: AbortSignal;
+      _meta?: acp.PromptRequest['_meta'];
+      /**
+       * Run a goal action inside this prompt. The action travels as metadata so
+       * the conversation never carries command text; runtimes that predate that
+       * capability get the `/goal …` bridge instead.
+       */
+      goalControl?: GoalPromptControl;
+    }
   ) {
+    const goalPrompt = options?.goalControl
+      ? this.buildGoalControlPrompt(prompt, options.goalControl)
+      : null;
+    if (goalPrompt) {
+      prompt = goalPrompt.prompt;
+    }
     const span = startTraceSpan(this.logger, 'agent_client.prompt', {
       sessionId: this.options.sessionId,
       acpSessionId: sessionId,
       promptBlocks: prompt.length,
+      ...(options?.goalControl ? { goalAction: options.goalControl.action } : {}),
     });
     this.logger.debug(
       `[${this.options.sessionId}] AgentClient.prompt called (acpSessionId=${sessionId})`
@@ -2387,10 +2516,11 @@ export class AgentClient implements acp.Client {
       this.logger.debug(
         `[${this.options.sessionId}] Session match verified, calling connection.prompt`
       );
+      const promptMeta = goalPrompt?._meta ?? options?._meta;
       const promptPromise = this.connection?.prompt({
         sessionId,
         prompt,
-        ...(options?._meta ? { _meta: options._meta } : {}),
+        ...(promptMeta ? { _meta: promptMeta } : {}),
       });
       if (!promptPromise) {
         this.logger.error(
@@ -2399,6 +2529,14 @@ export class AgentClient implements acp.Client {
         span.end({ outcome: 'undefined-promise' });
         return undefined;
       }
+
+      // A local abort does not finish the remote request. Track every raw
+      // request, including overlapping prompts used by acknowledged handoff.
+      this.pendingPrompts.add(promptPromise);
+      const releasePrompt = () => {
+        this.pendingPrompts.delete(promptPromise);
+      };
+      void promptPromise.then(releasePrompt, releasePrompt);
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;

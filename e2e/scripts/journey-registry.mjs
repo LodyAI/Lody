@@ -147,15 +147,24 @@ export function validateRegistry(registry) {
       failures.push(`${path}.freshness must be an integer from 1 through 5`);
     }
     requireStringArray(journey.scoutJourneys, `${path}.scoutJourneys`, failures, true);
-    if (journey.blockedReason !== null && typeof journey.blockedReason !== 'string') {
-      failures.push(`${path}.blockedReason must be null or a string`);
+    if (
+      journey.blockedReason !== null &&
+      (typeof journey.blockedReason !== 'string' || journey.blockedReason.trim() === '')
+    ) {
+      failures.push(`${path}.blockedReason must be null or a non-empty string`);
     }
 
     if (journey.state === 'active') {
       requireString(journey.feature, `${path}.feature`, failures);
+      if (journey.blockedReason !== null) {
+        failures.push(`${path}.blockedReason must be null while the journey is active`);
+      }
     } else {
       requireString(journey.gap, `${path}.gap`, failures);
       requireStringArray(journey.evidence, `${path}.evidence`, failures);
+      if (journey.state === 'quarantined' && journey.blockedReason === null) {
+        failures.push(`${path}.blockedReason must explain why the journey is quarantined`);
+      }
     }
 
     if (Array.isArray(journey.actions) && journey.actions.length > 0) {
@@ -284,6 +293,10 @@ export function renderCoverage(registry) {
     ''
   );
   return lines.join('\n');
+}
+
+export function coverageMatchesRegistry(coverage, registry) {
+  return coverage.replaceAll('\r\n', '\n') === renderCoverage(registry);
 }
 
 function normalizePath(path) {

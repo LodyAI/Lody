@@ -15,6 +15,7 @@ import {
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  HistoryWriteError,
   MachineId,
   WorkspaceId,
   SessionInputBlockSchema,
@@ -39,7 +40,7 @@ import {
   type TitleGenerationConfig,
   isManagedBuiltinAgentType,
   sanitizeLodyInternalInstructions,
-  usesAcpProvidedSessionTitle,
+  acpOwnsSessionTitleGeneration,
   SessionCreateResponse,
   SessionChatResponse,
   SessionStatusFactory,
@@ -133,6 +134,8 @@ import {
   getServerNow,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isSessionGoalActive,
+  type SessionGoalAction,
+  type SessionGoalResponse,
   resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
   type RepoId,
@@ -253,7 +256,6 @@ import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/a
 import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
 import type { AgentSessionWarning } from '@/agent/agent-client';
-import { ensureValidBranchName } from '@/agent/branch-name-generator';
 import {
   SessionActivePresenceController,
   type SessionActivePresencePhase,
@@ -264,7 +266,6 @@ import {
 } from './session-activity-status';
 import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
-import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
   AgentClient,
   type AcpWriteTextFileEvidence,
@@ -273,10 +274,6 @@ import {
 } from 'src/agent/agent-client';
 import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from '@/session/worktree/worktree-manager';
-import {
-  isManagedWorktreeBranchName,
-  renameBranchWithAvailableSuffix,
-} from '@/session/worktree/branch-name-allocation';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -386,7 +383,6 @@ import {
   handleLocalProjectWorktreeConfigRequest,
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
-import { readLegacySessionLaunchConfig } from '@/session/session-launch-config-resolver';
 import { resolveSessionWorktreeCleanupConfig } from '@/session/worktree/worktree-config-resolver';
 
 type RepoDocMetaPatch = Parameters<LoroDocumentManager['repo']['upsertDocMeta']>[1];
@@ -2769,6 +2765,36 @@ export class MessageHandler {
     return await this.executionService.steerSession(args);
   }
 
+  private async controlSessionGoalWithAccessCheck(args: {
+    sessionId: SessionId;
+    action: SessionGoalAction;
+    objective?: string;
+    userId: string;
+  }): Promise<SessionGoalResponse> {
+    const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
+    if (access.outcome !== 'allowed') {
+      return {
+        type: 'session/goal_response',
+        sessionId: args.sessionId,
+        action: args.action,
+        accepted: false,
+        disposition: 'error',
+        error: `Goal access verification ${access.outcome}`,
+      };
+    }
+    // Goal turns commit with the requester's identity, exactly like the turns a
+    // user message would start.
+    const user = await this.sessionUserResolver.resolve(args.userId);
+    return await this.executionService.controlSessionGoal({
+      sessionId: args.sessionId,
+      action: args.action,
+      ...(args.objective ? { objective: args.objective } : {}),
+      userId: args.userId,
+      userName: user.name,
+      userEmail: user.email,
+    });
+  }
+
   private async forkSessionWithAccessCheck(args: SessionForkSpec): Promise<SessionForkResponse> {
     const access = await this.verifySessionMachineAccess(
       args.sourceSessionId,
@@ -3117,8 +3143,8 @@ export class MessageHandler {
           userTurnId
         ),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId) =>
-          await this.finalizeACPState(sessionId, turnId),
+        finalizeACPState: async (sessionId, turnId, options) =>
+          await this.finalizeACPState(sessionId, turnId, options),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -3154,22 +3180,6 @@ export class MessageHandler {
           env,
           customAcp,
           runtimeOverrides
-        ),
-      maybeRenameSessionBranchFromPrompt: async (
-        sessionId,
-        session,
-        cliType,
-        agentType,
-        prompt,
-        env
-      ) =>
-        await this.maybeRenameSessionBranchFromPrompt(
-          sessionId,
-          session,
-          cliType,
-          agentType,
-          prompt,
-          env
         ),
       processMessageQueue: async (sessionId) => await this.processMessageQueue(sessionId),
       syncLiveActivitySummary: async (userId) => {
@@ -3271,7 +3281,7 @@ export class MessageHandler {
             requestId,
             targetVersion,
           }),
-        onMachineLifecycleResponseAppended: ({ response }) => {
+        onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
@@ -3392,6 +3402,7 @@ export class MessageHandler {
           };
         },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
+        controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
         forkSession: async (args) => await this.forkSessionWithAccessCheck(args),
         editAndResendSession: async (args) => await this.editAndResendSessionWithAccessCheck(args),
@@ -5082,8 +5093,8 @@ export class MessageHandler {
     turnId: string;
     targetSource: ACPUpdateTarget['source'];
     modelInfo?: ModelInfo;
-    // Counts notifications (in `args.updates` order) whose history writes
-    // committed. Text batches and rich-content uploads interleave inside one
+    // Counts consumed notifications (committed or explicitly rejected) in
+    // `args.updates` order. Text batches and rich-content uploads interleave inside one
     // call, so a mid-group failure leaves a persisted prefix; the caller must
     // only re-queue past this watermark or short text chunks (intentionally not
     // deduplicated) would duplicate on retry.
@@ -5093,25 +5104,40 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
-      await appendACPNotificationsToAssistantEntry(
-        args.sessionDoc,
-        notifications,
-        args.assistantEntryId,
-        {
-          logger: this.logger,
-          editCallback: async (edits) => {
-            // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
-            // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
-            // them into the diff store (old text chained from the prior recorded state),
-            // keeping the turn-diff badge and its clickable content from the same source.
-            this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+      try {
+        await appendACPNotificationsToAssistantEntry(
+          args.sessionDoc,
+          notifications,
+          args.assistantEntryId,
+          {
+            logger: this.logger,
+            editCallback: async (edits) => {
+              // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
+              // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
+              // them into the diff store (old text chained from the prior recorded state),
+              // keeping the turn-diff badge and its clickable content from the same source.
+              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+            },
+            standardDiffCallback: async (diffs) => {
+              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            },
           },
-          standardDiffCallback: async (diffs) => {
-            await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
-          },
-        },
-        args.modelInfo
-      );
+          args.modelInfo
+        );
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        // The writer rejects before committing history. Isolate deterministic
+        // poison inputs instead of retaining them ahead of every later chunk.
+        if (notifications.length > 1) {
+          for (const notification of notifications) await persistNotifications([notification]);
+          return;
+        }
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        return;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += notifications.length;
       }
@@ -5182,7 +5208,16 @@ export class MessageHandler {
             await this.uploadValidatedSessionFile(uploadArgs),
         }));
       update.materializedContents = contents;
-      await appendContents(contents);
+      try {
+        await appendContents(contents);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP rich-content history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        continue;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += 1;
       }
@@ -5797,7 +5832,11 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+  private async finalizeACPState(
+    sessionId: SessionId,
+    turnId?: string,
+    options?: { settleContextCompactionAsFailed?: boolean }
+  ): Promise<void> {
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
@@ -5824,7 +5863,12 @@ export class MessageHandler {
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.updateHistory((history) =>
-        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+        markAssistantTurnFinished(history, {
+          turnId,
+          endedAt,
+          permissionWaitMs,
+          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+        })
       );
       await sessionDoc.waitUntilSynced();
     } catch (error) {
@@ -6679,6 +6723,12 @@ export class MessageHandler {
         });
       case 'session/steer': {
         return await this.steerSessionWithAccessCheck({
+          ...request.params,
+          sessionId: request.params.sessionId as SessionId,
+        });
+      }
+      case 'session/goal': {
+        return await this.controlSessionGoalWithAccessCheck({
           ...request.params,
           sessionId: request.params.sessionId as SessionId,
         });
@@ -8980,8 +9030,9 @@ export class MessageHandler {
     runtimeOverrides?: BuiltinRuntimeOverrides,
     titleConfig?: TitleGenerationConfig
   ): Promise<void> {
-    // Builtin Claude publishes a generated session_info_update title.
-    if (usesAcpProvidedSessionTitle(cliType, agentType)) {
+    // Builtin Claude, Codex and Grok generate their own titles and publish them
+    // as session_info_update; the isolated agent would only duplicate that work.
+    if (acpOwnsSessionTitleGeneration(cliType, agentType, runtimeOverrides)) {
       return;
     }
     const existingGeneration = this.titleGenerationInFlight.get(sessionId);
@@ -9663,160 +9714,6 @@ export class MessageHandler {
     await this.codeCollabV2DiffStore.close();
     await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup');
     await this.sessionManager.cleanUp();
-  }
-
-  private async maybeRenameSessionBranchFromPrompt(
-    sessionId: SessionId,
-    session: ISession,
-    cliType: AgentConfigCliType,
-    agentType: string,
-    taskPrompt: string,
-    env?: Record<string, string>,
-    titleConfig?: TitleGenerationConfig
-  ): Promise<void> {
-    const trimmedPrompt = taskPrompt.trim();
-    if (!trimmedPrompt) {
-      return;
-    }
-
-    let metaBranchName: string | null = null;
-    let metaCustomAcp: CustomAcpLaunchSpec | undefined;
-    let metaRuntimeOverrides: BuiltinRuntimeOverrides | undefined;
-    let metaAgentConfigId: AgentConfigId | undefined;
-    let reusableTitlePromise: Promise<string | null> | undefined;
-    try {
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
-      metaBranchName = meta?.branchName?.trim() || null;
-      metaAgentConfigId = meta?.agentConfigId;
-      const generatedMetaTitle = meta?.titleSource === 'generated' ? meta.title?.trim() : '';
-      reusableTitlePromise = generatedMetaTitle
-        ? Promise.resolve(generatedMetaTitle)
-        : this.titleGenerationInFlight.get(sessionId);
-      const agentConfig = metaAgentConfigId
-        ? await this.workspaceDocument.getAgentConfigById(metaAgentConfigId)
-        : null;
-      const legacyLaunchConfig = await readLegacySessionLaunchConfig({
-        repo: this.workspaceDocument.repo,
-        workspaceId: this.workspaceId,
-        machineId: this.machineId,
-        sessionId,
-        sessionMeta: meta,
-        logger: this.logger,
-      });
-      metaCustomAcp = agentConfig?.customAcp ?? legacyLaunchConfig?.customAcp;
-      metaRuntimeOverrides = agentConfig?.runtimeOverrides ?? legacyLaunchConfig?.runtimeOverrides;
-      if (metaBranchName && !isManagedWorktreeBranchName(metaBranchName)) {
-        return;
-      }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to read session meta before branch rename: ${formatErrorMessage(error)}`
-      );
-    }
-
-    const resolvedTitleConfig =
-      titleConfig ?? (await this.resolveTitleConfig(sessionId, metaAgentConfigId));
-    const branchName = await this.generateBranchNameWithTimeout(
-      cliType,
-      agentType,
-      trimmedPrompt,
-      env,
-      20_000,
-      resolvedTitleConfig,
-      metaCustomAcp,
-      metaRuntimeOverrides,
-      reusableTitlePromise
-    );
-    if (!branchName) {
-      this.logger.debug(`[${sessionId}] Skipping branch rename: name generation timed out`);
-      return;
-    }
-
-    const workdir = session.getWorkdir();
-    const currentBranch = await resolveGitBranchName(session.exec.bind(session), workdir);
-    if (!currentBranch || currentBranch === branchName) {
-      return;
-    }
-    if (!isManagedWorktreeBranchName(currentBranch)) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: not on a managed worktree branch (currentBranch=${currentBranch})`
-      );
-      return;
-    }
-    if (metaBranchName && metaBranchName !== currentBranch) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: branch changed before rename (metaBranchName=${metaBranchName} currentBranch=${currentBranch})`
-      );
-      return;
-    }
-
-    try {
-      const renamedBranch = await renameBranchWithAvailableSuffix({
-        exec: session.exec.bind(session),
-        workdir,
-        currentBranch,
-        desiredBranchName: branchName,
-        maxLength: 50,
-      });
-      if (!renamedBranch) {
-        this.logger.debug(
-          `[${sessionId}] Skipping branch rename: branch changed or git rejected the rename`
-        );
-        return;
-      }
-      await this.turnPostProcessingService.syncSessionBranchName(sessionId, session);
-    } catch (error) {
-      this.logger.debug(`[${sessionId}] Failed to rename branch: ${formatErrorMessage(error)}`);
-    }
-  }
-
-  private async generateBranchNameWithTimeout(
-    cliType: AgentConfigCliType,
-    agentType: string,
-    taskPrompt: string,
-    env: Record<string, string> | undefined,
-    timeoutMs: number,
-    titleConfig?: TitleGenerationConfig,
-    customAcp?: CustomAcpLaunchSpec,
-    runtimeOverrides?: BuiltinRuntimeOverrides,
-    reusableTitlePromise?: Promise<string | null>
-  ): Promise<string | null> {
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    const timeoutPromise = new Promise<null>((resolve) => {
-      timeoutHandle = setTimeout(() => resolve(null), timeoutMs);
-    });
-
-    const namePromise = (async (): Promise<string> => {
-      const title = reusableTitlePromise
-        ? await reusableTitlePromise
-        : await generateTitleIsolated({
-            cliType,
-            agentType,
-            customAcp,
-            runtimeOverrides,
-            taskPrompt,
-            logger: this.logger,
-            env,
-            titleConfig,
-          });
-      const base = title ?? taskPrompt;
-      return ensureValidBranchName(base, 'task');
-    })();
-
-    try {
-      const result = await Promise.race([namePromise, timeoutPromise]);
-      return result ?? null;
-    } catch (error) {
-      this.logger.debug(
-        `[branch-name] Failed to generate branch name: ${formatErrorMessage(error)}`
-      );
-      return null;
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
   }
 
   private async notifySessionCompleted(

@@ -136,15 +136,12 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
         preSelectedProject={base.project}
         preSelectedRepo={base.repo}
       />
-      {/* repositionInputs is platform-scoped, not unconditionally off. On mobile
-         web (`interactive-widget=resizes-content`) the keyboard shrinks the layout
-         viewport, so vaul's visualViewport handler captures the shrunk height as
-         "initial" and never restores it after the keyboard closes — the composer
-         stays lifted (#2761). But in the native shell the keyboard overlays the
-         content and `--native-keyboard-height` stays 0px on Android, so vaul's
-         repositionInputs is the only thing lifting the composer above the keyboard
-         and restoring it on close. Off on web, on natively.
-         See context/mobile-keyboard.md. */}
+      {/* Enable the shared Drawer's native keyboard handling. ui/drawer.tsx
+         uses a live viewport bottom inset on non-iOS side drawers, supporting
+         both resizing WebViews and overlay keyboards without caching a shrunk
+         height. iOS retains Vaul repositioning. Mobile web leaves layout to the
+         browser (`interactive-widget=resizes-content`); Vaul's cached height
+         previously left the composer lifted after keyboard dismissal (#2761). */}
       <Drawer
         direction="right"
         repositionInputs={isNativeAppShell()}
