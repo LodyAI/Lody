@@ -311,6 +311,7 @@ const buildTaskMeta = (args: {
         ? 'background'
         : 'subagent',
     status: args.status,
+    event: message.subtype,
   };
   setIfDefined(
     meta,

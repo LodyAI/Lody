@@ -336,8 +336,8 @@ describe('handleACPUpdateMessage', () => {
             taskId: 'task-1',
             status: 'completed',
             event: 'task_notification',
-            // description survives from the earlier task_started/progress events
-            description: 'Reading files',
+            // Activity labels do not overwrite the task's original purpose.
+            description: 'Start',
           },
         ],
       },
@@ -347,6 +347,70 @@ describe('handleACPUpdateMessage', () => {
     expect(tasks).toHaveLength(1);
     // No tool_call is persisted for lifecycle events.
     expect(items?.some((item) => item.type === 'tool_call')).toBe(false);
+  });
+
+  it('persists valid Lody task progress while filtering generic running snapshots', async () => {
+    const { doc, readHistory } = createDoc();
+    const getCurrentSessionTurnId = vi.fn(() => 'turn-1');
+
+    await handleACPUpdateMessage(
+      doc,
+      [
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'task-progress',
+            title: 'Read',
+            kind: 'read',
+            status: 'in_progress',
+            _meta: {
+              lody: {
+                task: {
+                  version: 1,
+                  taskId: 'task-meta-1',
+                  kind: 'subagent',
+                  status: 'in_progress',
+                  actor: 'Explore',
+                  description: 'Trace history writes',
+                  lastToolName: 'Read',
+                  usage: { totalTokens: 123, toolUses: 2 },
+                },
+              },
+            },
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'generic-progress',
+            title: 'Read',
+            kind: 'read',
+            status: 'in_progress',
+            _meta: { lody: { task: { version: 1, taskId: '', status: 'in_progress' } } },
+          },
+        }),
+      ],
+      { getCurrentSessionTurnId }
+    );
+
+    expect(readHistory()).toMatchObject([
+      {
+        items: [
+          {
+            type: 'subagent_task',
+            taskId: 'task-meta-1',
+            status: 'in_progress',
+            actor: 'Explore',
+            description: 'Trace history writes',
+            lastToolName: 'Read',
+            usage: { totalTokens: 123, toolUses: 2 },
+          },
+        ],
+      },
+    ]);
+    expect(readHistory()[0]?.items).toHaveLength(1);
   });
 
   it('preserves subagent identity when the terminal task_notification omits it', async () => {

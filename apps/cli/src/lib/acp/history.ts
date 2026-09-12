@@ -8,6 +8,7 @@ import type {
 } from '@lody/shared';
 import {
   getServerNow,
+  parseLodyTaskMeta,
   sanitizeGoalObjective,
   truncateTerminalOutputForHistory,
   ToolCallContentSchema,
@@ -876,6 +877,12 @@ const filterNotificationsForHistory = (
     // transitions that represent a finished tool call.
     if (update.status === 'completed' || update.status === 'failed') return true;
 
+    // Provider-neutral task progress is compact, bounded lifecycle state. Keep
+    // only snapshots that satisfy the canonical metadata schema; unrelated
+    // running tool snapshots must remain filtered to avoid history growth.
+    const meta = (update as Record<string, unknown>)._meta;
+    if (parseLodyTaskMeta(meta) !== null) return true;
+
     // Claude Code sends rawInput in a tool_call_update (~14% of Bash calls, ~50% of Read/Grep,
     // and ALL Edit calls). Keep these updates so we can extract terminal commands, diff blocks,
     // and locations from them.
@@ -886,7 +893,6 @@ const filterNotificationsForHistory = (
 
     // Claude Code sends toolResponse in updates with status=null. Keep these updates
     // so we can extract terminal output from _meta.claudeCode.toolResponse.
-    const meta = (update as Record<string, unknown>)._meta;
     if (meta && typeof meta === 'object') {
       const claudeCode = (meta as Record<string, unknown>).claudeCode;
       if (claudeCode && typeof claudeCode === 'object') {

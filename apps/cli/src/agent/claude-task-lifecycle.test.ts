@@ -47,6 +47,7 @@ describe('convertClaudeTaskLifecycleNotification', () => {
       version: 1,
       taskId: 'task-1',
       kind: 'subagent',
+      event: 'task_started',
       description: 'Find CLI startup behavior',
       status: 'in_progress',
       actor: 'Explore',
@@ -92,6 +93,7 @@ describe('convertClaudeTaskLifecycleNotification', () => {
       version: 1,
       taskId: 'task-1',
       kind: 'subagent',
+      event: 'task_notification',
       status: 'completed',
       summary: 'Agent finished',
       usage: { totalTokens: 123, toolUses: 3, durationMs: 700 },
@@ -117,6 +119,7 @@ describe('convertClaudeTaskLifecycleNotification', () => {
     expect(started.notification.update._meta?.lody?.task).toMatchObject({
       actor: 'spec',
       kind: 'subagent',
+      event: 'task_started',
     });
 
     const updated = convertClaudeTaskLifecycleNotification({
@@ -134,6 +137,7 @@ describe('convertClaudeTaskLifecycleNotification', () => {
       status: 'failed',
       error: 'boom',
       kind: 'background',
+      event: 'task_updated',
     });
   });
 
@@ -168,6 +172,7 @@ describe('convertKimiTaskLifecycleNotification', () => {
       taskId: 'agent-1',
       kind: 'subagent',
       actor: 'Kimi task',
+      event: 'task_started',
     });
   });
 });

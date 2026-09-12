@@ -50,6 +50,12 @@ goes silently empty (unit tests fabricate history and will not catch it).
 The former `_meta.claudeCode.toolName` carrier is read only by the centralized
 one-release compatibility path; new provider output must use the Core contract.
 
+Provider-neutral task progress is the other bounded-history exception: persist a
+nonterminal `tool_call_update` only when `_meta.lody.task` passes the canonical
+validator. Merge those snapshots by `taskId`, preserving the original actor,
+purpose, and background state; ignore late progress after settlement, while
+explicit `task_started`/`task_updated` events may resume a settled task.
+
 ## Flush, evidence, and shutdown
 
 Turn finalization cancels unanswered permission/question requests in the owning
