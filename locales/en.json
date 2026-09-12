@@ -2661,6 +2661,7 @@
   "settings.general.autoLaunch.hideWindowToggleFailed": "Failed to update hidden auto-launch",
   "settings.general.autoLaunch.title": "Startup",
   "settings.general.autoLaunch.toggleFailed": "Failed to update auto launch",
+  "settings.general.autoLaunch.unsupported": "This platform does not support launching at startup.",
   "settings.general.cliAutoStart.helper": "Lody runs an agent on this computer to work on your local projects. Turn this off to use Lody only as a control panel for agents running on other machines.",
   "settings.general.cliAutoStart.label": "Run local agent",
   "settings.general.cliAutoStart.toggleFailed": "Failed to update local agent setting",

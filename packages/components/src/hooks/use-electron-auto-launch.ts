@@ -8,7 +8,9 @@ type AutoLaunchStatus = Awaited<ReturnType<IpcServices['app']['getAutoLaunchStat
 
 export function useElectronAutoLaunch(isElectron: boolean) {
   const { t } = useTranslation();
-  const [supported, setSupported] = useState(false);
+  // null until the main process answers. "Not answered" and "answered: unsupported"
+  // have to be distinguishable, or a failed read reads as an unsupported platform.
+  const [supported, setSupported] = useState<boolean | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [hideWindowOnAutoLaunch, setHideWindowOnAutoLaunch] = useState(false);
   const [pendingOperation, setPendingOperation] = useState<PendingAutoLaunchOperation>(
@@ -21,7 +23,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       ? services.app.getAutoLaunchStatus.bind(services.app)
       : undefined;
     if (!isElectron || typeof window === 'undefined' || !getAutoLaunchStatus) {
-      setSupported(false);
+      setSupported(null);
       setEnabled(false);
       setHideWindowOnAutoLaunch(false);
       setPendingOperation(null);
@@ -39,7 +41,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       })
       .catch(() => {
         if (!active) return;
-        setSupported(false);
+        setSupported(null);
         setEnabled(false);
         setHideWindowOnAutoLaunch(false);
       })
@@ -128,6 +130,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
     loading,
     enabledLoading: pendingOperation === 'read' || pendingOperation === 'enabled',
     hideWindowLoading: pendingOperation === 'read' || pendingOperation === 'hide-window',
+    unsupported: supported === false,
     updateEnabled,
     updateHideWindow,
   };

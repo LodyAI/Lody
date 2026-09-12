@@ -722,14 +722,26 @@ export function MobileGeneralSettings() {
       {isElectron && (
         <MobileSettingsSection title={t('settings.general.autoLaunch.title', 'Startup')}>
           <MobileSettingsRowGroup>
-            <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
+            <MobileSettingsRow
+              label={t('settings.general.autoLaunch.label', 'Launch at startup')}
+              helper={
+                autoLaunch.unsupported ? (
+                  <span className="text-destructive">
+                    {t(
+                      'settings.general.autoLaunch.unsupported',
+                      'This platform does not support launching at startup.'
+                    )}
+                  </span>
+                ) : undefined
+              }
+            >
               {autoLaunch.enabledLoading ? (
                 <Loading size="sm" className="h-5 w-9" />
               ) : (
                 <Switch
                   id="auto-launch-toggle"
                   checked={autoLaunch.enabled}
-                  disabled={!autoLaunch.supported || autoLaunch.loading}
+                  disabled={autoLaunch.supported !== true || autoLaunch.loading}
                   onCheckedChange={(checked) => {
                     void autoLaunch.updateEnabled(checked);
                   }}

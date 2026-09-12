@@ -2661,6 +2661,7 @@
   "settings.general.autoLaunch.hideWindowToggleFailed": "更新自动启动窗口设置失败",
   "settings.general.autoLaunch.title": "启动项",
   "settings.general.autoLaunch.toggleFailed": "更新自动启动设置失败",
+  "settings.general.autoLaunch.unsupported": "当前平台不支持开机自动启动。",
   "settings.general.cliAutoStart.helper": "Lody 会在本机运行 Agent（CLI）来处理你的本地项目。关闭后，可将 Lody 仅作为控制界面，用于操作其他机器上运行的 Agent。",
   "settings.general.cliAutoStart.label": "运行本机 Agent",
   "settings.general.cliAutoStart.toggleFailed": "更新本机 Agent 设置失败",
