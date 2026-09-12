@@ -3,6 +3,14 @@ import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Accordion } from '../disclosure/accordion';
+import { Alert } from '../feedback/alert';
+import { feedback as feedbackTokens } from '../feedback/feedback.tokens.stylex';
+import { Progress } from '../feedback/progress';
+import { Skeleton } from '../feedback/skeleton';
+import { Spinner } from '../feedback/spinner';
+import { feedbackSurface } from '../feedback/surface';
+import { Toast } from '../feedback/toast';
+import { TONE_GLYPHS, TONE_MARKS, TOAST_TONES, type FeedbackTone } from '../feedback/tone';
 import { Collapsible } from '../disclosure/collapsible';
 import { disclosure as disclosureTokens } from '../disclosure/disclosure.tokens.stylex';
 import { Tabs, type TabsSize } from '../disclosure/tabs';
@@ -342,6 +350,10 @@ const styles = stylex.create({
   // 167.5px.
   /** A disclosure takes the width of what it is in; the board gives it one. */
   disclosureBlock: { flexGrow: 1, flexShrink: 1, minWidth: '260px' },
+  /** The toast stand-in is out of its viewport, so it takes no fixed width. */
+  toastReplica: { position: 'static', maxWidth: '100%' },
+  skeletonBlock: { display: 'flex', alignItems: 'center', gap: space[3], flexGrow: 1 },
+  skeletonLines: { display: 'flex', flexDirection: 'column', gap: space[2], flexGrow: 1 },
   collapsibleBody: {
     margin: 0,
     paddingBlockStart: space[2],
@@ -442,6 +454,8 @@ const ROLE_COLORS = [
   { name: 'onAccent', value: colors.onAccent, note: 'content on accent' },
   { name: 'destructive', value: colors.destructive, note: 'destructive fill, invalid ring' },
   { name: 'onDestructive', value: colors.onDestructive, note: 'content on destructive' },
+  { name: 'success', value: colors.success, note: 'an outcome that worked' },
+  { name: 'warning', value: colors.warning, note: 'one that still may not' },
 ];
 
 const GRAYS = [
@@ -657,6 +671,49 @@ const STACK_COLORS = [
     name: 'disclosure.separator',
     value: disclosureTokens.separator,
     note: 'the line to the next row, and nothing else',
+  },
+];
+
+const FEEDBACK_TONES: FeedbackTone[] = ['neutral', 'success', 'warning', 'danger'];
+
+const MESSAGE_COLORS = [
+  {
+    name: 'feedback.noticeBackground',
+    value: feedbackTokens.noticeBackground,
+    note: 'an Alert: the card rung',
+  },
+  {
+    name: 'feedback.toastBackground',
+    value: feedbackTokens.toastBackground,
+    note: 'a Toast: the floating rung',
+  },
+  { name: 'feedback.title', value: feedbackTokens.title, note: 'what the message is' },
+  {
+    name: 'feedback.description',
+    value: feedbackTokens.description,
+    note: 'the sentence under it',
+  },
+  { name: 'feedback.mark', value: feedbackTokens.mark, note: 'a neutral mark' },
+  { name: 'feedback.success', value: feedbackTokens.success, note: 'it worked' },
+  { name: 'feedback.warning', value: feedbackTokens.warning, note: 'it still may not' },
+  { name: 'feedback.danger', value: feedbackTokens.danger, note: 'it did not' },
+];
+
+const WAIT_COLORS = [
+  {
+    name: 'feedback.trackBackground',
+    value: feedbackTokens.trackBackground,
+    note: 'the well a bar runs in',
+  },
+  {
+    name: 'feedback.indicator',
+    value: feedbackTokens.indicator,
+    note: 'accent: the one live thing',
+  },
+  {
+    name: 'feedback.skeleton',
+    value: feedbackTokens.skeleton,
+    note: 'a gray, because it has no role yet',
   },
 ];
 
@@ -1920,6 +1977,205 @@ function StackDimensions() {
   );
 }
 
+/** One message on the card rung, in each of the four things it can report. */
+function AlertRow({ tone }: { tone: FeedbackTone }) {
+  return (
+    <Row>
+      <LegendKey>{tone}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Alert.Root tone={tone}>
+          <Alert.Title>Worktree setup finished</Alert.Title>
+          <Alert.Description>
+            Two commands ran before the agent started; the second one printed nothing.
+          </Alert.Description>
+        </Alert.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** A message that answers back, so the row of buttons is on the board too. */
+function AlertActionsRow() {
+  return (
+    <Row>
+      <LegendKey>answers</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Alert.Root tone="danger">
+          <Alert.Title>Sync failed</Alert.Title>
+          <Alert.Description>The machine did not answer in time.</Alert.Description>
+          <Alert.Actions>
+            <Button size="small">Retry</Button>
+            <Button variant="ghost" size="small">
+              Dismiss
+            </Button>
+          </Alert.Actions>
+        </Alert.Root>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The toast, standing still. A real one is portalled to the document and gone
+ * again in five seconds, so the board holds a stand-in built from the same
+ * styles — and the button beside it reports a real one.
+ */
+function ToastReplica({ tone }: { tone: FeedbackTone }) {
+  const Mark = TONE_GLYPHS[tone];
+  return (
+    <Row>
+      <LegendKey>{tone}</LegendKey>
+      <Cluster>
+        <div
+          {...stylex.props(
+            feedbackSurface.message,
+            feedbackSurface.toast,
+            TOAST_TONES[tone],
+            styles.toastReplica
+          )}
+        >
+          <span {...stylex.props(feedbackSurface.mark, TONE_MARKS[tone])}>
+            <Mark />
+          </span>
+          <div {...stylex.props(feedbackSurface.body)}>
+            <p {...stylex.props(feedbackSurface.title)}>Session archived</p>
+            <p {...stylex.props(feedbackSurface.description)}>It can be restored from Archive.</p>
+          </div>
+        </div>
+      </Cluster>
+    </Row>
+  );
+}
+
+/** A real toast, reported the way a surface reports one: through the manager. */
+const galleryToasts = Toast.createManager();
+
+function ToastTriggerRow() {
+  return (
+    <Row>
+      <LegendKey>reported</LegendKey>
+      <Cluster>
+        <Toast.Provider manager={galleryToasts} limit={3}>
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() =>
+              galleryToasts.add({
+                title: 'Sync failed',
+                description: 'The machine did not answer in time.',
+                type: 'danger',
+              })
+            }
+          >
+            Report one
+          </Button>
+        </Toast.Provider>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        A real toast, through the manager a surface outside React would use. It lands in the
+        viewport at the top of the window, above every popup.
+      </span>
+    </Row>
+  );
+}
+
+function ProgressRow({ name, value }: { name: string; value: number | null }) {
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Progress value={value} />
+      </div>
+    </Row>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <Row>
+      <LegendKey>skeleton</LegendKey>
+      <div {...stylex.props(styles.skeletonBlock)}>
+        <Skeleton shape="circle" width={32} height={32} />
+        <div {...stylex.props(styles.skeletonLines)}>
+          <Skeleton width="100%" />
+          <Skeleton width="60%" />
+        </div>
+      </div>
+    </Row>
+  );
+}
+
+function SpinnerRow() {
+  return (
+    <Row>
+      <LegendKey>spinner</LegendKey>
+      <Cluster>
+        <Spinner size="small" />
+        <Spinner size="medium" />
+        <Spinner size="large" />
+        <Button variant="secondary" size="small">
+          <Spinner size="small" label={null} />
+          Saving
+        </Button>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        Drawn in currentColor, so the one inside a button takes the button's ink. The label is the
+        surface's: a spinner beside the word "Saving" states nothing, and says so with label=null.
+      </span>
+    </Row>
+  );
+}
+
+function MessageDimensions() {
+  const dimensions = [
+    { name: 'feedback.noticeRadius', value: feedbackTokens.noticeRadius },
+    { name: 'feedback.padding', value: feedbackTokens.padding },
+    { name: 'feedback.gap', value: feedbackTokens.gap },
+    { name: 'feedback.markSize', value: feedbackTokens.markSize },
+    { name: 'feedback.titleSize', value: feedbackTokens.titleSize },
+    { name: 'feedback.titleLeading', value: feedbackTokens.titleLeading },
+    { name: 'feedback.descriptionSize', value: feedbackTokens.descriptionSize },
+    { name: 'feedback.descriptionLeading', value: feedbackTokens.descriptionLeading },
+    { name: 'feedback.toastWidth', value: feedbackTokens.toastWidth },
+    { name: 'feedback.toastGap', value: feedbackTokens.toastGap },
+    { name: 'feedback.viewportInset', value: feedbackTokens.viewportInset },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+function WaitDimensions() {
+  const dimensions = [
+    { name: 'feedback.trackHeight', value: feedbackTokens.trackHeight },
+    { name: 'feedback.spinnerSmall', value: feedbackTokens.spinnerSmall },
+    { name: 'feedback.spinnerMedium', value: feedbackTokens.spinnerMedium },
+    { name: 'feedback.spinnerLarge', value: feedbackTokens.spinnerLarge },
+    { name: 'feedback.spinnerWidth', value: feedbackTokens.spinnerWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
 function ButtonFocusRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -2706,6 +2962,77 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {STACK_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Alert and Toast · what the system says back"
+        rule="One message on two rungs. An Alert stays on the page it is about, so it takes the card rung; a Toast arrives over that page, so it takes the floating one — not the modal rung, because a toast does not have to be answered and nothing behind it recedes. Both are the same block: the tone's mark, what happened, the sentence under it, and whatever answers it. A tone is a tint and a mark, never a fill: the tint is 8% of the tone mixed into the rung's own background, which is the mix a destructive menu row already uses, and the mark is drawn by the part rather than passed to it — a caller free to choose a glyph can put a tick on a failure. Neutral is the one tone with no colour of its own: accent is the obvious candidate and the rules reserve it for live state. How urgently a message is announced follows from its tone as well, because a surface that had to choose would choose alert every time."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {FEEDBACK_TONES.map((tone) => (
+              <AlertRow key={tone} tone={tone} />
+            ))}
+            <AlertActionsRow />
+            <ToastReplica tone="neutral" />
+            <ToastReplica tone="danger" />
+            <ToastTriggerRow />
+            <MessageDimensions />
+          </Rows>
+          <Grid>
+            {MESSAGE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="feedback.noticeShadow"
+              box={feedbackTokens.noticeShadow}
+              fill={feedbackTokens.noticeBackground}
+              ink={false}
+              note="an Alert, on the card rung"
+            />
+            <ShadowChip
+              name="feedback.toastShadow"
+              box={feedbackTokens.toastShadow}
+              fill={feedbackTokens.toastBackground}
+              ink={false}
+              note="a Toast, over the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Progress, Skeleton and Spinner · still working"
+        rule="The other half of the same sentence: not what happened, but that it has not finished. A bar is a well-rung track with the accent running in it, because the rules give accent to live state and name the running indicator by name — ink there would say the value is stored. A bar with no value is not a bar at zero: it is the same track with a band crossing it, since 'I do not know how far' and 'nothing has happened' are different reports. A skeleton takes a gray, which is what the rules reserve them for — a thing with no role yet — and it breathes rather than sweeping, stopping where a person has asked for less movement. A spinner is drawn in currentColor so it belongs to whatever holds it, and it keeps turning under reduced motion: it is the only thing saying the work has not stopped."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>labelled</LegendKey>
+              <div {...stylex.props(styles.disclosureBlock)}>
+                <Progress value={62} label="Uploading the worktree" showValue />
+              </div>
+            </Row>
+            <ProgressRow name="0" value={0} />
+            <ProgressRow name="62" value={62} />
+            <ProgressRow name="100" value={100} />
+            <ProgressRow name="indeterminate" value={null} />
+            <SkeletonRow />
+            <SpinnerRow />
+            <WaitDimensions />
+          </Rows>
+          <Grid>
+            {WAIT_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="feedback.trackWell"
+              box={feedbackTokens.trackWell}
+              fill={feedbackTokens.trackBackground}
+              ink={false}
+              note="the track, sunken"
+            />
           </Grid>
         </PaletteSplit>
       </Section>

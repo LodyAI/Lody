@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { dialog } from '../src/dialog/dialog.tokens.stylex';
 import { disclosure } from '../src/disclosure/disclosure.tokens.stylex';
+import { feedback } from '../src/feedback/feedback.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
@@ -201,6 +202,23 @@ describe('UiGallery', () => {
     expect(board).toContain('Rerun this turn');
     for (const name of tokenNames(tooltip)) {
       expect(board, `tooltip.${name} is missing from the board`).toContain(`tooltip.${name}`);
+    }
+  });
+
+  test('shows both halves of the feedback family, and every token they share', () => {
+    // An Alert renders in place, so the board holds the real thing in each of
+    // the four tones; a Toast is portalled and gone again, so what a reader
+    // compares against is the stand-in beside the button that reports one.
+    expect(board).toContain('role="alert"');
+    expect(board).toContain('role="status"');
+    expect(board).toContain('Session archived');
+    expect(board).toContain('role="progressbar"');
+    // A bar with no value is a different report from a bar at zero, and both
+    // are on the board.
+    expect(board).toContain('aria-valuenow="0"');
+    expect(board).toContain('indeterminate');
+    for (const name of tokenNames(feedback)) {
+      expect(board, `feedback.${name} is missing from the board`).toContain(`feedback.${name}`);
     }
   });
 

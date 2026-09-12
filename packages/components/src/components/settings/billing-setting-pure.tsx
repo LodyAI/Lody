@@ -4,8 +4,8 @@ import { FREE_SESSION_LIMIT_PER_WORKSPACE, FREE_WORKSPACE_MEMBER_LIMIT } from '@
 import { ArrowLeftRight, Check, Loader2 } from 'lucide-react';
 import { Badge, Button, Card } from '@/ui';
 import { Input } from '@lody/ui/input';
-import { Progress } from '@/ui/progress';
-import { Skeleton } from '@/ui/skeleton';
+import { Progress } from '@lody/ui/progress';
+import { Skeleton } from '@lody/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
@@ -388,7 +388,7 @@ export function BillingSettingsView({
               {sessionLimit === null ? (
                 t('billing.unlimited')
               ) : sessionCount === null ? (
-                <Skeleton className="h-4 w-14" />
+                <Skeleton width={56} height={16} />
               ) : (
                 <>
                   <span
@@ -406,12 +406,13 @@ export function BillingSettingsView({
             </div>
           </div>
           {sessionLimit !== null && sessionCount === null ? (
-            <Skeleton className="mt-3 h-2 w-full" />
+            <Skeleton width="100%" height={8} className="mt-3" />
           ) : sessionLimit !== null && sessionCount !== null ? (
             <Progress
               value={sessionCount}
               max={sessionLimit}
-              className={cn('mt-3', nearLimit && '[&>div]:bg-destructive')}
+              tone={nearLimit ? 'danger' : 'running'}
+              className="mt-3"
             />
           ) : null}
           {sessionLimit !== null ? (

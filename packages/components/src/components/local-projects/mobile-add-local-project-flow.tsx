@@ -21,7 +21,7 @@ import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import {
   describeBrowseError,
   getTailPriorityBreadcrumbs,
@@ -245,7 +245,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           <>
             <div className="flex min-h-10 min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-[0.9rem] text-muted-foreground">
               {crumbs.length === 0 ? (
-                <Skeleton className="mx-1.5 h-4 w-32 shrink-0 rounded" />
+                <Skeleton width={128} height={16} className="mx-1.5 shrink-0" />
               ) : (
                 <>
                   {breadcrumbTrail.hiddenPrefix ? (
@@ -449,8 +449,8 @@ function MobileDirectorySkeleton() {
     <div className="py-1">
       {Array.from({ length: 8 }).map((_, index) => (
         <div key={index} className="flex items-center gap-3 px-4 py-3.5">
-          <Skeleton className="h-7 w-7 shrink-0 rounded" />
-          <Skeleton className="h-4 flex-1 rounded" style={{ maxWidth: `${64 - index * 5}%` }} />
+          <Skeleton width={28} height={28} className="shrink-0" />
+          <Skeleton height={16} className="flex-1" style={{ maxWidth: `${64 - index * 5}%` }} />
         </div>
       ))}
     </div>

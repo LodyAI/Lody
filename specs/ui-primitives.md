@@ -132,6 +132,33 @@ is opened by whatever the surface already had there. What opens is animated from
 its own measured height, so what it holds keeps its spacing on something inside
 it rather than on the part being measured.
 
+The system also speaks back. What it says is either what happened or that it is
+still working, and those are one family rather than five components. A message
+is the same block wherever it appears — a mark that names what kind of message
+it is, what happened, a sentence about it, and whatever answers it — and it
+appears in two places: kept on the page it is about, or arriving over that page
+and leaving on its own. Neither takes the whole window, because a message does
+not have to be answered before a person carries on.
+
+A message reports one of four things: something worth knowing, something that
+worked, something that may still go wrong, and something that failed. The
+palette names three of them; the fourth is deliberately unnamed, because the
+colour that would suggest itself is reserved for live state. What it reports
+colours its mark and tints the surface under it, and never fills it. The mark
+belongs to what is being reported rather than to the surface that reports it, so
+a failure cannot be shown with a tick. How urgently a person using a screen
+reader is told follows from the same fact: a failure interrupts, a confirmation
+waits its turn.
+
+The other half is the wait. A bar shows how far something has got, in the one
+colour this system gives to live state; a bar with no value to show is not a bar
+at zero but the same bar saying it does not know, which is a different report. A
+bar that measures something rather than progressing through it gives that colour
+back. A stand-in for content that has not arrived says nothing to a screen
+reader, because its shape already says it, and it stops moving where a person
+has asked for less movement — while the mark that says work is under way keeps
+turning there, since it is the only thing saying the work has not stopped.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is

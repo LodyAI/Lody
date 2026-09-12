@@ -9,7 +9,7 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Separator } from '@/ui/separator';
 import { Drawer } from '@lody/ui/drawer';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
@@ -589,9 +589,10 @@ function SidebarMenuSkeleton({
       className={cn('flex h-8 items-center gap-2 rounded-md px-2', className)}
       {...props}
     >
-      {showIcon && <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
+      {showIcon && <Skeleton width={16} height={16} data-sidebar="menu-skeleton-icon" />}
       <Skeleton
-        className="h-4 max-w-(--skeleton-width) flex-1"
+        height={16}
+        className="max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
         style={
           {

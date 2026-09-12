@@ -18,6 +18,12 @@ export const colors = stylex.defineVars({
   onAccent: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 0%)' },
   destructive: { default: 'hsl(356 72% 47%)', [DARK]: 'hsl(0 100% 75%)' },
   onDestructive: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 0%)' },
+  // The two states a message can report that `label` and `destructive` cannot.
+  // They name an outcome rather than an action — a finished sync, a quota about
+  // to run out — so they are never a fill a person presses, only a mark beside
+  // what it is about and the tint under it.
+  success: { default: 'hsl(151 55% 36%)', [DARK]: 'hsl(151 60% 52%)' },
+  warning: { default: 'hsl(32 90% 48%)', [DARK]: 'hsl(43 96% 56%)' },
   overlay: { default: 'hsl(225 7% 11% / 0.5)', [DARK]: 'hsl(0 0% 0% / 0.6)' },
   gray: { default: 'hsl(220 8% 62%)', [DARK]: 'hsl(0 0% 42%)' },
   gray2: { default: 'hsl(220 9% 70%)', [DARK]: 'hsl(0 0% 34%)' },
@@ -74,6 +80,8 @@ export const darkTheme = stylex.createTheme(colors, {
   onAccent: 'hsl(0 0% 0%)',
   destructive: 'hsl(0 100% 75%)',
   onDestructive: 'hsl(0 0% 0%)',
+  success: 'hsl(151 60% 52%)',
+  warning: 'hsl(43 96% 56%)',
   overlay: 'hsl(0 0% 0% / 0.6)',
   gray: 'hsl(0 0% 42%)',
   gray2: 'hsl(0 0% 34%)',
@@ -99,6 +107,8 @@ export const lightTheme = stylex.createTheme(colors, {
   onAccent: 'hsl(0 0% 100%)',
   destructive: 'hsl(356 72% 47%)',
   onDestructive: 'hsl(0 0% 100%)',
+  success: 'hsl(151 55% 36%)',
+  warning: 'hsl(32 90% 48%)',
   overlay: 'hsl(225 7% 11% / 0.5)',
   gray: 'hsl(220 8% 62%)',
   gray2: 'hsl(220 9% 70%)',
