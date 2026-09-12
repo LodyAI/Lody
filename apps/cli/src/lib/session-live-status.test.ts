@@ -61,4 +61,26 @@ describe('resolveSessionLiveStatus', () => {
       })
     ).toEqual({ state: 'running' });
   });
+
+  it('reports an engine-opened turn as running without presence or client turn state', () => {
+    expect(
+      resolveSessionLiveStatus({
+        presence: null,
+        execution: idleExecution,
+        hasPendingDispatch: false,
+        engineTurnActive: true,
+      })
+    ).toEqual({ state: 'running' });
+  });
+
+  it('lets presence outrank an engine-opened turn', () => {
+    expect(
+      resolveSessionLiveStatus({
+        presence: SessionStatusFactory.requestPermission(),
+        execution: idleExecution,
+        hasPendingDispatch: false,
+        engineTurnActive: true,
+      })
+    ).toEqual({ state: 'waiting' });
+  });
 });

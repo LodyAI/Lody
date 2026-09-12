@@ -169,6 +169,7 @@ import {
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   hasPendingUserTurnActivation,
+  readLodyTurnEnded,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -274,6 +275,7 @@ import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
   SessionTransientStore,
+  autonomousACPUpdateTargetFrom,
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
@@ -3330,6 +3332,7 @@ export class MessageHandler {
             presence: this.sessionActivePresence.getStatus(sessionId),
             execution: this.executionService.getExecutionSnapshot(sessionId),
             hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+            engineTurnActive: this.store.isEngineTurnActive(sessionId),
           });
           return {
             type: 'session/live-status_response' as const,
@@ -3484,6 +3487,7 @@ export class MessageHandler {
           presence: this.sessionActivePresence.getStatus(sessionId),
           execution: this.executionService.getExecutionSnapshot(sessionId),
           hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+          engineTurnActive: this.store.isEngineTurnActive(sessionId),
         });
         return live.state !== 'unknown';
       },
@@ -4353,7 +4357,13 @@ export class MessageHandler {
     if (this.store.recordSuppressedAcpReplay(sessionId)) {
       return;
     }
-    const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    // Updates from a turn the engine opened itself always take an autonomous
+    // target — never the active/finalized client turn's — so their content
+    // (including rich content, which bypasses turn-aware regrouping at write
+    // time) lands in that turn's own entry from the start.
+    const target =
+      this.autonomousACPUpdateTarget(sessionId, update) ??
+      this.store.getCurrentACPUpdateTarget(sessionId);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -4374,6 +4384,36 @@ export class MessageHandler {
     }
     this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  /**
+   * Synthesize a routing target for an update from a turn the agent opened
+   * itself (see `autonomousACPUpdateTargetFrom`). Also maintains the
+   * engine-turn activity marker — the one place every engine-turn update
+   * passes — so busy status and the idle-GC guard can see the turn. Recorded
+   * as an invariant so autonomous-turn routing stays observable.
+   */
+  private autonomousACPUpdateTarget(
+    sessionId: SessionId,
+    update: AcpSessionNotification
+  ): ACPUpdateTarget | undefined {
+    const target = autonomousACPUpdateTargetFrom(update);
+    if (target) {
+      if (readLodyTurnEnded(update.update)) {
+        this.store.clearEngineTurnActivity(sessionId, target.turnId);
+      } else {
+        this.store.noteEngineTurnActivity(sessionId, target.turnId);
+      }
+      this.captureACPUpdateInvariant('autonomous_turn_acp_update_target', sessionId, update, {
+        acpTurnId: target.turnId,
+      });
+    }
+    return target;
+  }
+
+  /** Clear the engine-turn activity marker (ACP process termination). */
+  clearEngineTurnActivity(sessionId: SessionId): void {
+    this.store.clearEngineTurnActivity(sessionId);
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -4598,10 +4638,13 @@ export class MessageHandler {
   }
 
   private captureACPUpdateInvariant(
-    eventName: 'late_acp_update_routed_to_finalized_turn' | 'out_of_turn_acp_update_without_target',
+    eventName:
+      | 'late_acp_update_routed_to_finalized_turn'
+      | 'out_of_turn_acp_update_without_target'
+      | 'autonomous_turn_acp_update_target',
     sessionId: SessionId,
     notification: AcpSessionNotification,
-    extra?: { assistantEntryId?: string; turnEpoch?: number }
+    extra?: { assistantEntryId?: string; turnEpoch?: number; acpTurnId?: string }
   ): void {
     captureCli(
       eventName,
@@ -4611,6 +4654,7 @@ export class MessageHandler {
         session_update: notification.update.sessionUpdate,
         ...(extra?.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
         ...(typeof extra?.turnEpoch === 'number' ? { turn_epoch: extra.turnEpoch } : {}),
+        ...(extra?.acpTurnId ? { acp_turn_id: extra.acpTurnId } : {}),
       },
       { tier: 'C' }
     );
@@ -9602,12 +9646,17 @@ export class MessageHandler {
   }
 
   /**
-   * Check if a session has an active turn (prompting or finalizing).
+   * Check if a session has an active turn (prompting or finalizing) or an
+   * engine-opened turn in flight.
    */
   hasActiveTurn(sessionId: SessionId): boolean {
     if (!this.store.has(sessionId)) return false;
     const state = this.store.get(sessionId);
-    return state.turn.phase !== 'idle' || this.hasSessionActivePresence(sessionId);
+    return (
+      state.turn.phase !== 'idle' ||
+      state.engineTurn !== undefined ||
+      this.hasSessionActivePresence(sessionId)
+    );
   }
 
   /**

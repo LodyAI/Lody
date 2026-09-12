@@ -171,6 +171,30 @@ Recovery must never enumerate session rooms or open docs to find candidates: eac
 the room and pulls its stream, so a full scan is O(all historical sessions) of Streams
 subscriptions at every daemon start (see [../lib/loro/AGENTS.md](../lib/loro/AGENTS.md)).
 
+### Engine turns
+
+An agent engine can open turns behind the client's back (a kimi cron fire, a task wake), and
+its ACP server forwards their content deliberately. Unstamped, those updates are
+indistinguishable from stragglers of the last client turn, so the finalized-turn routing
+merged them into that turn's assistant entry — the real reply folded away, the interrupting
+turn's text became the visible answer — and dropped them outright after a daemon restart. The
+wire fix: engine-opened turns carry `_meta.lody.turnId = auto:<n>` (non-numeric, so
+`session/fork` can never parse one into a turn position) plus `_meta.lody.turnOrigin`. History
+apply (`ensureEntryForAcpTurn` in `@lody/shared`) gives only those ids their own
+`assistant:autonomous-<turnId>` entry — other stamped ids keep legacy last-wins restamping,
+because claude's per-message uuids and codex collab child turns are boundaries inside one
+client turn — and `autonomousACPUpdateTargetFrom` (`../lib/session-transient-store.ts`) routes
+them to a synthesized autonomous target even while a client turn owns the session, which also
+covers rich content. The agent also emits `_meta.lody.turnEnded` when the engine turn ends;
+without it the entry would render as streaming forever, since finalization otherwise only
+happens for client-dispatched turns. The same markers drive an engine-turn activity flag in
+the transient store (`noteEngineTurnActivity`, cleared by the end marker or process
+termination — process-bounded, never a wall clock): `hasActiveTurn` reads it so the idle GC
+cannot reap the agent mid-engine-turn, and the live-status RPC upgrades `unknown` to
+`running` so the session no longer shows "completed" while the engine turn is still working.
+Decision record:
+[../../../../.agents/notes/implemented/bug-fix/2026-09-12-engine-turn-entries.md](../../../../.agents/notes/implemented/bug-fix/2026-09-12-engine-turn-entries.md).
+
 ### GitHub credential broker
 
 Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it creates the git
