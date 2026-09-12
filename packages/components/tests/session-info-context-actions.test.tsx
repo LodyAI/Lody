@@ -218,6 +218,52 @@ describe('ContextChip actions', () => {
     );
   });
 
+  it('keeps a demoted merge action reachable from the overflow menu', async () => {
+    // Merge is a split button only while it leads. Unpublished work outranks it,
+    // and the overflow list used to filter merge actions out entirely — which
+    // would leave a proven-ready PR unmergeable from the bar on exactly the
+    // sessions that rank Commit & Push first. Demoted, it collapses to one item
+    // performing the already-selected method.
+    const onMerge = vi.fn();
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          projectName: 'loro-dev/lody',
+          actions: [
+            { id: 'commit-and-push', label: 'Commit & Push', onClick: vi.fn() },
+            { kind: 'merge', id: 'merge', method: 'squash', onMerge, onSelectMethod: vi.fn() },
+          ],
+        })
+      );
+    });
+
+    expect(container.querySelector('[data-pr-merge-control]')).toBeNull();
+    const menuButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="More actions"]'
+    );
+    await act(async () => {
+      menuButton?.dispatchEvent(
+        new TestPointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerType: 'mouse',
+        })
+      );
+    });
+
+    const mergeItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.includes('Squash and merge')
+    );
+    expect(mergeItem).toBeInstanceOf(HTMLElement);
+    await act(async () => mergeItem?.click());
+    expect(onMerge).toHaveBeenCalledWith('squash');
+  });
+
   it('renders the compact merge split button and switches methods without merging', async () => {
     const onMerge = vi.fn();
     const onSelectMethod = vi.fn();

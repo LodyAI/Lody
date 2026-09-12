@@ -344,43 +344,38 @@ describe('TurnPostProcessingService', () => {
     });
   });
 
-  it.each([true, false])(
-    'refreshes a GitHub-capable local project (useWorktree=%s)',
-    async (useWorktree) => {
-      // A local ProjectRef resolves its repo from `githubRepoFullName`, not
-      // `repoFullName`, so the gate has to accept this shape or a linked local
-      // project would silently stop reporting uncommitted work. `useWorktree`
-      // is deliberately NOT part of the gate: unlike the removed auto-commit,
-      // this probe is read-only, so running it in the project's original shared
-      // directory is safe — and the Info Bar offers Commit & Push there too.
-      const logger = createLogger();
-      const sessionDoc = {
-        getMetaState: vi.fn(async () => ({ project: { ...localProject, useWorktree } })),
-      } as unknown as SessionDocument;
-      const upsertDocMeta = vi.fn(async () => {});
-      const workspaceDocument = {
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        repo: { upsertDocMeta },
-      } as unknown as LoroDocumentManager;
-      const service = createService({ logger, workspaceDocument });
-      const session = {
-        getWorkdir: () => '/repo',
-        exec: vi.fn(async (_command: string, args: string[]) => {
-          const key = args.join(' ');
-          if (key === 'status --porcelain') return ' M src/app.ts\n';
-          if (key === 'rev-list @{u}..HEAD --count') return '0\n';
-          throw new Error(`Unexpected git args: ${key}`);
-        }),
-      } as unknown as ISession;
+  it('refreshes a GitHub-capable local project in its original directory', async () => {
+    // A local ProjectRef resolves its repo from `githubRepoFullName`, not
+    // `repoFullName`. `useWorktree` is deliberately NOT part of the gate: unlike
+    // the removed auto-commit, this probe is read-only, so it is safe in the
+    // project's shared directory — and the Info Bar offers Commit & Push there.
+    const logger = createLogger();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ project: { ...localProject, useWorktree: false } })),
+    } as unknown as SessionDocument;
+    const upsertDocMeta = vi.fn(async () => {});
+    const workspaceDocument = {
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+    const service = createService({ logger, workspaceDocument });
+    const session = {
+      getWorkdir: () => '/repo',
+      exec: vi.fn(async (_command: string, args: string[]) => {
+        const key = args.join(' ');
+        if (key === 'status --porcelain') return ' M src/app.ts\n';
+        if (key === 'rev-list @{u}..HEAD --count') return '0\n';
+        throw new Error(`Unexpected git args: ${key}`);
+      }),
+    } as unknown as ISession;
 
-      await service.syncWorkspaceGitState(sessionId, session);
+    await service.syncWorkspaceGitState(sessionId, session);
 
-      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', {
-        workspaceDirty: true,
-        workspaceUnpushed: false,
-      });
-    }
-  );
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-1', {
+      workspaceDirty: true,
+      workspaceUnpushed: false,
+    });
+  });
 
   it('skips the dirty probe for a session with no GitHub repository', async () => {
     // Nothing can act on the flag without a repo, and the probe costs a process

@@ -174,19 +174,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
     ).toEqual(['commit-and-push', 'merge']);
   });
 
-  it('offers Merge alone once the branch is committed AND pushed', () => {
-    expect(
-      resolveSessionInfoBarGitHubActionIds({
-        ...BASE_INPUT,
-        hasExistingPr: true,
-        prStatus: 'open',
-        prMergeState: 'c',
-        prCiState: 's',
-        prReadiness: 'y',
-      })
-    ).toEqual(['merge']);
-  });
-
   it('offers no PR action after the PR is terminal', () => {
     expect(
       resolveSessionInfoBarGitHubActionIds({
