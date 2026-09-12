@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-12-grok-token-accounting.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/661
+
 ## Abstract
 
 Grok reports prompted research into low token totals without an original user sample. Synthetic execution proved that multiple prompt updates before a flush lost earlier usage, and a rejected persistence request lost its staged update. The follow-up implements ordered prompt delivery and retains failed payloads until acknowledgement, preserving ordinary per-prompt request semantics and token conversion. The actual user trigger, hosted aggregation, and exact release-source mapping remain unverified. This note stays proposed for those broader accounting questions; the confirmed client delivery fixes and their limits are recorded below.

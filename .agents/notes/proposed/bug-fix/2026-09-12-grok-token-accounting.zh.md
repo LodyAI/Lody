@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-12-grok-token-accounting.md)
 
+PR: https://github.com/LodyAI/Lody/pull/661
+
 ## 摘要
 
 本次调查针对 Grok Token 统计偏低反馈，没有用户原始样本。合成验证证实同一次 flush 前的多个 prompt 会丢失早先用量，持久化请求失败也会丢失已暂存的数据。后续修复实现了按顺序投递 prompt、成功确认后才移除失败待发记录，保持正常逐 prompt 请求语义和 Token 换算。用户实际触发条件、托管端聚合以及精确发布源码映射仍未验证。本 Note 因这些更广的计量问题保持 proposed，已实现的客户端投递修复及其限制记录如下。
