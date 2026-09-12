@@ -122,6 +122,14 @@ export const modal = stylex.create({
     inset: 0,
     display: 'flex',
     padding: 0,
+    // The stacking belongs here, not on the panel. A `position: fixed` element
+    // creates a stacking context, so a `z-index` on the panel inside it only
+    // orders the panel against its own siblings — against the page it counts as
+    // whatever the viewport counts as, which with no `z-index` is `auto`. The
+    // backdrop, at `z.dialogBackdrop`, then paints over the drawer: the panel
+    // renders greyed under its own overlay. The viewport is the element that
+    // stacks against the product shell, so it is the one that says so.
+    zIndex: z.dialog,
   },
   /**
    * An inset drawer floats off every edge instead of meeting one.
@@ -178,7 +186,9 @@ export const modal = stylex.create({
     transitionProperty: 'transform',
     transitionDuration: duration.slow,
     transitionTimingFunction: ease.standard,
-    zIndex: z.dialog,
+    // No `z-index` here on purpose: the viewport above already carries the
+    // rung's, and a second one on a panel inside that stacking context would
+    // look like it did something.
   },
   /**
    * How big the panel is on the edge it came in on. Top and bottom take the

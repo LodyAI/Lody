@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Button } from '../src/button/button';
 import { modal, drawerSwipeDirection } from '../src/dialog/surface';
+import { z } from '../src/tokens/scales.stylex';
 import { Drawer } from '../src/drawer/drawer';
 import { Select } from '../src/field/select';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
@@ -126,6 +127,32 @@ describe('Drawer', () => {
     for (const className of centringClasses) {
       expect(classesFor(modal.popup)).toContain(className);
       expect(classesFor(modal.drawerPopup)).not.toContain(className);
+    }
+  });
+
+  test("the viewport carries the rung's stacking, so the backdrop stays under it", () => {
+    // A `position: fixed` element creates a stacking context, so a `z-index` on
+    // the panel inside the viewport orders it only against its own siblings —
+    // against the page it counts as whatever the viewport counts as. With the
+    // viewport at `auto` the backdrop painted over the drawer and the panel
+    // rendered greyed under its own overlay. The stacking therefore belongs to
+    // the viewport, and the panel states none.
+    const rung = classesFor(stylex.create({ probe: { zIndex: z.dialog } }).probe);
+    const under = classesFor(stylex.create({ probe: { zIndex: z.dialogBackdrop } }).probe);
+    expect(rung.length).toBeGreaterThan(0);
+    expect(rung).not.toEqual(under);
+
+    for (const className of rung) {
+      expect(classesFor(modal.drawerViewport)).toContain(className);
+      // The dialog panel is the other member of the rung and stacks the same,
+      // which is what makes this the rung's z-index rather than the drawer's.
+      expect(classesFor(modal.popup)).toContain(className);
+      // The panel inside the viewport claims nothing it could not honour.
+      expect(classesFor(modal.drawerPopup)).not.toContain(className);
+    }
+    for (const className of under) {
+      expect(classesFor(modal.backdrop)).toContain(className);
+      expect(classesFor(modal.drawerViewport)).not.toContain(className);
     }
   });
 

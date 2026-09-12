@@ -165,8 +165,8 @@ and would be nameless after a mechanical port. There are 75 files importing
 
 ## Found by opening it, not by a test
 
-Three defects survived a green suite, for the reason the menu note already
-recorded: the tests run in jsdom, where StyleX's compiled CSS is never applied,
+Four defects survived a green suite. Three did so for the reason the menu note
+already recorded: the tests run in jsdom, where StyleX's compiled CSS is never applied,
 so no test here can see a layout or a colour.
 
 **Every edge-anchored panel collapsed to the height of its own content.** The
@@ -187,6 +187,18 @@ room left in it. Then, once the stand-in was made `position: relative` so the
 cross had something to pin to, it started honouring the panel's own
 `inset-inline-start: 50%` and sat half a column to the right of itself. A
 stand-in that drops `position: fixed` inherits every inset the real part set.
+
+**The overlay painted over the drawer.** The panel rendered greyed under its own
+backdrop, which is the whole surface looking subtly wrong rather than obviously
+broken. `position: fixed` creates a stacking context, so the `z-index: z.dialog`
+on the panel ordered it only against its own siblings inside the viewport; the
+viewport itself had no `z-index`, counted as `auto` against the page, and the
+backdrop at `z.dialogBackdrop` won. The rung's stacking belongs to the viewport,
+because the viewport is the element that stacks against the product shell, and
+the panel now states none. This one *was* checkable without a browser — it is a
+fact about which classes compile onto which part — and `test/drawer.test.tsx`
+pins it now: the viewport carries the same z-index class the dialog panel does,
+the backdrop carries the other, and the drawer panel carries neither.
 
 **The board's dimension probes reported the width they were given, not the one
 they declared.** `dialog.width` read back as 167.5px because the probe was a flex
