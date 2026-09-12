@@ -110,7 +110,7 @@ export function runSessionDataContract(
       expect(result.status).toBe('accepted');
 
       const stored = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
-      expect(Object.hasOwn(stored, 'finished')).toBe(false);
+      expect(stored.finished).toBe(false);
       expect(Object.hasOwn(stored, 'endedAt')).toBe(false);
       expect(Object.hasOwn(stored, 'permissionWaitMs')).toBe(false);
       expect((stored as Record<string, unknown>).legacyFlag).toBe('kept');
@@ -141,7 +141,7 @@ export function runSessionDataContract(
       const stored = harness.readStored();
       expect(stored.filter((turn) => turn.id === 'assistant-1')).toHaveLength(1);
       const turn = stored.find((candidate) => candidate.id === 'assistant-1')!;
-      expect(Object.hasOwn(turn, 'finished')).toBe(false);
+      expect(turn.finished).toBe(false);
       expect(Object.hasOwn(turn, 'endedAt')).toBe(false);
       expect(Object.hasOwn(turn, 'permissionWaitMs')).toBe(false);
       expect((turn as Record<string, unknown>).legacyFlag).toBe('kept');

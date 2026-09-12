@@ -183,11 +183,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       const target = writer.read(turnId);
       if (!target) return rejected('not_found');
       if (target.role !== 'assistant') return rejected('invalid_input');
-      // One conditional commit: the target is re-located inside `updateEntry`,
-      // and only the terminal footprint is cleared. Unknown fields survive
-      // because the draft starts from the currently stored row.
+      // One conditional commit: the target is re-located inside `updateEntry`.
+      // Reopen sets an explicit non-terminal `finished` and removes the two end
+      // markers; unknown fields survive because the draft starts from storage.
       writer.updateEntry(turnId, (turn) => {
-        delete turn.finished;
+        turn.finished = false;
         delete turn.endedAt;
         delete turn.permissionWaitMs;
         return turn;
@@ -199,10 +199,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       if (existing) {
         if (existing.role !== 'assistant') return rejected('invalid_input');
         try {
-          // One conditional commit: only the terminal footprint is cleared, and
-          // provenance is filled only where the stored turn has none.
+          // One conditional commit: reopen sets an explicit non-terminal
+          // `finished`, removes the end markers, and fills provenance only where
+          // the stored turn has none.
           writer.updateEntry(input.turnId, (turn) => {
-            delete turn.finished;
+            turn.finished = false;
             delete turn.endedAt;
             delete turn.permissionWaitMs;
             if (turn.userTurnId === undefined && input.userTurnId !== undefined)

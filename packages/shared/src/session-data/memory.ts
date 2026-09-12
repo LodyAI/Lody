@@ -240,9 +240,10 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         if (turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
         const updated = { ...next[index]! } as Record<string, unknown>;
-        // Explicit clear of the terminal footprint; every unknown stored field
-        // rides along untouched.
-        delete updated.finished;
+        // Reopen: explicitly non-terminal, and the two end markers are removed
+        // rather than passed as `undefined`. Every unknown stored field rides
+        // along untouched.
+        updated.finished = false;
         delete updated.endedAt;
         delete updated.permissionWaitMs;
         next[index] = withoutUndefined(updated) as SessionHistory;
@@ -281,7 +282,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         if (index < 0 || turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
         const updated = { ...next[index]! } as Record<string, unknown>;
-        delete updated.finished;
+        updated.finished = false;
         delete updated.endedAt;
         delete updated.permissionWaitMs;
         // Never overwrite provenance the stored turn already has.
