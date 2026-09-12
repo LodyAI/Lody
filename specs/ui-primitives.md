@@ -44,6 +44,27 @@ holds the keyboard and the scroll inside its panel, so a list that opens outside
 that panel is unreachable in it; the surface names the panel once and the lists
 under it follow. Product surfaces do not otherwise place these lists.
 
+The same floating surface also carries commands. A person reaches a menu three
+ways — a control that opens one, a right click or long press over a region, and
+a bar of names along the top of a window — and meets the same commands whichever
+way they came: one row, one height, one mark for where the keyboard is. A menu
+holds commands, commands that toggle a setting, commands that pick one of a set,
+headings over groups of them, and commands that open a further menu; a command
+may carry a glyph, a keyboard shortcut, and the fact that it destroys something,
+which it states in its own colour rather than only in its words. A command that
+toggles a setting leaves the menu open so a second can be toggled; a command that
+acts closes it. A person walks a menu with the arrow keys, opens a further menu
+from the row that owns it, and leaves with Escape; the row the pointer is on and
+the row the keyboard is on are one row, and a row that cannot be used is neither
+reached nor run.
+
+The list a control opens is as wide as that control, because the control shows
+the value the list holds. A menu is opened by whatever the surface already had
+there, so it states a width of its own. Where keyboard focus goes after a menu
+closes is a product decision — a surface may want the composer rather than the
+control that opened the menu — so the surface states it and the primitive does
+not choose for it.
+
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring
 on focus, a destructive ring while invalid that persists when the control is
@@ -116,3 +137,6 @@ stored value, are recorded in the
 The select and the combobox, the separate token group their lists take, and the
 container a modal names for them are recorded in the
 [UI select and combobox note](../.agents/notes/implemented/feature/2026-09-10-ui-select-combobox.md).
+The menu family that shares that surface, the one declaration it replaces, and
+the migration of the Radix menus still owed to it are recorded in the
+[UI menu primitives note](../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).

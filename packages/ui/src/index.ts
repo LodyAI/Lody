@@ -22,6 +22,8 @@ export type {
   ComboboxSize,
   ComboboxTriggerProps,
 } from './field/combobox';
+export { ContextMenu } from './menu/context-menu';
+export type { ContextMenuContentProps, ContextMenuTriggerProps } from './menu/context-menu';
 export { Field } from './field/field';
 export type {
   FieldDescriptionProps,
@@ -32,6 +34,23 @@ export type {
 } from './field/field';
 export { Input } from './field/input';
 export type { InputProps, InputSize } from './field/input';
+export { Menu } from './menu/menu';
+export type {
+  MenuCheckboxItemProps,
+  MenuContentProps,
+  MenuGroupLabelProps,
+  MenuGroupProps,
+  MenuItemProps,
+  MenuItemTone,
+  MenuLinkItemProps,
+  MenuRadioGroupProps,
+  MenuRadioItemProps,
+  MenuSeparatorProps,
+  MenuSubmenuTriggerProps,
+  MenuTriggerProps,
+} from './menu/menu';
+export { Menubar } from './menu/menubar';
+export type { MenubarRootProps, MenubarTriggerProps } from './menu/menubar';
 export { PopupContainerProvider, usePopupContainer } from './popup/portal-container';
 export type { PopupContainer } from './popup/portal-container';
 export { Radio, RadioGroup } from './field/radio';

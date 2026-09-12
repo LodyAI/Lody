@@ -38,3 +38,21 @@ export function ChevronUpGlyph() {
 export function TickGlyph() {
   return <Glyph d="M3.2 8.4 6.4 11.6 12.8 4.4" />;
 }
+
+/** The chevron on a menu row that opens a submenu: there is more this way. */
+export function ChevronRightGlyph() {
+  return <Glyph d="M6.5 4 10.5 8 6.5 12" />;
+}
+
+/**
+ * The dot on the chosen row of a radio group. It is filled rather than stroked,
+ * because a radio mark is a disc: at 16px a stroked ring reads as a tick that
+ * has not finished drawing.
+ */
+export function DotGlyph() {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="3" fill="currentColor" />
+    </svg>
+  );
+}

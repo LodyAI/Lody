@@ -2423,17 +2423,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-menubar-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-menubar",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.16"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-popover-mit",
       "kind": "package",
       "scope": "production-dependency",

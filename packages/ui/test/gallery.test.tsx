@@ -1,7 +1,9 @@
+import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
+import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
 import { colors, shadow } from '../src/tokens/colors.stylex';
 import { control, duration, radius, space, text, z } from '../src/tokens/scales.stylex';
@@ -119,6 +121,27 @@ describe('UiGallery', () => {
       expect(board, `popup.${name} is missing from the board`).toContain(`popup.${name}`);
     }
     expect(board, 'field.icon is missing from the board').toContain('field.icon');
+  });
+
+  test('shows the three ways into a menu, and every row state a menu holds', () => {
+    // The ways in are the real controls: a dropdown trigger, a bar of them, and
+    // an area that answers a right click.
+    expect(board).toContain('aria-haspopup="menu"');
+    expect(board).toContain('role="menubar"');
+    expect(board).toContain('Right-click this area');
+    // The rows are a stand-in, because a menu is portalled and unmounted while
+    // it is closed — the board would otherwise show three triggers and nothing
+    // a reader could compare.
+    for (const row of ['New task', 'Copy link', 'Sort by name', 'Export', 'Archive']) {
+      expect(board, `the ${row} row is missing from the board`).toContain(row);
+    }
+    // A destructive command is a state of the one row rather than a component
+    // of its own, and it has two: at rest, and under the keyboard.
+    for (const state of [surface.itemDestructive, surface.itemDestructiveHighlighted]) {
+      for (const name of (stylex.props(state).className ?? '').split(' ').filter(Boolean)) {
+        expect(board, `a destructive row state is missing from the board`).toContain(name);
+      }
+    }
   });
 
   test('renders one palette when asked for one', () => {

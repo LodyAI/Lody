@@ -31,6 +31,12 @@ export const popup = stylex.defineVars({
   // The rules put popups at 4px below at opacity 0, rising over duration.regular.
   rise: '4px',
   scrollArrowHeight: '20px',
+  // A list takes the width of the control it belongs to, because that control
+  // shows the value it holds. A menu has no such pair: what opens it is often a
+  // 28px icon button, and matching that would produce a column of clipped
+  // commands. A menu surface therefore states a width of its own and grows past
+  // it for the longest row.
+  menuWidth: '200px',
   label: colors.label,
   hint: colors.tertiaryLabel,
   groupLabel: colors.secondaryLabel,
@@ -51,6 +57,13 @@ export const popup = stylex.defineVars({
   highlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
   selected: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
   indicator: colors.label,
+  // The one row that is not `label`: a command that destroys something. Its
+  // highlight is mixed toward `destructive` for the same reason `highlight` is
+  // mixed toward `label` — on this rung the named fills collapse into the
+  // surface — so the row about to delete something stays legible while the
+  // keyboard is on it, in both palettes.
+  destructive: colors.destructive,
+  destructiveHighlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.destructive} 12%)`,
 });
 
 /**
@@ -68,4 +81,6 @@ export const popupPaletteTheme = stylex.createTheme(popup, {
   highlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`,
   selected: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 3%)`,
   indicator: colors.label,
+  destructive: colors.destructive,
+  destructiveHighlight: `color-mix(in oklab, ${colors.raisedBackground}, ${colors.destructive} 12%)`,
 });
