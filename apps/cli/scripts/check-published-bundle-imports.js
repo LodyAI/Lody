@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -97,7 +96,6 @@ checkPublishedRuntimeDependencies();
 runDeepSeekAdapterBundleSmoke();
 runGrokAdapterBundleSmoke();
 runPublishedRuntimeSmoke();
-runPublishedFileLoggerSmoke();
 runWorkspaceWatchWorkerSmoke();
 runDiffWorkerSmoke();
 runTurnDiffStoreWorkerSmoke();
@@ -383,40 +381,6 @@ originalExit(0);
       if ('stderr' in output && output.stderr) {
         console.error(String(output.stderr));
       }
-    }
-    process.exit(1);
-  }
-}
-
-function runPublishedFileLoggerSmoke() {
-  const tempBase = process.platform === 'win32' ? os.tmpdir() : '/tmp';
-  const dataDir = fs.mkdtempSync(path.join(tempBase, 'lody-cli-logger-smoke-'));
-  const result = spawnSync(process.execPath, [path.join(distDir, 'index.js'), 'start'], {
-    cwd: cliRoot,
-    encoding: 'utf8',
-    env: {
-      LANG: process.env.LANG,
-      LODY_DATA_DIR: dataDir,
-      LODY_E2E: '1',
-      LODY_ELECTRON_BOOTSTRAP: '1',
-      LODY_PLATFORM: 'local',
-      NODE_ENV: 'test',
-      PATH: process.env.PATH,
-      TMPDIR: process.env.TMPDIR,
-    },
-    timeout: 10_000,
-  });
-
-  fs.rmSync(dataDir, { recursive: true, force: true });
-
-  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  if (result.error || !output.includes('Refusing supervised start:')) {
-    console.error('Published CLI file logger smoke failed.');
-    if (result.error) {
-      console.error(result.error);
-    }
-    if (output.trim()) {
-      console.error(output.trim());
     }
     process.exit(1);
   }

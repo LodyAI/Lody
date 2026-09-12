@@ -1,4 +1,4 @@
-# Vite 8 non-desktop migration
+# Vite 8 frontend migration
 
 Status: implemented
 Translation: pending
@@ -6,35 +6,37 @@ PR: https://github.com/LodyAI/Lody/pull/633
 
 ## Abstract
 
-The shared Vite catalog used by the CLI, components package, and standalone
-review helper now targets Vite 8.3. The desktop build remains on its explicit
-Vite 7 dependency because electron-vite 5 does not declare Vite 8 support. This
-boundary moves the independently buildable surfaces to Rolldown without
-conflating that migration with the Electron runtime upgrade.
+The components package and standalone review helper now target Vite 8.3. The CLI
+remains explicitly on Vite 7 because its bundled logging dependency is not
+compatible with Rolldown's CommonJS interop, while the desktop remains on Vite 7
+because electron-vite 5 does not declare Vite 8 support. This boundary adopts
+Rolldown only where the complete build and runtime paths pass without local
+dependency patches or peer exceptions. Vite 7 also satisfies the current
+TanStack Start peer contract used by the CLI.
 
 ## Pressure
 
-Vite 8 replaces Rollup and esbuild-based internals with Rolldown and Oxc, while
-the repository has several custom plugins, worker bundles, SSR entries, and a
-single-file build. Upgrading every surface together would make electron-vite's
-unsupported peer contract a hard blocker and obscure which custom build path
-caused any regression.
+Vite 8 replaces Rollup and esbuild-based internals with Rolldown and Oxc. The
+repository has custom plugins, worker bundles, SSR entries, and a single-file
+build, and the CLI bundles older CommonJS dependencies into its published
+artifact. Upgrading every surface together would turn unrelated compatibility
+gaps into local patches and obscure which build path caused a regression.
 
 ## Decision
 
-Raise only the shared catalog to Vite 8.3 after the compatible plugin and
-Storybook layers. Verify the CLI SSR multi-entry output, components library and
-Storybook builds, and review-helper standalone and Storybook builds under the
-new bundler. Raise the CLI's directly used esbuild to 0.28 so its development
-builder also satisfies Vite 8's optional peer contract. Move the components
-name-preservation option from esbuild to Oxc and make local config imports
-explicit for the future native loader. Retain `vite-tsconfig-paths`, but point it
-at `tsconfig.vite.json`: the typecheck config has type-only React mappings that
-both the native resolver and the plugin would incorrectly apply to Rolldown's
-runtime Storybook graph. Keep shared alias helpers structurally typed so their
-Vite 8 implementation types do not leak into the Electron Vite 7 config. Keep
-`apps/electron` on Vite 7 until electron-vite publishes a stable release whose
-peer contract includes Vite 8.
+Raise the shared catalog to Vite 8.3 after the compatible plugin and Storybook
+layers, then pin both the CLI and desktop to stable Vite 7. Verify components
+library and Storybook builds plus
+review-helper standalone and Storybook builds under Rolldown. Raise the CLI's
+directly used esbuild to 0.28 as an independent development-builder upgrade.
+
+Move the components name-preservation option from esbuild to Oxc and make local
+config imports explicit for the native loader. Retain `vite-tsconfig-paths`, but
+point it at `tsconfig.vite.json`: the typecheck config has type-only React
+mappings that both the native resolver and the plugin would incorrectly apply to
+Rolldown's runtime Storybook graph. Keep shared alias helpers structurally typed
+so their Vite 8 implementation types do not leak into the Vite 7 CLI and desktop
+configs.
 
 The first macOS ARM CI run exposed an incomplete lockfile snapshot: the
 `rolldown@1.2.8` JavaScript wrapper had no matching optional native dependencies,
@@ -45,16 +47,14 @@ every supported 1.2.8 native binding is recorded alongside the wrapper. Treat
 wrapper/native version equality as an installation invariant for future Rolldown
 updates.
 
-The next macOS ARM desktop smoke exposed Vite 8's intentional CommonJS default
-interop change in the embedded CLI. `file-stream-rotator@0.6.1`, pulled by the
-current `winston-daily-rotate-file`, calls the result of `require('moment')` as a
-function; Rolldown's consistent interop produced a namespace-shaped value and the
-CLI exited during file logger initialization. Vite's documented legacy bridge is
-insufficient because it does not cover this nested `require()` shape. Patch the
-transitive dependency to accept either the callable CommonJS value or Rolldown's
-`.default` value until the logging dependency removes that ambiguous contract. The
-desktop artifact startup probe is the removal gate because importing the CLI with
-`--version` does not initialize its file transport.
+A macOS ARM desktop smoke demonstrated why the CLI cannot join this migration.
+`file-stream-rotator@0.6.1`, pulled by the current
+`winston-daily-rotate-file`, invokes the result of `require('moment')` as a
+function. Rolldown's consistent interop produces a namespace-shaped value, so the
+embedded CLI exits during file logger initialization. Vite's legacy bridge does
+not cover that nested `require()` shape. Do not patch the transitive dependency;
+keep the CLI on Vite 7 until the logging dependency removes the ambiguous contract
+or the transport is deliberately replaced.
 
 ## Validation
 
@@ -62,9 +62,7 @@ desktop artifact startup probe is the removal gate because importing the CLI wit
   `rolldown` and `@rolldown/binding-darwin-arm64` at 1.2.8.
 - The previously failing review-helper standalone build transformed 2,334 modules
   and produced the complete single-file artifact under Vite 8.3.0.
-- The patched Vite 8 CLI bundle initializes its hybrid file logger, then reaches
-  the expected supervisor-contract rejection. The published-bundle check now
-  runs that exact startup boundary without launching a daemon.
-- The rebuilt macOS ARM desktop artifact passed all four P0 smoke scenarios and
-  all 28 steps, including session startup, work creation, onboarding, and
-  shortcuts.
+- Components library and Storybook builds and both review-helper build modes pass
+  under Vite 8.3.0.
+- The CLI development builder passes with esbuild 0.28 while its published bundle
+  remains on Vite 7.

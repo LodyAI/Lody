@@ -99,7 +99,7 @@
     "tsx": "^4.23.5",
     "undici": "catalog:",
     "uuid": "^13.0.0",
-    "vite": "catalog:",
+    "vite": "^7.0.0",
     "vite-plugin-top-level-await": "catalog:",
     "vite-plugin-wasm": "catalog:",
     "vitest": "^3.2.4",
