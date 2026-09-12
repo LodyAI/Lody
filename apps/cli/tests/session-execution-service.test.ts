@@ -2094,6 +2094,12 @@ describe('SessionExecutionService', () => {
       startSessionActivePresence: vi.fn(() => {
         events.push('active-start');
       }),
+      setSessionActivePresencePhase: vi.fn((_sessionId, phase) => {
+        events.push(`phase:${phase}`);
+      }),
+      createAssistantEntryForTurn: vi.fn(async () => {
+        events.push('assistant-entry');
+      }),
       clearSessionActivePresence: vi.fn(() => {
         events.push('active-clear');
       }),
@@ -2137,6 +2143,10 @@ describe('SessionExecutionService', () => {
     expect(idleAfterPromptAt).toBeGreaterThan(promptResolvedAt);
     expect(finalizeStartedAt).toBeGreaterThan(idleAfterPromptAt);
     expect(activeClearedAt).toBeGreaterThan(finalizeStartedAt);
+    const assistantEntryAt = events.indexOf('assistant-entry');
+    const thinkingAt = events.indexOf('phase:thinking');
+    expect(assistantEntryAt).toBeGreaterThanOrEqual(0);
+    expect(thinkingAt).toBeGreaterThan(assistantEntryAt);
   });
 
   it.each([undefined, 'delivery'] as const)(

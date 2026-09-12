@@ -3616,8 +3616,10 @@ export const SessionChatInterface = memo(
       sessionProject,
       workspaceId,
     ]);
-    const hideThinkingUnderFinishedAssistant =
-      shouldHideThinkingUnderFinishedAssistant(sessionHistory);
+    const hideThinkingUnderFinishedAssistant = shouldHideThinkingUnderFinishedAssistant(
+      sessionHistory,
+      liveSessionStatus?.type
+    );
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel

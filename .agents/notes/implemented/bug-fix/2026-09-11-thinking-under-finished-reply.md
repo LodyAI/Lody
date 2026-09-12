@@ -7,14 +7,15 @@ Translation: current
 
 ## Abstract
 
-After the assistant turn is stamped `finished`, the desktop footer already shows the completion time and duration. Session presence can still be `running` during host finalization, so the activity row kept saying "Thinking" under that finished bubble. The row is now omitted when the last history entry is a finished assistant. Presence is unchanged.
+After the assistant turn is stamped `finished`, the desktop footer already shows the completion time and duration. Session presence can still be `running` during host finalization, so the activity row kept saying "Thinking" under that finished bubble. The row is omitted when the last history entry is a finished assistant **and** live presence is leftover `running`. Goal resume has no user row; thinking presence is published only after `openAssistantEntry`, so the gap stays on `initializing` and the presence-driven label remains.
 
 ## Decision
 
-- Gate the activity row on the last history bubble, not on clearing session presence.
-- Keep showing permission and initializing labels. A later user turn in history restores the thinking row.
-- Do not clear presence on `history.finished`; that signal is session-scoped and still covers a new turn, permission wait, and autoPrompt.
+- Hide leftover Thinking under a finished last assistant while presence is `running` (same-turn finalize tail).
+- Do not hide for `initializing` or `requestPermission`. Goal resume stays on initializing until the assistant entry exists.
+- Publish `thinking` presence after `openAssistantEntry` on continueSession, not before prompt setup.
+- Do not clear presence on `history.finished`.
 
 ## Evidence and limits
 
-A Windows 0.93.3 tester confirmed the sequence on Codex, first conversation: the reply and completion time appear, then the extra "Thinking" under them disappears on its own. No exact overlap duration was recorded. Unit tests cover last-entry finished vs open vs later user turn. Packaged Electron was not retested here.
+A Windows 0.93.3 tester confirmed leftover Thinking under a finished first Codex reply, then it disappeared. Unit tests cover last-entry finished vs open vs later user turn, initializing/permission not hidden, and continueSession thinking-after-assistant-entry order. Packaged Electron and a live goal-resume GUI click were not retested here.

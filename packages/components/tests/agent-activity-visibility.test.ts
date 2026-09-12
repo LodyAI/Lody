@@ -28,6 +28,24 @@ describe('shouldHideThinkingUnderFinishedAssistant', () => {
         { role: 'assistant', finished: true },
       ])
     ).toBe(true);
+    expect(
+      shouldHideThinkingUnderFinishedAssistant([{ role: 'assistant', finished: true }], 'running')
+    ).toBe(true);
+  });
+
+  it('keeps presence-driven activity when a new turn is initializing without a user row', () => {
+    expect(
+      shouldHideThinkingUnderFinishedAssistant(
+        [{ role: 'assistant', finished: true }],
+        'initializing'
+      )
+    ).toBe(false);
+    expect(
+      shouldHideThinkingUnderFinishedAssistant(
+        [{ role: 'assistant', finished: true }],
+        'requestPermission'
+      )
+    ).toBe(false);
   });
 
   it('shows thinking again when a later user turn is already in history', () => {
