@@ -6,13 +6,12 @@ Base UI + StyleX component library that `packages/components/src/ui` migrates
 into one component at a time. Source-consumed; consumers compile it through
 `@stylexjs/unplugin` configured with `stylex-options.ts` from this package.
 
-- Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge`, or
-  `@source` scanning inside this package. Component props own visual variants,
-  sizes, tones, and shapes. A plain `className` pass-through may carry caller
-  layout or interaction constraints during staged migration; do not use it to
-  reconstruct the deleted component's visual design.
-- Depends on React, `@base-ui/react` and `@stylexjs/stylex` only. Never on
-  `@lody/components`, `@lody/platform`, or any cloud package.
+- Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
+  `@source` scanning here. Component props own visual variants, sizes, tones and
+  shapes. A caller's `className` may carry layout or interaction constraints
+  during staged migration, never the deleted component's visual design.
+- Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
+  `@lody/components`, `@lody/platform` or any cloud package.
 - No border token exists. Edges are wells, raised shadows, elevation shadows
   and the focus ring. See `src/tokens/RULES.md` before adding a token or a
   component style.
@@ -24,10 +23,10 @@ into one component at a time. Source-consumed; consumers compile it through
   `nativeButton`, so `:disabled` and `:focus-visible` reach them and a `<label>`
   can point at them.
 - Controls in the field family read validity and disabled from `Field.Root`
-  through Base UI's state callback on `className`, never from a prop of their
-  own. The invalid ring follows `aria-invalid`, so the ring and what a screen
-  reader announces are one fact; `src/field/invalid.ts` owns that reading in JS,
-  because StyleX cannot express an attribute selector.
+  through Base UI's state callback on `className`, never a prop of their own. The
+  invalid ring follows `aria-invalid`, so it and what a screen reader announces
+  are one fact; `src/field/invalid.ts` owns that reading in JS, because StyleX
+  cannot express an attribute selector.
 - A trigger reads `field` and the list it opens reads `popup`: different rungs,
   and the list shares its vocabulary with a menu rather than an input.
   `src/popup/surface.ts` holds what the floating parts share, as
@@ -45,8 +44,8 @@ into one component at a time. Source-consumed; consumers compile it through
   `--anchor-width`; the surface and rows come from `src/popup/surface.ts`.
 - Whatever holds a glyph gives it a box, because this package's glyphs state
   100% and StyleX has no descendant selector: a menu row's leading box, a
-  message's mark, an icon-only `Button`'s `button.iconSize` box. A caller's icon
-  states 100% too; a checkbox or radio row's box holds its mark only.
+  badge's, a message's mark, an icon-only `Button`'s `button.iconSize` box. A
+  caller's icon states 100% too; a checkbox row's box holds its mark only.
 - Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
   modal with what it already had there, `render={<Button …/>}`. Post-close focus
   is the product's policy, passed as `finalFocus`.
@@ -55,21 +54,21 @@ into one component at a time. Source-consumed; consumers compile it through
   `test/popover.test.tsx` pins the count.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts`; only the way in and what may dismiss them differ. An
-  outside press does not answer an alert dialog, but Escape does. `Content`
-  names its own panel to `PopupContainerProvider` and holds it in **state, not a
-  ref**: React attaches a child's refs before its parent's, so a popup mounting
-  in the same commit would read null and land on the body.
-- There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`,
-  whose viewport lays it out so the panel's `transform` carries the drag. `side`
-  is the writing direction's edge; `inset` is the second axis.
+  outside press does not answer an alert dialog, but Escape does. `Content` names
+  its panel to `PopupContainerProvider` in **state, not a ref**: React attaches a
+  child's refs first, so a popup mounting in the same commit reads null and lands
+  on the body.
+- There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`, whose
+  viewport lays it out so the panel's `transform` carries the drag. `side` is the
+  writing direction's edge; `inset` is the second axis.
 - `Tooltip` is the one floating part that does not read `popup`: the ladder
   inverts it, `label` under `shadow.medium`. Base UI makes it visual-only — no
   role, no `aria-describedby` — so every trigger states its own `aria-label`.
 - Tabs, Accordion and Collapsible are one `disclosure` family sharing
-  `disclosure/surface.ts`: a trigger, and what it shows. `Tabs.List` draws its
-  own indicator and states the size once for every tab in it; a revealed
-  panel's padding rides on a child, because Base UI measures the height it
-  animates with `scrollHeight`, which counts padding.
+  `disclosure/surface.ts`: a trigger, and what it shows. `Tabs.List` draws its own
+  indicator and states the size once for every tab; a revealed panel's padding
+  rides on a child, because Base UI measures the height it animates with
+  `scrollHeight`, which counts padding.
 - Alert, Toast, Progress, Skeleton and Spinner are one `feedback` family: what
   the system says back. A tone is a tint and a mark, never a fill; the mark is
   the part's, and `feedback/tone.ts` maps the four. The tint is mixed in
@@ -83,18 +82,23 @@ into one component at a time. Source-consumed; consumers compile it through
   too narrow. `table/parts.tsx` is the element layer, for a table that is not a
   list of records. A table draws no surface; `border-collapse: separate` is what
   lets its one line, a sticky head and a row's ring all be box-shadows.
-- A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
-  and `Content` re-declares the palette on the positioner, because a popup is
-  mounted outside the subtree that declares it and would otherwise inherit the
-  document's palette — a light panel on a dark page would open a dark list.
-- A part the shell may ring states its own edge, which is no edge —
-  `box-shadow: none` / `outline: none` — because the shell rings any focused
-  `[tabindex]` through a zero-specificity `:where()` rule. `Combobox.Empty`
-  stays mounted for its live region and collapses through `:empty`.
+- Card, Badge and Separator answer "what is an edge?" three ways: a card's is its
+  shadow — the card rung with a Dialog's parts, no nesting, and `interactive`
+  only marks it pressable — a badge is on **no rung**, so its tone is a film over
+  whatever holds it and its words stay ink, and a `Separator` _is_ the one
+  allowed line: no token group, announced, no margin.
+- A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
+  and `Content` re-declares it on the positioner, because a popup mounts outside
+  the subtree that declares it — a light panel on a dark page would otherwise
+  open a dark list.
+- A part the shell may ring states no edge (`box-shadow: none` /
+  `outline: none`), because the shell rings any focused `[tabindex]`.
+  `Combobox.Empty` stays mounted for its live region and collapses through
+  `:empty`.
 - Files that call `defineVars`, `createTheme` or `defineConsts` end in
-  `.stylex.ts`. Their arguments are object literals; the compiler cannot
-  evaluate helpers. Vars are imported from that file by a specifier ending in
-  `.stylex` (`@lody/ui/tokens/colors.stylex`), never through a barrel.
+  `.stylex.ts`. Their arguments are object literals; the compiler cannot evaluate
+  helpers. Vars are imported from that file by a specifier ending in `.stylex`
+  (`@lody/ui/tokens/colors.stylex`), never through a barrel.
 - Component tokens live beside the component as
   `<name>/<name>.tokens.stylex.ts` and reference semantic tokens or literal px.
   A component token that points at a semantic colour also belongs in that file's
@@ -106,7 +110,7 @@ into one component at a time. Source-consumed; consumers compile it through
   open) rather than one group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
-  board reads sample values back off the rendered node instead of repeating a
+  board reads sample values off the rendered node rather than repeating a
   literal. `test/gallery.test.tsx` fails when a token has no entry.
 - `corner.shape` goes wherever a radius goes, except `radius.full`: a pill or a
   circle takes `corner.round`, because a squircle there is a superellipse rather

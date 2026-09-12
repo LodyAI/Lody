@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, ChevronRight, CircleDashed, Loader2, X } from 'lucide-react';
 import type { MessageContent } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 
 /**
  * Renders the subagent/background tasks a turn spawned as a single grouped
@@ -114,9 +114,7 @@ const SubagentTaskRow = ({ task }: { task: SubagentTask }) => {
           <span className="min-w-0 flex-1" />
         )}
         {task.isBackgrounded ? (
-          <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-medium">
-            {t('sessions.subagentTasks.background', 'Background')}
-          </Badge>
+          <Badge>{t('sessions.subagentTasks.background', 'Background')}</Badge>
         ) : null}
         {action ? (
           <span

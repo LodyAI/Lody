@@ -837,16 +837,6 @@ declare module '@/ui/tooltip' {
   export function TooltipProvider(props: TooltipProviderProps): ReactElement | null;
 }
 
-declare module '@/ui/badge' {
-  import type { HTMLAttributes, ReactElement } from 'react';
-
-  export interface BadgeProps extends HTMLAttributes<HTMLDivElement> {
-    variant?: 'default' | 'secondary' | 'destructive' | 'outline';
-  }
-
-  export function Badge(props: BadgeProps): ReactElement;
-}
-
 declare module '@/atoms' {
   import type { PrimitiveAtom } from 'jotai';
   import type { WorkspaceId } from '@lody/shared';

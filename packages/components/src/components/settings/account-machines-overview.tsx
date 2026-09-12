@@ -24,7 +24,7 @@ import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-loc
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { isElectronRenderer } from '@/lib/electron';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 
@@ -237,10 +237,7 @@ export function AccountMachinesOverviewView({
                           {item.name}
                         </button>
                         {item.id === currentMachineId ? (
-                          <Badge
-                            variant="secondary"
-                            className="shrink-0 px-1.5 py-0 text-[10px] font-medium text-muted-foreground"
-                          >
+                          <Badge>
                             {t('settings.account.machines.localMachine', 'This machine')}
                           </Badge>
                         ) : null}

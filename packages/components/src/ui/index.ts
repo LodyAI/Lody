@@ -1,5 +1,4 @@
 // Export all UI components
-export * from './badge';
 export { Button } from '@lody/ui/button';
 export type { ButtonProps } from '@lody/ui/button';
 export * from './calendar';
@@ -10,7 +9,6 @@ export * from './dropdown-menu';
 export * from './kbd';
 export * from './popover';
 export * from './scroll-area';
-export * from './separator';
 // export * from './sidebar-resizer' // Has external dependencies - needs to be refactored
 // export * from './sidebar' // Has external dependencies - needs to be refactored
 export * from './tabs';

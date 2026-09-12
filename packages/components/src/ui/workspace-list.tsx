@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Cloud, LogIn, CloudOff, Upload, MoreHorizontal, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Separator } from './separator';
+import { Separator } from '@lody/ui/separator';
 import { useTranslation } from 'react-i18next';
 import {
   DropdownMenu,

@@ -28,7 +28,7 @@ import {
 } from '@lody/shared';
 import { toast } from 'sonner';
 import { Button } from '@lody/ui/button';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
   AlertDialog,
@@ -1463,13 +1463,11 @@ function getProviderTestActivityPercent(activity?: ProviderTestActivity): number
 }
 
 /**
- * One chip geometry for every provider status. The words differ in length and
- * only some carry a glyph, so without a fixed height and a single padding the
- * column read as five different controls stacked on top of each other.
+ * Every provider status is one `Badge`, and the tone says which kind it is. The
+ * geometry is the primitive's — one height, one padding, one corner — which is
+ * what this column needed when it was five hand-built chips that read as five
+ * different controls stacked on top of each other.
  */
-const PROVIDER_STATUS_CHIP =
-  'h-5 shrink-0 gap-1 whitespace-nowrap rounded-full border px-2 py-0 text-[10px] font-medium';
-
 function ProviderStatusBadge({
   status,
   activity,
@@ -1523,18 +1521,10 @@ function ProviderStatusBadge({
     );
     const badge = (
       <Badge
-        variant="outline"
         // The badge is not focusable, so the tooltip is a hover-only detail.
         // The acknowledgement itself must reach assistive tech regardless.
         aria-label={exceptional ? slowDetail : undefined}
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          runtimeFailed
-            ? 'border-destructive/40 bg-destructive/8 text-destructive'
-            : exceptional
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-              : 'border-primary/35 bg-primary/8 text-primary'
-        )}
+        tone={runtimeFailed ? 'danger' : exceptional ? 'warning' : 'running'}
       >
         {exceptional ? t('onboarding.providers.activitySlow', 'Taking longer') : stageLabel}
       </Badge>
@@ -1556,11 +1546,7 @@ function ProviderStatusBadge({
   }
   if (status === 'passed') {
     return (
-      <Badge
-        variant="outline"
-        className={cn(PROVIDER_STATUS_CHIP, 'border-primary/40 bg-primary/10 text-primary')}
-      >
-        <CheckCircle2 className="h-2.5 w-2.5" />
+      <Badge tone="success" icon={<CheckCircle2 className="h-3 w-3" />}>
         {t('onboarding.providers.statusPassed', 'Verified')}
       </Badge>
     );
@@ -1568,7 +1554,6 @@ function ProviderStatusBadge({
   if (status === 'failed') {
     const badge = (
       <Badge
-        variant="outline"
         aria-label={
           failureReason
             ? t('onboarding.providers.failureReasonA11y', 'Failed: {{reason}}', {
@@ -1576,12 +1561,9 @@ function ProviderStatusBadge({
               })
             : undefined
         }
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          'border-destructive/40 bg-destructive/8 text-destructive'
-        )}
+        tone="danger"
+        icon={<XCircle className="h-3 w-3" />}
       >
-        <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
       </Badge>
     );
@@ -1601,24 +1583,7 @@ function ProviderStatusBadge({
     );
   }
   if (status === 'needs-auth') {
-    return (
-      <Badge
-        variant="outline"
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-        )}
-      >
-        {t('onboarding.providers.statusNeedsAuth', 'Sign in')}
-      </Badge>
-    );
+    return <Badge tone="warning">{t('onboarding.providers.statusNeedsAuth', 'Sign in')}</Badge>;
   }
-  return (
-    <Badge
-      variant="outline"
-      className={cn(PROVIDER_STATUS_CHIP, 'border-border/70 bg-muted/40 text-muted-foreground')}
-    >
-      {t('onboarding.providers.statusUntested', 'Untested')}
-    </Badge>
-  );
+  return <Badge>{t('onboarding.providers.statusUntested', 'Untested')}</Badge>;
 }

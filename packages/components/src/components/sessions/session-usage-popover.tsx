@@ -12,7 +12,7 @@ import {
 } from '@/components/codex-reset/codex-reset-forecast-entry';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Progress } from '@lody/ui/progress';
-import { Separator } from '@/ui/separator';
+import { Separator } from '@lody/ui/separator';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -171,7 +171,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           ) : null}
 
           {(context || isContextCompacting) && hasRateLimitDetails ? (
-            <Separator className="my-2.5 bg-border/60" />
+            <Separator className="my-2.5" />
           ) : null}
 
           {hasRateLimitDetails ? (

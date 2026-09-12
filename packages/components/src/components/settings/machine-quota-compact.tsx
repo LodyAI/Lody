@@ -10,7 +10,7 @@ import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
@@ -95,11 +95,7 @@ export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaC
           ) : null;
 
         const tierBadge = tierLabel ? (
-          <Badge
-            variant="secondary"
-            className="max-w-[180px] truncate px-1.5 py-0 text-[10px]"
-            title={tierLabel}
-          >
+          <Badge className="max-w-[180px]" title={tierLabel}>
             {tierLabel}
           </Badge>
         ) : null;
