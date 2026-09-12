@@ -13,6 +13,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -47,6 +48,9 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
     waitUntilSynced: vi.fn(async () => {}),
     ...overrides.sessionDoc,
   };
+  (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
+    sessionDoc.updateHistory as never
+  );
 
   const workspaceDocument = {
     sessions: new Map<SessionId, unknown>(),

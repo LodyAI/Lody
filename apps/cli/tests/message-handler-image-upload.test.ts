@@ -15,6 +15,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -75,6 +76,9 @@ const createHarness = (): TestHarness => {
       state.status = status;
     }),
   };
+  (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
+    sessionDoc.updateHistory as never
+  );
 
   const workspaceDocument = {
     isTransportConnected: vi.fn(() => true),

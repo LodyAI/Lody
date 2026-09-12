@@ -3,6 +3,7 @@ import { v4 as uuidV4 } from 'uuid';
 import type {
   AcpSessionNotification,
   MessageContent,
+  PermissionOutcome,
   SessionHistoryInput,
   SessionId,
 } from '@lody/shared';
@@ -1326,30 +1327,21 @@ export const updatePermissionOutcomeInHistory = async (
   doc: SessionDocument,
   requestId: string,
   outcome: RequestPermissionResponse['outcome'],
-  _logger: Logger
+  logger: Logger
 ) => {
-  await doc.updateHistory((history) => {
-    history.forEach((entry) => {
-      const parsed = readEntryItems(entry);
-      let entryUpdated = false;
-      const nextContents = parsed.map((content) => {
-        if (content.type === 'tool_call' && content.permissionRequest?.requestId === requestId) {
-          entryUpdated = true;
-          return {
-            ...content,
-            permissionRequest: content.permissionRequest
-              ? { ...content.permissionRequest, outcome }
-              : content.permissionRequest,
-          };
-        }
-        return content;
-      });
-      if (entryUpdated) {
-        writeEntryItems(entry, nextContents);
-      }
-    });
-    return history;
-  });
+  // Domain command instead of a whole-history callback: the adapter locates the
+  // matching tool call by request id and writes only that turn's outcome.
+  const result = await doc.sessionData.commands.respondPermission(
+    requestId,
+    outcome as PermissionOutcome
+  );
+  if (result.status === 'rejected') {
+    // A missing request was a silent no-op before; preserve that, but never
+    // report a rejected write as applied.
+    logger.debug(`Permission outcome for ${requestId} not applied: ${result.reason.code}`);
+    return;
+  }
+  if (result.status === 'indeterminate') throw result.cause;
 };
 
 const mergeToolCallWithPermission = (

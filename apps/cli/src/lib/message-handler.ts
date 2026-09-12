@@ -1060,52 +1060,29 @@ export class MessageHandler {
     });
     this.logger.debug(`[${sessionId}] Creating assistant entry for turn ${turnId}`);
     try {
-      await sessionDoc.updateHistory((history) => {
-        const existingEntry = history.find(
-          (entry) => entry.id === turnId && entry.role === 'assistant'
-        );
-        if (existingEntry) {
-          return history.map((entry) => {
-            if (entry.id !== turnId || entry.role !== 'assistant') {
-              return entry;
-            }
-            // Reopen a reused assistant entry for a live turn: clear the terminal
-            // footprint that `finalizeACPState` may have stamped on it. Assistant
-            // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn
-            // is re-dispatched after the machine died/restarted mid-turn (durable
-            // pointer recovery), execution reuses THIS finalized entry and streams
-            // fresh output into it. Without this reset `finished`/`endedAt` stay true
-            // from the pre-death teardown finalize, and the web renderer folds the
-            // still-streaming turn into a "Worked for …" summary (and shared
-            // "active assistant entry" logic treats it as terminal). This branch only
-            // runs at genuine turn (re)start via `openAssistantEntry`, so resetting to
-            // the not-finished state here is correctly scoped. See
-            // apps/cli/src/session/AGENTS.md (assistant entry id reuse) and
-            // packages/components/src/components/ai-gui/AGENTS.md ("Worked for …").
-            return {
-              ...entry,
-              userTurnId: entry.userTurnId ?? userTurnId,
-              modelInfo: modelInfo ?? entry.modelInfo,
-              finished: false,
-              endedAt: undefined,
-              permissionWaitMs: undefined,
-            };
-          });
-        }
-
-        history.push({
-          id: turnId,
-          role: 'assistant',
-          userTurnId,
-          items: [] as unknown as SessionHistoryInput['items'],
-          timestamp: new Date(getServerNow()).toISOString(),
-          userId: undefined,
-          read: undefined,
-          modelInfo,
-          fileDiff: [],
-        });
-        return history;
+      // Reopen a reused assistant entry for a live turn, or create it. Assistant
+      // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn is
+      // re-dispatched after the machine died/restarted mid-turn (durable pointer
+      // recovery), execution reuses THIS finalized entry and streams fresh output
+      // into it. Without clearing `finished`/`endedAt`/`permissionWaitMs` they stay
+      // true from the pre-death teardown finalize, and the web renderer folds the
+      // still-streaming turn into a "Worked for …" summary (and shared "active
+      // assistant entry" logic treats it as terminal). This only runs at genuine
+      // turn (re)start via `openAssistantEntry`. See apps/cli/src/session/AGENTS.md
+      // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
+      // ("Worked for …").
+      const result = await sessionDoc.sessionData.commands.openAssistantTurn({
+        turnId,
+        ...(userTurnId !== undefined ? { userTurnId } : {}),
+        ...(modelInfo !== undefined ? { modelInfo } : {}),
+        timestamp: new Date(getServerNow()).toISOString(),
       });
+      if (result.status === 'rejected') {
+        throw new HistoryWriteError(
+          result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+        );
+      }
+      if (result.status === 'indeterminate') throw result.cause;
       span.end();
       this.logger.debug(`[${sessionId}] Assistant entry created`);
     } catch (error) {

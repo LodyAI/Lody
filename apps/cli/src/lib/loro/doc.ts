@@ -95,6 +95,7 @@ import {
 } from './connection-recovery';
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 import type { ModelInfo } from '@lody/shared';
+import { createLoroSessionData, type LoroSessionData } from '@lody/shared/session-data';
 import { redactProxyUrl, sanitizeUrlForLogging } from '@/utils/log-sanitize';
 import { getProxyForUrl } from 'proxy-from-env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
@@ -1753,6 +1754,12 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private destroyed = false;
+  /**
+   * CRDT-neutral read/write seam over the same doc and the Mirror's one shared
+   * writer. Business callers use this instead of raw history callbacks; Loro,
+   * Mirror and container ids stay inside the adapter.
+   */
+  private sessionDataInstance: LoroSessionData | null = null;
 
   get isDestroyed(): boolean {
     return this.destroyed;
@@ -1804,7 +1811,29 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       doc: handle.doc,
       initialState: merged,
     });
+    // The adapter binds to the Mirror's one writer; rebuild it with the mirror.
+    this.sessionDataInstance = null;
     this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.mirror);
+  }
+
+  /**
+   * The domain seam for session history. Callers express business operations
+   * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
+   * Loro doc, the Mirror, or a container id.
+   */
+  get sessionData(): LoroSessionData {
+    if (!this.sessionDataInstance) {
+      const doc = this.handle?.doc;
+      if (!doc || !this.mirror) throw new Error('SessionDocument not initialized');
+      this.sessionDataInstance = createLoroSessionData({
+        sessionId: this.sessionId,
+        doc,
+        // Reuse the Mirror's writer: one writer instance owns local history writes.
+        writer: this.mirror.historyWriter,
+        flushLocal: () => this.repo.flush(),
+      });
+    }
+    return this.sessionDataInstance;
   }
 
   async init(options: { skipAutoRead?: boolean } = {}) {
