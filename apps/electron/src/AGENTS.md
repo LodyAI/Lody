@@ -52,6 +52,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   PostHog reporting. De-duplicate the same error across React and window events.
   Renderer-mounted notification must come from a committed layout-effect sentinel,
   never a timer or microtask guess.
+- Native notification IPC settles from Electron's `show` or `failed` event. Never
+  report success immediately after calling `Notification.show()`.
 - Theme changes must also update the native window color in `window-theme.ts`.
   OS appearance changes while `themeSource` is `system` must retint chrome and
   notify the renderer (`app.nativeTheme`). On macOS also subscribe

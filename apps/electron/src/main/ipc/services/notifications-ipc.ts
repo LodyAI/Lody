@@ -32,6 +32,6 @@ export class NotificationsIpc extends IpcService {
     if (!isShowSessionCompletionNotificationInput(payload)) {
       return { shown: false, reason: 'invalid_payload' }
     }
-    return getIpcServiceDeps().notificationService.showSessionCompletion(payload)
+    return await getIpcServiceDeps().notificationService.showSessionCompletion(payload)
   }
 }

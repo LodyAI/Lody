@@ -75,3 +75,5 @@ $ pnpm build:mac
 # For Linux
 $ pnpm build:linux
 ```
+
+Packaged macOS builds require macOS 13 or later.
