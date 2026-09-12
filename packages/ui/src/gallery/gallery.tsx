@@ -6,7 +6,7 @@ import { Checkbox } from '../field/checkbox';
 import { AlertDialog } from '../dialog/alert-dialog';
 import { Dialog } from '../dialog/dialog';
 import { dialog as dialogTokens } from '../dialog/dialog.tokens.stylex';
-import { Sheet, type SheetSide } from '../dialog/sheet';
+import { Drawer, type DrawerSide } from '../drawer/drawer';
 import { modal } from '../dialog/surface';
 import { Combobox } from '../field/combobox';
 import { Field } from '../field/field';
@@ -290,7 +290,7 @@ const styles = stylex.create({
   // The dialog stand-in drops what makes the panel own the window — the fixed
   // position, the centring transform and the 512px width, which would overflow
   // this board — and keeps the padding, the radius, the gap and the type, which
-  // are what a reader is here to see. `dialog.width`, `dialog.sheetSize` and
+  // are what a reader is here to see. `dialog.width`, `dialog.drawerSize` and
   // `dialog.inset` are reported by probes instead, because a panel scaled to fit
   // a board can no longer report its own width.
   dialogReplica: {
@@ -421,7 +421,7 @@ const FILLS = [
   { name: 'hoverFill', value: colors.hoverFill, note: 'pointer over a row' },
   { name: 'selectedFill', value: colors.selectedFill, note: 'current row' },
   { name: 'separator', value: colors.separator, note: 'between rows only' },
-  { name: 'overlay', value: colors.overlay, note: 'dialog and sheet backdrop' },
+  { name: 'overlay', value: colors.overlay, note: 'dialog and drawer backdrop' },
 ];
 
 const ROLE_COLORS = [
@@ -446,7 +446,7 @@ const RUNGS = [
   { name: 'region', style: styles.region, use: 'sidebar, footer band' },
   { name: 'card', style: styles.card, use: 'card, panel, composer' },
   { name: 'floating', style: styles.floating, use: 'menu, popover, select list' },
-  { name: 'modal', style: styles.modal, use: 'dialog, sheet' },
+  { name: 'modal', style: styles.modal, use: 'dialog, alert dialog, drawer' },
 ];
 
 const SHADOWS = [
@@ -497,7 +497,7 @@ const SHADOWS = [
     box: shadow.large,
     fill: colors.elevatedBackground,
     ink: false,
-    note: 'dialogs and sheets',
+    note: 'dialogs and drawers',
   },
 ];
 
@@ -548,7 +548,7 @@ const TYPE_SCALE = [
     leading: text.headlineLeading,
     note: 'dialog title',
   },
-  { name: 'title', size: text.titleSize, leading: text.titleLeading, note: 'sheet, full page' },
+  { name: 'title', size: text.titleSize, leading: text.titleLeading, note: 'a full page' },
 ];
 
 const SPACES = [
@@ -611,7 +611,7 @@ const TOOLTIP_COLORS = [
   { name: 'tooltip.label', value: tooltipTokens.label, note: 'the page background, as ink' },
 ];
 
-const SHEET_SIDES: SheetSide[] = ['top', 'end', 'bottom', 'start'];
+const DRAWER_SIDES: DrawerSide[] = ['top', 'end', 'bottom', 'start'];
 
 const SELECT_SIZES = [
   { name: 'small · 28', size: 'small' as const },
@@ -1445,7 +1445,7 @@ function DialogReplica() {
       <div {...stylex.props(styles.replicaCaption)}>
         <span {...stylex.props(styles.rungUse)}>
           The modal rung states three things at once: the elevated background, the large shadow, and
-          an overlay over the page. A Dialog, an AlertDialog and a Sheet are this one panel — they
+          an overlay over the page. A Dialog, an AlertDialog and a Drawer are this one panel — they
           differ in how they arrive and in what may dismiss them, not in what they are made of.
         </span>
         <dl {...stylex.props(styles.constList)}>
@@ -1477,7 +1477,8 @@ function WidthProbeRow({ name, value }: { name: string; value: string }) {
 function ModalDimensions() {
   const dimensions = [
     { name: 'dialog.width', value: dialogTokens.width },
-    { name: 'dialog.sheetSize', value: dialogTokens.sheetSize },
+    { name: 'dialog.drawerSize', value: dialogTokens.drawerSize },
+    { name: 'dialog.drawerInset', value: dialogTokens.drawerInset },
     { name: 'dialog.inset', value: dialogTokens.inset },
     { name: 'dialog.rise', value: dialogTokens.rise },
   ];
@@ -1496,29 +1497,34 @@ function ModalDimensions() {
 }
 
 /**
- * A sheet on one edge. A sheet arrives from somewhere, so the edge it came in on
- * is the one thing it states for itself, and all four belong on the board: each
- * pins to a different pair of sides and slides along a different axis.
+ * A drawer on one edge, flush or inset.
+ *
+ * A drawer arrives from somewhere, so the edge it came in on is one axis and
+ * all four belong on the board: each is laid out against a different side and
+ * swiped away in a different direction. Whether it meets that edge or floats
+ * off it is the second axis, and it changes the corners as well as the gap.
  */
-function FilterSheet({ side }: { side: SheetSide }) {
+function FilterDrawer({ side, inset }: { side: DrawerSide; inset?: boolean }) {
   return (
-    <Sheet.Root>
-      <Sheet.Trigger render={<Button variant="secondary" size="small" />}>{side}</Sheet.Trigger>
-      <Sheet.Content side={side}>
-        <Sheet.Header>
-          <Sheet.Title>Filters</Sheet.Title>
-          <Sheet.Description>They apply to the session list.</Sheet.Description>
-        </Sheet.Header>
+    <Drawer.Root side={side}>
+      <Drawer.Trigger render={<Button variant="secondary" size="small" />}>
+        {inset ? `${side} · inset` : side}
+      </Drawer.Trigger>
+      <Drawer.Content side={side} inset={inset}>
+        <Drawer.Header>
+          <Drawer.Title>Filters</Drawer.Title>
+          <Drawer.Description>They apply to the session list.</Drawer.Description>
+        </Drawer.Header>
         <Field.Label>
           <Checkbox name="running" defaultChecked />
           Running only
         </Field.Label>
-        <Sheet.Footer>
-          <Sheet.Close render={<Button variant="secondary" size="small" />}>Reset</Sheet.Close>
-          <Sheet.Close render={<Button size="small" />}>Apply</Sheet.Close>
-        </Sheet.Footer>
-      </Sheet.Content>
-    </Sheet.Root>
+        <Drawer.Footer>
+          <Drawer.Close render={<Button variant="secondary" size="small" />}>Reset</Drawer.Close>
+          <Drawer.Close render={<Button size="small" />}>Apply</Drawer.Close>
+        </Drawer.Footer>
+      </Drawer.Content>
+    </Drawer.Root>
   );
 }
 
@@ -1573,10 +1579,18 @@ function ModalTriggers() {
         </Cluster>
       </Row>
       <Row>
-        <LegendKey>sheet · each edge</LegendKey>
+        <LegendKey>drawer · flush</LegendKey>
         <Cluster>
-          {SHEET_SIDES.map((side) => (
-            <FilterSheet key={side} side={side} />
+          {DRAWER_SIDES.map((side) => (
+            <FilterDrawer key={side} side={side} />
+          ))}
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>drawer · inset</LegendKey>
+        <Cluster>
+          {DRAWER_SIDES.map((side) => (
+            <FilterDrawer key={side} side={side} inset />
           ))}
         </Cluster>
       </Row>
@@ -1885,7 +1899,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Motion"
-        rule="Press translates 1px and drops the ink edge at duration.fast. Popups rise from 4px below at duration.regular. One easing. Hover a chip to see its duration."
+        rule="The distance a thing travels picks its step. Press translates 1px and drops the ink edge at duration.fast. A popup rises 4px at duration.regular. A drawer crosses the window at duration.slow, because 180ms over 600px reads as a snap rather than a slide. One easing throughout. Hover a chip to see its duration."
       >
         <PaletteSplit palettes={palettes}>
           <Cluster>
@@ -1894,6 +1908,9 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             </div>
             <div {...stylex.props(styles.motionChip, dyn.transition(duration.regular))}>
               duration.regular · rise
+            </div>
+            <div {...stylex.props(styles.motionChip, dyn.transition(duration.slow))}>
+              duration.slow · a drawer crossing the window
             </div>
           </Cluster>
         </PaletteSplit>
@@ -2354,8 +2371,8 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
 
       <Section
-        title="Dialog · AlertDialog and Sheet"
-        rule="The modal rung is the one that states three things at once: the elevated background, the large shadow, and an overlay over the page — a panel that covers what a person was doing while still showing it. The three are one family reading one token group. A Dialog is dismissable and says so with a cross; an AlertDialog is answered rather than dismissed, so it has no cross and a press beside it is not an answer — Escape still is, because it is the platform's cancel; a Sheet is that panel arriving from an edge, which is the only thing it restates. Each one names its own panel as the container every Select, Combobox and Menu inside it mounts into, so a list opened in a modal is inside the focus scope holding it."
+        title="Dialog · AlertDialog and Drawer"
+        rule="The modal rung is the one that states three things at once: the elevated background, the large shadow, and an overlay over the page — a panel that covers what a person was doing while still showing it. The three are one family reading one token group. A Dialog is dismissable and says so with a cross; an AlertDialog is answered rather than dismissed, so it has no cross and a press beside it is not an answer — Escape still is, because it is the platform's cancel; a Drawer is that panel arriving from an edge, and unlike the other two it can be dragged back out of it — which is why this system has no Sheet. Each one names its own panel as the container every Select, Combobox and Menu inside it mounts into, so a list opened in a modal is inside the focus scope holding it."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>

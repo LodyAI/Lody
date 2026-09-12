@@ -161,10 +161,14 @@ describe('UiGallery', () => {
     // so what a reader compares against is the stand-in beside the triggers.
     expect(board).toContain('Rename session');
     expect(board).toContain('Delete session');
-    // A sheet arrives from somewhere, so the edge is a variant of it and all
-    // four belong on the board: each pins to a different pair of sides.
+    // A drawer has two axes and both belong on the board: the edge it arrives
+    // from — each laid out against a different side and swiped a different way
+    // — and whether it meets that edge or floats off it.
     for (const side of ['top', 'end', 'bottom', 'start']) {
-      expect(board, `the ${side} sheet is missing from the board`).toContain(`>${side}<`);
+      expect(board, `the ${side} drawer is missing from the board`).toContain(`>${side}<`);
+      expect(board, `the inset ${side} drawer is missing from the board`).toContain(
+        `${side} · inset`
+      );
     }
     for (const name of tokenNames(dialog)) {
       expect(board, `dialog.${name} is missing from the board`).toContain(`dialog.${name}`);

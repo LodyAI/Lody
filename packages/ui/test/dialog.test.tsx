@@ -1,19 +1,10 @@
-import * as stylex from '@stylexjs/stylex';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Button } from '../src/button/button';
 import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
-import { Sheet } from '../src/dialog/sheet';
-import { modal, sheetHiddenStyle, sheetSideStyle } from '../src/dialog/surface';
 import { Select } from '../src/field/select';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
-
-/** See `menu.test.tsx`: the same loosened call the primitives make. */
-function classesFor(...styles: readonly unknown[]): string[] {
-  const props = stylex.props as (...args: readonly unknown[]) => { className?: string };
-  return (props(...styles).className ?? '').split(' ').filter(Boolean);
-}
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -202,39 +193,5 @@ describe('AlertDialog', () => {
     // leaves a keyboard user holding a panel they cannot put down.
     await press('Escape');
     expect(alerts()).toHaveLength(0);
-  });
-
-  test('is the dialog panel, not a second one', () => {
-    // Both read `dialog/surface.ts`. The claim the token group makes — that the
-    // three are one family differing in how they arrive — is a claim about the
-    // classes they compile to, so it is checked as one.
-    const dialogPanel = classesFor(modal.popup);
-    expect(dialogPanel.length).toBeGreaterThan(0);
-    expect(classesFor(modal.popup)).toEqual(dialogPanel);
-  });
-});
-
-describe('Sheet', () => {
-  test('comes in from the edge it was given, and leaves the same way', () => {
-    // A sheet's rest and hidden ends are a pair: it slides off the edge it came
-    // in on rather than fading 4px down the way a centred panel does.
-    for (const side of ['top', 'bottom', 'start', 'end'] as const) {
-      expect(classesFor(sheetSideStyle(side)).length).toBeGreaterThan(0);
-      expect(classesFor(sheetHiddenStyle(side)).length).toBeGreaterThan(0);
-    }
-    expect(classesFor(sheetHiddenStyle('start'))).not.toEqual(classesFor(sheetHiddenStyle('end')));
-  });
-
-  test('is the dialog with the centring replaced, and reports its side', async () => {
-    mounted = await mount(
-      <Sheet.Root defaultOpen>
-        <Sheet.Content side="start">
-          <Sheet.Title>Filters</Sheet.Title>
-        </Sheet.Content>
-      </Sheet.Root>
-    );
-    expect(panel().getAttribute('data-side')).toBe('start');
-    // It is a dialog to the platform: same role, same name, same way out.
-    expect(all('[role="dialog"] button[aria-label="Close"]')).toHaveLength(1);
   });
 });

@@ -39,6 +39,14 @@ export type {
   ModalContentProps,
 } from './dialog/dialog';
 export type { DialogSectionProps } from './dialog/parts';
+export { Drawer } from './drawer/drawer';
+export type {
+  DrawerContentProps,
+  DrawerDescriptionProps,
+  DrawerRootProps,
+  DrawerSide,
+  DrawerTitleProps,
+} from './drawer/drawer';
 export { Field } from './field/field';
 export type {
   FieldDescriptionProps,
@@ -89,8 +97,6 @@ export type {
   SelectTriggerProps,
   SelectValueProps,
 } from './field/select';
-export { Sheet } from './dialog/sheet';
-export type { SheetContentProps, SheetSide } from './dialog/sheet';
 export { Switch } from './field/switch';
 export type { SwitchProps } from './field/switch';
 export { Textarea } from './field/textarea';

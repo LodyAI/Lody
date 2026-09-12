@@ -198,8 +198,9 @@ export const DialogDescription = forwardRef<HTMLParagraphElement, DialogDescript
  * writes a header, a body and a footer.
  *
  * `AlertDialog` is the same panel for a question that has to be answered, and
- * `Sheet` is the same panel arriving from an edge of the window; all three read
- * one token group, so a padding or a title step has one place to change.
+ * `Drawer` is the same panel arriving from an edge of the window and draggable
+ * back out of it; all three read one token group, so a padding or a title step
+ * has one place to change.
  */
 export const Dialog = {
   Root: BaseDialog.Root,

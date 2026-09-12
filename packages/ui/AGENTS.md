@@ -38,11 +38,10 @@ into one component at a time. Source-consumed; consumers compile it through
   well, or the trigger names the raw value; `test/select.test.tsx` pins both.
 - Every floating part's `Content` assembles Base UI's portal, positioner and
   popup so a caller writes contents rather than plumbing, and takes the
-  positioning props on the outside. They mount into the nearest
-  `PopupContainerProvider`, and switch to the absolute positioning strategy when
-  they do: a host container that centres itself with `translate` is the
-  containing block for `position: fixed` descendants, and a viewport-anchored
-  popup inside one lands at its own offset.
+  positioning props outside. They mount into the nearest
+  `PopupContainerProvider`, switching to the absolute strategy when they do: a
+  container centred with `translate` is the containing block for `fixed`
+  descendants, so a viewport-anchored popup inside one lands at its own offset.
 - `Menu` is the dropdown menu; Base UI has no separate part for one and a second
   name would be a second thing to keep in step. `ContextMenu` and `Menubar`
   restate only the way in and re-export `Menu`'s rows. A menu reads `popup` and
@@ -59,13 +58,20 @@ into one component at a time. Source-consumed; consumers compile it through
 - `Popover` reads `popup` too and replaces five of a list's declarations: the
   anchor width, the row inset, and the three that make type a control's rather
   than prose. `test/popover.test.tsx` pins that as a count.
-- Dialog, AlertDialog and Sheet are one family on the modal rung sharing
+- Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts` and the `dialog` group; only the way in and what may
   dismiss them differ. An outside press does not answer an alert dialog, but
   Escape does. `Content` names its own panel to `PopupContainerProvider` and
   holds it in state, not a ref: React attaches a child's refs before its
   parent's, so a popup mounting in the same commit reads null and lands on the
   body — the one case that mechanism exists to prevent.
+- There is no `Sheet`. A panel arriving from an edge promises it can be sent
+  back, so it is Base UI's `Drawer` — a viewport that lays the panel out, a
+  panel whose `transform` carries the drag — not a `Dialog` pinned to an edge,
+  which spends that property on its own centring. `side` is the writing
+  direction's edge and `Root` derives the physical swipe from it; `inset` is the
+  second axis: flush meets the window and squares two corners, inset floats at
+  `dialog.drawerInset` and keeps four.
 - `Tooltip` is the one floating part that does not read `popup`: the ladder
   inverts it, `label` under `shadow.medium`. Base UI makes a tooltip visual-only
   — no role, no `aria-describedby` — so every trigger states its own
@@ -75,11 +81,10 @@ into one component at a time. Source-consumed; consumers compile it through
   mounted outside the subtree that declares it and would otherwise inherit the
   document's palette — a light panel on a dark page would open a dark list.
 - A part on the floating or modal rung declares its own edge, which is no edge:
-  the product shell rings any focused `[tabindex]` through a zero-specificity
-  `:where()` rule, and Base UI focuses the highlighted row and the open panel, so
-  both state `box-shadow: none` / `outline: none`. `Combobox.Empty` stays mounted
-  so a screen reader has a live region and collapses through `:empty`; hiding it
-  takes the region out of the tree.
+  the shell rings any focused `[tabindex]` through a zero-specificity `:where()`
+  rule and Base UI focuses the highlighted row and the open panel, so both state
+  `box-shadow: none` / `outline: none`. `Combobox.Empty` stays mounted for its
+  live region and collapses through `:empty`; hiding it drops it from the tree.
 - Files that call `defineVars`, `createTheme` or `defineConsts` end in
   `.stylex.ts`. Their arguments are object literals; the compiler cannot
   evaluate helpers. Vars are imported from that file by a specifier ending in

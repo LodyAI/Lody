@@ -83,6 +83,21 @@ lists and menus inside it belong, so a surface that opens one never has to.
 Which answer in such a panel is the affirmative one, and what it is about, is
 the surface's decision rather than the panel's.
 
+The one that arrives from an edge can also be sent back to it. A panel sliding in
+from an edge promises that gesture, and a person using a touch screen will make
+it, so that panel is a different thing from the one in the middle rather than the
+same thing repositioned: it is laid out against the edge it belongs to instead of
+placing itself, which is what leaves it free to follow a finger. It names that
+edge in reading order rather than as left or right, and the direction that sends
+it away follows from the edge, so a panel on the leading side departs the way
+"away" means in the reader's language. It either meets the window — reaching the
+physical edge, squaring the corners that touch it, and keeping its own contents
+clear of whatever the device intrudes — or floats clear of every edge as an
+object resting over the page. As it is dragged away the page behind it returns in
+proportion, so a gesture half-made reads as one that can be abandoned. A shell
+that wants the page itself to recede while such a panel is open says so around
+its own interface; the panel does not reach out and do it.
+
 A person may also be told what a control is without acting on it. That label is
 not a surface a person visits: it is a mark over the thing it names, so it reads
 inverted rather than raised, it never takes the pointer, and it sits above every

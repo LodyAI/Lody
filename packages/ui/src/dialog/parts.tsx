@@ -9,7 +9,7 @@ export interface DialogSectionProps {
 }
 
 /**
- * The heading block. A Dialog, an AlertDialog and a Sheet all open with a title
+ * The heading block. A Dialog, an AlertDialog and a Drawer all open with a title
  * and, usually, one sentence about it; the pair is one block with one gap, so
  * the panel's own `gap` separates it from the body rather than from the
  * sentence it belongs to.

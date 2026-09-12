@@ -19,7 +19,7 @@ import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Sheet } from '@lody/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import {
   createCustomPathLauncherId,
   DEFAULT_PATH_LAUNCHER_PREFERENCE,
@@ -299,10 +299,10 @@ function LauncherFormDialog({
     ? command.replaceAll(PATH_LAUNCHER_PATH_PLACEHOLDER, PREVIEW_SAMPLE_PATH)
     : '';
   const showPreview = validation.ok === true && previewCommand.length > 0;
-  const FormHeader = isMobile ? Sheet.Header : DialogHeader;
-  const FormTitle = isMobile ? Sheet.Title : DialogTitle;
-  const FormDescription = isMobile ? Sheet.Description : DialogDescription;
-  const FormFooter = isMobile ? Sheet.Footer : DialogFooter;
+  const FormHeader = isMobile ? Drawer.Header : DialogHeader;
+  const FormTitle = isMobile ? Drawer.Title : DialogTitle;
+  const FormDescription = isMobile ? Drawer.Description : DialogDescription;
+  const FormFooter = isMobile ? Drawer.Footer : DialogFooter;
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onClose();
@@ -404,14 +404,14 @@ function LauncherFormDialog({
 
   if (isMobile) {
     return (
-      <Sheet.Root open={draft !== null} onOpenChange={handleOpenChange}>
-        <Sheet.Content
+      <Drawer.Root side="bottom" open={draft !== null} onOpenChange={handleOpenChange}>
+        <Drawer.Content
           side="bottom"
           className="max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-t-2xl pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
         >
           {form}
-        </Sheet.Content>
-      </Sheet.Root>
+        </Drawer.Content>
+      </Drawer.Root>
     );
   }
 

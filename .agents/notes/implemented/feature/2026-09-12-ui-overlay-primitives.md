@@ -6,15 +6,16 @@ Translation: pending
 ## Abstract
 
 `@lody/ui` owned the floating surface a list and a menu open. This note records
-the four things that sit over a page and were still Radix with Tailwind classes:
-`Popover`, `Dialog`, `AlertDialog`, `Sheet` and `Tooltip`. It records why the
+the things that sit over a page and were still Radix with Tailwind classes:
+`Popover`, `Dialog`, `AlertDialog`, `Drawer` and `Tooltip`. It records why the
 popover joins the `popup` group instead of opening a second floating surface;
 why the three modal surfaces are one family under one new `dialog` group; why the
 tooltip is the one floating part that does **not** read `popup`; and the defects
 found in the primitives as they were first written — two by the tests, three more
 only by opening the board in Chromium. It also records
-what this change deliberately does not do: `Sheet` is migrated and its Radix file
-is deleted, and the Popover, Dialog, AlertDialog and Tooltip call sites are not.
+why there is deliberately no `Sheet`; and what this change does not do: the
+`Drawer` is migrated and the Radix `sheet.tsx` deleted, while the Popover,
+Dialog, AlertDialog and Tooltip call sites are not.
 
 ## Problem
 
@@ -52,13 +53,57 @@ forgetting that stepping from the control type rule to the prose rule replaces
 three more declarations. The test failed, and the claim was corrected rather than
 the test loosened.
 
-**Dialog, AlertDialog and Sheet are one family, not three components.** They
+**Dialog, AlertDialog and Drawer are one family, not three components.** They
 share `src/dialog/surface.ts` and one `dialog` token group for the reason `field`
 serves the whole control family: the three differ in how they arrive and in what
 may dismiss them, not in what they are made of. A dialog carries a cross; an
-alert dialog does not, and a press beside it is not an answer; a sheet is the
-same panel pinned to an edge, restating the centring transform, the capped width
-and the two corners that now meet the window.
+alert dialog does not, and a press beside it is not an answer; a drawer arrives
+from an edge and can be dragged back out of it.
+
+**There is no `Sheet`, and the first version of this change was wrong about
+that.** It shipped a `Sheet` built on Base UI's `Dialog` with a `side` prop —
+which is Base UI's `Drawer` reimplemented out of the wrong primitive. Base UI's
+own subtitle for Drawer, *"a panel that slides in from the edge of the screen"*,
+is word for word what that `Sheet`'s documentation said. That is the mistake the
+menu note already recorded under a different name: a second name for the same
+component and a second thing to keep in step.
+
+The behaviour is the real argument, not the naming. A panel that slides in from
+an edge promises that it can be sent back, and on a touch screen a person will
+try; a dialog cannot answer that gesture at all. The repository had already voted
+on this — 23 files reach for `vaul` precisely because the Dialog-based sheet was
+not enough — and every one of the five callers this change migrates is a mobile
+bottom or side panel. The `Sheet` migration would have made five surfaces worse
+on touch than the vaul drawers beside them.
+
+**A drawer is laid out by a viewport, not positioned by itself.** That is the
+mechanical reason the two cannot be the same component. A dialog centres itself
+with `translate(-50%, -50%)`, which spends the one property CSS has for movement;
+Base UI's Drawer puts the panel inside a fixed `Viewport` whose alignment picks
+the edge, leaving the panel's `transform` free to carry the drag from
+`--drawer-swipe-movement-x/y`. `test/drawer.test.tsx` pins that the drawer panel
+never carries the dialog's centring class.
+
+**The edge is stated in writing direction; the swipe is derived from it.** Base
+UI names a swipe physically, because a finger moves in physical space, while this
+package names an edge as `start`/`end`. `drawerSwipeDirection` resolves between
+them and flips only the inline pair, so a drawer on the start edge is swiped away
+leftwards in a left-to-right document and rightwards in a right-to-left one. The
+direction is read from the document rather than taken as a prop.
+
+**Flush or inset is the second axis.** A flush drawer is part of the window: it
+meets the edge, squares the two corners that touch it, and pads its own content
+clear of the safe area. An inset one is an object resting over the page: the
+viewport pads it off every edge by `dialog.drawerInset`, it keeps all four
+corners, and it has to travel that gap as well on its way out. The gap is the
+viewport's padding rather than a margin on the panel for the same reason the
+position is — a margin would be one more thing competing with the drag.
+
+**A drawer crosses the window, so it takes a new motion step.** The scale gains
+`duration.slow` at 320ms: 180ms over 600px reads as a snap rather than a slide.
+The backdrop lifts with `--drawer-swipe-progress` rather than only at the end, so
+a half-dismissed drawer shows a half-lit page and the gesture reads as
+reversible.
 
 Escape still closes an alert dialog. The first draft claimed it did not — that
 was an assumption about Base UI, and `test/dialog.test.tsx` showed it false. It
@@ -124,17 +169,17 @@ Three defects survived a green suite, for the reason the menu note already
 recorded: the tests run in jsdom, where StyleX's compiled CSS is never applied,
 so no test here can see a layout or a colour.
 
-**Every sheet collapsed to the height of its own content.** `Sheet.Content`
-composed the centred panel, a `sheet` reset that set `top: auto`, and an edge
-style that set `inset-block: 0`. StyleX keeps one class per property *key* and
+**Every edge-anchored panel collapsed to the height of its own content.** The
+first version composed the centred dialog panel, a reset that set `top: auto`,
+and an edge style that set `inset-block: 0`. StyleX keeps one class per property *key* and
 has no idea that `top`, `inset-block-start` and `inset-block` are three names for
 one thing, so both declarations survived into the stylesheet and the cascade, not
 the author, picked the winner. It picked `top`, leaving `top: auto` with
-`bottom: 0`: a 380px sheet 158px tall, sitting on the bottom edge. Every inset in
+`bottom: 0`: a 380px panel 158px tall, sitting on the bottom edge. Every inset in
 `dialog/surface.ts` is now a logical longhand, and each edge states all four
 rather than relying on a reset before it — "the last style wins" is only true
 between styles that use one vocabulary. This is a general hazard for this
-package, not a detail of sheets.
+package, not a detail of drawers.
 
 **The board's dialog stand-in ran off its column, twice, for two reasons.**
 First `width: 100%` on a flex item resolves against the whole row rather than the
@@ -155,12 +200,24 @@ primary — so the alert dialog's answer rendered as an ordinary primary button 
 the gallery, the README, this note and the component's own doc comment. All four
 now say `variant="destructive"`.
 
+## The naming collision this leaves behind
+
+Eleven of the 23 vaul files are *named* `*-sheet.tsx` — `mobile-new-chat-sheet`,
+`mobile-session-tab-sheet`, `mobile-acp-history-sheet` and so on. The product's
+word for a vaul drawer is "sheet", and this package now says a panel from an edge
+is a Drawer. Naming the primitive `Drawer` is what resolves that rather than
+deepening it: when those files migrate they become drawers in both the import and
+the filename. `session-detail.tsx` imports both today, so the new primitive is
+aliased `UiDrawer` there until the vaul one goes.
+
 ## Deliberately not done: four of the five migrations
 
-`Sheet` is complete: all five callers are on `@lody/ui/sheet`, the Radix
+`Drawer` is complete: all five callers are on `@lody/ui/drawer`, the Radix
 `sheet.tsx` and its barrel export are deleted. `sidebar.tsx`'s
 `[&>button]:hidden` became `closeButton={false}`, and its `side` moved from
-`left`/`right` to the writing-direction `start`/`end`.
+`left`/`right` to the writing-direction `start`/`end`. The 23 vaul drawers are
+untouched; Base UI's Drawer is what they eventually migrate to, and this change
+makes that a rename rather than a third vocabulary.
 
 One test moved with it, and the way it had to move is worth recording.
 `tests/path-launchers-setting.test.tsx` asserted `bottom-0` and
@@ -201,19 +258,29 @@ Inspected implementation: `packages/ui/src/popover`, `packages/ui/src/dialog`,
 `packages/ui/src/tooltip`, `packages/ui/src/popup`, and the deleted
 `packages/components/src/ui/sheet.tsx`.
 
+One limit of the browser pass is worth stating: a drag cannot be synthesised
+from JavaScript here — Base UI reads real pointer input, and dispatched
+`PointerEvent`s leave `data-swiping` unset. What was verified instead is this
+package's half of it: setting `--drawer-swipe-movement-y` moves the panel by
+exactly that much, and setting `--drawer-swipe-progress` fades the backdrop to
+match. The gesture itself is Base UI's tested code; that it is wired to these
+styles is what was checked.
+
 Executed validation: `pnpm --filter @lody/components test` under
 `NODE_ENV=development` (3306 tests, all passing; the root `pnpm check` does not
 set that variable and every React test fails there with `act is not a function`,
 which is a pre-existing gate problem rather than one this change introduced).
 The board opened in Chromium under both palettes and every
-part driven there — each of the four sheet edges measured against the viewport,
+part driven there — all eight drawer configurations measured against the
+viewport, flush and inset on each of the four edges, with the derived
+`data-swipe-direction` read off each,
 the dialog and the alert dialog opened and read for fill, padding, radius and
 answer variant, the popover for its panel padding and prose type, the tooltip
 hovered for its inversion — plus `pnpm --filter @lody/ui typecheck` and
 `pnpm --filter @lody/ui test` (141 tests, 23 of them new across
 `test/popover.test.tsx`, `test/dialog.test.tsx` and `test/tooltip.test.tsx`,
 plus three new board assertions), and `pnpm --filter @lody/components typecheck`
-for the Sheet migration.
+for the Drawer migration.
 
 The same limit the menu note recorded applies here and is worth repeating: these
 tests run in jsdom, where StyleX's compiled CSS is never applied, so

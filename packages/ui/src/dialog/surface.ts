@@ -5,7 +5,7 @@ import { dialog } from './dialog.tokens.stylex';
 /**
  * The appearance every surface on the modal rung shares: the overlay under it,
  * the panel itself, and the header, body and footer a caller lays out on it. It
- * lives here rather than on one component so Dialog, AlertDialog and Sheet
+ * lives here rather than on one component so Dialog, AlertDialog and Drawer
  * cannot each grow their own padding, radius and title step, the way
  * `popup/surface.ts` keeps the floating surfaces together and `field/well.ts`
  * keeps the controls on the well rung together.
@@ -36,6 +36,18 @@ export const modal = stylex.create({
   /** Both ends of the backdrop's fade. */
   backdropHidden: { opacity: 0 },
   /**
+   * A drawer's backdrop lifts as the panel is dragged away.
+   *
+   * Base UI publishes the gesture's progress and the host decides what it
+   * means. Here it means the page comes back as the drawer leaves, so a
+   * half-dismissed drawer shows a half-lit page and the gesture reads as
+   * reversible rather than as a switch that has not flipped yet.
+   */
+  backdropSwipe: {
+    opacity: 'calc(1 - var(--drawer-swipe-progress, 0))',
+    transitionDuration: duration.slow,
+  },
+  /**
    * The panel: centred, capped, and inset from the window by `dialog.inset` on
    * every side so it never reaches an edge. The safe-area insets are added to
    * the vertical cap and shift the centre, so on a device with a notch and a
@@ -48,9 +60,9 @@ export const modal = stylex.create({
     // Every inset in this file is a logical longhand, and deliberately so.
     // StyleX keeps one class per property *key*, and it has no idea that `top`,
     // `inset-block-start` and `inset-block` are three names for one thing — so a
-    // sheet resetting `top: auto` over a `inset-block: 0` produced two
+    // drawer resetting `top: auto` over a `inset-block: 0` produced two
     // declarations and the cascade, not the author, picked the winner. It picked
-    // `top`, and the sheet collapsed to the height of its own content at the
+    // `top`, and the panel collapsed to the height of its own content at the
     // bottom of the window. One vocabulary, longhands only, is what makes "the
     // last style wins" true here.
     insetInlineStart: '50%',
@@ -96,75 +108,151 @@ export const modal = stylex.create({
     transform: `translate(-50%, calc(-50% + ${dialog.rise}))`,
   },
   /**
-   * A sheet is the same panel arriving from an edge instead of the middle, so
-   * it drops the centring entirely: it is pinned to two or three sides and
-   * slides along the axis it came in on.
+   * The drawer's viewport: a fixed box over the whole window whose alignment
+   * decides which edge the panel sits on.
+   *
+   * A drawer is not a dialog pinned to an edge. Base UI lays the panel out
+   * inside this container rather than positioning it, which is what lets the
+   * panel be dragged: the popup's `transform` belongs to the gesture, so it
+   * cannot also be carrying a `translate(-50%, -50%)` that puts it where it
+   * lives. The viewport holds the position; the popup holds the movement.
    */
-  sheet: {
-    transform: 'none',
-    maxWidth: 'none',
-    maxHeight: 'none',
-    width: 'auto',
+  drawerViewport: {
+    position: 'fixed',
+    inset: 0,
+    display: 'flex',
+    padding: 0,
   },
   /**
-   * Each edge states all four insets, rather than setting the two it cares
-   * about and leaving the others to a reset. A style that only sets what it
-   * needs depends on the one before it having cleared the rest, which is the
-   * shape that produced the collapsed sheet; stating four is four lines and no
-   * dependency.
+   * An inset drawer floats off every edge instead of meeting one.
+   *
+   * It is the viewport's padding rather than a margin on the panel, for the
+   * same reason the position is: a margin would be one more thing competing
+   * with the swipe transform. The safe area is added here too, because a panel
+   * that is already held off the edge should clear the notch by the same
+   * mechanism rather than by padding its own text.
    */
-  sheetTop: {
-    insetBlockStart: 0,
-    insetBlockEnd: 'auto',
-    insetInlineStart: 0,
-    insetInlineEnd: 0,
-    maxHeight: `calc(100dvh - ${dialog.inset})`,
+  drawerViewportInset: {
+    paddingBlockStart: `calc(${dialog.drawerInset} + env(safe-area-inset-top, 0px))`,
+    paddingBlockEnd: `calc(${dialog.drawerInset} + env(safe-area-inset-bottom, 0px))`,
+    paddingInlineStart: `calc(${dialog.drawerInset} + env(safe-area-inset-left, 0px))`,
+    paddingInlineEnd: `calc(${dialog.drawerInset} + env(safe-area-inset-right, 0px))`,
+  },
+  /** Which edge the panel is laid out against. */
+  viewportTop: { alignItems: 'flex-start', justifyContent: 'center' },
+  viewportBottom: { alignItems: 'flex-end', justifyContent: 'center' },
+  viewportStart: { alignItems: 'stretch', justifyContent: 'flex-start' },
+  viewportEnd: { alignItems: 'stretch', justifyContent: 'flex-end' },
+  /**
+   * The panel itself: the modal rung again, laid out by its viewport and moved
+   * by the gesture.
+   *
+   * Base UI publishes the drag as two custom properties and lets the host
+   * compose them, so the panel follows the finger; on release it publishes a
+   * strength scalar that scales the transition, so a hard throw closes faster
+   * than a gentle one. A drawer crosses the window rather than rising 4px, so
+   * it takes the slow step of the motion scale.
+   */
+  drawerPopup: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: dialog.gap,
+    padding: dialog.padding,
+    backgroundColor: dialog.background,
+    boxShadow: dialog.shadow,
+    borderRadius: dialog.radius,
+    cornerShape: corner.shape,
+    color: dialog.title,
+    // Same reasoning as the dialog panel: the shadow and the overlay separate a
+    // modal from the page, and a ring around the whole panel would say it is a
+    // control.
+    outlineStyle: 'none',
+    overflowY: 'auto',
+    // A drawer that has been scrolled to its end must not hand the wheel to the
+    // page it is covering.
+    overscrollBehavior: 'contain',
+    transform:
+      'translate(var(--drawer-swipe-movement-x, 0px), var(--drawer-swipe-movement-y, 0px))',
+    willChange: 'transform',
+    transitionProperty: 'transform',
+    transitionDuration: duration.slow,
+    transitionTimingFunction: ease.standard,
+    zIndex: z.dialog,
+  },
+  /**
+   * How big the panel is on the edge it came in on. Top and bottom take the
+   * width of the window and cap their height; start and end take the height and
+   * cap their width at `drawerSize`.
+   */
+  drawerTop: { width: '100%', maxHeight: `calc(100dvh - ${dialog.inset})` },
+  drawerBottom: { width: '100%', maxHeight: `calc(100dvh - ${dialog.inset})` },
+  drawerStart: {
+    height: '100%',
+    width: dialog.drawerSize,
+    maxWidth: `calc(100vw - ${dialog.inset})`,
+  },
+  drawerEnd: {
+    height: '100%',
+    width: dialog.drawerSize,
+    maxWidth: `calc(100vw - ${dialog.inset})`,
+  },
+  /**
+   * A flush drawer meets the window, so the two corners that touch it are
+   * square and the safe area is padding inside the panel rather than a gap
+   * outside it — the panel reaches the physical edge and keeps its text off the
+   * notch. An inset drawer states none of this: it keeps all four corners and
+   * its viewport already holds it clear.
+   */
+  flushTop: {
     paddingBlockStart: `calc(${dialog.padding} + env(safe-area-inset-top, 0px))`,
     borderStartStartRadius: 0,
     borderStartEndRadius: 0,
   },
-  sheetBottom: {
-    insetBlockStart: 'auto',
-    insetBlockEnd: 0,
-    insetInlineStart: 0,
-    insetInlineEnd: 0,
-    maxHeight: `calc(100dvh - ${dialog.inset})`,
+  flushBottom: {
     paddingBlockEnd: `calc(${dialog.padding} + env(safe-area-inset-bottom, 0px))`,
     borderEndStartRadius: 0,
     borderEndEndRadius: 0,
   },
-  sheetStart: {
-    insetBlockStart: 0,
-    insetBlockEnd: 0,
-    insetInlineStart: 0,
-    insetInlineEnd: 'auto',
-    width: dialog.sheetSize,
-    maxWidth: `calc(100vw - ${dialog.inset})`,
+  flushStart: {
     paddingInlineStart: `calc(${dialog.padding} + env(safe-area-inset-left, 0px))`,
     borderStartStartRadius: 0,
     borderEndStartRadius: 0,
   },
-  sheetEnd: {
-    insetBlockStart: 0,
-    insetBlockEnd: 0,
-    insetInlineStart: 'auto',
-    insetInlineEnd: 0,
-    width: dialog.sheetSize,
-    maxWidth: `calc(100vw - ${dialog.inset})`,
+  flushEnd: {
     paddingInlineEnd: `calc(${dialog.padding} + env(safe-area-inset-right, 0px))`,
     borderStartEndRadius: 0,
     borderEndEndRadius: 0,
   },
   /**
-   * A sheet's hidden end: fully off the edge it came in on, rather than 4px
-   * below. The rise says a popup arrives from where it belongs; for a sheet
-   * that is outside the window, which is also the only motion that reads as
-   * "this came in from there" rather than "this faded in near the edge".
+   * Both ends of a drawer's travel: fully off the edge it belongs to.
+   *
+   * This replaces the whole transform rather than composing the swipe
+   * variables, which is right — while the panel is arriving or leaving there is
+   * no gesture to follow, and Base UI reports that state as the transition
+   * status the way it does everywhere else in this package.
    */
-  sheetHiddenTop: { opacity: 0, transform: 'translateY(-100%)' },
-  sheetHiddenBottom: { opacity: 0, transform: 'translateY(100%)' },
-  sheetHiddenStart: { opacity: 0, transform: 'translateX(-100%)' },
-  sheetHiddenEnd: { opacity: 0, transform: 'translateX(100%)' },
+  drawerHiddenTop: { transform: 'translateY(-100%)' },
+  drawerHiddenBottom: { transform: 'translateY(100%)' },
+  drawerHiddenStart: { transform: 'translateX(-100%)' },
+  drawerHiddenEnd: { transform: 'translateX(100%)' },
+  /**
+   * The same, for a panel its viewport is holding off the edge: 100% of the
+   * panel only reaches the gap, so the gap and the safe area go with it or the
+   * drawer parks with a strip of itself still showing.
+   */
+  drawerInsetHiddenTop: {
+    transform: `translateY(calc(-100% - ${dialog.drawerInset} - env(safe-area-inset-top, 0px)))`,
+  },
+  drawerInsetHiddenBottom: {
+    transform: `translateY(calc(100% + ${dialog.drawerInset} + env(safe-area-inset-bottom, 0px)))`,
+  },
+  drawerInsetHiddenStart: {
+    transform: `translateX(calc(-100% - ${dialog.drawerInset} - env(safe-area-inset-left, 0px)))`,
+  },
+  drawerInsetHiddenEnd: {
+    transform: `translateX(calc(100% + ${dialog.drawerInset} + env(safe-area-inset-right, 0px)))`,
+  },
   /** The title and the sentence under it: one block, so one gap. */
   header: { display: 'flex', flexDirection: 'column', gap: dialog.headerGap },
   title: {
@@ -221,29 +309,84 @@ export function isHidden(status: string | undefined): boolean {
   return status === 'starting' || status === 'ending';
 }
 
-/** Which edge a Sheet comes in on. */
-export type SheetSide = 'top' | 'bottom' | 'start' | 'end';
+/** Which edge a Drawer comes in on, in writing-direction terms. */
+export type DrawerSide = 'top' | 'bottom' | 'start' | 'end';
 
-const SHEET_SIDES = {
-  top: modal.sheetTop,
-  bottom: modal.sheetBottom,
-  start: modal.sheetStart,
-  end: modal.sheetEnd,
+/**
+ * The swipe that dismisses a drawer, for the edge it came in on.
+ *
+ * Base UI names the gesture in physical directions because a finger moves in
+ * physical space: a drawer on the inline-start edge is swiped `left` away in a
+ * left-to-right document and `right` away in a right-to-left one. The mapping
+ * is resolved here rather than by a caller, and the right-to-left case is
+ * resolved at render time from the document's direction.
+ */
+export type DrawerSwipe = 'up' | 'down' | 'left' | 'right';
+
+const VIEWPORTS = {
+  top: modal.viewportTop,
+  bottom: modal.viewportBottom,
+  start: modal.viewportStart,
+  end: modal.viewportEnd,
 } as const;
 
-const SHEET_HIDDEN = {
-  top: modal.sheetHiddenTop,
-  bottom: modal.sheetHiddenBottom,
-  start: modal.sheetHiddenStart,
-  end: modal.sheetHiddenEnd,
+const SIZES = {
+  top: modal.drawerTop,
+  bottom: modal.drawerBottom,
+  start: modal.drawerStart,
+  end: modal.drawerEnd,
 } as const;
 
-/** Where a sheet rests, for the edge it came in on. */
-export function sheetSideStyle(side: SheetSide) {
-  return SHEET_SIDES[side];
+const FLUSH = {
+  top: modal.flushTop,
+  bottom: modal.flushBottom,
+  start: modal.flushStart,
+  end: modal.flushEnd,
+} as const;
+
+const HIDDEN = {
+  top: modal.drawerHiddenTop,
+  bottom: modal.drawerHiddenBottom,
+  start: modal.drawerHiddenStart,
+  end: modal.drawerHiddenEnd,
+} as const;
+
+const INSET_HIDDEN = {
+  top: modal.drawerInsetHiddenTop,
+  bottom: modal.drawerInsetHiddenBottom,
+  start: modal.drawerInsetHiddenStart,
+  end: modal.drawerInsetHiddenEnd,
+} as const;
+
+/** How the viewport lays the panel out for the edge it belongs to. */
+export function drawerViewportStyle(side: DrawerSide) {
+  return VIEWPORTS[side];
 }
 
-/** Where that sheet starts and ends: off the same edge. */
-export function sheetHiddenStyle(side: SheetSide) {
-  return SHEET_HIDDEN[side];
+/** How big the panel is on that edge. */
+export function drawerSizeStyle(side: DrawerSide) {
+  return SIZES[side];
+}
+
+/** The two square corners and the safe-area padding a flush drawer takes. */
+export function drawerFlushStyle(side: DrawerSide) {
+  return FLUSH[side];
+}
+
+/** Where the panel starts and ends: off that edge, plus the gap if it is inset. */
+export function drawerHiddenStyle(side: DrawerSide, inset: boolean) {
+  return inset ? INSET_HIDDEN[side] : HIDDEN[side];
+}
+
+/**
+ * The physical swipe that takes a drawer away from its edge.
+ *
+ * `rtl` flips only the inline pair, because the block axis does not reverse
+ * with writing direction in any script this ships to.
+ */
+export function drawerSwipeDirection(side: DrawerSide, rtl: boolean): DrawerSwipe {
+  if (side === 'top') return 'up';
+  if (side === 'bottom') return 'down';
+  if (side === 'start') return rtl ? 'right' : 'left';
+  return rtl ? 'left' : 'right';
 }

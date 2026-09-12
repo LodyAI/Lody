@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Separator } from '@/ui/separator';
-import { Sheet } from '@lody/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import { Skeleton } from '@/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 
@@ -159,8 +159,13 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet.Root open={openMobile} onOpenChange={setOpenMobile} {...props}>
-        <Sheet.Content
+      <Drawer.Root
+        side={side === 'left' ? 'start' : 'end'}
+        open={openMobile}
+        onOpenChange={setOpenMobile}
+        {...props}
+      >
+        <Drawer.Content
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
@@ -176,13 +181,13 @@ function Sidebar({
           }
           side={side === 'left' ? 'start' : 'end'}
         >
-          <Sheet.Header className="sr-only">
-            <Sheet.Title>Sidebar</Sheet.Title>
-            <Sheet.Description>Displays the mobile sidebar.</Sheet.Description>
-          </Sheet.Header>
+          <Drawer.Header className="sr-only">
+            <Drawer.Title>Sidebar</Drawer.Title>
+            <Drawer.Description>Displays the mobile sidebar.</Drawer.Description>
+          </Drawer.Header>
           <div className="flex h-full w-full flex-col">{children}</div>
-        </Sheet.Content>
-      </Sheet.Root>
+        </Drawer.Content>
+      </Drawer.Root>
     );
   }
 

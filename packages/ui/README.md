@@ -14,7 +14,8 @@ behavior.
 | `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface             |
 | `src/popover`       | The same surface holding content rather than rows                   |
-| `src/dialog`        | Dialog, AlertDialog and Sheet: the modal rung, and its tokens        |
+| `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens               |
+| `src/drawer`        | The same rung, arriving from an edge and draggable back out          |
 | `src/tooltip`       | The inverted chip that names what is under the pointer               |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
@@ -145,12 +146,11 @@ than prose.
 </Popover.Root>
 ```
 
-`Dialog`, `AlertDialog` and `Sheet` are one family on the modal rung — the
+`Dialog`, `AlertDialog` and `Drawer` are one family on the modal rung — the
 elevated background under the large shadow, over an overlay. They share one token
 group and one surface, and differ only in how they arrive and in what may dismiss
 them. A dialog carries a cross and says so; an alert dialog is answered rather
-than dismissed, so a press beside it is not an answer, though Escape still is; a
-sheet is the same panel arriving from an edge of the window.
+than dismissed, so a press beside it is not an answer, though Escape still is.
 
 ```tsx
 <Dialog.Root>
@@ -172,6 +172,42 @@ sheet is the same panel arriving from an edge of the window.
 An alert dialog's answers are Buttons rather than parts of the component: which
 variant an answer takes is the surface's decision, so a footer writes them with
 `AlertDialog.Close render={<Button variant="destructive" />}`.
+
+A `Drawer` is that same panel arriving from an edge — and there is deliberately no
+`Sheet`. A panel that slides in from an edge promises that it can be sent back,
+and on a touch screen a person will try; a dialog pinned to an edge cannot answer
+that gesture. Base UI's Drawer lays the panel out inside a viewport instead of
+positioning it, which is what leaves the panel's own `transform` free to follow a
+finger.
+
+```tsx
+<Drawer.Root side="bottom">
+  <Drawer.Trigger render={<Button variant="secondary" />}>Filters</Drawer.Trigger>
+  <Drawer.Content side="bottom">
+    <Drawer.Header>
+      <Drawer.Title>Filters</Drawer.Title>
+      <Drawer.Description>They apply to the session list.</Drawer.Description>
+    </Drawer.Header>
+    <Field.Label>
+      <Checkbox name="running" defaultChecked />
+      Running only
+    </Field.Label>
+  </Drawer.Content>
+</Drawer.Root>
+```
+
+`side` is the writing direction's edge — `top`, `bottom`, `start`, `end` — and the
+root derives the physical swipe from it, so a drawer on the start edge is swiped
+away leftwards in a left-to-right document and rightwards in a right-to-left one.
+The edge is stated on both parts because the root needs it for the gesture and the
+content for the layout. `inset` is the second axis: a flush drawer meets the
+window and squares the two corners that touch it, while an inset one floats at
+`dialog.drawerInset` and keeps all four.
+
+A shell that wants the page to recede behind an open drawer wraps its own UI in
+`Drawer.Indent` and styles `data-active` itself; that is a decision about a
+product's shell rather than about a drawer, so the primitive exposes it and does
+not choose.
 
 A popup mounts on the document by default, and a modal panel is the exception. A
 surface that owns a focus scope and a scroll lock states its panel once with

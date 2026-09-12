@@ -54,7 +54,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/ui/dialog';
-import { Sheet } from '@lody/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
@@ -1091,11 +1091,12 @@ export function ChatComposer({
 
         if (isMobile) {
           return (
-            <Sheet.Root
+            <Drawer.Root
+              side="bottom"
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Sheet.Content
+              <Drawer.Content
                 side="bottom"
                 className="flex h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
               >
@@ -1105,13 +1106,13 @@ export function ChatComposer({
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <Sheet.Title className="flex items-center gap-2 text-sm font-medium">
+                      <Drawer.Title className="flex items-center gap-2 text-sm font-medium">
                         <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                         {pastedTextDialogTitle}
-                      </Sheet.Title>
-                      <Sheet.Description className="text-xs text-muted-foreground tabular-nums">
+                      </Drawer.Title>
+                      <Drawer.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </Sheet.Description>
+                      </Drawer.Description>
                     </div>
                     <Textarea
                       aria-label={pastedTextEditorLabel}
@@ -1124,8 +1125,8 @@ export function ChatComposer({
                     />
                   </>
                 ) : null}
-              </Sheet.Content>
-            </Sheet.Root>
+              </Drawer.Content>
+            </Drawer.Root>
           );
         }
 

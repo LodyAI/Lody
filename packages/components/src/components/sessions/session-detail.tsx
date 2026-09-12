@@ -181,7 +181,9 @@ import {
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
 import { SessionNotFound } from './session-not-found';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
-import { Sheet } from '@lody/ui/sheet';
+// Aliased while the vaul drawer below still holds the bare name; the two
+// merge when the mobile drawers migrate onto this primitive.
+import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import {
@@ -5243,16 +5245,17 @@ const SessionDetail = ({
         </div>
 
         {/* Mobile diff sheet */}
-        <Sheet.Root
+        <UiDrawer.Root
+          side="bottom"
           open={mobileDiffState !== null}
           onOpenChange={(open) => !open && handleCloseMobileDiff()}
         >
-          <Sheet.Content side="bottom" className="h-[85vh] flex flex-col p-0">
-            <Sheet.Header className="shrink-0 border-b border-border px-4 py-3">
-              <Sheet.Title className="text-sm font-medium">
+          <UiDrawer.Content side="bottom" className="h-[85vh] flex flex-col p-0">
+            <UiDrawer.Header className="shrink-0 border-b border-border px-4 py-3">
+              <UiDrawer.Title className="text-sm font-medium">
                 {t('sessions.diffTab', 'Changes')}
-              </Sheet.Title>
-            </Sheet.Header>
+              </UiDrawer.Title>
+            </UiDrawer.Header>
             <div className="flex-1 min-h-0 overflow-hidden">
               {mobileDiffState && (
                 <SessionConversationDiffPanel
@@ -5297,8 +5300,8 @@ const SessionDetail = ({
                 />
               )}
             </div>
-          </Sheet.Content>
-        </Sheet.Root>
+          </UiDrawer.Content>
+        </UiDrawer.Root>
         {viewerTabs
           .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')
           .map((tab) => {
