@@ -115,6 +115,20 @@ is not live state at all and gives the accent back. Without it neither caller
 could migrate without reconstructing the bar's colours in Tailwind, which is
 exactly what the package forbids.
 
+**An icon-only `Button` now draws the box its glyph needs, which is a defect
+this change inherited rather than introduced.** This package's glyphs state
+their size as 100% of whatever holds them, and every holder gives them a 16px
+box — a menu row's leading box, a Select's chevron, a message's mark. An
+icon-only Button gave none, and StyleX has no descendant selector with which it
+could reach the glyph, so a cross filled a 28px button edge to edge: measured
+28×28 in Chromium, on the Dialog's close since #634 and on the Toast's close as
+soon as it was written. `Button` renders a `button.iconSize` box around its
+children when `icon` is set. The 122 icon buttons in `@lody/components` size
+their own lucide icons at 14 or 16px, so the box is a no-op for them and a
+constraint on the three that pass a caller's icon straight through. The board's
+own `PlusGlyph` had been quietly working around the same hole with hardcoded
+`width="14"`, which is gone now.
+
 **A skeleton takes its room as props.** `width` and `height` resolve to inline
 values through a dynamic style, which nothing has to win a specificity fight
 against — and there is a fight to lose: the line shape sets a default height,
@@ -196,8 +210,9 @@ Inspected implementation: `packages/ui/src/feedback`, the two new colours in
 seventeen migrated surfaces.
 
 Executed validation: `pnpm --filter @lody/ui typecheck` and
-`pnpm --filter @lody/ui test` (182 tests, 15 of them new in
-`test/feedback.test.tsx` plus one new board assertion);
+`pnpm --filter @lody/ui test` (183 tests, 15 of them new in
+`test/feedback.test.tsx`, one pinning the icon button's glyph box, plus one new
+board assertion);
 `pnpm --filter @lody/components typecheck`; and
 `NODE_ENV=development pnpm --filter @lody/components test` (3306 tests, one
 timeout outside the changed scope in `tests/path-launchers-setting.test.tsx`
@@ -210,4 +225,5 @@ landed 16px below the top edge at `z-index: 100`, 360px wide, with the popover
 shadow, `pointer-events: none` on the viewport and `auto` on itself, and it was
 the topmost painted element at its own centre; the bars measured a 6px well-rung
 track with the accent in it; the skeleton and the three spinner sizes were read
-for fill and measurement.
+for fill and measurement. Both close crosses measured 16×16 inside their 28px
+buttons after the Button fix, where each had been 28×28 before it.

@@ -23,6 +23,21 @@ describe('Button', () => {
     expect(cls.split(' ').length).toBeGreaterThan(5);
   });
 
+  test('an icon-only button gives what it holds a box, and a text one does not', () => {
+    // This package's glyphs state their size as 100% of whatever holds them,
+    // and StyleX has no descendant selector with which a button could reach
+    // one — so without the box a 16px cross fills a 28px button edge to edge.
+    const icon = renderToStaticMarkup(
+      <Button variant="ghost" size="small" icon aria-label="Close">
+        <svg />
+      </Button>
+    );
+    expect(icon).toMatch(/<button[^>]*><span class="[^"]*"><svg><\/svg><\/span><\/button>/);
+    // A label flows on its own; wrapping it would put the words in a 16px box.
+    const text = renderToStaticMarkup(<Button>Save</Button>);
+    expect(text).toMatch(/<button[^>]*>Save<\/button>/);
+  });
+
   test('render swaps the element', () => {
     const html = renderToStaticMarkup(<Button render={<a href="/x" />}>Link</Button>);
     expect(html).toMatch(/^<a /);

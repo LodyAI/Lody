@@ -399,7 +399,8 @@ only thing saying the work has not stopped.
   tooltips, `medium` 10 for 32 and 36px controls, `large` 14 for surfaces.
 - Nested radius is outer minus inset. A 14px popup with 4px inset holds 10px
   items. Never the child's own token.
-- Icon-only buttons are square at the size's height.
+- Icon-only buttons are square at the size's height, and hold a 16px glyph:
+  the button draws that box, because a glyph here fills whatever holds it.
 
 ## Type
 

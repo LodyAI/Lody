@@ -45,9 +45,11 @@ into one component at a time. Source-consumed; consumers compile it through
   in and re-export its rows. A menu reads `popup` and replaces exactly one of a
   list's declarations, `--anchor-width`; the surface and every row are shared
   through `src/popup/surface.ts`.
-- A menu row's leading box sizes the glyph in it: a caller's icon states 100%
-  rather than its library's default, because StyleX has no descendant selector.
-  A checkbox or radio row's box holds its mark only.
+- Whatever holds a glyph gives it a box, because this package's glyphs state
+  100% and StyleX has no descendant selector: a menu row's leading box, a
+  Select's chevron, a message's mark, and an icon-only `Button`, which draws a
+  `button.iconSize` box around its children. A caller's icon states 100% rather
+  than its library's default. A checkbox or radio row's box holds its mark only.
 - Every trigger here is Base UI's, unstyled: a surface opens a menu, a popover or
   a modal with whatever it already had there, through `render={<Button …/>}`.
   Post-close focus is the product's policy, passed as `finalFocus`.

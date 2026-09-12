@@ -770,11 +770,12 @@ function CrossGlyph() {
   );
 }
 
+/** The board's own mark, sized by the box the icon button gives it. */
 function PlusGlyph() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="100%"
+      height="100%"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
