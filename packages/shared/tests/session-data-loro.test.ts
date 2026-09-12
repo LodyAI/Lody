@@ -213,23 +213,31 @@ describe('loro session data adapter', () => {
   it('reads one turn by shallow identity without materializing unrelated bodies', async () => {
     const doc = new Loro();
     const harness = makeHarness(doc);
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       await harness.data.commands.appendTurn({
-        id: `turn-${index}`,
+        id: `a${index}`,
         role: 'user',
         timestamp: '2026-01-01T00:00:00.000Z',
         items: [{ type: 'text', text: `body ${index}` }],
         fileDiff: [],
       });
     }
-    const toJSON = vi.spyOn(LoroMap.prototype, 'toJSON');
+    // Record which turn bodies are materialized while resolving the first id,
+    // which sits at the far end of the list.
+    const bodies: string[] = [];
+    const original = LoroMap.prototype.toJSON;
+    const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+      const id = this.get('id');
+      if (typeof id === 'string') bodies.push(id);
+      return original.call(this);
+    });
     try {
-      const read = await harness.data.history.readTurn('turn-1');
-      expect(read.state).toBe('ready');
-      // Exactly the target body is materialized; identity checks are shallow.
-      expect(toJSON).toHaveBeenCalledTimes(1);
+      const read = await harness.data.history.readTurn('a0');
+      expect(read.state === 'ready' && read.turn.id).toBe('a0');
+      // Identity is read shallowly: only the target body is materialized.
+      expect(bodies).toEqual(['a0']);
     } finally {
-      toJSON.mockRestore();
+      spy.mockRestore();
     }
   });
 });
