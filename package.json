@@ -62,12 +62,12 @@
   ],
   "author": "LodyAI",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.14.0"
   },
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": ">=22.0.0",
+      "version": ">=22.14.0",
       "onFail": "error"
     }
   },
