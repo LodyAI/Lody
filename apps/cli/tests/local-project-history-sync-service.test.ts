@@ -11,14 +11,24 @@ import type {
   SessionMeta,
 } from '@lody/shared';
 
+import { parseSessionNotification, type AcpSessionNotification } from '@lody/shared';
+
 import {
   buildExistingHistorySessionIndex,
   compareCatalogItems,
   decideHistoryConflictResolution,
   decideHistoryRefresh,
   getHistoryCatalogStatus,
+  HASH_VERSION_V1,
+  HASH_VERSION_V2,
+  hashHistoryEntry,
+  hashHistoryEntryForVersion,
+  hashHistoryEntryV2,
+  hashText,
   LocalProjectHistorySyncService,
+  materializeReplay,
   selectLatestCatalogItems,
+  storedBaselineHashes,
 } from '../src/lib/local-project-history-sync-service';
 
 const machineId = 'machine-1' as MachineId;
@@ -80,6 +90,7 @@ function materializedReplay(
     turnHashes: string[];
     replayDigest: string;
     droppedNotifications: number;
+    hashVersion: number;
   }> = {}
 ) {
   return {
@@ -87,6 +98,8 @@ function materializedReplay(
     turnHashes: ['hash-1'],
     replayDigest: 'digest-new',
     droppedNotifications: 0,
+    // The opaque placeholder hashes above are already in the stored v1 form.
+    hashVersion: 1,
     ...overrides,
   };
 }
@@ -330,6 +343,341 @@ describe('decideHistoryConflictResolution', () => {
       status: 'blocked',
       reason: 'session_has_pending_local_turn',
     });
+  });
+});
+
+describe('canonical hash versions', () => {
+  const acpSessionId = 'codex-session-1' as ACPSessionId;
+
+  const notification = (update: unknown): AcpSessionNotification =>
+    parseSessionNotification({ sessionId: acpSessionId, update });
+
+  /** Two turns: a user prompt and an assistant turn with one tool call. */
+  function replayNotifications(toolCall: Record<string, unknown>, turns = 1) {
+    const result: AcpSessionNotification[] = [];
+    for (let turn = 0; turn < turns; turn += 1) {
+      result.push(
+        notification({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: `inspect repo ${turn}` },
+        }),
+        notification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: `tool-${turn}`,
+          ...toolCall,
+        }),
+        notification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: `done ${turn}` },
+        })
+      );
+    }
+    return result;
+  }
+
+  const fullToolCall = {
+    kind: 'read',
+    title: 'Read package.json',
+    status: 'completed',
+    content: [{ type: 'content', content: { type: 'text', text: '{}' } }],
+    locations: [{ path: 'package.json' }],
+    rawInput: { path: 'package.json' },
+    rawOutput: { output: '{}' },
+    toolName: 'Read',
+    schedulingTimeZone: 'America/Los_Angeles',
+    activityKind: 'context_compaction',
+    permissionRequest: { requestId: 'req-1', options: [] },
+  };
+
+  /** The same tool call as a sealed skeleton: payload replaced by a local ref. */
+  const skeletonToolCall = {
+    kind: 'read',
+    title: 'Read package.json',
+    status: 'completed',
+    locations: [{ path: 'package.json' }],
+    ref: { machineId: 'machine-1', turnId: 'turn-1', index: 0 },
+  };
+
+  const hashEntry = (items: unknown[]) =>
+    ({
+      role: 'assistant' as const,
+      items: items as SessionHistoryInput['items'],
+      plan: [],
+    }) as unknown as SessionHistoryInput;
+
+  const materialize = (toolCall: Record<string, unknown>, turns = 1) =>
+    materializeReplay({
+      provider,
+      acpSessionId,
+      replayNotifications: replayNotifications(toolCall, turns),
+      userId: 'user-1',
+    });
+
+  it('records the version with the materialized replay', () => {
+    const materialized = materialize(fullToolCall);
+    expect(materialized.hashVersion).toBe(HASH_VERSION_V2);
+    expect(materialized.turnHashes).toHaveLength(2);
+    expect(materialized.turnHashes).toEqual(
+      materialized.history.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V2))
+    );
+    // Entry ids stay content-addressed, now from the v2 hashes.
+    materialized.history.forEach((entry, index) => {
+      expect(entry.id.endsWith(materialized.turnHashes[index]!.slice(0, 16))).toBe(true);
+    });
+  });
+
+  it('hashes a full tool_call and its sealed skeleton identically under v2', () => {
+    // Canonicalization is a pure function of transcript content; going through a replay
+    // would normalize the payload away before the hash ever sees it.
+    const full = hashEntry([
+      { type: 'tool_call', toolCallId: 'call-1', ...fullToolCall },
+    ]) as unknown as Parameters<typeof hashHistoryEntryV2>[0];
+    const skeleton = hashEntry([
+      { type: 'tool_call', ref: { machineId: 'm', turnId: 't', index: 0 }, ...skeletonToolCall },
+    ]) as unknown as Parameters<typeof hashHistoryEntryV2>[0];
+    expect(hashHistoryEntryV2(full)).toBe(hashHistoryEntryV2(skeleton));
+    expect(hashHistoryEntryForVersion(full, HASH_VERSION_V2)).toBe(
+      hashHistoryEntryForVersion(skeleton, HASH_VERSION_V2)
+    );
+    // v1 hashed the items verbatim, which is exactly why v2 exists.
+    expect(hashHistoryEntry(full)).not.toBe(hashHistoryEntry(skeleton));
+  });
+
+  it('treats tool_call title null, undefined, and missing identically under v2', () => {
+    const withNull = hashEntry([
+      { type: 'tool_call', title: null, status: 'completed', kind: 'read' },
+    ]) as unknown as Parameters<typeof hashHistoryEntryV2>[0];
+    const withUndefined = hashEntry([
+      { type: 'tool_call', title: undefined, status: 'completed', kind: 'read' },
+    ]) as unknown as Parameters<typeof hashHistoryEntryV2>[0];
+    const without = hashEntry([
+      { type: 'tool_call', status: 'completed', kind: 'read' },
+    ]) as unknown as Parameters<typeof hashHistoryEntryV2>[0];
+    expect(hashHistoryEntryV2(withNull)).toBe(hashHistoryEntryV2(without));
+    expect(hashHistoryEntryV2(withUndefined)).toBe(hashHistoryEntryV2(without));
+  });
+
+  it('rejects an unknown hash version instead of guessing', () => {
+    const [entry] = materialize(fullToolCall).history;
+    expect(() => hashHistoryEntryForVersion(entry!, 3)).toThrow(/Unsupported history hash version/);
+  });
+
+  it('appends a v2 replay against a v1 cursor instead of reporting prefix_mismatch', () => {
+    const replay = materialize(fullToolCall);
+    // A legacy cursor: v1 hashes with no version field anywhere on the cursor, while the
+    // metadata digest already advanced to v2. Without version pairing this manufactured a
+    // prefix_mismatch because the v1 cursor was compared against v2 replay hashes. The
+    // replay is longer than the cursor's own prefix, so the decision must not conflict.
+    const v1Hashes = replay.history.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    const decision = decideHistoryRefresh({
+      externalHistory: externalHistory({
+        hashVersion: HASH_VERSION_V2,
+        replayDigest: 'advanced-v2-digest',
+        importedTurnCount: v1Hashes.length,
+      }),
+      importedTurnHashes: v1Hashes,
+      importedTurnHashVersion: HASH_VERSION_V1,
+      replayDigest: replay.replayDigest,
+      turnHashes: replay.turnHashes,
+      materialized: replay,
+      currentHistoryHashes: v1Hashes,
+    });
+    expect(decision.status).not.toBe('conflicted');
+    expect(decision).toEqual({
+      status: 'skipped',
+      reason: 'empty_suffix',
+      appendFromIndex: v1Hashes.length,
+    });
+  });
+
+  it('recognizes a v2 replay suffix against a shorter v1 cursor', () => {
+    // The same transcript at two source lengths, so the v1 cursor is a real prefix.
+    const cursorReplay = materialize(fullToolCall, 1);
+    const replay = materialize(fullToolCall, 2);
+    const v1Hashes = cursorReplay.history.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    expect(
+      decideHistoryRefresh({
+        externalHistory: externalHistory({
+          hashVersion: HASH_VERSION_V2,
+          replayDigest: cursorReplay.replayDigest,
+          importedTurnCount: v1Hashes.length,
+        }),
+        importedTurnHashes: v1Hashes,
+        importedTurnHashVersion: HASH_VERSION_V1,
+        replayDigest: replay.replayDigest,
+        turnHashes: replay.turnHashes,
+        materialized: replay,
+      })
+    ).toEqual({
+      status: 'refreshed',
+      reason: 'prefix_append',
+      appendFromIndex: v1Hashes.length,
+    });
+  });
+
+  it('treats an already-synced v1 session as already_resolved against a v2 replay', () => {
+    const replay = materialize(fullToolCall);
+    const v1Hashes = replay.history.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    expect(
+      decideHistoryConflictResolution({
+        externalHistory: externalHistory({
+          status: 'synced',
+          hashVersion: HASH_VERSION_V2,
+          replayDigest: replay.replayDigest,
+          importedTurnCount: v1Hashes.length,
+        }),
+        importedTurnHashes: v1Hashes,
+        importedTurnHashVersion: HASH_VERSION_V1,
+        materialized: replay,
+        currentHistoryHashes: v1Hashes,
+        currentHistoryHasPendingDispatch: false,
+      })
+    ).toEqual({ status: 'already_resolved' });
+  });
+
+  it('recomputes a v2 replay in the cursor version when only the metadata advanced', () => {
+    const replay = materialize(fullToolCall);
+    const v1Hashes = replay.history.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    // markConflict writes only the meta: its digest is v2 while the doc cursor stays v1.
+    expect(
+      decideHistoryConflictResolution({
+        externalHistory: externalHistory({
+          status: 'sync_conflict',
+          hashVersion: HASH_VERSION_V2,
+          replayDigest: replay.replayDigest,
+          importedTurnCount: v1Hashes.length,
+        }),
+        importedTurnHashes: v1Hashes,
+        importedTurnHashVersion: HASH_VERSION_V1,
+        materialized: replay,
+        currentHistoryHashes: [...v1Hashes, 'local-only'],
+        currentHistoryHasPendingDispatch: false,
+      })
+    ).toEqual({ status: 'replace' });
+  });
+
+  it('refuses to compare mismatched versions without the replay history', () => {
+    const replay = materialize(fullToolCall);
+    expect(() =>
+      decideHistoryRefresh({
+        externalHistory: externalHistory({ hashVersion: HASH_VERSION_V2 }),
+        importedTurnHashes: ['v1-hash'],
+        importedTurnHashVersion: HASH_VERSION_V1,
+        replayDigest: hashText('v2'),
+        turnHashes: replay.turnHashes,
+        replayHashVersion: HASH_VERSION_V2,
+      })
+    ).toThrow(/materialized replay history/);
+  });
+
+  it('re-imports an unchanged transcript to identical v2 hashes and ids', () => {
+    const first = materialize(fullToolCall);
+    const second = materialize(fullToolCall);
+    expect(second.turnHashes).toEqual(first.turnHashes);
+    expect(second.replayDigest).toBe(first.replayDigest);
+    expect(second.history.map((entry) => entry.id)).toEqual(first.history.map((entry) => entry.id));
+    expect(
+      decideHistoryRefresh({
+        externalHistory: externalHistory({
+          hashVersion: HASH_VERSION_V2,
+          replayDigest: first.replayDigest,
+          importedTurnCount: first.turnHashes.length,
+        }),
+        replayDigest: second.replayDigest,
+        turnHashes: second.turnHashes,
+        materialized: second,
+      })
+    ).toEqual({ status: 'skipped', reason: 'digest_match' });
+  });
+});
+
+describe('stored baseline hash-version binding', () => {
+  const sourceHashes = ['source-1', 'source-2'];
+  const storedHashes = ['stored-1', 'stored-2'];
+  const baseline = (hashVersion?: number) =>
+    JSON.stringify({
+      version: 1,
+      ...(hashVersion === undefined ? {} : { hashVersion }),
+      sourceDigest: hashText(sourceHashes.join('\n')),
+      turnHashes: storedHashes,
+    });
+
+  it('accepts a genuine unversioned baseline as v1', () => {
+    expect(
+      storedBaselineHashes(
+        { importedTurnHashes: [...sourceHashes], storedHistoryBaseline: baseline() },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+  });
+
+  it('accepts a baseline whose version matches the cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V1,
+          storedHistoryBaseline: baseline(HASH_VERSION_V1),
+        },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V2,
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(storedHashes);
+  });
+
+  it('rejects a v1 baseline against a v2 cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V2,
+          storedHistoryBaseline: baseline(HASH_VERSION_V1),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
+  });
+
+  it('rejects a v2 baseline against a v1 cursor', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          hashVersion: HASH_VERSION_V1,
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
+  });
+
+  it('rejects a versioned baseline against an unversioned (v1) cursor when versions differ', () => {
+    expect(
+      storedBaselineHashes(
+        {
+          importedTurnHashes: [...sourceHashes],
+          storedHistoryBaseline: baseline(HASH_VERSION_V2),
+        },
+        sourceHashes
+      )
+    ).toEqual(sourceHashes);
   });
 });
 

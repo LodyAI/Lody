@@ -15,7 +15,12 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 
-import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  LocalProjectHistorySyncService,
+} from '../src/lib/local-project-history-sync-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import type { Logger } from '../src/utils/logger';
 
@@ -150,8 +155,21 @@ async function createHarness() {
     const loro = await rawDoc();
     location(loro).set('endColumn', 12);
     loro.commit();
-    const cursor = await doc.getExternalHistoryCursor();
-    await doc.setExternalHistoryCursor({ importedTurnHashes: cursor?.importedTurnHashes });
+    // Model a real pre-version client: v1 hashes AND a cursor/baseline shape that has no
+    // `hashVersion` field anywhere. A baseline that carries `hashVersion: 1` is a shape
+    // only this build can write and would hide the "unversioned baseline is v1" rule.
+    const stored = loro.getList('history').toJSON() as SessionHistoryInput[];
+    const importedTurnHashes = stored.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    await doc.setExternalHistoryCursor({
+      importedTurnHashes,
+      storedHistoryBaseline: JSON.stringify({
+        version: 1,
+        sourceDigest: hashText(importedTurnHashes.join('\n')),
+        turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1)),
+      }),
+    });
     return loro;
   }
   return { repo, service, importTurns, getOnlyDoc, getMeta, rawDoc, makeLegacy };
@@ -378,4 +396,33 @@ describe('history import through the real SessionDocument writer', () => {
     );
     expect((await harness.getMeta(sessionId)).externalHistory?.status).toBe('synced');
   });
+});
+
+it('accepts a genuine unversioned v1 stored baseline after upgrade', async () => {
+  // Regression: the baseline guard compared `parsed.hashVersion` directly against the
+  // cursor version, so every real pre-version baseline (`undefined !== 1`) was ignored.
+  // That discarded the projected stored history and turned a normal append into
+  // `local_history_has_untracked_suffix`. The cursor and the baseline here are the exact
+  // shape an old client writes: no `hashVersion` field anywhere.
+  const h = await createHarness();
+  await h.importTurns(1);
+  const { doc } = h.getOnlyDoc();
+  const loro = await h.rawDoc();
+  const source = loro.getList('history').toJSON() as SessionHistoryInput[];
+  const hashes = source.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1));
+  // A prior importer projected away an extension; its saved baseline represents the
+  // actual stored turns independently of the source transcript hashes.
+  location(loro).delete('endColumn');
+  loro.commit();
+  const stored = loro.getList('history').toJSON() as SessionHistoryInput[];
+  await doc.setExternalHistoryCursor({
+    importedTurnHashes: hashes,
+    storedHistoryBaseline: JSON.stringify({
+      version: 1,
+      sourceDigest: hashText(hashes.join('\n')),
+      turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1)),
+    }),
+  });
+
+  expect((await h.importTurns(2)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
 });

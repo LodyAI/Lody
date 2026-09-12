@@ -15,9 +15,14 @@
   diagnostics; they must not leave partial history writes. Keep stored unknown fields
   and unchanged opaque items; do not sanitize/rewrite a whole stored document.
 - New inputs use the shared message parsers. Known protocol extension dictionaries
-  retain JSON data, not arbitrary JS objects. Storage layout stays separate: coordinate
-  any `Any.storageSchema` adoption with its Mirror patch, including rollback.
-  Rationale: [single writer](../../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md).
+  retain JSON data, not arbitrary JS objects. Storage layout stays separate and is an
+  insertion policy, never a migration or a validation constraint: new writes store
+  ordinary metadata strings as primitives and create `LoroText` only for fields that
+  stream. That holds at every nesting level — a tool content or worktree-step `command`,
+  `path`, `args` or terminal id is metadata, so only payloads like tool `text`/`output`
+  and nested `content.text` are declared Text in `schema.ts`. Stored values keep their
+  representation, and opening a document never rewraps them. Rationale:
+  [single writer](../../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md).
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the
   actual SessionDocument/HistoryWriter boundary; a mock updateHistory cannot prove it.
@@ -41,17 +46,19 @@
 - Steer provenance is a declared history input-config field, not an unknown extension.
   Both new writes and read normalization must retain it for edit-and-resend checks.
 - Scalar/fileDiff writes read and diff only the requested field, never the turn's items.
-  Writer input parsers derive from schema definitions with all refinements retained;
-  never mutate the original RPC schemas. Parsing filters and validates in one pass.
-  `readStored` returns detached JSON for hashing, not stored-copy provenance. Keep `capture`
-  protection for callers that can author copies from an old snapshot.
+  Parser schemas derive from schema definitions with refinements retained; never mutate the
+  original RPC schemas. Parsing filters and validates in one pass. `readStored` returns
+  detached JSON for hashing, not stored-copy provenance. Keep `capture` protection.
 - Target-local streaming uses `updateEntry`; it must not produce/plan the entire history.
   Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
   Generic history updates remain for operations with cross-turn ownership or structural edits.
-- The pinned Mirror text-event patch copies only an existing single text leaf's path.
-  Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
-  paths retain the general reader. Future Mirror patches must compose with this patch,
-  never silently replace it. No storage schema or write validation depends on this optimization.
+- Every canonical turn hash carries a version and is compared only against hashes of the
+  same version. A stored cursor without a version is v1. The session doc cursor versions its
+  own `importedTurnHashes`; the sync metadata versions its own `replayDigest` independently,
+  because a conflict marker may update only the metadata. Recompute a replay in the stored
+  cursor's version; never reinterpret the cursor. A mismatch with no replay history is an error.
+- Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
+  exists and no storage schema or write validation depends on it.
 These contracts bind producers and consumers, including UI and CLI callers outside
 this package. Read them when changing daemon protocol negotiation, MCP/Role catalogs,
 per-turn MCP selection, or Role-based session creation and dispatch.
