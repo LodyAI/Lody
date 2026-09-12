@@ -1979,6 +1979,7 @@ export class SessionDispatchWatcher {
       userId: entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
+      userGitHubNoreplyEmail: user.githubNoreplyEmail,
     };
   }
 
@@ -2026,6 +2027,7 @@ export class SessionDispatchWatcher {
       userId: entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
+      userGitHubNoreplyEmail: user.githubNoreplyEmail,
       parentSessionId: meta.parentSessionId,
     };
   }

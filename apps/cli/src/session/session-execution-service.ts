@@ -249,6 +249,7 @@ type SessionGoalTurnRequest = {
   userId: string;
   userName: string;
   userEmail: string;
+  userGitHubNoreplyEmail?: string;
 };
 
 type TurnInvocation = {
@@ -1220,6 +1221,7 @@ export class SessionExecutionService {
     userId: string;
     userName: string;
     userEmail: string;
+    userGitHubNoreplyEmail?: string;
   }): Promise<SessionGoalResponse> {
     const { sessionId, action } = options;
     const respond = (
@@ -1267,6 +1269,7 @@ export class SessionExecutionService {
       userId: options.userId,
       userName: options.userName,
       userEmail: options.userEmail,
+      userGitHubNoreplyEmail: options.userGitHubNoreplyEmail,
     };
     // Acceptance is not prompt completion (or even a claim of turn ownership).
     // The worker reports startup failures through the session's existing history.
@@ -1367,6 +1370,7 @@ export class SessionExecutionService {
         userId: request.userId,
         userName: request.userName,
         userEmail: request.userEmail,
+        userGitHubNoreplyEmail: request.userGitHubNoreplyEmail,
       },
       {
         dispatchSource: 'goal',
@@ -3860,6 +3864,7 @@ export class SessionExecutionService {
     prepareOptions?: { sessionDoc?: SessionDocument }
   ): Promise<VisibleSessionTurnPlan> {
     const { sessionId, acpSessionConfig, userId, userName, userEmail, userTurnId } = message;
+    const userGitHubNoreplyEmail = message.userGitHubNoreplyEmail;
     // System-caused turns own an assistant entry, not a user dispatch pointer.
     const executionUserTurnId =
       dispatchOptions?.dispatchSource === 'delivery' || dispatchOptions?.dispatchSource === 'goal'
@@ -4027,6 +4032,7 @@ export class SessionExecutionService {
           parentSessionId: meta?.parentSessionId,
           userName,
           userEmail,
+          userGitHubNoreplyEmail,
           onPresencePhase: (phase, detail) =>
             self.deps.setSessionActivePresencePhase(sessionId, phase, detail),
         };
@@ -4232,6 +4238,7 @@ export class SessionExecutionService {
           ctx.bindSession(nextSession);
           nextSession.updateGitIdentity(userName, userEmail, message.userId, {
             preferMachineIdentity: message.userId === self.deps.userId,
+            githubNoreplyEmail: message.userGitHubNoreplyEmail,
           });
         };
 
@@ -4875,6 +4882,7 @@ export class SessionExecutionService {
       parentSessionId: message.parentSessionId,
       userName: message.userName,
       userEmail: message.userEmail,
+      userGitHubNoreplyEmail: message.userGitHubNoreplyEmail,
       onPresencePhase: (phase, detail) =>
         this.deps.setSessionActivePresencePhase(sessionId, phase, detail),
     };

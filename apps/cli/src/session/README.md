@@ -168,18 +168,25 @@ fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
 ### Commit identity
 
 The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
-`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
-the turn requester is the machine owner, the repository/machine Git identity wins and the
-resolved Lody/GitHub identity is its fallback. A non-owner requester always uses their resolved
-Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
-identity exists, the neutral LodyAI identity is used. Resolving that Lody/GitHub identity
-(`session-user-resolver.ts`) prefers the account's `<id>+<login>@users.noreply.github.com`
-address over the stored account email, because an account with "Keep my email addresses private"
-plus "Block command line pushes that expose my email" has GitHub reject every push carrying a
-commit authored with its real address (GH007), and the no-reply attributes the commit to the same
-account anyway. The account email is used only when the profile carries no usable GitHub id and
-login. The cloud composition root owns hosted user resolution because the daemon does not own an
-end-user browser session; the local access
+`updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`).
+
+The requester's GitHub no-reply address `<id>+<login>@users.noreply.github.com` is tried first,
+but only when the session workdir pushes to github.com. There it beats every other candidate: an
+account with "Keep my email addresses private" plus "Block command line pushes that expose my
+email" has GitHub reject every push carrying a commit authored with its real address (GH007),
+and the no-reply attributes the commit to the same account anyway. `git-identity.ts` reads the
+workdir remotes for this and lets `origin` decide alone when it exists, so a GitLab repository
+with a GitHub mirror is still a GitLab repository; `github.com` and `gist.github.com` are the
+only GitHub hosts, which deliberately excludes GitHub Enterprise. `session-user-resolver.ts`
+reports the address beside the account email rather than instead of it, because that resolver is
+cached per user and cannot see a workdir.
+
+Off github.com the older order stands. When the turn requester is the machine owner, the
+repository/machine Git identity wins and the resolved Lody/GitHub identity is its fallback. A
+non-owner requester always uses their resolved Lody/GitHub identity and can never inherit the
+machine owner's Git config; if no usable requester identity exists, the neutral LodyAI identity
+is used. The cloud composition root owns hosted user resolution because the daemon does not own
+an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
 itself comes from the requester-bound GitHub token, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
 including adopted preparations. Existing ACP children retain their launch environment; live

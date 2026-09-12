@@ -325,7 +325,7 @@ export interface ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: { preferMachineIdentity: boolean; githubNoreplyEmail?: string }
   ): void;
   /**
    * Return the already-resolved effective git identity only when it belongs to
@@ -938,6 +938,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       workdir: spec.project?.kind === 'local' ? provisionalWorkdir : undefined,
       userName: user.name,
       userEmail: user.email,
+      userGitHubNoreplyEmail: user.githubNoreplyEmail,
     };
     const compatibility = buildSessionPreparationCompatibility(
       config,
@@ -1210,6 +1211,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       session.ghTokenInjected = prepared.session.ghTokenInjected;
       session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
         preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+        githubNoreplyEmail: config.userGitHubNoreplyEmail,
       });
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -1359,6 +1361,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
     session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
       preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+      githubNoreplyEmail: config.userGitHubNoreplyEmail,
     });
     let acpSessionId: string | undefined;
 

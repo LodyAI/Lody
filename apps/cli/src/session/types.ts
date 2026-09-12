@@ -86,6 +86,8 @@ export interface SessionConfig {
   userName: string;
   /** Git commit author email (from session creator) */
   userEmail: string;
+  /** GitHub no-reply commit email; used only on a github.com remote. */
+  userGitHubNoreplyEmail?: string;
 }
 
 /**

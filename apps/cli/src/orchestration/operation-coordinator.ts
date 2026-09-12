@@ -1204,6 +1204,7 @@ export class LodyOperationCoordinator {
         userId: operation.requesterUserId,
         userName: requester.name,
         userEmail: requester.email,
+        userGitHubNoreplyEmail: requester.githubNoreplyEmail,
       },
       {
         dispatchSource: 'delivery',
@@ -1416,7 +1417,7 @@ export class LodyOperationCoordinator {
    */
   private async resolveRequesterIdentity(
     requesterUserId: string
-  ): Promise<{ name: string; email: string }> {
+  ): Promise<{ name: string; email: string; githubNoreplyEmail?: string }> {
     const fallback = {
       name: requesterUserId,
       email: buildMissingEmail('lody', requesterUserId),
@@ -1427,7 +1428,11 @@ export class LodyOperationCoordinator {
     }
     try {
       const profile = await resolver.resolve(requesterUserId);
-      return { name: profile.name, email: profile.email };
+      return {
+        name: profile.name,
+        email: profile.email,
+        ...(profile.githubNoreplyEmail ? { githubNoreplyEmail: profile.githubNoreplyEmail } : {}),
+      };
     } catch (error) {
       this.options.logger.debug(
         `[operation-coordinator] Failed to resolve requester identity ${requesterUserId}: ${

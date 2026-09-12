@@ -36,7 +36,28 @@ describe('SessionUserResolver', () => {
     expect(queryProfile).toHaveBeenCalledWith('user_a');
   });
 
-  it('uses the GitHub no-reply address when the stored email is a missing-email placeholder', async () => {
+  it('reports the GitHub no-reply address beside a real account email', async () => {
+    // Both are real identities; only the session workdir's remote can decide
+    // which one attributes a commit, so the resolver reports both.
+    const resolver = createResolver(
+      vi.fn(async () => ({
+        id: 'user_a',
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        githubLogin: 'ada',
+        githubAccountId: '4324',
+      }))
+    );
+
+    await expect(resolver.resolve('user_a')).resolves.toEqual({
+      id: 'user_a',
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      githubNoreplyEmail: '4324+ada@users.noreply.github.com',
+    });
+  });
+
+  it('reports the GitHub no-reply address when the stored email is a placeholder', async () => {
     const resolver = createResolver(
       vi.fn(async () => ({
         id: 'user_a',
@@ -50,31 +71,12 @@ describe('SessionUserResolver', () => {
     await expect(resolver.resolve('user_a')).resolves.toEqual({
       id: 'user_a',
       name: 'Ada Lovelace',
-      email: '4324+ada@users.noreply.github.com',
+      email: buildMissingEmail('github', '4324'),
+      githubNoreplyEmail: '4324+ada@users.noreply.github.com',
     });
   });
 
-  it('prefers the GitHub no-reply address over a real account email', async () => {
-    const resolver = createResolver(
-      vi.fn(async () => ({
-        id: 'user_a',
-        name: 'Ada Lovelace',
-        email: 'ada@example.com',
-        githubLogin: 'ada',
-        githubAccountId: '4324',
-      }))
-    );
-
-    // A real account email is exactly the address GitHub rejects with GH007 when
-    // the account keeps its email private and blocks command-line pushes.
-    await expect(resolver.resolve('user_a')).resolves.toEqual({
-      id: 'user_a',
-      name: 'Ada Lovelace',
-      email: '4324+ada@users.noreply.github.com',
-    });
-  });
-
-  it('keeps the account email when the GitHub profile is incomplete', async () => {
+  it('reports no GitHub no-reply address when the GitHub profile is incomplete', async () => {
     const resolver = createResolver(
       vi.fn(async () => ({
         id: 'user_a',
@@ -104,7 +106,8 @@ describe('SessionUserResolver', () => {
     await expect(resolver.resolve('user_a')).resolves.toEqual({
       id: 'user_a',
       name: 'ada',
-      email: '4324+ada@users.noreply.github.com',
+      email: 'ada@example.com',
+      githubNoreplyEmail: '4324+ada@users.noreply.github.com',
     });
   });
 

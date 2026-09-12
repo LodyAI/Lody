@@ -373,7 +373,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: { preferMachineIdentity: boolean; githubNoreplyEmail?: string }
   ): void {
     const configEnv = this.config.env ?? {};
     // Set git identity using Git's recognized environment variables directly
@@ -382,6 +382,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       {
         preferMachineIdentity: options.preferMachineIdentity,
         cwd: this.getWorkdir(),
+        githubNoreplyEmail: options.githubNoreplyEmail,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;

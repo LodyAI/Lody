@@ -50,7 +50,7 @@ type WorktreeForkPreparedInput = {
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   sourceSnapshot: StoredHistorySnapshot;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
-  user: { name: string; email: string };
+  user: { name: string; email: string; githubNoreplyEmail?: string };
   operation: SessionForkOperation;
   targetWorkdir?: string;
 };
@@ -838,6 +838,9 @@ export class SessionForkService {
             parentSessionId,
             userName: user.name,
             userEmail: user.email,
+            ...('githubNoreplyEmail' in user
+              ? { userGitHubNoreplyEmail: user.githubNoreplyEmail }
+              : {}),
           },
           {
             forkSessionId: source.acpSessionId,
@@ -962,6 +965,7 @@ export class SessionForkService {
       ...(targetWorkdir ? { workdir: targetWorkdir } : {}),
       userName: user.name,
       userEmail: user.email,
+      userGitHubNoreplyEmail: user.githubNoreplyEmail,
     };
     try {
       await this.deps.sessionManager.createSession(config, {

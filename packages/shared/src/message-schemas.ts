@@ -571,6 +571,7 @@ export const SessionCreateRequestSchema = z
     userId: z.string(),
     userName: z.string(),
     userEmail: z.string(),
+    userGitHubNoreplyEmail: z.string().optional(),
     parentSessionId: SessionIdSchema.optional(),
   })
   .strict();
@@ -603,6 +604,7 @@ export const SessionChatRequestSchema = z
     userId: z.string(),
     userName: z.string(),
     userEmail: z.string(),
+    userGitHubNoreplyEmail: z.string().optional(),
   })
   .strict();
 

@@ -531,6 +531,7 @@ export class SessionEditAndResendService {
         parentSessionId: meta.parentSessionId,
         userName: user.name,
         userEmail: user.email,
+        userGitHubNoreplyEmail: user.githubNoreplyEmail,
       },
       {
         resumeSessionId: meta.acpSessionId,

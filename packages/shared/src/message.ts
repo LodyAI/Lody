@@ -71,6 +71,12 @@ export interface SessionCreateRequest {
   userId: string;
   userName: string;
   userEmail: string;
+  /**
+   * Requester's GitHub no-reply commit email, when their account has one.
+   * Used only when the session workdir pushes to github.com; absent requests
+   * keep committing with `userEmail`.
+   */
+  userGitHubNoreplyEmail?: string;
   /** If set, this is a child tab session that should reuse the parent's workspace directory. */
   parentSessionId?: SessionId;
 }
@@ -107,6 +113,12 @@ export type SessionChatRequest = {
   userId: string;
   userName: string;
   userEmail: string;
+  /**
+   * Requester's GitHub no-reply commit email, when their account has one.
+   * Used only when the session workdir pushes to github.com; absent requests
+   * keep committing with `userEmail`.
+   */
+  userGitHubNoreplyEmail?: string;
 };
 
 export interface SessionChatResponse {

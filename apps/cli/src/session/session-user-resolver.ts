@@ -1,4 +1,4 @@
-import { buildMissingEmail, isMissingEmail, type WorkspaceId } from '@lody/shared';
+import { buildMissingEmail, type WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { buildGitHubNoreplyEmail } from './git-identity';
@@ -8,6 +8,13 @@ export type SessionUserProfile = {
   id: string;
   name: string;
   email: string;
+  /**
+   * Canonical GitHub attribution address for the account, when it has one.
+   *
+   * Kept separate from `email` because it is a commit identity only on a
+   * github.com remote, and this resolver cannot see the session workdir.
+   */
+  githubNoreplyEmail?: string;
 };
 
 /** Raw workspace-member profile as returned by the CLI-token Convex query. */
@@ -90,20 +97,15 @@ export class SessionUserResolver {
     profile: CloudWorkspaceUserProfile
   ): SessionUserProfile {
     const accountEmail = trimNonEmpty(profile.email);
-    // The GitHub no-reply address wins over the stored account email whenever the
-    // profile carries a GitHub account: it attributes the commit to the same
-    // GitHub account that opens the pull request AND it is the only address that
-    // survives "Keep my email addresses private" + "Block command line pushes
-    // that expose my email" (pushing a commit authored with the private account
-    // email is rejected with GH007). A stored missing-email placeholder is not a
-    // commit identity at all, so it only survives as the last resort.
-    const email =
-      buildGitHubNoreplyEmail(profile.githubAccountId, profile.githubLogin) ??
-      (accountEmail && !isMissingEmail(accountEmail) ? accountEmail : undefined) ??
-      accountEmail ??
-      buildMissingEmail('lody', userId);
+    const email = accountEmail ?? buildMissingEmail('lody', userId);
     const name = trimNonEmpty(profile.name) ?? trimNonEmpty(profile.githubLogin) ?? email;
-    return { id: userId, name, email };
+    // Reported alongside the account email rather than instead of it: only the
+    // session workdir's remote decides which of the two can attribute a commit.
+    const githubNoreplyEmail = buildGitHubNoreplyEmail(
+      profile.githubAccountId,
+      profile.githubLogin
+    );
+    return { id: userId, name, email, ...(githubNoreplyEmail ? { githubNoreplyEmail } : {}) };
   }
 
   private fallbackUser(userId: string): SessionUserProfile {

@@ -2711,6 +2711,7 @@ export class MessageHandler {
       userId: args.userId,
       userName: user.name,
       userEmail: user.email,
+      userGitHubNoreplyEmail: user.githubNoreplyEmail,
     });
   }
 
