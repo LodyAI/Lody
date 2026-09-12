@@ -217,6 +217,8 @@ export default function TaskBodyEditorFallback({
           rows={14}
           placeholder={t('tasks.body.placeholderShort', 'Add description…')}
           onPaste={(event) => {
+            const text = event.clipboardData.getData('text/plain');
+            if (text.length > 0) return;
             const files = Array.from(event.clipboardData.files).filter((file) =>
               file.type.startsWith('image/')
             );
