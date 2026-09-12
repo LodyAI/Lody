@@ -172,8 +172,14 @@ The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session e
 the turn requester is the machine owner, the repository/machine Git identity wins and the
 resolved Lody/GitHub identity is its fallback. A non-owner requester always uses their resolved
 Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
-identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
-user resolution because the daemon does not own an end-user browser session; the local access
+identity exists, the neutral LodyAI identity is used. Resolving that Lody/GitHub identity
+(`session-user-resolver.ts`) prefers the account's `<id>+<login>@users.noreply.github.com`
+address over the stored account email, because an account with "Keep my email addresses private"
+plus "Block command line pushes that expose my email" has GitHub reject every push carrying a
+commit authored with its real address (GH007), and the no-reply attributes the commit to the same
+account anyway. The account email is used only when the profile carries no usable GitHub id and
+login. The cloud composition root owns hosted user resolution because the daemon does not own an
+end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
 itself comes from the requester-bound GitHub token, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
 including adopted preparations. Existing ACP children retain their launch environment; live

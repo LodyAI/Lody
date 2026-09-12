@@ -13,6 +13,12 @@ Lody 每轮依据机器所有权选择 host Session 的 Git identity，而不是
 其他 workspace 成员发起时，Lody 只使用该请求者经 Lody/GitHub 解析出的身份，绝不读取
 或回退到机器 Git identity。
 
+当请求者的 profile 同时带有 GitHub account id 与 login 时，其经 Lody/GitHub 解析出的身份
+使用 GitHub no-reply 地址 `<id>+<login>@users.noreply.github.com`，优先于存储的账号邮箱。
+该地址同样把 commit 归属到同一个 GitHub 账号，并且对于开启了邮箱保密、且禁止命令行推送
+暴露邮箱的账号，它是唯一被接受的地址。只有在拿不到 GitHub account id 与 login 时，才使用
+存储的账号邮箱。
+
 缺失邮箱占位符不是可用身份。如果允许使用的机器身份和请求者解析身份都不可用，Lody
 使用中性的 `LodyAI <agent@lody.ai>` 身份。最终选择的名字和邮箱会同时写入 Git author
 与 committer 环境变量。GitHub 鉴权仍是独立的、绑定请求者的决策，不会改变 commit 对象
@@ -24,7 +30,8 @@ Lody 每轮依据机器所有权选择 host Session 的 Git identity，而不是
 
 ## 证据
 
-身份选择实现在 `apps/cli/src/session/git-identity.ts`。初次创建 session 时，
+身份选择实现在 `apps/cli/src/session/git-identity.ts`，请求者的 Lody/GitHub 身份解析实现在
+`apps/cli/src/session/session-user-resolver.ts`。初次创建 session 时，
 `apps/cli/src/session/session-manager.ts` 应用所有权策略；后续轮次由
 `apps/cli/src/session/session-execution-service.ts` 重新应用。
 

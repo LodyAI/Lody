@@ -90,12 +90,16 @@ export class SessionUserResolver {
     profile: CloudWorkspaceUserProfile
   ): SessionUserProfile {
     const accountEmail = trimNonEmpty(profile.email);
-    // A stored missing-email placeholder is not a commit identity; a GitHub
-    // no-reply address is, and it keeps the commit attributed to the same
-    // GitHub account that opens the pull request.
+    // The GitHub no-reply address wins over the stored account email whenever the
+    // profile carries a GitHub account: it attributes the commit to the same
+    // GitHub account that opens the pull request AND it is the only address that
+    // survives "Keep my email addresses private" + "Block command line pushes
+    // that expose my email" (pushing a commit authored with the private account
+    // email is rejected with GH007). A stored missing-email placeholder is not a
+    // commit identity at all, so it only survives as the last resort.
     const email =
-      (accountEmail && !isMissingEmail(accountEmail) ? accountEmail : undefined) ??
       buildGitHubNoreplyEmail(profile.githubAccountId, profile.githubLogin) ??
+      (accountEmail && !isMissingEmail(accountEmail) ? accountEmail : undefined) ??
       accountEmail ??
       buildMissingEmail('lody', userId);
     const name = trimNonEmpty(profile.name) ?? trimNonEmpty(profile.githubLogin) ?? email;

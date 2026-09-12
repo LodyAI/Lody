@@ -54,7 +54,7 @@ describe('SessionUserResolver', () => {
     });
   });
 
-  it('prefers the real account email over the GitHub no-reply address', async () => {
+  it('prefers the GitHub no-reply address over a real account email', async () => {
     const resolver = createResolver(
       vi.fn(async () => ({
         id: 'user_a',
@@ -65,7 +65,28 @@ describe('SessionUserResolver', () => {
       }))
     );
 
-    await expect(resolver.resolve('user_a')).resolves.toMatchObject({
+    // A real account email is exactly the address GitHub rejects with GH007 when
+    // the account keeps its email private and blocks command-line pushes.
+    await expect(resolver.resolve('user_a')).resolves.toEqual({
+      id: 'user_a',
+      name: 'Ada Lovelace',
+      email: '4324+ada@users.noreply.github.com',
+    });
+  });
+
+  it('keeps the account email when the GitHub profile is incomplete', async () => {
+    const resolver = createResolver(
+      vi.fn(async () => ({
+        id: 'user_a',
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        githubLogin: 'ada',
+      }))
+    );
+
+    await expect(resolver.resolve('user_a')).resolves.toEqual({
+      id: 'user_a',
+      name: 'Ada Lovelace',
       email: 'ada@example.com',
     });
   });
@@ -83,7 +104,7 @@ describe('SessionUserResolver', () => {
     await expect(resolver.resolve('user_a')).resolves.toEqual({
       id: 'user_a',
       name: 'ada',
-      email: 'ada@example.com',
+      email: '4324+ada@users.noreply.github.com',
     });
   });
 
