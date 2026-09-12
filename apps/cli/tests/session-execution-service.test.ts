@@ -166,6 +166,8 @@ const createBaseDeps = (
     clearConversationTurn: vi.fn(),
     getActiveTurnId: vi.fn(() => undefined),
     clearActiveTurnId: vi.fn(() => {}),
+    isEngineTurnActive: vi.fn(() => false),
+    clearEngineTurnActivity: vi.fn(),
     buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
     applyAcpModeAndModel: vi.fn(async () => {}),
     createAssistantEntryForTurn: vi.fn(async () => {}),
@@ -266,6 +268,57 @@ describe('SessionExecutionService', () => {
     expect(await service.cancelSession(request)).toEqual({ success: true });
     expect([...runningChildren]).toEqual(['child-2']);
     expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
+  });
+
+  it('routes a stop request matching no client turn to the active engine-opened turn', async () => {
+    const cancel = vi.fn(async () => {});
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    // The autonomous entry's id owns no client-turn state, so a naive stale
+    // check would report success without cancelling anything.
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(cancel).toHaveBeenCalledWith('acp-1');
+    expect(clearEngineTurnActivity).toHaveBeenCalledWith('session-1');
+  });
+
+  it('keeps a stale stop request a no-op when no engine turn is active', async () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => false),
+    });
+    deps.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({
+      getHistory: async () => [],
+    })) as never;
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:stale',
+    });
+    expect(result).toEqual({ success: true });
+    expect(deps.sessionManager.getSession).not.toHaveBeenCalled();
   });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({

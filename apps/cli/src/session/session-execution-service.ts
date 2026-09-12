@@ -527,6 +527,10 @@ export type SessionExecutionServiceDeps = {
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
+  /** Whether an engine-opened turn (a cron fire, a task wake) is producing updates. */
+  isEngineTurnActive: (sessionId: SessionId) => boolean;
+  /** Drop the engine-turn activity marker (process exit, user stop, or its end marker). */
+  clearEngineTurnActivity: (sessionId: SessionId) => void;
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
@@ -5327,6 +5331,30 @@ export class SessionExecutionService {
       // cleaning up: a turn that starts while getHistory() is awaited must keep
       // its presence and dispatch metadata.
       if (currentTurnId == null) {
+        // A stop request matching no client turn can target an engine-opened
+        // turn (a cron fire, a task wake) — the only live work on the agent.
+        // Cancel it through the plain ACP session cancel instead of reporting
+        // a stale no-op while the work continues.
+        if (this.deps.isEngineTurnActive(sessionId)) {
+          const session = this.deps.sessionManager.getSession(sessionId);
+          this.deps.clearEngineTurnActivity(sessionId);
+          if (session?.agentClient?.isCreated() && session.acpSessionId) {
+            try {
+              await session.agentClient.cancel(session.acpSessionId);
+              this.deps.logger.debug(
+                `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
+              );
+            } catch (error) {
+              this.deps.logger.warn(
+                `[${sessionId}] Failed to cancel engine-opened turn: ${formatErrorMessage(error)}`
+              );
+            }
+          }
+          this.deps.clearSessionActivePresence(sessionId);
+          await this.clearCancelRequest(sessionId);
+          this.clearTurnCancellation(sessionId, turnId);
+          return { success: true };
+        }
         const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
         if (releaseConflict) {
           try {
