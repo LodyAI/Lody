@@ -635,10 +635,10 @@ export function SidebarListSkeleton({
           <div className="relative flex h-7 min-w-0 flex-1 items-center gap-1 rounded-md px-2">
             {showHeaderIcon ? (
               <span className="flex h-5 w-5 shrink-0 items-center">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+                <Skeleton width={14} height={14} />
               </span>
             ) : null}
-            <Skeleton className="h-3 w-24" />
+            <Skeleton width={96} height={12} />
           </div>
         </div>
         <div className="flex flex-col gap-px">

@@ -12,8 +12,8 @@ One rung per component. The rung fixes background and shadow together.
 | well     | `wellBackground`      | `shadow.inset`             | input, select, textarea, switch off, checkbox off, segmented track, selected item |
 | page     | `background`          | none                       | app ground                                                                        |
 | region   | `secondaryBackground` | none                       | sidebar, footer band, hover on a card                                             |
-| card     | `elevatedBackground`  | `shadow.card`              | card, panel, composer                                                             |
-| floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list; tooltip is `label` with `shadow.medium`               |
+| card     | `elevatedBackground`  | `shadow.card`              | card, panel, composer, alert                                                      |
+| floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list, toast; tooltip is `label` with `shadow.medium`        |
 | modal    | `elevatedBackground`  | `shadow.large` + `overlay` | dialog, alert dialog, drawer                                                      |
 
 ## Edges
@@ -36,6 +36,9 @@ One rung per component. The rung fixes background and shadow together.
   `background` text.
 - `accent` for live state only: focus ring, link, live switch, running
   indicator. Never a button fill.
+- `success` and `warning` report an outcome rather than an action, so they mark
+  and tint a message and never fill a control a person presses. `destructive`
+  is the third: an action that destroys, and an outcome that failed.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
   scrollbar, tracks, kbd, skeleton.
@@ -317,6 +320,74 @@ exactly its own padding under `border-box` and overshoots by it under
 `content-box`. A caller migrating a panel that carried its own padding moves it
 inwards.
 
+## Feedback
+
+What the system says back: what happened, and that it is still working. One
+group, `feedback`, covers both halves for the reason `field` covers a checkbox
+and a select trigger — what changes between them is what they are made of, not
+what they are for.
+
+### Messages
+
+An Alert and a Toast are one message on two rungs. An Alert stays on the page it
+is about, so it takes the card rung; a Toast arrives over that page, so it takes
+the floating one. Neither is on the modal rung: a message does not have to be
+answered, and nothing behind it recedes.
+
+| part        | what it is                                                             |
+| ----------- | ---------------------------------------------------------------------- |
+| mark        | `feedback.markSize`, in the tone's colour, drawn by the part           |
+| title       | what happened, at the control step, weight 600, in `feedback.title`    |
+| description | the sentence under it, at the footnote step, in `feedback.description` |
+| actions     | what answers it: Buttons, whose variants are the surface's choice      |
+| viewport    | a toast lands at the top, clear of the safe area, above every popup    |
+
+A tone is a **tint and a mark, never a fill**. There are four — neutral,
+success, warning and danger — and the tint is 8% of the tone mixed into the
+rung's own background, which is the mix a destructive menu row already uses. It
+is mixed in `feedback/surface.ts` rather than frozen into a token, because it is
+a mix _of a surface_ and the two surfaces are on different rungs.
+
+Neutral is the one tone with no colour of its own: `accent` is the obvious
+candidate and the rules reserve it for live state, so a neutral message takes
+`secondaryLabel` for its mark and lets the words do the work. It still takes a
+tint, toward `label`, because an Alert is the one part of this family that
+shares its rung with what it sits on — a card inside a card is the same fill
+twice, and in the light palette the card rung and the page are one white.
+
+The mark belongs to the tone rather than to the caller, the way an accordion's
+chevron does: the point of a tone is that a person knows what kind of message
+this is before reading it, and a glyph a caller chose can put a tick on a
+failure. The warning is the one that is not a circle, because a triangle is what
+separates it from an error for a person who does not see the two colours apart.
+
+How urgently a message is announced follows from its tone as well: `alert` for a
+failure or a warning, which interrupts, and `status` for the rest, which waits
+its turn. A surface that had to choose would choose `alert` every time, which is
+the version that teaches people to ignore it.
+
+### Waiting
+
+| part     | what it is                                                                    |
+| -------- | ----------------------------------------------------------------------------- |
+| track    | `feedback.trackBackground` under `feedback.trackWell`, `trackHeight` tall     |
+| bar      | `feedback.indicator` — `accent`, because the rules name the running indicator |
+| no value | the same track with a band crossing it, not a bar at zero                     |
+| skeleton | `feedback.skeleton`, a gray, because it has no role yet                       |
+| spinner  | `currentColor`, so it belongs to whatever holds it                            |
+
+A bar that reports an outcome rather than progress takes that outcome's tone,
+and one that measures something rather than progressing through it — a quota, a
+share of storage — takes `neutral` and gives the accent back. Ink is never the
+answer here: ink is for a value that is stored, and a bar in motion is the
+opposite.
+
+A skeleton breathes rather than sweeping, because a page of sweeping blocks is a
+page of movement, and it stops where a person has asked for less of it — it
+reports nothing its own shape does not already say, which is also why it is
+hidden from a screen reader. A spinner keeps turning there, because it is the
+only thing saying the work has not stopped.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
@@ -328,7 +399,8 @@ inwards.
   tooltips, `medium` 10 for 32 and 36px controls, `large` 14 for surfaces.
 - Nested radius is outer minus inset. A 14px popup with 4px inset holds 10px
   items. Never the child's own token.
-- Icon-only buttons are square at the size's height.
+- Icon-only buttons are square at the size's height, and hold a 16px glyph:
+  the button draws that box, because a glyph here fills whatever holds it.
 
 ## Type
 

@@ -388,7 +388,7 @@ export function BillingSettingsView({
               {sessionLimit === null ? (
                 t('billing.unlimited')
               ) : sessionCount === null ? (
-                <Skeleton className="h-4 w-14" />
+                <Skeleton width={56} height={16} />
               ) : (
                 <>
                   <span
@@ -406,12 +406,13 @@ export function BillingSettingsView({
             </div>
           </div>
           {sessionLimit !== null && sessionCount === null ? (
-            <Skeleton className="mt-3 h-2 w-full" />
+            <Skeleton width="100%" height={8} className="mt-3" />
           ) : sessionLimit !== null && sessionCount !== null ? (
             <Progress
               value={sessionCount}
               max={sessionLimit}
-              className={cn('mt-3', nearLimit && '[&>div]:bg-destructive')}
+              tone={nearLimit ? 'danger' : 'running'}
+              className="mt-3"
             />
           ) : null}
           {sessionLimit !== null ? (

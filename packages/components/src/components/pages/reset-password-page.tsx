@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CheckCircle2, KeyRound } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
-import { Alert, AlertDescription } from '@/ui/alert';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Field as UiField } from '@lody/ui/field';
@@ -70,23 +70,22 @@ export function ResetPasswordPage({
             aria-busy={submitting}
           >
             {!tokenAvailable ? (
-              <Alert variant="destructive">
-                <AlertDescription>
+              <Alert.Root tone="danger">
+                <Alert.Description>
                   {t(
                     'resetPassword.missingToken',
                     'This reset link is missing a token. Request a new password reset email.'
                   )}
-                </AlertDescription>
-              </Alert>
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
 
             {success ? (
-              <Alert>
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>
+              <Alert.Root tone="success">
+                <Alert.Description>
                   {t('resetPassword.success', 'Password reset. You can now sign in.')}
-                </AlertDescription>
-              </Alert>
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <div className="grid gap-2">
@@ -126,9 +125,9 @@ export function ResetPasswordPage({
             </div>
 
             {submitError !== null && submitError.length > 0 ? (
-              <Alert variant="destructive">
-                <AlertDescription id="reset-password-error">{submitError}</AlertDescription>
-              </Alert>
+              <Alert.Root tone="danger">
+                <Alert.Description id="reset-password-error">{submitError}</Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <Button

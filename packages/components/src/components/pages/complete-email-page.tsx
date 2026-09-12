@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
-import { Alert, AlertDescription } from '@/ui/alert';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Input } from '@lody/ui/input';
@@ -99,9 +99,9 @@ export function CompleteEmailPage({
             </div>
 
             {submitError ? (
-              <Alert variant="destructive">
-                <AlertDescription id="complete-email-error">{submitError}</AlertDescription>
-              </Alert>
+              <Alert.Root tone="danger">
+                <Alert.Description id="complete-email-error">{submitError}</Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <Button type="submit" className="w-full" disabled={submitting || signingOut}>

@@ -5,7 +5,7 @@ import type {
   OpenSystemNotificationSettingsResult,
 } from '@lody/shared';
 import { Trash2 } from 'lucide-react';
-import { Loading } from '@/ui';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
@@ -706,7 +706,9 @@ export function GeneralSettingsComponent() {
             alignTop
           >
             {isProcessing ? (
-              <Loading size="sm" className="h-5 w-9" />
+              <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
             ) : (
               <Switch
                 id="notification-toggle"
@@ -730,7 +732,9 @@ export function GeneralSettingsComponent() {
               )}
             >
               {autoLaunch.enabledLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-toggle"
@@ -750,7 +754,9 @@ export function GeneralSettingsComponent() {
               )}
             >
               {autoLaunch.hideWindowLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-hide-window-toggle"
@@ -772,7 +778,9 @@ export function GeneralSettingsComponent() {
                 alignTop
               >
                 {cliAutoStartLoading ? (
-                  <Loading size="sm" className="h-5 w-9" />
+                  <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
                 ) : (
                   <Switch
                     id="cli-auto-start-toggle"

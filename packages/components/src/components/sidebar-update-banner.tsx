@@ -50,7 +50,7 @@ export function SidebarUpdateBanner({
       </div>
       {isDownloading && percent != null ? (
         <div className="mt-2 flex items-center gap-2">
-          <Progress value={percent} className="h-1 flex-1" />
+          <Progress value={percent} className="flex-1" />
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {t('sidebar.updateDownloading.percent', '{{percent}}%', { percent })}
           </span>
