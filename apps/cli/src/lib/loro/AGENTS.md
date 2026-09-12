@@ -13,11 +13,6 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../../../packages/shared/AGENTS.md#session-history).
 
-`SessionDocument.sessionData` is the CLI's domain seam over that same writer and doc:
-business callers use its commands (`openAssistantTurn`, `respondPermission`,
-`setTurnField`, `readVisiblePage`, ...) so Loro/Mirror/container ids stay inside the adapter.
-It must reuse `mirror.historyWriter`; never construct a second writer.
-
 ## Opening a doc pulls its stream
 
 `LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.

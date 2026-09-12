@@ -78,6 +78,56 @@ composer on the entire idle pass. Reads neither migrate storage nor change the s
 writer. Regression tests control idle scheduling and assert the Role written by an
 immediate send survives snapshot reload, with an old-body materialization guard.
 
+## Session data port
+
+Session business code (renderer hooks, `WorkspaceWriter`, CLI `SessionDocument`, MCP)
+still named Loro containers, the Mirror and `HistoryWriter` callbacks directly, so a future
+database CRDT would force an edit at every consumer. `packages/shared/src/session-data`
+now owns a CRDT-neutral seam: `SessionHistoryReader` (`count`/`readTurn`/`readRange`/
+`readVisiblePage`), `SessionHistoryCommands` and a separate durability port. Nothing in the
+port names Loro, Mirror, a CID or a storage offset; business identity is a turn/request id or
+an opaque raw cursor.
+
+Two rules make it trustworthy and distinguish it from a renamed CRDT API. A field change is
+explicit: `set(value)` or `clear`, never an `undefined`-means-delete contract that cannot
+cross JSON/worker/Rust. A command result states its phase: `accepted` (retrying duplicates
+it), `rejected` (nothing applied, safe to fix and retry) or `indeterminate` (never auto-retry).
+Local acceptance stays separate from local durability (`waitDurable`) and remote sync. A
+conditional field write re-locates its target inside the adapter's commit, so a peer edit
+between read and write cannot be overwritten outside the named field; `clear` removes only
+that field and leaves unknown stored fields intact.
+
+`createLoroSessionData` is the only Loro implementation and delegates to the one shared
+`HistoryWriter`; the session entrypoint injects `mirror.historyWriter` so no second writer
+exists. `createMemorySessionData` is an independent array/Map implementation with no Loro,
+Mirror or CID import, and both run the same contract (`tests/session-data-contract.ts`),
+including hidden-row paging, bad raw slots, unknown-field preservation and the
+accepted/durability split. `tests/session-data-consumer.test.ts` then drives the real
+`createDirectWorkspaceWriter` against the in-memory implementation, which is what proves the
+renderer consumer depends on the port rather than on Loro.
+
+Migrated callers: `SessionDocument` exposes `sessionData` and its assistant reopen/create
+(`openAssistantTurn`) and permission outcome (`respondPermission`) use it, so opening a turn
+no longer materializes unrelated history and an answer locates only its own turn; the
+renderer `WorkspaceWriter` routes append/replace/permission/task-proposal/assistant-open
+through it and surfaces a rejected command instead of silently dropping it; MCP
+`session_history` pages through `readVisiblePage`, where `limit` counts displayable turns,
+the cursor is a raw position, and a hidden tail is never reported as an empty history.
+
+Not migrated in this change, and therefore still raw: `SessionDocument.init` builds the full
+`sessionMirror` and `getHistory()` materializes it (a control-plane Mirror plus a shared
+reader is still outstanding), `ConversationView` continues to read the raw list as the UI's
+display cache, and queue/fork/import paths still use whole-history `updateHistory`. Owner/
+seal mapping and old-format migration remain separate work, as does replacing the Mirror
+`WeakMap` copy provenance with a storage-owned handle. `setTurnField`/`resumeAssistant`/
+`clearField` are implemented and contract-tested but have no production caller yet.
+
+Verification: shared `session-data` contract plus real-Loro regressions for clear
+round-trips, unknown fields, a bad raw slot and two-replica convergence; the components suite
+(469 files / 3538 tests) and the CLI suite (2695 tests, 4 skipped) pass, along with the
+shared, components and CLI typechecks. These are library-level checks; they do not establish
+device-scale cold-open, memory or owner/seal behaviour.
+
 ## Verification
 
 The control-plane suite runs both modes with opaque stored history and the shared writer.
