@@ -41,6 +41,9 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.
+- Repo storage, durable Streams cursors, and eager-sync high-water state must use the
+  same per-renderer cache namespace. A checkpoint must never be shared by independently
+  persisted Repo views.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.

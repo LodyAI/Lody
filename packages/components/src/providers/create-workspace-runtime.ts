@@ -145,6 +145,22 @@ export type WorkspaceRuntimeAnalyticsEvent = {
   properties: Record<string, unknown>;
 };
 
+export function resolveWorkspaceRuntimeCacheIdentity(
+  workspaceId: WorkspaceId,
+  windowId: string
+): {
+  namespace: string;
+  repoDbName: string;
+  remoteCursorDbName: string;
+} {
+  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  return {
+    namespace,
+    repoDbName: `lody-loro-repo-db-${namespace}`,
+    remoteCursorDbName: `lody-loro-stream-cursors-${namespace}`,
+  };
+}
+
 type RuntimeDeps = {
   /**
    * Used for caching the (slug, id) mapping in localStorage.
@@ -372,6 +388,7 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 }
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -396,10 +413,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repo = await LoroRepo.create({
     storageAdapter: new IndexedDBStorageAdaptor({
-      dbName:
-        'lody-loro-repo-db-' +
-        deps.workspaceId +
-        (desktopWindowId() ? ':' + desktopWindowId() : ''),
+      dbName: cacheIdentity.repoDbName,
     }),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
@@ -424,7 +438,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     );
   };
   const remoteCursorStore = createResilientRemoteCursorStore({
-    dbName: 'lody-loro-stream-cursors-' + deps.workspaceId,
+    dbName: cacheIdentity.remoteCursorDbName,
     shouldBypassPrimaryLoad: shouldBypassMetaRemoteCursorLoad,
     onWarning: (message, context) => {
       console.warn(message, {
@@ -4212,7 +4226,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     watchHandles.push(watchHandle);
 
     backgroundSyncCoordinatorStartPromise = (async () => {
-      const highWaterStore = await createEagerSyncHighWaterStore(workspaceId);
+      const highWaterStore = await createEagerSyncHighWaterStore(cacheIdentity.namespace);
       if (disposePromise) {
         highWaterStore.close();
         return;
