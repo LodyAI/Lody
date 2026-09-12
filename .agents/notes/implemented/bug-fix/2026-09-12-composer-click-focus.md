@@ -3,6 +3,8 @@
 Status: implemented
 Translation: pending
 
+PR: [#655](https://github.com/LodyAI/Lody/pull/655)
+
 ## Abstract
 
 The desktop Session composer had an inert 8px strip below its input card, so
