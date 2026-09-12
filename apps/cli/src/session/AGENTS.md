@@ -37,8 +37,8 @@ Contract: specs/session-orchestration.md.
 - Never re-dispatch a late-arriving history entry; recovery is a fresh send.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
-- Session metadata is the activation index: never inspect historical Session documents to infer
-  work, and never publish or clear active presence here (`../lib/loro/session-active-presence.ts`).
+- Never inspect historical Session documents to infer work, or publish or clear active presence
+  here (`../lib/loro/session-active-presence.ts`).
 - Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
   extra throttle.
 
@@ -47,26 +47,27 @@ Contract: specs/session-orchestration.md.
 - Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
   never gate status or meta writes.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
-  second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
-  owns source Turn, requester and config; steer replaces it before tools.
+- In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
+  completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
+  `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- INVARIANT: a steer the agent never accepted must not stay parked in `pending_apply`. Requeue it
-  through the pointer, not the entry status, only for pre-submission rejections or
-  `AgentSteerNotDeliveredError`; skip active or already-handled entries.
+- Never submit steer after Stop. A late accepted ACK cancels that exact steer entry without
+  transferring ownership, changing dispatch pointers or requeueing it.
+  Requeue unaccepted steer via its pointer, not entry status, only before submission or on
+  `AgentSteerNotDeliveredError`; skip active or handled entries.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
 - Continue-session recovery may restore the ACP session and retry the same prompt once, only
   while that turn has no ACP output.
-- INVARIANT: a resolved prompt is not proof of success. A turn that emitted no ACP update takes
-  `recordSilentTurnFailure`, not `setDispatchHandled` (read `turnProducedVisibleOutput` before
-  `finalizeTurn` clears it); it still finalizes, still ADVANCES the pointer, and fails open.
+- A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
+  Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
+  the pointer, and fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 

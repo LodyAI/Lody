@@ -1,7 +1,7 @@
 # Session history writes
 
 Status: draft
-Translation: stale
+Translation: current
 
 [中文](session-history-writes.zh.md)
 
@@ -46,6 +46,25 @@ That tolerance must not authorize creating new malformed items locally.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
   stored history. Steer config and same-identity task-proposal edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
+- Manual Codex compaction owns its native turn through completion. Stop interrupts
+  that turn and retains the ACP prompt until `turn/completed` confirms its outcome
+  or the provider connection closes. For an in-flight prompt with a ready ACP session,
+  Lody records cancellation and sends provider cancel without interrupting its owner
+  fiber. The owner and unfinished history remain until ACP returns; new dispatch and
+  undelivered steer stay pending. If the raw prompt remains pending five seconds after
+  Stop, Lody terminates the old session so connection closure can end the prompt.
+  This deadline does not wait for cancel acknowledgement or restart on repeated Stop.
+  Failed termination retains ownership until ACP ends. Start and interrupt
+  acknowledgements, like compaction-item completion, do not release execution ownership.
+  The CLI persists unresolved compaction as failed after confirmed cancellation,
+  before accepting another turn.
+  Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
+- If Stop wins while a submitted steer awaits acceptance, a later successful ACK must
+  not transfer ownership, change the source invocation or settle the source as handled.
+  Mark that exact steer user turn `canceled` before returning `stale-turn`, without
+  changing dispatch pointers. Keep the current cancellation owner until provider completion.
+  Do not requeue the accepted steer: rejection of the local ownership transfer is not
+  proof of non-delivery.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned
