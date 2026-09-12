@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { VList } from 'virtua';
 import type { PagedFileSource } from '@/lib/paged-file-source';
-import { Input } from '@lody/ui/input';
+import { Pagination } from '@lody/ui/pagination';
 import { Button } from '@lody/ui/button';
 
 /** One bounded page, virtual rows, no editor/LSP/HTML execution or accumulated cache. */
@@ -43,39 +43,25 @@ export function PagedFileViewer({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b p-2 text-xs text-muted-foreground">
         <span>{t('sessions.fileViewer.paged', 'Large file · read-only')}</span>
-        <Button
-          variant="ghost"
+        <Pagination
+          layout="compact"
+          jump
           size="small"
-          disabled={current === 0}
-          onClick={() => setPage(current - 1)}
-        >
-          {t('sessions.fileViewer.previousPage', 'Previous page')}
-        </Button>
-        <label>
-          {t('sessions.fileViewer.page', 'Page')}{' '}
-          <Input
-            aria-label={t('sessions.fileViewer.page', 'Page')}
-            type="number"
-            min={1}
-            max={pages}
-            value={current + 1}
-            className="inline-flex h-7 w-20 px-2 py-1"
-            onChange={(event) => {
-              const value = Number(event.target.value);
-              if (Number.isSafeInteger(value) && value >= 1 && value <= pages) setPage(value - 1);
-            }}
-          />
-          {' / '}
-          {pages.toLocaleString()}
-        </label>
-        <Button
-          variant="ghost"
-          size="small"
-          disabled={current + 1 >= pages}
-          onClick={() => setPage(current + 1)}
-        >
-          {t('sessions.fileViewer.nextPage', 'Next page')}
-        </Button>
+          page={current + 1}
+          pages={pages}
+          onPageChange={(next) => setPage(next - 1)}
+          labels={{
+            root: t('sessions.fileViewer.pagination', 'File pages'),
+            previous: t('sessions.fileViewer.previousPage', 'Previous page'),
+            next: t('sessions.fileViewer.nextPage', 'Next page'),
+            jump: t('sessions.fileViewer.page', 'Page'),
+            position: (shown, count) =>
+              t('sessions.fileViewer.position', 'Page {{page}} of {{total}}', {
+                page: shown,
+                total: count,
+              }),
+          }}
+        />
         {onOpenExternal ? (
           <Button variant="ghost" size="small" onClick={onOpenExternal}>
             {t('sessions.fileActions.openInDefaultApp', 'Open in default app')}

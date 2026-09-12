@@ -92,6 +92,13 @@ export { Menubar } from './menu/menubar';
 export type { MenubarRootProps, MenubarTriggerProps } from './menu/menubar';
 export { Progress } from './feedback/progress';
 export type { ProgressProps, ProgressTone } from './feedback/progress';
+export { Pagination } from './table/pagination';
+export type {
+  PaginationLabels,
+  PaginationLayout,
+  PaginationProps,
+  PaginationSize,
+} from './table/pagination';
 export { Popover } from './popover/popover';
 export type {
   PopoverContentProps,
@@ -121,6 +128,22 @@ export { Spinner } from './feedback/spinner';
 export type { SpinnerProps, SpinnerSize } from './feedback/spinner';
 export { Switch } from './field/switch';
 export type { SwitchProps } from './field/switch';
+export { Table } from './table/table';
+export type {
+  TableAlign,
+  TableCaptionProps,
+  TableCellProps,
+  TableColumn,
+  TableColumnHeaderProps,
+  TableLabels,
+  TableProps,
+  TableRootProps,
+  TableRowProps,
+  TableSectionProps,
+  TableSize,
+  TableSort,
+  TableSorting,
+} from './table/table';
 export { Tabs } from './disclosure/tabs';
 export type {
   TabsListProps,

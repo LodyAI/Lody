@@ -388,6 +388,113 @@ reports nothing its own shape does not already say, which is also why it is
 hidden from a screen reader. A spinner keeps turning there, because it is the
 only thing saying the work has not stopped.
 
+## Tables
+
+Rows of records, and the way to the rows that did not fit. One group, `table`,
+covers both for the reason `dialog` covers three modals: a pager exists because
+a table did not fit, the two sit on the same rung and state the same size, and
+how dense a list of records is has one place to change rather than two.
+
+A table is the one part of this system with **no surface of its own**: no
+background, no shadow, no radius. It is rows on whatever the surface around it
+already was — a page, a card, a dialog — so the card that holds one keeps owning
+its edges, and a table inside a card is not a card inside a card. What it draws
+is the one edge the rules give a list: `separator`, between one row and the next.
+
+**A column is stated once.** How wide it is, which way it aligns, whether it
+holds figures, whether the table can be ordered by it, what a totals row holds
+under it — these are facts about a column, and a column written twice (a name in
+the head, a cell in every row) is a fact that can drift. Everything below
+follows from stating them in one place; a table that is not a list of records —
+a two-column list of facts, a Markdown document's markup — assembles the
+elements instead and gets none of it.
+
+| part     | what it is                                                                    |
+| -------- | ----------------------------------------------------------------------------- |
+| row      | a `table.rowHeight*` row on the control ladder; the height is a floor         |
+| line     | `table.line` under a row, and none under the last one                         |
+| head     | a column's name, at the footnote step in `table.head`: about the column       |
+| cell     | the value, at the control step in `table.value`, on one line                  |
+| numeric  | tabular digits, aligned to the end of the column                              |
+| sorted   | the one column at `table.headActive`, with the arrow the part draws           |
+| hover    | `table.hover`, and only where pressing a row does something                   |
+| selected | `table.selected`, under the tick that is what actually says so                |
+| stayed   | a head over its own scroll box: `table.headStickyBackground`, the region rung |
+| stacked  | too narrow for columns: label and value per line, `table.head` on the label   |
+| nothing  | `table.emptyHeight` of `table.empty`, across every column, head still up      |
+| caption  | what the table is, under it, at the footnote step in `table.caption`          |
+
+The head takes the line too. The rule against a line under a header is about a
+heading over a surface; a row of column names is the row before the first
+record, and the line under it is the divider to the next row that `separator` is
+for. The last record draws none, because there is no next row there.
+
+The line is the `inset 0 -1px 0` every other row in this system draws, and the
+table is laid out with `border-collapse: separate` so that it can be. Under
+`collapse` a row's box-shadow is not painted, a sticky head's border does not
+travel with it, and a row could not carry a focus ring; under `separate` all
+three work and a row keeps **one** box-shadow in which its line and its ring
+compose, which is the rule every other control here already follows.
+
+The two fills are the palette's own `hoverFill` and `selectedFill` rather than a
+mix of the surface, which is the opposite of what a popup row does. Those two
+were tuned against the page and card rungs, and a table row is exactly the row
+this table names them for; a popup derives its own only because on the floating
+rung they collapse into the surface.
+
+The pointer is answered **only where pressing a row does something**. A table of
+facts is read, not operated, and a row that lights up and does nothing when
+pressed is a promise the table cannot keep. A row that can be pressed takes the
+keyboard with it — Enter and Space press it, and the ring says where the
+keyboard is. Selection is a **tick** first: `aria-selected` belongs to a row in
+a grid, so a table that lets a person pick rows puts a checkbox in one, which is
+both what they press and what announces it, and the fill is how they find those
+rows again down the page. The box over that column is derived, never passed:
+none, some — which is `mixed` — or all.
+
+A column's name is a control only where the table can be ordered by it, and then
+it is a real button with the ring every control here takes. Which way it is
+sorted is on the cell as `aria-sort`, so what a screen reader is told and what
+the arrow shows are one fact, and **one column wears the arrow at a time**. The
+table does not reorder the records: a server sorts, a comparator breaks ties, a
+page is one slice of many, so the control is the primitive's and the data is the
+surface's.
+
+A head stays only where the table owns a box to stay in — a height and a sticky
+head are one decision, because a head that scrolls out of its own box is not
+something a surface would ask for. A head that stays is no longer a row: it is a
+band over the rows moving under it, so it takes the rung the ladder gives a band
+over the page. That is not decoration; a transparent one has the records painted
+through the column names.
+
+### Too narrow for columns
+
+A table narrower than its columns need is not a table with a scrollbar: it is a
+list of records, each one a stack of label-and-value lines, with the label
+taking the head's colour and step. It is the head's own words rather than a
+second copy of them — which is reachable only because the columns were stated.
+
+The question is about **the table's own width**, not the window's. A settings
+table in a 360px side panel on a 27-inch screen is narrow, and a breakpoint
+calls it wide; the panel is the thing that got small. So it is a container
+query, and the width at which it stacks belongs to the system rather than to a
+caller: a caller choosing it is a caller deciding how wide a record may be.
+
+### The pager
+
+The window is one width from the first page to the last, so the buttons do not
+move out from under the pointer, and a gap is drawn only where it stands for
+more than one page — a gap hiding a single page is wider than the page it hides
+and costs the press that page would have taken. Against either end the gap that
+is not needed is spent listing more pages instead.
+
+The page a person is on says so twice: a secondary Button among ghosts, and
+`aria-current`, because the fill reaches only the people who can see it. The
+steps either way are disabled at the ends rather than removed, since a pager
+whose buttons come and go moves the ones beside them. Nine thousand pages are
+not a list, so a pager that long says where you are instead — `table.pagerHint`
+for the count, the label colour for the number — and lets a person type it.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
