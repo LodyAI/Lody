@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  getSessionRoomId,
-  SessionStatusFactory,
-  type SessionId,
-} from '@lody/shared';
+import { getSessionRoomId, SessionStatusFactory, type SessionId } from '@lody/shared';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 
@@ -123,7 +119,7 @@ describe('SessionDocument status metadata', () => {
     expect(upsertDocMeta).not.toHaveBeenCalledWith(parentRoomId, expect.anything());
   });
 
-  it('deletes the key instead of persisting null when unsetting a history entry field', () => {
+  it('deletes the key instead of persisting null when unsetting a history entry field', async () => {
     // Raw LoroMap writes bypass loro-mirror's undefined-stripping; `set(field,
     // undefined)` would persist null and break strict readers.
     const loroDoc = new LoroDoc();
@@ -133,13 +129,23 @@ describe('SessionDocument status metadata', () => {
     entry.set('fileDiff', [{ path: 'a.ts', add: 1, del: 0 }]);
     const doc = createSessionDocument({}, undefined, loroDoc);
 
-    expect(doc.setHistoryEntryField('entry-1', 'fileDiff', undefined)).toBe(true);
+    expect(
+      (await doc.sessionData.commands.setTurnField('entry-1', 'fileDiff', { kind: 'clear' })).status
+    ).toBe('accepted');
 
     const readBack = loroDoc.getList('history').get(0) as LoroMap;
     expect(readBack.keys()).not.toContain('fileDiff');
     expect(readBack.get('fileDiff')).toBeUndefined();
 
-    expect(doc.setLatestAssistantHistoryFileDiff(undefined, 'entry-1')).toBe(true);
+    expect(
+      (
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'assistant-file-diff',
+          turnId: 'entry-1',
+          change: { kind: 'clear' },
+        })
+      ).status
+    ).toBe('accepted');
     expect((loroDoc.getList('history').get(0) as LoroMap).keys()).not.toContain('fileDiff');
     doc.mirror?.dispose();
   });

@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { getExternalAcpHistoryImportKey, getSessionRoomId } from '@lody/shared';
 import { createMemorySessionData } from '@lody/shared/session-data';
@@ -429,20 +430,20 @@ describe('history import persistence', () => {
     // The honest in-memory double: its composed import rejects `unsupported`
     // instead of faking the no-gap binding; used by the rejection case below.
     const memoryData = createMemorySessionData({ sessionId: 'imported-memory' as never });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       sessionData: {
         commands: {
-          applyHistoryImport: (input: Parameters<
-            typeof memoryData.commands.applyHistoryImport
-          >[0]) => {
+          applyHistoryImport: (
+            input: Parameters<typeof memoryData.commands.applyHistoryImport>[0]
+          ) => {
             if (options.rejectImport) return memoryData.commands.applyHistoryImport(input);
             // Mirrors the port's one synchronous block: the write, the stored
             // baseline and the cursor creation with no await gap.
             calls.push('history');
-            storedHistory = input.update(storedHistory, { importedTurnHashes });
+            storedHistory = [...input.replay.history] as SessionHistoryInput[];
             calls.push('cursor');
-            importedTurnHashes = input.createCursor(storedHistory).importedTurnHashes ?? [];
-            return Promise.resolve({ status: 'accepted' as const });
+            importedTurnHashes = [...input.replay.turnHashes];
+            return Promise.resolve({ status: 'accepted' as const, appended: storedHistory.length });
           },
         },
       },
@@ -458,7 +459,7 @@ describe('history import persistence', () => {
         }
       ),
       waitUntilSynced: vi.fn(async () => options.remoteSyncConfirmed ?? true),
-    };
+    });
     const upsertDocMeta = options.failMetaWrite
       ? vi.fn(async () => {
           calls.push('meta');

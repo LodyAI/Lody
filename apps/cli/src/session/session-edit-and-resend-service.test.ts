@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { SessionDocument } from '../lib/loro/doc';
@@ -119,9 +120,9 @@ function createHarness(
     agentConfigId: 'agent-config-1' as AgentConfigId,
     acpSessionId: 'acp-old',
   } as SessionMeta;
-  const sessionDoc = {
+  const sessionDoc = withHistoryPort({
     getMetaState: vi.fn(async () => meta),
-    getHistory: vi.fn(realDoc.getHistory.bind(realDoc)),
+    getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
     sessionData: {
       commands: {
         replaceEditableTail: vi.fn(async (input: ReplaceEditableTailInput) => {
@@ -129,7 +130,7 @@ function createHarness(
           await options.beforeReplace?.(realDoc);
           const result = await realDoc.sessionData.commands.replaceEditableTail(input);
           if (result.status !== 'accepted') return result;
-          history = await realDoc.getHistory();
+          history = await realDoc.sessionData.history.readAll();
           return {
             ...result,
             rollback: async () => {
@@ -142,7 +143,7 @@ function createHarness(
         }),
       },
     },
-  };
+  });
   const repo = {
     upsertDocMeta: vi.fn(async () => {
       events.push('meta');
@@ -212,7 +213,7 @@ function createHarness(
     enqueueDispatch: () => events.push('dispatch'),
   });
 
-  return {
+  return withHistoryPort({
     agentClient,
     events,
     executionService,
@@ -223,7 +224,7 @@ function createHarness(
     realDoc,
     repo,
     service,
-  };
+  });
 }
 
 const spec = {
@@ -263,15 +264,18 @@ describe('SessionEditAndResendService', () => {
       'barrier-release',
       'dispatch',
     ]);
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
       'user-1',
       'assistant-1',
       'user-3',
     ]);
     await vi.waitFor(() => {
-      expect(harness.getHistory().at(-1)).toMatchObject({ status: 'seen', read: true });
+      expect(harness.sessionData.history.readAll().at(-1)).toMatchObject({
+        status: 'seen',
+        read: true,
+      });
     });
-    expect(harness.getHistory().at(-1)).toMatchObject({
+    expect(harness.sessionData.history.readAll().at(-1)).toMatchObject({
       userId: 'original-author',
       status: 'seen',
       read: true,
@@ -309,7 +313,7 @@ describe('SessionEditAndResendService', () => {
     const result = await harness.service.editAndResend(spec);
     expect(result).toMatchObject({ success: false, error: { code: 'STALE_USER_TURN' } });
     // The concurrent user turn survives; the replacement was refused before any write.
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
       'user-1',
       'assistant-1',
       'user-2',
@@ -355,7 +359,7 @@ describe('SessionEditAndResendService', () => {
     });
     expect(harness.events).toContain('persist-rollback');
     expect(harness.events).toContain('barrier-release');
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
       'user-1',
       'assistant-1',
       'user-2',
@@ -379,7 +383,7 @@ describe('SessionEditAndResendService', () => {
     expect(harness.logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to restore history after commit failure')
     );
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
       'user-1',
       'assistant-1',
       'user-2',
@@ -398,7 +402,7 @@ describe('SessionEditAndResendService', () => {
       error: { code: 'ACP_FORK_FAILED' },
     });
     expect(harness.executionService.cancelSession).not.toHaveBeenCalled();
-    expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
       'user-1',
       'assistant-1',
       'user-2',
@@ -454,7 +458,7 @@ describe('SessionEditAndResendService', () => {
     await execution['setUserTurnStatus'](harness.realDoc, 'user-2', 'handled');
     const stored = harness.realDoc.sessionData.writer.read('user-2');
     expect(stored?.inputConfig?._lodyDeliveryKind).toBe('steer');
-    const read = await harness.realDoc.getHistory();
+    const read = await harness.realDoc.sessionData.history.readAll();
     expect(read.find((entry) => entry.id === 'user-2')?.inputConfig?._lodyDeliveryKind).toBe(
       'steer'
     );
@@ -509,14 +513,14 @@ describe('SessionEditAndResendService', () => {
         success: false,
         error: { code: 'HISTORY_WRITE_FAILED' },
       });
-      expect(harness.getHistory().map((entry) => entry.id)).toEqual([
+      expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
         'user-1',
         'assistant-1',
         'user-2',
         'assistant-2',
       ]);
       expect(harness.events).toContain('persist-rollback');
-      expect(harness.getHistory()).toEqual(
+      expect(harness.sessionData.history.readAll()).toEqual(
         peerEdit
           ? [
               { ...history[0], items: [{ type: 'text', text: 'peer prefix edit' }] },

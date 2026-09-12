@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { readLatestTurn, type SessionData } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
   ACPSessionId,
@@ -19,7 +21,6 @@ import {
   MachineId,
   ManagedBuiltinAgentType,
   SessionHistoryInput,
-  StoredHistorySnapshot,
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
@@ -37,11 +38,9 @@ import {
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
-  FileDiff,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
   normalizeSessionPullRequestMeta,
-  normalizeSessionTurnInputConfig,
   getServerNow,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
@@ -69,7 +68,7 @@ import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-ser
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
 import { v4 as uuidv4 } from 'uuid';
 import { getLogger, type Logger } from '@/utils/logger';
-import { captureException, captureMessage } from '@/instrument';
+import { captureException } from '@/instrument';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
 import { traceAsync } from '@/utils/trace-span';
 
@@ -95,7 +94,6 @@ import {
   type StreamsOnlineListener,
 } from './connection-recovery';
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
-import type { ModelInfo } from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,
@@ -117,11 +115,6 @@ import {
 } from '@/lib/agent-config-machine-flock';
 import { installCliHttpGlobalDispatcher } from '@/utils/http-transport';
 import { createCliStreamsTransport } from './streams-transport';
-
-const normalizeSessionHistoryEntry = (entry: SessionHistoryInput): SessionHistoryInput => ({
-  ...entry,
-  inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
-});
 
 const isValidDaemonLaunchConfig = (
   config: AgentConfigMeta,
@@ -1291,12 +1284,12 @@ export class LoroDocumentManager {
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
     const active = this.sessions.get(sessionId);
     if (active) {
-      return await active.getHistory();
+      return await readSessionHistory(active.sessionData.history);
     }
 
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
-      return await (await pending).getHistory();
+      return await readSessionHistory((await pending).sessionData.history);
     }
 
     const docId = getSessionRoomId(sessionId);
@@ -1313,7 +1306,7 @@ export class LoroDocumentManager {
       );
       await sessionDoc.init({ skipAutoRead: true });
       try {
-        return await sessionDoc.getHistory();
+        return await readSessionHistory(sessionDoc.sessionData.history);
       } finally {
         await sessionDoc.destroy({ preserveStatus: true });
       }
@@ -1755,23 +1748,10 @@ const EDITING_LEASE_MS = 5 * 60 * 1000;
  * document that was not composed through `composeSessionData` throws.
  */
 export function subscribeSessionChanges(
-  sessionDoc: Pick<SessionDocument, 'mirror' | 'sessionData'>,
+  sessionDoc: Pick<SessionDocument, 'subscribeAll'>,
   listener: () => void
 ): () => void {
-  if (!sessionDoc.mirror) throw new Error('SessionDocument not initialized');
-  let disposed = false;
-  const unsubscribeMirror = sessionDoc.mirror.subscribe(() => {
-    if (!disposed) listener();
-  });
-  const observation = sessionDoc.sessionData.history.observe(() => {
-    if (!disposed) listener();
-  });
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    unsubscribeMirror();
-    observation.unsubscribe();
-  };
+  return sessionDoc.subscribeAll(listener);
 }
 
 export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta> {
@@ -1881,7 +1861,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
    * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
    * Loro doc, the Mirror, or a container id.
    */
-  get sessionData(): LoroSessionData {
+  get sessionData(): SessionData {
     if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
     return this.sessionDataInstance;
   }
@@ -2101,30 +2081,12 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   }
 
   /**
-   * Explicit synchronous full-history snapshot for one-shot consumers that must
-   * observe every intermediate state (`session output --jsonl`). Materializes the
-   * stored history; not for the UI or background paths.
-   */
-  readHistorySnapshot(): SessionHistoryInput[] {
-    return this.sessionData.writer
-      .readStored()
-      .map((entry) => normalizeSessionHistoryEntry(entry));
-  }
-
-  /**
    * Explicit full-history read through the domain reader. Used only by callers
    * whose contract IS the whole history (`getHistory`, `getDocState`, export);
    * the windowed UI never routes through here.
    */
   private async readFullHistory(): Promise<SessionHistoryInput[]> {
-    const count = await this.sessionData.history.count();
-    const range = await this.sessionData.history.readRange(0, count);
-    const out: SessionHistoryInput[] = [];
-    for (const read of range) {
-      if (read.state !== 'ready') continue;
-      out.push(normalizeSessionHistoryEntry(read.turn as unknown as SessionHistoryInput));
-    }
-    return out;
+    return readSessionHistory(this.sessionData.history);
   }
 
   /**
@@ -2621,21 +2583,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.logger.debug(`[${this.sessionId}] setStatus: upsertDocMeta complete`);
   }
 
-  async getHistory(): Promise<SessionHistoryInput[]> {
-    if (!this.sessionDataInstance) {
-      return [];
-    }
-    return this.readFullHistory();
-  }
-
-  captureStoredHistory(): StoredHistorySnapshot {
-    return this.sessionData.writer.capture();
-  }
-
-  async copyStoredHistory(snapshot: StoredHistorySnapshot, history: SessionHistoryInput[]) {
-    this.sessionData.writer.copyFrom(snapshot, history);
-  }
-
   async getPreviewState(): Promise<SessionPreviewDocState | undefined> {
     if (!this.mirror) {
       return undefined;
@@ -2672,32 +2619,12 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }));
   }
 
-  /** No async gap between the guarded history write, its stored snapshot and cursor. */
-  async updateHistoryAndCursor(
-    update: (
-      history: SessionHistoryInput[],
-      cursor: SessionExternalHistoryCursorDocState | undefined
-    ) => SessionHistoryInput[],
-    createCursor: (stored: SessionHistoryInput[]) => SessionExternalHistoryCursorDocState
-  ): Promise<void> {
-    if (!this.mirror) throw new Error('Mirror not initialized');
-    // The composed import operation on the port binds the write, the stored
-    // snapshot read and the cursor creation in one synchronous block; the
-    // control-plane accessors were supplied at composition time.
-    const result = await this.sessionData.commands.applyHistoryImport({ update, createCursor });
-    if (result.status === 'accepted') return;
-    if (result.status === 'rejected') {
-      throw new HistoryWriteError(result.reason.issues ?? [{ path: [], code: 'invalid_input' }]);
-    }
-    throw result.cause;
-  }
-
   /**
    * Get the plan from the latest assistant entry in history.
    * Plan is now stored per-turn on each history entry, not at the root level.
    */
   async getPlan(): Promise<SessionPlanEntry[]> {
-    const entry = this.getLatestAssistantHistory();
+    const entry = await readLatestTurn(this.sessionData.history, 'assistant');
     if (!entry) {
       return [];
     }
@@ -2720,59 +2647,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     await this.repo.upsertDocMeta(this.roomId, {
       pullRequests: updated,
     });
-  }
-
-  async updateHistory(
-    updateFn: (history: SessionHistoryInput[]) => SessionHistoryInput[],
-    options?: { onlyEntryId: string }
-  ) {
-    if (!this.mirror) {
-      throw new Error('Mirror not initialized');
-    }
-    let attemptedTail: Record<string, unknown> | null = null;
-    try {
-      const writer = this.sessionData.writer;
-      // The caller promises this operation needs no other turn (e.g. targeted
-      // text chunks). A missing target retains the normal creation path below.
-      if (
-        options &&
-        writer.updateEntry(options.onlyEntryId, (entry) => {
-          const next = updateFn([entry]);
-          attemptedTail = this.summarizeHistoryTailForDiagnostics(next);
-          if (next.length !== 1 || next[0]?.id !== options.onlyEntryId)
-            throw new HistoryWriteError([{ path: ['history'], code: 'invalid_targeted_update' }]);
-          return next[0];
-        })
-      )
-        return;
-      writer.update((history) => {
-        const nextHistory = updateFn(history);
-        attemptedTail = this.summarizeHistoryTailForDiagnostics(nextHistory);
-        return nextHistory;
-      });
-    } catch (error) {
-      const detail =
-        error instanceof Error
-          ? (error.stack ?? error.message)
-          : error
-            ? String(error)
-            : 'Unknown error';
-      this.logger.error(`[${this.sessionId}] Failed to update history: ${detail}`);
-      if (attemptedTail) {
-        this.logger.error(
-          `[${this.sessionId}] Attempted history tail diagnostics: ${JSON.stringify(attemptedTail)}`
-        );
-      }
-      void captureMessage('Failed to update session history', {
-        component: 'loro-doc',
-        level: 'error',
-        extra: {
-          sessionId: this.sessionId,
-          ...(attemptedTail ?? {}),
-        },
-      });
-      throw error;
-    }
   }
 
   /**
@@ -2805,120 +2679,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     await this.repo.upsertDocMeta(this.roomId, {
       latestUserMsgId: entry.id,
     } satisfies Partial<SessionMeta>);
-  }
-
-  private summarizeHistoryTailForDiagnostics(
-    history: SessionHistoryInput[]
-  ): Record<string, unknown> {
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    const lastItems = last && Array.isArray(last.items) ? (last.items as unknown[]) : [];
-
-    const summarizeValue = (value: unknown): Record<string, unknown> => {
-      if (value === null) return { type: 'null' };
-      if (Array.isArray(value)) return { type: 'array', length: value.length };
-      if (typeof value === 'string') return { type: 'string', length: value.length };
-      if (typeof value === 'object') {
-        const record = value as Record<string, unknown>;
-        const keys = Object.keys(record).slice(0, 20);
-        const keyTypes: Record<string, string> = {};
-        for (const k of keys) {
-          const v = record[k];
-          keyTypes[k] = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
-        }
-        return { type: 'object', keys: keys.length, keyTypes };
-      }
-      return { type: typeof value };
-    };
-
-    const tailItems = lastItems.slice(-3).map((item) => {
-      if (!item || typeof item !== 'object') {
-        return { itemType: 'non_object' };
-      }
-      const record = item as Record<string, unknown>;
-      const keys = Object.keys(record).slice(0, 20);
-      const fieldSummaries: Record<string, Record<string, unknown>> = {};
-      for (const key of keys) {
-        fieldSummaries[key] = summarizeValue(record[key]);
-      }
-      return {
-        type: typeof record.type === 'string' ? record.type : 'unknown',
-        keys: keys.length,
-        fields: fieldSummaries,
-      };
-    });
-
-    return {
-      historyEntries: history.length,
-      lastEntry: last
-        ? {
-            id: last.id,
-            role: last.role,
-            timestamp: last.timestamp,
-            items: lastItems.length,
-            tailItems,
-          }
-        : null,
-    };
-  }
-
-  getLatestAssistantHistory(): SessionHistoryInput | null {
-    if (!this.mirror) {
-      throw new Error('Mirror not initialized');
-    }
-    const id = this.shallowLatestTurnId('assistant');
-    return id ? (this.sessionData.writer.read(id) ?? null) : null;
-  }
-
-  /**
-   * Directly set a field on a history entry using loro-crdt API.
-   * This is more efficient than using `updateHistory` for simple field updates
-   * because it avoids the overhead of loro-mirror's setState.
-   *
-   * @param historyId - The id of the history entry to update
-   * @param field - The field name to set
-   * @param value - The value to set
-   * @returns true if the entry was found and updated, false otherwise
-   */
-  setHistoryEntryField(
-    historyId: string,
-    field: 'fileDiff',
-    value: FileDiff[] | undefined
-  ): boolean;
-  setHistoryEntryField(
-    historyId: string,
-    field: 'modelInfo',
-    value: ModelInfo | undefined
-  ): boolean;
-  setHistoryEntryField(
-    historyId: string,
-    field: 'fileDiff' | 'modelInfo',
-    value: FileDiff[] | ModelInfo | undefined
-  ): boolean {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
-    return this.sessionData.writer.setField(historyId, field, value);
-  }
-
-  /**
-   * Set the fileDiff field on the latest assistant history entry, optionally filtered by turn ID.
-   * This is more efficient than using `updateHistory` for simple field updates.
-   *
-   * @param fileDiff - The file diff data to set
-   * @param turnId - Optional: the turn ID (history entry ID) of the assistant entry to update.
-   *                 A turn is a single message in a conversation, regardless of role.
-   *                 See specs/data-model.md for the definition of "turn".
-   * @returns true if an entry was found and updated, false otherwise
-   */
-  setLatestAssistantHistoryFileDiff(fileDiff: FileDiff[] | undefined, turnId?: string): boolean {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
-    const targetId = turnId ?? this.shallowLatestTurnId('assistant');
-    if (!targetId) return false;
-    const target = this.sessionData.writer.read(targetId);
-    if (!target || target.role !== 'assistant') return false;
-    return this.sessionData.writer.setField(targetId, 'fileDiff', fileDiff);
   }
 
   /** Return stable persisted ordering metadata for one assistant turn. */

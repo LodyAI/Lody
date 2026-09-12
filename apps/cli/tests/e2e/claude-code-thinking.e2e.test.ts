@@ -268,7 +268,7 @@ After your deep analysis, summarize your key insights in 3 bullet points and end
       console.log(`Saved summarized notifications to: ${summarizedNotificationsPath}`);
 
       // Save session history
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const summarizeHistory = (historyEntries: SessionHistoryInput[]) =>
         historyEntries.map((h) => ({
           id: h.id,

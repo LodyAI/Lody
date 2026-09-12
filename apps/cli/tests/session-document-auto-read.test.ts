@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
@@ -24,14 +25,14 @@ describe('SessionDocument auto read', () => {
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
 
-      await doc.updateHistory((history) => history.concat(createUserEntry('h1', 'hi')));
+      await updateTestHistory(doc, (history) => history.concat(createUserEntry('h1', 'hi')));
       // Auto-read is a background port command now: wait for the accepted write
       // instead of assuming a single microtask.
       await vi.waitFor(async () => {
-        expect((await doc.getHistory())[0]!.status).toBe('seen');
+        expect((await doc.sessionData.history.readAll())[0]!.status).toBe('seen');
       });
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.role).toBe('user');
       expect(history[0]!.status).toBe('seen');
@@ -48,15 +49,15 @@ describe('SessionDocument auto read', () => {
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
 
-      await doc.updateHistory((history) =>
+      await updateTestHistory(doc, (history) =>
         history.concat([createUserEntry('h1', 'first'), createUserEntry('h2', 'second')])
       );
       await vi.waitFor(async () => {
-        const current = await doc.getHistory();
+        const current = await doc.sessionData.history.readAll();
         expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
       });
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(2);
       const first = history.find((entry) => entry.id === 'h1');
       const second = history.find((entry) => entry.id === 'h2');
@@ -75,16 +76,16 @@ describe('SessionDocument auto read', () => {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
-      await doc.updateHistory(() => [
+      await updateTestHistory(doc, () => [
         createUserEntry('h1', 'first'),
         createUserEntry('h2', 'second'),
       ]);
       await vi.waitFor(async () => {
-        const current = await doc.getHistory();
+        const current = await doc.sessionData.history.readAll();
         expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
       });
 
-      const before = await doc.getHistory();
+      const before = await doc.sessionData.history.readAll();
       expect(before).toHaveLength(2);
       const beforeFirst = before.find((entry) => entry.id === 'h1');
       const beforeSecond = before.find((entry) => entry.id === 'h2');
@@ -95,7 +96,7 @@ describe('SessionDocument auto read', () => {
 
       await doc.markLatestUserHistoryAsSeenIfNeeded();
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(2);
       const first = history.find((entry) => entry.id === 'h1');
       const second = history.find((entry) => entry.id === 'h2');

@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -104,7 +105,7 @@ export class SessionEditAndResendService {
       );
     }
 
-    const history = await sessionDoc.getHistory();
+    const history = await readSessionHistory(sessionDoc.sessionData.history);
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
       return this.success(spec);
@@ -183,7 +184,7 @@ export class SessionEditAndResendService {
 
         const [freshMeta, freshHistory] = await Promise.all([
           sessionDoc.getMetaState(),
-          sessionDoc.getHistory(),
+          readSessionHistory(sessionDoc.sessionData.history),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
         if (!freshMeta || !freshEditable || freshEditable.forkTurnId !== editable.forkTurnId) {

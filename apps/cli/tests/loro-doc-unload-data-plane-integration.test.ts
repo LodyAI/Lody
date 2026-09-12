@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 /**
  * End-to-end coverage of the CLI seam that pairs a repo doc eviction with the
  * local data plane's room invalidation:
@@ -306,7 +307,7 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
       // The offline room settles immediately because no transport is attached.
       await sessionDoc.waitForRemoteSync();
       const cliEntryId = 'cli-authored-turn';
-      await sessionDoc.updateHistory((history) => [
+      await updateTestHistory(sessionDoc, (history) => [
         ...history,
         historyEntry(cliEntryId, 'assistant', 'agent reply written by the CLI'),
       ]);

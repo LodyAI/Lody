@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionHistoryInput, SessionId } from '@lody/shared';
 import {
@@ -41,11 +42,12 @@ const createMirror = (initialState: MirrorState) => {
   };
 };
 
-const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => ({
-  sessionId: 'session-1' as SessionId,
-  readHistorySnapshot: () => mirror.getState().history ?? [],
-  subscribeAll: (listener: () => void) => mirror.subscribe(() => listener()),
-});
+const createSessionDoc = (mirror: ReturnType<typeof createMirror>) =>
+  withHistoryPort({
+    sessionId: 'session-1' as SessionId,
+    readHistorySnapshot: () => mirror.getState().history ?? [],
+    subscribeAll: (listener: () => void) => mirror.subscribe(() => listener()),
+  });
 
 describe('session output helpers', () => {
   it('finds the assistant entry linked to the target user turn', () => {

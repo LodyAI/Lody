@@ -126,7 +126,9 @@ export function mintSessionSnapshot(
 }
 
 /** Internal: the issuing store context of a handle, or undefined for a forgery. */
-export function sessionSnapshotContext(snapshot: unknown): SessionSnapshotIssuerContext | undefined {
+export function sessionSnapshotContext(
+  snapshot: unknown
+): SessionSnapshotIssuerContext | undefined {
   return snapshot !== null && typeof snapshot === 'object'
     ? issuedByStore.get(snapshot)
     : undefined;
@@ -150,4 +152,12 @@ export function checkSessionSnapshot(
     throw new SessionSnapshotError('cross_store', 'The snapshot was issued by a different store.');
   if (!issuer.issued.has(snapshot))
     throw new SessionSnapshotError('released', 'The snapshot was released.');
+}
+
+export function requireSessionSnapshots(
+  data: import('./types').SessionData
+): SessionSnapshotService {
+  if (!data.snapshots)
+    throw new SessionSnapshotError('unsupported', 'This session store does not support snapshots');
+  return data.snapshots;
 }

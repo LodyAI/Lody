@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import type { SessionHistory } from '@lody/shared';
 
 type HistoryRecord = SessionHistory & Record<string, unknown>;
@@ -24,6 +25,7 @@ export function fakeSessionData(
     },
     durability: { waitDurable: async () => {} },
     commands: {
+      ...withHistoryPort({ updateHistory }).sessionData.commands,
       async openAssistantTurn(input: {
         turnId: string;
         userTurnId?: string;

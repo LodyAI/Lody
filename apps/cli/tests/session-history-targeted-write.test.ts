@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { parseSessionNotification, type SessionId } from '@lody/shared';
+import { createHistoryWriter, parseSessionNotification, type SessionId } from '@lody/shared';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { appendACPNotificationsToAssistantEntry } from '../src/lib/acp/history';
@@ -17,7 +17,7 @@ describe('targeted history writes', () => {
     } as never);
     // The production storage entry (control-plane Mirror + one shared writer).
     composeTestSessionDoc(doc, { doc: loro });
-    const writer = doc.sessionData.writer;
+    const writer = createHistoryWriter(loro);
     try {
       writer.append({
         id: 'older',
@@ -31,14 +31,12 @@ describe('targeted history writes', () => {
         timestamp: 'synthetic',
         items: [],
       });
-      await doc.updateHistory(
-        (history) => {
-          expect(history.map((entry) => entry.id)).toEqual(['target']);
-          history[0]!.items = [{ type: 'text', text: 'start' }];
-          return history;
-        },
-        { onlyEntryId: 'target' }
-      );
+      await doc.sessionData.commands.applyHistoryAction({
+        kind: 'assistant-items',
+        mode: 'replace',
+        turnId: 'target',
+        items: [{ type: 'text', text: 'start' }],
+      });
       const notify = (update: unknown) =>
         parseSessionNotification({ sessionId: 'synthetic-acp', update });
       await appendACPNotificationsToAssistantEntry(
@@ -67,9 +65,13 @@ describe('targeted history writes', () => {
       );
       expect(writer.read('new-target')?.items).toEqual([{ type: 'text', text: 'created' }]);
       const version = loro.version().toJSON();
-      await expect(doc.updateHistory(() => [], { onlyEntryId: 'target' })).rejects.toThrow(
-        'invalid_targeted_update'
-      );
+      const invalid = await doc.sessionData.commands.applyHistoryAction({
+        kind: 'assistant-items',
+        mode: 'replace',
+        turnId: 'target',
+        items: [{ type: 'text', text: 42 } as never],
+      });
+      expect(invalid).toMatchObject({ status: 'rejected', reason: { code: 'invalid_input' } });
       expect(loro.version().toJSON()).toEqual(version);
     } finally {
       doc.mirror?.dispose();

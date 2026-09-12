@@ -10,7 +10,8 @@ storage offset.
 - **One shared writer.** `createLoroSessionData` consumes the entrypoint's
   `HistoryWriter` (`mirror.historyWriter`); never construct a second writer, and never
   re-implement parsing, container diffing, rollback or stored-copy rules. Domain
-  command rules live once in `planner.ts` and are applied by both the Loro adapter and
+  command rules live once in the shared planners (`planner.ts`, `history-actions.ts`,
+  `history-import.ts`) and are applied by both the Loro adapter and
   the in-memory double.
 - **Explicit field changes.** `set(value)` or `clear`; never `undefined`-means-delete
   across a JSON/worker boundary. `items`/`id` are edited whole-entry.
@@ -68,12 +69,21 @@ storage offset.
   the caller MUST `await` it (and handle rejection) before persisting its own follow-up
   state, because the compensation may reach durable storage. `commands.applyHistoryImport`
   (imported history write + stored snapshot read + cursor creation in ONE synchronous block,
-  no await gap; the cursor setter arrives as a construction-time control-plane accessor) is
-  still a caller-supplied update/cursor callback. Both are port commands over the one shared
+  no await gap; the cursor setter arrives as a construction-time control-plane accessor) accepts only explicit initialize/refresh/resolve-conflict inputs; no business callbacks.
+  The shared import planner checks current history and cursor inside the write.
+  Missing cursor capability rejects before writing. A cursor failure after history
+  mutation is indeterminate, never a pre-write rejection. Both are port commands over the one shared
   writer; a backend without the rules (memory) rejects `unsupported` instead of faking them.
-  Business code never passes a raw writer callback or names `SessionHistoryInput`, and never
-  calls the `SessionDocument.captureStoredHistory` / `copyStoredHistory` /
-  `updateHistoryAndCursor` back-compat facades.
+  Business code never passes a raw writer callback. The old SessionDocument history
+  facades are removed; read through `history`, write through `commands`.
+  `applyHistoryAction` accepts a discriminated domain action, never a draft callback
+  or arbitrary property patch. Targeted actions read only the located turn.
+  UI steer fallback rechecks `pending_apply` at commit time; it cannot requeue an
+  already executing turn. Field deletion is explicit `clear`.
+  `readSessionHistory` preserves legacy business input-config normalization and skips
+  invalid slots without writing; `history.readAll` and snapshot reads preserve the
+  authoritative stored values. The CLI and renderer do not expose a HistoryWriter;
+  `pnpm check:session-data-boundary` enforces these access rules.
 - **The in-memory double** exists to prove async reads/writes and real consumer contracts;
   it is not a second copy of domain rules. Both backends run
   `tests/session-data-contract.ts`, and a real consumer runs against the double in

@@ -3,7 +3,7 @@ import type { SessionData } from '@lody/shared/session-data';
 import { atom } from 'jotai';
 import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
-import type { ConversationView, HistoryWriter } from '@/lib/conversation-view';
+import type { ConversationView } from '@/lib/conversation-view';
 import type {
   InferInputType,
   InferType,
@@ -80,7 +80,7 @@ import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from './workspace-co
 /**
  * Control-plane state of a session doc. `history` is deliberately absent: the
  * renderer reads turns through `SessionDocStore.history` (a `ConversationView`)
- * and writes them through `SessionDocStore.historyWriter`, so opening a long
+ * and writes them through `SessionDocStore.sessionData.commands`, so opening a long
  * conversation never materializes the whole list.
  */
 export type SessionDocState = Omit<InferType<typeof sessionDocSchema>, 'history'>;
@@ -110,12 +110,7 @@ export type SessionDocStore = {
   subscribe: (listener: (state: SessionDocState) => void) => () => void;
   /** Windowed read access to the session's turns; see `lib/conversation-view`. */
   readonly history: ConversationView;
-  /** The only write path for turns; byte-identical to the Mirror writes it replaced. */
-  readonly historyWriter: HistoryWriter;
-  /**
-   * CRDT-neutral domain seam for session history. UI business operations call
-   * its commands; `historyWriter` stays for storage-owned capabilities only.
-   */
+  /** CRDT-neutral history reads, commands and stored-copy capabilities. */
   readonly sessionData: SessionData;
   dispose: () => void;
   /**

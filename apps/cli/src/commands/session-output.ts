@@ -1,12 +1,10 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
 
 export type StructuredSessionOutputMode = 'json' | 'jsonl';
 
-type SessionDocForOutput = Pick<
-  SessionDocument,
-  'sessionId' | 'readHistorySnapshot' | 'subscribeAll'
->;
+type SessionDocForOutput = Pick<SessionDocument, 'sessionId' | 'sessionData' | 'subscribeAll'>;
 
 export type SessionTurnOutputEvent =
   | {
@@ -132,7 +130,7 @@ export async function waitForTurnCompletion(options: {
   signal?: AbortSignal;
   onEvent?: (event: SessionTurnOutputEvent) => void;
 }): Promise<CompletedAssistantTurn> {
-  if (!options.sessionDoc.readHistorySnapshot || !options.sessionDoc.subscribeAll) {
+  if (!options.sessionDoc.sessionData || !options.sessionDoc.subscribeAll) {
     throw new Error('SessionDocument not initialized');
   }
 
@@ -248,11 +246,25 @@ export async function waitForTurnCompletion(options: {
       }
     };
 
-    // Read the synchronous snapshot per change, exactly like the previous Mirror
-    // listener, so rapid intermediate states are not coalesced away.
+    // Start each consistent read at observation time, then deliver results in
+    // observation order even when the backend completes requests out of order.
+    let delivery = Promise.resolve();
     const refresh = () => {
       if (settled) return;
-      inspect(options.sessionDoc.readHistorySnapshot());
+      const snapshot = readSessionHistory(options.sessionDoc.sessionData.history);
+      // Attach immediately: a later read may reject before an earlier one finishes.
+      const captured = snapshot.then(
+        (history) => ({ history }),
+        (error) => ({ error })
+      );
+      delivery = delivery
+        .then(async () => {
+          const result = await captured;
+          if (settled) return;
+          if ('error' in result) rejectWith(result.error);
+          else inspect(result.history);
+        })
+        .catch(rejectWith);
     };
 
     const handleAbort = () => {

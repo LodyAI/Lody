@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import {
   getServerNow,
   getSessionRoomId,
@@ -121,7 +122,7 @@ export const createReviewAutomation = (
     readIntent: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = await doc.getHistory();
+        const history = await readSessionHistory(doc.sessionData.history);
         const firstUserEntry = history.find((entry) => entry.role === 'user');
         return entryText(firstUserEntry) || undefined;
       } catch {
@@ -131,7 +132,7 @@ export const createReviewAutomation = (
     readLastAssistantText: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = await doc.getHistory();
+        const history = await readSessionHistory(doc.sessionData.history);
         for (let index = history.length - 1; index >= 0; index -= 1) {
           const entry = history[index];
           if (entry?.role !== 'assistant') {

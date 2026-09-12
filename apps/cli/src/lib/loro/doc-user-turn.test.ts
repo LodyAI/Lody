@@ -86,7 +86,7 @@ describe('SessionDocument.appendUserTurn', () => {
 
     await doc.appendUserTurn(createUserTurn('turn-1'));
 
-    expect(doc.readHistorySnapshot().map((entry) => entry.id)).toEqual(['turn-1']);
+    expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['turn-1']);
     expect(upsertDocMeta).toHaveBeenCalledWith(doc.roomId, { latestUserMsgId: 'turn-1' });
   });
 
@@ -108,7 +108,7 @@ describe('SessionDocument.appendUserTurn', () => {
     await expect(
       doc.appendUserTurn({ ...createUserTurn('turn-3'), role: 'assistant' })
     ).rejects.toThrow(/requires a user entry/);
-    expect(doc.readHistorySnapshot()).toEqual([]);
+    expect(await doc.sessionData.history.readAll()).toEqual([]);
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 });

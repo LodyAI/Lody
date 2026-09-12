@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import { spawn } from 'child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1600,7 +1601,7 @@ const readSessionExecutionSnapshot = async (
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
   const [history, docState] = await Promise.all([
-    sessionDoc.getHistory(),
+    readSessionHistory(sessionDoc.sessionData.history),
     sessionDoc.getDocState(),
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(history);

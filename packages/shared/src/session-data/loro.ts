@@ -1,4 +1,21 @@
-import { isContainer, type LoroDoc, type LoroEventBatch, type LoroList, type LoroMap } from 'loro-crdt';
+import { HistoryActionRefused } from './task-proposal';
+import { applyHistoryAction, historyActionTarget } from './history-actions';
+import {
+  HistoryImportCursorSchema,
+  HistoryImportRefused,
+  planHistoryImport,
+  createImportCursor,
+  hashHistoryEntry,
+  resolveImportedTurnHashes,
+} from './history-import';
+import { isSessionHistoryPendingForDispatch } from '../schema';
+import {
+  isContainer,
+  type LoroDoc,
+  type LoroEventBatch,
+  type LoroList,
+  type LoroMap,
+} from 'loro-crdt';
 import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
@@ -10,7 +27,11 @@ import {
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
 import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
-import { createHistoryWriter, type HistoryWriter, type StoredHistorySnapshot } from '../history-writer';
+import {
+  createHistoryWriter,
+  type HistoryWriter,
+  type StoredHistorySnapshot,
+} from '../history-writer';
 import {
   mintSessionSnapshot,
   sessionSnapshotContext,
@@ -36,6 +57,7 @@ import {
   type SessionData,
   type SessionDirectoryRow,
   type SessionEditableTailResult,
+  type SessionImportResult,
   type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
@@ -242,7 +264,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         state: 'ready',
         turnId: scalars.id,
         scalars,
-        ...(scalars.role === 'user' ? { inputConfig: pickDirectoryInputConfig(record.inputConfig) } : {}),
+        ...(scalars.role === 'user'
+          ? { inputConfig: pickDirectoryInputConfig(record.inputConfig) }
+          : {}),
         ...(itemCount !== undefined ? { itemCount } : {}),
         ...(planCount !== undefined ? { planCount } : {}),
       };
@@ -346,7 +370,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     async readAll() {
       // One detached synchronous read of the stored list: a single consistent
       // snapshot, never a stitched count + paginated read.
-      return writer.readStored() as unknown as SessionTurn[];
+      return writer.readStored();
     },
     observe(listener) {
       // Subscribe first, then snapshot in the same synchronous block: a change
@@ -377,6 +401,36 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   };
 
   const commands: SessionHistoryCommands = {
+    async applyHistoryAction(action) {
+      let matched = action.kind === 'user-status' && action.requeueUndelivered === true;
+      let proposal: import('./task-proposal').TaskProposalPublishResult | undefined;
+      const apply = (entries: SessionHistoryInput[]) => {
+        const result = applyHistoryAction(entries, action);
+        matched = result.matched;
+        proposal = result.proposal;
+        return result.turns;
+      };
+      try {
+        if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
+          const current = writer.readStored();
+          const preview = applyHistoryAction(current, action);
+          if (!preview.matched)
+            return {
+              ...(await accepted('history-action', [])),
+              matched: false,
+              proposal: preview.proposal,
+            };
+        }
+        const target = historyActionTarget(action);
+        if (target !== undefined) writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
+        else writer.update(apply);
+      } catch (error) {
+        if (error instanceof HistoryActionRefused) return rejected('conflict');
+        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
+        return indeterminate(error);
+      }
+      return { ...(await accepted('history-action', [])), matched, proposal };
+    },
     async appendTurn(turn) {
       try {
         parseHistoryWrite(HistoryEntryWriteSchema, turn);
@@ -634,21 +688,52 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         ...(previousUserTurnId !== undefined ? { previousUserTurnId } : {}),
       };
     },
-    async applyHistoryImport(input): Promise<SessionCommandResult> {
-      const cursor = options.historyImportCursor?.read();
+    async applyHistoryImport(input): Promise<SessionImportResult> {
+      if (!options.historyImportCursor)
+        return { status: 'rejected', reason: { code: 'unsupported' } };
+      let appended = 0;
+      let writing = false;
+      let historyWritten = false;
       try {
-        writer.update((turns) => input.update(turns, cursor as never));
+        const cursor = HistoryImportCursorSchema.optional().parse(
+          options.historyImportCursor.read()
+        );
+        const importedHashes =
+          input.mode === 'refresh'
+            ? resolveImportedTurnHashes(input.externalHistory, cursor?.importedTurnHashes)
+            : [];
+        const projectedHashes = [
+          ...importedHashes,
+          ...input.replay.history
+            .slice(importedHashes.length)
+            .map((entry) => hashHistoryEntry(parseHistoryWrite(HistoryEntryWriteSchema, entry))),
+        ];
+        writer.update((turns) => {
+          const plan = planHistoryImport(
+            input,
+            turns,
+            cursor,
+            projectedHashes,
+            turns.some(isSessionHistoryPendingForDispatch)
+          );
+          appended = plan.appended;
+          // Writer preflights authored changes before its first storage mutation.
+          writing = true;
+          return [...plan.turns] as SessionHistoryInput[];
+        });
+        historyWritten = true;
+        const nextCursor = createImportCursor(input.replay.turnHashes, writer.readStored());
+        options.historyImportCursor.write(nextCursor);
+        return { status: 'accepted', receipt: issueReceipt('import-history', []), appended };
       } catch (error) {
-        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
-        throw error;
+        if (historyWritten) return indeterminate(error);
+        if (error instanceof HistoryImportRefused)
+          return { status: 'rejected', reason: { code: error.code } };
+        if (!historyWritten && error instanceof HistoryWriteError)
+          return { status: 'rejected', reason: { code: 'invalid_input', issues: issuesOf(error) } };
+        if (!writing) return { status: 'rejected', reason: { code: 'invalid_input' } };
+        return { status: 'indeterminate', cause: error };
       }
-      // Same synchronous block as the write: capture the stored baseline and
-      // bind the new cursor with no await gap, so a peer edit can neither fall
-      // between them nor be blessed into the baseline.
-      const stored = writer.readStored();
-      const nextCursor = input.createCursor(stored);
-      options.historyImportCursor?.write(nextCursor);
-      return { status: 'accepted', receipt: issueReceipt('import-history', []) };
     },
   };
 

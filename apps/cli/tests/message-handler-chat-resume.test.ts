@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { Logger } from '../src/utils/logger';
@@ -39,7 +40,7 @@ describe('MessageHandler chat resume', () => {
     };
 
     let history: unknown[] = [];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -51,10 +52,11 @@ describe('MessageHandler chat resume', () => {
         history = updater(history);
       }),
       waitUntilSynced: vi.fn(async () => {}),
-    };
+    });
     (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
       sessionDoc.updateHistory as never
     );
+    withHistoryPort(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),

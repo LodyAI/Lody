@@ -1,4 +1,5 @@
-import type { ModelInfo } from '../ai';
+import type { MessageContent, ModelInfo, SessionTurnInputConfig } from '../ai';
+import type { PlanEntry } from '@agentclientprotocol/sdk';
 
 // # Session domain DTOs
 //
@@ -137,3 +138,32 @@ export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
   'configOptionValues',
   'taskToolsEnabled',
 ] as const;
+
+/** Business history shape, independent of the storage schema and container ids.
+ * Known content is interpreted by consumers; stored future variants are retained,
+ * so consumers must continue guarding discriminators before reading their payload.
+ */
+export type SessionEntry = Omit<
+  { -readonly [K in keyof SessionTurn]: SessionTurn[K] },
+  'items' | 'plan' | 'inputConfig' | 'fileDiff'
+> & {
+  items?: Array<MessageContent & { text?: string }>;
+  plan?: Array<Pick<PlanEntry, 'status' | 'content' | 'priority'>>;
+  inputConfig?: SessionTurnInputConfig;
+  fileDiff: SessionFileDiff[];
+};
+
+/** Opaque Code Collab checkpoint, unrelated to the session storage backend. */
+export type SessionFileDiff = {
+  filePath: string;
+  add: number;
+  del: number;
+  cc?: {
+    v: 1;
+    fileId: string;
+    opId?: `${string}:${number}`;
+    baseOpId?: `${string}:${number}`;
+    base?: 'missing';
+    deleted?: true;
+  };
+};

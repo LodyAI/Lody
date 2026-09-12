@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { SessionDocument } from '../lib/loro/doc';
@@ -102,7 +103,7 @@ function createForkHarness(
     for (const [key, value] of Object.entries(entry)) if (value !== undefined) map.set(key, value);
   }
   sourceLoro.commit();
-  const sourceDoc = {
+  const sourceDoc = withHistoryPort({
     getMetaState: vi.fn(async () => sourceMeta),
     getHistory: vi.fn(async () => options.sourceHistory ?? sourceHistory),
     // The storage-owned snapshot service over the source doc: capture happens
@@ -112,7 +113,7 @@ function createForkHarness(
       doc: sourceLoro,
       durability: 'unavailable',
     }),
-  };
+  });
   let forkOperation: unknown = options.forkOperation;
   const targetCopyFrom = vi.fn(
     (_snapshot: SessionSnapshot, _history: readonly SessionTurn[]) =>
@@ -121,7 +122,7 @@ function createForkHarness(
         receipt: { sessionId: targetSessionId, kind: 'copy', turnIds: [] },
       }) as const
   );
-  const targetDoc = {
+  const targetDoc = withHistoryPort({
     sessionData: { snapshots: { copyFrom: targetCopyFrom } },
     waitUntilSynced: vi.fn(async () => false),
     getMetaState: vi.fn(async () => options.targetMeta),
@@ -130,7 +131,7 @@ function createForkHarness(
     setForkOperation: vi.fn((operation) => {
       forkOperation = operation;
     }),
-  };
+  });
   const persistPendingChanges = vi.fn(async (reason: string) => {
     if (reason === failPersistReason) {
       throw new Error(`persist failed: ${reason}`);

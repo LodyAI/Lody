@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SessionStatusFactory, type SessionId, type WorkspaceId } from '@lody/shared';
@@ -55,7 +56,7 @@ const withSessionData = <T extends object>(doc: T): T => {
       durability: { waitDurable: async () => {} },
     },
   });
-  return doc;
+  return withHistoryPort(doc);
 };
 
 const createNotificationPort = (
@@ -100,7 +101,7 @@ describe('MessageHandler permission notifications', () => {
         fileDiff: [],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -123,7 +124,7 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
     withSessionData(sessionDoc);
 
     const workspaceDocument = {
@@ -292,7 +293,7 @@ describe('MessageHandler permission notifications', () => {
         fileDiff: [],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -315,7 +316,7 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
     withSessionData(sessionDoc);
 
     const workspaceDocument = {
@@ -496,7 +497,7 @@ describe('MessageHandler permission notifications', () => {
       },
     ];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       currentStatus: SessionStatusFactory.requestPermission(),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
@@ -525,7 +526,7 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
     withSessionData(sessionDoc);
 
     const workspaceDocument = {
@@ -639,7 +640,7 @@ describe('MessageHandler permission notifications', () => {
       },
     ];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -656,7 +657,7 @@ describe('MessageHandler permission notifications', () => {
         subscribe: vi.fn(() => () => {}),
         getState: () => ({ history }),
       },
-    };
+    });
     withSessionData(sessionDoc);
 
     const workspaceDocument = {

@@ -6,6 +6,8 @@ import { createHistoryWriter } from '../src/history-writer';
 import {
   createLoroSessionData,
   pageVisibleTranscript,
+  hashHistoryEntry,
+  hashText,
   type SessionTurn,
 } from '../src/session-data';
 import {
@@ -15,7 +17,14 @@ import {
 } from './session-data-contract';
 
 const makeHarness = (doc = new Loro()): SessionDataHarness => {
+  let cursor: unknown;
   const data = createLoroSessionData({
+    historyImportCursor: {
+      read: () => cursor,
+      write: (value) => {
+        cursor = value;
+      },
+    },
     sessionId: contractSessionId,
     doc,
     durable: async () => {},
@@ -247,52 +256,37 @@ describe('loro session data adapter', () => {
 
   it('binds an imported history write, its stored baseline and the cursor with no await gap', async () => {
     const doc = new Loro();
-    let cursorState: unknown = { importedTurnHashes: ['old'] };
+    let cursorState: unknown;
     const data = createLoroSessionData({
       sessionId: contractSessionId,
       doc,
       durability: 'unavailable',
       historyImportCursor: {
         read: () => cursorState,
-        write: (cursor) => {
-          cursorState = cursor;
+        write: (value) => {
+          cursorState = value;
         },
       },
     });
-    await data.commands.appendTurn({
-      id: 'a',
-      role: 'user',
-      timestamp: '2026-01-01T00:00:00.000Z',
-      items: [{ type: 'text', text: 'x' }],
-      fileDiff: [],
-    });
-    const seenCursors: unknown[] = [];
+    const history: SessionTurn[] = [
+      { id: 'a', role: 'user', timestamp: 'synthetic', items: [{ type: 'text', text: 'x' }] },
+    ];
+    const hashes = history.map(hashHistoryEntry);
     const result = await data.commands.applyHistoryImport({
-      update: (history, cursor) => {
-        // The callback sees the cursor read at the start of the same block.
-        seenCursors.push(cursor);
-        return [
-          ...history,
-          {
-            id: 'b',
-            role: 'assistant',
-            timestamp: '2026-01-01T00:00:01.000Z',
-            items: [{ type: 'text', text: 'y' }],
-            fileDiff: [],
-          },
-        ];
+      mode: 'initialize',
+      replay: {
+        history,
+        turnHashes: hashes,
+        replayDigest: hashText(hashes.join('\n')),
+        droppedNotifications: 0,
       },
-      createCursor: (stored) => ({
-        importedTurnHashes: [
-          ...((cursorState as { importedTurnHashes: string[] }).importedTurnHashes ?? []),
-          `hash-${stored.length}`,
-        ],
-      }),
     });
-    expect(result.status).toBe('accepted');
-    expect(seenCursors).toEqual([{ importedTurnHashes: ['old'] }]);
-    expect(cursorState).toEqual({ importedTurnHashes: ['old', 'hash-2'] });
-    expect((await data.history.count())).toBe(2);
+    expect(result).toMatchObject({ status: 'accepted', appended: 1 });
+    const cursor = cursorState as { importedTurnHashes: string[]; storedHistoryBaseline: string };
+    expect(cursor.importedTurnHashes).toEqual(hashes);
+    expect(JSON.parse(cursor.storedHistoryBaseline).turnHashes).toEqual(
+      createHistoryWriter(doc).readStored().map(hashHistoryEntry)
+    );
   });
 
   it('reports an accepted write whose post-accept side effect failed', async () => {

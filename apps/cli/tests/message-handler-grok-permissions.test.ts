@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import {
@@ -74,7 +75,7 @@ function fixture(initialMode = 'ask') {
         client: AgentClient
       ) => Promise<RequestPermissionResponse>)
     | undefined;
-  const doc = {
+  const doc = withHistoryPort({
     updateHistory: vi.fn(async (update: (prev: unknown[]) => unknown[]) => {
       history = update(history);
       for (const listener of historyListeners) listener();
@@ -98,8 +99,9 @@ function fixture(initialMode = 'ask') {
       },
       getState: () => ({ history }),
     },
-  };
+  });
   (doc as { sessionData?: unknown }).sessionData = fakeSessionData(doc.updateHistory as never);
+  withHistoryPort(doc);
   const workspace = {
     sessions: new Map(),
     repo: {

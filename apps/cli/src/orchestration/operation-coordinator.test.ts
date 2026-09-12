@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -119,55 +120,56 @@ const makeHarness = async (options?: {
   const subscribers = new Map<SessionId, Set<() => void>>();
   let historyUpdateAttempt = 0;
   let remainingProgressHistoryFailures = options?.progressHistoryFailures ?? 0;
-  const sessionDoc = (sessionId: SessionId) => ({
-    mirror: {
-      subscribe: (callback: () => void) => {
-        const set = subscribers.get(sessionId) ?? new Set();
-        set.add(callback);
-        subscribers.set(sessionId, set);
-        return () => set.delete(callback);
+  const sessionDoc = (sessionId: SessionId) =>
+    withHistoryPort({
+      mirror: {
+        subscribe: (callback: () => void) => {
+          const set = subscribers.get(sessionId) ?? new Set();
+          set.add(callback);
+          subscribers.set(sessionId, set);
+          return () => set.delete(callback);
+        },
       },
-    },
-    // `subscribeSessionChanges` needs the session-data surface; the fake drives
-    // change notification through its own `mirror.subscribe` set above.
-    sessionData: {
-      history: {
-        count: async () => 0,
-        readAt: async () => ({ state: 'missing' as const }),
-        readTurn: async () => ({ state: 'missing' as const }),
-        readRange: async () => [],
-        readDirectory: async () => [],
-        observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+      // `subscribeSessionChanges` needs the session-data surface; the fake drives
+      // change notification through its own `mirror.subscribe` set above.
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
       },
-      commands: {},
-      durability: { waitDurable: async () => {} },
-    },
-    getHistory: async () => histories.get(sessionId) ?? [],
-    updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
-      const current = histories.get(sessionId) ?? [];
-      const next = update(current);
-      if (sessionId === requesterSessionId) {
-        await options?.beforeRequesterHistoryWrite?.();
-        historyUpdateAttempt += 1;
-        if (historyUpdateAttempt <= (options?.historyFailuresBeforeSuccess ?? 0)) {
-          throw new Error('transient history write failure');
+      getHistory: async () => histories.get(sessionId) ?? [],
+      updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        const current = histories.get(sessionId) ?? [];
+        const next = update(current);
+        if (sessionId === requesterSessionId) {
+          await options?.beforeRequesterHistoryWrite?.();
+          historyUpdateAttempt += 1;
+          if (historyUpdateAttempt <= (options?.historyFailuresBeforeSuccess ?? 0)) {
+            throw new Error('transient history write failure');
+          }
         }
-      }
-      const progressItems = (history: SessionHistoryInput[]) =>
-        history.flatMap(
-          (entry) => entry.items?.filter((item) => item.type === 'operation_progress') ?? []
-        );
-      if (
-        sessionId === requesterSessionId &&
-        JSON.stringify(progressItems(next)) !== JSON.stringify(progressItems(current)) &&
-        (options?.failProgressHistoryWrites === true || remainingProgressHistoryFailures > 0)
-      ) {
-        remainingProgressHistoryFailures = Math.max(0, remainingProgressHistoryFailures - 1);
-        throw new Error('progress history unavailable');
-      }
-      histories.set(sessionId, next);
-    },
-  });
+        const progressItems = (history: SessionHistoryInput[]) =>
+          history.flatMap(
+            (entry) => entry.items?.filter((item) => item.type === 'operation_progress') ?? []
+          );
+        if (
+          sessionId === requesterSessionId &&
+          JSON.stringify(progressItems(next)) !== JSON.stringify(progressItems(current)) &&
+          (options?.failProgressHistoryWrites === true || remainingProgressHistoryFailures > 0)
+        ) {
+          remainingProgressHistoryFailures = Math.max(0, remainingProgressHistoryFailures - 1);
+          throw new Error('progress history unavailable');
+        }
+        histories.set(sessionId, next);
+      },
+    });
   const flockRows = options?.machineAgentConfig
     ? [
         {

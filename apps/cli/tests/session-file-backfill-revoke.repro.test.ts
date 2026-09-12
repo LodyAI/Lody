@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 /**
  * Regression tests for review finding F1 (2026-07-04, S5/D10 撤权不上传).
  *
@@ -111,12 +112,12 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
       },
     ] as unknown as SessionHistoryInput[];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getHistory: async () => history,
       updateHistory: async (updater: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
-    };
+    });
 
     const sessionManager = {
       getSession: vi.fn(() => undefined),
@@ -168,7 +169,7 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
     const inFlight = (handler as unknown as { sessionFileBackfillInFlight: Set<string> })
       .sessionFileBackfillInFlight;
 
-    return {
+    return withHistoryPort({
       handler,
       uploadStarted,
       uploadGate,
@@ -176,7 +177,7 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
       getHistory: () => history,
       getUploadCalls: () => uploadCalls,
       getFirstUploadSignal: () => firstUploadSignal,
-    };
+    });
   };
 
   const firstItem = (history: SessionHistoryInput[]) =>
@@ -204,7 +205,7 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
 
       const blobArgs = { workspaceId, sessionId, fileId };
       // 1. The persisted block must still be pending-local, not adopted as r2.
-      expect(firstItem(harness.getHistory())).toMatchObject({
+      expect(firstItem(harness.sessionData.history.readAll())).toMatchObject({
         type: 'file',
         transport: 'local',
         fileId,
@@ -234,13 +235,16 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
       // The pending blob must backfill under the new authorization generation.
       await handler.enableRemoteBackfillAndScan();
       await vi.waitFor(
-        () => expect(firstItem(harness.getHistory())).toMatchObject({ transport: 'r2' }),
+        () =>
+          expect(firstItem(harness.sessionData.history.readAll())).toMatchObject({
+            transport: 'r2',
+          }),
         { timeout: 10_000 }
       );
 
       expect(harness.getUploadCalls()).toBeGreaterThanOrEqual(2);
       // The adopted key comes from the sanctioned (post-re-enable) upload.
-      expect(firstItem(harness.getHistory())).toMatchObject({
+      expect(firstItem(harness.sessionData.history.readAll())).toMatchObject({
         type: 'file',
         transport: 'r2',
         fileId: `file-relay-${harness.getUploadCalls()}`,

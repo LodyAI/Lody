@@ -1,11 +1,13 @@
+import type { HistoryAction } from './history-actions';
 import type { MessageContent, ModelInfo } from '../ai';
 import type { AcpSessionNotification } from '../acp/schema';
 import type { SessionGoalMessage } from '../goal';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
-import type { SessionHistoryInput } from '../schema';
+import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
 import type {
+  SessionEntry,
   SessionDirectoryRow,
   SessionTurn,
   SessionTurnRead,
@@ -30,6 +32,7 @@ import type {
 // rejection. Only the first is safe to retry blindly.
 
 export type {
+  SessionEntry,
   SessionDirectoryRow,
   SessionDirectoryScalars,
   SessionTurn,
@@ -88,6 +91,7 @@ export interface SessionWriteReceipt {
     | 'mark-seen'
     | 'respond-permission'
     | 'copy'
+    | 'history-action'
     | 'replace-editable-tail'
     | 'import-history'
     | 'apply-agent-batch';
@@ -278,12 +282,13 @@ export interface SessionHistoryReader {
    * source. It is a read capability, not copy provenance: a stored copy still
    * goes through the opaque snapshot handle.
    */
-  readAll(): Promise<readonly SessionTurn[]>;
+  readAll(): Promise<SessionEntry[]>;
   /** Live observation with a gap-free initial directory. */
   observe(listener: SessionDataChangeListener): SessionObservation;
 }
 
 export interface SessionHistoryCommands {
+  applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
   /** Append a new turn. Rejects invalid input before touching storage. */
   appendTurn(turn: SessionTurn): Promise<SessionCommandResult>;
   /** Replace an existing turn by business id. */
@@ -349,22 +354,9 @@ export interface SessionHistoryCommands {
    * `unsupported`.
    */
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
-  /**
-   * One composed import operation: the guarded history write, the stored
-   * snapshot read and the cursor creation happen in one synchronous block with
-   * no await gap, so a peer edit can neither fall between them nor be blessed
-   * into the baseline. The business callback returns only its decision and the
-   * selected history; the cursor write goes through a control-plane setter the
-   * adapter received at construction. Backends without import support reject
-   * with `unsupported` instead of faking the binding.
-   */
-  applyHistoryImport<TCursor>(input: {
-    readonly update: (
-      history: SessionHistoryInput[],
-      cursor: TCursor | undefined
-    ) => SessionHistoryInput[];
-    readonly createCursor: (stored: SessionHistoryInput[]) => TCursor;
-  }): Promise<SessionCommandResult>;
+  /** Import inputs are data. The store rechecks history/cursor conflicts at commit
+   * time and binds the stored baseline and cursor to that same write. */
+  applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
 }
 
 /**
@@ -405,3 +397,19 @@ export interface SessionData {
    */
   readonly snapshots?: SessionSnapshotService;
 }
+
+export type SessionImportResult =
+  | (Extract<SessionCommandResult, { status: 'accepted' }> & { readonly appended: number })
+  | {
+      readonly status: 'rejected';
+      readonly reason: {
+        readonly code: string;
+        readonly issues?: readonly { path: readonly PropertyKey[]; code: string }[];
+      };
+    }
+  | Extract<SessionCommandResult, { status: 'indeterminate' }>;
+
+export type SessionActionResult = SessionCommandResult & {
+  readonly matched?: boolean;
+  readonly proposal?: import('./task-proposal').TaskProposalPublishResult;
+};

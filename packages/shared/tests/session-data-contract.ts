@@ -647,8 +647,13 @@ export function runSessionDataContract(
       expect(replaced.status).toBe('rejected');
       if (replaced.status === 'rejected') expect(replaced.reason.code).toBe('unsupported');
       const imported = await data.commands.applyHistoryImport({
-        update: () => [userTurn('b')],
-        createCursor: () => ({ importedTurnHashes: ['hash-b'] }),
+        mode: 'initialize',
+        replay: {
+          history: [userTurn('b')],
+          turnHashes: ['hash-b'],
+          replayDigest: 'digest',
+          droppedNotifications: 0,
+        },
       });
       expect(imported.status).toBe('rejected');
       if (imported.status === 'rejected') expect(imported.reason.code).toBe('unsupported');
@@ -824,20 +829,17 @@ export function runSessionDataContract(
       const { data } = harness;
       if (!data.snapshots?.capabilities.copy) return; // import ships with stored copy
 
-      await data.commands.appendTurn(userTurn('a'));
-      let cursorInput: unknown;
       const imported = await data.commands.applyHistoryImport({
-        update: (history) => [...history, userTurn('b')],
-        createCursor: (stored) => {
-          // The stored baseline the cursor derives from is the history the
-          // write produced, read in the same synchronous block.
-          cursorInput = stored.map((turn) => turn.id);
-          return { importedTurnHashes: ['hash-b'] };
+        mode: 'initialize',
+        replay: {
+          history: [userTurn('a'), userTurn('b')],
+          turnHashes: ['hash-a', 'hash-b'],
+          replayDigest: 'digest',
+          droppedNotifications: 0,
         },
       });
       expect(imported.status).toBe('accepted');
-      if (imported.status === 'accepted') expect(imported.receipt.kind).toBe('import-history');
-      expect(cursorInput).toEqual(['a', 'b']);
+      if (imported.status === 'accepted') expect(imported.appended).toBe(2);
       expect(harness.readStored().map((turn) => turn.id)).toEqual(['a', 'b']);
     });
   });

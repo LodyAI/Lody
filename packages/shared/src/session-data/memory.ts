@@ -1,7 +1,13 @@
+import { HistoryActionRefused } from './task-proposal';
+import { applyHistoryAction, historyActionTarget } from './history-actions';
 import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistoryInput } from '../schema';
-import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
+import {
+  HistoryEntryWriteSchema,
+  HistoryWriteError,
+  parseHistoryWrite,
+} from '../history-write-schema';
 import { prepareReplacement } from '../history-writer';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
@@ -205,7 +211,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   const mutating = async (
     kind: SessionWriteReceipt['kind'],
     turnIds: readonly string[],
-    mutation: (plan: MemoryCommitPlan) => boolean
+    mutation: (plan: MemoryCommitPlan) => boolean | 'unchanged'
   ): Promise<SessionCommandResult> => {
     const plan: MemoryCommitPlan = { kind, turnIds };
     await options.beforeCommit?.(plan);
@@ -217,11 +223,13 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     const structural = turns.length !== beforeLength;
     // A structural mutation reports the tail from the first touched row; a
     // scalar write reports only its own turn.
-    if (from >= 0)
-      notify({ from, to: structural ? turns.length : from + 1, structural });
-    else notify();
     const receipt = issueReceipt(kind, plan.turnIds.slice());
     try {
+      if (applied !== 'unchanged') {
+        if (from >= 0) notify({ from, to: structural ? turns.length : from + 1, structural });
+        else if (structural) notify({ from: 0, to: turns.length, structural: true });
+        else notify();
+      }
       await options.afterCommit?.(plan);
     } catch (postAcceptError) {
       return { status: 'accepted', receipt, postAcceptError };
@@ -261,7 +269,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     },
     async readAll() {
       // Detached clone of the whole store in one read.
-      return turns.map((turn) => clone(turn));
+      return turns.map((turn) => clone(turn)) as SessionHistoryInput[];
     },
     observe(listener) {
       // The listener is registered before the snapshot is taken in the same
@@ -281,6 +289,38 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   };
 
   const commands: SessionHistoryCommands = {
+    async applyHistoryAction(action) {
+      let matched = false;
+      let proposal: import('./task-proposal').TaskProposalPublishResult | undefined;
+      try {
+        const result = await mutating(
+          'history-action',
+          historyActionTarget(action) ? [historyActionTarget(action)!] : [],
+          () => {
+            const previous = clone(turns) as SessionHistoryInput[];
+            const plan = applyHistoryAction(previous, action);
+            matched = plan.matched;
+            proposal = plan.proposal;
+            if (!matched) return 'unchanged';
+            const prepared = plan.turns.map((next) => {
+              const stored = turns.find((t) => t.id === next.id);
+              return stored
+                ? (prepareReplacement(stored, next) as SessionTurn)
+                : parseHistoryWrite(HistoryEntryWriteSchema, next);
+            });
+            turns = prepared;
+            matched = plan.matched;
+            proposal = plan.proposal;
+            return true;
+          }
+        );
+        return { ...result, matched, proposal };
+      } catch (error) {
+        if (error instanceof HistoryActionRefused) return rejected('conflict');
+        if (error instanceof HistoryWriteError) return toRejection(error);
+        return { status: 'indeterminate', cause: error };
+      }
+    },
     async appendTurn(turn) {
       try {
         parseHistoryWrite(HistoryEntryWriteSchema, turn);
@@ -509,7 +549,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       return { status: 'rejected', reason: { code: 'unsupported' } };
     },
     async applyHistoryImport() {
-      return rejected('unsupported');
+      return { status: 'rejected', reason: { code: 'unsupported' } };
     },
   };
 

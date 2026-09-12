@@ -27,6 +27,7 @@ export {
   type SessionSnapshotService,
 } from './snapshot';
 export type {
+  SessionEntry,
   SessionDirectoryRow,
   SessionDirectoryScalars,
   SessionTurn,
@@ -68,3 +69,20 @@ export {
   type LoroSessionDataOptions,
   type LoroSessionSnapshotService,
 } from './loro';
+
+export * from './history-import';
+
+export type { HistoryAction } from './history-actions';
+export { requireSessionAccepted } from './result';
+
+export {
+  getOperationProgressTurnId,
+  getOperationProgressTargetKey,
+  buildOperationProgressContent,
+  mergeOperationProgressContent,
+  type OperationProgressStatusByTarget,
+} from './operation-progress';
+
+export { readLatestTurn, readSessionHistory } from './read';
+
+export { requireSessionSnapshots } from './snapshot';

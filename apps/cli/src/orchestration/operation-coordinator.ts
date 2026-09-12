@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import { randomUUID } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -458,7 +460,11 @@ export class LodyOperationCoordinator {
       await upsertOperationProgressHistory(sessionDoc, operation, this.now, statusByTarget);
       if (
         operation.state === 'finished' &&
-        this.progressIsSettled(operation, await sessionDoc.getHistory(), statusByTarget)
+        this.progressIsSettled(
+          operation,
+          await readSessionHistory(sessionDoc.sessionData.history),
+          statusByTarget
+        )
       ) {
         // The SQLite acknowledgement must never outrun local Loro durability.
         await this.options.workspaceDocument.repo.flush();
@@ -530,7 +536,7 @@ export class LodyOperationCoordinator {
         target.sessionId
       );
       this.subscribeTarget(target.sessionId, sessionDoc);
-      const history = await sessionDoc.getHistory();
+      const history = await readSessionHistory(sessionDoc.sessionData.history);
       const userTurn = history.find(
         (entry) => entry.id === target.userTurnId && entry.role === 'user'
       );
@@ -691,7 +697,7 @@ export class LodyOperationCoordinator {
       item.target.sessionId
     );
     this.subscribeTarget(item.target.sessionId, sessionDoc);
-    const history = await sessionDoc.getHistory();
+    const history = await readSessionHistory(sessionDoc.sessionData.history);
     const userTurn = history.find(
       (entry) => entry.id === item.target.userTurnId && entry.role === 'user'
     );
@@ -744,7 +750,7 @@ export class LodyOperationCoordinator {
       return false;
     }
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = await sessionDoc.getHistory();
+    const history = await readSessionHistory(sessionDoc.sessionData.history);
     const userTurn = history.find((entry) => entry.id === userTurnId && entry.role === 'user');
     if (!userTurn) return false;
     const meta = metaRecord.meta as SessionMeta;
@@ -761,11 +767,9 @@ export class LodyOperationCoordinator {
 
   private subscribeTarget(sessionId: SessionId, sessionDoc: SessionDocument): void {
     if (!this.started || this.targetSubscriptions.has(sessionId)) return;
-    const unsubscribe = sessionDoc.mirror
-      ? subscribeSessionChanges(sessionDoc, () => {
-          void this.wake('target-history');
-        })
-      : () => {};
+    const unsubscribe = subscribeSessionChanges(sessionDoc, () => {
+      void this.wake('target-history');
+    });
     this.targetSubscriptions.set(sessionId, { unsubscribe });
   }
 
@@ -1546,82 +1550,12 @@ export class LodyOperationCoordinator {
         },
       };
     };
-    await sessionDoc.updateHistory((history) => {
-      const progressMessageId = this.findProgressMessageId(history, operation);
-      const existing = history.find((entry) => entry.id === delivery.systemTurnId);
-      if (!existing) return [...history, buildTurn(progressMessageId)];
-      if (existing.role !== 'system') return history;
-      return history.map((entry) =>
-        entry.id !== delivery.systemTurnId
-          ? entry
-          : {
-              ...entry,
-              items: entry.items?.map((existingItem) => {
-                if (
-                  existingItem.type !== 'operation_completion' ||
-                  existingItem.deliveryId !== delivery.deliveryId
-                ) {
-                  return existingItem;
-                }
-                const linkedItem = progressMessageId
-                  ? { ...existingItem, progressMessageId }
-                  : existingItem;
-                if (continuationFailure) {
-                  return {
-                    ...linkedItem,
-                    continuation: {
-                      status: continuationFailure.status ?? ('not_started' as const),
-                      reason: {
-                        code: continuationFailure.code,
-                        message: continuationFailure.message,
-                      },
-                    },
-                  };
-                }
-                const { continuation: _continuation, ...withoutContinuation } = linkedItem;
-                return withoutContinuation;
-              }),
-            }
-      );
-    });
-  }
-
-  private findProgressMessageId(
-    history: SessionHistoryInput[],
-    operation: StoredLodyOperation
-  ): string | undefined {
-    if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many') {
-      return undefined;
-    }
-    const progressMessageId = getOperationProgressTurnId(
-      operation.requesterSessionId,
-      operation.operationId
+    requireSessionAccepted(
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'operation-completion',
+        operation,
+        turn: buildTurn(undefined),
+      })
     );
-    const progress = history
-      .find((entry) => entry.id === progressMessageId && entry.role === 'system')
-      ?.items?.find(
-        (item) => item.type === 'operation_progress' && item.operationId === operation.operationId
-      );
-    if (progress?.type !== 'operation_progress') return undefined;
-    const covered = new Map(
-      progress.items.map((item) => [getOperationProgressTargetKey(item.target), item.status])
-    );
-    // A partial row is not permission to hide every successful-target fallback.
-    // Include the completion payload as well as stored items for recovery snapshots.
-    const completion = operation.completion;
-    const results =
-      completion?.type === 'result'
-        ? completion.value.items
-        : completion?.type === 'cancelled'
-          ? (completion.partial?.items ?? [])
-          : [];
-    const complete = [...operation.items, ...results].every((item) =>
-      item.status === 'succeeded'
-        ? covered.get(getOperationProgressTargetKey(item.target)) === 'succeeded'
-        : item.status === 'active' && item.inputDurable
-          ? covered.has(getOperationProgressTargetKey(item.target))
-          : true
-    );
-    return complete ? progressMessageId : undefined;
   }
 }

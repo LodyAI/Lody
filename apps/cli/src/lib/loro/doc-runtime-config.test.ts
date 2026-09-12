@@ -1,3 +1,4 @@
+import { updateTestHistory } from '../../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
@@ -78,7 +79,7 @@ describe('SessionDocument ACP runtime config', () => {
       })
     ).toBe(true);
 
-    await doc.updateHistory((history) => [
+    await updateTestHistory(doc, (history) => [
       ...history,
       historyEntry('assistant-1', 'assistant'),
       historyEntry('turn-2', 'user'),

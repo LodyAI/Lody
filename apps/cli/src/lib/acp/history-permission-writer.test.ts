@@ -1,3 +1,4 @@
+import { updateTestHistory } from '../../../tests/history-port-fixture';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import { type SessionControlPlaneMirror, type SessionId } from '@lody/shared';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
@@ -114,7 +115,7 @@ describe.each(['unknown', 'malformed'] as const)(
         permissionRequest: { requestId: 'request', options: request.options },
       });
       // Exercise the production read boundary, not a raw-mirror getHistory stub.
-      expect((await doc.getHistory())[0]?.items[0]).toMatchObject({
+      expect((await doc.sessionData.history.readAll())[0]?.items[0]).toMatchObject({
         type: 'tool_call',
         content: before.content,
         permissionRequest: { requestId: 'request' },
@@ -141,7 +142,7 @@ describe.each(['unknown', 'malformed'] as const)(
 
         await expect(
           ensurePermissionRequestOnToolCall(doc, 'invalid', invalidRequest)
-        ).rejects.toThrow('Invalid history write');
+        ).rejects.toThrow('Session write rejected: invalid_input');
         expect(currentClient.version().toJSON()).toEqual(version);
         expect(currentClient.toJSON()).toEqual(json);
         expect(readStored()).toEqual(before);
@@ -159,7 +160,7 @@ describe.each(['unknown', 'malformed'] as const)(
       const json = currentClient.toJSON();
 
       await expect(
-        doc.updateHistory((history) => {
+        updateTestHistory(doc, (history) => {
           const tool = history[0]?.items[0];
           if (tool?.type !== 'tool_call') throw new Error('Missing synthetic tool');
           tool.title = 'A valid metadata update';

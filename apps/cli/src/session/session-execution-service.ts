@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { requireSessionAccepted, readLatestTurn } from '@lody/shared/session-data';
 import {
   type ACPSessionId,
   type AgentConfigId,
@@ -48,7 +50,6 @@ import {
   hasRecentResumeNotice,
   buildReplayPromptFromHistory,
   type ReplayPromptResult,
-  getLegacyReadForSessionHistoryStatus,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
   type AcpConfigOptionValue,
@@ -1045,7 +1046,7 @@ export class SessionExecutionService {
         // Best-effort: missing meta should not break turn completion.
       }
       try {
-        const latestAssistant = sessionDoc.getLatestAssistantHistory?.();
+        const latestAssistant = await readLatestTurn(sessionDoc.sessionData.history, 'assistant');
         diffFileCount = Array.isArray(latestAssistant?.fileDiff)
           ? latestAssistant.fileDiff.length
           : 0;
@@ -1716,22 +1717,16 @@ export class SessionExecutionService {
     userTurnId: string
   ): Promise<boolean> {
     let queueable = true;
-    await sessionDoc.updateHistory((history) =>
-      history.map((entry) => {
-        if (entry.id !== userTurnId || entry.role !== 'user') {
-          return entry;
-        }
-        queueable =
-          entry.status === 'pending_apply' || entry.status === 'pending' || entry.status === 'seen';
-        return entry.status === 'pending_apply'
-          ? {
-              ...entry,
-              status: 'pending' as const,
-              read: getLegacyReadForSessionHistoryStatus('pending'),
-            }
-          : entry;
+    await sessionDoc.sessionData.commands
+      .applyHistoryAction({
+        kind: 'user-status',
+        turnId: userTurnId,
+        status: 'pending',
+        requeueUndelivered: true,
       })
-    );
+      .then((result) => {
+        queueable = requireSessionAccepted(result).matched ?? false;
+      });
     return queueable;
   }
 
@@ -3329,19 +3324,11 @@ export class SessionExecutionService {
     status: 'pending' | 'seen' | 'processing' | 'handled' | 'failed' | 'canceled'
   ): Promise<boolean> {
     let matched = false;
-    await sessionDoc.updateHistory((history) =>
-      history.map((entry) => {
-        if (entry.id !== userTurnId || entry.role !== 'user') {
-          return entry;
-        }
-        matched = true;
-        return {
-          ...entry,
-          status,
-          read: getLegacyReadForSessionHistoryStatus(status),
-        };
-      })
-    );
+    await sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status })
+      .then((result) => {
+        matched = requireSessionAccepted(result).matched ?? false;
+      });
     return matched;
   }
 
@@ -3467,22 +3454,14 @@ export class SessionExecutionService {
         'handled'
       );
     }
-    await options.sessionDoc.updateHistory((history) =>
-      history.map((entry) => {
-        if (entry.id !== options.nextUserTurnId || entry.role !== 'user') {
-          return entry;
-        }
-        return {
-          ...entry,
-          status: 'processing' as const,
-          read: true,
-          inputConfig: {
-            ...entry.inputConfig,
-            _lodyDeliveryKind: 'steer',
-          },
-        };
+    await options.sessionDoc.sessionData.commands
+      .applyHistoryAction({
+        kind: 'user-status',
+        turnId: options.nextUserTurnId,
+        status: 'processing',
+        deliveredSteer: true,
       })
-    );
+      .then(requireSessionAccepted);
     await this.upsertSessionMeta(options.sessionId, {
       latestUserMsgId: options.nextUserTurnId,
       ...(options.previousUserTurnId ? { lastHandledUserMsgId: options.previousUserTurnId } : {}),
@@ -3518,13 +3497,7 @@ export class SessionExecutionService {
   }
 
   private async getSessionHistory(sessionDoc: SessionDocument): Promise<SessionHistoryInput[]> {
-    const getHistory = (
-      sessionDoc as { getHistory?: (() => Promise<SessionHistoryInput[]>) | undefined }
-    ).getHistory;
-    if (!getHistory) {
-      return [];
-    }
-    return await getHistory.call(sessionDoc);
+    return readSessionHistory(sessionDoc.sessionData.history);
   }
 
   /**
@@ -3561,9 +3534,6 @@ export class SessionExecutionService {
       return latest;
     }
 
-    if (!args.sessionDoc.mirror) {
-      return latest;
-    }
     // Control fields and history both count as wakeups; each check re-reads.
     const subscribe = (listener: () => void) => subscribeSessionChanges(args.sessionDoc, listener);
 
@@ -4067,7 +4037,9 @@ export class SessionExecutionService {
             // to resume, even though the user turn is durable in Loro history.
             // This freshly created ACP session has no knowledge of that turn,
             // so reconstruct its context before sending the current request.
-            const history = yield* self.tryPromise(() => sessionDoc.getHistory());
+            const history = yield* self.tryPromise(() =>
+              readSessionHistory(sessionDoc.sessionData.history)
+            );
             if (history.length > 0) {
               replayPromptResult = buildReplayPromptFromHistory({
                 history,
@@ -4263,7 +4235,9 @@ export class SessionExecutionService {
             if (!usedHistoryReplay || !replayPromptResult) {
               return undefined;
             }
-            const history = yield* self.tryPromise(() => sessionDoc.getHistory());
+            const history = yield* self.tryPromise(() =>
+              readSessionHistory(sessionDoc.sessionData.history)
+            );
             if (hasRecentResumeNotice(history)) {
               return undefined;
             }
@@ -4294,19 +4268,13 @@ export class SessionExecutionService {
               items: [noticeItem],
             };
             yield* self.tryPromise(() =>
-              sessionDoc.updateHistory((prevHistory) => {
-                let insertIndex = prevHistory.length;
-                for (let i = prevHistory.length - 1; i >= 0; i--) {
-                  const entry = prevHistory[i];
-                  if (entry && entry.role === 'user') {
-                    insertIndex = i;
-                    break;
-                  }
-                }
-                const nextHistory = [...prevHistory];
-                nextHistory.splice(insertIndex, 0, systemNotice);
-                return nextHistory;
-              })
+              sessionDoc.sessionData.commands
+                .applyHistoryAction({
+                  kind: 'upsert-turn',
+                  turn: systemNotice,
+                  beforeLastUser: true,
+                })
+                .then(requireSessionAccepted)
             );
             return undefined;
           });
@@ -5319,7 +5287,7 @@ export class SessionExecutionService {
               this.currentTurnBySession.get(sessionId) ??
               this.turnRuntimeBySession.get(sessionId)?.turnId;
             if (liveTurnId == null) {
-              const history = await sessionDoc.getHistory();
+              const history = await readSessionHistory(sessionDoc.sessionData.history);
               const hasUnfinishedRequestedTurn = history.some(
                 (entry) =>
                   entry.id === turnId &&
@@ -5338,24 +5306,15 @@ export class SessionExecutionService {
                   `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
                 );
                 this.deps.clearSessionActivePresence(sessionId);
-                await sessionDoc.updateHistory((nextHistory) => {
-                  for (const entry of nextHistory) {
-                    if (entry.id !== turnId) continue;
-                    entry.finished = true;
-                    entry.endedAt = getServerNow();
-                    if (!entry.items) continue;
-                    for (const item of entry.items) {
-                      if (
-                        item.type === 'tool_call' &&
-                        item.activityKind === 'context_compaction' &&
-                        (item.status === 'pending' || item.status === 'in_progress')
-                      ) {
-                        item.status = 'failed';
-                      }
-                    }
-                  }
-                  return nextHistory;
-                });
+                await sessionDoc.sessionData.commands
+                  .applyHistoryAction({
+                    kind: 'finish-assistant',
+                    turnId,
+                    endedAt: getServerNow(),
+                    force: true,
+                    settleContextCompactionAsFailed: true,
+                  })
+                  .then(requireSessionAccepted);
 
                 await this.finalizeCancelledTurn({
                   sessionId,

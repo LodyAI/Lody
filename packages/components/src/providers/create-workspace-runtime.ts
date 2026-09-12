@@ -3668,7 +3668,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const persistedDoc = await repo.openPersistedDoc(roomId);
     const sessionDoc = persistedDoc.doc as LoroDoc;
 
-    const { mirror, history, historyWriter, sessionData } = createConversationSession(sessionDoc, {
+    const { mirror, history, sessionData } = createConversationSession(sessionDoc, {
       sessionId,
       windowed: isConversationViewEnabled(),
       // Local IndexedDB durability barrier. Remote convergence is `waitUntilSynced`.
@@ -3809,7 +3809,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       },
       subscribe: (listener) => mirror.subscribe(listener as never),
       history,
-      historyWriter,
       sessionData,
       dispose: () => {
         disposed = true;

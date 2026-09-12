@@ -1,3 +1,5 @@
+import { updateTestHistory } from './history-port-fixture';
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
@@ -34,7 +36,7 @@ describe('nested operation progress feedback', () => {
           },
         ],
       }));
-      return {
+      return withHistoryPort({
         mirror,
         // `subscribeSessionChanges` needs the session-data surface; the fake
         // drives change notification through the raw Mirror's subscribe, so the
@@ -57,7 +59,7 @@ describe('nested operation progress feedback', () => {
         ) => {
           mirror.setState((state) => ({ ...state, history: update(state.history) }));
         },
-      };
+      });
     };
     const docs = new Map(['A', 'B', 'C'].map((id) => [id, makeDoc(id)]));
     const operation = (parent: string, child: string): StoredLodyOperation => ({
@@ -138,7 +140,7 @@ describe('nested operation progress feedback', () => {
         2, 2, 1,
       ]);
       const child = docs.get('C')!;
-      await child.updateHistory((history) => [
+      await updateTestHistory(child, (history) => [
         ...history,
         {
           id: 'answer-C',

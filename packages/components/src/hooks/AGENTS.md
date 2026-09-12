@@ -33,6 +33,8 @@ edit `AGENTS.md` only. Per-hook background and reasoning: [README.md](README.md)
 
 ## Session, auth, and app shell
 
+- History uses SessionData commands.
+
 - `useStableSession` treats an HTTP 401 from `authClient.useSession()` as potentially
   stale and verifies it once with the current credential. Only a second 401 for the
   unchanged local token is terminal: stop retrying, ignore cached user/bootstrap and
@@ -88,7 +90,7 @@ edit `AGENTS.md` only. Per-hook background and reasoning: [README.md](README.md)
 
 ## Mobile prompts and Live Activity
 
-- `use-app-store-review-prompt.ts` takes its historical baseline only from the first
+- `use-app-store-review-prompt.ts` takes its baseline only from the first
   ready-and-synced session snapshot. Hydrated turns seed eligibility but never trigger
   a prompt; later finalized turns are processed once, and streaming updates with no new
   outcome must not synchronously rewrite local storage. Its idle timer depends on the

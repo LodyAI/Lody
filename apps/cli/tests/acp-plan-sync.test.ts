@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionNotification } from '@agentclientprotocol/sdk';
@@ -39,7 +40,7 @@ describe('handleACPUpdateMessage plan sync', () => {
       };
     });
 
-    const doc = {
+    const doc = withHistoryPort({
       updateHistory,
       setPlan,
       sessionData: {
@@ -54,7 +55,7 @@ describe('handleACPUpdateMessage plan sync', () => {
         },
         durability: { waitDurable: async () => {} },
       },
-    } as any;
+    }) as any;
 
     await appendAutonomousACPNotifications(
       doc,

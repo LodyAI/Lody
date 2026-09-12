@@ -381,7 +381,8 @@ export function useSessionDoc(
       // The updater is a function that can't cross the intent wire; resolve it to
       // the concrete replacement entry against the current turn and send that
       // through the writer seam. Preserve the "not found → no-op" short-circuit.
-      const current = await withStore((store) => store.historyWriter.read(historyId));
+      const read = await withStore((store) => store.sessionData.history.readTurn(historyId));
+      const current = read.state === 'ready' ? read.turn : undefined;
       if (!current) {
         return;
       }

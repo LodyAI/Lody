@@ -103,7 +103,7 @@ e2eDescribe('kimi shell tool history parsing', () => {
       await doc.initOffline();
 
       await appendAutonomousACPNotifications(doc, notifications);
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
 
       // Find all tool_call items
       const toolCalls = history.flatMap((h) =>

@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SessionStatusFactory,
@@ -30,7 +31,7 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
   const sessionId = 's-1' as SessionId;
   const acpSessionId = 'acp-1' as ACPSessionId;
 
-  const sessionDoc = {
+  const sessionDoc = withHistoryPort({
     getMetaState: vi.fn(async () => ({
       isArchived: false,
       project: {
@@ -47,7 +48,7 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
     getHistory: vi.fn(async () => []),
     waitUntilSynced: vi.fn(async () => {}),
     ...overrides.sessionDoc,
-  };
+  });
   (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
     sessionDoc.updateHistory as never
   );
@@ -173,13 +174,13 @@ describe('MessageHandler chat status transitions', () => {
       },
     ];
     const { handler, sessionDoc } = createTestHarness({
-      sessionDoc: {
+      sessionDoc: withHistoryPort({
         updateHistory: vi.fn(
           async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
             history = updater(history);
           }
         ),
-      },
+      }),
     });
     const host = handler as unknown as {
       createAssistantEntryForTurn(

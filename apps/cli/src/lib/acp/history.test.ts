@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseSessionNotification,
@@ -54,7 +55,7 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
     };
   });
 
-  const doc = {
+  const doc = withHistoryPort({
     sessionId: sid('session-1'),
     updateHistory: vi.fn(
       async (updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
@@ -75,7 +76,7 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
       },
       durability: { waitDurable: async () => {} },
     },
-  } as unknown as SessionDocument;
+  }) as unknown as SessionDocument;
 
   return { doc, readHistory: () => history, applyAgentBatch };
 }

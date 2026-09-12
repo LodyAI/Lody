@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -108,13 +109,13 @@ function createHarness(options?: {
     );
     if (rowIndex >= 0) machineFlockRows.splice(rowIndex, 1);
   });
-  const sessionDoc = {
+  const sessionDoc = withHistoryPort({
     updateHistory: vi.fn(async (updater: (history: unknown[]) => unknown[]) => {
       updater([]);
     }),
     waitUntilSynced: vi.fn(async () => {}),
     setLastMessageAt: vi.fn(async () => {}),
-  };
+  });
   const repo = {
     watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
     getDocMeta: vi.fn(async (roomId: string) => {

@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { requireSessionSnapshots } from '@lody/shared/session-data';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -330,7 +332,7 @@ export class SessionForkService {
       return;
     }
 
-    const history = await targetDoc.getHistory();
+    const history = await readSessionHistory(targetDoc.sessionData.history);
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -475,7 +477,7 @@ export class SessionForkService {
     // path; the rejection order below is unchanged.
     const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
       this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      sourceDoc.sessionData.snapshots.capture(),
+      requireSessionSnapshots(sourceDoc.sessionData).capture(),
       this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
       reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
     ]);
@@ -766,7 +768,8 @@ export class SessionForkService {
         marker,
         historyResult,
         sourceSnapshot,
-        releaseSourceSnapshot: () => sourceDoc.sessionData.snapshots.release(sourceSnapshot),
+        releaseSourceSnapshot: () =>
+          requireSessionSnapshots(sourceDoc.sessionData).release(sourceSnapshot),
         agentConfig,
         user,
         operation,
@@ -868,7 +871,7 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
+        const copyResult = await requireSessionSnapshots(targetDoc.sessionData).copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
@@ -879,7 +882,7 @@ export class SessionForkService {
             copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
           );
         }
-        sourceDoc.sessionData.snapshots.release(sourceSnapshot);
+        requireSessionSnapshots(sourceDoc.sessionData).release(sourceSnapshot);
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -1018,7 +1021,7 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
+        const copyResult = await requireSessionSnapshots(targetDoc.sessionData).copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );

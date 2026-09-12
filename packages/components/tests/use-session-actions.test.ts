@@ -1,3 +1,5 @@
+import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
+import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
 import { act, createElement, useEffect } from 'react';
@@ -120,19 +122,21 @@ function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void 
   return null;
 }
 
-/** The store's history writer over a plain array, as the runtime stub exposes it. */
-const historyWriterOver = (history: unknown[]) => ({
-  read: (turnId: string) => history.find((entry) => (entry as { id?: string }).id === turnId),
-  replace: (turnId: string, entry: unknown) => {
-    const index = history.findIndex((candidate) => (candidate as { id?: string }).id === turnId);
-    if (index < 0) return false;
-    history[index] = entry;
-    return true;
+/** Minimal port fixture: retain the observable array used by each UI test. */
+const sessionDataOver = (history: unknown[]) => ({
+  history: {
+    readTurn: async (turnId: string) => {
+      const turn = history.find((entry) => (entry as { id?: string }).id === turnId);
+      return turn ? { state: 'ready', turn } : { state: 'missing' };
+    },
   },
-  append: (entry: unknown) => {
-    history.push(entry);
+  commands: {
+    applyHistoryAction: async (action: HistoryAction) => {
+      const result = applyHistoryAction(history as SessionEntry[], action);
+      history.splice(0, history.length, ...result.turns);
+      return { status: 'accepted', matched: result.matched, receipt: { kind: 'history-action' } };
+    },
   },
-  respondPermission: () => false,
 });
 
 const createRuntime = (
@@ -204,7 +208,7 @@ const createRuntime = (
     withSessionStore: vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history: sessionHistory })),
-        historyWriter: historyWriterOver(sessionHistory),
+        sessionData: sessionDataOver(sessionHistory),
         setState: vi.fn((updater: (draft: { history: unknown[] }) => void) => {
           updater({ history: sessionHistory });
         }),
@@ -617,7 +621,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history })),
-        historyWriter: historyWriterOver(history),
+        sessionData: sessionDataOver(history),
         setState,
         waitUntilSynced,
       })
@@ -684,7 +688,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history })),
-        historyWriter: historyWriterOver(history),
+        sessionData: sessionDataOver(history),
         setState: vi.fn(),
         waitUntilSynced: vi.fn(async () => undefined),
       })
@@ -742,7 +746,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history })),
-        historyWriter: historyWriterOver(history),
+        sessionData: sessionDataOver(history),
         setState: vi.fn(),
         waitUntilSynced: vi.fn(async () => undefined),
       })
@@ -971,7 +975,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history })),
-        historyWriter: historyWriterOver(history),
+        sessionData: sessionDataOver(history),
         setState: vi.fn(),
         waitUntilSynced: vi.fn(async () => undefined),
       })
@@ -1042,7 +1046,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => state),
-        historyWriter: historyWriterOver(state.history),
+        sessionData: sessionDataOver(state.history),
         setState,
         waitUntilSynced,
       })
@@ -1098,7 +1102,7 @@ describe('useSessionActions', () => {
     runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
       fn({
         getState: vi.fn(() => ({ history })),
-        historyWriter: historyWriterOver(history),
+        sessionData: sessionDataOver(history),
         setState,
         waitUntilSynced: vi.fn(async () => undefined),
       })
