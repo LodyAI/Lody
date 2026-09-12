@@ -52,14 +52,15 @@ That tolerance must not authorize creating new malformed items locally.
   item, and only after live execution ownership proves that turn is no longer
   active. Turn `finished`, durable Session status, elapsed time, daemon restart,
   or missing live evidence is insufficient. The renderer requests repair only while
-  the Session is inactive and connectivity is ready. An offline, unsupported,
+  the Session is inactive, browser connectivity is online, and the Session room is
+  synced. An offline, reconnecting, unsupported,
   non-owning, active, or indeterminate daemon leaves history unchanged. Repair must
   inspect a remotely synced Session document, reject any live Session work, recheck
   ownership, and update only the named entry through `onlyEntryId`; a concurrent new
   turn has a different identity and remains untouched. Report `reconciled` only after
   the write is confirmed; every other result is `retry`. Retry evidence is bounded by
-  the exact candidate, daemon generation, connectivity, and stable Session activity
-  transitions; presence heartbeats must not become polling.
+  the exact candidate, daemon generation, browser and Session-room connectivity, and
+  stable Session activity transitions; presence heartbeats must not become polling.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned

@@ -20,12 +20,13 @@ unchanged.
 The renderer remains a reader of durable compaction status. It does not reinterpret
 `SessionHistory.finished`, a timeout, a restart, or missing presence as provider
 termination. When the latest compaction is unresolved, its assistant turn is
-finished, the Session is inactive, browser connectivity is ready, and the owner
-daemon advertises the capability, the renderer requests reconciliation. A single
-`lastAttemptEvidenceRef` bounds requests by the exact candidate, owner-daemon
-instance, and connectivity state. Leaving eligibility clears that evidence, so a
-later inactive or reconnected transition can try again. RPC results do not drive a
-parallel renderer state machine, and heartbeat-only presence updates do not poll.
+finished, the Session is inactive, browser connectivity is online, the Session room
+is synced, and the owner daemon advertises the capability, the renderer requests
+reconciliation. A single `lastAttemptEvidenceRef` bounds requests by the exact
+candidate, owner-daemon instance, and connectivity state. Leaving eligibility clears
+that evidence, so a later inactive, browser-online, or Session-room-reconnected
+transition can try again. RPC results do not drive a parallel renderer state machine,
+and heartbeat-only presence updates do not poll.
 
 The request names `sessionId`, `turnId`, and `toolCallId`. The target daemon first
 verifies that current Session metadata assigns ownership to its own machine, joins the
@@ -75,8 +76,9 @@ Behavioral coverage exercises exact-item mutation, active and indeterminate owne
 outcomes, cold/unsynced documents, write-confirmation failure, and a turn that starts
 between the final liveness check and the targeted history mutation. Renderer coverage
 exercises owner-daemon generations, inactive eligibility, local-first browser
-connectivity restoration while Machine presence remains online, and bounded attempts
-for unchanged evidence. RPC coverage exercises ordinary-lane isolation, local
+connectivity restoration while Machine presence remains online, Session-room
+reconnection while browser connectivity remains online, and bounded attempts for
+unchanged evidence. RPC coverage exercises ordinary-lane isolation, local
 capability gating, both local and Loro transports, and shared request/response schemas.
 No startup scan, storage migration, rewrite-barrier compensation, or end-to-end
 provider fixture was added.

@@ -17,11 +17,12 @@ daemon 协调精确的 turn 与 tool-call id。只有实时执行所有权证明
 
 Renderer 仍只读取持久化的 compaction 状态。它不会把 `SessionHistory.finished`、超时、
 重启或 presence 缺失重新解释成 provider 已终止。仅当最新 compaction 未完成、所属
-assistant turn 已 finished、Session inactive、browser connectivity ready，且 owner daemon
-声明支持该能力时，renderer 才请求 reconciliation。一个
+assistant turn 已 finished、Session inactive、browser connectivity online、Session room
+已 synced，且 owner daemon 声明支持该能力时，renderer 才请求 reconciliation。一个
 `lastAttemptEvidenceRef` 按 exact candidate、owner-daemon instance 和 connectivity state
-限定请求。离开 eligibility 会清除该 evidence，因此后续 inactive 或重连转换可以
-再试。RPC 结果不驱动另一套 renderer state machine，单纯 heartbeat 更新也不会退化成轮询。
+限定请求。离开 eligibility 会清除该 evidence，因此后续 inactive、browser online 或
+Session room 重连转换可以再试。RPC 结果不驱动另一套 renderer state machine，单纯
+heartbeat 更新也不会退化成轮询。
 
 请求携带 `sessionId`、`turnId` 和 `toolCallId`。目标 daemon 先验证当前 Session metadata
 确实把所有权分配给本机，加入 Session document，并等待其远端状态完成。然后它会拒绝
@@ -61,6 +62,7 @@ owner 能提供证据。本次变更不假定每一条历史未完成 compaction
 行为测试覆盖精确 item 修改、active 与 indeterminate 所有权结果、cold/unsynced document、
 写入确认失败，以及最终 liveness 检查与 targeted history mutation 之间启动的新 turn。
 Renderer 测试覆盖 owner-daemon generation、inactive eligibility、Machine presence 保持 online 时的
-local-first browser connectivity 恢复，以及 evidence 未变时的有界尝试。RPC 测试覆盖普通 lane
-隔离、本地 capability gating、local 与 Loro transport，以及共享 request/response schema。本次没有
-加入启动扫描、存储迁移、rewrite-barrier compensation 或端到端 provider fixture。
+local-first browser connectivity 恢复、browser connectivity 保持 online 时的 Session room 重连，
+以及 evidence 未变时的有界尝试。RPC 测试覆盖普通 lane 隔离、本地 capability gating、local 与
+Loro transport，以及共享 request/response schema。本次没有加入启动扫描、存储迁移、
+rewrite-barrier compensation 或端到端 provider fixture。

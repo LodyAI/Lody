@@ -13,6 +13,7 @@ export const useSessionContextCompactionReconciliation = ({
   activeCompaction,
   canReconcile,
   isConnectivityOnline,
+  isSessionRoomSynced,
   isSessionActive,
   machineId,
   ownerInstanceId,
@@ -22,6 +23,7 @@ export const useSessionContextCompactionReconciliation = ({
   activeCompaction: ActiveSessionContextCompaction | null;
   canReconcile: boolean;
   isConnectivityOnline: boolean;
+  isSessionRoomSynced: boolean;
   isSessionActive: boolean;
   machineId: MachineId;
   ownerInstanceId: string | null;
@@ -35,6 +37,7 @@ export const useSessionContextCompactionReconciliation = ({
       !runtime ||
       !canReconcile ||
       !isConnectivityOnline ||
+      !isSessionRoomSynced ||
       isSessionActive ||
       !activeCompaction?.turnFinished
     ) {
@@ -47,6 +50,7 @@ export const useSessionContextCompactionReconciliation = ({
       activeCompaction.toolCallId,
       ownerInstanceId,
       isConnectivityOnline,
+      isSessionRoomSynced,
     ]);
     if (lastAttemptEvidenceRef.current === evidence) return;
     lastAttemptEvidenceRef.current = evidence;
@@ -61,6 +65,7 @@ export const useSessionContextCompactionReconciliation = ({
     activeCompaction,
     canReconcile,
     isConnectivityOnline,
+    isSessionRoomSynced,
     isSessionActive,
     machineId,
     ownerInstanceId,

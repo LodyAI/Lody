@@ -84,6 +84,7 @@ describe('context compaction reconciliation retry transitions', () => {
         activeCompaction,
         canReconcile: true,
         isConnectivityOnline: true,
+        isSessionRoomSynced: true,
         isSessionActive,
         machineId,
         ownerInstanceId: 'daemon-1',
@@ -134,6 +135,7 @@ describe('context compaction reconciliation retry transitions', () => {
         activeCompaction,
         canReconcile: true,
         isConnectivityOnline,
+        isSessionRoomSynced: true,
         isSessionActive: false,
         machineId,
         ownerInstanceId: 'daemon-1',
@@ -160,6 +162,53 @@ describe('context compaction reconciliation retry transitions', () => {
 
       await act(async () => root.render(createElement(Probe, { isConnectivityOnline: false })));
       await act(async () => root.render(createElement(Probe, { isConnectivityOnline: true })));
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      act(() => root.unmount());
+      delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    }
+  });
+
+  it('retries after the Session room reconnects while browser connectivity stays online', async () => {
+    const sessionId = 'session-1' as SessionId;
+    const machineId = 'machine-1' as MachineId;
+    const activeCompaction = findActiveSessionContextCompaction(
+      historyWithStatus('in_progress', true)
+    );
+    const request = vi.fn().mockResolvedValue({
+      type: 'session/reconcile-context-compaction_response',
+      sessionId,
+      turnId: 'assistant:turn-1',
+      toolCallId: 'context-compaction-1',
+      outcome: 'retry',
+    } satisfies SessionContextCompactionReconcileResponse);
+    const runtime = { requestSessionContextCompactionReconciliation: request };
+
+    const Probe = ({ syncState }: { syncState: 'synced' | 'reconnecting' }) => {
+      useSessionContextCompactionReconciliation({
+        activeCompaction,
+        canReconcile: true,
+        isConnectivityOnline: true,
+        isSessionRoomSynced: syncState === 'synced',
+        isSessionActive: false,
+        machineId,
+        ownerInstanceId: 'daemon-1',
+        runtime,
+        sessionId,
+      });
+      return null;
+    };
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const root = createRoot(document.createElement('div'));
+    try {
+      await act(async () => root.render(createElement(Probe, { syncState: 'synced' })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { syncState: 'reconnecting' })));
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => root.render(createElement(Probe, { syncState: 'synced' })));
       expect(request).toHaveBeenCalledTimes(2);
     } finally {
       act(() => root.unmount());
