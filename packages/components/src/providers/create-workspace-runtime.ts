@@ -114,6 +114,10 @@ import { createResilientRemoteCursorStore } from './resilient-remote-cursor-stor
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import { listDocMetaEntries } from '@/lib/doc-meta-batch';
+import {
+  createEagerSyncHighWaterStore,
+  type EagerSyncHighWaterCache,
+} from '@/lib/eager-sync-high-water-cache';
 import { createEagerSyncWorkerClient } from './eager-sync-worker-client';
 import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import { isRemoteCursorDebugEnabled } from '@/lib/remote-cursor-debug';
@@ -582,6 +586,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // releaseIdleDocumentStoresBeforeReconnect pattern above.
   let backgroundSyncCoordinator: BackgroundSyncCoordinator | null = null;
   let backgroundSyncCoordinatorStartPromise: Promise<void> | null = null;
+  let backgroundSyncHighWaterStore: EagerSyncHighWaterCache | null = null;
   let eagerSyncWorkerClient: ReturnType<typeof createEagerSyncWorkerClient> | null = null;
   let cancelDelayedBackgroundSyncStart: (() => void) | null = null;
   let startBackgroundSyncCoordinator: () => void = () => {};
@@ -3658,7 +3663,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
    * Create a session store that can read local data immediately (offline-first).
    * Remote sync is deferred until transport is ready (workspaceId is set).
    */
-  const eagerSyncScope = JSON.stringify([workspaceId, desktopWindowId() ?? 'primary']);
+  const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
   eagerSyncWorkerClient = createEagerSyncWorkerClient({
     workspaceId,
@@ -3673,7 +3678,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
       // Prime endpoint-derived routing before handing the transport to the worker.
       await streamsTokenProvider.getToken();
-      const baseUrl = getStreamsBaseUrlForProvider(streamsTokenProvider);
+      // Match the mounted foreground transport. `transportStreamsBaseUrl`
+      // records the endpoint selected when that transport was attached.
+      const baseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
       return {
         plane: 'cloud',
         streamId: getLoroStreamIdForDocId(workspaceId, roomId),
@@ -3752,8 +3759,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         sub.unsubscribe();
         // unsubscribe() does not emit a status change, so the tracker would keep
         // reporting its last 'synced' state. Reset it to idle so the room-sync
-        // registry no longer treats this warmed room as joined (which would
-        // suppress eager sync and block warm-doc LRU eviction).
+        // registry no longer treats this cached UI room as joined, which would
+        // suppress future eager sync.
         syncTracker.markStopped();
       }
     };
@@ -4272,9 +4279,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     watchHandles.push(watchHandle);
 
     backgroundSyncCoordinatorStartPromise = (async () => {
+      const highWaterStore = await createEagerSyncHighWaterStore(workspaceId);
       if (disposePromise) {
+        highWaterStore.close();
         return;
       }
+      backgroundSyncHighWaterStore = highWaterStore;
 
       backgroundSyncCoordinator = createBackgroundSyncCoordinator({
         activitySource: {
@@ -4290,27 +4300,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
         registry: roomSyncRegistry,
         prefetcher: {
-          prefetch: async (sessionId, signal) => {
-            const snapshot = backgroundSyncSnapshots.get(sessionId);
-            if (
-              signal.aborted ||
-              materializedSessionIds.has(sessionId) ||
-              snapshot?.isArchived ||
-              snapshot?.lastMessageAt == null
-            ) {
+          prefetch: async (sessionId, lastMessageAt, signal) => {
+            if (signal.aborted || materializedSessionIds.has(sessionId)) {
               return 'skipped';
             }
             return (
-              eagerSyncWorkerClient?.prefetch(
-                getSessionRoomId(sessionId),
-                snapshot.lastMessageAt,
-                signal
-              ) ?? 'skipped'
+              eagerSyncWorkerClient?.prefetch(getSessionRoomId(sessionId), lastMessageAt, signal) ??
+              'skipped'
             );
           },
-          // Workers release their document after every task. Disk cache eviction
-          // is byte-bounded and owned by the worker, not the UI store cache.
-          evict: () => {},
         },
         env: {
           isOnline: () => isBrowserOnline(),
@@ -4341,11 +4339,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           clearTimeout: (handle) => clearTimeout(handle as Parameters<typeof clearTimeout>[0]),
         },
         policy: resolveEagerSyncPolicy(deps.eagerSyncSurface ?? 'web'),
+        highWaterStore,
       });
 
       const coordinator = backgroundSyncCoordinator;
       await seedBackgroundSyncSnapshots().catch(() => {});
       if (disposePromise || backgroundSyncCoordinator !== coordinator) {
+        highWaterStore.close();
+        if (backgroundSyncHighWaterStore === highWaterStore) {
+          backgroundSyncHighWaterStore = null;
+        }
         return;
       }
       coordinator.start();
@@ -4357,6 +4360,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         });
         backgroundSyncCoordinator?.stop();
         backgroundSyncCoordinator = null;
+        backgroundSyncHighWaterStore?.close();
+        backgroundSyncHighWaterStore = null;
       })
       .finally(() => {
         backgroundSyncCoordinatorStartPromise = null;
@@ -4402,6 +4407,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       startupAcpCapabilitiesRefreshAbortController = null;
       backgroundSyncCoordinator?.stop();
       backgroundSyncCoordinator = null;
+      backgroundSyncHighWaterStore?.close();
+      backgroundSyncHighWaterStore = null;
       eagerSyncWorkerClient?.dispose();
       eagerSyncWorkerClient = null;
       localReconnectLoop?.stop();

@@ -119,11 +119,9 @@ function createFakeActivitySource(initial: SessionActivitySnapshot[] = []) {
 
 function createFakePrefetcher() {
   const calls: SessionId[] = [];
-  const evicted: SessionId[] = [];
   const pending = new Map<SessionId, (outcome: PrefetchOutcome) => void>();
   return {
     calls,
-    evicted,
     isPending: (id: SessionId) => pending.has(id),
     resolve: (id: SessionId, outcome: PrefetchOutcome = 'synced') => {
       const resolver = pending.get(id);
@@ -131,7 +129,7 @@ function createFakePrefetcher() {
       resolver?.(outcome);
     },
     port: {
-      prefetch: (sessionId: SessionId, signal: AbortSignal) => {
+      prefetch: (sessionId: SessionId, _lastMessageAt: number, signal: AbortSignal) => {
         calls.push(sessionId);
         return new Promise<PrefetchOutcome>((resolve) => {
           pending.set(sessionId, resolve);
@@ -149,9 +147,6 @@ function createFakePrefetcher() {
             { once: true }
           );
         });
-      },
-      evict: (sessionId: SessionId) => {
-        evicted.push(sessionId);
       },
     },
   };
@@ -210,7 +205,6 @@ function setup(
     batchSize: Number.POSITIVE_INFINITY,
     batchCooldownMs: 0,
     freshnessTtlMs: 15_000,
-    maxWarmDocs: 24,
     candidateWindow: 50,
     prefetchTimeoutMs: 20_000,
     ...options.policy,
@@ -237,21 +231,18 @@ describe('createBackgroundSyncCoordinator', () => {
       batchSize: 1,
       batchCooldownMs: 1_500,
       candidateWindow: 20,
-      maxWarmDocs: 0,
     });
     expect(resolveEagerSyncPolicy('desktop')).toMatchObject({
       concurrency: 1,
       batchSize: 1,
       batchCooldownMs: 1_500,
       candidateWindow: Number.POSITIVE_INFINITY,
-      maxWarmDocs: 0,
     });
     expect(resolveEagerSyncPolicy('mobile')).toMatchObject({
       concurrency: 1,
       batchSize: 1,
       batchCooldownMs: 3_000,
       candidateWindow: Number.POSITIVE_INFINITY,
-      maxWarmDocs: 0,
     });
   });
 
@@ -402,6 +393,21 @@ describe('createBackgroundSyncCoordinator', () => {
     expect(prefetcher.calls).toEqual([]);
   });
 
+  it('allows a manual nudge to rebuild a snapshot hidden by the high-water mark', async () => {
+    const highWater = createFakeHighWaterStore([[sid('a'), 100]]);
+    const { coordinator, prefetcher } = setup({
+      activity: [{ sessionId: sid('a'), lastMessageAt: 100 }],
+      highWaterStore: highWater.port,
+    });
+    coordinator.start();
+    await tick();
+
+    coordinator.requestPrefetch(sid('a'));
+    await tick();
+
+    expect(prefetcher.calls).toEqual([sid('a')]);
+  });
+
   it('prefetches again when activity is newer than the persisted high-water mark', async () => {
     const highWater = createFakeHighWaterStore([[sid('a'), 100]]);
     const { coordinator, prefetcher } = setup({
@@ -535,40 +541,6 @@ describe('createBackgroundSyncCoordinator', () => {
     coordinator.start();
     await tick();
     expect(prefetcher.calls).toEqual([sid('run')]);
-  });
-
-  it('evicts the oldest non-joined warmed doc beyond maxWarmDocs', async () => {
-    const { coordinator, prefetcher, activity } = setup({ policy: { maxWarmDocs: 2 } });
-    coordinator.start();
-
-    for (const id of ['a', 'b', 'c']) {
-      activity.emit({ sessionId: sid(id), lastMessageAt: 1 });
-      await tick();
-      prefetcher.resolve(sid(id), 'synced');
-      await tick();
-    }
-    // a, b, c warmed → cap 2 → oldest (a) evicted.
-    expect(prefetcher.evicted).toEqual([sid('a')]);
-  });
-
-  it('never evicts a warmed doc that is currently joined', async () => {
-    const { coordinator, prefetcher, activity, registry } = setup({ policy: { maxWarmDocs: 2 } });
-    coordinator.start();
-
-    for (const id of ['a', 'b']) {
-      activity.emit({ sessionId: sid(id), lastMessageAt: 1 });
-      await tick();
-      prefetcher.resolve(sid(id), 'synced');
-      await tick();
-    }
-    // 'a' is the oldest, but the user is now viewing it (joined) → skip it,
-    // evict 'b' instead when 'c' warms.
-    registry.joined.add(room('a'));
-    activity.emit({ sessionId: sid('c'), lastMessageAt: 1 });
-    await tick();
-    prefetcher.resolve(sid('c'), 'synced');
-    await tick();
-    expect(prefetcher.evicted).toEqual([sid('b')]);
   });
 
   it('pauses and aborts in-flight prefetches when offline, resumes when back', async () => {

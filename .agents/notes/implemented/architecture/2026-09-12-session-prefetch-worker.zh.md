@@ -26,13 +26,21 @@ Translation: pending
 
 Worker 每次任务结束即退出；并发和批大小均为 1。桌面／Web 批间冷却为
 1.5 秒，移动端为 3 秒。独立缓存上限为 128 MiB / 64 条，保存快照和活动
-进度的同一条记录，不复用旧 eager-sync high-water 记录或前台远端游标。
-接收端没有创建业务字段；本地适配器仍遵守现有版本协商协议。
+进度的同一条记录，不复用前台远端游标。协调器在产生候选前加载最多 1000
+条的轻量 high-water 时间戳索引，使被 64 条快照 LRU 淘汰的旧会话也不会在
+每次启动重新排队；该索引不读取 Doc 或 history。父线程在创建 Worker 和
+Loro WASM 前再读取快照 checkpoint，命中即完成；Worker 再读一次以关闭
+跨窗口竞态。同一 workspace 的所有窗口共用 `[workspaceId, roomId]` 缓存
+作用域，较慢的同平面写入不能降低 checkpoint。接收端没有创建业务字段；
+本地适配器仍遵守现有版本协商协议。云端 Worker 使用与已挂载前台
+transport 相同的显式 Streams endpoint。
 
 任务取消由父线程终止 Worker，并发送本地 peer detach；这不依赖正在执行
 同步 WASM 的 Worker 处理取消消息。打开目标会话先取消对应后台任务，已有
 UI store 不参与预同步。导入缓存使用 CRDT merge，保留前台未上传编辑。
-缓存清理包含新增数据库，旧 high-water 数据库仍列入清理以兼容历史安装。
+缓存清理包含快照和 high-water 数据库。已失效的 warm/evict 端口与
+`maxWarmDocs` 策略字段已删除；Worker 任务结束即释放 Doc，磁盘快照只由
+容量上限管理。
 
 大文档本地同步会先发 `joined`，再发送更新分块；适配器的初次同步信号
 不能单独作为缓存完成依据。Worker 等待自身版本达到 `joined.serverVersion`
@@ -44,14 +52,16 @@ UI store 不参与预同步。导入缓存使用 CRDT merge，保留前台未上
 
 ## 验证与限制
 
-新增确定性测试覆盖串行任务、取消时 detach、异步路由取消后的槽位释放、
-Worker 错误／销毁，以及真实 Loro 更新缓存后与未上传前台编辑的合并。
+新增确定性测试覆盖 checkpoint 命中时不创建 Worker、活动更新后创建 Worker、
+串行任务、取消时 detach、异步路由取消后的槽位释放、Worker 错误／销毁，
+以及真实 Loro 更新缓存后与未上传前台编辑的合并。
 分块用例显式延迟最后一块，确认不会提前保存快照。原调度器测试保留；
 删除独立的策略常量测试文件，因为同一断言已在调度器
 套件中存在。使用临时隔离依赖验证，不在嵌套 checkout 执行完整安装。
 
-隔离验证通过 30 项测试（其中 2 项是临时 IndexedDB 持久化／容量探针）、
-Worker 模块类型检查及 Vite 6.4.1 的浏览器 Worker 构建。整个仓库的文档
+隔离验证共通过 36 项测试，其中 3 项是临时 IndexedDB 持久化／容量／跨窗口
+checkpoint 单调性探针。Worker 模块类型检查及 Vite 6.4.1 的浏览器 Worker
+构建也通过。整个仓库的文档
 检查和 public-boundary 检查受到未初始化 ACP 子模块阻塞；未运行完整
 应用构建或完整类型检查。新增 shared 子路径只导出已有快照编解码器，不
 引入依赖版本变化。

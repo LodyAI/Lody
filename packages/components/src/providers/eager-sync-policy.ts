@@ -3,7 +3,6 @@ export interface EagerSyncPolicy {
   batchSize: number;
   batchCooldownMs: number;
   freshnessTtlMs: number;
-  maxWarmDocs: number;
   candidateWindow: number;
   prefetchTimeoutMs: number;
 }
@@ -18,7 +17,6 @@ export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   batchSize: 1,
   batchCooldownMs: 1_500,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 0,
   candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };
@@ -28,7 +26,6 @@ export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   batchSize: 1,
   batchCooldownMs: 1_500,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 0,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };
@@ -38,7 +35,6 @@ export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   batchSize: 1,
   batchCooldownMs: 3_000,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 0,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };

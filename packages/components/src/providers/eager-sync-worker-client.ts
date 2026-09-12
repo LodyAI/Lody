@@ -1,6 +1,7 @@
 import { LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION } from '@lody/shared/local-loro-data-plane';
 import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-transport';
 import type { PrefetchOutcome } from './background-sync-coordinator';
+import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import type {
   EagerSyncTransport,
   EagerSyncWorkerInput,
@@ -17,6 +18,7 @@ export type EagerSyncWorkerClientDeps = {
   resolveTransport(roomId: string): Promise<EagerSyncTransport>;
   auth(reason?: string): Promise<string | undefined>;
   localConnection(): { connection: LocalLoroDataPlaneConnection; dispose(): void } | null;
+  readSnapshot?: typeof readEagerSyncSnapshot;
   createWorker?: () => Worker;
 };
 
@@ -42,6 +44,16 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
       signal.removeEventListener('abort', abortSetup);
     }
     if (!transport) return 'skipped';
+    if (signal.aborted || disposed) return 'skipped';
+    // Check the durable activity checkpoint before instantiating the module
+    // Worker and its Loro WASM. The worker repeats this check to close the race
+    // with another window updating the shared workspace cache.
+    const cached = await (deps.readSnapshot ?? readEagerSyncSnapshot)(deps.scope, roomId).catch(
+      () => undefined
+    );
+    if (cached?.plane === transport.plane && cached.lastMessageAt >= lastMessageAt) {
+      return 'synced';
+    }
     if (signal.aborted || disposed) return 'skipped';
     const peerId = `eager-sync:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random().toString(36)}`}`;
     const worker = (

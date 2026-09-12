@@ -67,20 +67,30 @@ export async function writeEagerSyncSnapshot(
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE, 'readwrite');
       const store = transaction.objectStore(STORE);
-      store.put({ ...row, key: keyOf(row.scope, row.roomId) });
-      // Blobs are lazy handles; scanning sizes does not deserialize histories.
-      const request = store.index('savedAt').getAll();
-      request.onsuccess = () => {
-        const rows = request.result as EagerSyncSnapshot[];
-        let bytes = rows.reduce((sum, entry) => sum + entry.snapshot.size, 0);
-        let count = rows.length;
-        for (const entry of rows) {
-          if (bytes <= maxBytes && count <= MAX_CACHE_ENTRIES) break;
-          if (entry.key === keyOf(row.scope, row.roomId)) continue;
-          store.delete(entry.key);
-          bytes -= entry.snapshot.size;
-          count--;
+      const key = keyOf(row.scope, row.roomId);
+      const existingRequest = store.get(key);
+      existingRequest.onsuccess = () => {
+        const existing = existingRequest.result as EagerSyncSnapshot | undefined;
+        // Multiple windows share this row. A slower worker must not replace a
+        // newer checkpoint from another window on the same transport plane.
+        if (existing?.plane === row.plane && existing.lastMessageAt > row.lastMessageAt) {
+          return;
         }
+        store.put({ ...row, key });
+        // Blobs are lazy handles; scanning sizes does not deserialize histories.
+        const request = store.index('savedAt').getAll();
+        request.onsuccess = () => {
+          const rows = request.result as EagerSyncSnapshot[];
+          let bytes = rows.reduce((sum, entry) => sum + entry.snapshot.size, 0);
+          let count = rows.length;
+          for (const entry of rows) {
+            if (bytes <= maxBytes && count <= MAX_CACHE_ENTRIES) break;
+            if (entry.key === key) continue;
+            store.delete(entry.key);
+            bytes -= entry.snapshot.size;
+            count--;
+          }
+        };
       };
       transaction.oncomplete = () => resolve();
       transaction.onabort = () => reject(transaction.error);

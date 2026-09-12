@@ -45,7 +45,9 @@ class TestWorker {
 }
 
 function clientHarness(
-  resolveTransport = async (): Promise<EagerSyncTransport> => ({ plane: 'local' })
+  resolveTransport = async (): Promise<EagerSyncTransport> => ({ plane: 'local' }),
+  readSnapshot = async (_scope: string, _roomId: string): Promise<EagerSyncSnapshot | undefined> =>
+    undefined
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
   const workers: TestWorker[] = [];
@@ -55,6 +57,7 @@ function clientHarness(
     workspaceId: 'workspace',
     scope: 'scope',
     resolveTransport,
+    readSnapshot,
     auth: async () => {
       throw new Error('Local prefetch must never request cloud credentials');
     },
@@ -85,6 +88,48 @@ function clientHarness(
 }
 
 describe('eager-sync worker ownership', () => {
+  it('uses a durable activity checkpoint before constructing a worker', async () => {
+    const reads: Array<[string, string]> = [];
+    const h = clientHarness(undefined, async (scope, roomId) => {
+      reads.push([scope, roomId]);
+      return {
+        key: 'cached',
+        scope,
+        roomId,
+        plane: 'local',
+        lastMessageAt: 42,
+        savedAt: 1,
+        snapshot: new Blob(),
+      };
+    });
+
+    await expect(h.client.prefetch('cached-room', 42, new AbortController().signal)).resolves.toBe(
+      'synced'
+    );
+    expect(reads).toEqual([['scope', 'cached-room']]);
+    expect(h.workers).toEqual([]);
+    h.client.dispose();
+  });
+
+  it('constructs a worker when activity is newer than the durable checkpoint', async () => {
+    const h = clientHarness(undefined, async (scope, roomId) => ({
+      key: 'cached',
+      scope,
+      roomId,
+      plane: 'local',
+      lastMessageAt: 41,
+      savedAt: 1,
+      snapshot: new Blob(),
+    }));
+    const result = h.client.prefetch('changed-room', 42, new AbortController().signal);
+    const worker = await h.starts[0].promise;
+
+    worker.emit({ type: 'complete', outcome: 'synced' });
+    await expect(result).resolves.toBe('synced');
+    expect(h.workers).toEqual([worker]);
+    h.client.dispose();
+  });
+
   it('serializes jobs, terminates before advancing, and never returns snapshots to the UI', async () => {
     const h = clientHarness();
     const signal = new AbortController().signal;
