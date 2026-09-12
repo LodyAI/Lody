@@ -1845,7 +1845,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
       execution: SessionExecutionSnapshot;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
-    for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
+    for (let offset = 0; offset < candidates.length && matches.length <= limit; ) {
       const chunk = candidates.slice(offset, offset + readChunkSize);
       offset += chunk.length;
       const liveStatuses = await readSessionLiveStatusesMany({
@@ -4116,7 +4116,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
     {
       title: 'Request a conversation share',
       description:
-        'Request a static share of this conversation only when the user asks to share. A confirmation card appears in the current Lody conversation. The user must review and confirm in the app before any content is uploaded or a link is created. Supply a stable requestId and reuse it after an ambiguous response. sessionIds may explicitly include related conversations; the current conversation is always included. This tool cannot approve, upload, update, reset or revoke a share and never returns a link credential.',
+        'Request a static share of this conversation only when the user asks to share. A confirmation card appears in the current Lody conversation. The user must review and confirm in the app before any content is uploaded or a link is created. Supply a stable requestId and reuse it after an ambiguous response. The response echoes that requestId; shareRequestId is a separate server record ID, never a retry key. sessionIds may explicitly include related conversations; the current conversation is always included. This tool cannot approve, upload, update, reset or revoke a share and never returns a link credential.',
       inputSchema: z
         .object({
           requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),

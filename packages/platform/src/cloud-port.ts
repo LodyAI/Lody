@@ -15,13 +15,11 @@ import type {
 import type { PlatformKind, WorkspaceSummary } from './provider';
 import type {
   SessionShareRequestInput,
-  SessionShareRequestStatus,
+  SessionShareRequestResult,
 } from '@lody/shared/session-sharing';
 
 export interface CloudSessionSharingPort {
-  request(
-    input: SessionShareRequestInput
-  ): Promise<{ requestId: string; status: SessionShareRequestStatus }>;
+  request(input: SessionShareRequestInput): Promise<SessionShareRequestResult>;
 }
 
 /**

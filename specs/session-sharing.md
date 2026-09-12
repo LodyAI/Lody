@@ -88,6 +88,10 @@ include original workspace or agent identities in added export metadata.
 MCP may request publication but may not approve it. A pending card in the
 authenticated app requires human confirmation before the client prepares and
 publishes the copy. A tool-return flag or history text is not approval.
+The tool echoes the caller's `requestId` for retries and returns `shareRequestId`
+separately as the server record identity. Closing the editor discards upload
+credentials: an unpublished request must then be abandoned and recreated with a
+new retry key; an ordinary draft must be revoked before preparing another copy.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a

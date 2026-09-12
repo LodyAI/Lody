@@ -60,6 +60,14 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                   : t('settings.shares.revoked', 'Revoked')}
             </p>
           )}
+          {entry?.status === 'draft' && entry.canManage && !pending && !busy && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t(
+                'sharing.static.draftRecovery',
+                'This unpublished draft cannot be resumed after the editor closes. Revoke it, then prepare a new share.'
+              )}
+            </p>
+          )}
           {children.length > 0 && canPublish && !props.selectionLocked && (
             <label className="flex items-center justify-between gap-4 text-sm">
               <span>

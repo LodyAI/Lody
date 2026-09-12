@@ -73,10 +73,15 @@ function RequestCards({
             </p>
             {request.status === 'confirmed' && (
               <p className="mt-1 text-sm text-muted-foreground">
-                {t(
-                  'sharing.request.incomplete',
-                  'This deployment is not published yet. Continue in the open editor, or abandon it and ask the agent for a new request.'
-                )}
+                {selected?.requestId === request.requestId
+                  ? t(
+                      'sharing.request.incompleteOpen',
+                      'This deployment is not published yet. Retry in the open editor. Closing it discards the upload credentials; you must then abandon this deployment and request a new share.'
+                    )
+                  : t(
+                      'sharing.request.incomplete',
+                      'This deployment is not published yet and cannot be resumed after the editor closes. Abandon it, then ask the agent for a new share request with a new requestId.'
+                    )}
               </p>
             )}
             <ul className="my-2 list-inside list-disc text-sm">

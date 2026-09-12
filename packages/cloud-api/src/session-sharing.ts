@@ -3,6 +3,7 @@ import type { SharePackageManifest } from '@lody/shared/session-sharing';
 import type { SessionShareRequestStatus } from '@lody/shared/session-sharing';
 export type {
   SessionShareRequestInput,
+  SessionShareRequestResult,
   SessionShareRequestStatus,
 } from '@lody/shared/session-sharing';
 export type SessionShareRequest = {

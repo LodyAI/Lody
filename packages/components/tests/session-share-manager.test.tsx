@@ -105,6 +105,21 @@ describe('static share confirmation controls', () => {
     await click('Update deployment');
     expect(props.onPrepare).toHaveBeenCalledOnce();
   });
+  it('guides a reopened draft through revoke before preparing a replacement', async () => {
+    props.entry = { ...entry, status: 'draft' };
+    props.hasSecret = false;
+    props.onRevoke = async () => {
+      props.entry = { ...entry, status: 'revoked', revision: 2 };
+      await render();
+    };
+    await render();
+    expect(container.textContent).toContain('Revoke it, then prepare a new share');
+    expect(button('Prepare share')?.disabled).toBe(true);
+    await click('Revoke');
+    await click('Confirm');
+    expect(container.textContent).not.toContain('cannot be resumed');
+    expect(button('Prepare share')?.disabled).toBe(false);
+  });
   it('allows administrators to revoke but not reset or publish another member’s share', async () => {
     props.entry = { ...entry, canManage: false };
     props.hasSecret = false;

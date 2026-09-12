@@ -5,7 +5,7 @@ import type {
   SessionShareView,
   PublishedSessionSharePage,
   SessionShareRequestInput,
-  SessionShareRequestStatus,
+  SessionShareRequestResult,
   SessionShareRequest,
 } from './session-sharing';
 export type {
@@ -16,6 +16,7 @@ export type {
   SessionShareManagement,
   SessionShareRequestInput,
   SessionShareRequestStatus,
+  SessionShareRequestResult,
   SessionShareRequest,
 } from './session-sharing';
 import type { ModelUsage } from 'acp-extension-core';
@@ -359,7 +360,7 @@ export type CloudApi = {
   sessionSharing: {
     requestFromCli: Mutation<
       SessionShareRequestInput & { cliToken: string },
-      { requestId: string; status: SessionShareRequestStatus }
+      SessionShareRequestResult
     >;
     listRequests: Query<{ workspaceId: string; sourceSessionId: string }, SessionShareRequest[]>;
     cancelRequest: Mutation<{ requestId: string }, void>;

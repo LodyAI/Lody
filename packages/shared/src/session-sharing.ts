@@ -12,6 +12,13 @@ export type SessionShareRequestInput = {
   sessionIds: string[];
 };
 export type SessionShareRequestStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired';
+export type SessionShareRequestResult = {
+  /** Echo of the caller's idempotency key; reuse this as requestId on retry. */
+  requestId: string;
+  /** Server record identity for human confirmation, never a retry key. */
+  shareRequestId: string;
+  status: SessionShareRequestStatus;
+};
 
 /** Every response body, including attachment downloads, is bounded. */
 export const SESSION_SHARE_READ_LIFETIME_MS = 120_000;

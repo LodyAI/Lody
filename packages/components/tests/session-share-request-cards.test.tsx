@@ -76,17 +76,20 @@ it('opens human review without publishing and retains its editor after confirmat
   cloud.status = 'confirmed';
   await render();
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(container.textContent).toContain('Closing it discards the upload credentials');
   await click('Close editor');
-  expect(container.textContent).toContain('This deployment is not published yet');
+  expect(container.textContent).toContain('cannot be resumed after the editor closes');
+  expect(container.textContent).not.toContain('Retry in the open editor');
   await click('Abandon deployment');
   expect(cloud.cancel).toHaveBeenCalledWith({ requestId: 'request' });
 });
 
-it('keeps confirmed drafts recoverable after remount and hides completed requests', async () => {
+it('explains abandon-and-restart after remount and hides completed requests', async () => {
   cloud.status = 'confirmed';
   await render();
   expect(container.textContent).toContain('Abandon deployment');
   expect(container.textContent).not.toContain('Review share');
+  expect(container.textContent).toContain('new share request with a new requestId');
   cloud.status = 'published';
   await render();
   expect(container.querySelector('section')).toBeNull();

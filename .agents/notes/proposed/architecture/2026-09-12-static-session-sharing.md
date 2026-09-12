@@ -34,6 +34,13 @@ erase those assignments. Idempotent begin requests must bind initial credentials
 and confirmation identity as well as object hashes, or a retry can report success
 for a different link credential.
 
+MCP responses echo the caller's `requestId` retry key and separately expose the
+server's `shareRequestId`; the document ID is never substituted for the retry key.
+Upload credentials live only in the open editor. After it closes, unfinished
+requests must be abandoned and recreated with a new key; ordinary draft shares
+must be revoked before preparing another copy. The UI describes this explicitly
+rather than promising resumable uploads or persisting another secret.
+
 ## Outcome and verification limits
 
 The reader resolves one deployment and independently cancels main/side history

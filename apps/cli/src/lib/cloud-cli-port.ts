@@ -55,6 +55,7 @@ export function createCloudSessionSharingPort(options: {
   const result = z
     .object({
       requestId: z.string().min(1),
+      shareRequestId: z.string().min(1),
       status: z.enum(['pending', 'confirmed', 'cancelled', 'expired']),
     })
     .strict();
