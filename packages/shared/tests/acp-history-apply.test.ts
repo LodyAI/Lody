@@ -121,6 +121,255 @@ describe('acp history apply', () => {
     ]);
   });
 
+  it('routes an engine-opened turn to its own entry instead of the finalized turn', () => {
+    const userTurnNotifications = [
+      makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'msg_reply',
+        content: { type: 'text', text: 'the real reply' },
+        _meta: { lody: { turnId: '40' } },
+      }),
+    ];
+    const cronTurnNotifications = [
+      makeNotification({
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: 'msg_cron_think',
+        content: { type: 'text', text: 'cron thinking' },
+        _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+      }),
+      makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'msg_cron_text',
+        content: { type: 'text', text: 'cron status update' },
+        _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+      }),
+    ];
+
+    // The finalized user turn is still the routing target when the cron turn's
+    // updates arrive — they must not merge into it.
+    let history = applyNotificationOnHistory([], userTurnNotifications, undefined, {
+      targetAssistantEntryId: 'assistant:user-turn',
+    });
+    history = applyNotificationOnHistory(history, cronTurnNotifications, undefined, {
+      targetAssistantEntryId: 'assistant:user-turn',
+    });
+
+    expect(history).toHaveLength(2);
+    expect(history[0]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:user-turn',
+        acpTurnId: '40',
+        items: [{ type: 'text', text: 'the real reply' }],
+      })
+    );
+    expect(history[1]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:autonomous-auto:41',
+        acpTurnId: 'auto:41',
+        acpTurnOrigin: 'cron_job',
+        items: [
+          { type: 'thought', text: 'cron thinking' },
+          { type: 'text', text: 'cron status update' },
+        ],
+      })
+    );
+  });
+
+  it('keeps appending to the autonomous turn entry across batches', () => {
+    const cronThought = [
+      makeNotification({
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: 'msg_cron_think',
+        content: { type: 'text', text: 'cron thinking' },
+        _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+      }),
+    ];
+    const cronText = [
+      makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'msg_cron_text',
+        content: { type: 'text', text: 'cron status update' },
+        _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+      }),
+    ];
+
+    let history = applyNotificationOnHistory([], cronThought, undefined, {
+      targetAssistantEntryId: 'assistant:autonomous-auto:41',
+    });
+    history = applyNotificationOnHistory(history, cronText, undefined, {
+      targetAssistantEntryId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:autonomous-auto:41',
+        acpTurnId: 'auto:41',
+        items: [
+          { type: 'thought', text: 'cron thinking' },
+          { type: 'text', text: 'cron status update' },
+        ],
+      })
+    );
+  });
+
+  it('does not adopt an engine turn into a finalized entry whose own turn produced nothing', () => {
+    // A turn that died before producing output leaves a finalized, unstamped
+    // entry; an interrupting engine turn must not adopt it (that would merge
+    // the two turns exactly like the unrouted bug).
+    let history = applyNotificationOnHistory(
+      [
+        {
+          id: 'assistant:failed-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-04T07:50:00.000Z',
+          finished: true,
+          endedAt: 1788508365,
+          fileDiff: [],
+        } as never,
+      ],
+      [
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_cron',
+          content: { type: 'text', text: 'cron status update' },
+          _meta: { lody: { turnId: 'auto:32', turnOrigin: 'cron_job' } },
+        }),
+      ],
+      undefined,
+      { targetAssistantEntryId: 'assistant:failed-turn' }
+    );
+
+    expect(history).toHaveLength(2);
+    expect(history[0]).toEqual(expect.objectContaining({ id: 'assistant:failed-turn', items: [] }));
+    expect(history[0]?.acpTurnId).toBeUndefined();
+    expect(history[1]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:autonomous-auto:32',
+        acpTurnId: 'auto:32',
+        items: [{ type: 'text', text: 'cron status update' }],
+      })
+    );
+  });
+
+  it('keeps claude per-message boundary uuids on one entry with last-wins stamping', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_a',
+          content: { type: 'text', text: 'first answer' },
+        }),
+        makeNotification({
+          sessionUpdate: 'session_info_update',
+          _meta: { lody: { turnId: 'uuid-message-a' } },
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_b',
+          content: { type: 'text', text: ' and more' },
+        }),
+        makeNotification({
+          sessionUpdate: 'session_info_update',
+          _meta: { lody: { turnId: 'uuid-message-b' } },
+        }),
+      ],
+      undefined,
+      { targetAssistantEntryId: 'assistant:claude-turn' }
+    );
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:claude-turn',
+        acpTurnId: 'uuid-message-b',
+        items: [{ type: 'text', text: 'first answer and more' }],
+      })
+    );
+  });
+
+  it('keeps codex collab child-turn chunks inline with legacy restamping', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_main',
+          content: { type: 'text', text: 'main answer' },
+          _meta: { lody: { turnId: 'turn-main' } },
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_child',
+          content: { type: 'text', text: ' (child result)' },
+          _meta: { lody: { turnId: 'turn-child' } },
+        }),
+      ],
+      undefined,
+      { targetAssistantEntryId: 'assistant:codex-turn' }
+    );
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:codex-turn',
+        acpTurnId: 'turn-child',
+        items: [{ type: 'text', text: 'main answer (child result)' }],
+      })
+    );
+  });
+
+  it('finalizes an engine-opened turn on its end marker, once', () => {
+    const now = () => '2026-09-08T09:52:20.000Z';
+    let history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg_cron',
+          content: { type: 'text', text: 'cron status update' },
+          _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+        }),
+        makeNotification({
+          sessionUpdate: 'session_info_update',
+          _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job', turnEnded: true } },
+        }),
+      ],
+      undefined,
+      { targetAssistantEntryId: 'assistant:autonomous-auto:41', now }
+    );
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toEqual(
+      expect.objectContaining({
+        id: 'assistant:autonomous-auto:41',
+        acpTurnId: 'auto:41',
+        finished: true,
+        endedAt: Date.parse('2026-09-08T09:52:20.000Z'),
+        items: [{ type: 'text', text: 'cron status update' }],
+      })
+    );
+
+    // A duplicate marker must not move the terminal timing.
+    history = applyNotificationOnHistory(
+      history,
+      [
+        makeNotification({
+          sessionUpdate: 'session_info_update',
+          _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job', turnEnded: true } },
+        }),
+      ],
+      undefined,
+      {
+        targetAssistantEntryId: 'assistant:autonomous-auto:41',
+        now: () => '2026-09-08T10:00:00.000Z',
+      }
+    );
+    expect(history[0]?.endedAt).toBe(Date.parse('2026-09-08T09:52:20.000Z'));
+  });
+
   it('keeps a valid UTF-8 terminal tail within the shared byte budget', () => {
     const input = `${'a'.repeat(900)}${'界'.repeat(100)}${'🙂'.repeat(100)}`;
     const result = truncateTerminalOutputForHistory(input);
