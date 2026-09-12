@@ -117,9 +117,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
     async readVisiblePage(request: SessionVisiblePageRequest): Promise<SessionVisiblePage> {
       const limit = Math.max(0, Math.floor(request.limit));
-      if (limit === 0) return { turns: [], hasMore: false };
+      if (limit === 0) return { turns: [], positions: [], hasMore: false };
       let index = cursorToIndex(request.cursor, list.length) - 1;
-      const page: SessionHistory[] = [];
+      const page: Array<{ index: number; turn: SessionHistory }> = [];
       let hasMore = false;
       for (; index >= 0; index -= 1) {
         const read = readSlot(list, index);
@@ -128,11 +128,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
           hasMore = true;
           break;
         }
-        page.push(read.turn);
+        page.push({ index, turn: read.turn });
       }
       const nextCursor = index + 1 > 0 ? String(index + 1) : undefined;
+      const ordered = page.reverse();
       return {
-        turns: page.reverse(),
+        turns: ordered.map((entry) => entry.turn),
+        positions: ordered.map((entry) => entry.index),
         ...(nextCursor !== undefined ? { nextCursor } : {}),
         hasMore: hasMore && nextCursor !== undefined,
       };

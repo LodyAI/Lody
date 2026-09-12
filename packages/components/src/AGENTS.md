@@ -12,8 +12,13 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
   per-turn row, `turn(i)` for a hydrated turn, `acquireRange` and its release handle to hold a
   window. In React use `useSessionDoc().history`, `useConversationTail`,
   `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
-- **Write** `store.historyWriter` — `append`, `replace`, `respondPermission`,
-  and `read` for the read-modify-write flows. It uses the shared parser and materializer; neither reader owns writes.
+- **Write** domain commands through `store.sessionData` (`@lody/shared/session-data`):
+  `appendTurn`, `replaceTurn`, `setTurnField` (explicit set/clear), `openAssistantTurn`,
+  `resolveTaskProposal`, `respondPermission`. It is composed over the same doc and the
+  one shared writer; a rejected command surfaces as a failure, never a silent drop.
+- `store.historyWriter` is the storage-owned writer behind that seam: keep it for
+  capture/copy/rollback and read-modify-write flows that already need its raw rules.
+  Do not add a second writer or bypass `sessionData` for ordinary turn writes.
 
 `getState()` has no `history` key and `setState` receives a draft without one,
 so the ordinary spellings of a second path do not compile. What types cannot

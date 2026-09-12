@@ -277,6 +277,7 @@ export function runSessionDataContract(
 
       const first = await data.history.readVisiblePage({ limit: 1, isVisible });
       expect(first.turns.map((turn) => turn.id)).toEqual(['t2']);
+      expect(first.positions).toEqual([2]);
       expect(first.hasMore).toBe(true);
       expect(first.nextCursor).toBeDefined();
 
@@ -286,6 +287,7 @@ export function runSessionDataContract(
         isVisible,
       });
       expect(second.turns.map((turn) => turn.id)).toEqual(['t0']);
+      expect(second.positions).toEqual([0]);
       expect(second.hasMore).toBe(false);
 
       // A tail of hidden turns must not be reported as an empty history.

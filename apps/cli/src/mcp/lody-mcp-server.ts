@@ -122,7 +122,8 @@ import {
   selectDefaultAgentConfigForCreate,
   resolveTurnDispatchConfig,
   sendSessionChatResult,
-  toSessionTranscriptEntries,
+  isVisibleTranscriptTurn,
+  toSessionTranscriptEntry,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -2055,18 +2056,27 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const all = toSessionTranscriptEntries(await sessionDoc.getHistory());
     const beforeIndex = parseSessionHistoryCursor(input.cursor, sessionId, Number.MAX_SAFE_INTEGER);
-    const candidates = all.filter((entry) => entry.index < beforeIndex);
-    const selected = candidates.slice(-(input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT));
-    let items: Array<Record<string, unknown>> = selected.map((entry) => ({ ...entry }));
+    // Bounded business paging: scan raw rows backwards until `limit` displayable
+    // entries are collected. `limit` counts displayable turns; the cursor is a
+    // raw position, so hidden/empty rows never shift the caller.
+    const page = await sessionDoc.sessionData.history.readVisiblePage({
+      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+      ...(beforeIndex < Number.MAX_SAFE_INTEGER ? { cursor: String(beforeIndex) } : {}),
+      isVisible: isVisibleTranscriptTurn,
+    });
+    let items: Array<Record<string, unknown>> = [];
+    page.turns.forEach((turn, offset) => {
+      const formatted = toSessionTranscriptEntry(page.positions[offset] ?? 0, turn);
+      if (formatted) items.push({ ...formatted });
+    });
+    const hasOlder = page.hasMore;
     const makeResponse = () => {
       const firstIndex = typeof items[0]?.index === 'number' ? items[0].index : undefined;
-      const hasOlder = firstIndex !== undefined && all.some((entry) => entry.index < firstIndex);
       return {
         sessionId,
         items,
-        ...(hasOlder
+        ...(hasOlder && firstIndex !== undefined
           ? {
               nextCursor: encodeCursor({
                 v: 1,

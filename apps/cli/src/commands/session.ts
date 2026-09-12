@@ -509,34 +509,50 @@ function extractTranscriptText(
   return text || undefined;
 }
 
+/**
+ * Whether a raw history row is part of the displayable transcript. Shared by the
+ * whole-history formatter and by bounded paging, so both agree on `limit`
+ * counting displayable entries while positions stay raw.
+ */
+export function isVisibleTranscriptTurn(
+  entry: SessionHistoryInput
+): entry is SessionHistoryInput & { role: SessionTranscriptRole } {
+  if (!isTranscriptRole(entry.role)) return false;
+  if (
+    entry.role === 'system' &&
+    !entry.items?.some((item) => item.type === 'operation_completion')
+  ) {
+    return false;
+  }
+  return (
+    extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role) !== undefined
+  );
+}
+
+/** Format one raw row at its raw position, or `undefined` when not displayable. */
+export function toSessionTranscriptEntry(
+  index: number,
+  entry: SessionHistoryInput
+): SessionTranscriptEntry | undefined {
+  if (!isVisibleTranscriptTurn(entry)) return undefined;
+  const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
+  if (!text) return undefined;
+  return {
+    index,
+    id: entry.id,
+    role: entry.role,
+    timestamp: entry.timestamp,
+    text,
+  };
+}
+
 export function toSessionTranscriptEntries(
   history: SessionHistoryInput[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
-
   for (const [index, entry] of history.entries()) {
-    if (!isTranscriptRole(entry.role)) {
-      continue;
-    }
-    if (
-      entry.role === 'system' &&
-      !entry.items?.some((item) => item.type === 'operation_completion')
-    ) {
-      continue;
-    }
-
-    const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
-    if (!text) {
-      continue;
-    }
-
-    entries.push({
-      index,
-      id: entry.id,
-      role: entry.role,
-      timestamp: entry.timestamp,
-      text,
-    });
+    const formatted = toSessionTranscriptEntry(index, entry);
+    if (formatted) entries.push(formatted);
   }
 
   return entries;

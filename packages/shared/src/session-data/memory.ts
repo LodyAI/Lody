@@ -149,9 +149,9 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     },
     async readVisiblePage(request: SessionVisiblePageRequest): Promise<SessionVisiblePage> {
       const limit = Math.max(0, Math.floor(request.limit));
-      if (limit === 0) return { turns: [], hasMore: false };
+      if (limit === 0) return { turns: [], positions: [], hasMore: false };
       let index = cursorToIndex(request.cursor, turns.length) - 1;
-      const page: SessionHistory[] = [];
+      const page: Array<{ index: number; turn: SessionHistory }> = [];
       let hasMore = false;
       for (; index >= 0; index -= 1) {
         const turn = turns[index]!;
@@ -160,13 +160,15 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
           hasMore = true;
           break;
         }
-        page.push(clone(turn));
+        page.push({ index, turn: clone(turn) });
       }
       // The cursor is the raw boundary, not the visible-count boundary: the next
       // page starts strictly below the lowest raw row this page settled on.
       const nextCursor = index + 1 > 0 ? String(index + 1) : undefined;
+      const ordered = page.reverse();
       return {
-        turns: page.reverse(),
+        turns: ordered.map((entry) => entry.turn),
+        positions: ordered.map((entry) => entry.index),
         ...(nextCursor !== undefined ? { nextCursor } : {}),
         hasMore: hasMore && nextCursor !== undefined,
       };

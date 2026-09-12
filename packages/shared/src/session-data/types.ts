@@ -113,6 +113,8 @@ export const sessionTurnReadIsReady = (
  */
 export type SessionVisiblePage = {
   readonly turns: readonly SessionHistory[];
+  /** Raw slot position of each entry in `turns`, aligned by index. */
+  readonly positions: readonly number[];
   readonly nextCursor?: string;
   readonly hasMore: boolean;
 };
