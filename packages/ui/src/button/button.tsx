@@ -81,6 +81,21 @@ const styles = stylex.create({
     borderRadius: button.radiusMedium,
     fontSize: button.text,
   },
+  /**
+   * The box an icon-only button gives what is in it. It is drawn by the button
+   * for the reason a menu row draws its leading box: this package's glyphs
+   * state their size as 100% of whatever holds them, and StyleX has no
+   * descendant selector with which a button could reach one. Without it a
+   * 16px cross fills a 28px button edge to edge.
+   */
+  glyph: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: button.iconSize,
+    height: button.iconSize,
+  },
   iconMini: { width: button.heightMini, paddingInline: 0 },
   iconSmall: { width: button.heightSmall, paddingInline: 0 },
   iconMedium: { width: button.heightMedium, paddingInline: 0 },
@@ -168,6 +183,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     shape = 'default',
     icon = false,
     className,
+    children,
     ...rest
   },
   ref
@@ -183,6 +199,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       variant !== 'destructive' &&
       styles.destructiveTone
   );
+  const glyph = stylex.props(styles.glyph);
   return (
     <BaseButton
       ref={ref}
@@ -191,6 +208,14 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       {...rest}
       className={className ? `${sx.className} ${className}` : sx.className}
       style={sx.style}
-    />
+    >
+      {icon ? (
+        <span className={glyph.className} style={glyph.style}>
+          {children}
+        </span>
+      ) : (
+        children
+      )}
+    </BaseButton>
   );
 });

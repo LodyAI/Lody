@@ -61,3 +61,63 @@ export function DotGlyph() {
     </svg>
   );
 }
+
+/**
+ * The marks a message wears. A tone draws its own rather than taking one from a
+ * caller, the way a menu row draws its submenu chevron: the whole point of a
+ * tone is that a person recognises what kind of message this is before reading
+ * it, and a caller free to pass any glyph can put a tick on a failure.
+ */
+function Ringed({ d }: { d: string }) {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d={d}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Neutral: something worth knowing, and nothing has gone wrong. */
+export function InfoGlyph() {
+  return <Ringed d="M8 7.2v4M8 4.8h.01" />;
+}
+
+/** It worked. */
+export function SuccessGlyph() {
+  return <Ringed d="M5.2 8.2 7.2 10.2 10.8 6" />;
+}
+
+/** It did not. */
+export function DangerGlyph() {
+  return <Ringed d="M8 4.8v4M8 11.2h.01" />;
+}
+
+/**
+ * It still may. The triangle is what separates a warning from an error at a
+ * glance, which two circles of different colours cannot do for a person who
+ * does not see the difference between them.
+ */
+export function WarningGlyph() {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 1.8 15 13.8H1L8 1.8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 6.4v3.2M8 11.8h.01"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

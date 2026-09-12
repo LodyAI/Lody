@@ -24,11 +24,10 @@ into one component at a time. Source-consumed; consumers compile it through
   `nativeButton`, so `:disabled` and `:focus-visible` reach them the way they
   reach an `<input>` and a `<label>` can point at them.
 - Controls in the field family read validity and disabled from `Field.Root`
-  through Base UI's state callback on `className`. A control does not take its
-  own `invalid` or `disabled` colour prop. The invalid ring also follows
-  `aria-invalid`, which `Field.Root` renders onto the control, so the ring and
-  what a screen reader announces are one fact; `src/field/invalid.ts` owns that
-  reading. StyleX cannot express an attribute selector, so it is read in JS.
+  through Base UI's state callback on `className`, never from a prop of their
+  own. The invalid ring follows `aria-invalid`, so the ring and what a screen
+  reader announces are one fact; `src/field/invalid.ts` owns that reading in JS,
+  because StyleX cannot express an attribute selector.
 - A trigger reads `field` and the list it opens reads `popup`: different rungs,
   and the list shares its vocabulary with a menu rather than an input.
   `src/popup/surface.ts` holds the appearance the floating parts share, the way
@@ -42,33 +41,31 @@ into one component at a time. Source-consumed; consumers compile it through
   `PopupContainerProvider`, switching to the absolute strategy when they do: a
   container centred with `translate` is the containing block for `fixed`
   descendants, so a viewport-anchored popup inside one lands at its own offset.
-- `Menu` is the dropdown menu; Base UI has no separate part for one and a second
-  name would be a second thing to keep in step. `ContextMenu` and `Menubar`
-  restate only the way in and re-export `Menu`'s rows. A menu reads `popup` and
-  replaces exactly one of a list's declarations, its `--anchor-width`; the rest
-  of the surface, and every row, is shared through `src/popup/surface.ts`.
-- A menu row's leading box sizes the glyph in it; a caller's icon must fill the
-  box rather than take its library's default, because StyleX has no descendant
-  selector to reach it with. A checkbox or radio row's box holds its mark only —
-  Base UI unmounts the mark while unticked, so an icon there would move as the
-  row toggles.
+- `Menu` is the dropdown menu; `ContextMenu` and `Menubar` restate only the way
+  in and re-export its rows. A menu reads `popup` and replaces exactly one of a
+  list's declarations, `--anchor-width`; the surface and every row are shared
+  through `src/popup/surface.ts`.
+- Whatever holds a glyph gives it a box, because this package's glyphs state
+  100% and StyleX has no descendant selector: a menu row's leading box, a
+  Select's chevron, a message's mark, and an icon-only `Button`, which draws a
+  `button.iconSize` box around its children. A caller's icon states 100% rather
+  than its library's default. A checkbox or radio row's box holds its mark only.
 - Every trigger here is Base UI's, unstyled: a surface opens a menu, a popover or
   a modal with whatever it already had there, through `render={<Button …/>}`.
   Post-close focus is the product's policy, passed as `finalFocus`.
 - `Popover` reads `popup` too and replaces five of a list's declarations: the
-  anchor width, the row inset, and the three that make type a control's rather
-  than prose. `test/popover.test.tsx` pins that as a count.
+  anchor width, the row inset, and the three that make type prose.
+  `test/popover.test.tsx` pins that as a count.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
-  `dialog/surface.ts` and the `dialog` group; only the way in and what may
-  dismiss them differ. An outside press does not answer an alert dialog, but
-  Escape does. `Content` names its own panel to `PopupContainerProvider` and
-  holds it in state, not a ref: React attaches a child's refs before its
-  parent's, so a popup mounting in the same commit reads null and lands on the
-  body — the one case that mechanism exists to prevent.
-- There is no `Sheet`. A panel arriving from an edge is Base UI's `Drawer`,
-  whose viewport lays the panel out so the panel's `transform` stays free to
-  carry the drag. `side` is the writing direction's edge, from which `Root`
-  derives the physical swipe; `inset` is the second axis. See the README.
+  `dialog/surface.ts`; only the way in and what may dismiss them differ. An
+  outside press does not answer an alert dialog, but Escape does. `Content`
+  names its own panel to `PopupContainerProvider` and holds it in **state, not a
+  ref**: React attaches a child's refs before its parent's, so a popup mounting
+  in the same commit would read null and land on the body.
+- There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`,
+  whose viewport lays it out so the panel's `transform` carries the drag. `side`
+  is the writing direction's edge, from which `Root` derives the physical swipe;
+  `inset` is the second axis.
 - `Tooltip` is the one floating part that does not read `popup`: the ladder
   inverts it, `label` under `shadow.medium`. Base UI makes it visual-only — no
   role, no `aria-describedby` — so every trigger states its own `aria-label`.
@@ -77,15 +74,19 @@ into one component at a time. Source-consumed; consumers compile it through
   own indicator and states the size once for every tab in it; a revealed
   panel's padding rides on a child, because Base UI measures the height it
   animates with `scrollHeight`, which counts padding.
+- Alert, Toast, Progress, Skeleton and Spinner are one `feedback` family: what
+  the system says back. A tone is a tint and a mark, never a fill; the mark is
+  the part's, and `feedback/tone.ts` maps the four. The tint is mixed in
+  `feedback/surface.ts` from each rung's own background, because an Alert is a
+  card and a Toast floats. `disabled` from Base UI state, not `:disabled`.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
   document's palette — a light panel on a dark page would open a dark list.
-- A part on the floating or modal rung declares its own edge, which is no edge:
-  the shell rings any focused `[tabindex]` through a zero-specificity `:where()`
-  rule and Base UI focuses the highlighted row and the open panel, so both state
-  `box-shadow: none` / `outline: none`. `Combobox.Empty` stays mounted for its
-  live region and collapses through `:empty`; hiding it drops it from the tree.
+- A part the shell may ring states its own edge, which is no edge —
+  `box-shadow: none` / `outline: none` — because the shell rings any focused
+  `[tabindex]` through a zero-specificity `:where()` rule. `Combobox.Empty`
+  stays mounted for its live region and collapses through `:empty`.
 - Files that call `defineVars`, `createTheme` or `defineConsts` end in
   `.stylex.ts`. Their arguments are object literals; the compiler cannot
   evaluate helpers. Vars are imported from that file by a specifier ending in

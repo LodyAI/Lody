@@ -20,6 +20,11 @@ export const button = stylex.defineVars({
   textMini: text.footnoteSize,
   text: text.subheadlineSize,
   gap: '6px',
+  // What an icon-only button holds. The button is square at the size's height
+  // and the glyph inside it is not: 16 is the size every other holder in this
+  // package gives a glyph — a menu row's leading box, a Select's chevron, a
+  // message's mark — so an icon button is the same mark in a pressable box.
+  iconSize: '16px',
   primaryBackground: colors.label,
   primaryLabel: colors.background,
   primaryEdge: shadow.inkEdge,
