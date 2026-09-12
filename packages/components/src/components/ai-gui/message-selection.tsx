@@ -258,10 +258,12 @@ export function MessageSelectionOverlay() {
 export function MessageSelectionRow({
   id,
   first,
+  virtualRowKey,
   children,
 }: {
   id?: string;
   first: boolean;
+  virtualRowKey?: string;
   children: ReactNode;
 }) {
   const selection = useContext(MessageSelectionContext);
@@ -272,6 +274,7 @@ export function MessageSelectionRow({
   return (
     <div
       className={`relative ${selectable ? 'flow-root select-none cursor-default' : ''} ${selected ? 'bg-primary/10' : ''}`}
+      data-chat-virtual-row-key={virtualRowKey}
       data-message-selection-id={selectable ? id : undefined}
       onPointerDownCapture={
         selectable

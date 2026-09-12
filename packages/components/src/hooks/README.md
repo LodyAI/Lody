@@ -44,6 +44,13 @@ changing keyboard, terminal, or window-resize follow behavior, which is why it i
 consumed for exactly one height resize and is not merged into programmatic-jump
 suppression.
 
+The hook also mirrors the follow lock synchronously into the conversation renderer.
+When the latest Turn finishes after the reader has released follow, the renderer
+captures a stable visible row before the immediate `Worked for …` contraction and
+compensates its viewport coordinate in the following layout effect. A temporary
+trailing spacer prevents native scroll-range clamping before that compensation runs;
+bounded follow-up corrections absorb Virtua's asynchronous row measurements.
+
 ## `useStableSession`
 
 A single HTTP 401 can be a stale response, so it is verified once against the
