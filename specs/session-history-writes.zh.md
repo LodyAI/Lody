@@ -1,7 +1,7 @@
 # 会话历史写入
 
 Status: draft
-Translation: stale
+Translation: current
 
 [English](session-history-writes.md)
 
@@ -24,14 +24,28 @@ Translation: stale
   复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。
   调用者构造的 JSON 不能冒充这种来源。复制不修改源文档。
 - 编辑后重发失败时，可恢复捕获的旧历史，不将其当新输入重验。一次性的本地回滚凭据
-  只恢复本次变化的区间，保留未涉及轮次的当前内容。期间若轮次身份/顺序变化，或区间内
+  只恢复本次变化的区间，保留未涉及轮次的当前内容及随后追加的轮次。期间若轮次身份/顺序变化，或区间内
   内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
 - 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
-- 工具状态、权限请求与描述元数据（title/kind/locations）只解析本次变化的字段，
-  不重验未修改的工具内容；只修改 outcome 时保留已有请求信息。
-  修改工具身份或内容仍需完整 item 解析；新增元数据非法时，整条命令在写入前拒绝。
+- 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
+  只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
+  单独解析。新增字段非法时，整条命令在写入前拒绝。
+- 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置和保持身份的
+  task proposal 编辑也只校验变化的字段。
+- 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
+- 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
+  直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的
+  prompt，Lody 记录取消并发送 provider cancel，不中断 owner fiber。ACP 返回前保留 owner
+  和未完成的历史；新 dispatch 及未投递的 steer 保持 pending。Stop 后五秒 raw prompt
+  仍未结束时，Lody 终止旧 session，让连接关闭结束 prompt。计时不等待 cancel ACK，
+  也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
+  和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
+  将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
+- 已提交的 steer 等待接受时，若 Stop 先发生，则后到的成功 ACK 不得转移 ownership、
+  改变 source invocation 或将 source 结算为 handled。保持当前 cancellation owner，
+  直到 provider 完成。不得重排该已接受的 steer：拒绝本地 ownership 转移不代表消息未投递。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 

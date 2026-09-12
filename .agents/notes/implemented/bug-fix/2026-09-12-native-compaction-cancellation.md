@@ -1,7 +1,9 @@
 # Cancel compaction through the native turn
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-12-native-compaction-cancellation.zh.md)
 
 ## Abstract
 
@@ -33,9 +35,13 @@ Lody records `runtime.cancelRequested` and sends provider cancel while the promp
 is in flight. It retains the existing owner fiber and runtime until ACP returns;
 the scope then runs cancellation finalization and releases ownership. A new user
 message remains pending and cannot reach ACP during that interval. Steer admission
-also checks the existing cancellation flag, including after asynchronous preparation,
-so a handoff cannot submit a second prompt while the cancelled provider drains. Cancellation
-before prompt submission and finalization teardown retain their existing paths.
+also checks the existing cancellation flag after asynchronous preparation and after
+the provider's acceptance ACK. A successful ACK after Stop cannot replace the source
+invocation, force its settlement to handled, or transfer ownership. It returns
+`stale-turn` without requeueing an already accepted steer and releases the application
+lease; the existing owner continues to its cancelled terminal outcome. Neither the
+daemon nor the client treats that disposition as permission to replay the steer.
+Cancellation before prompt submission and finalization teardown retain their existing paths.
 
 The earlier CLI code already retained the runtime through `pendingPromptCompletion`
 inside its scope finalizer; it did not unconditionally release ownership at Stop.
@@ -77,7 +83,11 @@ neither hiding progress nor rewriting history can interrupt native execution.
   retaining unfinished history and ownership until ACP ends. External-interruption
   coverage retains raw completion, process termination, and failed-termination cases.
 - Steer coverage retains undelivered history and its dispatch pointer when Stop
-  precedes the request or arrives while prompt blocks are being built.
+  precedes the request or arrives while prompt blocks are being built. A controlled
+  acceptance ACK arriving after Stop preserves the source invocation, user-turn and
+  dispatch owner, leaves source history unfinished, and never reports handled or
+  replays the steer. Provider terminal then settles the source as cancelled and
+  releases ownership. This race failed on `e4a860a2` before the post-ACK guard.
 - Contract: [Session history writes](../../../../specs/session-history-writes.md).
 - Pull request: [Lody #618](https://github.com/LodyAI/Lody/pull/618).
 - Adapter implementation: [Codex adapter #41](https://github.com/LodyAI/acp-extension-codex/pull/41).
@@ -88,7 +98,7 @@ compaction normally and confirmed that Stop produces native `interrupted` before
 the ACP prompt returns `cancelled`.
 
 Root typechecks, lint, formatting, i18n, documentation and boundary checks passed.
-The targeted Lody execution, dispatch-watcher and AgentClient suites pass 206 tests.
+The targeted Lody execution, dispatch-watcher and AgentClient suites pass 207 tests.
 The full `pnpm check` reached Electron tests: 103 passed, while the relay suite
 could not load because this checkout lacks the installed Electron binary. All
-preceding workspace test suites passed. Documentation translation remains pending.
+preceding workspace test suites passed.

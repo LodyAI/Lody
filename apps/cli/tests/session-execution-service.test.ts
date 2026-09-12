@@ -5289,12 +5289,14 @@ describe('SessionExecutionService', () => {
 
   const cancelCompletions = [
     'native-terminal',
+    'late-steer-ack',
     'terminated',
     'termination-failed',
     'cancel-unacknowledged',
   ] as const;
   it.each(cancelCompletions)('retains cancelled ownership (%s)', async (completion) => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const nativeCompletion = completion === 'native-terminal' || completion === 'late-steer-ack';
     let meta: Record<string, unknown> = {};
     let history: Array<Record<string, unknown>> = [
       {
@@ -5337,6 +5339,11 @@ describe('SessionExecutionService', () => {
     const cancelSubmitted = createDeferred();
     const cancelAck = createDeferred();
     const nativeTerminal = createDeferred<PromptResponse>();
+    const steerSubmitted = createDeferred();
+    const steerApplied = createDeferred<{ release: () => void }>();
+    const steerReleased = createDeferred();
+    const deliveredSteers: ContentBlock[][] = [];
+    let steering: ReturnType<SessionExecutionService['steerSession']> | undefined;
     const termination = createDeferred();
     let terminationRequested = false;
     let nativePending = false;
@@ -5377,6 +5384,19 @@ describe('SessionExecutionService', () => {
       promptSignal = options?.signal;
       return sendPrompt(id, blocks, options);
     });
+    if (completion === 'late-steer-ack') {
+      vi.spyOn(agentClient, 'getAcknowledgedSteerCapability').mockReturnValue({
+        provider: 'codex',
+        appliedNotificationMethod: 'codex/steerApplied',
+        upstreamTurn: 'same',
+        configPolicy: 'active',
+      });
+      vi.spyOn(agentClient, 'steerPrompt').mockImplementation((_id, blocks) => {
+        deliveredSteers.push(blocks);
+        steerSubmitted.resolve();
+        return { applied: steerApplied.promise, completion: nativeTerminal.promise };
+      });
+    }
     const session = {
       sessionId: 'session-prompt-cancel' as SessionId,
       acpSessionId: 'acp-prompt-cancel' as ACPSessionId,
@@ -5465,6 +5485,24 @@ describe('SessionExecutionService', () => {
     const running = service.continueSession(message, { onTurnSettled });
     try {
       await promptStarted.promise;
+      const sourceInvocation = service.getActiveInvocationContext(message.sessionId);
+      if (completion === 'late-steer-ack') {
+        history.push({
+          id: 'steer-user-turn',
+          role: 'user',
+          status: 'pending_apply',
+          inputConfig: { prompt: 'change direction' },
+        });
+        steering = service.steerSession({
+          sessionId: message.sessionId,
+          expectedTurnId: 'assistant-prompt-cancel',
+          userTurnId: 'steer-user-turn',
+          userId: 'steer-requester',
+          timestamp: '2026-09-13T00:00:00.000Z',
+          inputConfig: { prompt: 'change direction' },
+        });
+        await steerSubmitted.promise;
+      }
       await expect(
         service.cancelSession({
           type: 'session/cancel',
@@ -5477,6 +5515,22 @@ describe('SessionExecutionService', () => {
       await cancelSubmitted.promise;
       if (completion !== 'cancel-unacknowledged') cancelAck.resolve();
       await vi.advanceTimersByTimeAsync(0);
+      if (steering) {
+        steerApplied.resolve({ release: () => steerReleased.resolve() });
+        await expect(steering).resolves.toMatchObject({
+          applied: false,
+          disposition: 'stale-turn',
+        });
+        await steerReleased.promise;
+        expect(onTurnSettled).not.toHaveBeenCalled();
+        expect(service.getActiveInvocationContext(message.sessionId)).toEqual(sourceInvocation);
+        expect(service.getActiveUserTurnId(message.sessionId)).toBe(message.userTurnId);
+        expect(meta.processingUserMsgId).toBe(message.userTurnId);
+        expect(meta.latestUserMsgId).not.toBe('steer-user-turn');
+        expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
+          status: 'pending_apply',
+        });
+      }
       expect(agentClient.pendingPromptCompletion).not.toBeNull();
       expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
         hasActiveTurn: true,
@@ -5494,7 +5548,9 @@ describe('SessionExecutionService', () => {
       meta.latestUserMsgId = nextMessage.userTurnId;
       await service.continueSession(nextMessage);
       expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
-      expect(history[2]).toMatchObject({ status: 'pending' });
+      expect(history.find((entry) => entry.id === nextMessage.userTurnId)).toMatchObject({
+        status: 'pending',
+      });
       expect(deps.recordChatFailure).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(4_999);
       expect(terminationRequested).toBe(false);
@@ -5506,7 +5562,7 @@ describe('SessionExecutionService', () => {
         workspaceId: message.workspaceId,
         turnId: 'assistant-prompt-cancel',
       });
-      if (completion === 'native-terminal') {
+      if (nativeCompletion) {
         nativeTerminal.resolve({ stopReason: 'cancelled' });
       } else {
         await vi.advanceTimersByTimeAsync(1);
@@ -5535,12 +5591,14 @@ describe('SessionExecutionService', () => {
       }
       await running;
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(terminationRequested).toBe(completion !== 'native-terminal');
+      expect(terminationRequested).toBe(!nativeCompletion);
     } finally {
+      steerApplied.resolve({ release: () => steerReleased.resolve() });
       cancelAck.resolve();
       termination.resolve();
       nativeTerminal.resolve({ stopReason: 'cancelled' });
       await running;
+      await steering;
       vi.useRealTimers();
     }
 
@@ -5564,12 +5622,21 @@ describe('SessionExecutionService', () => {
       processingUserMsgId: undefined,
     });
     expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
+    expect(onTurnSettled).not.toHaveBeenCalledWith('handled');
     await service.continueSession(nextMessage);
     expect(delivered).toEqual([
       [{ type: 'text', text: '/compact' }],
       [{ type: 'text', text: 'continue' }],
     ]);
-    expect(history[2]).toMatchObject({ id: nextMessage.userTurnId, status: 'handled' });
+    expect(history.find((entry) => entry.id === nextMessage.userTurnId)).toMatchObject({
+      status: 'handled',
+    });
+    if (steering) {
+      expect(deliveredSteers).toEqual([[{ type: 'text', text: 'change direction' }]]);
+      expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
+        status: 'pending_apply',
+      });
+    }
     expect(meta).toMatchObject({
       latestUserMsgId: nextMessage.userTurnId,
       lastHandledUserMsgId: nextMessage.userTurnId,

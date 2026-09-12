@@ -1551,12 +1551,17 @@ export class SessionExecutionService {
       const application = await steerRun.applied;
       try {
         if (
+          runtime.cancelRequested ||
           this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
           !runtime.promptInFlight ||
           runtime.turnId !== previousTurnId ||
           runtime.activePromptRun !== ownedPromptRun
         ) {
-          return reject('stale-turn', 'Steer application arrived after ownership changed');
+          // Provider acceptance forbids replay; Stop keeps the source cancellation owner.
+          return reject(
+            'stale-turn',
+            'Steer application arrived after cancellation or ownership changed'
+          );
         }
 
         // The provider has accepted this steer and may execute tools before

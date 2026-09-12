@@ -55,9 +55,9 @@ Contract: specs/session-orchestration.md.
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never steer a cancelling turn or strand unaccepted steer in `pending_apply`. Requeue it
-  through the pointer, not the entry status, only for pre-submission rejections or
-  `AgentSteerNotDeliveredError`; skip active or already-handled entries.
+- Never submit steer after Stop; a late accepted ACK cannot transfer ownership or requeue.
+  Requeue unaccepted steer via its pointer, not entry status, only before submission or on
+  `AgentSteerNotDeliveredError`; skip active or handled entries.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
