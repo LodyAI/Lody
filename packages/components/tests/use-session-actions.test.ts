@@ -257,6 +257,9 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
     sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
   );
   const repo = {
+    listDoc: vi.fn(async () =>
+      Array.from(docs, ([docId, meta]) => ({ docId, exists: true, meta: { ...meta } }))
+    ),
     getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
       docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
@@ -313,9 +316,10 @@ describe('useSessionActions', () => {
       workspaceSlug?: string | null;
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
+      jotaiStore?: ReturnType<typeof createStore>;
     } = {}
   ): Promise<SessionActions> => {
-    const jotaiStore = createStore();
+    const jotaiStore = options.jotaiStore ?? createStore();
     jotaiStore.set(runtimeAtom, runtime);
     jotaiStore.set(docMetaCacheReadyAtom, options.docMetaCacheReady ?? false);
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
@@ -1122,6 +1126,9 @@ describe('useSessionActions', () => {
     const runtime = createRuntime({
       repo: {
         getDocMeta,
+        listDoc: vi.fn(async () => [
+          { docId: getSessionRoomId(sessionId), exists: true, meta: sessionMeta },
+        ]),
         upsertDocMeta,
         openFlockDoc: vi.fn(async () => ({
           flock: { scan: () => [], set: vi.fn(), delete: vi.fn(), commit: vi.fn() },
@@ -1156,7 +1163,11 @@ describe('useSessionActions', () => {
     // The repo cannot read the doc meta yet (child session still hydrating).
     const getDocMeta = vi.fn(async () => undefined);
     const runtime = createRuntime({
-      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+      repo: {
+        getDocMeta,
+        listDoc: vi.fn(async () => []),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
     });
     const actions = await renderActions(runtime, {
       sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
@@ -1175,12 +1186,15 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('archives child tabs without archiving independently opened session workspaces', async () => {
+  it('discovers child tabs from complete metadata before the UI cache hydrates', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('archive', false);
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
     const runtime = createRuntime({ repo: metaRepo.repo });
-    const actions = await renderActions(runtime, { sessionMetaCache });
+    const actions = await renderActions(runtime, {
+      docMetaCacheReady: false,
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
     sendIpcMock.mockClear();
 
     await actions.archiveSession(rootSession.id);
@@ -1203,6 +1217,73 @@ describe('useSessionActions', () => {
     for (const session of [rootSession, openedSession, openedFromTabSession]) {
       expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
     }
+  });
+
+  it('fails archive without writes when complete metadata cannot be read', async () => {
+    const sessionId = 'archive-scan-failure' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'archive-scan-failure-machine' as MachineId,
+      isArchived: false,
+      createdAt: '2026-09-13T00:00:00.000Z',
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: {
+        listDoc: vi.fn(async () => {
+          throw new Error('metadata scan failed');
+        }),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
+    });
+
+    await expect(actions.archiveSession(sessionId)).rejects.toThrow('metadata scan failed');
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('fails archive without writes when the workspace changes during metadata discovery', async () => {
+    const sessionId = 'archive-runtime-change' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'archive-runtime-change-machine' as MachineId,
+      isArchived: false,
+      createdAt: '2026-09-13T00:00:00.000Z',
+    } as SessionMeta;
+    let resolveListDoc!: (
+      entries: Array<{ docId: string; exists: boolean; meta: SessionMeta }>
+    ) => void;
+    const listDocResult = new Promise<Array<{ docId: string; exists: boolean; meta: SessionMeta }>>(
+      (resolve) => {
+        resolveListDoc = resolve;
+      }
+    );
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: {
+        listDoc: vi.fn(() => listDocResult),
+        upsertDocMeta,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const jotaiStore = createStore();
+    const actions = await renderActions(runtime, {
+      jotaiStore,
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: sessionMeta },
+    });
+
+    const archivePromise = actions.archiveSession(sessionId);
+    const archiveRejection = expect(archivePromise).rejects.toThrow(
+      'Workspace changed while loading session metadata'
+    );
+    await act(async () => {
+      jotaiStore.set(runtimeAtom, createRuntime({ workspaceId: 'workspace-2' as WorkspaceId }));
+      resolveListDoc([{ docId: getSessionRoomId(sessionId), exists: true, meta: sessionMeta }]);
+    });
+
+    await archiveRejection;
+    expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('restores child tabs without restoring independently opened session workspaces', async () => {

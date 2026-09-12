@@ -32,6 +32,7 @@ import {
   formatSessionQuotaRejection,
   isConvexUnauthenticatedError,
   isLoroRepoDocDeleted,
+  isSessionDocRoomId,
   normalizeSessionTurnInputConfig,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
@@ -57,6 +58,8 @@ import {
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
+import { listDocMetaEntries } from '@/lib/doc-meta-batch';
+import { withDerivedDocMetaId } from '@/lib/doc-meta-room';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 
 const log = debug('lody:session-actions');
@@ -241,6 +244,20 @@ function getArchiveStateTargets(
     { ...rootMeta, id: rootMeta.id ?? sessionId },
     ...getDirectChildSessions(sessionId, sessions),
   ];
+}
+
+async function listCompleteSessionMetadata(runtime: WorkspaceRuntime): Promise<SessionMeta[]> {
+  const entries = await listDocMetaEntries(runtime.repo);
+  return entries.flatMap((entry) => {
+    if (
+      !isSessionDocRoomId(entry.docId) ||
+      isLoroRepoDocDeleted(entry) ||
+      Object.keys(entry.meta).length === 0
+    ) {
+      return [];
+    }
+    return [withDerivedDocMetaId(entry.docId, entry.meta) as SessionMeta];
+  });
 }
 
 async function assertArchivedLocalProjectCanRestore(
@@ -1166,13 +1183,15 @@ export function useSessionActions(): SessionActions {
       }
 
       const sessionRoomId = getSessionRoomId(sessionId);
-      const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
-        | SessionMeta
-        | undefined;
-      // The repo read is preferred (freshest lifecycle fields), but it can lag
-      // a session the UI already renders. The archive write below is an
-      // idempotent patch, so the rendered meta cache is enough to proceed — a
-      // session the UI can show must also be closable.
+      const sessionMetadata = await listCompleteSessionMetadata(runtime);
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed while loading session metadata');
+      }
+      const repoMeta = sessionMetadata.find((session) => session.id === sessionId);
+      // The complete repository index is preferred, but it can lag a Session
+      // the UI already renders. The archive write below is an idempotent patch,
+      // so rendered root metadata is enough to proceed. Descendant discovery
+      // still comes exclusively from the complete index above.
       const sessionMeta =
         repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
       if (!sessionMeta) {
@@ -1183,11 +1202,7 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = getArchiveStateTargets(sessionId, sessionMeta, sessionMetadata);
       for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
