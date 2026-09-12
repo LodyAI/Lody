@@ -72,9 +72,9 @@ Contract: specs/session-orchestration.md.
 
 ## Lifecycle
 
-- `Session.createAgent` acquires the shared ACP start gate before spawn. ACP terminal creation
-  passes the protocol's executable and argv straight to `SessionSandbox.spawn`, never a rebuilt
-  shell command.
+- `Session.createAgent` takes the shared ACP start gate before spawn. ACP terminal creation spawns
+  the protocol's executable and argv; the only rebuild is the unsplit `sh -c` fallback. A failed
+  spawn is a JSON-RPC rejection, not a hung wait.
 - Child tab sessions reuse the parent workspace directory. Never write per-session workspace paths
   into `MachineMeta`: the machine publishes `['dotlodyPath']` and frontends derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
