@@ -1,7 +1,9 @@
 # Run the git credential helper under the CLI runtime
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-12-git-helper-cli-runtime.zh.md)
 
 ## Abstract
 
