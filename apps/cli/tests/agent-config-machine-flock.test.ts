@@ -82,14 +82,18 @@ const codexCustomEndpointConfig: AgentConfigMeta = {
 } as AgentConfigMeta;
 
 describe('machine flock agent config opt-out', () => {
-  it('rejects the reserved Codex credential without mutating Machine Flock', async () => {
+  it.each([
+    LODY_CODEX_API_KEY_ENV,
+    'lody_codex_custom_endpoint_api_key',
+    'LoDy_CoDeX_Custom_Endpoint_Api_Key',
+  ])('rejects the reserved Codex credential key %s without mutating Machine Flock', async (key) => {
     const { repo, flock } = createFakeRepo();
 
     await expect(
       upsertMachineAgentConfig(repo, workspaceId, {
         ...kimiConfig,
         agentType: 'codex',
-        env: { [LODY_CODEX_API_KEY_ENV]: 'must-not-sync' },
+        env: { [key]: 'must-not-sync' },
       })
     ).rejects.toThrow(/machine-local credential/);
     expect(flock.rows.size).toBe(0);

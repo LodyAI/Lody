@@ -5,8 +5,10 @@ import {
   buildLodyCodexCustomProviderEnv,
   CODEX_API_KEY_ENV,
   CODEX_CONFIG_ENV,
+  getLodyCodexCredentialBinding,
   getLodyCodexCustomProvider,
   isAllowedCredentialEndpoint,
+  isReservedCodexCredentialEnvKey,
   LODY_CODEX_API_KEY_ENV,
   LODY_CODEX_MODEL_PROVIDER_ID,
   LODY_CODEX_PROVIDER_STATE_ENV,
@@ -22,6 +24,19 @@ describe('Lody Codex custom provider config', () => {
       /reserved for machine-local credential injection/
     );
   });
+
+  it.each(['lody_codex_custom_endpoint_api_key', 'LoDy_CoDeX_Custom_Endpoint_Api_Key'])(
+    'treats the Windows-equivalent %s alias as reserved',
+    (key) => {
+      const config = { env: { [key]: 'sk-must-not-sync' } };
+
+      expect(isReservedCodexCredentialEnvKey(key)).toBe(true);
+      expect(agentConfigContainsCodexCredential(config)).toBe(true);
+      expect(() => assertAgentConfigDoesNotContainCodexCredential(config)).toThrow(
+        /reserved for machine-local credential injection/
+      );
+    }
+  );
 
   it('keeps the credential out of durable env and routes Codex through Responses', () => {
     const env = buildLodyCodexCustomProviderEnv(
@@ -45,6 +60,29 @@ describe('Lody Codex custom provider config', () => {
     expect(getLodyCodexCustomProvider(env)).toEqual({
       baseUrl: 'https://relay.example.com/v1',
     });
+  });
+
+  it('removes reserved key aliases from generated env and credential bindings', () => {
+    const lowerCaseKey = 'lody_codex_custom_endpoint_api_key';
+    const cleanEnv = buildLodyCodexCustomProviderEnv(
+      { EXTRA_FLAG: '1' },
+      { baseUrl: 'https://relay.example.com/v1' }
+    );
+    const configured = buildLodyCodexCustomProviderEnv(
+      { EXTRA_FLAG: '1', [lowerCaseKey]: 'sk-must-not-copy' },
+      { baseUrl: 'https://relay.example.com/v1' }
+    );
+    const config = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: { ...cleanEnv, [lowerCaseKey]: 'sk-must-not-hash' },
+    };
+
+    expect(configured[lowerCaseKey]).toBeUndefined();
+    expect(getLodyCodexCredentialBinding(config)).toBe(
+      getLodyCodexCredentialBinding({ ...config, env: cleanEnv })
+    );
+    expect(removeLodyCodexCustomProviderEnv(configured)[lowerCaseKey]).toBeUndefined();
   });
 
   it('restores the exact prior selector and existing API key', () => {

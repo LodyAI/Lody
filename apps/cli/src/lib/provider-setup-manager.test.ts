@@ -430,6 +430,74 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
+  it('upgrades an exact marker to wildcard before a stale replica can publish R2', async () => {
+    const rendererFlock = new Flock('wildcard-upgrade-renderer');
+    const machineFlock = new Flock('wildcard-upgrade-machine');
+    const replacement: ProviderSetupTask = {
+      ...createSetup('awaiting-auth'),
+      setupRevision: 'revision-2',
+      config: {
+        ...createSetup().config,
+        env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://replacement.example.com/v1' }),
+      },
+    };
+    seedSetup(machineFlock, replacement);
+    rendererFlock.importJson(machineFlock.exportJson());
+
+    const stageStarted = createDeferred<void>();
+    const releaseStage = createDeferred<void>();
+    const rollback = vi.fn(async () => undefined);
+    const stageCredential = vi.fn(async () => {
+      stageStarted.resolve();
+      await releaseStage.promise;
+      return { finalize: vi.fn(async () => undefined), rollback };
+    });
+    const harness = createHarnessForFlock(machineFlock, {}, { stageCredential });
+    const stalePublication = harness.manager.commitCredentialSetup(
+      setupId,
+      'revision-2',
+      'stale-r2-key'
+    );
+    await stageStarted.promise;
+
+    rendererFlock.txn(() => {
+      rendererFlock.set(machineFlockKeys.providerSetupCancellation(setupId), {
+        v: 1,
+        id: setupId,
+        machineId,
+        setupRevision: 'revision-1',
+        preservePublishedConfig: true,
+        cancelledAt: 20,
+      });
+    });
+    expect(
+      applyProviderSetupCancellationToFlock(rendererFlock, {
+        v: 1,
+        id: setupId,
+        machineId,
+        cancelledAt: 30,
+      })
+    ).toBe(true);
+    expect(readState(rendererFlock)).toEqual({
+      setup: undefined,
+      config: undefined,
+      cancellation: {
+        v: 1,
+        id: setupId,
+        machineId,
+        cancelledAt: 30,
+      },
+    });
+
+    machineFlock.importJson(rendererFlock.exportJson());
+    releaseStage.resolve();
+    await expect(stalePublication).rejects.toThrow(/cancelled or replaced/);
+    expect(rollback).toHaveBeenCalledTimes(1);
+    expect(readState(machineFlock).cancellation).not.toHaveProperty('setupRevision');
+    expect(readState(machineFlock).config).toBeUndefined();
+    harness.manager.stop();
+  });
+
   it('stores the verified key and publishes only for the exact setup revision', async () => {
     const harness = createHarness();
     const oldConfig = createSetup().config;

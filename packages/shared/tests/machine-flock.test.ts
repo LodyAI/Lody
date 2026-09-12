@@ -10,7 +10,9 @@ import {
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
+  getMachineFlockProviderSetupCancellations,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDeleteLocalProjectIds,
@@ -478,7 +480,11 @@ describe('machine Flock helpers', () => {
     expect(readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })).toEqual({});
   });
 
-  it('rejects the machine-local Codex credential at agent config read and write boundaries', () => {
+  it.each([
+    LODY_CODEX_API_KEY_ENV,
+    'lody_codex_custom_endpoint_api_key',
+    'LoDy_CoDeX_Custom_Endpoint_Api_Key',
+  ])('rejects the machine-local Codex credential key %s at agent config boundaries', (key) => {
     const agentConfigId = 'credential-bearing-config' as AgentConfigId;
     const config = {
       id: agentConfigId,
@@ -486,7 +492,7 @@ describe('machine Flock helpers', () => {
       name: 'Codex',
       cliType: 'builtin' as const,
       agentType: 'codex',
-      env: { [LODY_CODEX_API_KEY_ENV]: 'must-not-sync' },
+      env: { [key]: 'must-not-sync' },
     } as AgentConfigMeta;
     const flock = new FakeMachineFlock();
 
@@ -827,6 +833,60 @@ describe('machine Flock helpers', () => {
           prefixes: [machineFlockKeys.providerSetup(id)],
         })
       ).not.toEqual({});
+    });
+
+    it('upgrades an exact cancellation to wildcard and never downgrades it', () => {
+      const flock = new FakeMachineFlock();
+      const id = 'setup-1' as AgentConfigId;
+      flock.set(machineFlockKeys.providerSetupCancellation(id), {
+        v: 1,
+        id,
+        machineId,
+        setupRevision: 'revision-1',
+        preservePublishedConfig: true,
+        cancelledAt: 10,
+      });
+
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          cancelledAt: 20,
+        })
+      ).toBe(true);
+      expect(
+        getMachineFlockProviderSetupCancellations(readMachineFlockRowsFromFlock(flock))[id]
+      ).toEqual({ v: 1, id, machineId, cancelledAt: 20 });
+
+      flock.set(machineFlockKeys.providerSetup(id), {
+        v: 1,
+        id,
+        machineId,
+        config: {
+          ...kimi(id),
+          agentType: 'codex',
+          env: buildLodyCodexCustomProviderEnv({}, { baseUrl: 'https://relay.example.test/v1' }),
+        },
+        status: 'awaiting-auth',
+        setupRevision: 'revision-2',
+        attempt: 1,
+        createdAt: 30,
+        updatedAt: 30,
+      });
+      expect(
+        applyProviderSetupCancellationToFlock(flock, {
+          v: 1,
+          id,
+          machineId,
+          setupRevision: 'revision-2',
+          preservePublishedConfig: true,
+          cancelledAt: 40,
+        })
+      ).toBe(true);
+      expect(
+        getMachineFlockProviderSetupCancellations(readMachineFlockRowsFromFlock(flock))[id]
+      ).toEqual({ v: 1, id, machineId, cancelledAt: 20 });
     });
 
     it.each([

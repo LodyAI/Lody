@@ -222,14 +222,15 @@ describe('AgentConfigDialog', () => {
       agentType: 'codex',
       success: true,
     }),
-    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected']
+    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
+    onOpenChange = vi.fn<(open: boolean) => void>()
   ) => {
     await act(async () => {
       root?.render(
         <TooltipProvider>
           <AgentConfigDialog
             open
-            onOpenChange={vi.fn()}
+            onOpenChange={onOpenChange}
             mode={mode}
             machine={machine}
             onSubmit={onSubmit}
@@ -693,6 +694,60 @@ describe('AgentConfigDialog', () => {
     expect(document.body.textContent).not.toContain('Sign in with ChatGPT');
   });
 
+  it('blocks every dialog dismissal while provider provisioning is submitting', async () => {
+    let finishSubmit: () => void = () => undefined;
+    const submitPending = new Promise<void>((resolve) => {
+      finishSubmit = resolve;
+    });
+    const onSubmit = vi.fn(() => submitPending);
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    await renderDialog(
+      {
+        kind: 'create',
+        initialForm: { name: 'Codex Relay', cliType: 'builtin', agentType: 'codex' },
+      },
+      createMachine('Relay workstation', {
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+        codexCustomEndpointCredentials: CODEX_CUSTOM_ENDPOINT_CREDENTIALS_PROTOCOL_VERSION,
+      }),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      undefined,
+      undefined,
+      onOpenChange
+    );
+    await selectTab('Base URL + API Key');
+    await act(async () => {
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-base-url')!,
+        'https://relay.example.com/v1'
+      );
+      setNativeInputValue(
+        document.body.querySelector<HTMLInputElement>('#codex-api-key')!,
+        'sk-relay-test'
+      );
+      getPrimaryAction('Create').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+
+    const closeButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Close'
+    );
+    expect(closeButton).toBeDefined();
+    await act(async () => {
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-lody-dialog-content]')).not.toBeNull();
+
+    finishSubmit();
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
   it('uses a new setup revision for each provisioning submit attempt', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const onSubmit = vi
@@ -741,10 +796,13 @@ describe('AgentConfigDialog', () => {
   });
 
   it('hydrates a Codex custom endpoint and does not offer ChatGPT reauthentication', async () => {
-    const env = buildLodyCodexCustomProviderEnv(
-      { EXTRA_FLAG: '1' },
-      { baseUrl: 'https://relay.example.com/v1' }
-    );
+    const env = {
+      ...buildLodyCodexCustomProviderEnv(
+        { EXTRA_FLAG: '1' },
+        { baseUrl: 'https://relay.example.com/v1' }
+      ),
+      lody_codex_custom_endpoint_api_key: 'sk-must-not-render',
+    };
     await renderDialog(
       {
         kind: 'edit',
@@ -767,6 +825,9 @@ describe('AgentConfigDialog', () => {
     );
     expect(document.body.querySelector<HTMLInputElement>('#codex-api-key')?.value).toBe('');
     expect(findSignInAgainButton()).toBeUndefined();
+    expect((await openAdditionalEnvSection()).value).not.toContain(
+      'lody_codex_custom_endpoint_api_key'
+    );
   });
 
   it('saves a metadata-only Codex edit without asking for or rotating the API key', async () => {
