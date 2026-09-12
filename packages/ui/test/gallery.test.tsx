@@ -1,8 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
+import { dialog } from '../src/dialog/dialog.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
+import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
 import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
 import { colors, shadow } from '../src/tokens/colors.stylex';
@@ -141,6 +143,42 @@ describe('UiGallery', () => {
       for (const name of (stylex.props(state).className ?? '').split(' ').filter(Boolean)) {
         expect(board, `a destructive row state is missing from the board`).toContain(name);
       }
+    }
+  });
+
+  test('shows a popover, and names the two declarations it replaces', () => {
+    // The real popover is a trigger; its surface is a stand-in, because a popup
+    // is portalled and unmounted while it is closed.
+    expect(board).toContain('aria-haspopup="dialog"');
+    for (const name of ['popup.panelPadding', 'popup.panelGap', 'popup.description']) {
+      expect(board, `${name} is missing from the board`).toContain(name);
+    }
+  });
+
+  test('shows the modal rung: all three ways onto it, and every dialog token', () => {
+    // Base UI marks the panel, so its presence is the real component on the
+    // board rather than a picture of one. A dialog is unmounted while closed,
+    // so what a reader compares against is the stand-in beside the triggers.
+    expect(board).toContain('Rename session');
+    expect(board).toContain('Delete session');
+    // A drawer has two axes and both belong on the board: the edge it arrives
+    // from — each laid out against a different side and swiped a different way
+    // — and whether it meets that edge or floats off it.
+    for (const side of ['top', 'end', 'bottom', 'start']) {
+      expect(board, `the ${side} drawer is missing from the board`).toContain(`>${side}<`);
+      expect(board, `the inset ${side} drawer is missing from the board`).toContain(
+        `${side} · inset`
+      );
+    }
+    for (const name of tokenNames(dialog)) {
+      expect(board, `dialog.${name} is missing from the board`).toContain(`dialog.${name}`);
+    }
+  });
+
+  test('shows the tooltip, and names every token it inverts', () => {
+    expect(board).toContain('Rerun this turn');
+    for (const name of tokenNames(tooltip)) {
+      expect(board, `tooltip.${name} is missing from the board`).toContain(`tooltip.${name}`);
     }
   });
 

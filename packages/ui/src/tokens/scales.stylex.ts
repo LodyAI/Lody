@@ -51,6 +51,10 @@ export const text = stylex.defineVars({
 export const duration = stylex.defineVars({
   fast: '120ms',
   regular: '180ms',
+  // A drawer crosses the window; a popup rises 4px. The same duration cannot
+  // serve both — 180ms over 600px reads as a snap rather than a slide — so the
+  // distance a thing travels picks its step.
+  slow: '320ms',
 });
 
 export const ease = stylex.defineConsts({

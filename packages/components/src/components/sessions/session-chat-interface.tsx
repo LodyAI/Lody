@@ -192,7 +192,7 @@ import {
   type SessionSharingTranslator,
 } from '@/components/session-sharing';
 
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import { Badge } from '@/ui/badge';
 import { Input } from '@lody/ui/input';
 import { Separator } from '@/ui/separator';
@@ -745,13 +745,13 @@ export function SessionHistoryButton({
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side={isMobile ? 'bottom' : 'right'} className="sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>{t('sessions.history', 'History')}</SheetTitle>
+    <Drawer.Root side={isMobile ? 'bottom' : 'end'} open={open} onOpenChange={setOpen}>
+      <Drawer.Trigger render={trigger} />
+      <Drawer.Content side={isMobile ? 'bottom' : 'end'} className="sm:max-w-md">
+        <Drawer.Header>
+          <Drawer.Title>{t('sessions.history', 'History')}</Drawer.Title>
           <p className="text-sm text-muted-foreground">{t('sessions.newSession.title')}</p>
-        </SheetHeader>
+        </Drawer.Header>
         <div className="mt-6 space-y-2">
           {historySessions.length === 0 ? (
             <div className="text-sm text-muted-foreground">{t('sessions.noSessions')}</div>
@@ -805,8 +805,8 @@ export function SessionHistoryButton({
             })
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </Drawer.Content>
+    </Drawer.Root>
   );
 }
 

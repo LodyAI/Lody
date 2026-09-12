@@ -14,7 +14,7 @@ One rung per component. The rung fixes background and shadow together.
 | region   | `secondaryBackground` | none                       | sidebar, footer band, hover on a card                                             |
 | card     | `elevatedBackground`  | `shadow.card`              | card, panel, composer                                                             |
 | floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list; tooltip is `label` with `shadow.medium`               |
-| modal    | `elevatedBackground`  | `shadow.large` + `overlay` | dialog, sheet                                                                     |
+| modal    | `elevatedBackground`  | `shadow.large` + `overlay` | dialog, alert dialog, drawer                                                      |
 
 ## Edges
 
@@ -165,6 +165,93 @@ page: the popup starts one step further from what opened it, on whichever side
 it landed, and closes that step as it arrives. A context menu is anchored to the
 pointer instead of to a control, so it takes no gap at all.
 
+### Popovers
+
+A popover is that surface with content on it instead of rows, so it reads `popup`
+as well. It replaces five of a list's declarations and no more: the
+`--anchor-width` a list takes because its control shows the value it holds, the
+`popup.inset` that lets a row bleed to the surface's edge — prose needs room, so
+it takes `popup.panelPadding` and stacks at `popup.panelGap` — and the three that
+make the type a control's. What is in a popover is sentences, so it follows the
+prose rule, 14 at weight 400; a control placed inside one brings its own step.
+Its heading is the control step at weight 600 rather than a dialog's `headline`,
+because a popover does not own the window, and the sentence under it is
+`popup.description` at 12.
+
+## Modals
+
+The modal rung is the one rung that states three things at once:
+`dialog.background` under `dialog.shadow`, over `dialog.overlay`. A panel here
+covers what a person was doing and still shows it, so the page has to recede
+rather than merely sit behind something.
+
+One group, `dialog`, serves the whole family — the Dialog, the AlertDialog and
+the Drawer — for the reason `field` serves the whole control family: the three
+differ in how they arrive and in what may dismiss them, not in what they are made
+of. A padding or a heading has one place to change rather than three.
+
+| part        | what it is                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------- |
+| panel       | `dialog.width` wide, `dialog.padding` in, at `radius.large`, `dialog.inset` clear of the window on every side |
+| header      | the title and one sentence about it, at `dialog.headerGap`: one block                                         |
+| title       | `headline`, weight 600, in `dialog.title`; `title` stays for a full page                                      |
+| description | prose at `dialog.descriptionSize` in `dialog.description`                                                     |
+| footer      | the answers, from the end, at `dialog.footerGap`; stacked in reverse when narrow                              |
+| cross       | a ghost icon button in the corner, on a panel a person may dismiss                                            |
+| drawer      | the same panel arriving from an edge, `dialog.drawerSize` across                                              |
+
+The safe-area insets are read with `env()` rather than through a host variable,
+so the package stays platform-neutral: on a desktop browser every one resolves to
+0 and the panel is centred, and on a device with a notch and a home indicator it
+sits between them.
+
+The rise applies to a panel too, but a dialog is centred rather than anchored, so
+the 4px is composed into the centring transform — CSS has one `transform`, and a
+second class setting only `translateY` would replace the centring rather than add
+to it.
+
+### Drawers
+
+A drawer is that panel arriving from an edge, and it is not a dialog pinned to
+one. A panel that slides in from an edge promises that it can be sent back, and
+on a touch screen a person will try; a dialog cannot answer that gesture, so the
+system has no "sheet". The panel is laid out by a viewport rather than positioned
+by itself, which is exactly what leaves its `transform` free to carry the drag —
+a centred dialog has already spent that property.
+
+Two axes. **Which edge**: `top`, `bottom`, `start` and `end`, stated in writing
+direction, with the physical swipe derived from it so a drawer on the start edge
+is swiped away leftwards in a left-to-right document and rightwards in a
+right-to-left one. **Flush or inset**: flush meets the window, squares the two
+corners that touch it, and pads its own content clear of the safe area; inset
+floats at `dialog.drawerInset`, keeps all four corners, and takes the safe area
+as viewport padding instead. A flush drawer is part of the window; an inset one
+is an object resting over the page.
+
+A drawer crosses the window rather than rising 4px, so it takes `duration.slow`.
+The backdrop lifts with the gesture rather than only at the end: the page comes
+back as the drawer leaves, so a half-dismissed drawer reads as reversible.
+
+## Tooltips
+
+The one floating thing that is not the popup surface: `tooltip.background` is
+`label` and `tooltip.label` is `background`, under `shadow.medium` at
+`radius.small`. That inversion is deliberate. A popup is a place to act; a
+tooltip only names what is already under the pointer, and it has to read at a
+glance over whatever it covers without becoming another surface competing for
+attention. A tooltip reaching for `popup.background` would be naming the wrong
+thing to get the wrong colour.
+
+It is a hint about something else, so it takes the footnote step the rules give
+help text rather than the control step its trigger takes, and it wraps at
+`tooltip.maxWidth` rather than trailing off into an ellipsis a person cannot
+open. It never takes the pointer: one that landed under the cursor and accepted
+it would take the pointer off its own trigger and flicker itself closed and open
+again. It sits above every popup, because what it names may be inside one.
+
+A tooltip is visual only — it reaches neither touch nor a screen reader — so it
+is never a control's name. Every trigger states its own.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
@@ -182,7 +269,7 @@ pointer instead of to a control, so it takes no gap at all.
 
 - Controls at 13 (`subheadline`), weight 500, `text.controlTracking`.
 - Prose at 14 (`body`), weight 400. Field labels and help at 12 (`footnote`).
-- Dialog title is `headline`; `title` is for sheets and full pages.
+- Dialog title is `headline`; `title` is for a full page.
 - Sizes: 28 / 32 / 36. Default 32. 36 only for empty states and onboarding.
 
 ## Motion
