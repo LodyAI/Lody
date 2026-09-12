@@ -12,8 +12,10 @@ export type {
   SessionWritableField,
   SessionWriteReceipt,
   OpenAssistantTurnInput,
+  TaskProposalResolution,
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
+export { resolveTaskProposalOnEntry } from './task-proposal';
 export {
   createMemorySessionData,
   type MemoryCommitPlan,

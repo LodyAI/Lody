@@ -7,6 +7,7 @@ import {
   type HistoryWriteError,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
+import { resolveTaskProposalOnEntry } from './task-proposal';
 import type {
   SessionCommandResult,
   SessionData,
@@ -290,6 +291,22 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
           updated.userTurnId = input.userTurnId;
         if (input.modelInfo !== undefined) updated.modelInfo = input.modelInfo;
         next[index] = withoutUndefined(updated) as SessionHistory;
+        turns = next;
+        return true;
+      });
+    },
+    async resolveTaskProposal(entryId, proposalId, resolution) {
+      const initial = findIndex(entryId);
+      if (initial < 0) return rejected('not_found');
+      const probe = structuredClone(turns[initial]!) as { items?: unknown };
+      if (!resolveTaskProposalOnEntry(probe, proposalId, resolution)) return rejected('not_found');
+      return mutating('resolve-task-proposal', [entryId], () => {
+        const index = findIndex(entryId);
+        if (index < 0) return false;
+        const entry = structuredClone(turns[index]!) as { items?: unknown };
+        if (!resolveTaskProposalOnEntry(entry, proposalId, resolution)) return false;
+        const next = turns.slice();
+        next[index] = withoutUndefined(entry as Record<string, unknown>) as SessionHistory;
         turns = next;
         return true;
       });

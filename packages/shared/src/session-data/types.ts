@@ -1,3 +1,4 @@
+import type { TaskProposalMeta } from '../ai';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
@@ -55,7 +56,13 @@ export type SessionWriteReceipt = {
     | 'set-field'
     | 'resume-assistant'
     | 'open-assistant-turn'
+    | 'resolve-task-proposal'
     | 'respond-permission';
+};
+
+/** A user's decision on a task proposal, resolved against the live notice. */
+export type TaskProposalResolution = Pick<TaskProposalMeta, 'taskId'> & {
+  outcome: NonNullable<TaskProposalMeta['outcome']>;
 };
 
 /**
@@ -154,6 +161,16 @@ export interface SessionHistoryCommands {
   resumeAssistant(turnId: string): Promise<SessionCommandResult>;
   /** Reopen an existing assistant turn or create it, as one business operation. */
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<SessionCommandResult>;
+  /**
+   * Resolve a task proposal against the live notice in one entry. The adapter
+   * re-locates the proposal inside its commit; a rendered history snapshot is
+   * never written back.
+   */
+  resolveTaskProposal(
+    entryId: string,
+    proposalId: string,
+    resolution: TaskProposalResolution
+  ): Promise<SessionCommandResult>;
   /** Answer a permission request located by request id (optionally in one turn). */
   respondPermission(
     requestId: string,

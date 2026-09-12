@@ -149,6 +149,38 @@ export function runSessionDataContract(
       expect(turn.userTurnId).toBe('user-1');
     });
 
+    it('resolves a task proposal against the live notice and rejects a miss', async () => {
+      const harness = await create();
+      const { data } = harness;
+      await data.commands.appendTurn({
+        ...assistantTurn('assistant-1'),
+        items: [
+          {
+            type: 'system_notice',
+            name: 'task_proposal',
+            meta: { proposalId: 'p1', title: 'Ship it' },
+          },
+        ],
+      });
+
+      const resolved = await data.commands.resolveTaskProposal('assistant-1', 'p1', {
+        outcome: 'created',
+        taskId: 'task-1',
+      });
+      expect(resolved.status).toBe('accepted');
+      const stored = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
+      const item = stored.items?.[0];
+      expect(item?.type === 'system_notice' && item.meta?.outcome).toBe('created');
+      expect(item?.type === 'system_notice' && item.meta?.taskId).toBe('task-1');
+      // Unrelated fields survive the targeted edit.
+      expect(stored.endedAt).toBe(1234);
+
+      const missing = await data.commands.resolveTaskProposal('assistant-1', 'nope', {
+        outcome: 'dismissed',
+      });
+      expect(missing.status).toBe('rejected');
+    });
+
     it('answers permissions by request id and rejects a scoped miss', async () => {
       const harness = await create();
       const { data } = harness;

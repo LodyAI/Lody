@@ -4,6 +4,7 @@ import type { SessionHistory, SessionHistoryInput } from '../schema';
 import { HistoryWriteError, parseHistoryWrite } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
+import { resolveTaskProposalOnEntry } from './task-proposal';
 import type {
   SessionCommandResult,
   SessionData,
@@ -230,6 +231,20 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return rejected('invalid_input', (error as HistoryWriteError).issues);
       }
       return finish('open-assistant-turn', [input.turnId]);
+    },
+    async resolveTaskProposal(entryId, proposalId, resolution) {
+      let found = false;
+      try {
+        const updated = writer.updateEntry(entryId, (entry) => {
+          found = resolveTaskProposalOnEntry(entry, proposalId, resolution);
+          return entry;
+        });
+        if (!updated) return rejected('not_found');
+      } catch (error) {
+        return rejected('invalid_input', (error as HistoryWriteError).issues);
+      }
+      if (!found) return rejected('not_found');
+      return finish('resolve-task-proposal', [entryId]);
     },
     async respondPermission(requestId, outcome, respondOptions) {
       try {
