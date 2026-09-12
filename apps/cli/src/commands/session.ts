@@ -984,13 +984,19 @@ async function syncMachineFlockDocsForRead(
   machineIds: readonly MachineId[],
   reason: string
 ): Promise<void> {
+  const logger = getLogger('session');
   await Promise.all(
-    Array.from(new Set(machineIds)).map(
-      async (machineId) =>
+    Array.from(new Set(machineIds)).map(async (machineId) => {
+      try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
-        })
-    )
+        });
+      } catch (error) {
+        logger.warn(
+          `Machine Flock freshness sync was not confirmed (${reason}:${machineId}); continuing from the local replica: ${formatErrorMessage(error)}`
+        );
+      }
+    })
   );
 }
 

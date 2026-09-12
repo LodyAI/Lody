@@ -1146,6 +1146,47 @@ describe('session command helpers', () => {
     }
   });
 
+  it('resolves a local project from the replica when Flock freshness sync fails', async () => {
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      throw new Error('Streams sync failed: network_error');
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            localProjects: {
+              'local-project-1': {
+                id: 'local-project-1',
+                name: 'lody',
+                rootPath: '/workspace/lody',
+                createdAtMs: 1,
+              },
+            },
+          },
+        })),
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            scan: () => [],
+          },
+        })),
+      },
+    } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+    await expect(
+      resolveLocalProjectRefOrThrow(
+        manager,
+        'workspace-1' as WorkspaceId,
+        'machine-id' as MachineId,
+        'lody'
+      )
+    ).resolves.toEqual({
+      kind: 'local',
+      localProjectId: 'local-project-1',
+    });
+    expect(syncFlockDocOrThrow).toHaveBeenCalled();
+  });
+
   it('does not synthesize a branch for non-git local projects', async () => {
     const rootPath = mkdtempSync(path.join(os.tmpdir(), 'lody-session-non-git-'));
     try {
