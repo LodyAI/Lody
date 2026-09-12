@@ -644,6 +644,7 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<string | undefined>(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -675,6 +676,7 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     setExternalTextUpdate(undefined);
     latestEditorTextRef.current = undefined;
+    lastAckedExternalTextRef.current = undefined;
     latestStableSelectionRef.current = null;
     recentLocalTextEchoTrackerRef.current.clear();
     hasAcceptedLocalContentChangeRef.current = false;
@@ -764,6 +766,7 @@ function SessionFileContentViewImpl({
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          lastAckedExternalTextRef.current = externalTextUpdate.text;
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -776,6 +779,7 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          lastAckedExternalTextRef.current = externalTextUpdate.text;
         }
         return;
       }
@@ -874,6 +878,12 @@ function SessionFileContentViewImpl({
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
+  const resolveProviderEditorMountText = (snapshotText: string): string => {
+    if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
+      return latestEditorTextRef.current ?? snapshotText;
+    }
+    return lastAckedExternalTextRef.current ?? snapshotText;
+  };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
     if (saveStatus.kind === 'saved') {
@@ -1257,11 +1267,7 @@ function SessionFileContentViewImpl({
             {isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot.text)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1278,11 +1284,7 @@ function SessionFileContentViewImpl({
             ) : (
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot.text)}
                 language={getSessionFileMonacoLanguageId(normalizedPath)}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}

@@ -1598,4 +1598,56 @@ describe('independent preview remount investigation', () => {
       expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
     }
   );
+
+  it('retains acknowledged provider live text after preview remount', async () => {
+    const runtime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# Original', DIGEST_1),
+        path: 'README.md',
+      }),
+      saveText: async () => ({ status: 'ok', path: 'README.md', digest: DIGEST_2, rawBytes: 18 }),
+    });
+    const provider = new CodeCollabSessionFileProvider({
+      runtime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: sharedCodeCollabTextState,
+    });
+    const states: SessionFileSaveViewState[] = [];
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+        onSaveStateChange: (state) => states.push(state),
+      })
+    );
+    const click = async (label: string) => {
+      const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      expect(button).not.toBeNull();
+      expect(button?.disabled).toBe(false);
+      await act(async () => {
+        button?.click();
+      });
+    };
+    const textarea = () =>
+      view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Original');
+    await act(async () => {
+      await provider.saveText('README.md', '# Updated elsewhere');
+    });
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+    await click('Preview');
+    expect(view.textContent).toContain('Updated elsewhere');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+  });
 });
