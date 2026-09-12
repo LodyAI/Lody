@@ -1,24 +1,21 @@
-import {
-  getLegacyReadForSessionHistoryStatus,
-  resolveSessionHistoryStatus,
-  type SessionMirror,
-  type SessionHistoryInput,
-} from '@lody/shared';
-
-type SessionDocMirror = Pick<SessionMirror, 'subscribe' | 'getState' | 'setState'>;
+import { resolveSessionHistoryStatus } from '@lody/shared';
+import type { SessionData, SessionTurn } from '@lody/shared/session-data';
 
 export type AutoMarkLatestUserHistoryAsReadHandle = {
   dispose: () => void;
 };
 
-const findLatestUserHistoryEntry = (
-  history: SessionHistoryInput[]
-): SessionHistoryInput | undefined => {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i];
-    if (entry?.role === 'user') {
-      return entry;
-    }
+/**
+ * The newest user turn, when it is still awaiting a read acknowledgement. Scans
+ * raw rows backwards through the session-data reader, so it neither materializes
+ * the whole history nor depends on a full Mirror.
+ */
+const findLatestPendingUserTurn = async (data: SessionData): Promise<SessionTurn | undefined> => {
+  const count = await data.history.count();
+  for (let position = count - 1; position >= 0; position -= 1) {
+    const read = await data.history.readAt(position);
+    if (read.state !== 'ready' || read.turn.role !== 'user') continue;
+    return resolveSessionHistoryStatus(read.turn) === 'pending' ? read.turn : undefined;
   }
   return undefined;
 };
@@ -27,71 +24,53 @@ const findLatestUserHistoryEntry = (
  * Attaches a small policy on top of the session history:
  * - Whenever history changes, if there is a new user message, mark the latest one as seen.
  *
- * Notes:
- * - We defer the write into a microtask to avoid nested `setState()` inside `subscribe()`,
- *   which can lead to re-entrant updates and harder-to-reason-about ordering.
- * - The operation is idempotent and only touches the latest unread user entry.
+ * The reader is async, so a scan takes the slot count at its start. A change that
+ * lands while a scan runs (its listener fires during the awaits) requests one
+ * more pass; without that, a turn written after `count()` was read but before the
+ * scan finished would never be marked. The observation itself is gap-free: its
+ * initial directory and the listener start at the same point. Writes go through
+ * the session-data port, are idempotent, and only touch the latest unread user
+ * turn.
  */
 export const attachAutoMarkLatestUserHistoryAsRead = (
-  mirror: SessionDocMirror
+  data: SessionData
 ): AutoMarkLatestUserHistoryAsReadHandle => {
   let disposed = false;
-  let pendingTurnId: string | null = null;
+  let lastMarkedTurnId: string | null = null;
+  let running = false;
+  let rerunRequested = false;
 
-  const unsubscribe = mirror.subscribe((next) => {
-    if (disposed) {
+  const check = () => {
+    if (disposed) return;
+    if (running) {
+      rerunRequested = true;
       return;
     }
-
-    const history = (next.history as SessionHistoryInput[]) ?? [];
-    const latestUserEntry = findLatestUserHistoryEntry(history);
-    if (!latestUserEntry || resolveSessionHistoryStatus(latestUserEntry) !== 'pending') {
-      return;
-    }
-
-    const turnId = latestUserEntry.id;
-    if (pendingTurnId === turnId) {
-      return;
-    }
-    pendingTurnId = turnId;
-
-    void Promise.resolve().then(() => {
-      if (disposed) {
-        return;
+    running = true;
+    void (async () => {
+      try {
+        do {
+          rerunRequested = false;
+          const turn = await findLatestPendingUserTurn(data);
+          if (disposed) return;
+          if (!turn || turn.id === lastMarkedTurnId) continue;
+          lastMarkedTurnId = turn.id;
+          await data.commands.markTurnSeen(turn.id);
+        } while (rerunRequested);
+      } finally {
+        running = false;
       }
-      if (pendingTurnId !== turnId) {
-        return;
-      }
-      pendingTurnId = null;
+    })();
+  };
 
-      const current = mirror.getState().history ?? [];
-      const shouldMarkRead = current.some(
-        (entry) => entry?.id === turnId && resolveSessionHistoryStatus(entry) === 'pending'
-      );
-      if (!shouldMarkRead) {
-        return;
-      }
-
-      mirror.setState((prev) => {
-        const histories = prev.history ?? [];
-        for (let i = histories.length - 1; i >= 0; i--) {
-          const entry = histories[i];
-          if (entry?.id === turnId && resolveSessionHistoryStatus(entry) === 'pending') {
-            entry.status = 'seen';
-            entry.read = getLegacyReadForSessionHistoryStatus('seen');
-            break;
-          }
-        }
-        return prev;
-      });
-    });
-  });
+  const observation = data.history.observe(check);
+  void observation.initial.then(() => check());
 
   return {
     dispose: () => {
       disposed = true;
-      pendingTurnId = null;
-      unsubscribe();
+      lastMarkedTurnId = null;
+      observation.unsubscribe();
     },
   };
 };

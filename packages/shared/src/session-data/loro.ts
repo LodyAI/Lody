@@ -8,6 +8,7 @@ import {
   parseHistoryWrite,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
+import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
 import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import {
   applyMarkTurnSeen,
@@ -367,6 +368,56 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
       if (!answered) return rejected('not_found');
       return accepted('respond-permission', respondOptions?.turnId ? [respondOptions.turnId] : []);
+    },
+    async applyAgentBatch(input) {
+      const notifications = input.notifications ?? [];
+      const contents = input.contents ?? [];
+      const targetId = input.targetAssistantEntryId;
+      const touched = targetId !== undefined ? [targetId] : [];
+      if (notifications.length === 0 && contents.length === 0) {
+        return accepted('apply-agent-batch', touched);
+      }
+      const applyTo = (turns: SessionHistoryInput[]): SessionHistoryInput[] => {
+        let next = turns;
+        if (notifications.length > 0) {
+          next = applyNotificationOnHistory(next, notifications as never, input.model, {
+            ...(input.createId ? { createId: input.createId } : {}),
+            ...(input.now ? { now: input.now } : {}),
+            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
+          });
+        }
+        if (contents.length > 0) {
+          next = applyMessageContentsBatch(next, contents as never, {
+            ...(input.createId ? { createId: input.createId } : {}),
+            ...(input.now ? { now: input.now } : {}),
+            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
+            ...(input.model ? { model: input.model } : {}),
+          });
+        }
+        return next;
+      };
+      if (input.entryBound) {
+        if (targetId === undefined) return rejected('invalid_input');
+        // A bound batch whose target does not exist yet still creates it with the
+        // caller's id, matching the historical targeted-then-create fallthrough.
+        if (writer.read(targetId)) {
+          try {
+            writer.updateEntry(targetId, (entry) => {
+              const next = applyTo([entry as unknown as SessionHistoryInput]);
+              return (next[0] ?? entry) as unknown as SessionHistoryInput;
+            });
+          } catch (cause) {
+            return indeterminate(cause);
+          }
+          return accepted('apply-agent-batch', touched);
+        }
+      }
+      try {
+        writer.update((turns) => applyTo(turns));
+      } catch (cause) {
+        return indeterminate(cause);
+      }
+      return accepted('apply-agent-batch', touched);
     },
   };
 

@@ -30,6 +30,7 @@ import {
   type AgentConfigPointLookup,
 } from '@/lib/agent-config-machine-flock';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '@/session/session-execution-service';
@@ -760,10 +761,11 @@ export class LodyOperationCoordinator {
 
   private subscribeTarget(sessionId: SessionId, sessionDoc: SessionDocument): void {
     if (!this.started || this.targetSubscriptions.has(sessionId)) return;
-    const unsubscribe =
-      sessionDoc.mirror?.subscribe(() => {
-        void this.wake('target-history');
-      }) ?? (() => {});
+    const unsubscribe = sessionDoc.mirror
+      ? subscribeSessionChanges(sessionDoc, () => {
+          void this.wake('target-history');
+        })
+      : () => {};
     this.targetSubscriptions.set(sessionId, { unsubscribe });
   }
 

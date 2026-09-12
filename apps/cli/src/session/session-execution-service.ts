@@ -104,6 +104,7 @@ import type { SessionActivePresencePhase } from '@/lib/loro/session-active-prese
 import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import {
@@ -3560,11 +3561,11 @@ export class SessionExecutionService {
       return latest;
     }
 
-    const mirror = args.sessionDoc.mirror;
-    if (typeof mirror?.subscribe !== 'function') {
+    if (!args.sessionDoc.mirror) {
       return latest;
     }
-    const subscribe = mirror.subscribe.bind(mirror);
+    // Control fields and history both count as wakeups; each check re-reads.
+    const subscribe = (listener: () => void) => subscribeSessionChanges(args.sessionDoc, listener);
 
     const timeoutMs = args.timeoutMs ?? REPLAYABLE_HISTORY_SYNC_TIMEOUT_MS;
     const startedAtMs = Date.now();

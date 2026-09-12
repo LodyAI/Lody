@@ -115,27 +115,32 @@ in-memory implementation, which is what proves the renderer consumer depends on 
 
 Migrated callers: the renderer `WorkspaceWriter` routes
 append/replace/permission/task-proposal/assistant-open through the port and surfaces a rejected
-command instead of dropping it; `SessionDocument` exposes `sessionData`, and its assistant
-reopen/create (`openAssistantTurn`) and permission outcome (`respondPermission`) use it, so opening
-a turn no longer materializes unrelated history and an answer locates only its own turn; MCP
-`session_history` pages through `pageVisibleTranscript`, and its pure response builder recomputes
-`hasOlder` after the 128 KiB byte cap so entries shifted off a page stay reachable.
+command instead of dropping it; `SessionDocument` composes the control-plane Mirror, the one shared
+writer and `createLoroSessionData` through `composeSessionData`, so `init`/`initOffline` no longer
+build the full `sessionMirror`; its assistant reopen/create, permission outcome and bound ACP batch
+use port commands, and dispatch/reconcile wakeups plus the structured `session output` wait use
+`subscribeSessionChanges`/`readHistorySnapshot`. `markTurnSeen` now has its production caller in the
+async auto-read policy. MCP `session_history` pages through `pageVisibleTranscript`, and its pure
+response builder recomputes `hasOlder` after the 128 KiB byte cap so entries shifted off a page stay
+reachable. `applyAgentBatch` is the domain command for a bound ACP batch (notifications or
+already-materialized contents): it is applied by both adapters, reuses
+`applyNotificationOnHistory`/`applyMessageContentsBatch`, and keeps the historical "bound target
+missing, create it under that id" fallthrough. The CLI's control-plane Mirror function updaters use
+Immer (`useStrictShallowCopy`) because loro-mirror's queue identity is a non-enumerable `$cid` that
+`structuredClone` drops; a regression lives in
+`packages/shared/tests/session-control-plane-mirror.test.ts`. The async auto-read re-runs one scan
+when an observation lands during an in-flight scan, so a turn written after the scan's count read is
+still acknowledged.
 
 The control plane moved to `@lody/shared/session-control-plane` (`sessionControlPlaneSchema`,
 `createControlPlaneDoc`, `createSessionControlPlaneMirror`) so the CLI and renderer can build one
-history-less control plane; the component copies are re-exports. The port also gained an idempotent
-`markTurnSeen` command with the shared planner.
+history-less control plane; the component copies are re-exports.
 
-Not migrated in this change: `SessionDocument.init` still builds the full `sessionMirror` and
-`getHistory()` materializes it. The shared control plane is the prepared step; the remaining work
-is switching `doc.ts` to it and moving the synchronous consumers (dispatch/reconcile wakeups, the
-structured `session output` wait) onto the read/observe port, which requires updating several
-service test doubles that construct an uninitialized `SessionDocument`. `ConversationView` still
-reads the raw list as the UI display cache; queue/fork/import still use whole-history
-`updateHistory`; ACP batches are not yet a domain command; and the Mirror `WeakMap` copy provenance
-is not yet a storage-owned handle. `setTurnField`/`resumeAssistant`/`clearField`/`markTurnSeen` are
-implemented and contract-tested; `markTurnSeen` has no production caller yet. Owner/seal mapping and
-old-format migration remain separate.
+Not migrated in this change: `ConversationView` still reads the raw list as the UI display cache;
+queue/fork/import still use whole-history `updateHistory`; and the Mirror `WeakMap` copy provenance
+is not yet a storage-owned handle. `readHistorySnapshot`/`readFullHistory` remain deliberate
+bottom-level exposures owned by `SessionDocument` (synchronous dispatch output and explicit full
+reads); they are not a second writer. Owner/seal mapping and old-format migration remain separate.
 
 Verification: the shared suite (99 files / 1164 tests), components (469 files / 3538 tests) and
 CLI (2700 tests, 4 skipped, run with a redirected `HOME` because the sandbox blocks `~/.lody`

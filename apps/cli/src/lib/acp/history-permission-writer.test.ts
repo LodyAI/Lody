@@ -1,5 +1,5 @@
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
-import { createSessionMirror, type SessionId } from '@lody/shared';
+import { type SessionControlPlaneMirror, type SessionId } from '@lody/shared';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,21 +7,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import { SessionDocument } from '../loro/doc';
 import { ensurePermissionRequestOnToolCall } from './history';
+import { composeTestSessionDoc } from '../../../tests/session-doc-fixture';
 
-const mirrors: ReturnType<typeof createSessionMirror>[] = [];
+const mirrors: SessionControlPlaneMirror[] = [];
 afterEach(() => {
   for (const mirror of mirrors.splice(0)) mirror.dispose();
 });
+
+const createLogger = (): Logger =>
+  ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }) as unknown as Logger;
 
 const createStoredTool = (payload: 'unknown' | 'malformed') => {
   // Synthetic old-client storage: it intentionally cannot be authored by the
   // current new-message parser. Import it into an independent current client.
   const oldClient = new LoroDoc();
   const sessionId = 'permission-writer-test' as SessionId;
-  createSessionMirror({
-    doc: oldClient,
-    initialState: { session: { id: sessionId }, history: [] },
-  }).dispose();
   const turn = oldClient.getList('history').pushContainer(new LoroMap());
   turn.set('id', 'assistant-turn');
   turn.set('role', 'assistant');
@@ -41,21 +46,25 @@ const createStoredTool = (payload: 'unknown' | 'malformed') => {
     storedPayload.set('output', 42);
   }
   oldClient.commit();
+  // The old client is a composed session document too, so its doc carries the
+  // same control-plane roots as the current client and the convergence export
+  // below compares identical root sets.
+  const oldClientDoc = new SessionDocument(
+    {} as LoroRepo,
+    sessionId,
+    async () => {},
+    createLogger()
+  );
+  composeTestSessionDoc(oldClientDoc, { doc: oldClient });
+  if (oldClientDoc.mirror) mirrors.push(oldClientDoc.mirror);
 
   const currentClient = new LoroDoc();
   currentClient.import(oldClient.export({ mode: 'snapshot' }));
-  const doc = new SessionDocument({} as LoroRepo, sessionId, async () => {}, {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  } as unknown as Logger);
-  const mirror = createSessionMirror({
-    doc: currentClient,
-    initialState: { session: { id: sessionId }, history: [] },
-  });
-  doc.mirror = mirror;
-  mirrors.push(mirror);
+  const doc = new SessionDocument({} as LoroRepo, sessionId, async () => {}, createLogger());
+  // Compose the production storage entry (control-plane Mirror + shared writer
+  // + session-data seam) over the imported current client.
+  composeTestSessionDoc(doc, { doc: currentClient });
+  if (doc.mirror) mirrors.push(doc.mirror);
 
   const readStored = () => {
     const storedTurn = currentClient.getList('history').get(0) as LoroMap;

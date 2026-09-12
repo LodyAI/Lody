@@ -1,7 +1,9 @@
 import type { z } from 'zod';
 import type { SessionId } from '../ids';
+import type { SessionHistoryInput } from '../schema';
 import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
+import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
 import {
   applyMarkTurnSeen,
   applyOpenAssistantTurn,
@@ -382,6 +384,55 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const next = turns.slice();
         next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
+        return true;
+      });
+    },
+    async applyAgentBatch(input) {
+      const notifications = input.notifications ?? [];
+      const contents = input.contents ?? [];
+      const targetId = input.targetAssistantEntryId;
+      const touched = targetId !== undefined ? [targetId] : [];
+      if (notifications.length === 0 && contents.length === 0) {
+        return mutating('apply-agent-batch', touched, () => true);
+      }
+      const applyTo = (history: SessionHistoryInput[]): SessionHistoryInput[] => {
+        let next = history;
+        if (notifications.length > 0) {
+          next = applyNotificationOnHistory(next, notifications as never, input.model, {
+            ...(input.createId ? { createId: input.createId } : {}),
+            ...(input.now ? { now: input.now } : {}),
+            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
+          });
+        }
+        if (contents.length > 0) {
+          next = applyMessageContentsBatch(next, contents as never, {
+            ...(input.createId ? { createId: input.createId } : {}),
+            ...(input.now ? { now: input.now } : {}),
+            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
+            ...(input.model ? { model: input.model } : {}),
+          });
+        }
+        return next;
+      };
+      if (input.entryBound) {
+        if (targetId === undefined) return rejected('invalid_input');
+        // Missing target falls through to the routed path, which creates it.
+        if (findIndex(targetId) >= 0) {
+          return mutating('apply-agent-batch', touched, () => {
+            const index = findIndex(targetId);
+            if (index < 0) return false;
+            const entry = clone(turns[index]!) as unknown as SessionHistoryInput;
+            const next = applyTo([entry]);
+            const nextTurns = turns.slice();
+            nextTurns[index] = withoutUndefined(next[0] ?? entry) as SessionTurn;
+            turns = nextTurns;
+            return true;
+          });
+        }
+      }
+      return mutating('apply-agent-batch', touched, () => {
+        const draft = turns.map((turn) => clone(turn)) as unknown as SessionHistoryInput[];
+        turns = applyTo(draft) as unknown as SessionTurn[];
         return true;
       });
     },

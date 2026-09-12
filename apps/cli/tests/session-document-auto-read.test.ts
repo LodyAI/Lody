@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,7 +25,11 @@ describe('SessionDocument auto read', () => {
       await doc.initOffline({ history: [] });
 
       await doc.updateHistory((history) => history.concat(createUserEntry('h1', 'hi')));
-      await Promise.resolve();
+      // Auto-read is a background port command now: wait for the accepted write
+      // instead of assuming a single microtask.
+      await vi.waitFor(async () => {
+        expect((await doc.getHistory())[0]!.status).toBe('seen');
+      });
 
       const history = await doc.getHistory();
       expect(history).toHaveLength(1);
@@ -47,7 +51,10 @@ describe('SessionDocument auto read', () => {
       await doc.updateHistory((history) =>
         history.concat([createUserEntry('h1', 'first'), createUserEntry('h2', 'second')])
       );
-      await Promise.resolve();
+      await vi.waitFor(async () => {
+        const current = await doc.getHistory();
+        expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
+      });
 
       const history = await doc.getHistory();
       expect(history).toHaveLength(2);
@@ -72,6 +79,10 @@ describe('SessionDocument auto read', () => {
         createUserEntry('h1', 'first'),
         createUserEntry('h2', 'second'),
       ]);
+      await vi.waitFor(async () => {
+        const current = await doc.getHistory();
+        expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
+      });
 
       const before = await doc.getHistory();
       expect(before).toHaveLength(2);

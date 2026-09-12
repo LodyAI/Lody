@@ -1,3 +1,5 @@
+import type { MessageContent, ModelInfo } from '../ai';
+import type { AcpSessionNotification } from '../acp/schema';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
 import type {
@@ -79,13 +81,33 @@ export interface SessionWriteReceipt {
     | 'open-assistant-turn'
     | 'resolve-task-proposal'
     | 'mark-seen'
-    | 'respond-permission';
+    | 'respond-permission'
+    | 'apply-agent-batch';
 }
 
 /** A user's decision on a task proposal, resolved against the live notice. */
 export type TaskProposalResolution = {
   readonly taskId?: string;
   readonly outcome: 'created' | 'dismissed';
+};
+
+/**
+ * One bound batch of agent output. The target assistant turn is part of the
+ * input, never re-selected at flush time. `entryBound` means the caller has
+ * already proved every message belongs to `targetAssistantEntryId` (text/thought
+ * chunks); the adapter then rewrites only that located turn. Otherwise the
+ * adapter routes through the whole history because a tool/subagent update can
+ * belong to an older turn.
+ */
+export type ApplyAgentBatchInput = {
+  readonly notifications?: readonly AcpSessionNotification[];
+  readonly contents?: readonly MessageContent[];
+  readonly targetAssistantEntryId?: string;
+  readonly entryBound?: boolean;
+  readonly model?: ModelInfo;
+  /** Deterministic identity for tests; production derives the target id. */
+  readonly createId?: () => string;
+  readonly now?: () => string;
 };
 
 /**
@@ -215,6 +237,14 @@ export interface SessionHistoryCommands {
     outcome: PermissionOutcome,
     options?: { readonly turnId?: string }
   ): Promise<SessionCommandResult>;
+  /**
+   * Apply one bound ACP agent-output batch. The batch's target, ordering and
+   * identity are inputs; the adapter never asks for "the current turn". A mixed
+   * batch (tool/subagent updates that may belong to an older turn) keeps the
+   * whole-history routing, while a caller that proved entry ownership uses the
+   * target-local write.
+   */
+  applyAgentBatch(input: ApplyAgentBatchInput): Promise<SessionCommandResult>;
 }
 
 /**

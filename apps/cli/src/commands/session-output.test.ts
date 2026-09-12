@@ -43,7 +43,8 @@ const createMirror = (initialState: MirrorState) => {
 
 const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => ({
   sessionId: 'session-1' as SessionId,
-  mirror: mirror as unknown,
+  readHistorySnapshot: () => mirror.getState().history ?? [],
+  subscribeAll: (listener: () => void) => mirror.subscribe(() => listener()),
 });
 
 describe('session output helpers', () => {

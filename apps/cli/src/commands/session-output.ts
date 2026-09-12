@@ -3,16 +3,10 @@ import type { SessionDocument } from '@/lib/loro/doc';
 
 export type StructuredSessionOutputMode = 'json' | 'jsonl';
 
-type SessionDocMirrorState = {
-  history?: SessionHistoryInput[];
-};
-
-type SessionDocMirror = {
-  subscribe: (listener: (next: SessionDocMirrorState) => void) => () => void;
-  getState: () => SessionDocMirrorState;
-};
-
-type SessionDocForOutput = Pick<SessionDocument, 'sessionId' | 'mirror'>;
+type SessionDocForOutput = Pick<
+  SessionDocument,
+  'sessionId' | 'readHistorySnapshot' | 'subscribeAll'
+>;
 
 export type SessionTurnOutputEvent =
   | {
@@ -138,8 +132,7 @@ export async function waitForTurnCompletion(options: {
   signal?: AbortSignal;
   onEvent?: (event: SessionTurnOutputEvent) => void;
 }): Promise<CompletedAssistantTurn> {
-  const mirror = options.sessionDoc.mirror as SessionDocMirror | null;
-  if (!mirror) {
+  if (!options.sessionDoc.readHistorySnapshot || !options.sessionDoc.subscribeAll) {
     throw new Error('SessionDocument not initialized');
   }
 
@@ -175,12 +168,11 @@ export async function waitForTurnCompletion(options: {
       settle(() => reject(error));
     };
 
-    const inspect = (next: SessionDocMirrorState) => {
+    const inspect = (history: SessionHistoryInput[]) => {
       if (settled) {
         return;
       }
 
-      const history = Array.isArray(next.history) ? (next.history as SessionHistoryInput[]) : [];
       const userTurn = findUserTurn(history, options.userTurnId);
       if (userTurn?.status === 'failed') {
         rejectWith(
@@ -256,13 +248,18 @@ export async function waitForTurnCompletion(options: {
       }
     };
 
+    // Read the synchronous snapshot per change, exactly like the previous Mirror
+    // listener, so rapid intermediate states are not coalesced away.
+    const refresh = () => {
+      if (settled) return;
+      inspect(options.sessionDoc.readHistorySnapshot());
+    };
+
     const handleAbort = () => {
       rejectWith(new Error('Turn completion wait aborted.'));
     };
 
-    unsubscribe = mirror.subscribe((next) => {
-      inspect(next);
-    });
+    unsubscribe = options.sessionDoc.subscribeAll(refresh);
     options.signal?.addEventListener('abort', handleAbort, { once: true });
 
     if (options.timeoutMs > 0) {
@@ -280,6 +277,6 @@ export async function waitForTurnCompletion(options: {
       }, options.timeoutMs);
     }
 
-    inspect(mirror.getState());
+    refresh();
   });
 }

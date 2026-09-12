@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  createSessionMirror,
   getSessionRoomId,
   SessionStatusFactory,
   type SessionId,
@@ -10,6 +9,7 @@ import type { LoroRepo } from 'loro-repo';
 
 import type { Logger } from '@/utils/logger';
 import { SessionDocument } from './doc';
+import { composeTestSessionDoc } from '../../../tests/session-doc-fixture';
 
 const createLogger = (): Logger =>
   ({
@@ -21,7 +21,8 @@ const createLogger = (): Logger =>
 
 const createSessionDocument = (
   repo: Partial<LoroRepo>,
-  unloadDocRoom: (docId: string) => Promise<void> = async () => {}
+  unloadDocRoom: (docId: string) => Promise<void> = async () => {},
+  loroDoc?: LoroDoc
 ): SessionDocument => {
   const doc = new SessionDocument(
     repo as LoroRepo,
@@ -29,9 +30,9 @@ const createSessionDocument = (
     unloadDocRoom,
     createLogger()
   );
-  doc.mirror = {
-    dispose: vi.fn(),
-  } as SessionDocument['mirror'];
+  // Compose the real production storage entry: control-plane Mirror, the one
+  // shared HistoryWriter and the session-data seam over the same doc.
+  composeTestSessionDoc(doc, loroDoc ? { doc: loroDoc } : undefined);
   return doc;
 };
 
@@ -125,17 +126,12 @@ describe('SessionDocument status metadata', () => {
   it('deletes the key instead of persisting null when unsetting a history entry field', () => {
     // Raw LoroMap writes bypass loro-mirror's undefined-stripping; `set(field,
     // undefined)` would persist null and break strict readers.
-    const doc = createSessionDocument({});
     const loroDoc = new LoroDoc();
     const entry = loroDoc.getList('history').insertContainer(0, new LoroMap());
     entry.set('id', 'entry-1');
     entry.set('role', 'assistant');
     entry.set('fileDiff', [{ path: 'a.ts', add: 1, del: 0 }]);
-    doc.handle = { doc: loroDoc } as SessionDocument['handle'];
-    doc.mirror = createSessionMirror({
-      doc: loroDoc,
-      initialState: { session: { id: doc.sessionId }, history: [] },
-    });
+    const doc = createSessionDocument({}, undefined, loroDoc);
 
     expect(doc.setHistoryEntryField('entry-1', 'fileDiff', undefined)).toBe(true);
 
@@ -145,11 +141,10 @@ describe('SessionDocument status metadata', () => {
 
     expect(doc.setLatestAssistantHistoryFileDiff(undefined, 'entry-1')).toBe(true);
     expect((loroDoc.getList('history').get(0) as LoroMap).keys()).not.toContain('fileDiff');
-    doc.mirror.dispose();
+    doc.mirror?.dispose();
   });
 
   it('derives stable turn storage metadata from the associated user entry', () => {
-    const doc = createSessionDocument({});
     const loroDoc = new LoroDoc();
     const history = loroDoc.getList('history');
     const userEntry = history.insertContainer(0, new LoroMap());
@@ -161,7 +156,7 @@ describe('SessionDocument status metadata', () => {
     entry.set('role', 'assistant');
     entry.set('userTurnId', 'user-1');
     entry.set('timestamp', '2026-08-04T03:02:01.000Z');
-    doc.handle = { doc: loroDoc } as SessionDocument['handle'];
+    const doc = createSessionDocument({}, undefined, loroDoc);
 
     const capturedAtMs = Date.parse('2026-08-04T03:02:00.000Z');
     expect(doc.getAssistantHistoryEntryTurnStorageMetadata('entry-1')).toEqual({

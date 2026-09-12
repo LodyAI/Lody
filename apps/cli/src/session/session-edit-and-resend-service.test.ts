@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { SessionDocument } from '../lib/loro/doc';
-import { attachAutoMarkLatestUserHistoryAsRead } from '../lib/loro/history-auto-read';
+import { composeTestSessionDoc } from '../../tests/session-doc-fixture';
 import {
-  createSessionMirror,
   SessionStatusFactory,
   type AgentConfigId,
   type MachineId,
@@ -97,16 +96,10 @@ function createHarness(
     warn: vi.fn(),
     error: vi.fn(),
   } as never);
-  realDoc.mirror = createSessionMirror({
-    doc: loro,
-    initialState: { session: { id: sessionId }, history: [] },
-  });
-  const mirror = realDoc.mirror;
-  const autoRead = attachAutoMarkLatestUserHistoryAsRead(mirror);
-  cleanups.push(() => {
-    autoRead.dispose();
-    mirror.dispose();
-  });
+  // The production storage entry (control-plane Mirror + one shared writer +
+  // session-data seam, with the auto-read policy attached) over the fixture doc.
+  composeTestSessionDoc(realDoc, { doc: loro });
+  cleanups.push(() => realDoc.mirror?.dispose());
   const meta = {
     id: sessionId,
     machineId,
@@ -206,7 +199,9 @@ function createHarness(
     agentClient,
     events,
     executionService,
-    getHistory: () => history,
+    // Read the real doc so an async auto-read write is observable, not a snapshot
+    // captured at the last explicit history write.
+    getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     realDoc,
     repo,
     service,
@@ -255,6 +250,9 @@ describe('SessionEditAndResendService', () => {
       'assistant-1',
       'user-3',
     ]);
+    await vi.waitFor(() => {
+      expect(harness.getHistory().at(-1)).toMatchObject({ status: 'seen', read: true });
+    });
     expect(harness.getHistory().at(-1)).toMatchObject({
       userId: 'original-author',
       status: 'seen',
@@ -342,9 +340,7 @@ describe('SessionEditAndResendService', () => {
     });
     // Once settled, pending_apply no longer protects the steer from editing.
     await execution['setUserTurnStatus'](harness.realDoc, 'user-2', 'handled');
-    const stored = harness.realDoc.mirror
-      ?.getState()
-      .history.find((entry) => entry.id === 'user-2');
+    const stored = harness.realDoc.sessionData.writer.read('user-2');
     expect(stored?.inputConfig?._lodyDeliveryKind).toBe('steer');
     const read = await harness.realDoc.getHistory();
     expect(read.find((entry) => entry.id === 'user-2')?.inputConfig?._lodyDeliveryKind).toBe(

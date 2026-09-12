@@ -4,11 +4,11 @@ import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { composeTestSessionDoc } from './session-doc-fixture';
 import { LoroDoc } from 'loro-crdt';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import {
   buildMissingEmail,
-  createSessionMirror,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
   type MessageContent,
@@ -30,6 +30,33 @@ const createSilentLogger = (): Logger => ({
 });
 
 const createAllowMachineAccess = () => vi.fn(async () => ({ outcome: 'allowed' as const }));
+
+/**
+ * Give a fake session doc the session-data surface `subscribeSessionChanges`
+ * needs. The fakes drive change notification through their own `mirror.subscribe`
+ * mock; History reads in the watcher still go through the fake's `getHistory`,
+ * so this observe is a no-op stream. A real composed `SessionDocument` keeps its
+ * own getter.
+ */
+const withSessionData = <T extends object>(doc: T): T => {
+  if (!('sessionData' in doc)) {
+    Object.assign(doc, {
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
+      },
+    });
+  }
+  return doc;
+};
 
 type WatcherDeps = ConstructorParameters<typeof SessionDispatchWatcher>[0];
 
@@ -177,7 +204,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -254,7 +281,7 @@ describe('SessionDispatchWatcher', () => {
           flock: { scan: () => [] },
         })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
     const userResolver = {
@@ -330,7 +357,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta: vi.fn(async () => {}),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -428,7 +455,7 @@ describe('SessionDispatchWatcher', () => {
           return { unsubscribe: vi.fn() };
         }),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -535,7 +562,7 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
     const watcher = createWatcher({
       logger: createSilentLogger(),
@@ -592,9 +619,12 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta: vi.fn(async () => undefined),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => ({
-        getMetaState: vi.fn(async () => undefined),
-      })),
+      getOrCreateSessionDoc: vi.fn(async () =>
+        withSessionData({
+          getMetaState: vi.fn(async () => undefined),
+          mirror: { subscribe: vi.fn(() => vi.fn()) },
+        })
+      ),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
       publishSessionPresence,
       clearSessionPresence,
@@ -691,7 +721,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta: vi.fn(async () => {}),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -793,7 +823,7 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
@@ -863,7 +893,7 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
@@ -948,7 +978,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1058,7 +1088,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1384,7 +1414,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1463,7 +1493,7 @@ describe('SessionDispatchWatcher', () => {
     };
     const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
     const loro = new LoroDoc();
-    doc.mirror = createSessionMirror({ doc: loro, initialState: { session: { id }, history: [] } });
+    composeTestSessionDoc(doc, { doc: loro });
     const watcher = createWatcher({
       logger: createSilentLogger(),
       machineId: 'machine-1',
@@ -1495,8 +1525,7 @@ describe('SessionDispatchWatcher', () => {
       } as never);
     try {
       await enqueue();
-      const attempt = () =>
-        promote(doc, meta, doc.mirror!.getState().history as SessionHistoryInput[]);
+      const attempt = () => promote(doc, meta, doc.readHistorySnapshot());
       await expect(attempt()).rejects.toThrow('pointer-unavailable');
       expect(loro.getList('history').length).toBe(1);
       expect(await doc.getMessageQueue()).toHaveLength(1);
@@ -1660,21 +1689,19 @@ describe('SessionDispatchWatcher', () => {
       canUseMachine: createAllowMachineAccess(),
     });
 
-    // A real SessionDocument over a stub mirror, so promotion runs the real
+    // A real SessionDocument over real storage, so promotion runs the real
     // `appendUserTurn` binding rather than a fake that could drift from it.
-    const docState: { history: SessionHistoryInput[] } = { history: [] };
     const realDoc = new SessionDocument(
-      { upsertDocMeta } as unknown as ConstructorParameters<typeof SessionDocument>[0],
+      {
+        upsertDocMeta,
+        flush: async () => {},
+      } as unknown as ConstructorParameters<typeof SessionDocument>[0],
       initialMeta.id,
       async () => {},
       createSilentLogger()
     );
     realDoc.roomId = roomId;
-    realDoc.mirror = {
-      setState: (updateFn: (prev: typeof docState) => typeof docState) => {
-        updateFn(docState);
-      },
-    } as unknown as SessionDocument['mirror'];
+    composeTestSessionDoc(realDoc);
     const sessionDoc = Object.assign(realDoc, {
       peekReadyMessageQueue: vi.fn(async () => ({
         $cid: 'mq-pointer',
@@ -1866,7 +1893,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1948,7 +1975,7 @@ describe('SessionDispatchWatcher', () => {
           return { unsubscribe: vi.fn() };
         }),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -2049,7 +2076,7 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => fastSessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(fastSessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
     const logger = {
@@ -2214,7 +2241,7 @@ describe('SessionDispatchWatcher', () => {
       );
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
-        return {
+        return withSessionData({
           mirror: { subscribe: vi.fn(() => vi.fn()) },
           getMetaState: vi.fn(async () => meta),
           getHistory: vi.fn(async () => {
@@ -2232,7 +2259,7 @@ describe('SessionDispatchWatcher', () => {
           }),
           updateHistory: vi.fn(async () => {}),
           setStatus: vi.fn(async () => {}),
-        };
+        });
       });
       const workspaceDocument = {
         repo: {
@@ -2325,7 +2352,7 @@ describe('SessionDispatchWatcher', () => {
       }));
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
-        return {
+        return withSessionData({
           mirror: { subscribe: vi.fn(() => vi.fn()) },
           getMetaState: vi.fn(async () => meta),
           getHistory: vi.fn(async () => {
@@ -2340,7 +2367,7 @@ describe('SessionDispatchWatcher', () => {
           }),
           updateHistory: vi.fn(async () => {}),
           setStatus: vi.fn(async () => {}),
-        };
+        });
       });
       const workspaceDocument = {
         repo: {
@@ -2440,7 +2467,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta })),
           watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         onMetaRoomSynced: vi.fn(() => vi.fn()),
       } as unknown as LoroDocumentManager;
       const dispatchPreparedSessionTurn = vi.fn(async () => {});
@@ -2518,7 +2545,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta })),
           watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         onMetaRoomSynced: vi.fn(() => vi.fn()),
       } as unknown as LoroDocumentManager;
       const watcher = createWatcher({
@@ -2574,13 +2601,13 @@ describe('SessionDispatchWatcher', () => {
       const bothOpensStarted = createDeferred();
       const unsubscribe = vi.fn();
       const subscribe = vi.fn(() => unsubscribe);
-      const sessionDoc = {
+      const sessionDoc = withSessionData({
         mirror: { subscribe },
         getMetaState: vi.fn(async () => meta),
         getHistory: vi.fn(async () => [createPendingUserTurn(turnId, 'hello')]),
         updateHistory: vi.fn(async () => {}),
         setStatus: vi.fn(async () => {}),
-      };
+      });
       let openCount = 0;
       const getOrCreateSessionDoc = vi.fn(async () => {
         openCount += 1;
@@ -2722,7 +2749,7 @@ describe('SessionDispatchWatcher', () => {
         }) satisfies SessionMeta;
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = createMeta(sessionId);
-        return {
+        return withSessionData({
           mirror: { subscribe: vi.fn(() => vi.fn()) },
           getMetaState: vi.fn(async () => meta),
           getHistory: vi.fn(async () => {
@@ -2738,7 +2765,7 @@ describe('SessionDispatchWatcher', () => {
           }),
           updateHistory: vi.fn(async () => {}),
           setStatus: vi.fn(async () => {}),
-        };
+        });
       });
       const workspaceDocument = {
         repo: {
@@ -3013,7 +3040,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -3136,7 +3163,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
           upsertDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc,
       } as unknown as LoroDocumentManager;
 
@@ -3242,7 +3269,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
           upsertDocMeta: vi.fn(async () => {}),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager;
 
@@ -3351,7 +3378,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta: outerMeta })),
           upsertDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager;
 
@@ -3447,7 +3474,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta: { ...state.meta, ...repoMetaOverride } })),
           upsertDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager,
       executionService: {

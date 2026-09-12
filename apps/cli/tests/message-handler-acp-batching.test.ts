@@ -491,15 +491,16 @@ describe('MessageHandler ACP batching', () => {
       });
 
       // Agents keep emitting briefly after cancel: land one update in the
-      // finalization tail — after the drain flushed 'pending' (1st history
-      // write) and the finished marker was stamped (2nd write), but before the
-      // turn state is cleared. Wiping the buffer at turn clear used to drop it.
+      // finalization tail — after the drain flushed 'pending' (through the
+      // session-data command) and the finished marker was stamped (the first
+      // whole-history write), but before the turn state is cleared. Wiping the
+      // buffer at turn clear used to drop it.
       const originalUpdateHistory = doc.updateHistory.bind(doc);
-      let historyWrites = 0;
+      let finalizedWrites = 0;
       doc.updateHistory = (async (mutator: Parameters<typeof originalUpdateHistory>[0]) => {
         const result = await originalUpdateHistory(mutator);
-        historyWrites += 1;
-        if (historyWrites === 2) {
+        finalizedWrites += 1;
+        if (finalizedWrites === 1) {
           host.enqueueACPUpdate(sessionId, {
             sessionId,
             update: {

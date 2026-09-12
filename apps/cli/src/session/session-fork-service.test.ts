@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { SessionDocument } from '../lib/loro/doc';
+import { composeTestSessionDoc } from '../../tests/session-doc-fixture';
 import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-history';
 import {
   getSessionRoomId,
-  createSessionMirror,
   createHistoryWriter,
   type StoredHistorySnapshot,
   SessionStatusFactory,
@@ -395,17 +395,14 @@ describe('SessionForkService durability boundary', () => {
     async (kind) => {
       vi.useFakeTimers({ toFake: ['setImmediate'] });
       const loro = new LoroDoc();
-      const mirror = createSessionMirror({
-        doc: loro,
-        initialState: { session: { id: targetSessionId }, history: [] },
-      });
       const doc = new SessionDocument({} as never, targetSessionId, async () => {}, {
         debug: vi.fn(),
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
       } as never);
-      doc.mirror = mirror;
+      // The real storage entry: control-plane Mirror + the one shared writer.
+      composeTestSessionDoc(doc, { doc: loro });
       const opaqueItems = [
         { type: 'text', text: 'answer', futureMetadata: { revision: 3 } },
         { type: 'future_item', payload: [1, null, { future: true }] },
@@ -489,7 +486,7 @@ describe('SessionForkService durability boundary', () => {
         expect(harness.targetDoc.getForkOperation()).toBeUndefined();
         expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
       } finally {
-        mirror.dispose();
+        doc.mirror?.dispose();
         vi.useRealTimers();
       }
     }

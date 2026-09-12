@@ -36,6 +36,21 @@ describe('nested operation progress feedback', () => {
       }));
       return {
         mirror,
+        // `subscribeSessionChanges` needs the session-data surface; the fake
+        // drives change notification through the raw Mirror's subscribe, so the
+        // history observation is inert.
+        sessionData: {
+          history: {
+            count: async () => 0,
+            readAt: async () => ({ state: 'missing' as const }),
+            readTurn: async () => ({ state: 'missing' as const }),
+            readRange: async () => [],
+            readDirectory: async () => [],
+            observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+          },
+          commands: {},
+          durability: { waitDurable: async () => {} },
+        },
         getHistory: async () => mirror.getState().history,
         updateHistory: async (
           update: (history: SessionHistoryInput[]) => SessionHistoryInput[]

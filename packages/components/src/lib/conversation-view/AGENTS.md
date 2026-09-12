@@ -37,7 +37,12 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   (`history: schema.Ignore()`) over `createControlPlaneDoc`, which drops
   `history` events (the incremental event path applies ignored roots) and
   skips root enumeration (a lazy-snapshot walk of every container). Contract:
-  `tests/control-plane-mirror.test.ts`.
+  `tests/control-plane-mirror.test.ts`. The shared
+  `createSessionControlPlaneMirror` function updater must normalize with Immer
+  (`useStrictShallowCopy`), never `structuredClone`: loro-mirror's queue
+  identity is a non-enumerable `$cid` a clone drops, so removals/reorders
+  silently stop matching. Contract:
+  `packages/shared/tests/session-control-plane-mirror.test.ts`.
 - **Whole-history readers** use `createConversationDerivation` (a fact table
   filled by a background hydrate-derive-release pass, updated from view
   events) or `readConversationHistory` for one-shot copy/image sharing. That helper

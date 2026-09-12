@@ -14,6 +14,15 @@ export function fakeSessionData(
 ) {
   const rejected = () => ({ status: 'rejected' as const, reason: { code: 'not_found' as const } });
   return {
+    history: {
+      count: async () => 0,
+      readAt: async () => ({ state: 'missing' as const }),
+      readTurn: async () => ({ state: 'missing' as const }),
+      readRange: async () => [],
+      readDirectory: async () => [],
+      observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+    },
+    durability: { waitDurable: async () => {} },
     commands: {
       async openAssistantTurn(input: {
         turnId: string;

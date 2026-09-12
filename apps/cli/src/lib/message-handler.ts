@@ -177,7 +177,7 @@ import {
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
-import { LoroDocumentManager, SessionDocument } from './loro/doc';
+import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import {
   type ContentBlock,
   RequestPermissionRequest,
@@ -245,7 +245,6 @@ import {
 } from '@/lib/notifications';
 import {
   appendACPNotificationsToAssistantEntry,
-  applyMessageContentsBatch,
   ensurePermissionRequestOnToolCall,
   updatePermissionOutcomeInHistory,
   findPermissionOutcomeInHistory,
@@ -5146,14 +5145,19 @@ export class MessageHandler {
       if (contents.length === 0) {
         return;
       }
-      await args.sessionDoc.updateHistory((history) =>
-        applyMessageContentsBatch(history, contents, {
-          targetAssistantEntryId: args.assistantEntryId,
-          createId: () => args.assistantEntryId,
-          now: () => new Date(getServerNow()).toISOString(),
-          model: args.modelInfo,
-        })
-      );
+      const result = await args.sessionDoc.sessionData.commands.applyAgentBatch({
+        contents,
+        targetAssistantEntryId: args.assistantEntryId,
+        createId: () => args.assistantEntryId,
+        now: () => new Date(getServerNow()).toISOString(),
+        ...(args.modelInfo ? { model: args.modelInfo } : {}),
+      });
+      if (result.status === 'rejected') {
+        throw new HistoryWriteError(
+          result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+        );
+      }
+      if (result.status === 'indeterminate') throw result.cause;
     };
 
     let pendingNotifications: AcpSessionNotification[] = [];
@@ -6006,7 +6010,7 @@ export class MessageHandler {
       sessionId,
       userTurnId,
       readHistory: () => sessionDoc.getHistory(),
-      subscribeHistory: (listener) => sessionDoc.mirror?.subscribe(listener),
+      subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
       onBeforeOpen: async () => {
         await this.writeAssistantEntryForTurn(
           sessionId,
@@ -8807,22 +8811,21 @@ export class MessageHandler {
         resolve({ outcome });
       };
 
-      // Check if outcome already exists (e.g., from a previous device)
+      // Check if outcome already exists (e.g., from a previous device). Reads the
+      // whole history through the document's explicit full-history API.
       const checkForOutcome = () => {
-        if (resolved || !doc.mirror) return;
-        const history = (doc.mirror.getState().history as SessionHistoryInput[]) ?? [];
-        const outcome = findPermissionOutcomeInHistory(history, requestId);
-        if (outcome) {
-          void resolveWithOutcome(outcome);
-        }
+        if (resolved) return;
+        void doc.getHistory().then((history) => {
+          if (resolved) return;
+          const outcome = findPermissionOutcomeInHistory(history, requestId);
+          if (outcome) void resolveWithOutcome(outcome);
+        });
       };
 
-      // Subscribe to history changes
-      if (doc.mirror) {
-        unsubscribe = doc.mirror.subscribe(() => {
-          checkForOutcome();
-        });
-      }
+      // Subscribe to control and history changes alike.
+      unsubscribe = subscribeSessionChanges(doc, () => {
+        checkForOutcome();
+      });
 
       const checkAutomaticOutcome = (pending: boolean) => {
         // A client decision already written to history wins over a later mode toggle.

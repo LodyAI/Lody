@@ -269,6 +269,55 @@ export function runSessionDataContract(
       expect((request?.outcome as { outcome?: string } | undefined)?.outcome).toBe('cancelled');
     });
 
+    it('applies a bound agent batch to its target turn and preserves the others', async () => {
+      const harness = await create();
+      const { data } = harness;
+      await data.commands.appendTurn(assistantTurn('assistant-1'));
+      await data.commands.appendTurn(assistantTurn('assistant-2'));
+      const otherBefore = JSON.stringify(
+        harness.readStored().find((turn) => turn.id === 'assistant-2')
+      );
+
+      const result = await data.commands.applyAgentBatch({
+        notifications: [
+          {
+            sessionId: 'synthetic',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: ' streamed' },
+            },
+          },
+        ] as never,
+        targetAssistantEntryId: 'assistant-1',
+        entryBound: true,
+        createId: () => 'assistant-1',
+        now: () => '2026-01-01T00:00:02.000Z',
+      });
+      expect(result.status).toBe('accepted');
+
+      const target = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
+      expect(JSON.stringify(target.items)).toContain('streamed');
+      expect(JSON.stringify(harness.readStored().find((turn) => turn.id === 'assistant-2'))).toBe(
+        otherBefore
+      );
+
+      // A bound batch with no stored target still creates it under the bound id,
+      // matching the historical targeted-then-create fallthrough.
+      const created = await data.commands.applyAgentBatch({
+        contents: [{ type: 'text', text: 'created' }] as never,
+        targetAssistantEntryId: 'missing',
+        entryBound: true,
+        createId: () => 'missing',
+        now: () => '2026-01-01T00:00:03.000Z',
+      });
+      expect(created.status).toBe('accepted');
+      const createdRead = await data.history.readTurn('missing');
+      expect(createdRead.state).toBe('ready');
+      if (createdRead.state === 'ready') {
+        expect(JSON.stringify(createdRead.turn.items)).toContain('created');
+      }
+    });
+
     it('rejects invalid input before storage changes', async () => {
       const harness = await create();
       const { data } = harness;

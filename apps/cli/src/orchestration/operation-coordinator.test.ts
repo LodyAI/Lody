@@ -128,6 +128,20 @@ const makeHarness = async (options?: {
         return () => set.delete(callback);
       },
     },
+    // `subscribeSessionChanges` needs the session-data surface; the fake drives
+    // change notification through its own `mirror.subscribe` set above.
+    sessionData: {
+      history: {
+        count: async () => 0,
+        readAt: async () => ({ state: 'missing' as const }),
+        readTurn: async () => ({ state: 'missing' as const }),
+        readRange: async () => [],
+        readDirectory: async () => [],
+        observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+      },
+      commands: {},
+      durability: { waitDurable: async () => {} },
+    },
     getHistory: async () => histories.get(sessionId) ?? [],
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       const current = histories.get(sessionId) ?? [];

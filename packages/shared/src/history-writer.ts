@@ -534,7 +534,21 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     },
     update(updater) {
       const previous = readAll();
-      const next = immer.produce(previous as SessionHistoryInput[], (draft) => updater(draft));
+      const next = immer.produce(previous as SessionHistoryInput[], (draft) => {
+        // Callers may mutate the draft, return a replacement, or both. Immer
+        // rejects a recipe that does both, so a distinct return value is written
+        // back into the draft and the draft stays the one result (the legacy
+        // Mirror updater had the same rule).
+        const result = updater(draft);
+        if (result && result !== (draft as unknown)) {
+          (draft as SessionHistoryInput[]).splice(
+            0,
+            draft.length,
+            ...(result as SessionHistoryInput[])
+          );
+        }
+        return undefined;
+      });
       prepare(previous, next)();
     },
     updateEntry(id, updater) {
@@ -542,7 +556,17 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
       if (!target) return false;
       const { map, index } = target;
       const previous = readHistory?.()[index] ?? (map.toJSON() as SessionHistoryInput);
-      const next = immer.produce(previous, (draft) => updater(draft));
+      const next = immer.produce(previous, (draft) => {
+        // Same normalization as `update`: a caller may rewrite the draft's
+        // fields, return a replacement entry, or both.
+        const result = updater(draft);
+        if (result && result !== (draft as unknown)) {
+          const replacement = draft as unknown as Record<string, unknown>;
+          for (const key of Object.keys(replacement)) delete replacement[key];
+          Object.assign(replacement, result);
+        }
+        return undefined;
+      });
       if (next.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
       if (historyValuesEqual(previous, next)) return true;
       const prepared = prepareReplacement(previous, next);

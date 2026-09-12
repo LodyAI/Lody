@@ -31,6 +31,7 @@ import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { SessionExecutionService, type SessionDispatchSource } from './session-execution-service';
 import {
   extractPromptPreviewFromInputBlocks,
@@ -1182,11 +1183,13 @@ export class SessionDispatchWatcher {
         // Bootstrap and live metadata can race on the same session. Re-check
         // after the awaited open so only one subscription is installed.
         if (!this.watchedSessions.has(sessionId)) {
-          const unsubscribe = sessionDoc.mirror?.subscribe(() => {
-            if (isActive()) {
-              void this.enqueueSessionCheck(sessionId, { lifecycleGeneration });
-            }
-          });
+          const unsubscribe = sessionDoc.mirror
+            ? subscribeSessionChanges(sessionDoc, () => {
+                if (isActive()) {
+                  void this.enqueueSessionCheck(sessionId, { lifecycleGeneration });
+                }
+              })
+            : undefined;
           if (unsubscribe) {
             this.watchedSessions.set(sessionId, { unsubscribe });
           }
@@ -2528,7 +2531,9 @@ export class SessionDispatchWatcher {
       // arrives during join retries is a complete turn source and must preempt
       // the CRDT wait without bypassing the serialized dispatch chain.
       unsubscribeRpcOffers = this.subscribeToRpcTurnOffers(sessionId, requestTurnCheck);
-      unsubscribeMirror = sessionDoc.mirror?.subscribe(requestTurnCheck);
+      unsubscribeMirror = sessionDoc.mirror
+        ? subscribeSessionChanges(sessionDoc, requestTurnCheck)
+        : undefined;
       if (!unsubscribeMirror) {
         this.deps.logger.debug(
           `[${sessionId}] Session mirror is unavailable during history sync wait`

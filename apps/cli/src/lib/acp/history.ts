@@ -21,7 +21,6 @@ import type { Logger } from '@/utils/logger';
 import { captureMessage } from '@/instrument';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionPlanEntry } from '@lody/shared';
-import { applyNotificationOnHistory } from './history-apply';
 import {
   deriveLocationsFromToolCallContent,
   stripToolCallContentForHistory,
@@ -178,32 +177,46 @@ export const handleACPUpdateMessage = async (
   try {
     if (persistableBatch.length > 0) {
       const targetTurnId = getTargetTurnId();
-      // Tool/subagent updates can belong to older turns. Only text/thought
-      // chunks have a target-local ownership contract; retain full routing otherwise.
-      const targetOnly =
-        targetTurnId &&
-        persistableBatch.every(
-          ({ update }) =>
-            (update.sessionUpdate === 'agent_message_chunk' ||
-              update.sessionUpdate === 'agent_thought_chunk') &&
-            update.content.type === 'text'
+      if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
+        callbacks?.logger?.warn(
+          `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
         );
-      await doc.updateHistory(
-        (history) => {
-          if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
-            callbacks?.logger?.warn(
-              `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
-            );
-            return history;
-          }
-          const createId = targetTurnId ? () => targetTurnId : uuidV4;
-          return applyNotificationOnHistory(history, persistableBatch, model, {
-            createId,
-            ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
-          });
-        },
-        targetOnly ? { onlyEntryId: targetTurnId } : undefined
-      );
+      } else {
+        // Tool/subagent updates can belong to older turns. Only text/thought
+        // chunks have a target-local ownership contract; retain full routing otherwise.
+        const targetOnly = Boolean(
+          targetTurnId &&
+            persistableBatch.every(
+              ({ update }) =>
+                (update.sessionUpdate === 'agent_message_chunk' ||
+                  update.sessionUpdate === 'agent_thought_chunk') &&
+                update.content.type === 'text'
+            )
+        );
+        const createId = targetTurnId ? () => targetTurnId : uuidV4;
+        const result = await doc.sessionData.commands.applyAgentBatch({
+          notifications: persistableBatch,
+          ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
+          ...(targetOnly ? { entryBound: true } : {}),
+          createId,
+          ...(model ? { model } : {}),
+        });
+        if (result.status === 'rejected') {
+          throw new HistoryWriteError(
+            result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+          );
+        }
+        if (result.status === 'indeterminate') throw result.cause;
+        if (result.postAcceptError !== undefined) {
+          callbacks?.logger?.warn(
+            `[${doc.sessionId}] ACP history batch persisted, but a post-accept side effect failed: ${
+              result.postAcceptError instanceof Error
+                ? result.postAcceptError.message
+                : String(result.postAcceptError)
+            }`
+          );
+        }
+      }
     }
     // Evidence is derived from the same enriched notification, but it is only
     // safe to publish after the corresponding history write commits. Otherwise

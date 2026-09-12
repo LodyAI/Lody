@@ -3129,6 +3129,20 @@ describe('SessionExecutionService', () => {
           };
         },
       },
+      // `subscribeSessionChanges` needs the session-data surface; the fake drives
+      // the late-sync signal through the raw Mirror's subscribe.
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
+      },
     };
     const agentClient = {
       isCreated: vi.fn(() => true),

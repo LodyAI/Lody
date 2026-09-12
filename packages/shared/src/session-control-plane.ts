@@ -1,7 +1,10 @@
 import type { LoroDoc, LoroEventBatch } from 'loro-crdt';
+import { Immer, type Draft } from 'immer';
 import { Mirror, schema, type ContainerSchemaType } from 'loro-mirror';
 import { sessionDocSchema } from './schema';
 import type { SessionWriteState } from './session-mirror';
+
+const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 
 // # Session control-plane Mirror
 //
@@ -79,7 +82,7 @@ export type SessionControlPlaneState = Omit<SessionWriteState, 'history'>;
 
 export type SessionControlPlaneUpdater =
   | Partial<SessionControlPlaneState>
-  | ((draft: SessionControlPlaneState) => SessionControlPlaneState | void);
+  | ((draft: Draft<SessionControlPlaneState>) => SessionControlPlaneState | void);
 
 /**
  * The control-plane Mirror used by the CLI and the renderer. It never carries a
@@ -103,12 +106,16 @@ export function createSessionControlPlaneMirror(options: {
       mirror.subscribe(() => listener(mirror.getState() as SessionControlPlaneState)),
     setState(updater: SessionControlPlaneUpdater): void {
       const previous = mirror.getState() as SessionControlPlaneState;
+      // `immer` (not `structuredClone`) so the non-enumerable `$cid` stamps
+      // loro-mirror puts on nested containers survive into the draft; queue
+      // identity edits (`removeMessageQueueItem`, reorder) match on them.
       const next =
         typeof updater === 'function'
-          ? (() => {
-              const draft = structuredClone(previous) as SessionControlPlaneState;
-              return updater(draft) ?? draft;
-            })()
+          ? immer.produce(previous, (draft) => {
+              const result = updater(draft);
+              if (result && result !== draft) return result;
+              return undefined;
+            })
           : { ...previous, ...updater };
       mirror.setState(next as never);
     },
