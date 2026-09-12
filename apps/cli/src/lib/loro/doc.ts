@@ -87,6 +87,7 @@ import {
   attachAutoMarkLatestUserHistoryAsRead,
   type AutoMarkLatestUserHistoryAsReadHandle,
 } from './history-auto-read';
+import { attachSessionModelSummary } from './session-model-summary';
 
 import {
   LoroConnectionRecoveryController,
@@ -1752,6 +1753,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   private detachDocRoomStatusListener: (() => void) | null = null;
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
+  private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
   private destroyed = false;
 
   get isDestroyed(): boolean {
@@ -1775,6 +1777,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   }
 
   private createMirror(handle: RepoDocHandle, initialState?: SessionDocInitialState) {
+    this.modelSummary?.dispose();
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;
     this.mirror?.dispose();
@@ -1805,6 +1808,25 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       initialState: merged,
     });
     this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.mirror);
+    this.modelSummary = attachSessionModelSummary(
+      this.mirror,
+      async (lastModel, active) => {
+        const current = await this.repo.getDocMeta(this.roomId);
+        const meta = current?.meta as SessionMeta | undefined;
+        // Hidden fork targets and deleted sessions must never be published by a projection.
+        if (!active() || !current || isLoroRepoDocDeleted(current) || meta?.id !== this.sessionId)
+          return false;
+        if (JSON.stringify(meta.lastModel) !== JSON.stringify(lastModel)) {
+          await this.repo.upsertDocMeta(this.roomId, { lastModel });
+        }
+        return true;
+      },
+      () =>
+        this.logger.warn(
+          `[${this.sessionId}] Failed to publish model summary; retry on next history change`
+        )
+    );
+    if (this.mirror.getState().history?.length) void this.modelSummary.sync();
   }
 
   async init(options: { skipAutoRead?: boolean } = {}) {
@@ -2969,7 +2991,11 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       return;
     }
 
+    await this.modelSummary?.flush();
     this.destroyed = true;
+
+    this.modelSummary?.dispose();
+    this.modelSummary = null;
 
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;

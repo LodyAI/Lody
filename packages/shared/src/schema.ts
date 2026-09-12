@@ -798,6 +798,8 @@ export type PendingScheduledTask = {
 };
 
 export type SessionMeta = {
+  /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
+  lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
   machineId: MachineId;
   createdAt: string;
