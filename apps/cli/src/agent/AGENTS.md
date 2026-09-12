@@ -37,10 +37,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `lody_task_*` tool.
 - Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
   never between `initialize` and `newSession`.
-- Acknowledged steer is inject-or-refuse. `AgentSteerNotDeliveredError` marks ONLY a provable
-  refusal — local pre-write failure or the agent's own JSON-RPC `invalid request`; never widen
-  it. The applied-waiter must await the steer request's answer before giving up on the turn's
-  response.
+- Only pre-write failure or provider `invalid request` proves `AgentSteerNotDeliveredError`.
+  Steer cancellation releases the local wait, never an applied lease or the raw delivery verdict.
+  Preserve that verdict after Stop for the turn owner's finalizer.
 
 ## Launch and runtimes
 

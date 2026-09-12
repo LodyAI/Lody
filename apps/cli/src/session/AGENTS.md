@@ -44,17 +44,17 @@ Contract: specs/session-orchestration.md.
 
 ## Turn execution
 
-- Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
-  never gate status or meta writes.
+- Gate history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Keep `TurnRuntimeState` until raw ACP completion or confirmed termination after cancel; no
-  second visible turn. Assistant ids use `userTurnId`. `invocation` atomically
-  owns source Turn, requester and config; steer replaces it before tools.
+- Keep `TurnRuntimeState` until raw ACP/config completion or confirmed termination; no second
+  visible turn. Assistant ids use `userTurnId`; steer replaces `invocation` (Turn, requester,
+  config) before tools. Stop unwinds steer waits/leases first; applied handoffs finish before
+  owner interruption. Refused steers requeue; accepted/unknown never resend on Stop.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
-- Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
-  or terminal path may read-await-rewrite the other slots.
+- Execution writes only `processingUserMsgId`/`lastHandledUserMsgId`; never read-await-rewrite
+  producer slots at start or termination.
 - INVARIANT: a steer the agent never accepted must not stay parked in `pending_apply`. Requeue it
   through the pointer, not the entry status, only for pre-submission rejections or
   `AgentSteerNotDeliveredError`; skip active or already-handled entries.
@@ -62,8 +62,7 @@ Contract: specs/session-orchestration.md.
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
-- Continue-session recovery may restore the ACP session and retry the same prompt once, only
-  while that turn has no ACP output.
+- Recovery may restore ACP and retry once, only before the turn has ACP output.
 - INVARIANT: a resolved prompt is not proof of success. A turn that emitted no ACP update takes
   `recordSilentTurnFailure`, not `setDispatchHandled` (read `turnProducedVisibleOutput` before
   `finalizeTurn` clears it); it still finalizes, still ADVANCES the pointer, and fails open.

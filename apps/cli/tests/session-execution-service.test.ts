@@ -364,7 +364,9 @@ describe('SessionExecutionService', () => {
       dispatchSource: 'rpc',
       sessionDoc,
     });
-    expect(steerPrompt).toHaveBeenCalledWith('acp-steer', [{ type: 'text', text: 'hello' }]);
+    expect(steerPrompt).toHaveBeenCalledWith('acp-steer', [{ type: 'text', text: 'hello' }], {
+      signal: expect.any(AbortSignal),
+    });
     expect(deps.applyAcpModeAndModel).toHaveBeenCalledOnce();
     expect(steerPrompt.mock.invocationCallOrder[0]).toBeLessThan(
       upsertDocMeta.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY
@@ -5460,10 +5462,30 @@ describe('SessionExecutionService', () => {
     expect(onTurnSettled).toHaveBeenCalledWith('cancelled');
   });
 
-  it.each(['resolved', 'rejected', 'timeout', 'termination-failed'] as const)(
+  it.each([
+    'resolved',
+    'rejected',
+    'timeout',
+    'termination-failed',
+    'steer-preparing',
+    'steer-config',
+    'steer-application',
+    'steer-refused',
+    'steer-history-failed',
+  ] as const)(
     'keeps cancelled prompt ownership until raw ACP completion or termination (%s)',
     async (completion) => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const steerStarted = createDeferred();
+      const stalled = createDeferred<never>();
+      const delivery = createDeferred<void>();
+      void delivery.promise.catch(() => {});
+      const hasSteer = completion.startsWith('steer-');
+      const historyFails = completion === 'steer-history-failed';
+      const needsTermination =
+        (hasSteer && completion !== 'steer-refused') ||
+        completion === 'timeout' ||
+        completion === 'termination-failed';
       const rawPrompt = createDeferred();
       const termination = createDeferred();
       const promptStarted = createDeferred();
@@ -5505,7 +5527,14 @@ describe('SessionExecutionService', () => {
         setBaseBranch: vi.fn(async () => {}),
         getHistory: vi.fn(async () => history),
         updateHistory: vi.fn(async (update: (prev: typeof history) => typeof history) => {
-          history = update(history);
+          const next = update(history);
+          if (
+            historyFails &&
+            next.some((entry) => entry.id === 'steer' && entry.status === 'failed')
+          ) {
+            throw new Error('Steer history unavailable');
+          }
+          history = next;
         }),
       };
       let activeTurnId: string | undefined;
@@ -5550,6 +5579,24 @@ describe('SessionExecutionService', () => {
             );
           });
         },
+        getAcknowledgedSteerCapability: () => ({
+          provider: 'claudeCode',
+          appliedNotificationMethod: 'claude/steerApplied',
+          upstreamTurn: 'handoff',
+          configPolicy: 'apply',
+        }),
+        steerPrompt: (_id: unknown, _blocks: unknown, options?: { signal?: AbortSignal }) => {
+          steerStarted.resolve();
+          return {
+            completion: stalled.promise,
+            delivery: delivery.promise,
+            applied: new Promise<never>((_resolve, reject) => {
+              options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+                once: true,
+              });
+            }),
+          };
+        },
         currentModel: undefined,
       };
       const session = {
@@ -5572,13 +5619,17 @@ describe('SessionExecutionService', () => {
         applyExecutionPlaneLimits: vi.fn(async () => {}),
       };
       const sessionManager = {
-        getSession: () => session,
+        getSession: () => (terminated ? null : session),
         getPendingSession: () => null,
-        createSession: vi.fn(),
+        createSession: async () => ({
+          ...session,
+          agentClient: { ...agentClient, isCreated: () => true },
+        }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         refreshGhTokenForSession: vi.fn(async () => {}),
       } as unknown as SessionManager;
+      let configApplications = 0;
       const deps = createBaseDeps({
         sessionManager,
         beginConversationTurn: (_id, turn) => {
@@ -5599,7 +5650,23 @@ describe('SessionExecutionService', () => {
           getOrCreateSessionDoc: async () => sessionDoc,
           updateAcpCapabilities: vi.fn(async () => {}),
         } as unknown as LoroDocumentManager,
-        buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
+        buildAcpPromptBlocks: async ({ inputBlocks }) => {
+          if (
+            completion === 'steer-preparing' &&
+            inputBlocks[0]?.type === 'text' &&
+            inputBlocks[0].text === 'steer request'
+          ) {
+            steerStarted.resolve();
+            await stalled.promise;
+          }
+          return inputBlocks as ContentBlock[];
+        },
+        applyAcpModeAndModel: async () => {
+          if (++configApplications === 2 && completion === 'steer-config') {
+            steerStarted.resolve();
+            await stalled.promise;
+          }
+        },
       });
       vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
         async (_sessionId, turnId, options) => {
@@ -5625,12 +5692,39 @@ describe('SessionExecutionService', () => {
       };
       const nextMessage = {
         ...message,
-        userTurnId: 'turn-new-request',
-        acpSessionConfig: { ...message.acpSessionConfig, prompt: 'new request' },
+        userTurnId: completion === 'steer-refused' ? 'steer' : 'turn-new-request',
+        acpSessionConfig: {
+          ...message.acpSessionConfig,
+          prompt: completion === 'steer-refused' ? 'steer request' : 'new request',
+        },
       };
       const running = service.continueSession(message);
       try {
         await promptStarted.promise;
+        let steering: Promise<unknown> | undefined;
+        let queued: Promise<unknown> | undefined;
+        if (hasSteer) {
+          if (completion !== 'steer-application') {
+            history.push({ id: 'steer', role: 'user', status: 'pending_apply', read: false });
+          }
+          const steer = {
+            sessionId,
+            expectedTurnId: `assistant:${userTurnId}`,
+            userTurnId: 'steer',
+            userId: 'user-1',
+            timestamp: '2026-09-12T00:00:00.000Z',
+            inputConfig: { prompt: 'steer request' },
+          };
+          steering = service.steerSession(steer);
+          await steerStarted.promise;
+          if (completion === 'steer-preparing')
+            queued = service.steerSession({ ...steer, userTurnId: 'queued-steer' });
+          // Configuration alone must retain ownership after the prompt has finished.
+          if (completion === 'steer-config') {
+            rawPrompt.resolve();
+            await rawCompletion;
+          }
+        }
         await expect(
           service.cancelSession({
             type: 'session/cancel',
@@ -5641,6 +5735,8 @@ describe('SessionExecutionService', () => {
           })
         ).resolves.toEqual({ success: true });
         await Promise.race([drainStarted.promise, running]);
+        await steering;
+        await queued;
         expect(promptSignal?.aborted).toBe(true);
         expect(status).toEqual(SessionStatusFactory.idle());
         expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });
@@ -5662,9 +5758,9 @@ describe('SessionExecutionService', () => {
         await service.continueSession(nextMessage);
         expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
 
-        if (completion === 'timeout' || completion === 'termination-failed') {
+        if (needsTermination) {
           await vi.advanceTimersByTimeAsync(5_000);
-          await terminationStarted.promise;
+          await Promise.race([terminationStarted.promise, running]);
           expect(terminated).toBe(false);
           expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
           await service.continueSession(nextMessage);
@@ -5677,15 +5773,32 @@ describe('SessionExecutionService', () => {
             rawPrompt.resolve();
           }
           await running;
-          expect(terminated).toBe(completion === 'timeout');
+          expect(terminated).toBe(completion !== 'termination-failed');
         } else {
+          if (completion === 'steer-refused') {
+            delivery.reject(new AgentSteerNotDeliveredError('Provider refused the steer'));
+          }
           if (completion === 'resolved') rawPrompt.resolve();
           else rawPrompt.reject(new Error('Synthetic ACP connection closed'));
           await running;
           expect(terminated).toBe(false);
         }
+        if (completion === 'steer-application') {
+          expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'steer')).toBe('failed');
+        }
+        if (hasSteer && completion !== 'steer-application' && !historyFails) {
+          expect(history).toContainEqual(
+            expect.objectContaining({
+              id: 'steer',
+              status: 'pending',
+            })
+          );
+        }
+        if (completion === 'steer-refused') {
+          expect(meta.latestUserMsgId).toBe('steer');
+          expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'steer')).toBeUndefined();
+        }
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
-        expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
         expect(history[1]).toMatchObject({
           id: `assistant:${userTurnId}`,
           finished: true,
@@ -5696,13 +5809,11 @@ describe('SessionExecutionService', () => {
             }),
           ],
         });
-        if (completion !== 'timeout') {
-          await service.continueSession(nextMessage);
-          expect(delivered).toEqual([
-            [{ type: 'text', text: 'old request' }],
-            [{ type: 'text', text: 'new request' }],
-          ]);
-        }
+        await service.continueSession(nextMessage);
+        expect(delivered).toEqual([
+          [{ type: 'text', text: 'old request' }],
+          [{ type: 'text', text: nextMessage.acpSessionConfig.prompt }],
+        ]);
       } finally {
         rawPrompt.resolve();
         termination.resolve();

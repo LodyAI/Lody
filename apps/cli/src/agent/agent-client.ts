@@ -435,6 +435,8 @@ export type SteerApplicationLease = {
 export type SteerPromptRun = {
   completion: Promise<acp.PromptResponse | undefined>;
   applied: Promise<SteerApplicationLease>;
+  /** Provider verdict; cancelling the local application wait cannot replace it. */
+  delivery: Promise<void>;
 };
 
 type SteerApplicationWaiter = {
@@ -643,7 +645,7 @@ export class AgentClient implements acp.Client {
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
-  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
+  private readonly pendingPrompts = new Set<Promise<unknown>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -2285,6 +2287,8 @@ export class AgentClient implements acp.Client {
     if (!capability) {
       throw new Error('Agent does not support acknowledged steer');
     }
+    const signal = options?.signal;
+    const abortedBeforeSubmission = signal?.aborted;
     const steerId = randomUUID();
     let resolveApplication!: (lease: SteerApplicationLease) => void;
     let rejectApplication!: (error: unknown) => void;
@@ -2312,7 +2316,7 @@ export class AgentClient implements acp.Client {
     this.steerApplicationWaiters.set(steerId, waiter);
 
     let completion: Promise<acp.PromptResponse | undefined>;
-    let submission: Promise<unknown>;
+    let submission: Promise<void>;
     if (capability.requestMethod) {
       const activePrompt = this.activePromptCompletion;
       if (!activePrompt || activePrompt.sessionId !== sessionId) {
@@ -2329,11 +2333,12 @@ export class AgentClient implements acp.Client {
         options?.signal
       );
     } else {
-      completion = this.prompt(sessionId, prompt, {
-        signal: options?.signal,
-        _meta: buildSteerRequestMeta(capability, steerId),
-      });
-      submission = completion;
+      completion = abortedBeforeSubmission
+        ? Promise.reject(new AgentSteerNotDeliveredError('Agent steer aborted before submission'))
+        : this.prompt(sessionId, prompt, {
+            _meta: buildSteerRequestMeta(capability, steerId),
+          });
+      submission = completion.then(() => undefined);
     }
     const failUnapplied = (error: unknown) => {
       if (!waiter.applied && this.steerApplicationWaiters.get(steerId) === waiter) {
@@ -2342,10 +2347,17 @@ export class AgentClient implements acp.Client {
         waiter.release();
       }
     };
-    if (submission !== completion) {
-      // A refusal ends the steer immediately; the turn it was aimed at may run on.
-      void submission.catch(failUnapplied);
+    if (signal && !abortedBeforeSubmission) {
+      // The request ACK is not application. Keep cancellation attached until
+      // the application waiter settles, including after the RPC has returned.
+      const abort = () => failUnapplied(new Error('Agent steer application aborted'));
+      signal.addEventListener('abort', abort, { once: true });
+      const cleanup = () => signal.removeEventListener('abort', abort);
+      void applied.then(cleanup, cleanup);
+      if (signal.aborted) abort();
     }
+    // A refusal ends the steer immediately; the turn it was aimed at may run on.
+    void submission.catch(failUnapplied);
     // Otherwise wait for BOTH. The upstream turn's own response can beat the
     // agent's answer to the steer request onto the wire (the Codex adapter drains
     // session notifications before it refuses), and that answer is the verdict
@@ -2360,7 +2372,7 @@ export class AgentClient implements acp.Client {
           : new Error(`Steer ${steerId} completed before application`)
       );
     });
-    return { completion, applied };
+    return { completion, applied, delivery: submission };
   }
 
   private async requestSteeringExtension(
@@ -2395,35 +2407,27 @@ export class AgentClient implements acp.Client {
         error
       );
     }
-    let abortListener: (() => void) | undefined;
-    const abort = signal
-      ? new Promise<never>((_, reject) => {
-          abortListener = () => reject(new Error('Agent steer aborted'));
-          signal.addEventListener('abort', abortListener, { once: true });
-        })
-      : undefined;
-    try {
-      const response = await withAbort(request, abort).catch((error: unknown) => {
-        // Only the agent's own `invalid request` answer proves it declined the
-        // prompt (Codex answers `No active Codex turn to steer`). A closed
-        // connection, a dead agent process, or an internal error may have left
-        // the prompt inside the live turn, so those stay ambiguous — re-sending
-        // one of those would deliver the user's message twice.
-        throw isAcpInvalidRequestError(error)
-          ? new AgentSteerNotDeliveredError(
-              `Agent refused the acknowledged steer request ${method}: ${formatErrorMessage(error)}`,
-              error
-            )
-          : error;
-      });
-      const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
-      if (!parsed.success) {
-        throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
-      }
-    } finally {
-      if (signal && abortListener) {
-        signal.removeEventListener('abort', abortListener);
-      }
+    // A cancelled local waiter does not cancel a submitted steer RPC. Include
+    // it in the same raw-request drain as prompts before this session is reused.
+    this.pendingPrompts.add(request);
+    const release = () => this.pendingPrompts.delete(request);
+    void request.then(release, release);
+    const response = await request.catch((error: unknown) => {
+      // Only the agent's own `invalid request` answer proves it declined the
+      // prompt (Codex answers `No active Codex turn to steer`). A closed
+      // connection, a dead agent process, or an internal error may have left
+      // the prompt inside the live turn, so those stay ambiguous — re-sending
+      // one of those would deliver the user's message twice.
+      throw isAcpInvalidRequestError(error)
+        ? new AgentSteerNotDeliveredError(
+            `Agent refused the acknowledged steer request ${method}: ${formatErrorMessage(error)}`,
+            error
+          )
+        : error;
+    });
+    const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
+    if (!parsed.success) {
+      throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
     }
   }
 

@@ -90,7 +90,11 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import {
+  AcpAuthenticationRequiredError,
+  AgentSteerNotDeliveredError,
+  type SteerPromptRun,
+} from '@/agent/agent-client';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -287,6 +291,12 @@ type TurnRuntimeState = {
   };
   /** Logical prompt tail currently owned by the one session-owner fiber. */
   activePromptRun?: PromptHandoffRun;
+  /** Cancels the client-side steer wait so its queue/lease unwind before owner cleanup. */
+  steerAbortController?: AbortController;
+  /** Raw configuration work can outlive cancellation of its local steer waiter. */
+  steerConfigCompletion?: Promise<void>;
+  /** The existing cancellation finalizer owns this verdict after the local wait ends. */
+  cancelledSteer?: { userTurnId: string; delivery: Promise<void> };
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
   pendingSession?: Promise<ISession>;
@@ -533,6 +543,7 @@ export type SessionExecutionServiceDeps = {
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
+    signal?: AbortSignal;
   }) => Promise<ContentBlock[]>;
   applyAcpModeAndModel: (
     session: {
@@ -544,6 +555,7 @@ export type SessionExecutionServiceDeps = {
     context: {
       sessionDoc: SessionDocument;
       basedOnUserTurnId?: string;
+      signal?: AbortSignal;
     }
   ) => Promise<void>;
   createAssistantEntryForTurn: (
@@ -1463,7 +1475,7 @@ export class SessionExecutionService {
     if (runtime.turnId !== options.expectedTurnId) {
       return await rejectUndelivered('stale-turn');
     }
-    if (!runtime.promptInFlight) {
+    if (!runtime.promptInFlight || runtime.cancelRequested) {
       return await rejectUndelivered('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
@@ -1498,7 +1510,7 @@ export class SessionExecutionService {
       }
       // No provider request has been submitted yet, so this guide is still
       // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight) {
+      if (!runtime.promptInFlight || runtime.cancelRequested) {
         return await rejectUndelivered('no-active-turn');
       }
       return null;
@@ -1506,28 +1518,49 @@ export class SessionExecutionService {
 
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
-    let submittedToAgent = false;
+    let steerRun: SteerPromptRun | undefined;
+    const controller = new AbortController();
+    runtime.steerAbortController = controller;
+    let abortWait!: () => void;
+    const aborted = new Promise<never>((_, rejectWait) => {
+      abortWait = () => rejectWait(controller.signal.reason);
+      controller.signal.addEventListener('abort', abortWait, { once: true });
+    });
+    const wait = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, aborted]);
     try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
+      const sessionDoc = await wait(
+        this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId)
+      );
       const inputBlocks = normalizeSessionInputBlocks(
         options.inputConfig.inputBlocks,
         options.inputConfig.prompt ?? ''
       );
-      const promptBlocks = await this.deps.buildAcpPromptBlocks({
-        workspaceId: this.deps.workspaceId,
-        sessionId: options.sessionId,
-        inputBlocks,
-        issuePRMentions: options.inputConfig.issuePRMentions,
-      });
+      const promptBlocks = await wait(
+        this.deps.buildAcpPromptBlocks({
+          signal: controller.signal,
+          workspaceId: this.deps.workspaceId,
+          sessionId: options.sessionId,
+          inputBlocks,
+          issuePRMentions: options.inputConfig.issuePRMentions,
+        })
+      );
       const preConfigRejection = await rejectBeforeProviderSubmission();
       if (preConfigRejection) {
         return preConfigRejection;
       }
       if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
+        const configuring = this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
           sessionDoc,
           basedOnUserTurnId: options.userTurnId,
+          signal: controller.signal,
         });
+        runtime.steerConfigCompletion = configuring;
+        const release = () => {
+          if (runtime.steerConfigCompletion === configuring)
+            runtime.steerConfigCompletion = undefined;
+        };
+        void configuring.then(release, release);
+        await wait(configuring);
       }
 
       const preSubmitRejection = await rejectBeforeProviderSubmission();
@@ -1544,9 +1577,11 @@ export class SessionExecutionService {
 
       const previousTurnId = runtime.turnId;
       const previousUserTurnId = runtime.userTurnId;
-      const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
-      submittedToAgent = true;
+      steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks, {
+        signal: controller.signal,
+      });
       const application = await steerRun.applied;
+      runtime.steerAbortController = undefined;
       try {
         if (
           this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
@@ -1633,8 +1668,15 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
-      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
+      const notDelivered = !steerRun || error instanceof AgentSteerNotDeliveredError;
       if (!notDelivered) {
+        if (controller.signal.aborted && steerRun) {
+          runtime.cancelledSteer = { userTurnId: options.userTurnId, delivery: steerRun.delivery };
+          return reject(
+            'error',
+            'Steer wait cancelled; delivery will be settled when the agent stops.'
+          );
+        }
         return reject('error', formatErrorMessage(error));
       }
       // `no-active-turn` for the agent's own refusal: it is the disposition
@@ -1644,6 +1686,9 @@ export class SessionExecutionService {
         error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
         formatErrorMessage(error)
       );
+    } finally {
+      controller.signal.removeEventListener('abort', abortWait);
+      if (runtime.steerAbortController === controller) runtime.steerAbortController = undefined;
     }
   }
 
@@ -2095,6 +2140,11 @@ export class SessionExecutionService {
         runtime.cancelFinalized = true;
         runtime.cancelRequested = true;
       }
+      const cancelledSteer = runtime?.cancelledSteer;
+      let steerRefused = false;
+      const pendingDelivery = cancelledSteer?.delivery.catch((error: unknown) => {
+        steerRefused = error instanceof AgentSteerNotDeliveredError;
+      });
       self.deps.clearActiveTurnId(options.sessionId, options.turnId);
 
       const sessionToTerminate = options.session ?? null;
@@ -2156,11 +2206,17 @@ export class SessionExecutionService {
 
       const sessionToDrain = options.session;
       const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
-      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+      const pendingConfig = runtime?.steerConfigCompletion;
+      if (
+        (pendingPrompt || pendingConfig || pendingDelivery) &&
+        sessionToDrain &&
+        !options.terminateSession
+      ) {
+        const pendingWork = Promise.allSettled([pendingPrompt, pendingConfig, pendingDelivery]);
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
         yield* self
-          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
+          .tryPromise(() => withTimeout(pendingWork, 5_000, 'ACP cancellation timed out'))
           .pipe(
             Effect.catchAll(() =>
               self.tryPromise(async () => {
@@ -2174,11 +2230,31 @@ export class SessionExecutionService {
                     `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
                   );
                   // Failed termination is not permission to reuse a busy agent.
-                  await pendingPrompt;
+                  await pendingWork;
                 }
               })
             )
           );
+      }
+
+      if (cancelledSteer) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to save cancelled steer outcome',
+          self.tryPromise(() =>
+            steerRefused
+              ? self.requeueUndeliveredSteer(options.sessionId, cancelledSteer.userTurnId, {
+                  canWriteHistory: true,
+                })
+              : self.setTerminalUserTurnStatus(
+                  options.sessionId,
+                  options.sessionDoc,
+                  cancelledSteer.userTurnId,
+                  'failed'
+                )
+          )
+        );
+        if (runtime) runtime.cancelledSteer = undefined;
       }
 
       if (runtime?.promptStarted) {
@@ -5410,17 +5486,17 @@ export class SessionExecutionService {
         }
         return { success: true };
       }
-      const runtimeSession = runtime.session ?? this.deps.sessionManager.getSession(sessionId);
       if (runtime.promptInFlight) {
-        if (!runtimeSession?.agentClient?.isCreated() || !runtimeSession.acpSessionId) {
-          this.deps.logger.debug(
-            `[${sessionId}] Stop requested while prompt is in flight but ACP session is not ready; interrupting owner turn`
-          );
-          this.requestTurnInterrupt(runtime);
-          return { success: true };
-        }
-        this.requestTurnInterrupt(runtime);
         this.requestAgentCancelInBackground(runtime, 'active');
+        runtime.steerAbortController?.abort(new Error('Steer cancelled by Stop'));
+        // Cancel the local operation and release its queue/lease first. An
+        // already-applied handoff finishes before interrupting its new owner.
+        // The existing finalizer then drains raw ACP work or terminates it.
+        void this.steerMutationQueue.enqueue(sessionId, async () => {
+          if (this.turnRuntimeBySession.get(sessionId) === runtime) {
+            this.requestTurnInterrupt(runtime);
+          }
+        });
         return { success: true };
       }
 

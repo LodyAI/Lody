@@ -562,6 +562,52 @@ describe('AgentClient plan mode permission restoration', () => {
       expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
     });
 
+    it.each(['unanswered', 'acknowledged', 'refused'])(
+      'aborts an %s steer locally without reclassifying delivery or retaining its lease',
+      async (stage) => {
+        let finishRequest!: (value: unknown) => void;
+        let refuseRequest!: (error: unknown) => void;
+        const rawRequest = new Promise((resolve, reject) => {
+          finishRequest = resolve;
+          refuseRequest = reject;
+        });
+        const { client, request } = createSteerClient(() =>
+          stage === 'acknowledged' ? Promise.resolve({ outcome: 'injected' }) : rawRequest
+        );
+        const controller = new AbortController();
+        const run = client.steerPrompt(
+          'acp-test' as ACPSessionId,
+          [{ type: 'text', text: 'guide' }],
+          { signal: controller.signal }
+        );
+        const error = run.applied.catch((reason: unknown) => reason);
+        const verdict = run.delivery.then(
+          () => null,
+          (reason: unknown) => reason
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        controller.abort();
+        expect(await error).toBeInstanceOf(Error);
+        expect(await error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+        if (stage !== 'acknowledged') {
+          expect(client.pendingPromptCompletion).not.toBeNull();
+          if (stage === 'refused') {
+            refuseRequest(Object.assign(new Error('No active turn to steer'), { code: -32600 }));
+          } else {
+            finishRequest({ outcome: 'injected' });
+          }
+          await client.pendingPromptCompletion;
+          expect(client.pendingPromptCompletion).toBeNull();
+        }
+        if (stage === 'refused') expect(await verdict).toBeInstanceOf(AgentSteerNotDeliveredError);
+        else expect(await verdict).toBeNull();
+        // A late application cannot reopen a removed waiter and block notification handling.
+        const steerId = request.mock.calls[0]?.[1]?.steerId;
+        await client.extNotification?.('_codex/steerApplied', { sessionId: 'acp-test', steerId });
+      }
+    );
+
     it('lets the refusal win when the steered turn ends before the agent answers', async () => {
       // The Codex adapter drains session notifications before it refuses, so the
       // upstream turn's own response routinely lands first. Rejecting on that
