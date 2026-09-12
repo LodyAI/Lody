@@ -37,8 +37,8 @@ Contract: specs/session-orchestration.md.
 - Never re-dispatch a late-arriving history entry; recovery is a fresh send.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
-- Session metadata is the activation index: never inspect historical Session documents to infer
-  work, and never publish or clear active presence here (`../lib/loro/session-active-presence.ts`).
+- Never inspect historical Session documents to infer work, or publish or clear active presence
+  here (`../lib/loro/session-active-presence.ts`).
 - Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
   extra throttle.
 
@@ -64,9 +64,9 @@ Contract: specs/session-orchestration.md.
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
 - Continue-session recovery may restore the ACP session and retry the same prompt once, only
   while that turn has no ACP output.
-- INVARIANT: a resolved prompt is not proof of success. A turn that emitted no ACP update takes
-  `recordSilentTurnFailure`, not `setDispatchHandled` (read `turnProducedVisibleOutput` before
-  `finalizeTurn` clears it); it still finalizes, still ADVANCES the pointer, and fails open.
+- A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
+  Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
+  the pointer, and fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 
