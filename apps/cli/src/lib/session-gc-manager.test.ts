@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { SessionId } from '@lody/shared';
 import {
   SessionGCManager,
@@ -24,7 +25,7 @@ import { getMemoryPressureSnapshot } from '@/utils/memory';
 const mockedGetMemoryPressureSnapshot = vi.mocked(getMemoryPressureSnapshot);
 
 describe('SessionGCManager', () => {
-  let cleanMock: ReturnType<typeof vi.fn>;
+  let cleanMock: Mock<(sessionId: SessionId) => Promise<void>>;
   let loggerMock: {
     info: ReturnType<typeof vi.fn>;
     debug: ReturnType<typeof vi.fn>;

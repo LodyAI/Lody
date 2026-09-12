@@ -7,9 +7,19 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify('mylody.app'),
   },
-  plugins: [loroCrdtWasmUrlWorkaround(), wasm()],
+  plugins: [
+    loroCrdtWasmUrlWorkaround(),
+    // vite-plugin-wasm detects Vitest by this exact plugin name, while Vitest 5
+    // exposes only `vitest:*` plugins. Keep WASM inline for the Node runner.
+    { name: 'vitest' },
+    wasm(),
+  ],
   resolve: {
     alias: [
+      {
+        find: '@pierre/diffs/worker/worker.js?worker',
+        replacement: fileURLToPath(new URL('./tests/stubs/diff-render-worker.ts', import.meta.url)),
+      },
       // Must precede the general `@/` rule: Vite matches aliases in order
       // against the raw specifier. 324 icon SVGs no test asserts on; see the
       // stub's own comment for why they are worth aliasing away.

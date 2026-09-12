@@ -10,6 +10,7 @@ export default defineConfig({
       // Mirror vite.config.ts: the analytics poster imports package.json via `@/pkg`.
       '@/pkg': path.resolve(__dirname, 'package.json'),
       '@': path.resolve(__dirname, 'src'),
+      src: path.resolve(__dirname, 'src'),
     },
   },
   test: {

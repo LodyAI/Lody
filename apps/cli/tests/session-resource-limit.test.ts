@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
 import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { ChildProcess } from 'child_process';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 
@@ -153,7 +154,7 @@ const createProcessHandle = (
 const createSandbox = (
   handles: SessionProcessHandle[]
 ): SessionSandbox & {
-  spawn: ReturnType<typeof vi.fn>;
+  spawn: Mock<SessionSandbox['spawn']>;
   terminate: ReturnType<typeof vi.fn>;
   cleanup: ReturnType<typeof vi.fn>;
 } => ({
