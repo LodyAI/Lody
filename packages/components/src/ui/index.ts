@@ -11,7 +11,6 @@ export * from './dialog';
 export * from './dropdown-menu';
 export * from './kbd';
 export * from './loading';
-export * from './menubar';
 export * from './popover';
 export * from './scroll-area';
 export * from './separator';

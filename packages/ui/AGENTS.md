@@ -42,6 +42,19 @@ into one component at a time. Source-consumed; consumers compile it through
   absolute positioning strategy when they do: a host container that centres
   itself with `translate` is the containing block for `position: fixed`
   descendants, and a viewport-anchored popup inside one lands at its own offset.
+- `Menu` is the dropdown menu; Base UI has no separate part for one and a second
+  name would be a second thing to keep in step. `ContextMenu` and `Menubar`
+  restate only the way in and re-export `Menu`'s rows. A menu reads `popup` and
+  replaces exactly one of a list's declarations, its `--anchor-width`; the rest
+  of the surface, and every row, is shared through `src/popup/surface.ts`.
+- A menu row's leading box sizes the glyph in it; a caller's icon must fill the
+  box rather than arrive at its library's default, because StyleX has no
+  descendant selector to reach it with. A checkbox or radio row's box holds its
+  mark only — Base UI unmounts the mark while the row is unticked, so an icon
+  sharing that box would move as the row toggles.
+- `Menu.Trigger` is Base UI's, unstyled: a menu is opened by whatever the surface
+  already had there, through `render={<Button …/>}`. Post-close focus is the
+  product's policy, passed as `finalFocus`; this package does not decide it.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
