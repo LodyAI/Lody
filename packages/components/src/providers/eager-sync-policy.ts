@@ -14,31 +14,31 @@ export const WEB_EAGER_SYNC_CANDIDATE_WINDOW = 20;
 export const FULL_EAGER_SYNC_CANDIDATE_WINDOW = Number.POSITIVE_INFINITY;
 
 export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 2,
-  batchSize: 4,
+  concurrency: 1,
+  batchSize: 1,
   batchCooldownMs: 1_500,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 20,
+  maxWarmDocs: 0,
   candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };
 
 export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 3,
-  batchSize: 8,
-  batchCooldownMs: 750,
+  concurrency: 1,
+  batchSize: 1,
+  batchCooldownMs: 1_500,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 96,
+  maxWarmDocs: 0,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };
 
 export const MOBILE_EAGER_SYNC_POLICY: EagerSyncPolicy = {
   concurrency: 1,
-  batchSize: 3,
+  batchSize: 1,
   batchCooldownMs: 3_000,
   freshnessTtlMs: 15_000,
-  maxWarmDocs: 12,
+  maxWarmDocs: 0,
   candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   prefetchTimeoutMs: 20_000,
 };

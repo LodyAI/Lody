@@ -233,25 +233,25 @@ function setup(
 describe('createBackgroundSyncCoordinator', () => {
   it('uses a bounded web policy, full desktop policy, and paced mobile policy', () => {
     expect(resolveEagerSyncPolicy('web')).toMatchObject({
-      concurrency: 2,
-      batchSize: 4,
+      concurrency: 1,
+      batchSize: 1,
       batchCooldownMs: 1_500,
       candidateWindow: 20,
-      maxWarmDocs: 20,
+      maxWarmDocs: 0,
     });
     expect(resolveEagerSyncPolicy('desktop')).toMatchObject({
-      concurrency: 3,
-      batchSize: 8,
-      batchCooldownMs: 750,
+      concurrency: 1,
+      batchSize: 1,
+      batchCooldownMs: 1_500,
       candidateWindow: Number.POSITIVE_INFINITY,
-      maxWarmDocs: 96,
+      maxWarmDocs: 0,
     });
     expect(resolveEagerSyncPolicy('mobile')).toMatchObject({
       concurrency: 1,
-      batchSize: 3,
+      batchSize: 1,
       batchCooldownMs: 3_000,
       candidateWindow: Number.POSITIVE_INFINITY,
-      maxWarmDocs: 12,
+      maxWarmDocs: 0,
     });
   });
 

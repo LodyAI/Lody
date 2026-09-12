@@ -38,6 +38,14 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 
 ## Workspace runtime
 
+- Background Session prefetch must never acquire a UI Session store or create a
+  Mirror. Its disposable worker owns raw Doc import/export and a separate,
+  rebuildable snapshot cache. Keep one worker task per renderer, terminate before
+  releasing its slot, and detach local peers from the parent on cancellation.
+  Foreground acquisition cancels that room's prefetch and merges cached binary
+  state into the existing repo document; never replace unsent local edits or share
+  the UI repo's persistence/cursors with the worker. Intent:
+  [background prefetch](../../../../specs/session-background-prefetch.zh.md).
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.

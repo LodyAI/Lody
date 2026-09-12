@@ -14,9 +14,9 @@ import type { EagerSyncPolicy } from './eager-sync-policy';
  *   React, and never touches real timers — every external effect is an injected
  *   port. This makes it fully unit-testable with in-memory fakes and a fake
  *   clock/scheduler, and sidesteps the loro-repo fake-timer hang.
- * - Sync is always ONE-SHOT catch-up: the prefetcher opens the store, holds a
- *   sync lease until caught up, then releases. We never hold a long-lived live
- *   join for a session the user is not viewing.
+ * - Sync is always ONE-SHOT catch-up: the runtime prefetcher uses a disposable
+ *   worker and a raw-document snapshot cache, never a UI store or Mirror.
+ *   It releases the document and room after catch-up.
  * - Candidate scope depends on the surface: native/electron can eventually
  *   warm all candidates, while web stays bounded to the highest-priority set.
  *   All surfaces use bounded concurrency plus batch cooldowns.
@@ -57,8 +57,8 @@ export interface BackgroundSyncCoordinatorDeps {
   registry: CoordinatorRegistryView;
   prefetcher: {
     /**
-     * One-shot catch-up: open the store, hold a sync lease until caught up (or
-     * the signal aborts / a timeout fires), then release. Resolves with the
+     * One-shot catch-up: hold a replica until caught up (or the signal aborts /
+     * a timeout fires), persist and release. Resolves with the
      * outcome; never rejects.
      */
     prefetch(sessionId: SessionId, signal: AbortSignal): Promise<PrefetchOutcome>;
