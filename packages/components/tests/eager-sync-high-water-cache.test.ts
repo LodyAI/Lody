@@ -256,28 +256,32 @@ afterEach(() => {
 });
 
 describe('eager sync high-water cache', () => {
-  it('stores synced-through timestamps in IndexedDB per workspace', async () => {
+  it('isolates synced-through timestamps between windows in one workspace', async () => {
     const fake = installFakeIndexedDb();
     const localStorage = installThrowingLocalStorage();
-    const alpha = await createEagerSyncHighWaterStore(wid('workspace-alpha'), { now: () => 1 });
+    const windowA = await createEagerSyncHighWaterStore('workspace-alpha:window-a', {
+      now: () => 1,
+    });
 
-    alpha.set(sid('session-a'), 100);
-    await alpha.flush();
+    windowA.set(sid('session-a'), 100);
+    await windowA.flush();
 
-    const reloadedAlpha = await createEagerSyncHighWaterStore(wid('workspace-alpha'), {
+    const reloadedWindowA = await createEagerSyncHighWaterStore('workspace-alpha:window-a', {
       now: () => 2,
     });
-    const beta = await createEagerSyncHighWaterStore(wid('workspace-beta'), { now: () => 2 });
+    const windowB = await createEagerSyncHighWaterStore('workspace-alpha:window-b', {
+      now: () => 2,
+    });
 
     expect(fake.databases.has(EAGER_SYNC_HIGH_WATER_DB_NAME)).toBe(true);
-    expect(reloadedAlpha.get(sid('session-a'))).toBe(100);
-    expect(beta.get(sid('session-a'))).toBeUndefined();
+    expect(reloadedWindowA.get(sid('session-a'))).toBe(100);
+    expect(windowB.get(sid('session-a'))).toBeUndefined();
     expect(localStorage.getItem).not.toHaveBeenCalled();
     expect(localStorage.setItem).not.toHaveBeenCalled();
 
-    alpha.close();
-    reloadedAlpha.close();
-    beta.close();
+    windowA.close();
+    reloadedWindowA.close();
+    windowB.close();
   });
 
   it('never lowers an existing high-water mark', async () => {

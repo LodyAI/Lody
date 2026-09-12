@@ -315,7 +315,10 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
-import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
+import {
+  createWorkspaceRuntime,
+  resolveWorkspaceRuntimeCacheIdentity,
+} from '../src/providers/create-workspace-runtime';
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
@@ -392,6 +395,21 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('binds every persistent runtime cache to the same window identity', () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+
+    expect(resolveWorkspaceRuntimeCacheIdentity(workspaceId, '')).toEqual({
+      namespace: 'workspace-1',
+      repoDbName: 'lody-loro-repo-db-workspace-1',
+      remoteCursorDbName: 'lody-loro-stream-cursors-workspace-1',
+    });
+    expect(resolveWorkspaceRuntimeCacheIdentity(workspaceId, 'window-2')).toEqual({
+      namespace: 'workspace-1:window-2',
+      repoDbName: 'lody-loro-repo-db-workspace-1:window-2',
+      remoteCursorDbName: 'lody-loro-stream-cursors-workspace-1:window-2',
+    });
   });
 
   it('keeps the runtime and presence alive when joining the meta room fails', async () => {
