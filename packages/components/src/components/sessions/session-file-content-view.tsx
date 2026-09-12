@@ -644,9 +644,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
-  const lastAckedExternalTextRef = useRef<{ text: string; snapshot: object } | undefined>(
-    undefined
-  );
+  const lastAckedExternalTextRef = useRef<
+    { text: string; snapshot: SessionFileContentSnapshot } | undefined
+  >(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -769,10 +769,12 @@ function SessionFileContentViewImpl({
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
-          lastAckedExternalTextRef.current = {
-            text: externalTextUpdate.text,
-            snapshot: data.snapshot,
-          };
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -785,10 +787,12 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
-          lastAckedExternalTextRef.current = {
-            text: externalTextUpdate.text,
-            snapshot: data.snapshot,
-          };
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         return;
       }
