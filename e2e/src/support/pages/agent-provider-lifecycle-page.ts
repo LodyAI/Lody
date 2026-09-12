@@ -142,7 +142,7 @@ export class AgentProviderLifecyclePage {
     await expect(this.providerOption(this.fixture.initialProviderName)).toHaveCount(0);
     await expect(this.providerOption(this.fixture.editedProviderName)).toBeEnabled();
     await expect(this.providerOption(this.fixture.alternateProviderName)).toBeEnabled();
-    await this.page.keyboard.press('Escape');
+    await this.closeAgentMenu();
   }
 
   async createIsolatedSessions(): Promise<void> {
@@ -201,7 +201,7 @@ export class AgentProviderLifecyclePage {
     await this.openAgentMenu();
     await expect(this.providerOption(this.fixture.editedProviderName)).toHaveCount(0);
     await expect(this.providerOption(this.fixture.alternateProviderName)).toBeEnabled();
-    await this.page.keyboard.press('Escape');
+    await this.closeAgentMenu();
     await this.sessionRow(firstSessionId).click();
     await expect(this.assistantResponse(this.fixture.editedResponseText)).toBeVisible();
   }
@@ -326,18 +326,47 @@ export class AgentProviderLifecyclePage {
   }
 
   private async openAgentMenu(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Run configuration|运行设置)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u }).hover();
+    const trigger = this.runConfigurationButton();
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+      await trigger.click();
+    }
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    const agentSubmenu = this.agentSubmenuTrigger();
+    await expect(agentSubmenu).toBeVisible();
+    await agentSubmenu.hover();
+    await expect(agentSubmenu).toHaveAttribute('aria-expanded', 'true');
+  }
+
+  private async closeAgentMenu(): Promise<void> {
+    const trigger = this.runConfigurationButton();
+    await this.page.keyboard.press('Escape');
+    if (await this.agentSubmenuTrigger().isVisible()) {
+      await this.page.keyboard.press('Escape');
+    }
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await expect(this.agentSubmenuTrigger()).toBeHidden();
   }
 
   private async selectProvider(name: string): Promise<void> {
     await expect(this.page.locator('#chat-prompt')).toBeEditable({ timeout: 30_000 });
     await this.openAgentMenu();
     const option = this.providerOption(name);
+    await expect(option).toBeVisible();
     await expect(option).toBeEnabled();
     await option.click();
     await expect(option).toHaveAttribute('aria-checked', 'true');
-    await this.page.keyboard.press('Escape');
+    await this.closeAgentMenu();
+  }
+
+  private runConfigurationButton(): Locator {
+    return this.page.locator(
+      'button[aria-label="Run configuration"], button[aria-label="运行设置"]'
+    );
+  }
+
+  private agentSubmenuTrigger(): Locator {
+    return this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u });
   }
 
   private providerOption(name: string): Locator {

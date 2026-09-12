@@ -32,6 +32,10 @@ Electron starts.
   user-triggered file chooser. Fixtures simulate providers and record protocol evidence but do not
   mutate product state or release held turns. No matrix depends on sleeps, scheduler timing, live
   models, or network services.
+- Treat nested menu dismissal as a user-visible state transition. The Agent Provider journey waits
+  for both the run-configuration menu and Agent submenu to report their expanded state, dismisses
+  each open menu level with `Escape`, and waits for the root trigger to report closed before the
+  next click. It does not force clicks or dispatch selection through renderer internals.
 - Treat local file handoff as independent of cloud authentication. A workspace is always required;
   an authentication token is required only after local transfer is unavailable or fails and the
   caller must use cloud upload.
@@ -50,3 +54,10 @@ matrix journeys and their 94 steps in 59.290 seconds. The full serial regression
 scenarios and 223 steps in 199.995 seconds with no failures. Deterministic ACP providers prove local
 product integration and protocol behavior without making external model or network availability a
 merge condition.
+
+Two macOS PR runs at heads `299d06f7` and `396b379c` exposed the same Agent menu race: the selected,
+enabled Provider item detached while Playwright attempted to click it. The menu had been dismissed
+with one unobserved `Escape`, so the next trigger click could overlap Radix's nested-menu teardown.
+After adding observable open and close postconditions, three fresh focused `LODY-AGENT-001` runs
+each passed all 18 steps, and `pnpm --filter @lody/e2e check` passed. The full Electron suite was not
+rerun for this correction by explicit request.

@@ -28,6 +28,9 @@ Electron 应用、真实 IPC、bundled CLI 和确定性 ACP provider 操作可�
 - 每个产品状态迁移都由可见控件、键盘输入或用户触发的文件选择器驱动。fixture 只模拟
   provider 并记录协议证据，不修改产品状态，也不释放挂起的 turn。矩阵不依赖 sleep、
   调度时机、真实模型或网络服务。
+- 将嵌套菜单关闭视为用户可见的状态迁移。Agent Provider 旅程会等待运行配置菜单和 Agent
+  子菜单都报告展开，使用 `Escape` 逐层关闭仍打开的菜单，并在下一次点击前等待根 trigger
+  报告关闭。测试不强制点击，也不通过 renderer 内部状态触发选择。
 - 本地文件直传不依赖云端认证。workspace 始终必需；只有本地传输不可用或失败、调用方需要
   改走云端上传时，才要求 authentication token。
 - 在 `e2e:check` 中 dry-run 全部 Cucumber feature bindings。除了 registry metadata 和
@@ -43,3 +46,9 @@ P0、17 条 P1。Cucumber 静态解析覆盖 223 个步骤。一次组合真实 
 通过五条矩阵旅程及其 94 个步骤；完整串行回归在 199.995 秒内通过 21 条场景和 223 个步骤，
 没有失败。确定性 ACP provider 可以证明本地产品集成和协议行为，而不把外部模型或网络
 可用性变成合并条件。
+
+两个 macOS PR run 在 head `299d06f7` 和 `396b379c` 上暴露了同一 Agent 菜单竞态：已选择且
+可用的 Provider 项在 Playwright 尝试点击时从 DOM 脱离。测试此前只发送一次未观察结果的
+`Escape`；下一次 trigger 点击可能与 Radix 嵌套菜单卸载重叠。加入可观察的打开和关闭后置
+条件后，三轮全新的 focused `LODY-AGENT-001` 运行均通过全部 18 个步骤，且
+`pnpm --filter @lody/e2e check` 通过。按明确要求，本次修正未重跑完整 Electron suite。
