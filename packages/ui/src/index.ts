@@ -26,6 +26,16 @@ export type {
   AlertDialogDescriptionProps,
   AlertDialogTitleProps,
 } from './dialog/alert-dialog';
+export { Badge } from './badge/badge';
+export type { BadgeProps, BadgeTone } from './badge/badge';
+export { Card } from './card/card';
+export type {
+  CardDescriptionProps,
+  CardProps,
+  CardSectionProps,
+  CardTitleLevel,
+  CardTitleProps,
+} from './card/card';
 export { Checkbox } from './field/checkbox';
 export type { CheckboxProps } from './field/checkbox';
 export { Collapsible } from './disclosure/collapsible';
@@ -115,6 +125,8 @@ export type {
   SelectTriggerProps,
   SelectValueProps,
 } from './field/select';
+export { Separator } from './separator/separator';
+export type { SeparatorProps } from './separator/separator';
 export { Skeleton } from './feedback/skeleton';
 export type { SkeletonProps, SkeletonShape } from './feedback/skeleton';
 export { Spinner } from './feedback/spinner';

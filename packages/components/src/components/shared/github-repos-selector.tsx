@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, Github } from 'lucide-react';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { cn } from '@/lib/utils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -178,10 +178,7 @@ export function GitHubRepoBadge({ repo, className }: { repo?: string; className?
 
   return (
     <div className={cn('flex flex-wrap gap-1', className)}>
-      <Badge variant="secondary" className="gap-1 text-xs">
-        <Github className="h-3 w-3" />
-        {repo}
-      </Badge>
+      <Badge icon={<Github className="h-3 w-3" />}>{repo}</Badge>
     </div>
   );
 }

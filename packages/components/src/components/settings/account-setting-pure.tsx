@@ -20,7 +20,7 @@ import {
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1019,7 +1019,7 @@ export function AccountSettingsPure({
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
                       {sourceLabel && (
-                        <Badge variant="outline" className="h-5 rounded-md px-1.5 text-[10px]">
+                        <Badge>
                           {sourceLabel}
                         </Badge>
                       )}

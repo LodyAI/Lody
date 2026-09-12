@@ -190,9 +190,9 @@ import {
 } from '@/components/session-sharing';
 
 import { Drawer } from '@lody/ui/drawer';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Input } from '@lody/ui/input';
-import { Separator } from '@/ui/separator';
+import { Separator } from '@lody/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -878,7 +878,7 @@ export function SessionHistoryButton({
                       </div>
                     </div>
                     {isActive && (
-                      <Badge variant="secondary">{t('common.current', 'Current')}</Badge>
+                      <Badge>{t('common.current', 'Current')}</Badge>
                     )}
                   </div>
                 </button>
@@ -1707,7 +1707,7 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+        <Separator orientation="vertical" className="mx-0.5 h-5" />
 
         <div className="flex items-center gap-px">
           {renderNavButton(

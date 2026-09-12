@@ -11,7 +11,7 @@ One rung per component. The rung fixes background and shadow together.
 | -------- | --------------------- | -------------------------- | --------------------------------------------------------------------------------- |
 | well     | `wellBackground`      | `shadow.inset`             | input, select, textarea, switch off, checkbox off, segmented track, selected item |
 | page     | `background`          | none                       | app ground                                                                        |
-| region   | `secondaryBackground` | none                       | sidebar, footer band, hover on a card                                             |
+| region   | `secondaryBackground` | none                       | sidebar, footer band, a block inside a card                                       |
 | card     | `elevatedBackground`  | `shadow.card`              | card, panel, composer, alert                                                      |
 | floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list, toast; tooltip is `label` with `shadow.medium`        |
 | modal    | `elevatedBackground`  | `shadow.large` + `overlay` | dialog, alert dialog, drawer                                                      |
@@ -387,6 +387,83 @@ page of movement, and it stops where a person has asked for less of it — it
 reports nothing its own shape does not already say, which is also why it is
 hidden from a screen reader. A spinner keeps turning there, because it is the
 only thing saying the work has not stopped.
+
+## Cards, badges and lines
+
+Three answers to "what is an edge?". A card's is a shadow, a badge has none and
+is a film of ink instead, and a separator _is_ the one line this system allows.
+
+### Card
+
+The card rung made a component: `card.background` under `card.shadow` at
+`radius.large`, and no border. Its parts are a Dialog's — a header, the body a
+caller writes, and the answers — because what separates a panel that owns the
+window from a block that owns a region of a page is the rung and the heading
+step, not what either is made of. It keeps its own group rather than reading
+`dialog`, for the reason a menu does not read `field`: two rungs, two names.
+
+| part        | what it is                                                                     |
+| ----------- | ------------------------------------------------------------------------------ |
+| card        | `card.padding` in, children at `card.gap`, and no edge but the shadow          |
+| header      | the title and one sentence about it, at `card.headerGap`: one block            |
+| title       | `headline`, weight 600 — a card does not own the window, and `title` is a page |
+| description | prose at `card.descriptionSize` in `card.description`                          |
+| footer      | the answers, from the end at `card.footerGap`; reversed when narrow            |
+| interactive | the pointer's answer, `card.hover`, and nothing else                           |
+
+A card does not nest. Two of them one inside the other are the same fill twice
+in the light palette, where the card rung and the page are one white; a block
+inside a card is the region rung, which a surface lays out rather than asks for.
+It renders no control either: `interactive` marks the card and the caller brings
+the button, because what a press does is a product decision.
+
+The ladder names the region rung for "hover on a card", and measured in the dark
+palette that is the card rung's own value — `elevatedBackground` and
+`secondaryBackground` are both `hsl(0 0% 8.6%)`. So `card.hover` mixes the rung
+toward `label` at 4%, the derivation `popup.highlight` and a secondary Button's
+hover already use, which steps away from the surface in both palettes at once.
+
+### Badge
+
+A standing fact about the thing beside it, and the one part of this system on
+**no rung**: it sits on a page, a card, a menu row or a modal panel, so it can
+take no background from the ladder. Its fill is a _film_ — the tone at 8% of
+`label` or 14% of a tone over whatever is underneath, the form a destructive
+ghost Button's hover already takes — so one declaration reads on every rung and
+in both palettes.
+
+The words stay `badge.label` in every tone, and that is measured rather than
+preferred: `warning` is 2.8:1 on a near-white surface, a colour tuned for a 16px
+mark where the bar is 3:1, used as 11px text where it is 4.5:1. A badge is never
+wordless, so the tint carries the tone and the word carries the fact.
+
+It is metadata, so it takes the caption step the rules give a row's trailing
+metadata, `secondaryLabel` because it is _about_ the thing, `radius.mini` at
+`badge.height`, and figures at one width. It neither grows nor shrinks: a
+surface that must cap a long one caps the badge, because a chip that shrank
+would be clipped by a tight row rather than by a decision.
+
+Five tones: the four a message reports, and `running`, which `Progress` adds for
+the same reason — a machine being reached is live state, which is what `accent`
+is for. There is no hover, no focus ring and no pressed state. A chip that
+answered a pointer would be a Button, and the deleted implementation's filled
+`default` variant — ink, which the rules give a stored value — invited exactly
+that press.
+
+### Separator
+
+`separator`, 1px, between the rows of a list or a table. It has no token group:
+every other component derives its edge from tokens that say which rung it is on,
+and this one _is_ the edge, so a `separator.color` pointing at the semantic
+token would be a second name for one fact.
+
+It is announced. Base UI renders `role="separator"` with the orientation, and
+there is no `decorative` escape hatch: a line here is never decoration, because
+the one place it is allowed is structural. Where it sits in a stack is the
+surface's layout, so it carries no margin of its own — a popup's divider has one
+only because it bleeds through an inset the caller cannot see. A vertical line
+stretches to its row rather than taking a percentage of a height the row has
+not got.
 
 ## Corners
 

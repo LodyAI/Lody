@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface DesktopCheckoutReturnPageProps {
@@ -35,27 +35,23 @@ export function DesktopCheckoutReturnPage({
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md rounded-2xl border-border/60">
-        <CardHeader className="items-center gap-6 px-8 pt-10 pb-4 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10">
-            <img src={lodyLogo} alt="Lody" className="h-11 w-11 object-contain" draggable={false} />
-          </span>
-          <div className="flex flex-col items-center gap-2">
-            <CardTitle className="text-xl font-semibold tracking-tight">{title}</CardTitle>
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          </div>
-        </CardHeader>
-        <CardContent className="px-8 pb-9">
-          <Button
-            render={deepLink ? <a href={deepLink} /> : undefined}
-            size="large"
-            className="w-full"
-            disabled={!deepLink}
-          >
-            {openLabel}
-          </Button>
-        </CardContent>
-      </Card>
+      <Card.Root className="w-full max-w-md">
+        <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+          <img src={lodyLogo} alt="Lody" className="h-11 w-11 object-contain" draggable={false} />
+        </span>
+        <Card.Header className="text-center">
+          <Card.Title as="h1">{title}</Card.Title>
+          <Card.Description>{subtitle}</Card.Description>
+        </Card.Header>
+        <Button
+          render={deepLink ? <a href={deepLink} /> : undefined}
+          size="large"
+          className="w-full"
+          disabled={!deepLink}
+        >
+          {openLabel}
+        </Button>
+      </Card.Root>
     </div>
   );
 }

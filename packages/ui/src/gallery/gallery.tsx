@@ -1,7 +1,11 @@
 import * as stylex from '@stylexjs/stylex';
 import { Fragment, type ComponentProps, type ReactNode, type Ref, type RefObject } from 'react';
+import { Badge, type BadgeTone } from '../badge/badge';
+import { badge as badgeTokens } from '../badge/badge.tokens.stylex';
 import { Button } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
+import { Card } from '../card/card';
+import { card as cardTokens } from '../card/card.tokens.stylex';
 import { Accordion } from '../disclosure/accordion';
 import { Alert } from '../feedback/alert';
 import { feedback as feedbackTokens } from '../feedback/feedback.tokens.stylex';
@@ -36,6 +40,7 @@ import { Menubar } from '../menu/menubar';
 import { Input } from '../field/input';
 import { Radio, RadioGroup } from '../field/radio';
 import { Select } from '../field/select';
+import { Separator } from '../separator/separator';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
 import { Popover } from '../popover/popover';
@@ -111,7 +116,6 @@ const styles = stylex.create({
   modal: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.large },
   textSample: { display: 'flex', flexDirection: 'column', gap: space[1] },
   separatorRow: { display: 'flex', flexDirection: 'column', gap: 0 },
-  separatorLine: { height: '1px', backgroundColor: colors.separator },
   separatorText: {
     paddingBlock: space[2],
     fontSize: text.subheadlineSize,
@@ -353,6 +357,47 @@ const styles = stylex.create({
   /** The toast stand-in is out of its viewport, so it takes no fixed width. */
   toastReplica: { position: 'static', maxWidth: '100%' },
   skeletonBlock: { display: 'flex', alignItems: 'center', gap: space[3], flexGrow: 1 },
+  /**
+   * The button an interactive card is inside. A Card marks itself pressable and
+   * does not render the control, so the board states the composition it expects
+   * rather than a picture of it: the button is the caller's, stripped to
+   * nothing, and the card is what a person sees.
+   */
+  cardButton: {
+    display: 'block',
+    width: '100%',
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    color: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  /** A badge is on no rung, so the board puts the same four on three of them. */
+  badgeRung: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexWrap: 'wrap',
+    boxSizing: 'border-box',
+    padding: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  /**
+   * How little room a badge may be given, so the ellipsis is on the board.
+   *
+   * The clamp goes on the badge itself and not on a box around it: a badge
+   * neither grows nor shrinks, so inside a flex row it keeps its content's
+   * width and overflows a narrow parent rather than ellipsing inside it. A
+   * surface that has to cap one caps the badge.
+   */
+  badgeClamp: { maxWidth: '96px' },
+  /** A row of controls with a line down it: the separator's other orientation. */
+  separatorToolbar: { display: 'flex', alignItems: 'center', gap: space[2] },
   skeletonLines: { display: 'flex', flexDirection: 'column', gap: space[2], flexGrow: 1 },
   collapsibleBody: {
     margin: 0,
@@ -715,6 +760,52 @@ const WAIT_COLORS = [
     value: feedbackTokens.skeleton,
     note: 'a gray, because it has no role yet',
   },
+];
+
+const CARD_COLORS = [
+  {
+    name: 'card.background',
+    value: cardTokens.background,
+    note: 'the card rung, and no border',
+  },
+  {
+    name: 'card.hover',
+    value: cardTokens.hover,
+    note: 'a card a person can press, under the pointer',
+  },
+  { name: 'card.title', value: cardTokens.title, note: 'what the card is about' },
+  {
+    name: 'card.description',
+    value: cardTokens.description,
+    note: 'the sentence under it',
+  },
+];
+
+const BADGE_TONES: BadgeTone[] = ['neutral', 'running', 'success', 'warning', 'danger'];
+
+const BADGE_COLORS = [
+  { name: 'badge.label', value: badgeTokens.label, note: 'ink in every tone' },
+  {
+    name: 'badge.neutralFill',
+    value: badgeTokens.neutralFill,
+    note: 'a film of label, not a rung',
+  },
+  { name: 'badge.runningFill', value: badgeTokens.runningFill, note: 'it is happening now' },
+  { name: 'badge.successFill', value: badgeTokens.successFill, note: 'it worked' },
+  { name: 'badge.warningFill', value: badgeTokens.warningFill, note: 'it still may not' },
+  { name: 'badge.dangerFill', value: badgeTokens.dangerFill, note: 'it did not' },
+];
+
+/**
+ * Where the board puts the same four badges. A badge is on no rung of the
+ * ladder — it sits on whatever holds it — so its fill is a film of the tone
+ * rather than a colour, and this is the row where that either holds on three
+ * different surfaces or does not.
+ */
+const BADGE_RUNGS = [
+  { name: 'on a page', style: styles.page, use: 'a row of a list, a settings line' },
+  { name: 'on a card', style: styles.card, use: 'the rung a Card is on' },
+  { name: 'on a menu', style: styles.floating, use: 'inside a popup, where named fills collapse' },
 ];
 
 const STRIP_SIZES: { name: string; size: TabsSize }[] = [
@@ -2177,6 +2268,160 @@ function WaitDimensions() {
   );
 }
 
+/** The block itself: a heading, the body a caller writes, and the answers. */
+function CardRow() {
+  return (
+    <Row>
+      <LegendKey>card</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Card.Root>
+          <Card.Header>
+            <Card.Title as="h4">Worktree setup</Card.Title>
+            <Card.Description>
+              Commands that run once, before the agent takes the session.
+            </Card.Description>
+          </Card.Header>
+          <Field.Root name="setup">
+            <Field.Label>Setup command</Field.Label>
+            <Input size="small" placeholder="pnpm install" />
+          </Field.Root>
+          <Card.Footer>
+            <Button variant="ghost" size="small">
+              Reset
+            </Button>
+            <Button size="small">Save</Button>
+          </Card.Footer>
+        </Card.Root>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A card that is the pressable thing. The button is the board's, because the
+ * primitive marks the card and leaves what a press does to the surface.
+ */
+function InteractiveCardRow() {
+  return (
+    <Row>
+      <LegendKey>interactive</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <button type="button" {...stylex.props(styles.cardButton)}>
+          <Card.Root interactive>
+            <Card.Header>
+              <Card.Title as="h4">Agents</Card.Title>
+              <Card.Description>Which agent answers, and with what tools.</Card.Description>
+            </Card.Header>
+          </Card.Root>
+        </button>
+      </div>
+      <span {...stylex.props(styles.rungUse)}>
+        Only the fill answers the pointer. The ladder names the region rung for this, and in the
+        dark palette that is the card rung's own value — so the hover is mixed toward label instead,
+        the way a row's highlight is.
+      </span>
+    </Row>
+  );
+}
+
+function CardDimensions() {
+  const dimensions = [
+    { name: 'card.radius', value: cardTokens.radius },
+    { name: 'card.padding', value: cardTokens.padding },
+    { name: 'card.gap', value: cardTokens.gap },
+    { name: 'card.headerGap', value: cardTokens.headerGap },
+    { name: 'card.footerGap', value: cardTokens.footerGap },
+    { name: 'card.titleSize', value: cardTokens.titleSize },
+    { name: 'card.titleLeading', value: cardTokens.titleLeading },
+    { name: 'card.descriptionSize', value: cardTokens.descriptionSize },
+    { name: 'card.descriptionLeading', value: cardTokens.descriptionLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The four things a badge can state, and what a caller's glyph does to one. */
+function BadgeToneRow() {
+  return (
+    <Row>
+      <LegendKey>tones</LegendKey>
+      <Cluster>
+        {BADGE_TONES.map((tone) => (
+          <Badge key={tone} tone={tone}>
+            {tone}
+          </Badge>
+        ))}
+        <Badge icon={<TickGlyph />}>Verified</Badge>
+        <Badge>v1.42.0</Badge>
+        <Badge className={stylex.props(styles.badgeClamp).className}>
+          A plan name nobody shortened
+        </Badge>
+      </Cluster>
+    </Row>
+  );
+}
+
+/** A line between rows, and the same line down a row of controls. */
+function SeparatorRow() {
+  return (
+    <Row>
+      <LegendKey>separator</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <div {...stylex.props(styles.separatorRow)}>
+          <span {...stylex.props(styles.separatorText)}>lody-mac-studio</span>
+          <Separator />
+          <span {...stylex.props(styles.separatorText)}>lody-thinkpad</span>
+          <Separator />
+          <span {...stylex.props(styles.separatorText)}>lody-ci-runner</span>
+        </div>
+      </div>
+      <div {...stylex.props(styles.separatorToolbar)}>
+        <Button variant="ghost" size="small">
+          Previous
+        </Button>
+        <Separator orientation="vertical" />
+        <Button variant="ghost" size="small">
+          Next
+        </Button>
+      </div>
+    </Row>
+  );
+}
+
+function BadgeDimensions() {
+  const dimensions = [
+    { name: 'badge.height', value: badgeTokens.height },
+    { name: 'badge.radius', value: badgeTokens.radius },
+    { name: 'badge.paddingX', value: badgeTokens.paddingX },
+    { name: 'badge.gap', value: badgeTokens.gap },
+    { name: 'badge.glyphSize', value: badgeTokens.glyphSize },
+    { name: 'badge.labelSize', value: badgeTokens.labelSize },
+    { name: 'badge.labelLeading', value: badgeTokens.labelLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
 function ButtonFocusRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -2276,7 +2521,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             <div {...stylex.props(styles.hoverRow, styles.selectedFill)}>selectedFill</div>
             <div {...stylex.props(styles.separatorRow)}>
               <span {...stylex.props(styles.separatorText)}>separator — first row</span>
-              <div {...stylex.props(styles.separatorLine)} />
+              <Separator />
               <span {...stylex.props(styles.separatorText)}>separator — next row</span>
             </div>
             <div {...stylex.props(styles.overlaySample)}>overlay</div>
@@ -3034,6 +3279,61 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               ink={false}
               note="the track, sunken"
             />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Card · a block of a page"
+        rule="The elevation ladder's card step, made a component: the elevated background under the card shadow at the large radius, and no border, because a card's edge is its shadow. The parts are a Dialog's — a heading, the body a caller writes, and the answers — because what differs between a panel that owns the window and a block that owns a region of a page is the rung and the heading step, not what either is made of. It takes the same headline a dialog does: the rules reserve title for a page that is a page. A card does not nest — two of them one inside the other are the same fill twice in the light palette, where the card rung and the page are one white — and it renders no control of its own: interactive marks the card, and the button stays the caller's, because what a press does is a product decision."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <CardRow />
+            <InteractiveCardRow />
+            <CardDimensions />
+          </Rows>
+          <Grid>
+            {CARD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="card.shadow"
+              box={cardTokens.shadow}
+              fill={cardTokens.background}
+              ink={false}
+              note="the card rung, above the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Badge and Separator · a fact, and a line"
+        rule="A badge is the one part of this system on no rung: it sits on a page, a card, a menu row or a modal panel, so it cannot take a background from the ladder — its fill is a film of the tone over whatever is underneath, which is the form a destructive ghost button's hover already takes. The words stay ink in every tone, and that is measured rather than preferred: warning is 2.8:1 on a near-white surface, a colour tuned for a 16px mark where 3:1 is the bar, and a badge is never wordless, so the tint carries the tone and the word carries the fact. It answers no pointer and takes no focus — a chip that did would be a Button. A Separator is the other half of the sentence and the only line this system allows: between the rows of a list or a table, never around a surface and never under a header, and it says so to a screen reader rather than hiding behind a decorative flag."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <BadgeToneRow />
+            {BADGE_RUNGS.map((rung) => (
+              <Row key={rung.name}>
+                <LegendKey>{rung.name}</LegendKey>
+                <div {...stylex.props(styles.badgeRung, rung.style)}>
+                  {BADGE_TONES.map((tone) => (
+                    <Badge key={tone} tone={tone}>
+                      {tone}
+                    </Badge>
+                  ))}
+                </div>
+                <span {...stylex.props(styles.rungUse)}>{rung.use}</span>
+              </Row>
+            ))}
+            <SeparatorRow />
+            <BadgeDimensions />
+          </Rows>
+          <Grid>
+            {BADGE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
           </Grid>
         </PaletteSplit>
       </Section>

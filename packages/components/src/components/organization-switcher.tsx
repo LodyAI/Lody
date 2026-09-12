@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import {
   Dialog,
@@ -209,7 +209,7 @@ function CloudOrganizationSwitcher() {
                     />
                     <span className="truncate text-sm">{org.name}</span>
                     {planTierByWorkspaceId.has(org.id) ? (
-                      <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+                      <Badge>
                         {planTierByWorkspaceId.get(org.id) === 'enterprise'
                           ? t('billing.plan.enterprise')
                           : t('billing.plan.plus')}

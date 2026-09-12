@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
 import {
-  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -15,6 +14,7 @@ import {
   ScrollArea,
 } from '@/ui';
 import { Accordion } from '@lody/ui/accordion';
+import { Badge } from '@lody/ui/badge';
 import { Select } from '@lody/ui/select';
 
 const allEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries;
@@ -73,18 +73,12 @@ function AttributionItem({ entry }: { entry: OpenSourceAttributionEntry }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium text-foreground">{entry.name}</p>
-            <Badge variant="secondary" className="rounded-md">
-              {entry.license}
-            </Badge>
+            <Badge>{entry.license}</Badge>
             {entry.scope === 'bundled-theme' ? (
-              <Badge variant="outline" className="rounded-md">
-                Theme
-              </Badge>
+              <Badge>Theme</Badge>
             ) : null}
             {entry.scope === 'vendored-icon-set' ? (
-              <Badge variant="outline" className="rounded-md">
-                Icons
-              </Badge>
+              <Badge>Icons</Badge>
             ) : null}
           </div>
           {entry.versions?.length ? (
@@ -222,9 +216,7 @@ export function OpenSourceAttributionsDialog({
                   <span className="flex items-center gap-2">
                     <Palette className="h-4 w-4 text-muted-foreground" />
                     {t('settings.about.bundledAssets', 'Bundled assets')}
-                    <Badge variant="secondary" className="rounded-md">
-                      {bundledEntries.length}
-                    </Badge>
+                    <Badge>{bundledEntries.length}</Badge>
                   </span>
                 </Accordion.Trigger>
                 <Accordion.Panel>
@@ -241,9 +233,7 @@ export function OpenSourceAttributionsDialog({
                   <span className="flex items-center gap-2">
                     <FileCode2 className="h-4 w-4 text-muted-foreground" />
                     {t('settings.about.dependencies', 'Dependencies')}
-                    <Badge variant="secondary" className="rounded-md">
-                      {dependencyEntries.length}
-                    </Badge>
+                    <Badge>{dependencyEntries.length}</Badge>
                   </span>
                 </Accordion.Trigger>
                 <Accordion.Panel>
