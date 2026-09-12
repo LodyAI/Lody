@@ -165,7 +165,14 @@ release, or after `dispose` cannot overwrite the snapshot. `observe.initial` bui
 ranged `changed` re-reads only the affected range (directory plus hydrated turns in it); `reset` is
 the only full re-read. Directory rows carry the send-critical Role/MCP/option config, so sending does
 not wait on the idle pass. `readAll()` is the reader's one consistent full read; `readConversationHistory`
-(export/replay/copy) uses it when present instead of stitching pages.
+(export/replay/copy) uses it when present instead of stitching pages, and the projected view forwards it to
+the authoritative base (a display projection never becomes export/hash input). Three range rules are
+load-bearing: an event's `to` is a local range endpoint, never the authoritative length, so membership comes
+from the reader's `count()` plus in-range id mismatches; a mixed structural+content batch keeps every touched
+identity (the Loro adapter no longer drops the earlier content `from` when a list delta is present) and
+refreshes surviving hydrated bodies, not just the tail; and every async result — including background idle
+summaries, not only range hydration — is discarded when the generation changed or the captured position/row
+no longer belongs to the same turn.
 
 The snapshot service is wired to its business consumers: fork captures through
 `sessionData.snapshots.capture()`, clones the boundary with `snapshot.read()`, and copies into the

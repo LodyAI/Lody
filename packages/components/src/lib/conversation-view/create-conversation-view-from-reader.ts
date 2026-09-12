@@ -301,12 +301,17 @@ export function createConversationViewFromReader(
         continue;
       }
       let read: SessionTurnRead;
+      const gen = generation;
       try {
         read = await reader.readTurn(id);
       } catch {
         continue;
       }
-      if (disposed) return;
+      // A background summary must not write through a structural change or a
+      // same-turn content update that landed while the read was in flight: the
+      // captured position/row may now belong to another turn.
+      if (disposed || generation !== gen) return;
+      if (rows[i] !== row || ids[i] !== id) continue;
       if (read.state !== 'ready') continue;
       const turn = read.turn as unknown as SessionHistory;
       const next: TurnIndexRow = {
@@ -402,7 +407,21 @@ export function createConversationViewFromReader(
         structuralFrom = Math.min(structuralFrom, entry.position);
       }
     }
-    if (to !== ids.length) structuralFrom = Math.min(structuralFrom, Math.min(to, ids.length));
+    // `to` is the range endpoint the adapter reported, never the authoritative
+    // length: a content change to an early turn ends its range well before the
+    // list end. Membership changes come from the reader's own count (append or
+    // delete) plus id mismatches inside the re-read range, so a narrow content
+    // event never truncates the visible directory.
+    let authoritativeCount: number;
+    try {
+      authoritativeCount = await reader.count();
+    } catch {
+      return;
+    }
+    if (disposed || generation !== gen) return;
+    if (authoritativeCount !== ids.length) {
+      structuralFrom = Math.min(structuralFrom, Math.min(to, ids.length));
+    }
     const structural = Number.isFinite(structuralFrom);
 
     if (!structural) {
@@ -431,8 +450,9 @@ export function createConversationViewFromReader(
       bump();
       if (hi >= 0) emit({ kind: 'index', from: lo, to: hi + 1 });
       if (toReRead.length > 0) await applyHydratedReplacement(toReRead, gen);
-      // A summary that was invalidated needs the background pass again.
-      if (invalidatedSummary) scheduleIdlePass(false);
+      // A summary that was invalidated needs the background pass again; restart
+      // from the end so a cursor that already moved past this row revisits it.
+      if (invalidatedSummary) scheduleIdlePass(true);
       return;
     }
 
@@ -452,10 +472,14 @@ export function createConversationViewFromReader(
     }
     rows.length = fromIndex;
     ids.length = fromIndex;
+    const touchedSurvivors = new Set<string>();
     for (const entry of entries) {
       const row = rowFromDirectory(entry);
       rows[entry.position] = row;
       ids[entry.position] = row.id;
+      // A mixed batch (content edit + structural edit) carries content changes
+      // to turns that survive the structural edit; their bodies must refresh.
+      if (hydrated.has(row.id)) touchedSurvivors.add(row.id);
     }
     rebuildLookups(fromIndex);
     evict();
@@ -463,6 +487,10 @@ export function createConversationViewFromReader(
     // whose position may have changed, plus the fresh tail.
     await ensureTailHydrated(hydrateItemBudget, false);
     if (disposed) return;
+    if (touchedSurvivors.size > 0) {
+      await applyHydratedReplacement([...touchedSurvivors], generation);
+      if (disposed) return;
+    }
     bump();
     emit({ kind: 'structure', from: fromIndex, to: ids.length });
     emit({ kind: 'index', from: fromIndex, to: ids.length });

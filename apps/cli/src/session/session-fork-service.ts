@@ -49,6 +49,8 @@ type WorktreeForkPreparedInput = {
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   sourceSnapshot: SessionSnapshot;
+  /** Releases the source snapshot once the async worktree fork settles. */
+  releaseSourceSnapshot: () => void;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -764,6 +766,7 @@ export class SessionForkService {
         marker,
         historyResult,
         sourceSnapshot,
+        releaseSourceSnapshot: () => sourceDoc.sessionData.snapshots.release(sourceSnapshot),
         agentConfig,
         user,
         operation,
@@ -876,6 +879,7 @@ export class SessionForkService {
             copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
           );
         }
+        sourceDoc.sessionData.snapshots.release(sourceSnapshot);
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -1074,6 +1078,7 @@ export class SessionForkService {
       );
     } finally {
       this.activeOperations.delete(operation.id);
+      input.releaseSourceSnapshot();
     }
   }
 }

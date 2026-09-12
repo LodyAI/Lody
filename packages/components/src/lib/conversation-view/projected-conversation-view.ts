@@ -121,6 +121,9 @@ export function createProjectedConversationView(
         : { ready: Promise.resolve(), release: () => {} };
     },
     subscribe: (listener) => base.subscribe((change) => listener(translate(change))),
+    // Export/replay/hash read the authoritative base, never the accepted display
+    // projection, so the consistent full-read path still covers this wrapper.
+    ...(base.readAll ? { readAll: () => base.readAll!() } : {}),
     dispose: () => {},
   };
 }

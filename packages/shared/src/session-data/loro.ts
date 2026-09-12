@@ -294,7 +294,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
     }
     if (structural) {
-      const lo = Number.isFinite(structuralFrom) ? structuralFrom : 0;
+      // A mixed batch can carry an earlier child edit (a content change) plus a
+      // list insert/delete. Keep the earlier content position too, so the
+      // consumer re-reads every affected identity, not just the shifted suffix.
+      const contentFrom = Number.isFinite(from) ? from : structuralFrom;
+      const lo = Number.isFinite(structuralFrom)
+        ? Math.min(structuralFrom, contentFrom)
+        : contentFrom;
       return { from: Math.max(0, Math.min(lo, list.length)), to: list.length };
     }
     if (to < 0) return undefined;

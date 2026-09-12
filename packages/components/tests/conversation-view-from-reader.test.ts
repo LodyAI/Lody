@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import { createHistoryWriter } from '@lody/shared';
 import {
@@ -722,6 +723,223 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
     } finally {
       session.history.dispose();
       session.mirror.dispose();
+      doc.free();
+    }
+  });
+});
+
+/**
+ * Regressions pinned by the 8c reader audit. The first two also ran against the
+ * previous raw `createConversationViewFromDoc` as a same-document control, so
+ * the asserted behavior is "the display cache must not be worse than the raw
+ * view", not new product behavior.
+ */
+describe('createConversationViewFromReader audit regressions', () => {
+  const checkpoint = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it('a scalar change to an early turn preserves the later directory rows', async () => {
+    // `to` from the ranged event is a local endpoint, not the list length; a
+    // narrow content change must never truncate the visible directory.
+    const history = buildFixtureHistory(3);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      expect(view.turnCount).toBe(6);
+      const result = await data.commands.setTurnField('a-0', 'finished', setFieldTo(false));
+      expect(result.status).toBe('accepted');
+      await checkpoint();
+      expect(await data.history.count()).toBe(6);
+      expect(Array.from({ length: view.turnCount }, (_, i) => view.index(i)?.id)).toEqual(
+        history.map((turn) => turn.id)
+      );
+    } finally {
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('a mixed structural batch refreshes bodies of surviving hydrated turns', async () => {
+    const history = buildFixtureHistory(3);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      await view.acquireRange(0, 6).ready;
+      // One commit: an early content change plus a tail append.
+      const list = doc.getList('history');
+      (list.get(1) as LoroMap).set('finished', false);
+      list.push({ ...history[0], id: 'new' } as never);
+      doc.commit();
+      await checkpoint();
+      expect(view.turnCount).toBe(7);
+      expect(view.turn(1)?.finished).toBe(false);
+    } finally {
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('an idle summary read cannot overwrite a row after a head insertion', async () => {
+    const history = buildFixtureHistory(3);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    const entered = new Promise<void>((resolve) => (started = resolve));
+    const tasks: Array<(deadline: { timeRemaining(): number }) => void> = [];
+    let shouldBlock = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const value = await data.history.readTurn(id);
+        if (id === 'a-2' && shouldBlock) {
+          shouldBlock = false;
+          started();
+          await blocked;
+        }
+        return value;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: (task) => {
+        tasks.push(task);
+        return () => {};
+      },
+    });
+    try {
+      await checkpoint();
+      tasks.shift()!({ timeRemaining: () => 100 });
+      await entered;
+      doc.getList('history').insert(0, { ...history[0], id: 'new' } as never);
+      doc.commit();
+      await checkpoint();
+      expect(view.index(5)?.id).toBe('u-2');
+      release();
+      await checkpoint();
+      // The delayed summary for a-2 must not be written through position 5,
+      // which now belongs to u-2.
+      expect(view.index(5)?.id).toBe('u-2');
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('refreshes first, middle, and tail content updates without truncating, and shrinks on tail deletion', async () => {
+    const history = buildFixtureHistory(3);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    const view = createConversationViewFromReader(data.history, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const allIds = history.map((turn) => turn.id);
+      for (const id of ['a-0', 'a-1', 'a-2']) {
+        // `turn(a-0)`'s fixture value differs per turn; setting a new value must
+        // update only its row and leave the six-row directory intact.
+        const result = await data.commands.setTurnField(id, 'finished', setFieldTo(false));
+        expect(result.status).toBe('accepted');
+        await checkpoint();
+        expect(view.turnCount).toBe(6);
+        expect(Array.from({ length: view.turnCount }, (_, i) => view.index(i)?.id)).toEqual(allIds);
+      }
+      // A real structural shrink: deleting the tail row must reduce the count.
+      doc.getList('history').delete(5, 1);
+      doc.commit();
+      await checkpoint();
+      expect(view.turnCount).toBe(5);
+      expect(Array.from({ length: view.turnCount }, (_, i) => view.index(i)?.id)).toEqual(
+        allIds.slice(0, 5)
+      );
+    } finally {
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('a gated same-turn content update is not overwritten by the stale summary write', async () => {
+    const history = buildFixtureHistory(3);
+    const doc = buildSessionDoc(history);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    const entered = new Promise<void>((resolve) => (started = resolve));
+    const tasks: Array<(deadline: { timeRemaining(): number }) => void> = [];
+    let shouldBlock = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const value = await data.history.readTurn(id);
+        if (id === 'a-2' && shouldBlock) {
+          shouldBlock = false;
+          started();
+          await blocked;
+        }
+        return value;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: (task) => {
+        tasks.push(task);
+        return () => {};
+      },
+    });
+    try {
+      await checkpoint();
+      tasks.shift()!({ timeRemaining: () => 100 });
+      await entered;
+      // Same turn, no positional shift: the row object is replaced, so the
+      // delayed summary must not write its stale capture back.
+      const result = await data.commands.setTurnField('a-2', 'finished', setFieldTo(false));
+      expect(result.status).toBe('accepted');
+      release();
+      await checkpoint();
+      expect(view.index(5)?.id).toBe('a-2');
+      expect(view.index(5)?.finished).toBe(false);
+    } finally {
+      release();
+      view.dispose();
       doc.free();
     }
   });
