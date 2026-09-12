@@ -137,10 +137,13 @@ The control plane moved to `@lody/shared/session-control-plane` (`sessionControl
 history-less control plane; the component copies are re-exports.
 
 Not migrated in this change: `ConversationView` still reads the raw list as the UI display cache;
-queue/fork/import still use whole-history `updateHistory`; and the Mirror `WeakMap` copy provenance
-is not yet a storage-owned handle. `readHistorySnapshot`/`readFullHistory` remain deliberate
-bottom-level exposures owned by `SessionDocument` (synchronous dispatch output and explicit full
-reads); they are not a second writer. Owner/seal mapping and old-format migration remain separate.
+fork already uses the storage-owned `capture`/`copyFrom` handle, but external-history **import** still
+goes through the composed `SessionDocument.updateHistoryAndCursor` (a whole-history `updateHistory`
+callback that binds the stored snapshot and cursor with no async gap) rather than a dedicated port
+command. `readHistorySnapshot`/`readFullHistory` remain deliberate bottom-level exposures owned by
+`SessionDocument` (synchronous dispatch output and explicit full reads); they are not a second writer.
+Queue promotion appends through `SessionData.commands.appendTurn`. Owner/seal mapping and old-format
+migration remain separate.
 
 Verification: the shared suite (99 files / 1164 tests), components (469 files / 3538 tests) and
 CLI (2700 tests, 4 skipped, run with a redirected `HOME` because the sandbox blocks `~/.lody`

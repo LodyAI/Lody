@@ -100,6 +100,7 @@ import {
   createLoroSessionData,
   setFieldTo,
   type LoroSessionData,
+  type SessionTurn,
 } from '@lody/shared/session-data';
 import { redactProxyUrl, sanitizeUrlForLogging } from '@/utils/log-sanitize';
 import { getProxyForUrl } from 'proxy-from-env';
@@ -2767,7 +2768,15 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
         `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
       );
     }
-    await this.updateHistory((history) => [...history, entry]);
+    // Queue promotion is a dispatch producer: append through the domain command
+    // (which validates before writing), then publish the activation pointer.
+    const result = await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+    if (result.status === 'rejected') {
+      throw new HistoryWriteError(
+        result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+      );
+    }
+    if (result.status === 'indeterminate') throw result.cause;
     await this.repo.upsertDocMeta(this.roomId, {
       latestUserMsgId: entry.id,
     } satisfies Partial<SessionMeta>);

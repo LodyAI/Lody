@@ -35,6 +35,11 @@ storage offset.
   reader, counts displayable turns, keeps the cursor a raw position and never reports an
   empty tail as the end. A caller-supplied visibility predicate stays on this side of the
   boundary, not in the port.
+- **Bound ACP batches are one domain command.** `applyAgentBatch` rewrites only the
+  located turn for an entry-bound text/thought batch, keeps whole-history routing for a
+  mixed tool/subagent batch that may belong to an older turn, and creates a missing bound
+  target under the caller's id. Both adapters apply the same shared notification/content
+  planners; the caller never passes a JSON op list.
 - **The in-memory double** exists to prove async reads/writes and real consumer contracts;
   it is not a second copy of domain rules. Both backends run
   `tests/session-data-contract.ts`, and a real consumer runs against the double in
