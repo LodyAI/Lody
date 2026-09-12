@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: pending
-PR: pending
+PR: [#642](https://github.com/LodyAI/Lody/pull/642)
 
 ## Abstract
 
