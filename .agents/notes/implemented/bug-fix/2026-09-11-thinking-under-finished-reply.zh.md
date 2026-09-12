@@ -13,6 +13,7 @@ Translation: current
 
 - 在 `{ type: 'running' }` 上增加可选 `phase: 'finalizing'`。不新增 `activity: 'finalizing'`，旧 `ActiveSessionStatusSchema` 会拒收该枚举并丢掉整条 presence。
 - `markPromptWorkingEnded` 报告 `finalizing`，不清 presence。`markPromptWorkingStarted` 已会恢复 `thinking`，覆盖 autoPrompt 重启。
+- Codex image begin/end 只改 presence activity（`thinking` ↔ `image_generation`），不写 durable `SessionMeta.status`，避免在途 `setStatus` 把 `finalizing` / idle 写回 running。
 - UI 只在 live presence 为 `running` 且 `phase === 'finalizing'` 时藏活动条。不再按 last-history `finished` 藏灯。
 - 保持 continueSession 原 thinking 顺序。更早的 `openAssistantEntry` 已在 initializing 之前发生；把 thinking 挪到内层 open 之后挡不住 viewer 历史落后。
 - 旧端忽略未知 `phase` 并保留 `running`。没有 `phase` 的旧 host 仍会露出收尾残留的「思考中」。

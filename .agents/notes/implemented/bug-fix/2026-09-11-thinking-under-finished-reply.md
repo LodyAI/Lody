@@ -13,6 +13,7 @@ After the assistant turn is stamped `finished`, the desktop footer already shows
 
 - Add optional `phase: 'finalizing'` on `{ type: 'running' }`. Do not add `activity: 'finalizing'`; old `ActiveSessionStatusSchema` would reject the enum and drop the whole presence entry.
 - `markPromptWorkingEnded` reports `finalizing` without clearing presence. `markPromptWorkingStarted` already restores `thinking`, including autoPrompt restart.
+- Codex image begin/end update presence activity only (`thinking` ↔ `image_generation`). They do not write durable `SessionMeta.status`, so an in-flight `setStatus` cannot undo `finalizing` or idle.
 - UI hides the activity row only when live presence is `running` with `phase === 'finalizing'`. Do not hide from last-history `finished`.
 - Keep the original continueSession thinking order. An earlier `openAssistantEntry` already ran before initializing; moving thinking after the inner open cannot fence lagged viewer history.
 - Old clients strip unknown `phase` and keep `running`. Mixed old hosts without `phase` still show leftover Thinking.
