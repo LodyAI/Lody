@@ -1,26 +1,39 @@
-import type { TaskProposalMeta } from '../ai';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
-import type { SessionHistory, SessionHistoryInput } from '../schema';
+import type {
+  SessionDirectoryRow,
+  SessionTurn,
+  SessionTurnRead,
+  SessionTurnWritableValues,
+  SessionWritableField,
+} from './domain';
 
 // # Session data ports
 //
 // The CRDT-neutral seam between session *business* code (React UI, CLI, MCP)
 // and one concrete storage implementation (today Loro + Mirror + repo; later a
 // database CRDT). Nothing here names Loro, Mirror, a CID, a container id or a
-// storage offset: business identity is a turn id, a request id, or an opaque
-// cursor. Adapters keep those details inside `session-data/loro.ts`.
+// storage offset, and its DTOs come from `./domain` rather than the storage
+// schema. Adapters keep storage details inside `session-data/loro.ts`.
 //
-// Two rules make this seam trustworthy:
-//  - A field change is explicit. `set` writes a value, `clear` removes it, and
-//    an omitted field is never a change. Callers do not rely on `undefined`
-//    surviving a JSON/worker/Rust boundary to mean "delete".
-//  - A command result states its phase. A pre-write rejection is not the same as
-//    an accepted change, and an accepted-but-unacknowledged change is not a
-//    rejection. Only the first is safe to retry blindly.
+// A field change is explicit. `set` writes a value, `clear` removes it, and an
+// omitted field is never a change. Callers do not rely on `undefined` surviving
+// a JSON/worker/Rust boundary to mean "delete".
+//
+// A command result states its phase. A validated pre-write rejection is not the
+// same as an accepted change, and an accepted-but-unacknowledged change is not a
+// rejection. Only the first is safe to retry blindly.
 
-/** The turn-map fields a domain command may write. Items are edited whole-entry. */
-export type SessionWritableField = Exclude<keyof SessionHistoryInput, '$cid' | 'items' | 'id'>;
+export type {
+  SessionDirectoryRow,
+  SessionTurn,
+  SessionTurnRole,
+  SessionTurnStatus,
+  SessionTurnRead,
+  SessionUnavailableReason,
+  SessionWritableField,
+  SessionTurnWritableValues,
+} from './domain';
 
 /**
  * An explicit field change. `set` with an explicit value, or `clear` to remove
@@ -69,8 +82,9 @@ export interface SessionWriteReceipt {
 }
 
 /** A user's decision on a task proposal, resolved against the live notice. */
-export type TaskProposalResolution = Pick<TaskProposalMeta, 'taskId'> & {
-  outcome: NonNullable<TaskProposalMeta['outcome']>;
+export type TaskProposalResolution = {
+  readonly taskId?: string;
+  readonly outcome: 'created' | 'dismissed';
 };
 
 /**
@@ -85,7 +99,7 @@ export type OpenAssistantTurnInput = {
   /** Attached only when the stored turn has none (never overwrites a value). */
   readonly userTurnId?: string;
   /** Applied only when provided. */
-  readonly modelInfo?: SessionHistory['modelInfo'];
+  readonly modelInfo?: SessionTurn['modelInfo'];
   /** Timestamp for a freshly created turn. */
   readonly timestamp: string;
 };
@@ -110,56 +124,57 @@ export type SessionCommandResult =
   | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
 
-/** One raw storage slot's domain read. `invalid` covers unknown/corrupt slots. */
-export type SessionTurnRead =
-  | { readonly state: 'ready'; readonly turn: SessionHistory }
-  | { readonly state: 'invalid' }
-  | { readonly state: 'missing' };
-
 export const sessionTurnReadIsReady = (
   read: SessionTurnRead
-): read is { state: 'ready'; turn: SessionHistory } => read.state === 'ready';
+): read is { state: 'ready'; turn: SessionTurn } => read.state === 'ready';
 
 /**
- * A page of displayable transcript turns. `limit` counts displayable turns;
- * `cursor` is an opaque *raw* position, so hidden/empty rows between pages do
- * not shift the caller's notion of where it is. `hasMore` is only true when a
- * further raw row exists to continue from.
+ * A change notification after an observation's initial read. `changed` means the
+ * consumer should re-read the affected raw positions; `reset` means continuity
+ * was lost (for example the source was replaced) and the whole window must be
+ * re-read. The token is local only and is never a storage/wire version.
  */
-export type SessionVisiblePage = {
-  readonly turns: readonly SessionHistory[];
-  /** Raw slot position of each entry in `turns`, aligned by index. */
-  readonly positions: readonly number[];
-  readonly nextCursor?: string;
-  readonly hasMore: boolean;
-};
+export type SessionDataChange =
+  | { readonly kind: 'changed'; readonly from?: number; readonly to?: number }
+  | { readonly kind: 'reset' };
 
-export type SessionVisiblePageRequest = {
-  readonly limit: number;
-  /** Opaque cursor from a previous page; omit for the newest page. */
-  readonly cursor?: string;
-  /** Decides whether a raw turn is part of the displayable transcript. */
-  readonly isVisible: (turn: SessionHistory) => boolean;
-};
+export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
-/** Windowed authoritative reads. All methods are async so a database adapter
- *  can answer without blocking; a Loro adapter may resolve synchronously. */
+/**
+ * A gap-free read-and-subscribe. The initial directory is captured at the same
+ * point the listener becomes live, so a consumer never has to choose between
+ * "subscribe first and miss nothing" and "read first and see the latest": both
+ * come from one operation.
+ */
+export interface SessionObservation {
+  /** Directory rows already including every change at or after subscribe. */
+  readonly initial: Promise<readonly SessionDirectoryRow[]>;
+  /** Idempotent. */
+  unsubscribe(): void;
+}
+
+/** Windowed authoritative reads. Every method is async so a database adapter
+ *  can answer without blocking. */
 export interface SessionHistoryReader {
   /** Raw slot count, including slots no domain turn owns. */
-  count(): number;
+  count(): Promise<number>;
+  /** Authoritative read of one raw slot. */
+  readAt(position: number): Promise<SessionTurnRead>;
   /** Authoritative read of one business turn id. */
   readTurn(turnId: string): Promise<SessionTurnRead>;
   /** Authoritative read of raw slots `[from, to)`. */
   readRange(from: number, to: number): Promise<readonly SessionTurnRead[]>;
-  /** Business paging: `limit` displayable turns, `cursor` a raw position. */
-  readVisiblePage(request: SessionVisiblePageRequest): Promise<SessionVisiblePage>;
+  /** Shallow identity/state for raw slots `[from, to)`; never a turn body. */
+  readDirectory(from: number, to: number): Promise<readonly SessionDirectoryRow[]>;
+  /** Live observation with a gap-free initial directory. */
+  observe(listener: SessionDataChangeListener): SessionObservation;
 }
 
 export interface SessionHistoryCommands {
   /** Append a new turn. Rejects invalid input before touching storage. */
-  appendTurn(turn: SessionHistory): Promise<SessionCommandResult>;
+  appendTurn(turn: SessionTurn): Promise<SessionCommandResult>;
   /** Replace an existing turn by business id. */
-  replaceTurn(turnId: string, turn: SessionHistory): Promise<SessionCommandResult>;
+  replaceTurn(turnId: string, turn: SessionTurn): Promise<SessionCommandResult>;
   /**
    * Set or clear exactly one field. The adapter re-reads the target and applies
    * the change in one commit, so a peer edit between the caller's read and this
@@ -168,7 +183,7 @@ export interface SessionHistoryCommands {
   setTurnField<K extends SessionWritableField>(
     turnId: string,
     key: K,
-    change: SessionFieldChange<SessionHistoryInput[K]>
+    change: SessionFieldChange<SessionTurnWritableValues[K]>
   ): Promise<SessionCommandResult>;
   /**
    * Reopen an assistant turn for a re-dispatched execution: clear the terminal

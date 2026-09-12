@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionId } from '../src/ids';
-import type { SessionHistory } from '../src/schema';
-import type { SessionData, SessionWriteReceipt } from '../src/session-data';
-import { clearField, setFieldTo } from '../src/session-data';
+import type { SessionTurn } from '../src/session-data';
+import {
+  pageVisibleTranscript,
+  clearField,
+  setFieldTo,
+  type SessionData,
+  type SessionWriteReceipt,
+} from '../src/session-data';
 
 /**
  * The consumer contract for `SessionData`. Every implementation must satisfy it;
@@ -19,14 +24,14 @@ export type SessionDataHarness = {
   /** A peer's independent field write through the shared writer rules. */
   peerSetField(turnId: string, key: string, value: unknown): void;
   /** A peer's independent append. */
-  peerAppend(turn: SessionHistory): void;
+  peerAppend(turn: SessionTurn): void;
   /** Detached stored turns, newest last. */
-  readStored(): SessionHistory[];
+  readStored(): SessionTurn[];
 };
 
 const sessionId = 'contract-session' as SessionId;
 
-const userTurn = (turnId: string, text = 'hello'): SessionHistory => ({
+const userTurn = (turnId: string, text = 'hello'): SessionTurn => ({
   id: turnId,
   role: 'user',
   timestamp: '2026-01-01T00:00:00.000Z',
@@ -34,7 +39,7 @@ const userTurn = (turnId: string, text = 'hello'): SessionHistory => ({
   fileDiff: [],
 });
 
-const assistantTurn = (turnId: string): SessionHistory => ({
+const assistantTurn = (turnId: string): SessionTurn => ({
   id: turnId,
   role: 'assistant',
   userTurnId: 'user-1',
@@ -45,6 +50,9 @@ const assistantTurn = (turnId: string): SessionHistory => ({
   endedAt: 1234,
   permissionWaitMs: 50,
 });
+
+const textOf = (turn: SessionTurn | undefined): unknown =>
+  Array.isArray(turn?.items) ? (turn.items[0] as { text?: unknown } | undefined)?.text : undefined;
 
 const acceptedReceipt = (
   result: Awaited<ReturnType<SessionData['commands']['appendTurn']>>
@@ -64,16 +72,39 @@ export function runSessionDataContract(
       await data.commands.appendTurn(userTurn('b'));
       await data.commands.appendTurn(userTurn('c'));
 
-      expect(data.history.count()).toBe(3);
+      expect(await data.history.count()).toBe(3);
       const read = await data.history.readTurn('b');
       expect(read.state).toBe('ready');
-      if (read.state === 'ready') expect(read.turn.items?.[0]?.text).toBe('hello');
+      if (read.state === 'ready') expect(textOf(read.turn)).toBe('hello');
 
       const range = await data.history.readRange(1, 3);
       expect(range.map((entry) => (entry.state === 'ready' ? entry.turn.id : entry.state))).toEqual(
         ['b', 'c']
       );
       expect((await data.history.readTurn('missing')).state).toBe('missing');
+      expect((await data.history.readAt(9)).state).toBe('missing');
+    });
+
+    it('reads a shallow directory and observes changes gap-free', async () => {
+      const harness = await create();
+      const { data } = harness;
+      await data.commands.appendTurn(userTurn('a'));
+      await data.commands.appendTurn(userTurn('b'));
+
+      const rows = await data.history.readDirectory(0, 2);
+      expect(rows.map((row) => row.turnId)).toEqual(['a', 'b']);
+
+      const changes: number[] = [];
+      const observation = data.history.observe(() => changes.push(1));
+      // The initial directory is taken at the same moment the listener is live.
+      const initial = await observation.initial;
+      expect(initial.map((row) => row.turnId)).toEqual(['a', 'b']);
+      await data.commands.appendTurn(userTurn('c'));
+      expect(changes.length).toBeGreaterThan(0);
+      observation.unsubscribe();
+      const observed = changes.length;
+      await data.commands.appendTurn(userTurn('d'));
+      expect(changes.length).toBe(observed);
     });
 
     it('sets and clears a field explicitly, preserving unknown stored fields', async () => {
@@ -114,7 +145,7 @@ export function runSessionDataContract(
       expect(Object.hasOwn(stored, 'endedAt')).toBe(false);
       expect(Object.hasOwn(stored, 'permissionWaitMs')).toBe(false);
       expect((stored as Record<string, unknown>).legacyFlag).toBe('kept');
-      expect(stored.items?.[0]?.text).toBe('working');
+      expect(textOf(stored)).toBe('working');
     });
 
     it('opens an assistant turn by creating or reopening it without duplicating', async () => {
@@ -169,9 +200,13 @@ export function runSessionDataContract(
       });
       expect(resolved.status).toBe('accepted');
       const stored = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
-      const item = stored.items?.[0];
-      expect(item?.type === 'system_notice' && item.meta?.outcome).toBe('created');
-      expect(item?.type === 'system_notice' && item.meta?.taskId).toBe('task-1');
+      const item = (stored.items as Array<Record<string, unknown>> | undefined)?.[0];
+      expect(
+        item?.type === 'system_notice' && (item.meta as Record<string, unknown>)?.outcome
+      ).toBe('created');
+      expect(item?.type === 'system_notice' && (item.meta as Record<string, unknown>)?.taskId).toBe(
+        'task-1'
+      );
       // Unrelated fields survive the targeted edit.
       expect(stored.endedAt).toBe(1234);
 
@@ -184,7 +219,7 @@ export function runSessionDataContract(
     it('answers permissions by request id and rejects a scoped miss', async () => {
       const harness = await create();
       const { data } = harness;
-      const withPermission = (turnId: string, requestId: string): SessionHistory => ({
+      const withPermission = (turnId: string, requestId: string): SessionTurn => ({
         ...assistantTurn(turnId),
         items: [
           {
@@ -201,9 +236,7 @@ export function runSessionDataContract(
       const scopedMiss = await data.commands.respondPermission(
         'req-1',
         { outcome: 'cancelled' },
-        {
-          turnId: 'assistant-2',
-        }
+        { turnId: 'assistant-2' }
       );
       expect(scopedMiss.status).toBe('rejected');
       if (scopedMiss.status === 'rejected') expect(scopedMiss.reason.code).toBe('not_found');
@@ -215,10 +248,9 @@ export function runSessionDataContract(
       );
       expect(answered.status).toBe('accepted');
       const stored = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
-      const item = stored.items?.[0];
-      expect(item?.type === 'tool_call' && item.permissionRequest?.outcome?.outcome).toBe(
-        'cancelled'
-      );
+      const item = (stored.items as Array<Record<string, unknown>> | undefined)?.[0];
+      const request = item?.permissionRequest as Record<string, unknown> | undefined;
+      expect((request?.outcome as { outcome?: string } | undefined)?.outcome).toBe('cancelled');
     });
 
     it('rejects invalid input before storage changes', async () => {
@@ -230,7 +262,7 @@ export function runSessionDataContract(
       const invalid = await data.commands.appendTurn({
         ...userTurn('b'),
         role: 'invalid',
-      } as unknown as SessionHistory);
+      } as unknown as SessionTurn);
       expect(invalid.status).toBe('rejected');
 
       const badField = await data.commands.setTurnField(
@@ -273,15 +305,15 @@ export function runSessionDataContract(
       ].entries()) {
         await data.commands.appendTurn({ ...turn, id: `t${index}` });
       }
-      const isVisible = (turn: SessionHistory) => turn.role !== 'system';
+      const isVisible = (turn: SessionTurn) => turn.role !== 'system';
 
-      const first = await data.history.readVisiblePage({ limit: 1, isVisible });
+      const first = await pageVisibleTranscript(data.history, { limit: 1, isVisible });
       expect(first.turns.map((turn) => turn.id)).toEqual(['t2']);
       expect(first.positions).toEqual([2]);
       expect(first.hasMore).toBe(true);
       expect(first.nextCursor).toBeDefined();
 
-      const second = await data.history.readVisiblePage({
+      const second = await pageVisibleTranscript(data.history, {
         limit: 1,
         cursor: first.nextCursor,
         isVisible,
@@ -291,7 +323,7 @@ export function runSessionDataContract(
       expect(second.hasMore).toBe(false);
 
       // A tail of hidden turns must not be reported as an empty history.
-      const tailHidden = await data.history.readVisiblePage({
+      const tailHidden = await pageVisibleTranscript(data.history, {
         limit: 5,
         cursor: '1',
         isVisible: () => false,

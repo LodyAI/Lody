@@ -2,13 +2,13 @@ export type {
   SessionCommandRejection,
   SessionCommandResult,
   SessionData,
+  SessionDataChange,
+  SessionDataChangeListener,
   SessionDurability,
   SessionFieldChange,
   SessionHistoryCommands,
   SessionHistoryReader,
-  SessionTurnRead,
-  SessionVisiblePage,
-  SessionVisiblePageRequest,
+  SessionObservation,
   SessionWritableField,
   SessionWriteReceipt,
   OpenAssistantTurnInput,
@@ -16,6 +16,15 @@ export type {
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
 export { SessionDurabilityError, type SessionDurabilityErrorCode } from './types';
+export type {
+  SessionDirectoryRow,
+  SessionTurn,
+  SessionTurnRead,
+  SessionTurnRole,
+  SessionTurnStatus,
+  SessionTurnWritableValues,
+  SessionUnavailableReason,
+} from './domain';
 export {
   applyOpenAssistantTurn,
   applyRespondPermission,
@@ -25,6 +34,11 @@ export {
   parseTaskProposalResolution,
   resolveTaskProposalOnEntry,
 } from './planner';
+export {
+  pageVisibleTranscript,
+  type VisibleTranscriptPage,
+  type VisibleTranscriptRequest,
+} from './visible-transcript';
 export {
   createMemorySessionData,
   type MemoryCommitPlan,

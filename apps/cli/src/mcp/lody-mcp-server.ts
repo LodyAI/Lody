@@ -144,6 +144,7 @@ import {
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
 import { publishTaskProposal } from '@/mcp/task-proposal';
+import { pageVisibleTranscript } from '@lody/shared/session-data';
 import {
   buildSessionHistoryPage,
   parseSessionHistoryCursor,
@@ -2002,7 +2003,7 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
     // Bounded business paging: scan raw rows backwards until `limit` displayable
     // entries are collected. `limit` counts displayable turns; the cursor is a
     // raw position, so hidden/empty rows never shift the caller.
-    const page = await sessionDoc.sessionData.history.readVisiblePage({
+    const page = await pageVisibleTranscript(sessionDoc.sessionData.history, {
       limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
       ...(beforeIndex < Number.MAX_SAFE_INTEGER ? { cursor: String(beforeIndex) } : {}),
       isVisible: isVisibleTranscriptTurn,

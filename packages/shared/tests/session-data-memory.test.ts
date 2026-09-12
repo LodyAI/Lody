@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMemorySessionData, type MemorySessionDataOptions } from '../src/session-data';
-import type { SessionHistory } from '../src/schema';
+import type { SessionTurn } from '../src/session-data';
 import {
   contractSessionId,
   runSessionDataContract,
@@ -32,7 +32,7 @@ const makeHarness = (
 
 runSessionDataContract('memory', () => makeHarness());
 
-const userTurn = (turnId: string): SessionHistory => ({
+const userTurn = (turnId: string): SessionTurn => ({
   id: turnId,
   role: 'user',
   timestamp: '2026-01-01T00:00:00.000Z',

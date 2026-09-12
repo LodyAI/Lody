@@ -77,6 +77,7 @@ import {
   type MachineFlockKey,
   type MachineFlockRow,
 } from '@lody/shared';
+import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { AuthClient } from '@/lib/auth';
 import {
@@ -444,7 +445,7 @@ export function shouldWaitForSessionCompletion(options: {
   return options.wait === true;
 }
 
-function isTranscriptRole(role: SessionHistoryInput['role']): role is SessionTranscriptRole {
+function isTranscriptRole(role: SessionTurn['role']): role is SessionTranscriptRole {
   return role === 'user' || role === 'assistant' || role === 'system';
 }
 
@@ -515,12 +516,14 @@ function extractTranscriptText(
  * counting displayable entries while positions stay raw.
  */
 export function isVisibleTranscriptTurn(
-  entry: SessionHistoryInput
-): entry is SessionHistoryInput & { role: SessionTranscriptRole } {
+  entry: SessionTurn
+): entry is SessionTurn & { role: SessionTranscriptRole } {
   if (!isTranscriptRole(entry.role)) return false;
   if (
     entry.role === 'system' &&
-    !entry.items?.some((item) => item.type === 'operation_completion')
+    !(entry.items as Array<{ type?: string }> | undefined)?.some(
+      (item) => item.type === 'operation_completion'
+    )
   ) {
     return false;
   }
@@ -532,7 +535,7 @@ export function isVisibleTranscriptTurn(
 /** Format one raw row at its raw position, or `undefined` when not displayable. */
 export function toSessionTranscriptEntry(
   index: number,
-  entry: SessionHistoryInput
+  entry: SessionTurn
 ): SessionTranscriptEntry | undefined {
   if (!isVisibleTranscriptTurn(entry)) return undefined;
   const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
@@ -547,7 +550,7 @@ export function toSessionTranscriptEntry(
 }
 
 export function toSessionTranscriptEntries(
-  history: SessionHistoryInput[]
+  history: readonly SessionTurn[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
   for (const [index, entry] of history.entries()) {

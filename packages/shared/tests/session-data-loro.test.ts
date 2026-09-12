@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '../src/schema';
 import { createHistoryWriter } from '../src/history-writer';
-import { createLoroSessionData } from '../src/session-data';
+import {
+  createLoroSessionData,
+  pageVisibleTranscript,
+  type SessionTurn,
+} from '../src/session-data';
 import {
   contractSessionId,
   runSessionDataContract,
@@ -40,9 +44,9 @@ const makeHarness = (doc = new Loro()): SessionDataHarness => {
       createHistoryWriter(doc).setField(turnId, key as never, value as never);
     },
     peerAppend(turn) {
-      createHistoryWriter(doc).append(turn);
+      createHistoryWriter(doc).append(turn as unknown as SessionHistory);
     },
-    readStored: () => writer.readStored() as SessionHistory[],
+    readStored: () => writer.readStored() as SessionTurn[],
   };
 };
 
@@ -118,7 +122,7 @@ describe('loro session data adapter', () => {
     doc.getList('history').insert(0, 'not-a-turn');
     doc.commit();
 
-    expect(harness.data.history.count()).toBe(1);
+    expect(await harness.data.history.count()).toBe(1);
     expect((await harness.data.history.readRange(0, 1))[0]?.state).toBe('invalid');
 
     await harness.data.commands.appendTurn({
@@ -129,14 +133,14 @@ describe('loro session data adapter', () => {
       fileDiff: [],
     });
     // The invalid slot keeps its raw position; the valid turn stays at index 1.
-    expect(harness.data.history.count()).toBe(2);
+    expect(await harness.data.history.count()).toBe(2);
     const range = await harness.data.history.readRange(0, 2);
     expect(range.map((entry) => (entry.state === 'ready' ? entry.turn.id : entry.state))).toEqual([
       'invalid',
       'valid',
     ]);
 
-    const page = await harness.data.history.readVisiblePage({
+    const page = await pageVisibleTranscript(harness.data.history, {
       limit: 5,
       isVisible: () => true,
     });

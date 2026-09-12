@@ -1,11 +1,6 @@
 import type { z } from 'zod';
 import type { SessionId } from '../ids';
-import type { SessionHistory, SessionHistoryInput } from '../schema';
-import {
-  HistoryEntryWriteSchema,
-  parseHistoryWrite,
-  type HistoryWriteError,
-} from '../history-write-schema';
+import { HistoryEntryWriteSchema, parseHistoryWrite } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
 import {
   applyOpenAssistantTurn,
@@ -20,12 +15,15 @@ import {
   SessionDurabilityError,
   type SessionCommandResult,
   type SessionData,
+  type SessionDataChangeListener,
+  type SessionDirectoryRow,
   type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
+  type SessionObservation,
+  type SessionTurn,
   type SessionTurnRead,
-  type SessionVisiblePage,
-  type SessionVisiblePageRequest,
+  type SessionTurnWritableValues,
   type SessionWritableField,
   type SessionWriteReceipt,
 } from './types';
@@ -33,10 +31,10 @@ import {
 // # Independent in-memory SessionData
 //
 // Proves the consumer contracts do not depend on Loro, Mirror, CIDs or storage
-// offsets: a plain array of detached JSON turns. Business rules are NOT restated
-// here; every command applies the same shared planner as the Loro adapter, and
-// input validation uses the same pure shared validator, so the two backends can
-// only differ in how they persist.
+// offsets: a plain array of detached domain turns. Business rules are NOT
+// restated here; every command applies the same shared planner as the Loro
+// adapter, and input validation uses the same pure shared validator, so the two
+// backends can only differ in how they persist.
 //
 // Test-only control (never a product seam):
 //  - `beforeCommit` / `afterCommit` pin the exact interleaving of a peer edit or
@@ -51,7 +49,7 @@ export type MemoryCommitPlan = {
 
 export type MemorySessionDataOptions = {
   sessionId: SessionId;
-  initialTurns?: readonly SessionHistory[];
+  initialTurns?: readonly SessionTurn[];
   /** Awaited after validation, before the store mutates. Test-only. */
   beforeCommit?: (plan: MemoryCommitPlan) => void | Promise<void>;
   /** Awaited after the store mutates, before the command resolves. Test-only. */
@@ -66,14 +64,14 @@ export type MemorySessionDataOptions = {
 };
 
 export type MemorySessionData = SessionData & {
-  /** Snapshot of stored turns; detached JSON, newest last. */
-  readStored(): SessionHistory[];
+  /** Snapshot of stored turns; detached, newest last. */
+  readStored(): SessionTurn[];
   /** Mark every accepted change locally durable. */
   markDurable(): void;
   /** Number of accepted changes not yet marked durable. */
   pendingDurableCount(): number;
   /** Mutate storage as a peer would, bypassing this instance's commands. */
-  applyPeerMutation(mutate: (turns: SessionHistory[]) => void): void;
+  applyPeerMutation(mutate: (turns: SessionTurn[]) => void): void;
 };
 
 const clone = <T>(value: T): T =>
@@ -81,10 +79,10 @@ const clone = <T>(value: T): T =>
     ? structuredClone(value)
     : JSON.parse(JSON.stringify(value));
 
-const withoutUndefined = <T extends Record<string, unknown>>(value: T): T => {
-  const result = { ...value };
+const withoutUndefined = <T>(value: T): T => {
+  const result = { ...(value as Record<string, unknown>) };
   for (const key of Object.keys(result)) if (result[key] === undefined) delete result[key];
-  return result;
+  return result as T;
 };
 
 const rejected = (
@@ -98,26 +96,24 @@ const rejected = (
 const issuesOf = (
   error: unknown
 ): readonly { readonly path: readonly PropertyKey[]; readonly code: string }[] =>
-  (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
+  (
+    error as {
+      issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[];
+    }
+  ).issues ?? [{ path: [], code: 'invalid_input' }];
 
 const toRejection = (error: unknown): SessionCommandResult =>
   rejected('invalid_input', issuesOf(error));
 
-const cursorToIndex = (cursor: string | undefined, length: number): number => {
-  if (cursor === undefined) return length;
-  const parsed = Number.parseInt(cursor, 10);
-  if (!Number.isFinite(parsed)) return length;
-  return Math.max(0, Math.min(length, parsed));
-};
-
 export function createMemorySessionData(options: MemorySessionDataOptions): MemorySessionData {
   const sessionId = options.sessionId;
-  let turns: SessionHistory[] = (options.initialTurns ?? []).map(clone);
+  let turns: SessionTurn[] = (options.initialTurns ?? []).map(clone);
   let acceptedSerial = 0;
   let durableSerial = 0;
   const issuedReceipts = new WeakSet<object>();
   const receiptSerial = new WeakMap<object, number>();
   const durableWaiters = new Set<() => void>();
+  const listeners = new Set<SessionDataChangeListener>();
 
   const storedTurns = () => turns.map((turn) => withoutUndefined({ ...turn }));
 
@@ -127,6 +123,23 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       if (turns[index]!.id === turnId) return index;
     }
     return -1;
+  };
+
+  const notify = () => {
+    for (const listener of listeners) listener({ kind: 'changed' });
+  };
+
+  const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
+    const lo = Math.max(0, Math.min(from, turns.length));
+    const hi = Math.max(lo, Math.min(to, turns.length));
+    const rows: SessionDirectoryRow[] = [];
+    for (let position = lo; position < hi; position += 1) {
+      const turn = turns[position];
+      rows.push(
+        turn ? { position, state: 'ready', turnId: turn.id } : { position, state: 'invalid' }
+      );
+    }
+    return rows;
   };
 
   const issueReceipt = (
@@ -150,6 +163,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     await options.beforeCommit?.(plan);
     const applied = mutation(plan);
     if (!applied) return rejected('conflict');
+    notify();
     const receipt = issueReceipt(kind, plan.turnIds.slice());
     try {
       await options.afterCommit?.(plan);
@@ -160,7 +174,17 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   };
 
   const reader: SessionHistoryReader = {
-    count: () => turns.length,
+    async count() {
+      return turns.length;
+    },
+    async readAt(position) {
+      const turn = turns[position];
+      if (!turn)
+        return position >= 0 && position < turns.length
+          ? { state: 'invalid' }
+          : { state: 'missing' };
+      return { state: 'ready', turn: clone(turn) };
+    },
     async readTurn(turnId) {
       const index = findIndex(turnId);
       if (index < 0) return { state: 'missing' };
@@ -170,34 +194,29 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       const lo = Math.max(0, Math.min(from, turns.length));
       const hi = Math.max(lo, Math.min(to, turns.length));
       const out: SessionTurnRead[] = [];
-      for (let i = lo; i < hi; i += 1) out.push({ state: 'ready', turn: clone(turns[i]!) });
+      for (let position = lo; position < hi; position += 1) {
+        const turn = turns[position];
+        out.push(turn ? { state: 'ready', turn: clone(turn) } : { state: 'invalid' });
+      }
       return out;
     },
-    async readVisiblePage(request: SessionVisiblePageRequest): Promise<SessionVisiblePage> {
-      const limit = Math.max(0, Math.floor(request.limit));
-      if (limit === 0) return { turns: [], positions: [], hasMore: false };
-      let index = cursorToIndex(request.cursor, turns.length) - 1;
-      const page: Array<{ index: number; turn: SessionHistory }> = [];
-      let hasMore = false;
-      for (; index >= 0; index -= 1) {
-        const turn = turns[index]!;
-        if (!request.isVisible(turn)) continue;
-        if (page.length >= limit) {
-          hasMore = true;
-          break;
-        }
-        page.push({ index, turn: clone(turn) });
-      }
-      // The cursor is the raw boundary, not the visible-count boundary: the next
-      // page starts strictly below the lowest raw row this page settled on.
-      const nextCursor = index + 1 > 0 ? String(index + 1) : undefined;
-      const ordered = page.reverse();
+    async readDirectory(from, to) {
+      return directory(from, to);
+    },
+    observe(listener) {
+      // The listener is registered before the snapshot is taken in the same
+      // synchronous block, so no change can fall between the two.
+      listeners.add(listener);
+      const initial = Promise.resolve(directory(0, turns.length));
+      let active = true;
       return {
-        turns: ordered.map((entry) => entry.turn),
-        positions: ordered.map((entry) => entry.index),
-        ...(nextCursor !== undefined ? { nextCursor } : {}),
-        hasMore: hasMore && nextCursor !== undefined,
-      };
+        initial,
+        unsubscribe() {
+          if (!active) return;
+          active = false;
+          listeners.delete(listener);
+        },
+      } satisfies SessionObservation;
     },
   };
 
@@ -209,7 +228,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         return toRejection(error);
       }
       return mutating('append', [turn.id], () => {
-        turns = [...turns, withoutUndefined({ ...turn }) as SessionHistory];
+        turns = [...turns, clone(turn)];
         return true;
       });
     },
@@ -228,7 +247,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const index = findIndex(turnId);
         if (index < 0) return false;
         const next = turns.slice();
-        next[index] = withoutUndefined({ ...turn }) as SessionHistory;
+        next[index] = clone(turn);
         turns = next;
         return true;
       });
@@ -236,7 +255,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     async setTurnField<K extends SessionWritableField>(
       turnId: string,
       key: K,
-      change: SessionFieldChange<SessionHistoryInput[K]>
+      change: SessionFieldChange<SessionTurnWritableValues[K]>
     ) {
       if (findIndex(turnId) < 0) return rejected('not_found');
       let value: unknown;
@@ -251,10 +270,10 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const index = findIndex(turnId);
         if (index < 0) return false;
         const next = turns.slice();
-        const updated = { ...next[index]! } as Record<string, unknown>;
+        const updated = { ...(next[index] as Record<string, unknown>) };
         if (change.kind === 'clear') delete updated[key];
         else updated[key] = value;
-        next[index] = withoutUndefined(updated) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;
       });
@@ -267,9 +286,9 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const index = findIndex(turnId);
         if (index < 0 || turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
-        const updated = clone(next[index]!) as Record<string, unknown>;
+        const updated = { ...(next[index] as Record<string, unknown>) };
         applyResumeAssistant(updated);
-        next[index] = withoutUndefined(updated) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;
       });
@@ -277,7 +296,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     async openAssistantTurn(input) {
       const initial = findIndex(input.turnId);
       if (initial < 0) {
-        const entry = withoutUndefined(createAssistantTurn(input)) as unknown as SessionHistory;
+        const entry = withoutUndefined(createAssistantTurn(input)) as unknown as SessionTurn;
         try {
           parseHistoryWrite(HistoryEntryWriteSchema, entry);
         } catch (error) {
@@ -293,9 +312,9 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
         const index = findIndex(input.turnId);
         if (index < 0 || turns[index]!.role !== 'assistant') return false;
         const next = turns.slice();
-        const updated = clone(next[index]!) as Record<string, unknown>;
+        const updated = { ...(next[index] as Record<string, unknown>) };
         applyOpenAssistantTurn(updated, input);
-        next[index] = withoutUndefined(updated) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;
       });
@@ -308,14 +327,15 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       }
       const initial = findIndex(entryId);
       if (initial < 0) return rejected('not_found');
-      if (!hasTaskProposal(turns[initial]!, proposalId)) return rejected('not_found');
+      if (!hasTaskProposal(turns[initial] as unknown as { items?: unknown }, proposalId))
+        return rejected('not_found');
       return mutating('resolve-task-proposal', [entryId], () => {
         const index = findIndex(entryId);
         if (index < 0) return false;
-        const updated = clone(turns[index]!) as Record<string, unknown>;
+        const updated = { ...(turns[index] as Record<string, unknown>) };
         if (!resolveTaskProposalOnEntry(updated, proposalId, resolution)) return false;
         const next = turns.slice();
-        next[index] = withoutUndefined(updated) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;
       });
@@ -342,10 +362,10 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       return mutating('respond-permission', [turns[found]!.id], () => {
         const index = locate();
         if (index === undefined) return false;
-        const updated = clone(turns[index]!) as Record<string, unknown>;
+        const updated = { ...(turns[index] as Record<string, unknown>) };
         if (!applyRespondPermission(updated, requestId, outcome)) return false;
         const next = turns.slice();
-        next[index] = withoutUndefined(updated) as SessionHistory;
+        next[index] = withoutUndefined(updated) as SessionTurn;
         turns = next;
         return true;
       });
@@ -389,6 +409,7 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
       const draft = turns.map(clone);
       mutate(draft);
       turns = draft;
+      notify();
     },
   };
 }

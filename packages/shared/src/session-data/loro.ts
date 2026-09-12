@@ -21,12 +21,14 @@ import {
   SessionDurabilityError,
   type SessionCommandResult,
   type SessionData,
+  type SessionDirectoryRow,
   type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
+  type SessionObservation,
+  type SessionTurn,
   type SessionTurnRead,
-  type SessionVisiblePage,
-  type SessionVisiblePageRequest,
+  type SessionTurnWritableValues,
   type SessionWritableField,
   type SessionWriteReceipt,
 } from './types';
@@ -70,28 +72,35 @@ export type LoroSessionData = SessionData & {
   readonly writer: HistoryWriter;
 };
 
-const asStoredTurn = (value: unknown): SessionHistory | undefined => {
+const asStoredTurn = (value: unknown): SessionTurn | undefined => {
   if (isContainer(value)) {
     if (value.kind() !== 'Map') return undefined;
     const json = (value as LoroMap).toJSON();
-    return json && typeof json === 'object' ? (json as SessionHistory) : undefined;
+    return json && typeof json === 'object' ? (json as SessionTurn) : undefined;
   }
   // Legacy plain-JSON rows are still valid readable history.
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as SessionHistory;
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as SessionTurn;
   return undefined;
 };
 
-const readSlot = (list: LoroList, index: number): SessionTurnRead => {
-  if (index < 0 || index >= list.length) return { state: 'missing' };
-  const turn = asStoredTurn(list.get(index));
-  return turn ? { state: 'ready', turn } : { state: 'invalid' };
+/** Shallow identity of one raw slot: never reads the turn's body. */
+const readIdentity = (value: unknown): { turnId?: string } | undefined => {
+  if (isContainer(value)) {
+    if (value.kind() !== 'Map') return undefined;
+    const id = (value as LoroMap).get('id');
+    return { ...(typeof id === 'string' ? { turnId: id } : {}) };
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const id = (value as { id?: unknown }).id;
+    return { ...(typeof id === 'string' ? { turnId: id } : {}) };
+  }
+  return undefined;
 };
 
-const cursorToIndex = (cursor: string | undefined, length: number): number => {
-  if (cursor === undefined) return length;
-  const parsed = Number.parseInt(cursor, 10);
-  if (!Number.isFinite(parsed)) return length;
-  return Math.max(0, Math.min(length, parsed));
+const readSlot = (list: LoroList, position: number): SessionTurnRead => {
+  if (position < 0 || position >= list.length) return { state: 'missing' };
+  const turn = asStoredTurn(list.get(position));
+  return turn ? { state: 'ready', turn } : { state: 'invalid' };
 };
 
 export function createLoroSessionData(options: LoroSessionDataOptions): LoroSessionData {
@@ -140,31 +149,39 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     return { status: 'accepted', receipt };
   };
 
+  const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
+    const lo = Math.max(0, Math.min(from, list.length));
+    const hi = Math.max(lo, Math.min(to, list.length));
+    const rows: SessionDirectoryRow[] = [];
+    for (let position = lo; position < hi; position += 1) {
+      const identity = readIdentity(list.get(position));
+      rows.push(
+        identity
+          ? {
+              position,
+              state: 'ready',
+              ...(identity.turnId !== undefined ? { turnId: identity.turnId } : {}),
+            }
+          : { position, state: 'invalid' }
+      );
+    }
+    return rows;
+  };
+
   const history: SessionHistoryReader = {
-    count: () => list.length,
+    async count() {
+      return list.length;
+    },
+    async readAt(position) {
+      return readSlot(list, position);
+    },
     async readTurn(turnId) {
-      for (let index = list.length - 1; index >= 0; index -= 1) {
-        const value = list.get(index);
-        if (isContainer(value)) {
-          if (value.kind() !== 'Map') continue;
-          const map = value as LoroMap;
-          // Identity is a scalar. Read it shallowly so finding a turn never
-          // materializes an unrelated turn's body on the way to the target.
-          if (map.get('id') !== turnId) continue;
-          const json = map.toJSON();
-          return json && typeof json === 'object'
-            ? { state: 'ready', turn: json as SessionHistory }
-            : { state: 'invalid' };
-        }
-        // Legacy plain-JSON rows are already detached and cheap to inspect.
-        if (
-          value &&
-          typeof value === 'object' &&
-          !Array.isArray(value) &&
-          (value as { id?: unknown }).id === turnId
-        ) {
-          return { state: 'ready', turn: value as SessionHistory };
-        }
+      for (let position = list.length - 1; position >= 0; position -= 1) {
+        const value = list.get(position);
+        const identity = readIdentity(value);
+        if (identity?.turnId !== turnId) continue;
+        const turn = asStoredTurn(value);
+        return turn ? { state: 'ready', turn } : { state: 'invalid' };
       }
       return { state: 'missing' };
     },
@@ -172,32 +189,28 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       const lo = Math.max(0, Math.min(from, list.length));
       const hi = Math.max(lo, Math.min(to, list.length));
       const out: SessionTurnRead[] = [];
-      for (let index = lo; index < hi; index += 1) out.push(readSlot(list, index));
+      for (let position = lo; position < hi; position += 1) out.push(readSlot(list, position));
       return out;
     },
-    async readVisiblePage(request: SessionVisiblePageRequest): Promise<SessionVisiblePage> {
-      const limit = Math.max(0, Math.floor(request.limit));
-      if (limit === 0) return { turns: [], positions: [], hasMore: false };
-      let index = cursorToIndex(request.cursor, list.length) - 1;
-      const page: Array<{ index: number; turn: SessionHistory }> = [];
-      let hasMore = false;
-      for (; index >= 0; index -= 1) {
-        const read = readSlot(list, index);
-        if (read.state !== 'ready' || !request.isVisible(read.turn)) continue;
-        if (page.length >= limit) {
-          hasMore = true;
-          break;
-        }
-        page.push({ index, turn: read.turn });
-      }
-      const nextCursor = index + 1 > 0 ? String(index + 1) : undefined;
-      const ordered = page.reverse();
+    async readDirectory(from, to) {
+      return directory(from, to);
+    },
+    observe(listener) {
+      // Subscribe first, then snapshot in the same synchronous block: a change
+      // can neither be missed between the two nor delivered before `initial`.
+      const unsubscribeDoc = doc.subscribe(() => {
+        listener({ kind: 'changed' });
+      });
+      const initial = Promise.resolve(directory(0, list.length));
+      let active = true;
       return {
-        turns: ordered.map((entry) => entry.turn),
-        positions: ordered.map((entry) => entry.index),
-        ...(nextCursor !== undefined ? { nextCursor } : {}),
-        hasMore: hasMore && nextCursor !== undefined,
-      };
+        initial,
+        unsubscribe() {
+          if (!active) return;
+          active = false;
+          unsubscribeDoc();
+        },
+      } satisfies SessionObservation;
     },
   };
 
@@ -209,7 +222,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return rejected('invalid_input', issuesOf(error));
       }
       try {
-        writer.append(turn);
+        writer.append(turn as unknown as SessionHistory);
       } catch (cause) {
         return indeterminate(cause);
       }
@@ -225,7 +238,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return rejected('invalid_input', issuesOf(error));
       }
       try {
-        writer.replace(turnId, turn);
+        writer.replace(turnId, turn as unknown as SessionHistory);
       } catch (cause) {
         return indeterminate(cause);
       }
@@ -234,7 +247,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     async setTurnField<K extends SessionWritableField>(
       turnId: string,
       key: K,
-      change: SessionFieldChange<SessionHistoryInput[K]>
+      change: SessionFieldChange<SessionTurnWritableValues[K]>
     ) {
       if (!writer.read(turnId)) return rejected('not_found');
       if (change.kind === 'set') {
@@ -245,7 +258,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         }
       }
       try {
-        writer.setField(turnId, key, change.kind === 'set' ? change.value : undefined);
+        writer.setField(
+          turnId,
+          key,
+          (change.kind === 'set' ? change.value : undefined) as SessionHistoryInput[typeof key]
+        );
       } catch (cause) {
         return indeterminate(cause);
       }
