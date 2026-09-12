@@ -65,17 +65,18 @@ into one component at a time. Source-consumed; consumers compile it through
   holds it in state, not a ref: React attaches a child's refs before its
   parent's, so a popup mounting in the same commit reads null and lands on the
   body — the one case that mechanism exists to prevent.
-- There is no `Sheet`. A panel arriving from an edge promises it can be sent
-  back, so it is Base UI's `Drawer` — a viewport that lays the panel out, a
-  panel whose `transform` carries the drag — not a `Dialog` pinned to an edge,
-  which spends that property on its own centring. `side` is the writing
-  direction's edge and `Root` derives the physical swipe from it; `inset` is the
-  second axis: flush meets the window and squares two corners, inset floats at
-  `dialog.drawerInset` and keeps four.
+- There is no `Sheet`. A panel arriving from an edge is Base UI's `Drawer`,
+  whose viewport lays the panel out so the panel's `transform` stays free to
+  carry the drag. `side` is the writing direction's edge, from which `Root`
+  derives the physical swipe; `inset` is the second axis. See the README.
 - `Tooltip` is the one floating part that does not read `popup`: the ladder
-  inverts it, `label` under `shadow.medium`. Base UI makes a tooltip visual-only
-  — no role, no `aria-describedby` — so every trigger states its own
-  `aria-label`; a migrated caller whose only name was its tooltip has no name.
+  inverts it, `label` under `shadow.medium`. Base UI makes it visual-only — no
+  role, no `aria-describedby` — so every trigger states its own `aria-label`.
+- Tabs, Accordion and Collapsible are one `disclosure` family sharing
+  `disclosure/surface.ts`: a trigger, and what it shows. `Tabs.List` draws its
+  own indicator and states the size once for every tab in it; a revealed
+  panel's padding rides on a child, because Base UI measures the height it
+  animates with `scrollHeight`, which counts padding.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
