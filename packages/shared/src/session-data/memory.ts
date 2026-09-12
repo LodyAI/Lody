@@ -146,9 +146,18 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     return -1;
   };
 
-  const notify = (range?: { from: number; to: number }) => {
+  const notify = (range?: { from: number; to: number; structural?: boolean }) => {
     for (const listener of listeners)
-      listener(range ? { kind: 'changed', from: range.from, to: range.to } : { kind: 'changed' });
+      listener(
+        range
+          ? {
+              kind: 'changed',
+              from: range.from,
+              to: range.to,
+              ...(range.structural ? { structural: true } : {}),
+            }
+          : { kind: 'changed' }
+      );
   };
 
   const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
@@ -205,9 +214,11 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
     if (!applied) return rejected('conflict');
     const changedId = plan.turnIds[0];
     const from = changedId !== undefined ? findIndex(changedId) : -1;
+    const structural = turns.length !== beforeLength;
     // A structural mutation reports the tail from the first touched row; a
     // scalar write reports only its own turn.
-    if (from >= 0) notify({ from, to: turns.length !== beforeLength ? turns.length : from + 1 });
+    if (from >= 0)
+      notify({ from, to: structural ? turns.length : from + 1, structural });
     else notify();
     const receipt = issueReceipt(kind, plan.turnIds.slice());
     try {

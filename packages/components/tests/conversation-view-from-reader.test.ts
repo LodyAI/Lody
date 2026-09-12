@@ -444,9 +444,11 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       probe.release('u-0');
       await flush();
       await range.ready;
-      // The stale response was discarded: the snapshot was never overwritten.
-      expect(probeView.isHydrated(0)).toBe(false);
-      expect(probeView.turn(0)).toBeUndefined();
+      // The stale response was discarded, then the still-active lease re-read
+      // and refilled it with the current body (fc rule: dropping an outdated
+      // response must not leave an active lease with a hole).
+      expect(probeView.isHydrated(0)).toBe(true);
+      expect(probeView.turn(0)?.id).toBe('u-0');
       expect(probeView.turnCount).toBe(harness.expected.length + 1);
       probeView.dispose();
     } finally {
@@ -937,6 +939,109 @@ describe('createConversationViewFromReader audit regressions', () => {
       await checkpoint();
       expect(view.index(5)?.id).toBe('a-2');
       expect(view.index(5)?.finished).toBe(false);
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('a leased body read must not overwrite a content update received while it was pending', async () => {
+    // fc neighbor: the per-turn token fences a pending body read, and the still
+    // active lease is re-read so the range does not end with a hole.
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    let block = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const result = await data.history.readTurn(id);
+        if (id === 'a-2' && block) {
+          block = false;
+          entered();
+          await gate;
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(5, 6);
+      await started;
+      expect((await data.commands.setTurnField('a-2', 'finished', setFieldTo(false))).status).toBe(
+        'accepted'
+      );
+      await checkpoint();
+      expect(view.index(5)?.finished).toBe(false);
+      release();
+      await lease.ready;
+      await checkpoint();
+      expect(view.turn(5)?.finished).toBe(false);
+      lease.release();
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('a count from a later revision must not truncate rows read before an append', async () => {
+    // fc neighbor: the directory and count are one observation, so a structural
+    // change between them re-reads instead of pairing old rows with a new length.
+    const original = buildFixtureHistory(3);
+    const doc = buildSessionDoc(original);
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    let block = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      count: async () => {
+        if (block) {
+          block = false;
+          entered();
+          await gate;
+        }
+        return data.history.count();
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      await data.commands.setTurnField('a-0', 'finished', setFieldTo(false));
+      await started;
+      doc.getList('history').push({ ...original[0], id: 'new' } as never);
+      doc.commit();
+      release();
+      await checkpoint();
+      expect(view.turnCount).toBe(7);
+      expect(Array.from({ length: 7 }, (_, i) => view.index(i)?.id)).toEqual([
+        ...original.map((turn) => turn.id),
+        'new',
+      ]);
     } finally {
       release();
       view.dispose();

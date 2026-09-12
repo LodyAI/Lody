@@ -182,7 +182,17 @@ export const sessionTurnReadIsReady = (
  * re-read. The token is local only and is never a storage/wire version.
  */
 export type SessionDataChange =
-  | { readonly kind: 'changed'; readonly from?: number; readonly to?: number }
+  | {
+      readonly kind: 'changed';
+      readonly from?: number;
+      readonly to?: number;
+      /**
+       * True when membership or order changed (append/insert/delete/replace),
+       * so a consumer can fence reads that started before the change. Omitted
+       * for a content-only change, which must not invalidate unrelated reads.
+       */
+      readonly structural?: boolean;
+    }
   | { readonly kind: 'reset' };
 
 export type SessionDataChangeListener = (change: SessionDataChange) => void;

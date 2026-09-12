@@ -262,7 +262,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
    * affected window. Structural list edits report `[structuralFrom, length)`
    * because later positions shifted; child edits report their own turn.
    */
-  const changeRangeOf = (batch: LoroEventBatch): { from: number; to: number } | undefined => {
+  const changeRangeOf = (
+    batch: LoroEventBatch
+  ): { from: number; to: number; structural: boolean } | undefined => {
     let from = Number.POSITIVE_INFINITY;
     let to = -1;
     let structuralFrom = Number.POSITIVE_INFINITY;
@@ -301,10 +303,14 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       const lo = Number.isFinite(structuralFrom)
         ? Math.min(structuralFrom, contentFrom)
         : contentFrom;
-      return { from: Math.max(0, Math.min(lo, list.length)), to: list.length };
+      return { from: Math.max(0, Math.min(lo, list.length)), to: list.length, structural: true };
     }
     if (to < 0) return undefined;
-    return { from: Math.max(0, Math.min(from, list.length)), to: Math.max(0, Math.min(to, list.length)) };
+    return {
+      from: Math.max(0, Math.min(from, list.length)),
+      to: Math.max(0, Math.min(to, list.length)),
+      structural: false,
+    };
   };
 
   const history: SessionHistoryReader = {
@@ -347,7 +353,12 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         // A batch that does not touch `history` (e.g. a control root) is not a
         // history change; unrelated roots never invalidate the display cache.
         if (!range) return;
-        listener({ kind: 'changed', from: range.from, to: range.to });
+        listener({
+          kind: 'changed',
+          from: range.from,
+          to: range.to,
+          ...(range.structural ? { structural: true } : {}),
+        });
       });
       const initial = Promise.resolve(directory(0, list.length));
       let active = true;

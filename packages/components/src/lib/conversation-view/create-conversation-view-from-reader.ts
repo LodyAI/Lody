@@ -28,9 +28,10 @@ import {
 //
 // - Identity is `turnId` everywhere (index map, pins, hydration); positions are
 //   only the directory's address.
-// - Every async read/lease carries a generation. A response resolving after a
-//   structural change, after its lease was released, or after `dispose` is
-//   discarded and never overwrites the snapshot.
+// - Every async read/lease carries a membership epoch plus the turn's own
+//   content epoch. A response resolving after a relevant change is discarded
+//   (and re-read while a lease still needs it); an unrelated turn's token is
+//   untouched, so one turn's token never cancels every read.
 // - `observe` is the only subscription: `initial` builds the index, then each
 //   `changed` re-reads only its affected raw range (directory + the hydrated
 //   turns inside it); `reset` is the only full re-read. A structural range
@@ -110,11 +111,30 @@ export function createConversationViewFromReader(
   let version = 0;
   let disposed = false;
   /**
-   * Bumped on structural change, full re-read and dispose. An async response
-   * captured under an older generation is discarded instead of overwriting the
-   * snapshot (its change already re-queued a fresh read).
+   * Membership/order epoch. Bumped as soon as a structural change is observed
+   * (and again when it is applied), so a read that started before it can never
+   * write a position/row that has moved or been replaced.
    */
-  let generation = 0;
+  let structureEpoch = 0;
+  /**
+   * Per-turn content epoch. Bumped when that turn's row or body changed, so a
+   * pending body read for one turn is discarded without cancelling reads for
+   * unrelated turns (every content token must not invalidate the whole view).
+   */
+  const turnEpoch = new Map<string, number>();
+  const turnToken = (id: string) => ({
+    structure: structureEpoch,
+    turn: turnEpoch.get(id) ?? 0,
+  });
+  const bumpTurn = (id: string) => turnEpoch.set(id, (turnEpoch.get(id) ?? 0) + 1);
+  /**
+   * The ONE async-result acceptance rule: a result is accepted only while the
+   * membership epoch and the turn's own content epoch are the ones it captured.
+   * It fences initial directory reads, leased/eager hydration, hydrated
+   * replacement, idle summaries, full reads and resets alike.
+   */
+  const acceptsToken = (id: string, token: { structure: number; turn: number }) =>
+    !disposed && structureEpoch === token.structure && (turnEpoch.get(id) ?? 0) === token.turn;
   let idleCancel: (() => void) | null = null;
   let idleCursor = -1;
   let resolveReady: () => void = () => {};
@@ -201,42 +221,91 @@ export function createConversationViewFromReader(
     }
   };
 
-  /** Hydrate a group of ids (already pinned by the caller if leased). */
+  /** Whether a directory refresh actually changed the turn's index facts. */
+  const rowChanged = (old: TurnIndexRow | undefined, next: TurnIndexRow): boolean => {
+    if (!old) return true;
+    return (
+      old.id !== next.id ||
+      old.role !== next.role ||
+      old.timestamp !== next.timestamp ||
+      old.status !== next.status ||
+      old.finished !== next.finished ||
+      old.endedAt !== next.endedAt ||
+      old.sendStatus !== next.sendStatus ||
+      old.userTurnId !== next.userTurnId ||
+      old.acpTurnId !== next.acpTurnId ||
+      old.startedAt !== next.startedAt ||
+      old.permissionWaitMs !== next.permissionWaitMs ||
+      old.itemCount !== next.itemCount ||
+      old.planCount !== next.planCount
+    );
+  };
+
+  /**
+   * Hydrate a group of ids (already pinned by the caller if leased).
+   *
+   * A body read is accepted only under the token it captured. A result that a
+   * newer content/structural change invalidated is dropped and re-read, so an
+   * active lease never ends with a hole and a stale body never overwrites the
+   * newer row. Unrelated turns' tokens are untouched.
+   */
   const hydrateIds = async (
     targets: readonly string[],
     emitEvents: boolean,
     cancelled?: () => boolean
   ): Promise<void> => {
-    const gen = generation;
-    for (let start = 0; start < targets.length; start += hydrateChunkSize) {
-      if (start > 0) await yieldToEventLoop();
-      if (disposed || generation !== gen || cancelled?.()) return;
-      const chunk = targets.slice(start, start + hydrateChunkSize);
-      const reads: readonly SessionTurnRead[] = await Promise.all(
-        chunk.map((id) => reader.readTurn(id))
-      );
-      if (disposed || generation !== gen || cancelled?.()) return;
-      let lo = Infinity;
-      let hi = -1;
-      const positions: number[] = [];
-      for (const read of reads) {
-        if (read.state !== 'ready') continue;
-        const turn = read.turn as unknown as SessionHistory;
-        const pos = indexById.get(turn.id);
-        hydrated.set(turn.id, turn);
-        if (pos === undefined) continue;
-        rows[pos] = withBodyFacts(rows[pos]!, turn);
-        lo = Math.min(lo, pos);
-        hi = Math.max(hi, pos);
-        positions.push(pos);
+    let pending = [...new Set(targets)];
+    for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+      const stale: string[] = [];
+      const nextPending: string[] = [];
+      for (let start = 0; start < pending.length; start += hydrateChunkSize) {
+        if (start > 0) await yieldToEventLoop();
+        if (disposed || cancelled?.()) return;
+        const chunk = pending.slice(start, start + hydrateChunkSize);
+        const tokens = chunk.map((id) => turnToken(id));
+        const reads: readonly SessionTurnRead[] = await Promise.all(
+          chunk.map((id) => reader.readTurn(id))
+        );
+        if (disposed || cancelled?.()) return;
+        let lo = Infinity;
+        let hi = -1;
+        const positions: number[] = [];
+        reads.forEach((read, index) => {
+          const id = chunk[index]!;
+          if (!acceptsToken(id, tokens[index]!)) {
+            // Invalidated while pending: drop it, but keep it for the retry pass
+            // when the turn is still present.
+            stale.push(id);
+            return;
+          }
+          if (read.state !== 'ready') {
+            // The turn vanished under us: drop the stale body; the directory row
+            // already reflects the current state.
+            hydrated.delete(id);
+            return;
+          }
+          const turn = read.turn as unknown as SessionHistory;
+          const pos = indexById.get(id);
+          hydrated.set(id, turn);
+          if (pos === undefined) return;
+          rows[pos] = withBodyFacts(rows[pos]!, turn);
+          lo = Math.min(lo, pos);
+          hi = Math.max(hi, pos);
+          positions.push(pos);
+        });
+        evict();
+        if (!emitEvents || hi < 0) continue;
+        bump();
+        emit({ kind: 'index', from: lo, to: hi + 1 });
+        for (const pos of positions) {
+          emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
+        }
       }
-      evict();
-      if (!emitEvents || hi < 0) continue;
-      bump();
-      emit({ kind: 'index', from: lo, to: hi + 1 });
-      for (const pos of positions) {
-        emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
+      if (disposed || cancelled?.()) return;
+      for (const id of stale) {
+        if (indexById.has(id)) nextPending.push(id);
       }
+      pending = nextPending;
     }
   };
 
@@ -301,17 +370,17 @@ export function createConversationViewFromReader(
         continue;
       }
       let read: SessionTurnRead;
-      const gen = generation;
+      const token = turnToken(id);
       try {
         read = await reader.readTurn(id);
       } catch {
         continue;
       }
-      // A background summary must not write through a structural change or a
-      // same-turn content update that landed while the read was in flight: the
-      // captured position/row may now belong to another turn.
-      if (disposed || generation !== gen) return;
-      if (rows[i] !== row || ids[i] !== id) continue;
+      // The same acceptance rule as every other async read: a discarded summary
+      // is picked up by the next idle pass, and the row-identity check protects
+      // against a positional shift even if the turn's own token survived.
+      if (disposed) return;
+      if (!acceptsToken(id, token) || rows[i] !== row || ids[i] !== id) continue;
       if (read.state !== 'ready') continue;
       const turn = read.turn as unknown as SessionHistory;
       const next: TurnIndexRow = {
@@ -351,39 +420,51 @@ export function createConversationViewFromReader(
 
   // ---- change application ------------------------------------------------------
 
-  const applyHydratedReplacement = async (
-    idsToReRead: readonly string[],
-    gen: number
-  ): Promise<void> => {
-    const loPositions: number[] = [];
-    for (const id of idsToReRead) {
-      let read: SessionTurnRead;
-      try {
-        read = await reader.readTurn(id);
-      } catch {
-        continue;
+  const applyHydratedReplacement = async (idsToReRead: readonly string[]): Promise<void> => {
+    let pending = [...new Set(idsToReRead)];
+    for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+      const stale: string[] = [];
+      const nextPending: string[] = [];
+      const loPositions: number[] = [];
+      for (const id of pending) {
+        const token = turnToken(id);
+        let read: SessionTurnRead;
+        try {
+          read = await reader.readTurn(id);
+        } catch {
+          continue;
+        }
+        if (!acceptsToken(id, token)) {
+          // A newer change to this same turn (or a structural move) landed while
+          // the replacement read was pending: drop it and re-read below.
+          stale.push(id);
+          continue;
+        }
+        if (read.state !== 'ready') {
+          // The turn vanished under us: drop the stale body; the directory row
+          // already reflects the current state.
+          hydrated.delete(id);
+          continue;
+        }
+        const turn = read.turn as unknown as SessionHistory;
+        const pos = indexById.get(id);
+        hydrated.set(id, turn);
+        if (pos !== undefined) {
+          rows[pos] = withBodyFacts(rows[pos]!, turn);
+          loPositions.push(pos);
+        }
       }
-      if (disposed || generation !== gen) return;
-      if (read.state !== 'ready') {
-        // The turn vanished under us: drop the stale body; the directory row
-        // already reflects the current state.
-        hydrated.delete(id);
-        continue;
+      if (disposed) return;
+      if (loPositions.length > 0) {
+        evict();
+        bump();
+        for (const pos of loPositions) {
+          emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
+        }
       }
-      const turn = read.turn as unknown as SessionHistory;
-      const pos = indexById.get(id);
-      hydrated.set(id, turn);
-      if (pos !== undefined) {
-        rows[pos] = withBodyFacts(rows[pos]!, turn);
-        loPositions.push(pos);
-      }
-    }
-    if (disposed || generation !== gen) return;
-    if (loPositions.length === 0) return;
-    evict();
-    bump();
-    for (const pos of loPositions) {
-      emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
+      if (stale.length === 0) return;
+      for (const id of stale) if (indexById.has(id)) nextPending.push(id);
+      pending = nextPending;
     }
   };
 
@@ -396,9 +477,8 @@ export function createConversationViewFromReader(
    */
   const applyChange = async (
     from: number,
-    to: number,
     entries: readonly SessionDirectoryRow[],
-    gen: number
+    authoritativeCount: number
   ): Promise<void> => {
     let structuralFrom = Infinity;
     for (const entry of entries) {
@@ -411,16 +491,11 @@ export function createConversationViewFromReader(
     // length: a content change to an early turn ends its range well before the
     // list end. Membership changes come from the reader's own count (append or
     // delete) plus id mismatches inside the re-read range, so a narrow content
-    // event never truncates the visible directory.
-    let authoritativeCount: number;
-    try {
-      authoritativeCount = await reader.count();
-    } catch {
-      return;
-    }
-    if (disposed || generation !== gen) return;
+    // event never truncates the visible directory. The count is read coherently
+    // with the directory by `flushDirty`, so a later append cannot pair a new
+    // length with an old row set.
     if (authoritativeCount !== ids.length) {
-      structuralFrom = Math.min(structuralFrom, Math.min(to, ids.length));
+      structuralFrom = Math.min(structuralFrom, Math.min(from, ids.length));
     }
     const structural = Number.isFinite(structuralFrom);
 
@@ -441,6 +516,9 @@ export function createConversationViewFromReader(
             invalidatedSummary = true;
           }
         }
+        // Invalidate only the turn(s) whose facts actually changed, so an
+        // unrelated turn's in-flight body read is not cancelled.
+        if (rowChanged(old, row)) bumpTurn(row.id);
         rows[pos] = row;
         if (row.id !== old?.id) rebuildLookups(pos);
         if (hydrated.has(row.id)) toReRead.push(row.id);
@@ -449,7 +527,7 @@ export function createConversationViewFromReader(
       }
       bump();
       if (hi >= 0) emit({ kind: 'index', from: lo, to: hi + 1 });
-      if (toReRead.length > 0) await applyHydratedReplacement(toReRead, gen);
+      if (toReRead.length > 0) await applyHydratedReplacement(toReRead);
       // A summary that was invalidated needs the background pass again; restart
       // from the end so a cursor that already moved past this row revisits it.
       if (invalidatedSummary) scheduleIdlePass(true);
@@ -461,24 +539,27 @@ export function createConversationViewFromReader(
     // lease on another viewport's turns is never released by someone else's
     // insert/delete.
     const fromIndex = structuralFrom;
-    generation += 1;
+    structureEpoch += 1;
     const surviving = new Set<string>();
     for (const entry of entries) surviving.add(rowFromDirectory(entry).id);
+    const oldById = new Map<string, TurnIndexRow>();
     for (let i = fromIndex; i < ids.length; i += 1) {
-      const id = ids[i]!;
-      if (surviving.has(id)) continue;
-      hydrated.delete(id);
-      pins.delete(id);
+      const existing = rows[i]!;
+      oldById.set(existing.id, existing);
+      if (surviving.has(existing.id)) continue;
+      hydrated.delete(existing.id);
+      pins.delete(existing.id);
     }
     rows.length = fromIndex;
     ids.length = fromIndex;
     const touchedSurvivors = new Set<string>();
     for (const entry of entries) {
       const row = rowFromDirectory(entry);
-      rows[entry.position] = row;
-      ids[entry.position] = row.id;
       // A mixed batch (content edit + structural edit) carries content changes
       // to turns that survive the structural edit; their bodies must refresh.
+      if (rowChanged(oldById.get(row.id), row)) bumpTurn(row.id);
+      rows[entry.position] = row;
+      ids[entry.position] = row.id;
       if (hydrated.has(row.id)) touchedSurvivors.add(row.id);
     }
     rebuildLookups(fromIndex);
@@ -488,7 +569,7 @@ export function createConversationViewFromReader(
     await ensureTailHydrated(hydrateItemBudget, false);
     if (disposed) return;
     if (touchedSurvivors.size > 0) {
-      await applyHydratedReplacement([...touchedSurvivors], generation);
+      await applyHydratedReplacement([...touchedSurvivors]);
       if (disposed) return;
     }
     bump();
@@ -497,9 +578,17 @@ export function createConversationViewFromReader(
     scheduleIdlePass();
   };
 
-  const applyFull = async (gen: number, structural: boolean): Promise<void> => {
+  const applyFull = async (structural: boolean): Promise<void> => {
+    // Capture the membership epoch before reading the whole directory; if a
+    // structural change lands while the read is pending, the read is stale and
+    // the loop re-reads a coherent snapshot instead of applying a split one.
+    const structureBefore = structureEpoch;
     const entries = await reader.readDirectory(0, FULL_RANGE);
-    if (disposed || generation !== gen) return;
+    if (disposed) return;
+    if (structureEpoch !== structureBefore) {
+      mergeDirty(0, FULL_RANGE);
+      return;
+    }
     let structuralFrom = 0;
     if (!structural) {
       structuralFrom = Infinity;
@@ -520,13 +609,14 @@ export function createConversationViewFromReader(
       for (const entry of entries) {
         const row = rowFromDirectory(entry);
         const old = rows[entry.position];
+        if (rowChanged(old, row)) bumpTurn(row.id);
         rows[entry.position] = row;
         if (row.id !== old?.id) rebuildLookups(entry.position);
         if (hydrated.has(row.id)) toReRead.push(row.id);
       }
       bump();
       emit({ kind: 'index', from: 0, to: ids.length });
-      await applyHydratedReplacement(toReRead, gen);
+      await applyHydratedReplacement(toReRead);
       // Summaries of non-hydrated rows were dropped by the directory refresh:
       // re-fill them in the background rather than trusting possibly stale ones.
       scheduleIdlePass();
@@ -536,7 +626,7 @@ export function createConversationViewFromReader(
     // A `reset` re-reads everything, so it drops every held body and pin. A
     // positionless structural `changed` keeps ids that survived, so a lease on
     // another viewport's turns is not released by this reload.
-    generation += 1;
+    structureEpoch += 1;
     if (structural) {
       hydrated.clear();
       pins.clear();
@@ -580,19 +670,29 @@ export function createConversationViewFromReader(
         dirtyFrom = Infinity;
         dirtyTo = -1;
         resetPending = false;
-        const gen = generation;
         if (to === FULL_RANGE) {
-          await applyFull(gen, reset);
+          await applyFull(reset);
           continue;
         }
+        // Read the directory and the count as ONE observation: capture the
+        // membership epoch first, and if a structural change lands before the
+        // pair is ready, re-dirty the window so the next iteration re-reads a
+        // coherent pair instead of pairing old rows with a newer length.
+        const structureBefore = structureEpoch;
         let entries: readonly SessionDirectoryRow[];
+        let count: number;
         try {
           entries = await reader.readDirectory(from, to);
+          count = await reader.count();
         } catch {
           continue;
         }
-        if (disposed || generation !== gen) continue;
-        await applyChange(from, to, entries, gen);
+        if (disposed) break;
+        if (structureEpoch !== structureBefore) {
+          mergeDirty(from, to);
+          continue;
+        }
+        await applyChange(from, entries, count);
       }
     } finally {
       flushRunning = false;
@@ -606,11 +706,18 @@ export function createConversationViewFromReader(
       return;
     }
     if (change.kind === 'reset') {
+      // Continuity is lost: fence every in-flight read immediately.
+      structureEpoch += 1;
       resetPending = true;
       mergeDirty(0, FULL_RANGE);
       void flushDirty();
       return;
     }
+    // A membership/order change fences in-flight reads as soon as it is
+    // observed, before it is applied, so a directory+count pair read around the
+    // change is never applied as if it were coherent. Content changes do not
+    // fence unrelated turns.
+    if (change.structural) structureEpoch += 1;
     mergeDirty(change.from ?? 0, change.to ?? FULL_RANGE);
     void flushDirty();
   };
@@ -719,12 +826,10 @@ export function createConversationViewFromReader(
       if (chunk.length > 0) chunks.push(chunk);
       pinIds(capturedIds, 1);
       const hydrationReady = (async () => {
-        const gen = generation;
         try {
           for (let index = 0; index < chunks.length; index += 1) {
             if (index > 0) await yieldToEventLoop();
             if (disposed || released) return;
-            if (generation !== gen) return;
             await hydrateIds(chunks[index]!, true, () => released);
           }
         } catch (error) {
@@ -743,7 +848,7 @@ export function createConversationViewFromReader(
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      generation += 1;
+      structureEpoch += 1;
       observation.unsubscribe();
       idleCancel?.();
       idleCancel = null;

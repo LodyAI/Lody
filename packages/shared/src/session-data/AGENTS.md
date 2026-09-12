@@ -27,8 +27,11 @@ storage offset.
   `'invalid_receipt'` for a receipt it did not issue; a receipt is an opaque capability,
   never a caller-shaped object. Never treat an in-memory accept as persisted.
 - **Async windowed reads.** `count`, `readAt`/`readTurn`/`readRange`, `readDirectory`
-  (identity/state only, never bodies) and a gap-free `observe` whose initial directory is
-  captured at the same point the listener goes live. Read states distinguish
+  (identity/state only, never bodies), `readAll` (one consistent detached full read) and a
+  gap-free `observe` whose initial directory is captured at the same point the listener goes
+  live. `changed` carries a raw range plus `structural: true` only for a membership/order
+  change; a content-only change omits it so a consumer fences the affected turn without
+  cancelling unrelated in-flight reads. Read states distinguish
   missing/invalid/unavailable (`incomplete`/`unsupported`/`failed`). Identity lookups
   read `id` shallowly and materialize only the target body.
 - **Display paging is business logic.** `pageVisibleTranscript` scans raw rows through the
