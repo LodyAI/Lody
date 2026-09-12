@@ -176,6 +176,12 @@ and `count()` are read as one observation (a structural change between them re-d
 pairing old rows with a new length); a mixed structural+content batch keeps every touched identity (the Loro
 adapter no longer drops the earlier content `from` when a list delta is present) and refreshes surviving
 hydrated bodies; and background idle summaries follow the same token rule, not only range hydration.
+Invalidation comes from the identities an event actually touched, effective at the moment it arrives — a
+shallow directory comparison cannot see a body or `inputConfig` edit, so it is never used to conclude the body
+did not change — and a positionless change bumps only the turns that currently hold a body or a lease, never
+the whole table. An active request has no fixed retry cap: it stays owned, yielding between passes, until each
+requested identity is filled or reaches a terminal state (missing, read error, release, dispose); resolving
+success with an unfilled lease is not allowed.
 
 The snapshot service is wired to its business consumers: fork captures through
 `sessionData.snapshots.capture()`, clones the boundary with `snapshot.read()`, and copies into the

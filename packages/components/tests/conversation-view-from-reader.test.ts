@@ -1048,4 +1048,257 @@ describe('createConversationViewFromReader audit regressions', () => {
       doc.free();
     }
   });
+
+  it('a leased body read is invalidated by a streaming text update with unchanged index scalars', async () => {
+    // 71 neighbor: a body-only edit (same item count, same scalars) must
+    // invalidate the pending read by the event's identity, not by comparing the
+    // shallow directory row.
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    let block = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const result = await data.history.readTurn(id);
+        if (id === 'a-2' && block) {
+          block = false;
+          entered();
+          await gate;
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(5, 6);
+      await started;
+      data.writer.updateEntry('a-2', (turn) => {
+        turn.items![2] = { type: 'text', text: 'NEW CONTENT' } as never;
+        return turn;
+      });
+      await checkpoint();
+      expect(view.index(5)?.finished).toBe(true);
+      release();
+      await lease.ready;
+      await checkpoint();
+      expect(
+        (view.turn(5)?.items?.[2] as { text?: string } | undefined)?.text
+      ).toBe('NEW CONTENT');
+      lease.release();
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('an inputConfig-only change invalidates the pending body read for that turn', async () => {
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    let block = true;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const result = await data.history.readTurn(id);
+        if (id === 'u-2' && block) {
+          block = false;
+          entered();
+          await gate;
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(4, 5);
+      await started;
+      data.writer.updateEntry('u-2', (turn) => {
+        turn.inputConfig = {
+          ...(turn.inputConfig as Record<string, unknown>),
+          modelId: 'model-new',
+        } as never;
+        return turn;
+      });
+      await checkpoint();
+      release();
+      await lease.ready;
+      await checkpoint();
+      expect(
+        (view.turn(4)?.inputConfig as { modelId?: string } | undefined)?.modelId
+      ).toBe('model-new');
+      lease.release();
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('an active lease still fills after three successive invalidations and then quiescence', async () => {
+    // 71 neighbor: no fixed retry cap may silently resolve an unfilled lease.
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let writes = 0;
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        const result = await data.history.readTurn(id);
+        if (id === 'a-2' && writes < 3) {
+          writes += 1;
+          await data.commands.setTurnField('a-2', 'finished', setFieldTo(writes % 2 === 0));
+          await checkpoint();
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(5, 6);
+      await lease.ready;
+      expect(view.turn(5)?.finished).toBe(false);
+      lease.release();
+    } finally {
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('invalidates only the touched turn and leaves an unrelated pending read accepted', async () => {
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    const reads = new Map<string, number>();
+    let releaseA2!: () => void;
+    let enteredA2!: () => void;
+    const gateA2 = new Promise<void>((resolve) => (releaseA2 = resolve));
+    const startedA2 = new Promise<void>((resolve) => (enteredA2 = resolve));
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        reads.set(id, (reads.get(id) ?? 0) + 1);
+        const result = await data.history.readTurn(id);
+        if (id === 'a-2') {
+          enteredA2();
+          await gateA2;
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      // One id per chunk so u-2 can settle while a-2 is still gated.
+      hydrateChunkSize: 1,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(4, 6);
+      await startedA2;
+      // u-2 hydration completes and is accepted while a-2 is still pending.
+      await vi.waitFor(() => expect(view.turn(4)?.id).toBe('u-2'));
+      // A u-2 content update must not invalidate the pending a-2 read.
+      data.writer.updateEntry('u-2', (turn) => {
+        turn.items![2] = { type: 'text', text: 'U2 NEW' } as never;
+        return turn;
+      });
+      await checkpoint();
+      releaseA2();
+      await lease.ready;
+      await checkpoint();
+      expect(reads.get('a-2')).toBe(1);
+      expect(
+        (view.turn(4)?.items?.[2] as { text?: string } | undefined)?.text
+      ).toBe('U2 NEW');
+      lease.release();
+    } finally {
+      releaseA2();
+      view.dispose();
+      doc.free();
+    }
+  });
+
+  it('releasing a lease stops its in-flight hydration request', async () => {
+    const doc = buildSessionDoc(buildFixtureHistory(3));
+    const data = createLoroSessionData({
+      sessionId: FIXTURE_SESSION_ID,
+      doc,
+      durability: 'unavailable',
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const reads: string[] = [];
+    const reader: SessionHistoryReader = {
+      ...data.history,
+      readTurn: async (id) => {
+        reads.push(id);
+        const result = await data.history.readTurn(id);
+        if (id === 'a-2') {
+          entered();
+          await gate;
+        }
+        return result;
+      },
+    };
+    const view = createConversationViewFromReader(reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+    });
+    try {
+      await checkpoint();
+      const lease = view.acquireRange(5, 6);
+      await started;
+      lease.release();
+      release();
+      await lease.ready;
+      await checkpoint();
+      expect(reads.filter((id) => id === 'a-2')).toHaveLength(1);
+      expect(view.isHydrated(5)).toBe(false);
+    } finally {
+      release();
+      view.dispose();
+      doc.free();
+    }
+  });
 });

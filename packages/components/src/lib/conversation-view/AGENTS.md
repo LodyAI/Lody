@@ -34,10 +34,13 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   synchronous accessors read an in-memory snapshot that async port reads
   populate (`readDirectory` for index rows and send config, `readTurn` for
   bodies). Identity is `turnId`, never a position; leases pin by id with
-  refcounts, and every async read/lease carries a generation — a response
-  resolving after a structural change, after its lease was released, or after
-  `dispose` is discarded. `observe.initial` builds the index; each ranged
-  `changed` re-reads ONLY the affected raw range (directory + the hydrated
+  refcounts, and every async read/lease carries the membership epoch plus the
+  turn's own content epoch — a result is applied only while both still match, and
+  otherwise re-read while the lease needs it. Invalidation uses the identities an
+  event actually touched (never a shallow row comparison, which cannot see a body
+  or `inputConfig` edit); an active request has no fixed retry cap and is never
+  resolved as success with a hole. `observe.initial` builds the index; each
+  ranged `changed` re-reads ONLY the affected raw range (directory + the hydrated
   turns inside it) and `reset` is the only full re-read. Contract:
   `tests/conversation-view-from-reader.test.ts` (both `createLoroSessionData`
   and `createMemorySessionData` backends).

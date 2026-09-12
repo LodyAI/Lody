@@ -248,6 +248,11 @@ export function createConversationViewFromReader(
    * newer content/structural change invalidated is dropped and re-read, so an
    * active lease never ends with a hole and a stale body never overwrites the
    * newer row. Unrelated turns' tokens are untouched.
+   *
+   * There is no fixed retry cap: an active request stays owned until every
+   * requested identity is filled or reaches a terminal state (missing, read
+   * error, release, dispose). Each pass yields first, so event handling and
+   * other work interleave instead of the loop starving them.
    */
   const hydrateIds = async (
     targets: readonly string[],
@@ -255,7 +260,11 @@ export function createConversationViewFromReader(
     cancelled?: () => boolean
   ): Promise<void> => {
     let pending = [...new Set(targets)];
-    for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+    let pass = 0;
+    while (pending.length > 0) {
+      if (disposed || cancelled?.()) return;
+      if (pass > 0) await yieldToEventLoop();
+      pass += 1;
       const stale: string[] = [];
       const nextPending: string[] = [];
       for (let start = 0; start < pending.length; start += hydrateChunkSize) {
@@ -422,7 +431,13 @@ export function createConversationViewFromReader(
 
   const applyHydratedReplacement = async (idsToReRead: readonly string[]): Promise<void> => {
     let pending = [...new Set(idsToReRead)];
-    for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+    let pass = 0;
+    // Same lifecycle as `hydrateIds`: keep the request owned until each identity
+    // is current or terminal, yielding between passes rather than capping.
+    while (pending.length > 0) {
+      if (disposed) return;
+      if (pass > 0) await yieldToEventLoop();
+      pass += 1;
       const stale: string[] = [];
       const nextPending: string[] = [];
       const loPositions: number[] = [];
@@ -715,9 +730,22 @@ export function createConversationViewFromReader(
     }
     // A membership/order change fences in-flight reads as soon as it is
     // observed, before it is applied, so a directory+count pair read around the
-    // change is never applied as if it were coherent. Content changes do not
-    // fence unrelated turns.
-    if (change.structural) structureEpoch += 1;
+    // change is never applied as if it were coherent. A content change
+    // invalidates exactly the identities the event touched — a shallow
+    // directory comparison cannot see a body/inputConfig edit — and never the
+    // whole table.
+    if (change.structural) {
+      structureEpoch += 1;
+    } else if (change.from !== undefined && change.to !== undefined) {
+      const hi = Math.min(change.to, ids.length);
+      for (let i = Math.max(0, change.from); i < hi; i += 1) {
+        const id = ids[i];
+        if (id) bumpTurn(id);
+      }
+    } else {
+      for (const id of hydrated.keys()) bumpTurn(id);
+      for (const id of pins.keys()) bumpTurn(id);
+    }
     mergeDirty(change.from ?? 0, change.to ?? FULL_RANGE);
     void flushDirty();
   };
