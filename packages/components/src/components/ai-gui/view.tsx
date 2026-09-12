@@ -25,6 +25,13 @@ import {
   MessageSelectionRow,
 } from './message-selection';
 import {
+  captureCompletionVisualAnchor,
+  resolveCompletionAnchorAdjustment,
+  resolveCompletionContractionMessageId,
+  type CompletionLayoutState,
+  type CompletionVisualAnchorSnapshot,
+} from './completion-visual-anchor';
+import {
   ZoomableImageViewer,
   type ImagePreviewPortalAnchorRef,
 } from '@/components/shared/zoomable-image-viewer';
@@ -328,6 +335,9 @@ const OUTLINE_JUMP_TOLERANCE_PX = 2;
  * genuinely cannot reach the top (the list's tail) stops retrying.
  */
 const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
+/** Bounded settling window for Virtua's ResizeObserver-driven row measurements. */
+const COMPLETION_ANCHOR_CORRECTION_FRAMES = 4;
+const COMPLETION_ANCHOR_TOLERANCE_PX = 0.5;
 
 export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
 
@@ -1218,6 +1228,41 @@ export const SessionChatStreamView = forwardRef<
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
+    const stickyStateRef = useRef(true);
+    const latestAssistant = useMemo(
+      () =>
+        lastAssistantMessageId === null
+          ? null
+          : (items.find(
+              (item): item is SessionMessageItem =>
+                item.type === 'message' &&
+                item.message.role === 'assistant' &&
+                item.message.id === lastAssistantMessageId
+            )?.message ?? null),
+      [items, lastAssistantMessageId]
+    );
+    const latestAssistantFinished = latestAssistant?.finished === true;
+    const committedCompletionLayoutRef = useRef<CompletionLayoutState>({
+      messageId: latestAssistant?.id ?? null,
+      finished: latestAssistantFinished,
+      activityVisible: shouldShowAgentActivity,
+    });
+    const completionAnchorPendingRef = useRef<CompletionVisualAnchorSnapshot | null>(null);
+    const completionAnchorRetentionRef = useRef<{
+      rowKey: string;
+      viewportOffset: number;
+      framesRemaining: number;
+    } | null>(null);
+    const completionScrollElementRef = useRef<HTMLDivElement | null>(null);
+    const [completionAnchorSpacerHeight, setCompletionAnchorSpacerHeight] = useState(0);
+    const handleAtBottomChange = useCallback(
+      (atBottom: boolean) => {
+        stickyStateRef.current = atBottom;
+        if (atBottom) setCompletionAnchorSpacerHeight(0);
+        onAtBottomChange?.(atBottom);
+      },
+      [onAtBottomChange]
+    );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
     const pendingExpandedGroupRowKeyRef = useRef<string | null>(null);
@@ -1242,6 +1287,8 @@ export const SessionChatStreamView = forwardRef<
             groupExpansionAutoScrollSuppressedRef.current ||
             messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
+            completionAnchorPendingRef.current !== null ||
+            completionAnchorRetentionRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
@@ -1371,7 +1418,7 @@ export const SessionChatStreamView = forwardRef<
       scrollRef: scrollContainerRef,
       scrollElement: scrollViewportElement,
       isSticky,
-      scrollToBottom,
+      scrollToBottom: scrollToBottomImmediately,
       initialScrollRestored,
       handleScroll,
     } = useStickyScroll({
@@ -1380,10 +1427,142 @@ export const SessionChatStreamView = forwardRef<
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
-      onAtBottomChange,
+      onAtBottomChange: handleAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
+      stickyStateRef,
     });
+    completionScrollElementRef.current = scrollViewportElement;
+    // Read the mirror only after useStickyScroll has refreshed it from the
+    // library's mutable lock for this render. This covers touch/scrollbar
+    // release as well as the wheel handler's synchronous fast path.
+    const currentCompletionLayout: CompletionLayoutState = {
+      messageId: latestAssistant?.id ?? null,
+      finished: latestAssistantFinished,
+      activityVisible: shouldShowAgentActivity,
+    };
+    const completionContractionMessageId = resolveCompletionContractionMessageId(
+      committedCompletionLayoutRef.current,
+      currentCompletionLayout
+    );
+    if (
+      completionContractionMessageId !== null &&
+      !stickyStateRef.current &&
+      completionAnchorPendingRef.current === null &&
+      completionScrollElementRef.current !== null
+    ) {
+      completionAnchorPendingRef.current = captureCompletionVisualAnchor(
+        completionScrollElementRef.current,
+        completionContractionMessageId,
+        new Set(virtualRows.map((row) => row.key))
+      );
+    }
+    const renderedCompletionSpacerHeight =
+      completionAnchorPendingRef.current?.provisionalSpacerHeight ?? completionAnchorSpacerHeight;
+
+    const scrollToBottom = useCallback(() => {
+      setCompletionAnchorSpacerHeight(0);
+      scrollToBottomImmediately();
+    }, [scrollToBottomImmediately]);
+
+    useLayoutEffect(() => {
+      const pending = completionAnchorPendingRef.current;
+      const scrollElement = completionScrollElementRef.current;
+      if (
+        pending !== null &&
+        scrollElement !== null &&
+        pending.messageId === currentCompletionLayout.messageId
+      ) {
+        const anchorElement = Array.from(
+          scrollElement.querySelectorAll<HTMLElement>('[data-chat-virtual-row-key]')
+        ).find((element) => element.dataset.chatVirtualRowKey === pending.rowKey);
+        const viewportTop = scrollElement.getBoundingClientRect().top;
+        const newAnchorOffset =
+          anchorElement === undefined
+            ? null
+            : anchorElement.getBoundingClientRect().top - viewportTop;
+        const adjustment = resolveCompletionAnchorAdjustment({
+          currentScrollTop: scrollElement.scrollTop,
+          oldAnchorOffset: pending.viewportOffset,
+          newAnchorOffset,
+          viewportHeight: scrollElement.clientHeight,
+          scrollHeightWithSpacer: scrollElement.scrollHeight,
+          provisionalSpacerHeight: pending.provisionalSpacerHeight,
+        });
+        vlistRef.current?.scrollTo(adjustment.scrollTop);
+        completionAnchorRetentionRef.current =
+          pending.rowKey === null || pending.viewportOffset === null
+            ? null
+            : {
+                rowKey: pending.rowKey,
+                viewportOffset: pending.viewportOffset,
+                framesRemaining: COMPLETION_ANCHOR_CORRECTION_FRAMES,
+              };
+        completionAnchorPendingRef.current = null;
+        setCompletionAnchorSpacerHeight(adjustment.spacerHeight);
+      } else if (pending !== null) {
+        completionAnchorPendingRef.current = null;
+        setCompletionAnchorSpacerHeight(0);
+      }
+      committedCompletionLayoutRef.current = {
+        messageId: currentCompletionLayout.messageId,
+        finished: currentCompletionLayout.finished,
+        activityVisible: currentCompletionLayout.activityVisible,
+      };
+    }, [
+      currentCompletionLayout.activityVisible,
+      currentCompletionLayout.finished,
+      currentCompletionLayout.messageId,
+      renderedCompletionSpacerHeight,
+      virtualRows,
+    ]);
+
+    useLayoutEffect(() => {
+      let animationFrameId: number | null = null;
+      const retainAnchor = () => {
+        const retention = completionAnchorRetentionRef.current;
+        const scrollElement = completionScrollElementRef.current;
+        if (retention === null || scrollElement === null || retention.framesRemaining <= 0) {
+          completionAnchorRetentionRef.current = null;
+          return;
+        }
+        const anchorElement = Array.from(
+          scrollElement.querySelectorAll<HTMLElement>('[data-chat-virtual-row-key]')
+        ).find((element) => element.dataset.chatVirtualRowKey === retention.rowKey);
+        if (anchorElement === undefined) {
+          completionAnchorRetentionRef.current = null;
+          return;
+        }
+        const viewportTop = scrollElement.getBoundingClientRect().top;
+        const newAnchorOffset = anchorElement.getBoundingClientRect().top - viewportTop;
+        const spacerElement = scrollElement.querySelector<HTMLElement>(
+          '[data-completion-anchor-spacer]'
+        );
+        const adjustment = resolveCompletionAnchorAdjustment({
+          currentScrollTop: scrollElement.scrollTop,
+          oldAnchorOffset: retention.viewportOffset,
+          newAnchorOffset,
+          viewportHeight: scrollElement.clientHeight,
+          scrollHeightWithSpacer: scrollElement.scrollHeight,
+          provisionalSpacerHeight: spacerElement?.getBoundingClientRect().height ?? 0,
+        });
+        if (Math.abs(newAnchorOffset - retention.viewportOffset) > COMPLETION_ANCHOR_TOLERANCE_PX) {
+          vlistRef.current?.scrollTo(adjustment.scrollTop);
+        }
+        setCompletionAnchorSpacerHeight(adjustment.spacerHeight);
+        completionAnchorRetentionRef.current = {
+          ...retention,
+          framesRemaining: retention.framesRemaining - 1,
+        };
+        animationFrameId = requestAnimationFrame(retainAnchor);
+      };
+      if (completionAnchorRetentionRef.current !== null) {
+        animationFrameId = requestAnimationFrame(retainAnchor);
+      }
+      return () => {
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      };
+    }, [completionAnchorSpacerHeight, renderedCompletionSpacerHeight, virtualRows]);
 
     // useStickyScroll's layout effect runs before this one in hook order and
     // consumes the suppression for the expansion commit. Release it at the end
@@ -1546,14 +1725,17 @@ export const SessionChatStreamView = forwardRef<
       if (!scrollViewportElement) return undefined;
       const abandon = () => {
         pendingOutlineJumpRef.current = null;
+        completionAnchorRetentionRef.current = null;
       };
       const options = { passive: true } as const;
       scrollViewportElement.addEventListener('wheel', abandon, options);
       scrollViewportElement.addEventListener('touchstart', abandon, options);
+      scrollViewportElement.addEventListener('pointerdown', abandon, options);
       scrollViewportElement.addEventListener('keydown', abandon, options);
       return () => {
         scrollViewportElement.removeEventListener('wheel', abandon);
         scrollViewportElement.removeEventListener('touchstart', abandon);
+        scrollViewportElement.removeEventListener('pointerdown', abandon);
         scrollViewportElement.removeEventListener('keydown', abandon);
       };
     }, [scrollViewportElement]);
@@ -1726,6 +1908,7 @@ export const SessionChatStreamView = forwardRef<
                         key={row.key}
                         id={row.item.type === 'message' ? row.item.message.id : undefined}
                         first
+                        virtualRowKey={row.key}
                       >
                         <ChatItem
                           item={row.item}
@@ -1751,6 +1934,7 @@ export const SessionChatStreamView = forwardRef<
                       key={row.key}
                       id={row.item.message.id}
                       first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+                      virtualRowKey={row.key}
                     >
                       <AssistantChatItem
                         row={row}
@@ -1779,6 +1963,13 @@ export const SessionChatStreamView = forwardRef<
                   <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                 )}
               </Virtualizer>
+              {renderedCompletionSpacerHeight > 0 ? (
+                <div
+                  aria-hidden="true"
+                  data-completion-anchor-spacer=""
+                  style={{ height: renderedCompletionSpacerHeight }}
+                />
+              ) : null}
               <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
