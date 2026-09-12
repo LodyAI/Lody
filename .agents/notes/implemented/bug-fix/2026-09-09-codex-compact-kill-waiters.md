@@ -7,14 +7,14 @@ Translation: current
 
 ## Abstract
 
-`/compact` waits on a `thread/compacted` notification. Turn waiters already reject when the Codex process exits; compaction waiters were resolve-only, so a death after `thread/compact/start` left the ACP prompt occupied and the next message `already active`. This host change pins `acp-extension-codex` to `a67f231` (adapter #38 rebased onto current adapter main) so close/dispose rejects those waiters. Healthy compact and mid-turn process death are unchanged. Adapter #38 is not merged yet; this pin must not ship until that merge.
+`/compact` waits on a `thread/compacted` notification. Turn waiters already reject when the Codex process exits; compaction waiters were resolve-only, so a death after `thread/compact/start` left the ACP prompt occupied and the next message `already active`. This host change pins `acp-extension-codex` to `31c5ecc` (adapter #38 rebased onto current adapter main, which already includes #30) so close/dispose rejects those waiters. Healthy compact and mid-turn process death are unchanged. Adapter #38 is not merged yet; this pin must not ship until that merge.
 
 ## Decision
 
-- Host gitlink `packages/acp-extension-codex` moves from main's `5f0aab0f` (#554 / adapter #40) to `a67f231` (open adapter PR #38, rebased onto that main).
+- Host gitlink `packages/acp-extension-codex` moves from main's `314b3823` (host #275 / adapter cancel-compaction) to `31c5ecc` (open adapter PR #38, rebased onto adapter main after #30).
 - Core and other submodules stay on current main. This PR does not touch them.
 - `runCompact` keeps registering the waiter first, then `Promise.all`s start + completion, so a vscode-jsonrpc `close` (which does not reject in-flight start RPCs) still finishes the prompt.
-- This is not adapter #37 / Lody #544 (fork unsubscribe). It is not open adapter #30 (cancel during compact).
+- This is not adapter #37 / Lody #544 (fork unsubscribe). Adapter #30 (cancel during compact) is already on adapter main and is not this change.
 
 ## Evidence and limits
 

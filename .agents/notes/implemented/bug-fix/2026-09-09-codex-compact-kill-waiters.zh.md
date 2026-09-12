@@ -7,14 +7,14 @@ Translation: current
 
 ## 摘要
 
-`/compact` 会等待 `thread/compacted` 通知。回合 waiter 在 Codex 进程退出时已经会 reject；压缩 waiter 只有 resolve，所以 `thread/compact/start` 之后进程一死，ACP prompt 一直占着，下一句变成 `already active`。这次宿主改动把 `acp-extension-codex` 钉到 `a67f231`（adapter #38，已 rebase 到当前 adapter main），让 close/dispose 拒绝这些 waiter。健康压缩和回合中途杀进程的行为不变。adapter #38 尚未合入，在它合并前这个 pin 不能随桌面发布。
+`/compact` 会等待 `thread/compacted` 通知。回合 waiter 在 Codex 进程退出时已经会 reject；压缩 waiter 只有 resolve，所以 `thread/compact/start` 之后进程一死，ACP prompt 一直占着，下一句变成 `already active`。这次宿主改动把 `acp-extension-codex` 钉到 `31c5ecc`（adapter #38，已 rebase 到包含 #30 的当前 adapter main），让 close/dispose 拒绝这些 waiter。健康压缩和回合中途杀进程的行为不变。adapter #38 尚未合入，在它合并前这个 pin 不能随桌面发布。
 
 ## 决策
 
-- 宿主 gitlink `packages/acp-extension-codex` 从 main 的 `5f0aab0f`（#554 / adapter #40）移到 `a67f231`（未合的 adapter PR #38，基线就是那条当前 main）。
+- 宿主 gitlink `packages/acp-extension-codex` 从 main 的 `314b3823`（宿主 #275 / adapter 取消压缩）移到 `31c5ecc`（未合的 adapter PR #38，已 rebase 到含 #30 的 adapter main）。
 - Core 和其它 submodule 保持当前 main。本 PR 不改它们。
 - `runCompact` 仍然先登记 waiter，再用 `Promise.all` 同时等 start 和 completion，这样 vscode-jsonrpc 的 `close`（不会 reject 进行中的 start RPC）也能结束 prompt。
-- 这不是 adapter #37 / Lody #544（fork 退订），也不是还开着的 adapter #30（压缩过程中点停止）。
+- 这不是 adapter #37 / Lody #544（fork 退订）。adapter #30（压缩过程中点停止）已在 adapter main，不是这次改动。
 
 ## 证据与限制
 
