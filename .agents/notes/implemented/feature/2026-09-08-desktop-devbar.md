@@ -1,9 +1,11 @@
 # Runtime Desktop performance bar
 
 Status: implemented
-Translation: pending
+Translation: current
 
 PR: [#525](https://github.com/LodyAI/Lody/pull/525)
+
+[中文](2026-09-08-desktop-devbar.zh.md)
 
 ## Abstract
 

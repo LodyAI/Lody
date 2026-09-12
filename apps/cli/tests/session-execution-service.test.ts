@@ -234,6 +234,40 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('cancels only the named native child and rejects a stale parent turn', async () => {
+    const runningChildren = new Set(['child-1', 'child-2']);
+    const sessionManager = {
+      getSession: () => ({
+        agentClient: {
+          isCreated: () => true,
+          cancelSubagent: async (id: string) => {
+            runningChildren.delete(id);
+          },
+        },
+      }),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({ sessionManager, getActiveTurnId: () => 'parent-1' });
+    // A child control must never enter the parent Stop/history mutation path.
+    deps.workspaceDocument.getOrCreateSessionDoc = async () => {
+      throw new Error('Parent Stop was invoked');
+    };
+    const service = new SessionExecutionService(deps);
+    const request = {
+      type: 'session/cancel' as const,
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'parent-1',
+      subagentTaskId: 'child-1',
+    };
+    expect(await service.cancelSession({ ...request, turnId: 'old-parent' })).toMatchObject({
+      success: false,
+    });
+    expect([...runningChildren]).toEqual(['child-1', 'child-2']);
+    expect(await service.cancelSession(request)).toEqual({ success: true });
+    expect([...runningChildren]).toEqual(['child-2']);
+    expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
+  });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
@@ -6359,7 +6393,9 @@ describe('SessionExecutionService', () => {
     });
 
     expect(result).toEqual({ success: true });
-    expect(compactionItem.status).toBe('failed');
+    expect((await sessionDoc.sessionData.history.readAll())[0]?.items[0]).toMatchObject({
+      status: 'failed',
+    });
     expect(sessionDoc.updateHistory).toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-compaction', {

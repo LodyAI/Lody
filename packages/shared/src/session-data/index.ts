@@ -86,3 +86,5 @@ export {
 export { readLatestTurn, readSessionHistory } from './read';
 
 export { requireSessionSnapshots } from './snapshot';
+
+export { markAssistantTurnFinished } from './assistant-finalize';

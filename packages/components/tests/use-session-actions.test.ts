@@ -1127,7 +1127,7 @@ describe('useSessionActions', () => {
     expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
   });
 
-  it('writes legacy archive queue for mixed-version machine rollout', async () => {
+  it('archives by writing the archived state only, never a machine command or queue', async () => {
     const sessionId = 'session-archive-legacy-queue' as SessionId;
     const machineId = 'machine-1';
     const sessionMeta = {
@@ -1161,11 +1161,11 @@ describe('useSessionActions', () => {
     await actions.archiveSession(sessionId);
 
     expect(upsertDocMeta).toHaveBeenCalledWith(
-      getMachineRoomId(machineId),
-      expect.objectContaining({
-        needToArchiveSessions: { [sessionId]: true },
-      })
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
     );
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
+    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
   });
 
   it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
@@ -1225,23 +1225,10 @@ describe('useSessionActions', () => {
       ['terminal.closeSession', { sessionId: rootSession.id }],
       ['terminal.closeSession', { sessionId: tabSession.id }],
     ]);
-    expect(runtime.writer.flockRowPut).toHaveBeenCalledTimes(1);
-    expect(runtime.writer.flockRowPut).toHaveBeenCalledWith(
-      expect.any(String),
-      machineFlockKeys.archiveSessionCommand(rootSession.id),
-      expect.any(Object)
-    );
-    for (const session of [openedSession, openedFromTabSession]) {
-      expect(runtime.writer.flockRowPut).not.toHaveBeenCalledWith(
-        expect.any(String),
-        machineFlockKeys.archiveSessionCommand(session.id),
-        expect.any(Object)
-      );
+    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
+    for (const session of [rootSession, openedSession, openedFromTabSession]) {
       expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
     }
-    expect(metaRepo.getMeta(getMachineRoomId(rootSession.machineId))).toMatchObject({
-      needToArchiveSessions: { [rootSession.id]: true },
-    });
   });
 
   it('restores child tabs without restoring independently opened session workspaces', async () => {
@@ -1273,32 +1260,14 @@ describe('useSessionActions', () => {
     }
     for (const session of [openedSession, openedFromTabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
-      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toMatchObject({
-        needToArchiveSessions: { [session.id]: true },
-        needToDeleteSessions: { [session.id]: true },
-      });
-      expect(runtime.writer.flockRowDelete).not.toHaveBeenCalledWith(
-        expect.any(String),
-        machineFlockKeys.archiveSessionCommand(session.id)
-      );
-      expect(runtime.writer.flockRowDelete).not.toHaveBeenCalledWith(
-        expect.any(String),
-        machineFlockKeys.deleteSessionCommand(session.id)
-      );
     }
+    // Restore is a state change only; legacy queue entries written by older
+    // clients are left for the daemon to discard.
     expect(metaRepo.getMeta(getMachineRoomId(rootSession.machineId))).toMatchObject({
-      needToArchiveSessions: { [openedSession.id]: true },
-      needToDeleteSessions: { [openedSession.id]: true },
+      needToArchiveSessions: { [rootSession.id]: true, [openedSession.id]: true },
+      needToDeleteSessions: { [rootSession.id]: true, [openedSession.id]: true },
     });
-    expect(runtime.writer.flockRowDelete).toHaveBeenCalledTimes(2);
-    expect(runtime.writer.flockRowDelete).toHaveBeenCalledWith(
-      expect.any(String),
-      machineFlockKeys.archiveSessionCommand(rootSession.id)
-    );
-    expect(runtime.writer.flockRowDelete).toHaveBeenCalledWith(
-      expect.any(String),
-      machineFlockKeys.deleteSessionCommand(rootSession.id)
-    );
+    expect(runtime.writer.flockRowDelete).not.toHaveBeenCalled();
   });
 
   it('deletes exactly the requested Session before metadata hydration completes', async () => {
@@ -1445,7 +1414,7 @@ describe('useSessionActions', () => {
     expect(deleteDoc).not.toHaveBeenCalled();
   });
 
-  it('writes legacy delete queue before deleting archived code sessions', async () => {
+  it('deletes an archived code session by deleting its doc, never a machine command or queue', async () => {
     const sessionId = 'session-delete-legacy-queue' as SessionId;
     const machineId = 'machine-1';
     const sessionMeta = {
@@ -1500,21 +1469,9 @@ describe('useSessionActions', () => {
 
     await actions.deleteArchivedSession(sessionId);
 
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getMachineRoomId(machineId),
-      expect.objectContaining({
-        needToArchiveSessions: {},
-        needToDeleteSessions: expect.objectContaining({
-          [sessionId]: expect.objectContaining({
-            repoFullName: 'loro-dev/lody',
-            branchName: 'lody/session-delete-legacy-queue',
-            baseBranchName: 'main',
-            isWorktree: true,
-          }),
-        }),
-      })
-    );
     expect(deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
+    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
   });
 
   it('allows permanent deletion without a browser connection', async () => {
@@ -1540,7 +1497,7 @@ describe('useSessionActions', () => {
     expect(recordMyWorkspaceDailyActiveUser).not.toHaveBeenCalled();
   });
 
-  it('clears legacy archive queue when archived session does not need machine delete', async () => {
+  it('deletes an archived local session by deleting its doc and leaves legacy queues to the daemon', async () => {
     const sessionId = 'session-delete-local-no-cleanup' as SessionId;
     const machineId = 'machine-1';
     const sessionMeta = {
@@ -1592,13 +1549,8 @@ describe('useSessionActions', () => {
 
     await actions.deleteArchivedSession(sessionId);
 
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getMachineRoomId(machineId),
-      expect.objectContaining({
-        needToArchiveSessions: {},
-      })
-    );
     expect(deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
   });
 });
 

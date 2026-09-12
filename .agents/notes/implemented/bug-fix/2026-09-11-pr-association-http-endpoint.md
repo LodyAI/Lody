@@ -1,7 +1,9 @@
 # Route PR association through the HTTP action endpoint
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-11-pr-association-http-endpoint.zh.md)
 
 ## Abstract
 

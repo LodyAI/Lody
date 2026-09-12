@@ -1,9 +1,11 @@
 # Local file links and binary preview actions
 
 Status: implemented
-Translation: pending
+Translation: current
 
 PR: https://github.com/LodyAI/Lody/pull/555
+
+[中文](2026-09-09-local-file-link-actions.zh.md)
 
 ## Abstract
 

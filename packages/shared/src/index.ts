@@ -79,7 +79,6 @@ export * from './repo-doc-meta';
 export * from './session-input';
 export * from './session-preparation';
 export * from './session-bootstrap';
-export * from './session-delete-queue';
 export * from './goal';
 export * from './comment-reference-format';
 export * from './session-comment-types';

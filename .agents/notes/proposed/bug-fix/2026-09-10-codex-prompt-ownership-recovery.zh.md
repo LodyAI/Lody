@@ -1,8 +1,10 @@
 # Codex 恢复发送时的 prompt 占用调查
 
 Status: proposed
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/571
+
+[English](2026-09-10-codex-prompt-ownership-recovery.md)
 
 ## 摘要
 

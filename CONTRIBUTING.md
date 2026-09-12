@@ -85,7 +85,9 @@ For changes to important behavior or architecture, follow the
 [document maintenance workflow](./.agents/README.md). Specs explain intent and require explicit human
 review. Significant decisions belong in an Agent Note; routine styling and local
 fixes normally need only a PR explanation. You may contribute in either English
-or Chinese; maintainers can arrange the counterpart after merge. Invariants
+or Chinese; maintainers can arrange the counterpart after merge. Agents instead
+follow [the note rules](./.agents/notes/AGENTS.md#history-and-language) and ship
+both languages in the same change. Invariants
 continue to live in the nearest `AGENTS.md`.
 
 1. Create a clearly named branch from the latest code.

@@ -1,3 +1,4 @@
+import { markAssistantTurnFinished } from './assistant-finalize';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
 import type { OperationProgressStatus } from '../session-orchestration';
@@ -142,17 +143,20 @@ export function applyHistoryAction(
       return { turns: history, matched };
     }
     case 'permission-request': {
+      let ownerFound = false;
       let matched = false;
       for (const entry of history)
         entry.items = entry.items?.map((item) => {
           if (item.type !== 'tool_call' || item.toolCallId !== action.request.toolCall.toolCallId)
             return item;
+          ownerFound = true;
+          if (entry.finished === true || typeof entry.endedAt === 'number') return item;
           matched = true;
           return mergeToolCallWithPermission(item, action.requestId, action.request);
         });
-      const last = history[history.length - 1];
+      const last = history.at(-1);
       if (
-        !matched &&
+        !ownerFound &&
         last?.role === 'assistant' &&
         last.finished !== true &&
         typeof last.endedAt !== 'number'
@@ -189,25 +193,10 @@ export function applyHistoryAction(
       return { turns: history, matched: true };
     }
     case 'finish-assistant': {
-      const entry = [...history]
-        .reverse()
-        .find((t) => t.role === 'assistant' && (!action.turnId || t.id === action.turnId));
-      if (!entry) return { turns: history, matched: false };
-      if (action.settleContextCompactionAsFailed)
-        for (const item of entry.items ?? []) {
-          if (
-            item.type === 'tool_call' &&
-            item.activityKind === 'context_compaction' &&
-            (item.status === 'pending' || item.status === 'in_progress')
-          )
-            item.status = 'failed';
-        }
-      if (action.force || entry.finished !== true) {
-        entry.finished = true;
-        entry.endedAt = action.endedAt;
-        if (action.permissionWaitMs !== undefined) entry.permissionWaitMs = action.permissionWaitMs;
-      }
-      return { turns: history, matched: true };
+      const matched = history.some(
+        (t) => t.role === 'assistant' && (!action.turnId || t.id === action.turnId)
+      );
+      return { turns: markAssistantTurnFinished(history, action), matched };
     }
     case 'remove-turn':
       return {

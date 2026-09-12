@@ -485,6 +485,17 @@ describe('custom ACP resolution', () => {
     expect(resolved.exec).toEqual({ command: 'my-acp', args: [] });
   });
 
+  it('expands a leading ~ in the custom launch command', () => {
+    const resolved = resolveACPSetting({
+      cliType: 'custom',
+      agentType: 'custom-1234',
+      customAcp: { command: '~/bin/my-acp', args: ['--acp'] },
+    });
+
+    expect(resolved.exec).toEqual({ command: join(homedir(), 'bin/my-acp'), args: ['--acp'] });
+    expect(resolved.status.command).toBe(join(homedir(), 'bin/my-acp'));
+  });
+
   it('throws when a custom provider has no launch command', () => {
     expect(() => resolveACPSetting({ cliType: 'custom', agentType: 'custom-1234' })).toThrow(
       /no launch command/

@@ -1,7 +1,9 @@
 # Select and export chat messages as an image
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-08-chat-share-image.zh.md)
 
 ## Abstract
 

@@ -119,6 +119,8 @@ import {
   createEagerSyncHighWaterStore,
   type EagerSyncHighWaterCache,
 } from '@/lib/eager-sync-high-water-cache';
+import { createEagerSyncWorkerClient } from './eager-sync-worker-client';
+import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import { isRemoteCursorDebugEnabled } from '@/lib/remote-cursor-debug';
 import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '@/lib/clear-local-cache';
 import { runStartupAcpCapabilitiesRefresh } from './startup-acp-capabilities-refresh';
@@ -586,6 +588,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let backgroundSyncCoordinator: BackgroundSyncCoordinator | null = null;
   let backgroundSyncCoordinatorStartPromise: Promise<void> | null = null;
   let backgroundSyncHighWaterStore: EagerSyncHighWaterCache | null = null;
+  let eagerSyncWorkerClient: ReturnType<typeof createEagerSyncWorkerClient> | null = null;
   let cancelDelayedBackgroundSyncStart: (() => void) | null = null;
   let startBackgroundSyncCoordinator: () => void = () => {};
 
@@ -2644,6 +2647,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       metaSub = null;
     }
 
+    eagerSyncWorkerClient?.cancelAll();
     // Remove both planes' transports (loro-repo keeps room leases; their
     // bindings report 'detached' until a later attach).
     if (transportAttached) {
@@ -3660,6 +3664,44 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
    * Create a session store that can read local data immediately (offline-first).
    * Remote sync is deferred until transport is ready (workspaceId is set).
    */
+  const eagerSyncScope = workspaceId;
+  const materializedSessionIds = new Set<SessionId>();
+  eagerSyncWorkerClient = createEagerSyncWorkerClient({
+    workspaceId,
+    scope: eagerSyncScope,
+    localConnection: createLocalLoroDataPlaneConnection,
+    resolveTransport: async (roomId) => {
+      await targetRouter.prepareDocTarget(roomId);
+      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+      if (plane === 'local') return { plane: 'local' };
+      if (!cloudPlaneEnabled || !streamsTokenProvider) {
+        throw new Error('Eager-sync cloud transport unavailable');
+      }
+      // Prime endpoint-derived routing before handing the transport to the worker.
+      await streamsTokenProvider.getToken();
+      // Match the mounted foreground transport. `transportStreamsBaseUrl`
+      // records the endpoint selected when that transport was attached.
+      const baseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
+      return {
+        plane: 'cloud',
+        streamId: getLoroStreamIdForDocId(workspaceId, roomId),
+        options: {
+          bucketId: LORO_STREAMS_BUCKET_ID,
+          metaStreamId: getLoroMetaStreamId(workspaceId),
+          baseUrl,
+          shardUrls: getLoroStreamsShardUrls(
+            baseUrl,
+            getStreamsShardHostSuffixForProvider(streamsTokenProvider)
+          ),
+        },
+      };
+    },
+    auth: async (reason) => {
+      if (!cloudPlaneEnabled || !streamsTokenProvider) return undefined;
+      return streamsTokenProvider.createAuthCallback()(reason ? { reason } : undefined);
+    },
+  });
+
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
 
@@ -3667,6 +3709,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
     const sessionDoc = persistedDoc.doc as LoroDoc;
+
+    // Only an actual store consumer materializes a prefetched snapshot. Import
+    // merges with this replica's unsent user edits; never replace its document.
+    const cached = await withTimeout(
+      readEagerSyncSnapshot(eagerSyncScope, roomId),
+      1_500,
+      'Eager-sync cache read timed out'
+    ).catch(() => undefined);
+    if (cached) {
+      try {
+        (persistedDoc.doc as LoroDoc).import(new Uint8Array(await cached.snapshot.arrayBuffer()));
+      } catch {
+        // A rebuildable cache must not prevent normal foreground synchronization.
+      }
+    }
 
     const {
       mirror,
@@ -3710,8 +3767,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         sub.unsubscribe();
         // unsubscribe() does not emit a status change, so the tracker would keep
         // reporting its last 'synced' state. Reset it to idle so the room-sync
-        // registry no longer treats this warmed room as joined (which would
-        // suppress eager sync and block warm-doc LRU eviction).
+        // registry no longer treats this cached UI room as joined, which would
+        // suppress future eager sync.
         syncTracker.markStopped();
       }
     };
@@ -3817,6 +3874,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sessionData,
       dispose: () => {
         disposed = true;
+        materializedSessionIds.delete(sessionId);
         stopSyncNow();
         syncTracker.dispose();
         disposeConversation();
@@ -3856,7 +3914,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const sessionStoreCache = createManagedStoreCache<SessionId, SessionDocStore>({
-    create: createSessionStore,
+    create: async (sessionId) => {
+      materializedSessionIds.add(sessionId);
+      eagerSyncWorkerClient?.cancel(getSessionRoomId(sessionId));
+      try {
+        return await createSessionStore(sessionId);
+      } catch (error) {
+        materializedSessionIds.delete(sessionId);
+        throw error;
+      }
+    },
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     // The cache is the doc's sole application-layer owner: hard release = stop
     // sync + Mirror.dispose (store.dispose) + repo.unloadDoc, serialized per key
@@ -4081,7 +4148,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   // --- Background eager-sync coordinator ports -----------------------------
   // These adapters wire the pure BackgroundSyncCoordinator to runtime internals:
-  // session metadata (activity), the session store cache (one-shot prefetch),
+  // session metadata (activity), the isolated worker (one-shot prefetch),
   // and browser online/visibility (env). The coordinator itself imports none of
   // these — see background-sync-coordinator.ts.
   const sessionIdFromRoomId = (roomId: string): SessionId =>
@@ -4242,49 +4309,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
         registry: roomSyncRegistry,
         prefetcher: {
-          prefetch: async (sessionId, signal) => {
-            if (signal.aborted) {
+          prefetch: async (sessionId, lastMessageAt, signal) => {
+            if (signal.aborted || materializedSessionIds.has(sessionId)) {
               return 'skipped';
             }
-            let store: SessionDocStore;
-            try {
-              store = await sessionStoreCache.acquire(sessionId);
-            } catch {
-              return 'failed';
-            }
-            // Hold our own sync lease across the wait so the store reports the live
-            // tracker state (not 'idle') when we inspect the outcome below.
-            const releaseSync = store.acquireSync();
-            try {
-              const synced = store
-                // Pass the abort signal so offline/hidden/timeout cancellation
-                // actually releases the inner sync lease and lets the room join/SSE
-                // tear down, instead of leaving it alive until it settles on its own.
-                .waitUntilSynced(signal)
-                // waitUntilSynced() resolves even when the room join failed (no
-                // subscription → it awaits `undefined`). Only treat it as a real
-                // catch-up if the room actually reached 'synced'; otherwise it is a
-                // failure and must NOT advance the coordinator's synced high-water
-                // mark (which would suppress retries).
-                .then((): 'synced' | 'failed' =>
-                  store.getSyncState() === 'synced' ? 'synced' : 'failed'
-                )
-                .catch((): 'failed' => 'failed');
-              const aborted = new Promise<'skipped'>((resolve) => {
-                if (signal.aborted) {
-                  resolve('skipped');
-                  return;
-                }
-                signal.addEventListener('abort', () => resolve('skipped'), { once: true });
-              });
-              return await Promise.race([synced, aborted]);
-            } finally {
-              releaseSync();
-              sessionStoreCache.releaseRef(sessionId);
-            }
-          },
-          evict: (sessionId) => {
-            void sessionStoreCache.releaseIfIdle(sessionId);
+            return (
+              eagerSyncWorkerClient?.prefetch(getSessionRoomId(sessionId), lastMessageAt, signal) ??
+              'skipped'
+            );
           },
         },
         env: {
@@ -4386,6 +4418,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       backgroundSyncCoordinator = null;
       backgroundSyncHighWaterStore?.close();
       backgroundSyncHighWaterStore = null;
+      eagerSyncWorkerClient?.dispose();
+      eagerSyncWorkerClient = null;
       localReconnectLoop?.stop();
       cloudReconnectLoop?.stop();
       if (reconnectBackstopTimer) {

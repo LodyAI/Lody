@@ -358,6 +358,25 @@ test('translation statuses must agree and every AGENTS file stays under 8 KiB', 
   assert.ok(documentStatus(f.root).errors.some((e) => e.includes('apps/AGENTS.md: 8192')));
 });
 
+test('a pending note counterpart warns without failing the check', (t) => {
+  const f = fixture(t);
+  const note = '.agents/notes/proposed/process/2026-09-06-example.md';
+  f.write(note, '# Note\n\nStatus: proposed\nTranslation: pending\n\n## Abstract\n\nBody.\n');
+  const pending = documentStatus(f.root);
+  assert.ok(
+    pending.warnings.some((w) => w.includes(`${note}: ${note.replace(/\.md$/, '.zh.md')}`))
+  );
+  assert.deepEqual(pending.errors, []);
+  f.commit();
+  confirmTopic(f.root, 'specs/flow', 'reviewed', 'evidence');
+  assert.equal(main(f.root, ['check']), 0, 'translation debt alone must not fail the check');
+  f.write(
+    note.replace(/\.md$/, '.zh.md'),
+    '# 记录\n\nStatus: proposed\nTranslation: current\n\n## 摘要\n\n正文。\n'
+  );
+  assert.deepEqual(documentStatus(f.root).warnings, []);
+});
+
 test('an AGENTS file near the gate warns without failing the check', (t) => {
   const f = fixture(t);
   f.write('AGENTS.md', 'x'.repeat(7000));

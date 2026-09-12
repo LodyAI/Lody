@@ -5262,6 +5262,23 @@ export class SessionExecutionService {
     error?: string;
   }> {
     const { sessionId, turnId } = message;
+    if (message.subagentTaskId) {
+      // This control never writes lastCanceledTurn or interrupts the parent runtime.
+      if (
+        this.deps.getActiveTurnId(sessionId) !== turnId &&
+        this.currentTurnBySession.get(sessionId) !== turnId
+      )
+        return { success: false, error: 'The parent turn is no longer active.' };
+      const client = this.deps.sessionManager.getSession(sessionId)?.agentClient;
+      if (!client?.isCreated())
+        return { success: false, error: 'The agent is no longer connected.' };
+      try {
+        await client.cancelSubagent(message.subagentTaskId);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);

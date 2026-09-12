@@ -1,8 +1,10 @@
 # Continue accepted lifecycle work after ACK delivery failure
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/488
+
+[中文](2026-09-08-machine-lifecycle-ack.zh.md)
 
 ## Abstract
 

@@ -42,7 +42,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
-  ([AGENTS.md](worktree/AGENTS.md)).
+  ([AGENTS.md](worktree/AGENTS.md)). `worktree-gc.ts` reconciles the Lody-managed
+  worktree tree against Session state: archived or deleted root Sessions lose their
+  directory (after a backup commit, branch kept); contract in
+  [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
 
@@ -132,6 +135,22 @@ stalled event loop a short command exits and its stdio is destroyed — dropping
 a failed command is indistinguishable from an empty one. This is what made a session that had
 just opened a PR report "detached HEAD" and never associate it. Long-lived ACP stdio
 deliberately does not capture: it streams and would grow unbounded.
+
+### Why an unsplit terminal command line falls back to `sh -c`
+
+ACP `terminal/create` carries the executable in `command` and its argv in `args`, and that pair
+is spawned directly. Some agents instead send the whole shell line in `command` with empty `args`
+(a bare `ls -al`, or a relayed `bash -lc …`). Spawned literally, no such executable exists: on
+Linux the cgroup sandbox awaits the child's pid and the agent sees an untyped errno `-2`, while
+on the darwin fallback the handle resolves first, so `terminal/create` returns an id whose
+`wait_for_exit` never completes.
+
+The fallback is deliberately narrow — empty `args`, whitespace in `command`, and no file at
+that path — so a spec-conformant call is untouched and an executable whose path contains a
+space is still spawned directly. The shell is non-interactive and non-login (`sh -c`, not
+`bash -lc`): the agent asked for one command, not for the user's login profile to run and
+change its environment. A spawn that still fails answers with a JSON-RPC code instead of a bare
+errno, and its error is recorded as an exit status so no waiter is left pending.
 
 ### Fork saga recovery
 

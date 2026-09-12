@@ -70,6 +70,7 @@ const INHERITED_ENV_ALLOWLIST = [
   'DISPLAY',
   'HOME',
   'LOCALAPPDATA',
+  'LODY_E2E_SHOW_WINDOW',
   'PATH',
   'PATHEXT',
   'SHELL',
@@ -200,6 +201,33 @@ export class ElectronHarness {
     await this.page.waitForFunction(() => document.readyState !== 'loading', undefined, {
       timeout: 60_000,
     });
+    await this.page.evaluate(
+      () => new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()))
+    );
+    const expectedWindowVisibility = env.LODY_E2E_SHOW_WINDOW === '1';
+    if (expectedWindowVisibility) {
+      await this.app.evaluate(async ({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        if (!window || window.isVisible()) return;
+        await new Promise<void>((resolveShow) => window.once('show', () => resolveShow()));
+      });
+    }
+    const windowState = await this.app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      return {
+        backgroundThrottling: window?.webContents.getBackgroundThrottling() ?? null,
+        visible: window?.isVisible() ?? null,
+      };
+    });
+    this.record('electron-main', 'window-state', JSON.stringify(windowState));
+    if (
+      windowState.visible !== expectedWindowVisibility ||
+      windowState.backgroundThrottling !== false
+    ) {
+      throw new Error(
+        `Electron E2E window policy mismatch: expected visible=${expectedWindowVisibility} and backgroundThrottling=false, received ${JSON.stringify(windowState)}`
+      );
+    }
     this.performanceSession = await this.page.context().newCDPSession(this.page);
     this.performanceSession.on('LayerTree.layerPainted', () => {
       this.rendererPaintCount += 1;

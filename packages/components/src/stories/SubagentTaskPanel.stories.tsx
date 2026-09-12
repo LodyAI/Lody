@@ -6,6 +6,7 @@ const running: SubagentTask[] = [
     type: 'subagent_task',
     event: 'task_progress',
     taskId: 'task-1',
+    taskKind: 'subagent',
     status: 'in_progress',
     subagentType: 'Explore',
     description: 'Find codex capability refresh logic',
@@ -115,6 +116,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Running: Story = { args: { tasks: running } };
+export const CancellationError: Story = {
+  args: {
+    tasks: running,
+    onCancel: async () => {
+      throw new Error('Agent disconnected');
+    },
+  },
+};
 export const Completed: Story = { args: { tasks: completed } };
 export const Mixed: Story = { args: { tasks: mixed } };
 export const SingleRunning: Story = { args: { tasks: [running[0] as SubagentTask] } };

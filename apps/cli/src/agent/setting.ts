@@ -312,10 +312,13 @@ export function resolveCustomACPSetting(
   agentType: string,
   customAcp: CustomAcpLaunchSpec | undefined
 ): ResolvedACPSetting {
-  const command = customAcp?.command.trim();
-  if (!command) {
+  const configured = customAcp?.command.trim();
+  if (!configured) {
     throw new Error(`Custom ACP ${agentType} has no launch command configured`);
   }
+  // The launch command is typed by a human, so it can start with `~`. spawn()
+  // does not expand it and the agent would fail to start with ENOENT.
+  const command = expandHomePath(configured);
   return {
     status: { agent: `custom:${agentType}`, command },
     exec: { command, args: [...(customAcp?.args ?? [])] },

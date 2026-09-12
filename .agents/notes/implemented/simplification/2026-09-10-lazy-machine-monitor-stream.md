@@ -1,7 +1,9 @@
 # Join the machine-monitor stream only while it has observers
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-10-lazy-machine-monitor-stream.zh.md)
 
 ## Abstract
 

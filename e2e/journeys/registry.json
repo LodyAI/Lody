@@ -766,6 +766,277 @@
       "scoutJourneys": ["session"],
       "blockedReason": null,
       "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-SEARCH-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Search, rename, revisit, archive, and delete across a three-Session index",
+      "owner": "session-search",
+      "feature": "src/features/sidebar-search.feature",
+      "fixture": "three-ui-created-sessions-and-scripted-acp",
+      "fingerprint": "6bd5ef160471a73c8180652953372bbbd9b9f586dd9c8db950388d2dcb177c1f",
+      "ownerPaths": [
+        "packages/components/src/components/commands/command-palette.tsx",
+        "packages/components/src/components/commands/command-palette-view.tsx",
+        "packages/components/src/components/loro-sidebar.tsx"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createAndNameThree" },
+        { "id": "sidebar.searchCasePartialAndEmpty" },
+        { "id": "session.renameAfterSearch" },
+        { "id": "sidebar.openRenamedTarget" },
+        { "id": "sidebar.reopenRenamedTarget" },
+        { "id": "session.archiveTarget" },
+        { "id": "sidebar.verifyArchivedAndDeletedExclusion" },
+        { "id": "session.deleteAllThroughUi" }
+      ],
+      "checkpoints": [
+        "case-insensitive partial search returns two matching Sessions, excludes an unrelated title, and supports an empty result",
+        "clearing the query restores all three sidebar rows",
+        "renaming removes the old search term, indexes the new title, and opens the exact target history",
+        "leaving and reopening through the sidebar preserves all titles and the rebuilt search index",
+        "Archive and permanent deletion remove only the target while the similar active result remains searchable"
+      ],
+      "cleanup": ["all three Sessions are permanently deleted", "owned ACP processes exit"],
+      "coverage": {
+        "renderer": "Search palette queries, rename refresh, Session navigation, Archive, and UI revisit",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Real owned runtime and three isolated Session histories",
+        "durableState": "Three named Sessions across rename, UI revisit, Archive, and deletion",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-ATTACHMENT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Exercise text attachment draft, persistence, Archive, and cross-Session isolation",
+      "owner": "session-file-attachment",
+      "feature": "src/features/text-attachment.feature",
+      "fixture": "two-ui-created-sessions-local-text-and-scripted-acp",
+      "fingerprint": "6ba3d4df0f911a006f91db85c932c3607cbc7497f6b6682ac913199e5e8e4649",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/chat/",
+        "packages/components/src/components/sessions/session-chat-input-area.tsx",
+        "packages/components/src/hooks/use-chat-landing-file-draft.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createPrimaryFromComposer" },
+        { "id": "composer.cancelFilePicker" },
+        { "id": "composer.attachAndSendTextFileWithPrompt" },
+        { "id": "session.sendPlainFollowUp" },
+        { "id": "sidebar.reopenAttachmentHistory" },
+        { "id": "archive.restorePrimary" },
+        { "id": "session.createAttachmentFreeSecondary" },
+        { "id": "session.deletePrimaryAndVerifySecondary" },
+        { "id": "session.deleteSecondary" }
+      ],
+      "checkpoints": [
+        "cancelling the file chooser leaves no preview and cannot submit an empty draft",
+        "the composer sends synthetic local text plus a prompt without cloud authentication and clears both draft fields",
+        "a later plain-text turn does not inherit the prior attachment",
+        "leaving and reopening through the sidebar plus Archive restore preserve the primary Session attachment and ordered messages",
+        "the secondary Session contains no attachment and survives deletion of the primary Session"
+      ],
+      "cleanup": [
+        "both Sessions and the attachment history are permanently deleted",
+        "owned ACP process exits"
+      ],
+      "coverage": {
+        "renderer": "File picker cancellation, attachment draft, multi-turn history, UI revisit, Archive, and isolation",
+        "electronIpc": "Real Electron local-file handoff and Session RPC",
+        "bundledCli": "Local attachment storage and two Session histories",
+        "durableState": "Local file block across follow-up, UI revisit, Archive restore, isolation, and deletion",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-GOAL-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Control and persist a goal across metadata updates, UI revisit, Archive, and Session isolation",
+      "owner": "session-goal-control",
+      "feature": "src/features/session-goal.feature",
+      "fixture": "goal-capable-two-session-scripted-acp",
+      "fingerprint": "870f809122eb54e50baa12dfe01a65ecc54bd31571e669ba3df4f599c6967f64",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/sessions/",
+        "packages/shared/src/acp/"
+      ],
+      "actions": [
+        { "id": "settings.createGoalCapableAgent" },
+        { "id": "session.startPersistentGoal" },
+        { "id": "session.createIndependentControl" },
+        { "id": "goal.pause" },
+        { "id": "goal.rejectUnavailableActions" },
+        { "id": "goal.updateViaComposer" },
+        { "id": "goal.resume" },
+        { "id": "sidebar.reopenGoalState" },
+        { "id": "goal.pauseAndClear" },
+        { "id": "archive.restoreAndDeleteBoth" }
+      ],
+      "checkpoints": [
+        "the advertised capability exposes only valid controls while a second Session has no goal state or goal wire events",
+        "Pause reaches the out-of-band ACP control once and unavailable duplicate actions cannot create an error state",
+        "a real paused-Session composer turn updates objective and usage metadata before Resume",
+        "Resume carries goal metadata without visible command text and a sidebar reopen preserves the active updated snapshot",
+        "pause-to-clear survives Archive restore with no illegal follow-up controls"
+      ],
+      "cleanup": ["both Sessions are permanently deleted", "goal-capable ACP process exits"],
+      "coverage": {
+        "renderer": "Goal controls, unavailable actions, composer update, UI revisit, Archive, and two-Session isolation",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Goal snapshot persistence, ACP negotiation, prompt metadata, and independent Session history",
+        "durableState": "Isolated active, paused, updated, resumed, revisited, cleared, and restored goal snapshots",
+        "externalWire": "Goal-capable scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 7
+    },
+    {
+      "id": "LODY-AGENT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Validate, edit, revisit, dispatch, and delete two custom command Agent Providers",
+      "owner": "agent-provider-catalog",
+      "feature": "src/features/agent-provider-lifecycle.feature",
+      "fixture": "two-editable-custom-command-scripted-acp",
+      "fingerprint": "ba82d51c6dba18c3bfbd2a383c8e429e49b1589e28d700ea1573560247933d7e",
+      "ownerPaths": [
+        "apps/cli/src/lib/agent-config-machine-flock.ts",
+        "packages/components/src/components/settings/agent-config-dialog.tsx",
+        "packages/components/src/components/settings/machine-agent-settings.tsx",
+        "packages/components/src/components/sessions/desktop-run-config-menu.tsx"
+      ],
+      "actions": [
+        { "id": "settings.rejectUnparseableCustomAgent" },
+        { "id": "settings.createAndPersistCustomAgent" },
+        { "id": "settings.cancelDraftEdit" },
+        { "id": "settings.saveRenamedAgentAndCreateSecond" },
+        { "id": "settings.reopenAgentCatalog" },
+        { "id": "composer.createSessionWithEachAgent" },
+        { "id": "settings.deleteFirstAndRetainSessionHistory" },
+        { "id": "sessionAndAgent.cleanup" }
+      ],
+      "checkpoints": [
+        "an unparseable command disables Test and Create and cancellation leaves the catalog empty",
+        "created fields persist while cancelled draft edits cannot mutate the saved Provider",
+        "saved rename, command, prompt, and second Provider survive closing and reopening Settings while the old name disappears from catalog and composer",
+        "two explicit Provider selections create isolated histories and distinct ACP command-variant and prompt evidence",
+        "deleting the first Provider removes future selection without erasing its completed Session history"
+      ],
+      "cleanup": [
+        "both Sessions are permanently deleted",
+        "both custom Agent Provider rows are deleted"
+      ],
+      "coverage": {
+        "renderer": "Provider validation, edit rollback, Settings revisit, run selection, retained history, and cleanup",
+        "electronIpc": "Real Electron process launch and workspace RPC",
+        "bundledCli": "Two-Provider catalog persistence and selected command dispatch",
+        "durableState": "Rejected draft, cancelled edit, two saved Providers, two Sessions, and deletion transitions",
+        "externalWire": "Two-variant editable scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 8
+    },
+    {
+      "id": "LODY-CONTEXT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Copy Markdown across user, assistant, streaming, revisit, cancel, and Session isolation boundaries",
+      "owner": "session-context-copy",
+      "feature": "src/features/conversation-context-copy.feature",
+      "fixture": "two-session-rich-markdown-streaming-scripted-acp",
+      "fingerprint": "48caeb56b763e1350b9fa34212a141c9895b8e87a28d49b578e1c19dc982b5ea",
+      "ownerPaths": [
+        "packages/components/src/components/chat/",
+        "packages/components/src/components/sessions/",
+        "packages/shared/src/conversation-markdown.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createRichTwoTurnPrimary" },
+        { "id": "message.copyUserPrefix" },
+        { "id": "message.copyAssistantPrefixWithoutNativeFork" },
+        { "id": "sidebar.reopenContextHistory" },
+        { "id": "session.copyStreamingIncompleteMarkdown" },
+        { "id": "session.stopStreamAndRequestCompletedResponse" },
+        { "id": "session.copyCompletedMarkdown" },
+        { "id": "session.cancelIsolatedStream" },
+        { "id": "session.copyIsolatedMarkdown" },
+        { "id": "session.deleteBothThroughUi" }
+      ],
+      "checkpoints": [
+        "user-message copy includes rich Markdown from only the selected first user turn",
+        "assistant-message copy adds that response and still excludes later history while native fork destinations remain absent",
+        "leaving and reopening through the sidebar preserves history and repeats the assistant prefix boundary",
+        "generating Session export includes the stream prefix and incomplete marker; after the user clicks Stop and sends a complete request, export includes the tail without that marker",
+        "a second cancelled Session has ACP cancellation evidence and exports none of the primary Session history"
+      ],
+      "cleanup": ["both Sessions are permanently deleted", "owned ACP process exits"],
+      "coverage": {
+        "renderer": "User and assistant fork menus, streaming Stop, Session copy submenu, UI revisit, and clipboard isolation",
+        "electronIpc": "Real Electron clipboard and Session RPC",
+        "bundledCli": "Two isolated Session histories with completed and cancelled turns",
+        "durableState": "Rich history prefixes, user-stopped streaming state, completed follow-up, UI revisit, and cross-Session isolation",
+        "externalWire": "Scripted ACP with user-triggered cancellation and completed-prompt evidence"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 7
     }
   ]
 }

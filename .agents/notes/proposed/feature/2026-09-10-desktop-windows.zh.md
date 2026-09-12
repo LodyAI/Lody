@@ -1,7 +1,9 @@
 # 桌面多窗口的简化实现
 
 Status: proposed
-Translation: pending
+Translation: current
+
+[English](2026-09-10-desktop-windows.md)
 
 ## 摘要
 

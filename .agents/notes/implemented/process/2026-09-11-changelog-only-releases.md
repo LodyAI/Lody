@@ -1,8 +1,10 @@
 # Changelog-only tag releases
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/609
+
+[中文](2026-09-11-changelog-only-releases.zh.md)
 
 ## Abstract
 

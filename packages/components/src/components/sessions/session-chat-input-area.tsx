@@ -1145,7 +1145,7 @@ export const SessionChatInputArea = memo(
 
     const startFileUpload = useCallback(
       async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId || !authToken) {
+        if (!workspaceId) {
           updatePendingFile(targetSessionId, localId, (entry) => ({
             ...entry,
             status: 'failed',
@@ -1183,6 +1183,16 @@ export const SessionChatInputArea = memo(
           } catch {
             // Local handoff threw; fall back to the cloud upload path.
           }
+        }
+
+        if (!authToken) {
+          updatePendingFile(targetSessionId, localId, (entry) => ({
+            ...entry,
+            status: 'failed',
+            progress: 0,
+            error: fileUploadMissingAuthLabel,
+          }));
+          return;
         }
 
         const abort = new AbortController();

@@ -10,6 +10,14 @@ reference: `context/acp-protocol.md`; per-agent payload quirks:
 
 ## Ownership is bound at enqueue time
 
+Validated `_meta.lody.task` snapshots survive history filtering while running and
+merge by taskId. They are lifecycle facts, not repeated terminal output; never
+drop them under the generic intermediate-tool snapshot compaction rule.
+
+Machine RPC `session/cancel` with `subagentTaskId` forwards only to the native
+AgentClient for the exact active parent turn. It never marks the parent cancelled
+or falls back to whole-turn Stop. The machine advertises subagentCancellation v1.
+
 ACP updates must be bound to assistant-entry ownership when they are enqueued, never
 by asking for "the current turn" during flush. `../session-transient-store.ts` stores
 `assistantEntryId` / `userTurnId` / `turnEpoch` on each buffered update, and
@@ -43,6 +51,13 @@ The former `_meta.claudeCode.toolName` carrier is read only by the centralized
 one-release compatibility path; new provider output must use the Core contract.
 
 ## Flush, evidence, and shutdown
+
+Turn finalization cancels unanswered permission/question requests in the owning
+assistant entry through the existing history write. Preserve answered outcomes
+and other turns; the history subscription releases the waiter and the renderer
+withdraws the card. Do not add a parallel cancellation registry or Pi-only path.
+Permission writes targeting a finished entry are refused, never attached to a
+newer turn; the existing failed-persistence path returns cancellation to ACP.
 
 Parse tool content before enrichment inspects known fields. Unknown protocol blocks
 remain JSON, while malformed known blocks are rejected. Deterministic HistoryWriteError

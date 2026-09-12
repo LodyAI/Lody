@@ -15,6 +15,7 @@ import {
   ToolCallContentSchema,
   parseHistoryWrite,
   HistoryWriteError,
+  parseLodyTaskMeta,
 } from '@lody/shared';
 import type { ModelInfo } from '@lody/shared';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
@@ -879,6 +880,9 @@ const filterNotificationsForHistory = (
         );
     }
     if (update.sessionUpdate !== 'tool_call_update') return true;
+    // Task snapshots are small lifecycle facts, not replaceable tool output.
+    // The history applier merges them by taskId for both live and resumed views.
+    if (parseLodyTaskMeta(update._meta)) return true;
     // Tool call updates are often "full snapshots" (especially terminal output). Persisting all
     // intermediate snapshots causes the CRDT history to blow up. We keep only terminal state
     // transitions that represent a finished tool call.

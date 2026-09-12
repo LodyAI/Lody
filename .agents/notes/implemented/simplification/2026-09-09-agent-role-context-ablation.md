@@ -1,7 +1,9 @@
 # Agent Role context ablation
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-agent-role-context-ablation.zh.md)
 
 ## Abstract
 
