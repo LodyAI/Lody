@@ -346,16 +346,10 @@ const escapeForGitHelper = (value: string): string => value.replace(/"/g, '\\"')
  * `Lody Helper`, `Program Files`) and Windows separators must be forward slashes,
  * because backslashes are escape characters to that shell rather than separators.
  */
-const quoteForGitHelper = (value: string, platform: NodeJS.Platform): string => {
-  const normalized = platform === 'win32' ? value.replace(/\\/g, '/') : value;
+const quoteForGitHelper = (value: string): string => {
+  const normalized = process.platform === 'win32' ? value.replace(/\\/g, '/') : value;
   return `"${escapeForGitHelper(normalized)}"`;
 };
-
-export const formatCredentialHelperCommand = (
-  nodePath: string,
-  helperPath: string,
-  platform: NodeJS.Platform = process.platform
-): string => `!${quoteForGitHelper(nodePath, platform)} ${quoteForGitHelper(helperPath, platform)}`;
 
 /**
  * Host-side helpers run under the CLI's own runtime (`process.execPath`), never a bare
@@ -365,7 +359,9 @@ export const formatCredentialHelperCommand = (
  * the CLI/MCP/watch-worker spawns already do.
  */
 export const buildCredentialHelperValueForHost = (repoId: RepoId): string =>
-  formatCredentialHelperCommand(process.execPath, getCredentialHelperHostPath(repoId));
+  `!${quoteForGitHelper(process.execPath)} ${quoteForGitHelper(
+    getCredentialHelperHostPath(repoId)
+  )}`;
 
 /**
  * Container helpers run inside the devcontainer image, where `node` is on PATH and the
@@ -382,7 +378,7 @@ export const buildCredentialHelperValueForContainer = (repoId: RepoId): string =
  * the Electron binary; without this flag the helper invocation launches a second GUI
  * app instead of executing the helper script.
  */
-export const buildCredentialHelperRuntimeEnv = (
-  source: NodeJS.ProcessEnv = process.env
-): Record<string, string> =>
-  process.versions.electron || source.ELECTRON_RUN_AS_NODE ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+export const buildCredentialHelperRuntimeEnv = (): Record<string, string> =>
+  process.versions.electron || process.env.ELECTRON_RUN_AS_NODE
+    ? { ELECTRON_RUN_AS_NODE: '1' }
+    : {};
