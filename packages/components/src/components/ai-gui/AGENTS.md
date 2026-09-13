@@ -29,6 +29,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Finished turns keep the answer/result tail visible and fold earlier work;
   streaming turns stay expanded. Details remain sibling rows, and search opens
   both the worked region and the activity group.
+- Completion folding is immediate even after the reader releases bottom-follow. Preserve a stable
+  visible row's viewport coordinate across the contraction; transient trailing scroll range may
+  prevent native clamping, but finished rows must never masquerade as streaming rows.
 - The final answer is the final contiguous run of text before trailing
   never-collapsed items, not necessarily the last item: walk backward through
   adjacent text blocks until a non-text boundary.

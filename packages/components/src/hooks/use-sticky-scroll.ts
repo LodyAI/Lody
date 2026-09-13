@@ -31,6 +31,8 @@ export interface UseStickyScrollOptions {
    * can resize the list underneath it.
    */
   suppressAutoScrollRef?: RefObject<boolean>;
+  /** Synchronous mirror used when a render must avoid collapsing content under a reader. */
+  stickyStateRef?: MutableRefObject<boolean>;
 }
 
 export interface UseStickyScrollResult {
@@ -124,6 +126,35 @@ function useStickyViewportResizeObserver(options: {
   ]);
 }
 
+/**
+ * `use-stick-to-bottom` intentionally re-locks after a negative content resize
+ * lands within its bottom tolerance. Programmatic layout preservation needs the
+ * opposite rule: keep follow released until the caller finishes compensating.
+ * Register after the library observer so this callback wins the same delivery.
+ */
+function useStickyContentResizeSuppression(options: {
+  scrollElement: HTMLElement | null;
+  suppressAutoScrollRef?: RefObject<boolean>;
+  stickyStateRef?: MutableRefObject<boolean>;
+  stopScroll: () => void;
+}): void {
+  const { scrollElement, suppressAutoScrollRef, stickyStateRef, stopScroll } = options;
+
+  useEffect(() => {
+    const contentElement = scrollElement?.firstElementChild;
+    if (!(contentElement instanceof HTMLElement) || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      if (!suppressAutoScrollRef?.current) return;
+      if (stickyStateRef) stickyStateRef.current = false;
+      stopScroll();
+    });
+    observer.observe(contentElement);
+    return () => observer.disconnect();
+  }, [scrollElement, stickyStateRef, stopScroll, suppressAutoScrollRef]);
+}
+
 export function useStickyScroll({
   sessionId,
   vlistRef,
@@ -131,6 +162,7 @@ export function useStickyScroll({
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
   suppressAutoScrollRef,
+  stickyStateRef,
 }: UseStickyScrollOptions): UseStickyScrollResult {
   const cachedPositionAtMountRef = useRef(getScrollPosition(sessionId));
   const stickToBottom = useStickToBottom({
@@ -151,6 +183,7 @@ export function useStickyScroll({
   // `escapedFromLock` here would leave the UI permanently escaped after that
   // explicit re-lock because it records history rather than the current lock.
   const isSticky = state.isAtBottom;
+  if (stickyStateRef) stickyStateRef.current = isSticky;
   const stickyBottomRef = useRef(isSticky);
   stickyBottomRef.current = isSticky;
 
@@ -164,9 +197,12 @@ export function useStickyScroll({
 
   const handleWheelUp = useCallback(
     (event: WheelEvent) => {
-      if (event.deltaY < 0) stopScroll();
+      if (event.deltaY < 0) {
+        if (stickyStateRef) stickyStateRef.current = false;
+        stopScroll();
+      }
     },
-    [stopScroll]
+    [stickyStateRef, stopScroll]
   );
 
   const setScrollRef = useCallback<RefCallback<HTMLDivElement>>(
@@ -214,30 +250,35 @@ export function useStickyScroll({
       if (!currentVlist) return;
 
       if (cachedState?.type === 'offset') {
+        if (stickyStateRef) stickyStateRef.current = false;
         stopScroll();
         currentVlist.scrollTo(cachedState.scrollOffset);
       } else {
+        if (stickyStateRef) stickyStateRef.current = true;
         void scrollToBottomWithLock({ animation: 'instant' });
         scrollToRealBottom();
       }
       initialScrollRestoredRef.current = true;
       setInitialScrollRestored(true);
     });
-  }, [itemCount, scrollToBottomWithLock, scrollToRealBottom, stopScroll, vlistRef]);
+  }, [itemCount, scrollToBottomWithLock, scrollToRealBottom, stickyStateRef, stopScroll, vlistRef]);
 
   // Search jumps and group expansion are deliberate reading-position changes.
   // Release follow in a layout effect so ResizeObserver cannot pull the list to
   // the end between the React commit and the caller's programmatic jump.
   useLayoutEffect(() => {
-    if (suppressAutoScrollRef?.current) stopScroll();
+    if (!suppressAutoScrollRef?.current) return;
+    if (stickyStateRef) stickyStateRef.current = false;
+    stopScroll();
   });
 
   const scrollToBottom = useCallback(() => {
     saveScrollPosition(sessionId, { type: 'end' });
     if (itemCountRef.current <= 0) return;
+    if (stickyStateRef) stickyStateRef.current = true;
     void scrollToBottomWithLock({ animation: 'instant' });
     scrollToRealBottom();
-  }, [itemCountRef, scrollToBottomWithLock, scrollToRealBottom, sessionId]);
+  }, [itemCountRef, scrollToBottomWithLock, scrollToRealBottom, sessionId, stickyStateRef]);
 
   const handleScroll = useCallback(
     (offset: number) => {
@@ -275,6 +316,12 @@ export function useStickyScroll({
     scrollToRealBottom,
     skipNextViewportResizeAutoScrollRef,
     suppressAutoScrollRef,
+  });
+  useStickyContentResizeSuppression({
+    scrollElement,
+    suppressAutoScrollRef,
+    stickyStateRef,
+    stopScroll,
   });
 
   return {

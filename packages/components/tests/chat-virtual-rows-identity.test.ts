@@ -130,6 +130,31 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     });
   });
 
+  it('folds work immediately when a streaming turn finishes', () => {
+    const streaming = wrap(
+      makeMessage(
+        'turn-completing',
+        'assistant',
+        [toolCall(), text('checkpoint'), toolCall(), text('final answer')],
+        false
+      )
+    );
+    const beforeCompletion = build([streaming]);
+    const finished = wrap({ ...streaming.message, finished: true });
+
+    const folded = build([finished]);
+    expect(
+      folded.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
+    ).toBe(true);
+    const beforeContentKeys = beforeCompletion
+      .filter((row) => row.type === 'assistant' && row.content.kind !== 'footer')
+      .map((row) => row.key);
+    const foldedContentKeys = folded
+      .filter((row) => row.type === 'assistant' && row.content.kind !== 'footer')
+      .map((row) => row.key);
+    expect(foldedContentKeys).not.toEqual(beforeContentKeys);
+  });
+
   it('an index shift (prepended message) invalidates cached rows', () => {
     const { finishedTurn, streamingTurn, items } = makeConversation();
     const first = build(items);

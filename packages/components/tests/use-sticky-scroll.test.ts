@@ -74,6 +74,8 @@ type HarnessProps = {
   itemCount: number;
   onAtBottomChange?: (atBottom: boolean) => void;
   skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
+  suppressAutoScrollRef?: React.MutableRefObject<boolean>;
+  stickyStateRef?: React.MutableRefObject<boolean>;
 };
 
 async function advanceAnimationFrames(): Promise<void> {
@@ -222,6 +224,8 @@ function HookHarness({
   itemCount,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
+  suppressAutoScrollRef,
+  stickyStateRef,
 }: HarnessProps) {
   const vlistRef = useRef<VirtualizerHandle | null>(vlist);
   vlistRef.current = vlist;
@@ -232,6 +236,8 @@ function HookHarness({
     itemCount,
     onAtBottomChange,
     skipNextViewportResizeAutoScrollRef,
+    suppressAutoScrollRef,
+    stickyStateRef,
   });
   const { scrollRef } = result;
 
@@ -371,6 +377,29 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(fixture.getScrollTop()).toBe(320);
   });
 
+  it('mirrors upward wheel intent before React reports the changed lock', async () => {
+    const sessionId = 'session-wheel-mirror' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const stickyStateRef = { current: true };
+
+    await renderHarness({
+      sessionId,
+      vlist,
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+      stickyStateRef,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    act(() => {
+      fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+      expect(stickyStateRef.current).toBe(false);
+    });
+  });
+
   it('keeps the viewport pinned to the real bottom when sticky content grows', async () => {
     const sessionId = 'session-streaming-growth' as SessionId;
     const fixture = createScrollFixture();
@@ -488,6 +517,70 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(fixture.getScrollTop()).toBe(240);
     expect(skipNextViewportResizeAutoScrollRef.current).toBe(false);
     expect(latestResult?.isSticky).toBe(true);
+  });
+
+  it('synchronously mirrors a suppressed follow as unstuck', async () => {
+    const sessionId = 'session-suppressed-follow' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const suppressAutoScrollRef = { current: false };
+    const stickyStateRef = { current: true };
+
+    await renderHarness({
+      sessionId,
+      vlist,
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+      suppressAutoScrollRef,
+      stickyStateRef,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    suppressAutoScrollRef.current = true;
+    await renderHarness({
+      sessionId,
+      vlist,
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+      suppressAutoScrollRef,
+      stickyStateRef,
+    });
+
+    expect(stickyStateRef.current).toBe(false);
+    expect(latestResult?.isSticky).toBe(false);
+  });
+
+  it('keeps follow released when suppressed content contraction enters the bottom tolerance', async () => {
+    const sessionId = 'session-suppressed-content-resize' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const suppressAutoScrollRef = { current: false };
+    const stickyStateRef = { current: true };
+
+    await renderHarness({
+      sessionId,
+      vlist,
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+      suppressAutoScrollRef,
+      stickyStateRef,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    suppressAutoScrollRef.current = true;
+    fixture.setContentHeight(560);
+    fixture.setScrollHeight(584);
+    await act(async () => {
+      emitResize(fixture.contentElement);
+      await advanceAnimationFrames();
+    });
+
+    expect(stickyStateRef.current).toBe(false);
+    expect(latestResult?.isSticky).toBe(false);
   });
 
   it('attaches when the scroll viewport mounts after the empty state', async () => {
