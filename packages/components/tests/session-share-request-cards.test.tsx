@@ -70,7 +70,7 @@ afterEach(async () => {
 it('opens human review without publishing and retains its editor after confirmation consumes the request', async () => {
   await render();
   expect(container.textContent).toContain('Root title');
-  await click('Review share');
+  await click('Review and share');
   expect(container.querySelector('[role="dialog"]')?.getAttribute('data-request')).toBe('request');
   expect(cloud.cancel).not.toHaveBeenCalled();
   cloud.status = 'confirmed';
@@ -88,7 +88,7 @@ it('explains abandon-and-restart after remount and hides completed requests', as
   cloud.status = 'confirmed';
   await render();
   expect(container.textContent).toContain('Abandon deployment');
-  expect(container.textContent).not.toContain('Review share');
+  expect(container.textContent).not.toContain('Review and share');
   expect(container.textContent).toContain('new share request with a new requestId');
   cloud.status = 'published';
   await render();

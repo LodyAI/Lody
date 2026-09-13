@@ -24,59 +24,134 @@ const entry = {
   canManage: true,
   canRevoke: true,
 };
+/** Obviously synthetic: never screenshot a real bearer credential. */
+const storyLink = `https://lody.ai/s/demo-share#access=v1.${'demo'.repeat(16)}`;
+const noop = async () => {};
+
 const meta = {
   title: 'Sharing/SessionShareManager',
   component: SessionShareManager,
   parameters: { layout: 'fullscreen' },
   render: function Story(args) {
     const [selected, setSelected] = useState(args.selected);
+    const [wide, setWide] = useState(false);
     return (
-      <SessionShareDialogFrame title="Designing static sharing">
-        <SessionShareManager {...args} selected={selected} onSelect={setSelected} />
+      <SessionShareDialogFrame title="Designing static sharing" wide={wide}>
+        <SessionShareManager
+          {...args}
+          selected={selected}
+          onSelect={setSelected}
+          onPreviewOpenChange={setWide}
+        />
       </SessionShareDialogFrame>
     );
   },
   args: {
     sessionId: 'main',
-    entry,
-    selected: ['main', 'child'],
+    entry: null,
+    selected: ['main'],
     candidates: [
       { sessionId: 'main', title: 'Designing static sharing' },
       { sessionId: 'child', title: 'Deployment design' },
+      { sessionId: 'child-2', title: 'Reader layout notes' },
     ],
     pending: null,
+    phase: 'idle',
     progress: 0,
+    result: null,
+    shareLink: null,
     canCapture: true,
-    hasSecret: true,
+    hasSecret: false,
     busy: false,
     conflict: false,
     error: null,
     notice: null,
     onSelect: () => {},
-    onPrepare: async () => {},
-    onConfirm: async () => {},
+    onPrepare: noop,
+    onPublish: noop,
+    onConfirm: noop,
     onDiscard: () => {},
-    onReset: async () => {},
-    onCopy: async () => {},
-    onRevoke: async () => {},
+    onCopy: noop,
+    onReset: noop,
+    onRevoke: noop,
+    onClose: () => {},
   },
 } satisfies Meta<SessionShareManagerProps>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const Active: Story = {};
-export const NewLink: Story = { args: { entry: null, selected: ['main'], hasSecret: false } };
-export const MissingSecret: Story = { args: { hasSecret: false } };
-export const Administrator: Story = {
-  args: { entry: { ...entry, canManage: false }, hasSecret: false },
+
+/** First share: one sentence, one choice, two buttons. */
+export const NewShare: Story = {};
+
+export const NewShareWithoutSubConversations: Story = {
+  args: { candidates: [{ sessionId: 'main', title: 'Designing static sharing' }] },
 };
-export const SourceDeleted: Story = { args: { canCapture: false } };
-export const Publishing: Story = { args: { busy: true, progress: 45 } };
-export const Failed: Story = {
-  args: { error: 'Could not publish. The current deployment is unchanged.' },
+
+export const Capturing: Story = { args: { busy: true, phase: 'capturing' } };
+
+export const Uploading: Story = { args: { busy: true, phase: 'uploading', progress: 62 } };
+
+export const Publishing: Story = { args: { busy: true, phase: 'publishing', progress: 100 } };
+
+export const Published: Story = {
+  args: { entry, hasSecret: true, shareLink: storyLink, result: { url: storyLink, copied: true } },
 };
-export const Revoked: Story = {
+
+/** A blocked clipboard must never be reported as a successful copy. */
+export const PublishedCopyBlocked: Story = {
+  args: { entry, hasSecret: true, shareLink: storyLink, result: { url: storyLink, copied: false } },
+};
+
+export const AlreadyShared: Story = {
+  args: { entry, selected: ['main', 'child'], hasSecret: true, shareLink: storyLink },
+};
+
+export const PublishFailed: Story = {
   args: {
-    entry: { ...entry, status: 'revoked', canManage: false, canRevoke: false },
-    hasSecret: false,
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    error: 'Could not update sharing. Check the current settings and try again.',
+    pending: { manifest: { conversations: [], attachments: [] } } as never,
   },
 };
+
+export const Conflict: Story = {
+  args: {
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    conflict: true,
+    pending: { manifest: { conversations: [], attachments: [] } } as never,
+  },
+};
+
+export const UnfinishedDraft: Story = {
+  args: { entry: { ...entry, status: 'draft' } },
+};
+
+export const MissingCredential: Story = {
+  args: { entry, selected: ['main', 'child'], hasSecret: false },
+};
+
+export const Administrator: Story = {
+  args: { entry: { ...entry, canManage: false }, selected: ['main', 'child'] },
+};
+
+export const SourceDeleted: Story = {
+  args: {
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    canCapture: false,
+  },
+};
+
+export const Revoked: Story = {
+  args: { entry: { ...entry, status: 'revoked', canManage: false, canRevoke: false } },
+};
+
+export const Loading: Story = { args: { entry: undefined } };

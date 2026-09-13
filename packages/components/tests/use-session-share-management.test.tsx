@@ -148,6 +148,99 @@ describe('static publication client lifecycle', () => {
     expect(JSON.stringify(cloud.mutation.mock.calls)).not.toContain('a'.repeat(64));
     expect(readSessionShareSecret(localStorage, key, 1)).toBe('a'.repeat(64));
   });
+  it('freezes, uploads and publishes from one action and reports a real clipboard write', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await render();
+    await act(async () => control.onPublish());
+    expect(cloud.capture).toHaveBeenCalledOnce();
+    expect(cloud.upload).toHaveBeenCalledOnce();
+    expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+      'sessionSharing:beginDeployment',
+      'sessionSharing:publishDeployment',
+    ]);
+    const url = `https://share.test/s/share#access=v1.${'a'.repeat(64)}`;
+    expect(writeText).toHaveBeenCalledWith(url);
+    expect(control.result).toEqual({ url, copied: true });
+    expect(control.phase).toBe('idle');
+    expect(control.pending).toBeNull();
+  });
+
+  it('never claims a copy the clipboard refused, and keeps the link recoverable', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.result).toEqual({
+      url: `https://share.test/s/share#access=v1.${'a'.repeat(64)}`,
+      copied: false,
+    });
+    expect(control.error).toBeNull();
+  });
+
+  it('reports a measured phase only while bytes move', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    const gate = () => {
+      let open!: () => void;
+      const promise = new Promise<void>((resolve) => (open = resolve));
+      return { promise, open };
+    };
+    const captureEntered = gate(),
+      captureHeld = gate(),
+      uploadEntered = gate(),
+      uploadHeld = gate();
+    const frozen = await prepareSharePackage({
+      rootSourceId: 'root',
+      conversations: [{ sourceId: 'root', title: 'Root', history: [] }],
+      capturedAt: '2026-09-12T00:00:00.000Z',
+      readAttachment: async () => {
+        throw new Error('Unexpected');
+      },
+    });
+    cloud.capture.mockImplementation(async () => {
+      captureEntered.open();
+      await captureHeld.promise;
+      return frozen;
+    });
+    cloud.upload.mockImplementation(
+      async ({ onProgress }: { onProgress?: (uploaded: number, total: number) => void }) => {
+        onProgress?.(1, 2);
+        uploadEntered.open();
+        await uploadHeld.promise;
+      }
+    );
+    await render();
+    let published!: Promise<void>;
+    // Freezing has no byte total, so it must not report a percentage.
+    await act(async () => {
+      published = control.onPublish();
+      await captureEntered.promise;
+    });
+    expect([control.phase, control.progress]).toEqual(['capturing', 0]);
+    await act(async () => {
+      captureHeld.open();
+      await uploadEntered.promise;
+    });
+    expect([control.phase, control.progress]).toEqual(['uploading', 50]);
+    await act(async () => {
+      uploadHeld.open();
+      await published;
+    });
+    expect([control.phase, control.progress]).toEqual(['idle', 0]);
+  });
+
+  it('does not upload when an explicit preview freezes the package', async () => {
+    await render();
+    await act(async () => control.onPrepare());
+    expect(control.pending).not.toBeNull();
+    expect(cloud.upload).not.toHaveBeenCalled();
+    expect(cloud.mutation).not.toHaveBeenCalled();
+    expect(control.phase).toBe('idle');
+  });
+
   it('retries a failed publish without uploading or creating another deployment', async () => {
     let attempts = 0;
     cloud.mutation.mockImplementation(async (name: string) => {

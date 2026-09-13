@@ -46,7 +46,7 @@ export function SessionSharePreview({ prepared }: { prepared: PreparedSharePacka
     [prepared]
   );
   return (
-    <div className="mt-3 overflow-hidden rounded-md border [&_main]:h-[60vh]">
+    <div className="overflow-hidden rounded-md border border-border/60 [&_main]:h-[50vh]">
       <SessionShareErrorBoundary>
         <SessionShareSurface
           manifest={prepared.manifest}

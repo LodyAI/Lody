@@ -86,6 +86,20 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
       ? ephemeral.secret
       : null;
   }
+  /** The bearer link, or null when this device cannot reconstruct it. */
+  function linkFor(entry: SessionShareView): string | null {
+    const secret = secretFor(entry);
+    if (!secret) return null;
+    try {
+      return createSessionShareUrl(
+        entry.shareId,
+        secret,
+        import.meta.env.VITE_SESSION_SHARE_ORIGIN
+      );
+    } catch {
+      return null;
+    }
+  }
   async function run(action: () => Promise<void>) {
     if (!current() || busyRef.current) return;
     busyRef.current = true;
@@ -114,13 +128,12 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
     run,
     remember,
     secretFor,
+    linkFor,
     copy(entry: SessionShareView) {
       return run(async () => {
-        const secret = secretFor(entry);
-        if (!secret) throw new Error('Share credential unavailable');
-        await navigator.clipboard.writeText(
-          createSessionShareUrl(entry.shareId, secret, import.meta.env.VITE_SESSION_SHARE_ORIGIN)
-        );
+        const link = linkFor(entry);
+        if (!link) throw new Error('Share credential unavailable');
+        await navigator.clipboard.writeText(link);
         if (current()) setNotice(t('settings.shares.copied', 'Share link copied'));
       });
     },
@@ -165,6 +178,29 @@ type PendingPublication = {
   expected: SessionShareView | null;
 };
 
+/**
+ * Which irreversible step is running right now.
+ *
+ * Only `uploading` has a byte total, so it is the only phase whose bar may show
+ * a percentage; capture and the publish commit report an indeterminate bar
+ * rather than an invented number.
+ */
+export type SharePublishPhase =
+  | 'idle'
+  /** Freezing bytes for an explicit preview request; nothing will be uploaded. */
+  | 'previewing'
+  | 'capturing'
+  | 'uploading'
+  | 'publishing';
+
+/** What the just-finished publication produced, so success can be shown truthfully. */
+export type SharePublishResult = {
+  /** Null when this device holds no credential (an update published by its owner still has one). */
+  url: string | null;
+  /** Only true once the clipboard write actually resolved. */
+  copied: boolean;
+};
+
 /** Key the owner by account/workspace/root so an async publication cannot cross scopes. */
 export function useSessionShareManagement(
   workspaceId: WorkspaceId,
@@ -185,8 +221,24 @@ export function useSessionShareManagement(
   const begin = useCloudMutation(operations.beginDeployment);
   const publish = useCloudMutation(operations.publishDeployment);
   const [selectedDraft, setSelected] = useState<string[] | null>(null);
-  const [pending, setPending] = useState<PendingPublication | null>(null);
+  const [pending, setPendingState] = useState<PendingPublication | null>(null);
   const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState<SharePublishPhase>('idle');
+  const [result, setResult] = useState<SharePublishResult | null>(null);
+  // Publication is one uninterrupted async unit, so it must read the retry
+  // credentials it just created rather than a state value from a stale render.
+  const pendingRef = useRef<PendingPublication | null>(null);
+  const setPending = (
+    value:
+      | PendingPublication
+      | null
+      | ((prev: PendingPublication | null) => PendingPublication | null)
+  ) =>
+    setPendingState((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      pendingRef.current = next;
+      return next;
+    });
   const lifetime = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -204,85 +256,141 @@ export function useSessionShareManagement(
     !(pending.deploymentId && entry?.currentDeploymentId === pending.deploymentId) &&
     (pending.expected?.shareId !== (entry?.status === 'active' ? entry.shareId : undefined) ||
       pending.expected?.revision !== (entry?.status === 'active' ? entry.revision : undefined));
+  /** Freeze the package without publishing it. Reused as the retry key holder. */
+  const capture = async (label: SharePublishPhase): Promise<PendingPublication> => {
+    const runtime = store.get(activeWorkspaceRuntimeAtom),
+      token = store.get(authTokenAtom);
+    if (!runtime || runtime.workspaceId !== workspaceId || !token || !lifetime.current)
+      throw new Error('Share source unavailable');
+    const byId = new Map(Object.values(meta).map((session) => [session.id as string, session]));
+    const sessions = selected.map((id) => byId.get(id)).filter((s): s is SessionMeta => !!s);
+    if (sessions.length !== selected.length || !selected.includes(sessionId))
+      throw new Error('Share source unavailable');
+    const signal = AbortSignal.any([lifetime.current.signal, AbortSignal.timeout(120_000)]);
+    setPhase(label);
+    const prepared = await captureSessionShare({
+      runtime,
+      token,
+      sessions,
+      rootSessionId: sessionId,
+      previousSourceIds: entry?.sourceIds,
+      signal,
+    });
+    signal.throwIfAborted();
+    const expected = entry?.status === 'active' ? entry : null;
+    const value: PendingPublication = {
+      prepared,
+      expected,
+      requestId: crypto.randomUUID(),
+      uploadSecret: createSessionShareSecret(),
+      readerSecret: expected ? null : createSessionShareSecret(),
+    };
+    setPending(value);
+    return value;
+  };
+  /** Upload the frozen bytes and commit the deployment. Safe to call again after a failure. */
+  const publishPrepared = async (value: PendingPublication) => {
+    if (!lifetime.current) throw new Error('Share confirmation changed');
+    const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
+    setPhase('uploading');
+    setProgress(0);
+    const deployment = value.deploymentId
+      ? { deploymentId: value.deploymentId }
+      : await begin({
+          workspaceId,
+          rootSessionId: sessionId,
+          shareId: expected?.shareId,
+          expectedRevision: expected?.revision,
+          credentialHash: readerSecret ? await hashSessionShareSecret(readerSecret) : undefined,
+          uploadCredentialHash: await hashSessionShareSecret(uploadSecret),
+          requestId,
+          confirmationRequestId: confirmation?.requestId,
+          manifest: prepared.manifest,
+          sourceIds: prepared.sourceIds,
+        });
+    value.deploymentId = deployment.deploymentId;
+    setPending((current) =>
+      current?.requestId === requestId
+        ? { ...current, deploymentId: deployment.deploymentId }
+        : current
+    );
+    lifetime.current.signal.throwIfAborted();
+    if (!value.sealed) {
+      await uploadPreparedShare({
+        origin: import.meta.env.VITE_SERVER_URL,
+        deploymentId: deployment.deploymentId,
+        secret: uploadSecret,
+        prepared,
+        signal: lifetime.current.signal,
+        onProgress: (uploaded, total) =>
+          setProgress(total ? Math.round((uploaded / total) * 100) : 100),
+      });
+      value.sealed = true;
+      setPending((current) =>
+        current?.requestId === requestId ? { ...current, sealed: true } : current
+      );
+    }
+    setPhase('publishing');
+    const updated = await publish({ deploymentId: deployment.deploymentId });
+    if (readerSecret) actions.remember(updated, readerSecret);
+    if (lifetime.current.signal.aborted) return;
+    // Auto-copy is a convenience, never a claim: only a resolved write counts.
+    const url = actions.linkFor(updated);
+    let copied = false;
+    if (url) {
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+    if (lifetime.current.signal.aborted) return;
+    setResult({ url, copied });
+    setPending(null);
+    setSelected(null);
+    setProgress(0);
+  };
   const prepare = () =>
     actions.run(async () => {
-      const runtime = store.get(activeWorkspaceRuntimeAtom),
-        token = store.get(authTokenAtom);
-      if (!runtime || runtime.workspaceId !== workspaceId || !token || !lifetime.current)
-        throw new Error('Share source unavailable');
-      const byId = new Map(Object.values(meta).map((session) => [session.id as string, session]));
-      const sessions = selected.map((id) => byId.get(id)).filter((s): s is SessionMeta => !!s);
-      if (sessions.length !== selected.length || !selected.includes(sessionId))
-        throw new Error('Share source unavailable');
-      const signal = AbortSignal.any([lifetime.current.signal, AbortSignal.timeout(120_000)]);
-      const prepared = await captureSessionShare({
-        runtime,
-        token,
-        sessions,
-        rootSessionId: sessionId,
-        previousSourceIds: entry?.sourceIds,
-        signal,
-      });
-      signal.throwIfAborted();
-      const expected = entry?.status === 'active' ? entry : null;
-      setPending({
-        prepared,
-        expected,
-        requestId: crypto.randomUUID(),
-        uploadSecret: createSessionShareSecret(),
-        readerSecret: expected ? null : createSessionShareSecret(),
-      });
+      try {
+        await capture('previewing');
+      } finally {
+        setPhase('idle');
+      }
+    });
+  /** One human action: freeze if needed, then upload and commit. */
+  const publishNow = () =>
+    actions.run(async () => {
+      try {
+        const existing = pendingRef.current;
+        if (existing && conflict) throw new Error('Share confirmation changed');
+        await publishPrepared(existing ?? (await capture('capturing')));
+      } finally {
+        setPhase('idle');
+      }
     });
   const confirm = () =>
     actions.run(async () => {
-      if (!pending || conflict || !lifetime.current) throw new Error('Share confirmation changed');
-      const { expected, prepared, uploadSecret, readerSecret, requestId } = pending;
-      const result = pending.deploymentId
-        ? { deploymentId: pending.deploymentId }
-        : await begin({
-            workspaceId,
-            rootSessionId: sessionId,
-            shareId: expected?.shareId,
-            expectedRevision: expected?.revision,
-            credentialHash: readerSecret ? await hashSessionShareSecret(readerSecret) : undefined,
-            uploadCredentialHash: await hashSessionShareSecret(uploadSecret),
-            requestId,
-            confirmationRequestId: confirmation?.requestId,
-            manifest: prepared.manifest,
-            sourceIds: prepared.sourceIds,
-          });
-      setPending((value) =>
-        value?.requestId === requestId ? { ...value, deploymentId: result.deploymentId } : value
-      );
-      lifetime.current.signal.throwIfAborted();
-      if (!pending.sealed) {
-        await uploadPreparedShare({
-          origin: import.meta.env.VITE_SERVER_URL,
-          deploymentId: result.deploymentId,
-          secret: uploadSecret,
-          prepared,
-          signal: lifetime.current.signal,
-          onProgress: (uploaded, total) =>
-            setProgress(total ? Math.round((uploaded / total) * 100) : 100),
-        });
-        setPending((value) =>
-          value?.requestId === requestId ? { ...value, sealed: true } : value
-        );
-      }
-      const updated = await publish({ deploymentId: result.deploymentId });
-      if (readerSecret) actions.remember(updated, readerSecret);
-      if (!lifetime.current.signal.aborted) {
-        setPending(null);
-        setSelected(null);
-        setProgress(0);
+      const existing = pendingRef.current;
+      if (!existing || conflict) throw new Error('Share confirmation changed');
+      try {
+        await publishPrepared(existing);
+      } finally {
+        setPhase('idle');
       }
     });
+  const shareLink = entry ? actions.linkFor(entry) : null;
   return {
     entry,
     selected,
     pending: pending?.prepared ?? null,
     conflict,
     progress,
+    phase,
+    result,
+    /** The current bearer link when this device can rebuild it, else null. */
+    shareLink: result?.url ?? shareLink,
     canCapture: selected.every(
       (id) => candidateIds.includes(id) && Object.values(meta).some((session) => session.id === id)
     ),
@@ -297,10 +405,22 @@ export function useSessionShareManagement(
       }
     },
     onPrepare: prepare,
+    onPublish: publishNow,
     onConfirm: confirm,
     onDiscard: () => setPending(null),
-    onCopy: () => entry && actions.copy(entry),
+    onCopy: () =>
+      result
+        ? actions.run(async () => {
+            if (!result.url) throw new Error('Share credential unavailable');
+            await navigator.clipboard.writeText(result.url);
+            setResult((value) => (value ? { ...value, copied: true } : value));
+          })
+        : entry && actions.copy(entry),
     onReset: () => entry && actions.reset(entry),
-    onRevoke: () => entry && actions.revoke(entry),
+    onRevoke: () =>
+      entry &&
+      actions.revoke(entry).then(() => {
+        setResult(null);
+      }),
   };
 }
