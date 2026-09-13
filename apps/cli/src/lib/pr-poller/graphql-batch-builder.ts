@@ -2,7 +2,7 @@
  * Pure builder for the reconciler's batched GraphQL query (spec
  * `specs/pr-status-reconciler.md` — GitHub 请求契约): one query per
  * `(workspace, repository)` batch carrying `pullRequest(number:)` aliases for
- * known open/draft PRs and two bounded `pullRequests(headRefName:)` aliases
+ * known non-merged PRs and two bounded `pullRequests(headRefName:)` aliases
  * per branch-discovery target (newest open + newest merged/closed), plus a
  * top-level `rateLimit` block whose `cost`/`remaining` drive the quota
  * bucket. No review decision / review threads / check-run details — those

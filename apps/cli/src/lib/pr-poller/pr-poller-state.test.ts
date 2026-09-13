@@ -70,10 +70,6 @@ describe('PrPollerStateStore', () => {
     });
     store.upsertTarget('ws1|s1|owner/repo|status|11', { lastSuccessAtMs: 1_720_000_000_000 });
     store.upsertDiscoveryFingerprint('ws1:s1', 'owner/repo|feat/x');
-    store.upsertTerminalVerificationFingerprint(
-      'ws1:s1',
-      'owner/repo|pr|11|https://github.com/owner/repo/pull/11|merged'
-    );
     store.close();
 
     const reloaded = makeStore().load();
@@ -94,9 +90,6 @@ describe('PrPollerStateStore', () => {
       },
       targets: { 'ws1|s1|owner/repo|status|11': { lastSuccessAtMs: 1_720_000_000_000 } },
       discoveryFingerprints: { 'ws1:s1': 'owner/repo|feat/x' },
-      terminalVerificationFingerprints: {
-        'ws1:s1': 'owner/repo|pr|11|https://github.com/owner/repo/pull/11|merged',
-      },
     });
   });
 
@@ -115,8 +108,6 @@ describe('PrPollerStateStore', () => {
     store.deleteRepoCooldown('c1');
     store.upsertDiscoveryFingerprint('f1', 'r|b');
     store.deleteDiscoveryFingerprint('f1');
-    store.upsertTerminalVerificationFingerprint('v1', 'r|pr|1|url|merged');
-    store.deleteTerminalVerificationFingerprint('v1');
 
     expect(store.load()).toEqual({
       ...emptyPrPollerState(),
@@ -141,9 +132,6 @@ describe('PrPollerStateStore', () => {
         },
         targets: { 'ws1|s1|owner/repo|status|11': { lastSuccessAtMs: 7 } },
         discoveryFingerprints: { 'ws1:s1': 'owner/repo|feat/x' },
-        terminalVerificationFingerprints: {
-          'ws1:s1': 'owner/repo|pr|11|https://github.com/owner/repo/pull/11|merged',
-        },
       })
     );
 
@@ -152,9 +140,6 @@ describe('PrPollerStateStore', () => {
     expect(state.repoCooldowns['managed:abc:owner/repo']?.consecutiveFailures).toBe(1);
     expect(state.targets['ws1|s1|owner/repo|status|11']).toEqual({ lastSuccessAtMs: 7 });
     expect(state.discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
-    expect(state.terminalVerificationFingerprints['ws1:s1']).toBe(
-      'owner/repo|pr|11|https://github.com/owner/repo/pull/11|merged'
-    );
     // The JSON file is consumed — no double import, no stale duplicate store.
     await expect(fs.access(legacyPath)).rejects.toThrow();
   });

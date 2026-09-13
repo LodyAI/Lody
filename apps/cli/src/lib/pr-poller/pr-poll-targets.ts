@@ -14,26 +14,23 @@ import {
  */
 
 /**
- * An associated PR whose last known status is open/draft: refresh lifecycle,
- * CI rollup, and merge/conflict state. Keyed by the canonical PR URL exactly
- * as stored in session meta (also the write-back upsert key).
+ * An associated PR whose last known status is not `merged`: refresh lifecycle,
+ * CI rollup, and merge/conflict state. `closed` remains eligible because it can
+ * mean either a genuinely closed PR or a merge projection that lost the
+ * provider's `merged` bit. Keyed by the canonical PR URL exactly as stored in
+ * session meta (also the write-back upsert key).
  */
 export type PrPollStatusTarget = {
   url: string;
   repoFullName: string;
   prNumber: number;
-  status: 'open' | 'draft' | 'merged' | 'closed';
-  /**
-   * Present only for the current terminal PR. The generation includes the
-   * stored lifecycle so a later blind overwrite re-enables exact lookup.
-   */
-  terminalVerificationFingerprint?: string;
+  status: 'open' | 'draft' | 'closed';
 };
 
 /**
  * A `(repository, runtime head branch)` query for the newest PR on that
  * branch. Exists whenever the repository context is resolvable, the branch is
- * Session-owned, and the owner is not idle-terminal — including when an
+ * Session-owned, and the owner is not idle-for-discovery — including when an
  * open/draft PR is already associated (a newer PR on the same branch must
  * still be discovered).
  */
@@ -51,8 +48,6 @@ export type PrPollSessionEntry = {
   lastMessageAtMs: number | null;
   /** Runtime head branch (never `baseBranch`); null when unresolvable. */
   runtimeBranch: string | null;
-  /** Current terminal generation, even when it has already been verified. */
-  terminalVerificationGeneration: string | null;
   statusTargets: PrPollStatusTarget[];
   discoveryTarget: PrPollDiscoveryTarget | null;
 };
@@ -80,43 +75,13 @@ export function resolveDiscoveryBranch(meta: SessionMeta): string | undefined {
 }
 
 /**
- * The idle-terminal discovery fingerprint: "this exact `(repository,
+ * The idle discovery fingerprint: "this exact `(repository,
  * branch)` context has already had a successful discovery". Stored per owner
  * in local scheduling state; a branch switch changes the fingerprint and
  * re-enables discovery automatically.
  */
 export function computeDiscoveryFingerprint(repoFullName: string, branch: string): string {
   return `${repoFullName}|${branch}`;
-}
-
-/**
- * Successful exact verification of one stored terminal lifecycle generation.
- * The URL and parsed number identify the PR; lifecycle makes a later stale
- * overwrite a new generation even when the URL is unchanged.
- */
-export function computeTerminalVerificationFingerprint(
-  repoFullName: string,
-  prNumber: number,
-  url: string,
-  status: 'merged' | 'closed'
-): string {
-  return `${repoFullName}|pr|${prNumber}|${url}|${status}`;
-}
-
-/** Exact-query identity and lifecycle match required before a generation can be verified. */
-export function matchesTerminalVerificationObservation(
-  target: PrPollStatusTarget,
-  observation: { number: number; url: string; status: PrPollStatusTarget['status'] }
-): boolean {
-  if (!target.terminalVerificationFingerprint || observation.status !== target.status) {
-    return false;
-  }
-  const parsed = parseGitHubPullRequestUrl(observation.url);
-  return (
-    observation.number === target.prNumber &&
-    parsed?.repoFullName === target.repoFullName &&
-    parsed.prNumber === target.prNumber
-  );
 }
 
 /**
@@ -149,13 +114,12 @@ export function getCurrentPullRequest(
  * alive set is skipped — there is no owner doc to poll or write back to.
  *
  * `discoveryFingerprints` is the persisted per-owner fingerprint map (see
- * `computeDiscoveryFingerprint`); it drives the idle-terminal rule.
+ * `computeDiscoveryFingerprint`); it drives the discovery-idle rule only.
  */
 export function enumeratePrPollTargets(
   sessions: readonly AliveSessionMeta[],
   discoveryFingerprints: Readonly<Record<string, string>> = {},
-  resolveGitHubRepo: ResolveSessionGitHubRepo = defaultResolveGitHubRepo,
-  terminalVerificationFingerprints: Readonly<Record<string, string>> = {}
+  resolveGitHubRepo: ResolveSessionGitHubRepo = defaultResolveGitHubRepo
 ): PrPollSessionEntry[] {
   const metaBySessionId = new Map<SessionId, SessionMeta>();
   for (const { sessionId, meta } of sessions) {
@@ -180,7 +144,6 @@ export function enumeratePrPollTargets(
     }
 
     const runtimeBranch = resolveDiscoveryBranch(ownerMeta) ?? null;
-    const terminalStatusTarget = collectTerminalStatusTarget(ownerMeta);
     entries.set(ownerSessionId, {
       ownerSessionId,
       memberSessionIds: [sessionId],
@@ -189,12 +152,7 @@ export function enumeratePrPollTargets(
         sessionId === ownerSessionId ? null : (meta.lastMessageAt ?? null)
       ),
       runtimeBranch,
-      terminalVerificationGeneration: terminalStatusTarget?.terminalVerificationFingerprint ?? null,
-      statusTargets: collectStatusTargets(
-        ownerMeta,
-        terminalVerificationFingerprints[ownerSessionId],
-        terminalStatusTarget
-      ),
+      statusTargets: collectStatusTargets(ownerMeta),
       discoveryTarget: collectDiscoveryTarget(
         ownerMeta,
         runtimeBranch,
@@ -213,16 +171,14 @@ function maxNullable(a: number | null, b: number | null): number | null {
   return Math.max(a, b);
 }
 
-function collectStatusTargets(
-  ownerMeta: SessionMeta,
-  ownerTerminalVerificationFingerprint: string | undefined,
-  terminalStatusTarget: PrPollStatusTarget | null
-): PrPollStatusTarget[] {
+function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
   const targets: PrPollStatusTarget[] = [];
   const seen = new Set<string>();
   const current = getCurrentPullRequest(ownerMeta);
   for (const pr of ownerMeta.pullRequests ?? []) {
-    if (pr.status !== 'open' && pr.status !== 'draft') {
+    // `closed` is reversible (and is also the REST/webhook state of a merged
+    // PR), so it must remain an exact recurring target. Only `merged` is final.
+    if (pr.status === 'merged') {
       continue;
     }
     // The last entry owns lifecycle when duplicate URLs exist.
@@ -242,37 +198,7 @@ function collectStatusTargets(
       status: pr.status,
     });
   }
-  if (
-    terminalStatusTarget &&
-    !seen.has(terminalStatusTarget.url) &&
-    ownerTerminalVerificationFingerprint !== terminalStatusTarget.terminalVerificationFingerprint
-  ) {
-    targets.push(terminalStatusTarget);
-  }
   return targets;
-}
-
-function collectTerminalStatusTarget(ownerMeta: SessionMeta): PrPollStatusTarget | null {
-  const current = getCurrentPullRequest(ownerMeta);
-  if (current?.status !== 'merged' && current?.status !== 'closed') {
-    return null;
-  }
-  const parsed = parseGitHubPullRequestUrl(current.url);
-  if (!parsed) {
-    return null;
-  }
-  return {
-    url: current.url,
-    repoFullName: parsed.repoFullName,
-    prNumber: parsed.prNumber,
-    status: current.status,
-    terminalVerificationFingerprint: computeTerminalVerificationFingerprint(
-      parsed.repoFullName,
-      parsed.prNumber,
-      current.url,
-      current.status
-    ),
-  };
 }
 
 function collectDiscoveryTarget(
@@ -286,9 +212,8 @@ function collectDiscoveryTarget(
     // Unresolvable repository context: explicit skip, no guessing.
     return null;
   }
-  // Idle-terminal: branch discovery keeps its original identity. Exact
-  // verification of the known current PR is projected separately as a status
-  // target and never inferred from a successful branch query.
+  // Branch discovery keeps its original identity. A known closed PR has its
+  // own recurring exact status target, independent of this idle optimization.
   const current = getCurrentPullRequest(ownerMeta);
   if (
     current &&

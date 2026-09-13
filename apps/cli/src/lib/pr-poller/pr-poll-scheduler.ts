@@ -32,7 +32,6 @@ import {
 import {
   computeDiscoveryFingerprint,
   enumeratePrPollTargets,
-  matchesTerminalVerificationObservation,
   resolveOwnerRepositoryContext,
   type AliveSessionMeta,
   type PrPollSessionEntry,
@@ -420,12 +419,7 @@ export class PrPollScheduler {
   private projectRuntimeEntries(runtime: WorkspaceRuntime): void {
     runtime.entries = enumeratePrPollTargets(
       Array.from(runtime.sessionMetas.values()),
-      this.ownerFingerprints(runtime.handle.workspaceId, this.state.discoveryFingerprints),
-      undefined,
-      this.ownerFingerprints(
-        runtime.handle.workspaceId,
-        this.state.terminalVerificationFingerprints
-      )
+      this.ownerFingerprints(runtime.handle.workspaceId)
     );
   }
 
@@ -435,13 +429,10 @@ export class PrPollScheduler {
     }
   }
 
-  private ownerFingerprints(
-    workspaceId: string,
-    source: Readonly<Record<string, string>>
-  ): Record<string, string> {
+  private ownerFingerprints(workspaceId: string): Record<string, string> {
     const prefix = `${workspaceId}:`;
     const fingerprints: Record<string, string> = {};
-    for (const [key, value] of Object.entries(source)) {
+    for (const [key, value] of Object.entries(this.state.discoveryFingerprints)) {
       if (key.startsWith(prefix)) {
         fingerprints[key.slice(prefix.length)] = value;
       }
@@ -468,7 +459,6 @@ export class PrPollScheduler {
       for (const entry of runtime.entries) {
         const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
         for (const statusTarget of entry.statusTargets) {
-          const terminalVerification = Boolean(statusTarget.terminalVerificationFingerprint);
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'status',
@@ -476,9 +466,10 @@ export class PrPollScheduler {
               lane,
               desiredIntervalMs:
                 lane === 'high' ? config.highIntervalMs : config.lowStatusIntervalMs,
-              qualifier: terminalVerification
-                ? `${statusTarget.prNumber}|terminal|${statusTarget.status}`
-                : String(statusTarget.prNumber),
+              // A lifecycle transition is a new scheduling generation and is
+              // due immediately. Unlike the old terminal fingerprint, this
+              // key only controls cadence; it never certifies correctness.
+              qualifier: `${statusTarget.prNumber}|${statusTarget.status}`,
               status: statusTarget,
             })
           );
@@ -634,17 +625,12 @@ export class PrPollScheduler {
       }
     }
     const validOwners = new Set<string>();
-    const terminalOwners = new Set<string>();
     for (const runtime of this.workspaces.values()) {
       if (!runtime.ready) {
         continue;
       }
       for (const entry of runtime.entries) {
-        const ownerKey = `${runtime.handle.workspaceId}:${entry.ownerSessionId}`;
-        validOwners.add(ownerKey);
-        if (entry.terminalVerificationGeneration !== null) {
-          terminalOwners.add(ownerKey);
-        }
+        validOwners.add(`${runtime.handle.workspaceId}:${entry.ownerSessionId}`);
       }
     }
     for (const key of Object.keys(this.state.discoveryFingerprints)) {
@@ -652,16 +638,6 @@ export class PrPollScheduler {
       if (readyWorkspaceIds.has(workspaceId) && !validOwners.has(key)) {
         delete this.state.discoveryFingerprints[key];
         this.deps.stateStore.deleteDiscoveryFingerprint(key);
-      }
-    }
-    for (const key of Object.keys(this.state.terminalVerificationFingerprints)) {
-      const workspaceId = key.split(':')[0] ?? '';
-      if (
-        readyWorkspaceIds.has(workspaceId) &&
-        (!validOwners.has(key) || !terminalOwners.has(key))
-      ) {
-        delete this.state.terminalVerificationFingerprints[key];
-        this.deps.stateStore.deleteTerminalVerificationFingerprint(key);
       }
     }
   }
@@ -865,7 +841,7 @@ export class PrPollScheduler {
         );
         if (fingerprintChanged) {
           // A discovery-only success updates no metadata, so no meta event
-          // re-derives the entries — refresh them here so a terminal owner
+          // re-derives the entries — refresh them here so an idle discovery owner
           // whose context is now fingerprinted goes idle immediately.
           this.refreshRuntimeFingerprintProjection(runtime);
         }
@@ -915,7 +891,7 @@ export class PrPollScheduler {
    * target-local failure, never a confirmed empty), and (c) every effect the
    * owner's round required (association, metadata write-back) succeeded.
    * A discovery success also records the owner's context fingerprint
-   * (idle-terminal). Returns whether any fingerprint changed.
+   * (discovery-idle). Returns whether any fingerprint changed.
    */
   private markRefreshedTargets(
     batch: PrPollBatchPlan,
@@ -932,30 +908,6 @@ export class PrPollScheduler {
         const entry = parsed.pullRequests.find((candidate) => candidate.prNumber === prNumber);
         if (!entry?.ok || !effects?.statusOk) {
           continue;
-        }
-        if (target.status.terminalVerificationFingerprint) {
-          if (!entry.pr || !matchesTerminalVerificationObservation(target.status, entry.pr)) {
-            // The exact alias was valid, but it did not confirm the stored
-            // lifecycle generation. Write-back may project a new generation;
-            // never stamp the old one as verified.
-            continue;
-          }
-          const priorMatchingSuccess = this.state.targets[target.key] !== undefined;
-          // `closed` is briefly ambiguous after a merge. Require a second
-          // matching exact observation at the normal status cadence; merged
-          // is authoritative immediately.
-          if (target.status.status === 'merged' || priorMatchingSuccess) {
-            const fingerprintKey = `${target.workspaceId}:${target.ownerSessionId}`;
-            const fingerprint = target.status.terminalVerificationFingerprint;
-            if (this.state.terminalVerificationFingerprints[fingerprintKey] !== fingerprint) {
-              this.state.terminalVerificationFingerprints[fingerprintKey] = fingerprint;
-              this.deps.stateStore.upsertTerminalVerificationFingerprint(
-                fingerprintKey,
-                fingerprint
-              );
-              fingerprintChanged = true;
-            }
-          }
         }
       } else if (target.discovery) {
         const branch = target.discovery.branch;
@@ -1000,7 +952,6 @@ export class PrPollScheduler {
       const observations: PrObservation[] = [];
       const discovered: PrObservation[] = [];
       let queriedBranch: string | null = null;
-      let terminalExactObservationOk = true;
       for (const target of targets) {
         if (target.status) {
           const result = results.pullRequests.find(
@@ -1009,10 +960,6 @@ export class PrPollScheduler {
           if (result?.pr) {
             // Key the observation by the meta-side URL (upsert identity).
             observations.push({ ...result.pr, url: target.status.url });
-          } else if (target.status.terminalVerificationFingerprint) {
-            // Branch discovery cannot safely rank or supersede a known
-            // terminal current PR when its exact alias was not observed.
-            terminalExactObservationOk = false;
           }
         }
         const branch = target.discovery?.branch;
@@ -1028,9 +975,8 @@ export class PrPollScheduler {
         ownerSessionId,
         await this.applyOwner(runtime, ownerSessionId, batch.repoFullName, {
           observations,
-          discovered: terminalExactObservationOk ? discovered : [],
+          discovered,
           queriedBranch,
-          discoveryInputOk: terminalExactObservationOk,
         })
       );
     }
@@ -1045,7 +991,6 @@ export class PrPollScheduler {
       observations: PrObservation[];
       discovered: PrObservation[];
       queriedBranch: string | null;
-      discoveryInputOk: boolean;
     }
   ): Promise<OwnerEffectResult> {
     const { logger } = this.deps;
@@ -1068,8 +1013,8 @@ export class PrPollScheduler {
       const contextUnchanged =
         args.queriedBranch === null ||
         (freshContext.repoFullName === repoFullName && freshContext.branch === args.queriedBranch);
-      const discovered = contextUnchanged && args.discoveryInputOk ? args.discovered : [];
-      let discoveryOk = contextUnchanged && args.discoveryInputOk;
+      const discovered = contextUnchanged ? args.discovered : [];
+      let discoveryOk = contextUnchanged;
 
       const newlyAssociated: PrObservation[] = [];
       const associationPlan = planAssociation({

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import {
   computeDiscoveryFingerprint,
-  computeTerminalVerificationFingerprint,
   enumeratePrPollTargets,
   getCurrentPullRequest,
   resolveDiscoveryBranch,
@@ -52,7 +51,7 @@ describe('enumeratePrPollTargets', () => {
     ]);
   });
 
-  it('projects only the current terminal PR as an exact verification target', () => {
+  it('keeps closed PRs as exact targets but excludes merged PRs', () => {
     const [entry] = enumeratePrPollTargets([
       alive(
         's1',
@@ -71,8 +70,6 @@ describe('enumeratePrPollTargets', () => {
         repoFullName: 'owner/repo',
         prNumber: 2,
         status: 'closed',
-        terminalVerificationFingerprint:
-          'owner/repo|pr|2|https://github.com/owner/repo/pull/2|closed',
       },
     ]);
   });
@@ -199,7 +196,7 @@ describe('enumeratePrPollTargets', () => {
     });
   });
 
-  it('exact-verifies a newly terminal PR even when branch discovery is already idle', () => {
+  it('keeps a closed PR as an exact recurring target when branch discovery is idle', () => {
     const branchFingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
     const [entry] = enumeratePrPollTargets(
       [
@@ -221,40 +218,22 @@ describe('enumeratePrPollTargets', () => {
         repoFullName: 'owner/repo',
         prNumber: 649,
         status: 'closed',
-        terminalVerificationFingerprint:
-          'owner/repo|pr|649|https://github.com/owner/repo/pull/649|closed',
         url: 'https://github.com/owner/repo/pull/649',
       },
     ]);
   });
 
-  it('re-enables exact verification when the same terminal PR lifecycle changes', () => {
-    const mergedFingerprint = computeTerminalVerificationFingerprint(
-      'owner/repo',
-      649,
-      'https://github.com/owner/repo/pull/649',
-      'merged'
-    );
-    const meta = makeMeta({
-      pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'merged' }],
-    });
-    const [verified] = enumeratePrPollTargets([alive('s1', meta)], {}, undefined, {
-      s1: mergedFingerprint,
-    });
-    expect(verified?.statusTargets).toEqual([]);
+  it('stops exact lifecycle polling only after the PR is known merged', () => {
+    const url = 'https://github.com/owner/repo/pull/649';
+    const [closed] = enumeratePrPollTargets([
+      alive('s1', makeMeta({ pullRequests: [{ url, status: 'closed' }] })),
+    ]);
+    expect(closed?.statusTargets[0]?.status).toBe('closed');
 
-    const [staleClosed] = enumeratePrPollTargets(
-      [
-        alive('s1', {
-          ...meta,
-          pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'closed' }],
-        }),
-      ],
-      {},
-      undefined,
-      { s1: mergedFingerprint }
-    );
-    expect(staleClosed?.statusTargets[0]?.status).toBe('closed');
+    const [merged] = enumeratePrPollTargets([
+      alive('s1', makeMeta({ pullRequests: [{ url, status: 'merged' }] })),
+    ]);
+    expect(merged?.statusTargets).toEqual([]);
   });
 
   it('does NOT fall back to baseBranch when branchName is missing', () => {
