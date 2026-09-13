@@ -23,6 +23,7 @@ import {
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionStatusFactory,
+  collectSessionArchiveTargets,
   type BillingQuotaAdmission,
   countBillableSessionTurns,
   evaluateBillingQuota,
@@ -956,6 +957,15 @@ export async function listChildSessionIds(
       (session) => session.parentSessionId === parentSessionId && session.id !== parentSessionId
     )
     .map((session) => session.id);
+}
+
+export async function listArchiveDescendantSessionIds(
+  manager: LoroDocumentManager,
+  sessionId: SessionId
+): Promise<SessionId[]> {
+  return collectSessionArchiveTargets(sessionId, await listSessionMetasForWorkspace(manager)).map(
+    (session) => session.id
+  );
 }
 
 async function applySessionAndChildren(
@@ -4347,7 +4357,7 @@ const sessionArchiveCommand = new Command('archive')
       const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
       await withWorkspaceManager(auth, workspace, async (manager) => {
         await resolveSessionMetaOrThrow(manager, sessionId);
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
+        const childSessionIds = await listArchiveDescendantSessionIds(manager, sessionId);
         // The archived state is the whole request: the owning machine observes
         // it, releases the runtime, and reconciles the worktree directory.
         await applySessionAndChildren(sessionId, childSessionIds, (id) =>

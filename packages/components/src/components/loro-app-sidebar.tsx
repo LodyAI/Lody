@@ -1586,13 +1586,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
-      void archiveSession(sessionId as SessionId);
-      if (!workspaceSlug) return;
-      if (selectedSessionId !== sessionId) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-      });
+      void archiveSession(sessionId as SessionId)
+        .then(() => {
+          if (!workspaceSlug || selectedSessionId !== sessionId) return;
+          return router.navigate({
+            to: '/$workspaceName/chat',
+            params: { workspaceName: workspaceSlug },
+          });
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]
   );
@@ -1890,12 +1894,14 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         for (const sessionId of sessionIds) {
           await archiveSession(sessionId as SessionId);
         }
-      })();
-      if (!workspaceSlug) return;
-      if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
+        if (!workspaceSlug) return;
+        if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
+        await router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
+        });
+      })().catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : String(error));
       });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]
