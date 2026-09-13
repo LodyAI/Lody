@@ -11,7 +11,7 @@ import {
 import { useStickToBottom } from 'use-stick-to-bottom';
 import type { VirtualizerHandle } from 'virtua';
 import type { SessionId } from '@lody/shared';
-import { getScrollBottomPaddingOffset, scrollViewportToRealBottom } from './sticky-scroll-dom';
+import { scrollViewportToRealBottom } from './sticky-scroll-dom';
 import { getScrollPosition, saveScrollPosition } from './use-scroll-position-cache';
 
 export interface UseStickyScrollOptions {
@@ -198,32 +198,43 @@ export function useStickyScroll({
     const currentScrollElement = scrollElementRef.current;
     scrollViewportToRealBottom({
       itemCount: itemCountRef.current,
-      vlist: vlistRef.current,
       scrollElement: currentScrollElement,
-      bottomOffset: getScrollBottomPaddingOffset(currentScrollElement),
     });
-  }, [itemCountRef, vlistRef]);
+  }, [itemCountRef]);
 
-  useEffect(() => {
-    if (initialScrollRestoredRef.current || itemCount === 0) return;
-    if (!vlistRef.current) return;
+  // Restore before paint, and keep the same follow intent when a placeholder
+  // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
+  // would expose the old bottom for a frame (or several hydration commits).
+  useLayoutEffect(() => {
+    if (!scrollElement || itemCount === 0) return;
+    const currentVlist = vlistRef.current;
+    if (!currentVlist) return;
+
+    if (initialScrollRestoredRef.current) {
+      if (state.isAtBottom && !suppressAutoScrollRef?.current) scrollToRealBottom();
+      return;
+    }
 
     const cachedState = cachedPositionAtMountRef.current;
-    requestAnimationFrame(() => {
-      const currentVlist = vlistRef.current;
-      if (!currentVlist) return;
-
-      if (cachedState?.type === 'offset') {
-        stopScroll();
-        currentVlist.scrollTo(cachedState.scrollOffset);
-      } else {
-        void scrollToBottomWithLock({ animation: 'instant' });
-        scrollToRealBottom();
-      }
-      initialScrollRestoredRef.current = true;
-      setInitialScrollRestored(true);
-    });
-  }, [itemCount, scrollToBottomWithLock, scrollToRealBottom, stopScroll, vlistRef]);
+    if (cachedState?.type === 'offset') {
+      stopScroll();
+      currentVlist.scrollTo(cachedState.scrollOffset);
+    } else {
+      void scrollToBottomWithLock({ animation: 'instant' });
+      scrollToRealBottom();
+    }
+    initialScrollRestoredRef.current = true;
+    setInitialScrollRestored(true);
+  }, [
+    itemCount,
+    scrollElement,
+    scrollToBottomWithLock,
+    scrollToRealBottom,
+    state,
+    stopScroll,
+    suppressAutoScrollRef,
+    vlistRef,
+  ]);
 
   // Search jumps and group expansion are deliberate reading-position changes.
   // Release follow in a layout effect so ResizeObserver cannot pull the list to

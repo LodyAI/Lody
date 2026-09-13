@@ -1,10 +1,11 @@
 # React hooks
 
-Root and `packages/components/AGENTS.md` also apply. `CLAUDE.md` is a symlink;
-edit `AGENTS.md` only. Per-hook background and reasoning: [README.md](README.md).
+Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: [README.md](README.md).
 
 ## Conversation scrolling
 
+- Restore before paint; hydration re-anchors only while following. Bottom
+  following uses DOM extent, never a row index that eviction can invalidate.
 - Keep virtualization and bottom-following separate: `virtua` owns mounted rows,
   measurement, and index navigation; `use-sticky-scroll.ts` adapts `use-stick-to-bottom`
   to Virtua's viewport and content elements. Never restore a content-token effect or a
@@ -13,11 +14,10 @@ edit `AGENTS.md` only. Per-hook background and reasoning: [README.md](README.md)
 - Sticky-scroll binds through the real scroll viewport's React callback ref, on Virtua's
   public `Virtualizer` primitive with that explicit viewport. Never recover the element
   from a `VList` handle, DOM query, item-count effect, observer retry, or timer.
-  Empty-to-populated conversations attach on the viewport's mount commit and detach on
-  its unmount commit.
+  Bind on viewport mount and detach on unmount, including empty-to-populated lists.
 - Treat `use-stick-to-bottom`'s `state.isAtBottom` as the follow-lock truth: the returned
   `isAtBottom` adds near-bottom tolerance, and `escapedFromLock` is escape history that
-  stays true after an explicit `scrollToBottom` restored the lock.
+  survives explicit re-locking.
 - Follow viewport-size changes from the viewport's `ResizeObserver` records; never
   restore resize-event pumps, guessed transition durations, or stop timers. Only HEIGHT
   changes may re-anchor the viewport; never forward width-only records.
@@ -27,9 +27,8 @@ edit `AGENTS.md` only. Per-hook background and reasoning: [README.md](README.md)
 - Group expansion scrolls after Virtua descendants finish their layout effects and
   releases sticky suppression in the later parent layout effect of the same commit;
   no frame retries or guessed settle timers.
-- Preserve the app-specific adapters: per-session scroll restoration,
-  search/group-expansion suppression, and viewport resize handling for the mobile
-  keyboard and terminal dock.
+- Preserve per-session restoration, search/expansion suppression, and viewport
+  resize handling for keyboards and terminal docks.
 
 ## Session, auth, and app shell
 

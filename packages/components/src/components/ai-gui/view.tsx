@@ -1382,7 +1382,7 @@ export const SessionChatStreamView = forwardRef<
      * `resolveActiveOutlineIndex` reads positions back out of. Without the
      * `offset` compensation a jump settles a padding's worth low, and the
      * outline rail then reports the round BEFORE the one that was asked for.
-     * (`scrollViewportToRealBottom` compensates the bottom padding the same way.)
+     * Bottom following uses the DOM extent, which already includes padding.
      */
     const scrollRowToTop = useCallback(
       (rowIndex: number, smooth = false) => {

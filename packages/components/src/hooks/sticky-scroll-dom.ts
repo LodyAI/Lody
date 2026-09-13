@@ -1,5 +1,3 @@
-import type { VirtualizerHandle } from 'virtua';
-
 /** Ignore sub-pixel differences when clamping to the true DOM bottom. */
 const SCROLL_EPSILON = 1;
 
@@ -16,25 +14,15 @@ export function getScrollElementMaxOffset(scrollElement: ScrollElementLike): num
   return Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
 }
 
-export function getScrollBottomPaddingOffset(scrollElement: HTMLElement | null): number {
-  if (!scrollElement || typeof getComputedStyle !== 'function') {
-    return 0;
-  }
-  const paddingBottom = Number.parseFloat(getComputedStyle(scrollElement).paddingBottom);
-  return Number.isFinite(paddingBottom) ? Math.max(0, paddingBottom) : 0;
-}
-
 export function scrollViewportToRealBottom(options: {
   itemCount: number;
-  vlist: Pick<VirtualizerHandle, 'scrollToIndex'> | null;
   scrollElement: ScrollElementLike | null;
-  bottomOffset?: number;
 }): void {
-  const { itemCount, vlist, scrollElement, bottomOffset = 0 } = options;
+  const { itemCount, scrollElement } = options;
   if (itemCount <= 0) return;
 
-  vlist?.scrollToIndex(itemCount - 1, { align: 'end', offset: bottomOffset });
-
+  // Follow the viewport, not a captured row index: hydration/eviction can
+  // remove that row while Virtua is still waiting for measurements.
   if (!scrollElement) return;
 
   const maxScrollTop = getScrollElementMaxOffset(scrollElement);

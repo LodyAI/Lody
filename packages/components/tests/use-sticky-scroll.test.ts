@@ -292,6 +292,49 @@ describe('useStickyScroll Virtua adapter', () => {
     vi.useRealTimers();
   });
 
+  it('restores a followed session before waiting for an animation frame', async () => {
+    const sessionId = 'session-initial-paint' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    saveScrollPosition(sessionId, { type: 'end' });
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    expect(fixture.getScrollTop()).toBe(240);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+  });
+
+  it('keeps a followed session at the end when placeholders expand into more rows', async () => {
+    const sessionId = 'session-hydrated-tail' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const props = { sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 };
+    await renderHarness(props);
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+    fixture.setScrollHeight(1640);
+    await renderHarness({ ...props, itemCount: 12 });
+    expect(fixture.getScrollTop()).toBe(1240);
+    expect(latestResult?.isSticky).toBe(true);
+  });
+
+  it('does not follow expanded rows after the reader scrolls up', async () => {
+    const sessionId = 'session-reading-old-turn' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const props = { sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 };
+    await renderHarness(props);
+    await act(async () => {
+      await advanceAnimationFrames();
+      fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
+      fixture.setScrollTop(96);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+    });
+    fixture.setScrollHeight(1640);
+    await renderHarness({ ...props, itemCount: 12 });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(latestResult?.isSticky).toBe(false);
+  });
+
   it('restores a cached offset without forcing the list back to the bottom', async () => {
     const sessionId = 'session-cached-offset' as SessionId;
     const fixture = createScrollFixture();
@@ -304,7 +347,7 @@ describe('useStickyScroll Virtua adapter', () => {
       scrollElement: fixture.scrollElement,
       itemCount: 4,
     });
-    expect(latestResult?.initialScrollRestored).toBe(false);
+    expect(latestResult?.initialScrollRestored).toBe(true);
     await act(async () => {
       await advanceAnimationFrames();
     });
@@ -424,7 +467,7 @@ describe('useStickyScroll Virtua adapter', () => {
       await advanceAnimationFrames();
     });
 
-    expect(vlist.scrollToIndex).toHaveBeenCalledWith(3, { align: 'end', offset: 24 });
+    expect(vlist.scrollToIndex).not.toHaveBeenCalled();
     expect(fixture.getScrollTop()).toBe(320);
     expect(latestResult?.isSticky).toBe(true);
   });
