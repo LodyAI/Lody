@@ -14,7 +14,10 @@ now ends the wait — the steer response resolves with `stale-turn` and the guid
 settles to a terminal status (`canceled` on stop, `failed` when the turn ended without an answer)
 instead of an unbounded wait that also blocked the per-session steer mutation queue. Unknown
 delivery results are deliberately terminal rather than re-queued, because the provider may still
-take the held request and replaying could duplicate it.
+take the held request and replaying could duplicate it. The response never waits for the held
+request's verdict, but the verdict refines the outcome once it arrives: an agent-issued refusal
+proves non-delivery and returns the guide to ordinary dispatch, and a late acceptance releases its
+application lease so the agent client's session-update barrier cannot wedge.
 
 ## Problem and responsibilities
 
@@ -36,15 +39,22 @@ untouched.
   existing requeue-to-dispatch behavior unchanged; the terminal path only covers the unknown
   post-submission window.
 - The application waiter stays registered in the agent client until the agent answers or the
-  connection closes, so a late verdict resolves into a promise nobody consumes and cannot resurrect
-  the stopped turn; the existing post-application cancellation guard is unchanged.
+  connection closes, so the race result cannot resurrect the stopped turn. After settlement the
+  service still consumes the pending verdict without awaiting it: a late acceptance is released
+  immediately (the agent client installs `waiter.released` as the session's application barrier and
+  blocks every later `sessionUpdate` until the lease is released), and a late
+  `AgentSteerNotDeliveredError` — produced only by the agent's own invalid-request answer — requeues
+  the guide via `requeueSteerAfterLateRefusal`, which flips back only the terminal status that same
+  race branch wrote and re-walks the ordinary requeue guards; the existing post-application
+  cancellation guard is unchanged.
 
 ## Trade-offs and compatibility
 
 - Terminal-instead-of-requeue is the load-bearing choice: an auto-replay after an unknown verdict
-  risks duplicate delivery, which the report rules out explicitly. The cost is that a user must
-  re-send the guide manually when a provider later proves it never applied; the entry's terminal
-  status makes that visible.
+  risks duplicate delivery, which the report rules out explicitly. The terminal status therefore
+  covers only the genuinely unknown window; when the agent later proves it never applied, the guide
+  is requeued automatically, and a user needs to re-send only when the verdict stays unknown (for
+  example the connection closes without an answer).
 - Marking a non-cancel settlement `failed` is the one heuristic: an agent that finishes a turn
   without answering a held steer request is outside the acknowledged-steer contract, and the failure
   status reflects the unanswered verdict rather than asserting delivery.
@@ -55,6 +65,8 @@ untouched.
 
 Two regression tests reproduce the report: a held verdict plus a stopped turn resolves `stale-turn`
 and writes the `canceled` status (previously the test timed out at 30s), and a rejected verdict on a
-stopped turn converges to the same settlement (previously `error` with no history write). Both fail
-on the parent commit and pass with the fix; the full `apps/cli` suite passes unchanged apart from two
-runtime mocks completed with the `promptOutcome` field the race now reads.
+stopped turn converges to the same settlement (previously `error` with no history write). Two more
+cover the late verdict: a refused-after-settlement guide returns to `pending` with the dispatch
+pointer rewritten, and a late acceptance releases its lease. All four fail before the refinement and
+pass with it; the full `apps/cli` suite passes unchanged apart from two runtime mocks completed with
+the `promptOutcome` field the race now reads.

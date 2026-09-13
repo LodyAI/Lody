@@ -657,6 +657,211 @@ describe('SessionExecutionService', () => {
     expect(mapped[0]!.status).toBe('canceled');
   });
 
+  it('requeues a settled steer whose late verdict proves the agent refused it', async () => {
+    // The race answers the RPC with `stale-turn` and terminalizes the guide,
+    // but the held request can still answer afterwards: an agent-issued
+    // refusal (`AgentSteerNotDeliveredError` is only produced by the agent's
+    // own invalid-request answer) proves the steer was never taken, so the
+    // guide must return to ordinary dispatch instead of staying terminal.
+    const verdict = createDeferred<{ release: () => void }>();
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: verdict.promise,
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      })),
+      cancel: vi.fn(async () => {}),
+      steerPrompt,
+      currentModel: undefined,
+    };
+    const history: SessionHistoryInput[] = [
+      { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+    ];
+    const updateHistory = vi.fn(
+      async (map: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history.splice(0, history.length, ...map(history));
+      }
+    );
+    const sessionDoc = { updateHistory };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-late-refusal' as SessionId;
+    const promptSettled = createDeferred<{ status: 'rejected'; error: unknown }>();
+    const promptRun = {
+      turnId: 'assistant:user-1',
+      promptOutcome: promptSettled.promise,
+      successorReady: Promise.resolve(),
+      signalSuccessor: vi.fn(),
+    };
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer' as ACPSessionId },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
+      activePromptRun: promptRun,
+      yieldedFinalization: Promise.resolve(),
+      settlement: { callback: vi.fn(async () => {}), completed: false },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    const response = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      inputConfig: { prompt: 'change direction' },
+    });
+    await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+
+    runtime.cancelRequested = true;
+    promptSettled.resolve({ status: 'rejected', error: new Error('prompt canceled') });
+
+    await expect(response).resolves.toMatchObject({
+      applied: false,
+      disposition: 'stale-turn',
+    });
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'canceled' }));
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+
+    // The agent finally answers the held request: a provable refusal.
+    verdict.reject(
+      new AgentSteerNotDeliveredError(
+        'Agent refused the acknowledged steer request',
+        new Error('invalid request')
+      )
+    );
+
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'pending' }));
+    await vi.waitFor(() =>
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ latestUserMsgId: 'user-2' })
+      )
+    );
+  });
+
+  it('releases the lease of a steer acknowledgement arriving after settlement', async () => {
+    // AgentClient installs `waiter.released` as the session's application
+    // barrier and only clears it once the lease is released; a late
+    // acceptance whose race loser is no longer consumed must still be
+    // released, or every later sessionUpdate for the session blocks forever.
+    const release = vi.fn();
+    const verdict = createDeferred<{ release: () => void }>();
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: verdict.promise,
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      })),
+      cancel: vi.fn(async () => {}),
+      steerPrompt,
+      currentModel: undefined,
+    };
+    const history: SessionHistoryInput[] = [
+      { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+    ];
+    const updateHistory = vi.fn(
+      async (map: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history.splice(0, history.length, ...map(history));
+      }
+    );
+    const sessionDoc = { updateHistory };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-late-lease' as SessionId;
+    const promptSettled = createDeferred<{ status: 'rejected'; error: unknown }>();
+    const promptRun = {
+      turnId: 'assistant:user-1',
+      promptOutcome: promptSettled.promise,
+      successorReady: Promise.resolve(),
+      signalSuccessor: vi.fn(),
+    };
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer' as ACPSessionId },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
+      activePromptRun: promptRun,
+      yieldedFinalization: Promise.resolve(),
+      settlement: { callback: vi.fn(async () => {}), completed: false },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    const response = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      inputConfig: { prompt: 'change direction' },
+    });
+    await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+
+    runtime.cancelRequested = true;
+    promptSettled.resolve({ status: 'rejected', error: new Error('prompt canceled') });
+
+    await expect(response).resolves.toMatchObject({
+      applied: false,
+      disposition: 'stale-turn',
+    });
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'canceled' }));
+
+    // The agent accepts the held steer after the race already settled.
+    verdict.resolve({ release });
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+
+    // A taken steer must stay terminal — no replay, no dispatch pointer.
+    expect(history[0]).toMatchObject({ status: 'canceled' });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
   it('completes A to B to C when yielded prompts never settle', async () => {
     const sessionId = 'session-steer-lifecycle' as SessionId;
     const first = createDeferred<unknown>();

@@ -1537,6 +1537,22 @@ export class SessionExecutionService {
           options.userTurnId,
           runtime.cancelRequested ? 'canceled' : 'failed'
         );
+        // The response must not wait for the held request's verdict — it may
+        // never answer before the connection closes — but the verdict, when it
+        // does arrive, still settles the guide's fate: an agent-issued refusal
+        // proves non-delivery and returns the guide to ordinary dispatch, and
+        // a late acceptance must release its lease, or the application barrier
+        // installed by AgentClient blocks every later sessionUpdate.
+        void steerRun.applied.then(
+          (lease) => {
+            lease.release();
+          },
+          (error) => {
+            if (error instanceof AgentSteerNotDeliveredError) {
+              void this.requeueSteerAfterLateRefusal(options.sessionId, options.userTurnId);
+            }
+          }
+        );
         return reject(
           'stale-turn',
           runtime.cancelRequested
@@ -1721,6 +1737,75 @@ export class SessionExecutionService {
     } catch (error) {
       this.deps.logger.error(
         `[${sessionId}] Failed to requeue undelivered steer ${userTurnId}: ${formatErrorMessage(
+          error
+        )}`
+      );
+    }
+  }
+
+  /**
+   * Requeue a steer whose late verdict proved non-delivery after the
+   * `prompt-run-settled` race above already terminalized it.
+   *
+   * Only that race branch writes `canceled`/`failed` over a steer entry whose
+   * verdict is still pending, so a terminal status here is this steer request's
+   * own write, not a turn that already ran — flipping it back to `pending`
+   * cannot resurrect finished work. Same dispatch contract as
+   * {@link requeueUndeliveredSteer}: ordinary dispatch skips `pending_apply`
+   * but picks up `pending`, and the pointer write is what wakes the idle
+   * watcher. A steer whose history entry has not synced here keeps its
+   * terminal-without-entry record instead of being requeued blind.
+   */
+  private async requeueSteerAfterLateRefusal(
+    sessionId: SessionId,
+    userTurnId: string
+  ): Promise<void> {
+    try {
+      if (this.getActiveUserTurnId(sessionId) === userTurnId) {
+        return;
+      }
+      const meta = await this.getSessionMeta(sessionId);
+      if (meta?.lastHandledUserMsgId === userTurnId) {
+        return;
+      }
+      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      let queueable = false;
+      await sessionDoc.updateHistory((history) =>
+        history.map((entry) => {
+          if (entry.id !== userTurnId || entry.role !== 'user') {
+            return entry;
+          }
+          queueable =
+            entry.status === 'pending_apply' ||
+            entry.status === 'pending' ||
+            entry.status === 'seen' ||
+            // The terminal statuses are this steer request's own write (see the
+            // method doc); any other status means the turn already ran here.
+            entry.status === 'canceled' ||
+            entry.status === 'failed';
+          return queueable
+            ? {
+                ...entry,
+                status: 'pending' as const,
+                read: getLegacyReadForSessionHistoryStatus('pending'),
+              }
+            : entry;
+        })
+      );
+      if (!queueable) {
+        return;
+      }
+      this.clearTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId);
+      await this.upsertSessionMeta(sessionId, {
+        latestUserMsgId: userTurnId,
+        lastMissingHistoryUserMsgId: undefined,
+      });
+      this.deps.logger.info(
+        `[${sessionId}] Steer ${userTurnId} refused after its turn ended; requeued as a follow-up turn`
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        `[${sessionId}] Failed to requeue steer ${userTurnId} after a late refusal: ${formatErrorMessage(
           error
         )}`
       );
