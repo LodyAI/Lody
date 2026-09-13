@@ -8,11 +8,16 @@ import { SessionShareSurface } from '../src/components/sharing/session-share-pag
 import { SessionSharePreview } from '../src/components/sharing/session-share-preview';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+  useTranslation: () => ({
+    t: (_key: string, fallback: string, values?: Record<string, unknown>) =>
+      values
+        ? fallback.replace(/{{(\w+)}}/g, (_m, name: string) => String(values[name] ?? ''))
+        : fallback,
+  }),
 }));
+const theme = vi.hoisted(() => ({ value: 'system' as string, setTheme: vi.fn() }));
 vi.mock('../src/theme-provider', () => ({
-  useTheme: () => ({ theme: 'light', setTheme: vi.fn() }),
-  nextCycledTheme: () => 'dark',
+  useTheme: () => ({ theme: theme.value, setTheme: theme.setTheme }),
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // Exercise the real share shell and copy builder without a virtualized viewport.
@@ -30,6 +35,11 @@ vi.mock('../src/components/sharing/share-attachments', () => ({
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+const byText = (text: string) =>
+  [...document.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>('button, a')].find((node) =>
+    node.textContent?.includes(text)
+  );
 
 describe('static share presentation', () => {
   let root: Root, container: HTMLDivElement;
@@ -49,20 +59,38 @@ describe('static share presentation', () => {
     });
     source[0]!.items[0]!.text = 'Changed source';
     await act(async () => root.render(<SessionSharePreview prepared={prepared} />));
-    const button = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Copy as Markdown"]'
-    );
-    expect(button).not.toBeNull();
+    const button = byText('Copy as Markdown') as HTMLButtonElement | undefined;
+    expect(button).toBeTruthy();
     await act(async () => button!.click());
     expect(writeText.mock.calls[0]?.[0]).toContain('Frozen preview');
     expect(writeText.mock.calls[0]?.[0]).not.toContain('Changed source');
   });
+
+  it('keeps visitor chrome out of the publisher’s embedded preview', async () => {
+    const prepared = await prepareSharePackage({
+      rootSourceId: 'root',
+      capturedAt: '2026-09-12T00:00:00.000Z',
+      conversations: [{ sourceId: 'root', title: 'Preview', history: [] }],
+      readAttachment: async () => {
+        throw new Error('Unexpected source read');
+      },
+    });
+    await act(async () => root.render(<SessionSharePreview prepared={prepared} />));
+    // The app owns its own appearance: an embedded preview must not offer a
+    // theme control that would repaint the surrounding app, nor force one.
+    expect(byText('Sign in to Lody')).toBeUndefined();
+    expect(container.querySelector('[aria-label^="Appearance"]')).toBeNull();
+    expect(theme.setTheme).not.toHaveBeenCalled();
+  });
+
   beforeEach(async () => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     writeText.mockClear();
+    theme.value = 'system';
+    theme.setTheme.mockClear();
     const { manifest } = await prepareSharePackage({
       rootSourceId: 'root',
       capturedAt: '2026-09-12T00:00:00.000Z',
@@ -133,12 +161,29 @@ describe('static share presentation', () => {
     expect(props.onSelect).toHaveBeenCalledWith('c3');
   });
 
+  it('names each pane with the app’s tab, so child Tabs and a solo conversation match', async () => {
+    await render();
+    const tabs = container.querySelector('[role="tablist"]')!;
+    const labels = [...tabs.querySelectorAll('[role="tab"]')].map((node) => node.textContent);
+    expect(labels).toEqual(['Main', 'Notes']);
+    expect(tabs.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Notes');
+    await act(async () =>
+      [...tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        .find((node) => node.textContent === 'Main')!
+        .click()
+    );
+    expect(props.onSelect).toHaveBeenCalledWith('c1');
+    // The side pane holds one conversation, so it renders a solo tab, not a strip.
+    expect(container.querySelector('aside [role="tablist"]')).toBeNull();
+    expect(container.querySelector('aside h1')?.textContent).toBe('Discussion');
+  });
+
   it('generates Markdown only when copied, using the displayed transcript and no source namespace', async () => {
     await render();
     expect(writeText).not.toHaveBeenCalled();
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('button[aria-label="Copy as Markdown"]')!.click()
-    );
+    const copy = container.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
+    const main = [...copy].find((node) => node.textContent?.includes('Copy as Markdown'))!;
+    await act(async () => main.click());
     expect(writeText).toHaveBeenCalledOnce();
     const markdown = writeText.mock.calls[0]![0] as string;
     expect(markdown).toContain('Notes');
@@ -150,11 +195,56 @@ describe('static share presentation', () => {
   it('does not offer export before the selected transcript has loaded', async () => {
     props.snapshot = { status: 'loading', history: [] };
     await render();
-    const copy = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Copy as Markdown"]'
+    const copy = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+      node.textContent?.includes('Copy as Markdown')
     )!;
     expect(copy.disabled).toBe(true);
     await act(async () => copy.click());
     expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('offers Fork as a disabled, explicitly unfinished action', async () => {
+    await render();
+    const fork = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+      node.textContent?.includes('Fork to my Lody workspace')
+    )!;
+    expect(fork.disabled).toBe(true);
+    expect(fork.getAttribute('aria-label')).toContain('coming soon');
+  });
+
+  it('starts Light and switches only between Light and Dark', async () => {
+    await render();
+    expect(theme.setTheme).toHaveBeenCalledWith('light');
+    theme.setTheme.mockClear();
+    theme.value = 'light';
+    await render();
+    expect(theme.setTheme).not.toHaveBeenCalled();
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label^="Appearance"]')!;
+    await act(async () => toggle.click());
+    expect(theme.setTheme).toHaveBeenCalledWith('dark');
+    theme.value = 'dark';
+    theme.setTheme.mockClear();
+    await render();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label^="Appearance"]')!.click()
+    );
+    expect(theme.setTheme).toHaveBeenCalledExactlyOnceWith('light');
+  });
+
+  it('sends an anonymous visitor to the app to sign in, in a new tab', async () => {
+    await render();
+    const signIn = byText('Sign in to Lody') as HTMLAnchorElement;
+    expect(signIn.tagName).toBe('A');
+    expect(signIn.target).toBe('_blank');
+    expect(signIn.rel).toContain('noopener');
+    expect(signIn.getAttribute('href')?.endsWith('/login')).toBe(true);
+  });
+
+  it('shows the viewer a host resolved instead of a sign-in prompt', async () => {
+    props.viewer = { status: 'signed-in', name: 'Ada Lovelace' };
+    await render();
+    expect(byText('Sign in to Lody')).toBeUndefined();
+    expect(container.textContent).toContain('Ada Lovelace');
+    expect(container.textContent).toContain('AL');
   });
 });

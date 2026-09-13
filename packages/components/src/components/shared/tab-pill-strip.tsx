@@ -23,6 +23,8 @@ interface TabPillStripProps<Key extends string> {
   onSelect: (key: Key) => void;
   ariaLabel: string;
   className?: string;
+  /** Per-pill overrides, e.g. a width cap for titles that must truncate. */
+  itemClassName?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export function TabPillStrip<Key extends string>({
   onSelect,
   ariaLabel,
   className,
+  itemClassName,
 }: TabPillStripProps<Key>) {
   return (
     <div role="tablist" aria-label={ariaLabel} className={cn('flex items-center gap-1', className)}>
@@ -51,12 +54,13 @@ export function TabPillStrip<Key extends string>({
             aria-selected={active}
             onClick={() => onSelect(key)}
             className={cn(
-              'flex h-8 items-center gap-1.5 rounded-md border border-transparent px-3 text-[13px] font-medium transition-colors',
-              active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS
+              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[13px] font-medium transition-colors',
+              active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS,
+              itemClassName
             )}
           >
-            {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-            {label}
+            {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" /> : null}
+            <span className="min-w-0 truncate">{label}</span>
           </button>
         );
       })}

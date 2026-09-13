@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, Monitor, Moon, Sun, PanelLeft, PanelRight } from 'lucide-react';
+import { Moon, Sun, PanelLeft, PanelRight } from 'lucide-react';
 import {
   SessionRowLeadingSlot,
   buildSessionRowOpenedByTreeSlot,
@@ -40,18 +40,29 @@ import {
 } from './share-attachments';
 import { SessionShareErrorBoundary } from './session-share-error-boundary';
 import { Button } from '@/ui/button';
-import { nextCycledTheme, useTheme } from '@/theme-provider';
+import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
+import { cn } from '@/lib/utils';
+import { useTheme } from '@/theme-provider';
+import { SessionShareComposer } from './session-share-composer';
+import {
+  ShareViewerIdentity,
+  resolveShareAppOrigin,
+  type ShareViewer,
+} from './session-share-identity';
 
 function ShareThemeToggle() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
-  const mode =
-    theme === 'light'
-      ? t('settings.theme.light', 'Light')
-      : theme === 'dark'
-        ? t('settings.theme.dark', 'Dark')
-        : t('settings.theme.system', 'System');
-  const label = t('sharing.appearance', 'Appearance: {{mode}}', { mode });
+  // The reader offers Light and Dark only, and starts Light. It deliberately
+  // does not follow the app's appearance setting: a share is read on machines
+  // that never signed in, so `system` here would be a preference nobody set.
+  useEffect(() => {
+    if (theme !== 'light' && theme !== 'dark') setTheme('light');
+  }, [theme, setTheme]);
+  const dark = theme === 'dark';
+  const label = t('sharing.appearance', 'Appearance: {{mode}}', {
+    mode: dark ? t('settings.theme.dark', 'Dark') : t('settings.theme.light', 'Light'),
+  });
   return (
     <Button
       type="button"
@@ -59,15 +70,14 @@ function ShareThemeToggle() {
       size="icon"
       className="h-8 w-8 shrink-0 text-muted-foreground"
       aria-label={label}
+      aria-pressed={dark}
       title={label}
-      onClick={() => setTheme(nextCycledTheme(theme))}
+      onClick={() => setTheme(dark ? 'light' : 'dark')}
     >
-      {theme === 'light' ? (
-        <Sun className="h-4 w-4" aria-hidden="true" />
-      ) : theme === 'dark' ? (
+      {dark ? (
         <Moon className="h-4 w-4" aria-hidden="true" />
       ) : (
-        <Monitor className="h-4 w-4" aria-hidden="true" />
+        <Sun className="h-4 w-4" aria-hidden="true" />
       )}
     </Button>
   );
@@ -76,13 +86,21 @@ function ShareThemeToggle() {
 function ShareConversationPane({
   conversationId,
   title,
+  tabs,
+  onSelect,
   snapshot,
   attachmentAccess,
+  showFork,
 }: {
   conversationId: string;
   title: string;
+  /** Sibling child Tabs of this pane, app-style. One entry renders as a solo tab. */
+  tabs: { id: string; title: string }[];
+  onSelect: (conversationId: string) => void;
   snapshot: SessionShareReaderSnapshot;
   attachmentAccess: ShareAttachmentAccess;
+  /** Fork covers the whole share, so the side pane leaves it to the main one. */
+  showFork?: boolean;
 }) {
   const { t } = useTranslation();
   const [copying, setCopying] = useState(false);
@@ -148,43 +166,60 @@ function ShareConversationPane({
   };
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={title}>
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          disabled={copying || snapshot.status !== 'ready'}
-          onClick={() => void copy()}
-          aria-label={t('sessions.copyConversationHistory', 'Copy as Markdown')}
-        >
-          <Copy className="h-4 w-4" />
-        </Button>
+      {/* The app names a conversation with its tab, not a second title bar, so
+          a single conversation and a set of child Tabs read identically here. */}
+      <h1 className="sr-only">{title}</h1>
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+        {tabs.length > 1 ? (
+          <TabPillStrip
+            items={tabs.map((tab) => ({ key: tab.id, label: tab.title }))}
+            activeKey={conversationId}
+            onSelect={onSelect}
+            ariaLabel={t('sharing.conversations', 'Shared conversations')}
+            className="min-w-0 overflow-x-auto"
+            itemClassName="max-w-56 shrink-0"
+          />
+        ) : (
+          <span
+            className={cn(
+              'flex h-8 min-w-0 items-center rounded-md border border-transparent px-3 text-[13px] font-medium',
+              TAB_PILL_ACTIVE_CLASS
+            )}
+          >
+            <span className="min-w-0 truncate">{title}</span>
+          </span>
+        )}
       </div>
       {snapshot.status === 'unavailable' ? (
         <p role="status" className="p-8 text-sm text-muted-foreground">
           {t('sharing.unavailable', 'This share is unavailable')}
         </p>
       ) : (
-        <SessionReadonlyContext.Provider value={attachments}>
-          <SessionChatStreamView
-            key={conversationId}
-            sessionId={conversationId as SessionId}
-            items={stream.items}
-            className="min-h-0 flex-1"
-            renderMessageRow={renderRow}
-            lastAssistantMessageId={stream.lastAssistantMessageId}
-            lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
-            emptyState={
-              <p role="status" className="p-8 text-center text-sm text-muted-foreground">
-                {snapshot.status === 'loading'
-                  ? t('sharing.loading', 'Loading shared conversation…')
-                  : t('sharing.empty', 'No messages yet')}
-              </p>
-            }
+        <>
+          <SessionReadonlyContext.Provider value={attachments}>
+            <SessionChatStreamView
+              key={conversationId}
+              sessionId={conversationId as SessionId}
+              items={stream.items}
+              className="min-h-0 flex-1"
+              renderMessageRow={renderRow}
+              lastAssistantMessageId={stream.lastAssistantMessageId}
+              lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+              emptyState={
+                <p role="status" className="p-8 text-center text-sm text-muted-foreground">
+                  {snapshot.status === 'loading'
+                    ? t('sharing.loading', 'Loading shared conversation…')
+                    : t('sharing.empty', 'No messages yet')}
+                </p>
+              }
+            />
+          </SessionReadonlyContext.Provider>
+          <SessionShareComposer
+            showFork={showFork}
+            onCopyMarkdown={() => void copy()}
+            copyDisabled={copying || snapshot.status !== 'ready'}
           />
-        </SessionReadonlyContext.Provider>
+        </>
       )}
     </section>
   );
@@ -201,8 +236,19 @@ export function SessionShareSurface(props: {
   sideSnapshot?: SessionShareReaderSnapshot;
   onSelect: (conversationId: string) => void;
   attachmentAccess: ShareAttachmentAccess;
+  /** Supplied by a host that can establish an identity; signed-out otherwise. */
+  viewer?: ShareViewer;
+  /**
+   * Rendered inside the authenticated app (the publisher's frozen-copy
+   * preview). Visitor chrome is suppressed: the theme control here would drive
+   * the surrounding app's own appearance, and the sign-in slot describes a
+   * visitor, not the publisher looking at their own package.
+   */
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
+  const viewer = props.viewer ?? { status: 'signed-out' as const };
+  const appOrigin = useMemo(() => resolveShareAppOrigin(), []);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [treeVisible, setTreeVisible] = useState(true);
   const [sideVisible, setSideVisible] = useState(true);
@@ -249,24 +295,6 @@ export function SessionShareSurface(props: {
   const panes = resolveSharePanes(manifest, sessionId, props.sideId);
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
-  const tabStrip = (entries: typeof manifest.conversations, current: string) => (
-    <nav
-      className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-2 pt-2"
-      aria-label={t('sharing.conversations', 'Shared conversations')}
-    >
-      {entries.map((entry) => (
-        <button
-          type="button"
-          key={entry.id}
-          aria-current={entry.id === current ? 'page' : undefined}
-          onClick={() => props.onSelect(entry.id)}
-          className={`max-w-64 shrink-0 truncate rounded-t-lg px-3 py-2 text-sm ${entry.id === current ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}
-        >
-          {title(entry.title)}
-        </button>
-      ))}
-    </nav>
-  );
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
@@ -283,8 +311,10 @@ export function SessionShareSurface(props: {
               <PanelLeft className="h-4 w-4" />
             </Button>
           )}
-          <span className="text-xs text-muted-foreground">
-            {t('sharing.anonymous', 'Anonymous visitor')}
+          {/* The tab pill already names the conversation; on a phone this
+              caption would only push the header controls into a second row. */}
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            {t('sharing.sharedConversation', 'Shared conversation')}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -300,7 +330,12 @@ export function SessionShareSurface(props: {
               <PanelRight className="h-4 w-4" />
             </Button>
           )}
-          <ShareThemeToggle />
+          {!props.embedded && (
+            <>
+              <ShareThemeToggle />
+              <ShareViewerIdentity viewer={viewer} appOrigin={appOrigin} />
+            </>
+          )}
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
@@ -338,22 +373,25 @@ export function SessionShareSurface(props: {
           </nav>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {panes.tabs.length > 1 && tabStrip(panes.tabs, panes.main.id)}
           <ShareConversationPane
             key={panes.main.id}
             conversationId={panes.main.id}
             title={title(panes.main.title)}
+            tabs={panes.tabs.map((tab) => ({ id: tab.id, title: title(tab.title) }))}
+            onSelect={props.onSelect}
             snapshot={props.snapshot}
             attachmentAccess={props.attachmentAccess}
           />
         </div>
         {panes.side && sideVisible && (
           <aside className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border sm:max-w-[45%] sm:border-l sm:border-t-0">
-            {tabStrip(panes.sides, panes.side.id)}
             <ShareConversationPane
               key={panes.side.id}
               conversationId={panes.side.id}
               title={title(panes.side.title)}
+              tabs={panes.sides.map((tab) => ({ id: tab.id, title: title(tab.title) }))}
+              onSelect={props.onSelect}
+              showFork={false}
               snapshot={props.sideSnapshot ?? loadingSnapshot}
               attachmentAccess={props.attachmentAccess}
             />

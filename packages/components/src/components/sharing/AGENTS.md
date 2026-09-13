@@ -65,5 +65,20 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - Keep the read-only context free of composer, edit, retry, fork, permission,
   agent-control and workspace-navigation callbacks. Malformed reader errors
   unmount content and must not send history/error payloads to telemetry.
-- Theme controls reuse the app ThemeProvider and key, not a share-specific setting.
-  The host owns origin/build/CSP and an isolated anonymous platform/store.
+- Reader chrome, right to left in the header: viewer identity, then the theme
+  control. That control offers Light and Dark only and forces Light when it finds
+  any other stored value; the reader deliberately does not follow the app's
+  appearance setting. It still drives the app ThemeProvider, so `embedded`
+  (the publisher's frozen-copy preview) must suppress both it and the identity
+  slot rather than repaint the surrounding app.
+- `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
+  authenticates and, on its own origin, cannot read the app's session cookie:
+  showing a name or avatar requires the host to establish it. Signed-out offers
+  only a new-tab link to the app's `/login`, resolved from `VITE_SITE_URL` or by
+  dropping a leading `share.` label, and nothing when neither yields an origin.
+- Each pane is named by the app's tab pill (`shared/tab-pill-strip.tsx`), never a
+  second title bar, so one conversation and a set of child Tabs read alike. The
+  foot is `session-share-composer.tsx`: the product composer's exact resting
+  surface from `chat/composer-surface.ts`, inert and `aria-hidden`, with the
+  visitor's real actions floated over it. Keep Markdown copy there, per pane.
+- The host owns origin/build/CSP and an isolated anonymous platform/store.
