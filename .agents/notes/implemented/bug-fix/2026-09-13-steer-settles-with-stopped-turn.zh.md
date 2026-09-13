@@ -35,10 +35,13 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
   迟到的 `AgentSteerNotDeliveredError`——仅由 agent 亲口的 invalid-request 应答产生——经
   `requeueSteerAfterLateRefusal` 重排队，该方法只回翻同一 race 分支写下的终态并复走常规
   重排队守卫；既有的应用后取消守卫不变。重排队同时覆盖条目尚未同步到本机的场景（受支持的
-  RPC 先于历史到达顺序）：仅通过指针重排队并清除 race 分支遗留的 terminal-without-entry
-  记录，让迟同步的条目经 `pending_apply` 指针匹配进入分发而不是被修复回终态；且绝不替换
-  持有分发指针的更新 activation——执行侧只写自己的槽位——把回翻后的条目交给该 activation
-  持续驱动的分发扫描。
+  RPC 先于历史到达顺序）。其指针决策在历史工作之后基于重新读取的 meta 运行，因此这些 await
+  期间发布的 activation 绝不会被覆盖——执行侧只写自己的槽位。指针空闲时仅通过指针重排队并
+  清除 race 分支遗留的 terminal-without-entry 记录，让迟同步的条目经 `pending_apply` 指针
+  匹配进入分发而不是被修复回终态。更新的活跃 activation 持有指针时，回翻后的条目交给该
+  activation 持续驱动的分发扫描；仍未同步的条目则保留 terminal-without-entry 记录——指针
+  被占用时已无持久激活手段可发布，记录会让迟同步条目被修复回其终态（可见的未投递），而不是
+  搁浅成永远不会被分发的 `pending_apply` 意图。
 
 ## 权衡与兼容性
 
@@ -48,10 +51,17 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
 - 非取消结算标记为 `failed` 是唯一启发式：完成 turn 却不应答被扣 steer 请求的 agent 已偏离
   确认型 steer 契约，失败状态如实反映"无裁决"，而非断言已投递或未投递。
 - 响应结算后每会话 steer 变更队列立即解锁；后续 steer 的排队顺序不变。
-- 分发指针是单槽且 producer-owned。steer 请求被扣留期间更新的 send 已发布自己的 activation
-  时，重排队不能夺回该槽位：保持指针不动，依赖该活跃 activation 持续驱动的按时间序扫描来
-  派发回翻的条目（尚未同步的条目则保持 steer 意图，只能通过显式指针匹配进入分发）。销毁
-  更新的 activation 会在 watcher 卸载后让那个 turn 永久搁浅。
+- 分发指针是单槽且 producer-owned，重排队的指针决策在历史工作之后基于新鲜读取的 meta 运行：
+  依据 await 之前的快照做决策正是会话契约禁止的 read-await-rewrite，对 await 期间发布的
+  activation 视而不见。更新的 send 持有指针时重排队不能夺回该槽位：保持指针不动，把回翻的
+  条目交给该活跃 activation 持续驱动的按时间序扫描派发。此场景下尚未同步的条目已无持久激活
+  手段——发布一个会把活跃 turn 搁浅，而迟到的 `pending_apply` 条目只能经指针匹配进入分发——
+  因此重排队保留 race 分支的 terminal-without-entry 记录，迟同步条目被修复回其终态：可见的
+  未投递，与 race 分支已经报告的终态结算一致。该角落的自动激活需要在会话 meta 中新增排队激活
+  槽位，本改动刻意不引入。销毁更新的 activation 会在 watcher 卸载后让那个 turn 永久搁浅。
+- `lastMissingHistoryUserMsgId` 是对其所指 turn 的永久一次性否定确认：恢复流程已上报过该
+  投递失败，迟到的载荷不得复活已失败的 turn。重排队的指针写入只在它指向本 steer 时才清除
+  该确认——绝不清除指向更早 turn 的确认，那些 turn 的载荷同步后必须继续被分发排除。
 
 ## 验证
 
@@ -63,6 +73,13 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
 
 另有五条测试覆盖 review 指出的重排队边界：拒绝到达时条目缺失 → 经指针重排队并清除过期的
 terminal-without-entry 记录（修复前永久搁浅）；更新的活跃 activation 持有指针时，条目缺失
-→ 不写指针（记录仍清除）、条目在场 → 仅回翻 `pending` 不改写指针（修复前会覆盖新 turn 的
-activation）；指针指向已处理完成的 turn、以及指针已被 `settledActivationUserMsgId` 退役
-两种情况都视为空闲槽位，重排队照常发布指针。前三条在父提交上失败。
+→ 不写指针（保留其已记录的终态）、条目在场 → 仅回翻 `pending` 不改写指针（修复前会覆盖
+新 turn 的 activation）；指针指向已处理完成的 turn、以及指针已被 `settledActivationUserMsgId`
+退役两种情况都视为空闲槽位，重排队照常发布指针。前三条在父提交上失败。
+
+另有三条测试钉住第三轮 review：活跃 activation 之下条目缺失 → 保留 terminal-without-entry
+记录（修复前被清除，迟同步条目搁浅成不可分发的 steer 意图）；重排队的历史写入 await 期间
+发布的 activation 会被指针决策观察到（修复前守卫基于 await 前快照，覆盖了新 turn 的
+activation）；指向更早 turn 的 missing-history 确认在重排队的指针写入后保留（修复前被无条件
+清除，会让投递失败已上报的 turn 重新进入分发），而指向本 steer 的确认仍被清除。前三条在
+父提交上失败。

@@ -47,11 +47,16 @@ untouched.
   the guide via `requeueSteerAfterLateRefusal`, which flips back only the terminal status that same
   race branch wrote and re-walks the ordinary requeue guards; the existing post-application
   cancellation guard is unchanged. The requeue also covers the entry that has not synced to this
-  daemon (the supported RPC-before-history ordering): it requeues through the pointer alone and
-  drops the race branch's terminal-without-entry record so the late-syncing entry dispatches via
-  the `pending_apply` pointer match instead of being repaired back to terminal, and it never
-  replaces a newer activation that owns the dispatch pointer — execution writes its own slots only
-  — leaving the flipped entry to the dispatch scan that the newer activation keeps running.
+  daemon (the supported RPC-before-history ordering). Its pointer decision runs on a meta re-read
+  after the history work, so an activation published while those awaits run is never overwritten —
+  execution writes its own slots only. With the pointer free it requeues through the pointer alone
+  and drops the race branch's terminal-without-entry record, so the late-syncing entry dispatches
+  via the `pending_apply` pointer match instead of being repaired back to terminal. With a live
+  activation owning the pointer, a flipped entry is left to the dispatch scan that activation keeps
+  running, and an entry that has still not synced keeps the terminal-without-entry record: with the
+  pointer owned there is no durable way to activate it, and the record repairs the late-syncing
+  entry to its terminal status (visible non-delivery) instead of stranding it as `pending_apply`
+  intent nothing will ever dispatch.
 
 ## Trade-offs and compatibility
 
@@ -65,12 +70,22 @@ untouched.
   status reflects the unanswered verdict rather than asserting delivery.
 - The steer mutation queue is unblocked as soon as the response settles; queue ordering for later
   steers is unchanged.
-- The dispatch pointer is single-slot and producer-owned. When a newer send published its
-  activation while the steer request was held, the requeue must not reclaim the slot: it leaves
-  the pointer alone and relies on the chronological scan that the live activation keeps running (a
-  not-yet-synced entry then keeps steer intent, which dispatches only through an explicit pointer
-  match). Destroying the newer activation would strand that turn permanently once the watcher
-  unloads.
+- The dispatch pointer is single-slot and producer-owned, and the requeue's pointer decision runs
+  after the history work on a fresh meta read: deciding on the pre-await snapshot would be the
+  read-await-rewrite the session contract forbids, blind to activations published while the awaits
+  ran. When a newer send owns the pointer, the requeue must not reclaim the slot: it leaves the
+  pointer alone and relies on the chronological scan that the live activation keeps running for a
+  flipped entry. A not-yet-synced entry has no durable activation left in that case — publishing
+  one would strand the live turn, and a late `pending_apply` entry dispatches only through a
+  pointer match — so the requeue keeps the race branch's terminal-without-entry record and the
+  late-syncing entry is repaired to its terminal status: visible non-delivery, the same terminal
+  settlement the race branch already reported. Auto-activating that corner would need a
+  queued-activation slot in session meta, which this change deliberately does not introduce.
+  Destroying the newer activation would strand that turn permanently once the watcher unloads.
+- `lastMissingHistoryUserMsgId` is a permanent one-shot ack for the exact turn it names: recovery
+  already surfaced that delivery failure, and a late payload must not resurrect the failed turn.
+  The requeue's pointer write clears it only when it names the requeued steer itself — never an
+  older turn whose synced payload must stay excluded from dispatch.
 
 ## Verification
 
@@ -85,7 +100,16 @@ the `promptOutcome` field the race now reads.
 Five further tests cover the requeue edges flagged in review: an entry absent at refusal time is
 requeued through the pointer and the stale terminal-without-entry record is cleared (previously the
 guide stranded); with a live newer activation owning the pointer, an absent entry gets no pointer
-write (the record is still cleared) and a present entry is flipped to `pending` without a pointer
-rewrite (previously the newer turn's activation was clobbered); a pointer naming an already-handled
-turn and a pointer retired by `settledActivationUserMsgId` are both treated as free slots, so the
-requeue still publishes. The first three fail on the previous head.
+write (its recorded terminal status is kept) and a present entry is flipped to `pending` without a
+pointer rewrite (previously the newer turn's activation was clobbered); a pointer naming an
+already-handled turn and a pointer retired by `settledActivationUserMsgId` are both treated as free
+slots, so the requeue still publishes. The first three fail on the previous head.
+
+Three further tests pin the third review pass: an absent entry under a live activation keeps the
+terminal-without-entry record (previously cleared, stranding the late entry as undispatchable
+steer intent); an activation published while the requeue's history write is awaited is observed by
+the pointer decision (previously the guard ran on the pre-await snapshot and clobbered the newer
+turn's activation); and a missing-history tombstone naming an older turn survives the requeue's
+pointer write (previously cleared unconditionally, re-admitting a turn whose delivery failure had
+already surfaced), while a tombstone naming the requeued steer itself is still cleared. The first
+three fail on the previous head.

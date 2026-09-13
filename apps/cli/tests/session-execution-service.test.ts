@@ -889,16 +889,33 @@ describe('SessionExecutionService', () => {
       steerPrompt,
       currentModel: undefined,
     };
+    // Mutable so a test can publish a newer activation mid-flight and have the
+    // requeue's fresh meta re-read observe it.
+    const metaState: { current?: Partial<SessionMeta> } = { current: meta };
+    // Spy logger: the requeue's terminal log is the last statement of each of
+    // its branches, so awaiting it is a deterministic completion signal.
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     const updateHistory = vi.fn(
       async (map: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history.splice(0, history.length, ...map(history));
       }
     );
     const sessionDoc = { updateHistory };
-    const upsertDocMeta = vi.fn(async () => {});
+    const upsertDocMeta = vi.fn(async (_roomId: string, _patch: Partial<SessionMeta>) => {});
     const deps = createBaseDeps({
+      logger: logger as unknown as SessionExecutionServiceDeps['logger'],
       workspaceDocument: {
-        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => (meta ? { meta } : undefined)) },
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () =>
+            metaState.current ? { meta: metaState.current } : undefined
+          ),
+        },
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       } as unknown as LoroDocumentManager,
     });
@@ -957,7 +974,17 @@ describe('SessionExecutionService', () => {
         )
       );
     };
-    return { service, sessionId, history, upsertDocMeta, settleTurn, refuseLate };
+    return {
+      service,
+      sessionId,
+      history,
+      upsertDocMeta,
+      metaState,
+      logger,
+      updateHistory,
+      settleTurn,
+      refuseLate,
+    };
   };
 
   it('requeues a refused steer via the dispatch pointer even before its history entry syncs', async () => {
@@ -985,13 +1012,16 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('leaves the pointer alone when a newer activation owns it and the entry has not synced', async () => {
+  it('keeps the recorded terminal status when the entry has not synced and a newer activation owns the pointer', async () => {
     // With a live activation for a newer turn, publishing the refused steer's
     // pointer would destroy that activation — a turn visible only through the
-    // pointer is never reconsidered after the watcher unloads. The stale
-    // record is still dropped; the late-syncing entry keeps steer intent
-    // (it dispatches only through an explicit pointer match).
-    const { service, sessionId, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+    // pointer is never reconsidered after the watcher unloads. And with the
+    // entry still absent there is no durable activation left to publish: a
+    // late `pending_apply` entry dispatches only through a pointer match, so
+    // dropping the record would strand it as steer intent nothing runs. The
+    // record is kept so the late-syncing entry is repaired to its terminal
+    // status — visible non-delivery.
+    const { service, sessionId, upsertDocMeta, logger, settleTurn, refuseLate } = setupLateRefusal({
       history: [],
       meta: { latestUserMsgId: 'user-3', lastHandledUserMsgId: 'user-1' },
     });
@@ -999,9 +1029,57 @@ describe('SessionExecutionService', () => {
     expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBe('canceled');
 
     refuseLate();
+    // The requeue's branch log is its last statement — the steady state holds
+    // once it fires.
     await vi.waitFor(() =>
-      expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBeUndefined()
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('refused after its turn ended')
+      )
     );
+    expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBe('canceled');
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2' })
+    );
+  });
+
+  it('leaves the pointer alone when a newer activation is published while the history work is awaited', async () => {
+    // The pointer decision must observe activations published after the
+    // requeue read meta: a send that lands while the flip to `pending` is
+    // awaited owns the slot exactly like one published before it. Deciding on
+    // the earlier snapshot would overwrite the newer turn's only activation.
+    const { history, upsertDocMeta, metaState, logger, updateHistory, settleTurn, refuseLate } =
+      setupLateRefusal({
+        history: [
+          {
+            id: 'user-2',
+            role: 'user',
+            status: 'pending_apply',
+            read: false,
+          } as SessionHistoryInput,
+        ],
+      });
+    await settleTurn();
+    expect(history[0]).toMatchObject({ status: 'canceled' });
+    // From here every history write belongs to the requeue path. Publishing
+    // right after the flip lands simulates a send arriving while the awaited
+    // history work runs — after the requeue's first meta read, before the
+    // pointer decision.
+    const baseUpdate = updateHistory.getMockImplementation()!;
+    updateHistory.mockImplementation(async (map) => {
+      const result = await baseUpdate(map);
+      metaState.current = { latestUserMsgId: 'user-3', lastHandledUserMsgId: 'user-1' };
+      return result;
+    });
+    metaState.current = undefined;
+
+    refuseLate();
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('refused after its turn ended')
+      )
+    );
+    expect(history[0]).toMatchObject({ status: 'pending' });
     expect(upsertDocMeta).not.toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ latestUserMsgId: 'user-2' })
@@ -1072,6 +1150,63 @@ describe('SessionExecutionService', () => {
         expect.objectContaining({ latestUserMsgId: 'user-2' })
       )
     );
+  });
+
+  it('preserves a missing-history tombstone that names an older turn when requeueing', async () => {
+    // `lastMissingHistoryUserMsgId` is a permanent one-shot ack for the exact
+    // turn it names: recovery already surfaced that delivery failure, and a
+    // late payload must not resurrect the failed turn. Clearing it because a
+    // DIFFERENT steer was requeued would re-admit the older turn once its
+    // payload syncs — only this steer's own tombstone may go.
+    const { history, upsertDocMeta, logger, settleTurn, refuseLate } = setupLateRefusal({
+      history: [
+        { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+      ],
+      meta: {
+        latestUserMsgId: 'user-1',
+        lastHandledUserMsgId: 'user-1',
+        lastMissingHistoryUserMsgId: 'user-1',
+      },
+    });
+    await settleTurn();
+    refuseLate();
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('requeued as a follow-up turn')
+      )
+    );
+    expect(history[0]).toMatchObject({ status: 'pending' });
+    const patch = upsertDocMeta.mock.calls.find(
+      (call) => call[1]?.latestUserMsgId === 'user-2'
+    )?.[1];
+    expect(patch).toBeDefined();
+    expect('lastMissingHistoryUserMsgId' in patch!).toBe(false);
+  });
+
+  it('clears the missing-history tombstone when it names the requeued steer itself', async () => {
+    // The steer's own missing-history ack must go: the refusal proves
+    // non-delivery and the requeue re-aims dispatch at it, so the tombstone
+    // excluding it from every dispatch path would defeat the requeue.
+    const { upsertDocMeta, logger, settleTurn, refuseLate } = setupLateRefusal({
+      history: [],
+      meta: {
+        latestUserMsgId: 'user-1',
+        lastHandledUserMsgId: 'user-1',
+        lastMissingHistoryUserMsgId: 'user-2',
+      },
+    });
+    await settleTurn();
+    refuseLate();
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('requeued as a follow-up turn')
+      )
+    );
+    const patch = upsertDocMeta.mock.calls.find(
+      (call) => call[1]?.latestUserMsgId === 'user-2'
+    )?.[1];
+    expect(patch).toBeDefined();
+    expect('lastMissingHistoryUserMsgId' in patch!).toBe(true);
   });
 
   it('completes A to B to C when yielded prompts never settle', async () => {

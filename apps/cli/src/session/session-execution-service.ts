@@ -1757,12 +1757,18 @@ export class SessionExecutionService {
    * alone (the late-syncing entry dispatches via the `pending_apply` pointer
    * match in `findNextDispatchableUserTurn`), and the race branch's stale
    * terminal-without-entry record is dropped so it cannot repair the late
-   * entry back to terminal. The pointer write also never replaces a newer
-   * activation published while this steer request was held — execution writes
-   * its own slots only, per the rule documented on {@link setDispatchProcessing}
-   * — so with a live activation for another turn the pointer is left alone: a
-   * flipped entry is picked up by the dispatch scan that activation keeps
-   * running, and a not-yet-synced entry keeps steer intent.
+   * entry back to terminal.
+   *
+   * The pointer decision runs on a meta re-read AFTER the history work, so an
+   * activation published while those awaits ran is never overwritten
+   * (read-await-rewrite of producer-owned slots is forbidden — see
+   * {@link setDispatchProcessing}). With a live activation for another turn
+   * the pointer is left alone: a flipped entry is picked up by the dispatch
+   * scan that activation keeps running, while a not-yet-synced entry has no
+   * durable activation left to publish — it keeps the race branch's
+   * terminal-without-entry record so the late-syncing entry is repaired to its
+   * terminal status (visible non-delivery) instead of stranding as an
+   * undispatchable `pending_apply`.
    */
   private async requeueSteerAfterLateRefusal(
     sessionId: SessionId,
@@ -1776,19 +1782,6 @@ export class SessionExecutionService {
       if (meta?.lastHandledUserMsgId === userTurnId) {
         return;
       }
-      // A newer send that published its activation while this steer request was
-      // held owns the pointer; clobbering it would leave that turn unwatched.
-      // The suppression slots that retire an activation for dispatch
-      // (`lastMissingHistoryUserMsgId`, `settledActivationUserMsgId`) free the
-      // slot here too.
-      const pointer = meta?.latestUserMsgId;
-      const pointerHoldsNewerActivation =
-        typeof pointer === 'string' &&
-        pointer.length > 0 &&
-        pointer !== userTurnId &&
-        pointer !== meta?.lastHandledUserMsgId &&
-        pointer !== meta?.lastMissingHistoryUserMsgId &&
-        pointer !== meta?.settledActivationUserMsgId;
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       let entryPresent = false;
       let queueable = false;
@@ -1818,20 +1811,63 @@ export class SessionExecutionService {
       if (entryPresent && !queueable) {
         return;
       }
+      // The pointer decision re-reads meta AFTER the history work: a newer send
+      // can publish its activation while the awaits above run, and deciding on
+      // the earlier snapshot would read-await-rewrite the slot the
+      // turn-execution contract forbids touching.
+      const currentMeta = await this.getSessionMeta(sessionId);
+      if (currentMeta?.lastHandledUserMsgId === userTurnId) {
+        return;
+      }
+      // A newer send that published its activation while this steer request was
+      // held owns the pointer; clobbering it would leave that turn unwatched.
+      // The suppression slots that retire an activation for dispatch
+      // (`lastMissingHistoryUserMsgId`, `settledActivationUserMsgId`) free the
+      // slot here too.
+      const pointer = currentMeta?.latestUserMsgId;
+      const pointerHoldsNewerActivation =
+        typeof pointer === 'string' &&
+        pointer.length > 0 &&
+        pointer !== userTurnId &&
+        pointer !== currentMeta?.lastHandledUserMsgId &&
+        pointer !== currentMeta?.lastMissingHistoryUserMsgId &&
+        pointer !== currentMeta?.settledActivationUserMsgId;
+      if (pointerHoldsNewerActivation) {
+        if (entryPresent) {
+          // The flipped `pending` entry dispatches on its own; the scan the
+          // live activation keeps running picks it up without the pointer.
+          // The refusal still proves non-delivery, so the race branch's stale
+          // terminal-without-entry record must go: it would repair the entry
+          // back to terminal.
+          this.clearTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId);
+          this.deps.logger.info(
+            `[${sessionId}] Steer ${userTurnId} refused after its turn ended; left for the dispatch scan while activation ${pointer} holds the pointer`
+          );
+          return;
+        }
+        // No entry synced and the pointer is owned: publishing ours would
+        // strand the live turn, and a late `pending_apply` entry dispatches
+        // only through a pointer match. Keep the race branch's
+        // terminal-without-entry record so the late-syncing entry is repaired
+        // to its terminal status — visible non-delivery — instead of
+        // stranding as steer intent nothing will ever dispatch.
+        this.deps.logger.info(
+          `[${sessionId}] Steer ${userTurnId} refused after its turn ended; activation ${pointer} holds the pointer, keeping the recorded terminal status for the late entry`
+        );
+        return;
+      }
       // The refusal proves non-delivery: whatever terminal-without-entry record
       // the race branch left behind must not repair the late-syncing entry back
       // to terminal.
       this.clearTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId);
-      if (pointerHoldsNewerActivation) {
-        this.deps.logger.info(
-          `[${sessionId}] Steer ${userTurnId} refused after its turn ended; left for the dispatch scan while activation ${pointer} holds the pointer`
-        );
-        return;
+      // `lastMissingHistoryUserMsgId` is a permanent one-shot ack for the exact
+      // turn it names; clear it only when it names this steer, never an older
+      // turn whose synced payload must stay excluded from dispatch.
+      const patch: Partial<SessionMeta> = { latestUserMsgId: userTurnId };
+      if (currentMeta?.lastMissingHistoryUserMsgId === userTurnId) {
+        patch.lastMissingHistoryUserMsgId = undefined;
       }
-      await this.upsertSessionMeta(sessionId, {
-        latestUserMsgId: userTurnId,
-        lastMissingHistoryUserMsgId: undefined,
-      });
+      await this.upsertSessionMeta(sessionId, patch);
       this.deps.logger.info(
         `[${sessionId}] Steer ${userTurnId} refused after its turn ended; requeued as a follow-up turn`
       );
