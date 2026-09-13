@@ -1,12 +1,9 @@
+import { deriveSessionTurnFacts, type SessionTurnFacts } from './session-turn-facts';
 import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import {
-  createConversationDerivation,
-  type ConversationView,
-  type DeriveTurnFact,
-} from '@/lib/conversation-view';
+import { acquireConversationDerivation, type ConversationView } from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
   SessionFileChangeEntry,
@@ -87,15 +84,6 @@ function normalizeHistoryEntryFileDiffs(entry: SessionHistoryEntryInput): FileDi
   });
 }
 
-/** What the fallback summary needs from a turn; derived per turn object. */
-type DiffInputEntry = { id: string; role: string; fileDiff: unknown };
-
-const deriveDiffInputEntry: DeriveTurnFact<DiffInputEntry> = (turn) => ({
-  id: turn.id,
-  role: turn.role,
-  fileDiff: turn.fileDiff,
-});
-
 /**
  * Per-turn diff inputs for the whole conversation in order, from a fact table
  * over the view: turns the background pass has not reached yet are absent and
@@ -103,9 +91,9 @@ const deriveDiffInputEntry: DeriveTurnFact<DiffInputEntry> = (turn) => ({
  */
 function collectDiffInputs(
   view: ConversationView,
-  facts: ReadonlyMap<string, DiffInputEntry>
-): DiffInputEntry[] {
-  const entries: DiffInputEntry[] = [];
+  facts: ReadonlyMap<string, SessionTurnFacts>
+): SessionTurnFacts[] {
+  const entries: SessionTurnFacts[] = [];
   for (let i = 0; i < view.turnCount; i += 1) {
     const row = view.index(i);
     const fact = row ? facts.get(row.id) : undefined;
@@ -410,7 +398,7 @@ export function useSessionDiffSummary(
     let acquiredStore = false;
     let releaseSync: (() => void) | null = null;
     let unsubscribe: (() => void) | null = null;
-    let derivation: ReturnType<typeof createConversationDerivation<DiffInputEntry>> | null = null;
+    let lease: ReturnType<typeof acquireConversationDerivation<SessionTurnFacts>> | null = null;
 
     historyRef.current = undefined;
     diffInputsFingerprintRef.current = undefined;
@@ -434,7 +422,8 @@ export function useSessionDiffSummary(
         }
         releaseSync = store.acquireSync();
 
-        derivation = createConversationDerivation(store.history, deriveDiffInputEntry);
+        lease = acquireConversationDerivation(store.history, deriveSessionTurnFacts);
+        const derivation = lease.table;
         const initialHistory = collectDiffInputs(store.history, derivation.facts) as never;
         historyRef.current = initialHistory;
         diffInputsFingerprintRef.current = computeSessionDiffInputsFingerprint(initialHistory);
@@ -507,7 +496,7 @@ export function useSessionDiffSummary(
 
     return () => {
       cancelled = true;
-      derivation?.dispose();
+      lease?.release();
       if (unsubscribe) {
         unsubscribe();
       }

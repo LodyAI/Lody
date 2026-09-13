@@ -65,13 +65,14 @@ describe('targeted history writes', () => {
       );
       expect(writer.read('new-target')?.items).toEqual([{ type: 'text', text: 'created' }]);
       const version = loro.version().toJSON();
-      const invalid = await doc.sessionData.commands.applyHistoryAction({
-        kind: 'assistant-items',
-        mode: 'replace',
-        turnId: 'target',
-        items: [{ type: 'text', text: 42 } as never],
-      });
-      expect(invalid).toMatchObject({ status: 'rejected', reason: { code: 'invalid_input' } });
+      await expect(
+        doc.sessionData.commands.applyHistoryAction({
+          kind: 'assistant-items',
+          mode: 'replace',
+          turnId: 'target',
+          items: [{ type: 'text', text: 42 } as never],
+        })
+      ).rejects.toThrow('Invalid history write');
       expect(loro.version().toJSON()).toEqual(version);
     } finally {
       doc.mirror?.dispose();

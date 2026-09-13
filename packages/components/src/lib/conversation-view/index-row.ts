@@ -1,6 +1,7 @@
 import { normalizeSessionTurnInputConfig, type Role, type SessionHistory } from '@lody/shared';
 import { summarizeTurn } from './turn-summary';
-import { isPlainRecord } from './is-plain-record';
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 import type { TurnIndexInputConfig, TurnIndexRow } from './types';
 
 /** The body-independent send configuration subset of a user turn's `inputConfig`. */

@@ -1,3 +1,5 @@
+import { deriveSessionTurnFacts } from '../src/components/sessions/session-turn-facts';
+import { acquireConversationDerivation } from '../src/lib/conversation-view';
 import { writeStoredField } from './conversation-view-fixtures';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
@@ -63,6 +65,24 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 });
 
 describe('createConversationDerivation', () => {
+  it('shares goal and diff facts until the last consumer releases the view', async () => {
+    const { view, doc } = await openView(2, { tailKeep: 4, maxHydrated: 4 });
+    const goalReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
+    const diffReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
+    expect(goalReader.table).toBe(diffReader.table);
+    expect(diffReader.table.facts.get('a-0')?.fileDiff).toHaveLength(1);
+    goalReader.release();
+    const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID });
+    data.writer.setField('a-0', 'fileDiff', []);
+    await flushReaderChanges();
+    await drain(() => diffReader.table.facts.get('a-0')?.fileDiff?.length === 0);
+    expect(diffReader.table.facts.get('a-0')?.fileDiff).toEqual([]);
+    diffReader.release();
+    expect(diffReader.table.facts.size).toBe(0);
+    data.dispose();
+    view.dispose();
+  });
+
   it('fills all facts after a completed pass receives a bulk remote append', async () => {
     const { doc, view, idle } = await openView(1);
     const derivation = createConversationDerivation(view, deriveDiffCount, {
@@ -199,7 +219,7 @@ describe('createConversationDerivation', () => {
             ? { kind: 'clear-goal', threadId: goal.threadId, updatedAt: 10 }
             : { kind: 'upsert-goal', goal: { ...goal, status }, fallback: history[1]! }
         );
-        expect(result.status).toBe('accepted');
+        expect(result.matched).toBe(true);
         await drain(
           () => derivation.complete && derivation.facts.get('a-0')?.goal?.status === status,
           10000

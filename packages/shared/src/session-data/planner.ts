@@ -6,9 +6,9 @@ import type {
   OpenAssistantTurnInput,
   ReplaceEditableTailInput,
   SessionEditableTailRejectionCode,
-  SessionTurn,
   TaskProposalResolution,
 } from './types';
+import type { SessionTurn } from './domain';
 
 // # Shared session commands, single source
 //

@@ -129,9 +129,7 @@ describe('SessionDocument status metadata', () => {
     entry.set('fileDiff', [{ path: 'a.ts', add: 1, del: 0 }]);
     const doc = createSessionDocument({}, undefined, loroDoc);
 
-    expect(
-      (await doc.agentWrites.setTurnField('entry-1', 'fileDiff', { kind: 'clear' })).status
-    ).toBe('accepted');
+    await doc.agentWrites.setTurnField('entry-1', 'fileDiff', { kind: 'clear' });
 
     const readBack = loroDoc.getList('history').get(0) as LoroMap;
     expect(readBack.keys()).not.toContain('fileDiff');
@@ -144,8 +142,8 @@ describe('SessionDocument status metadata', () => {
           turnId: 'entry-1',
           change: { kind: 'clear' },
         })
-      ).status
-    ).toBe('accepted');
+      ).matched
+    ).toBe(true);
     expect((loroDoc.getList('history').get(0) as LoroMap).keys()).not.toContain('fileDiff');
     doc.mirror?.dispose();
   });

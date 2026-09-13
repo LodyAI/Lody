@@ -211,3 +211,35 @@ export function createConversationDerivation<F>(
     },
   };
 }
+
+const sharedDerivations = new WeakMap<
+  ConversationView,
+  Map<DeriveTurnFact<unknown>, { table: ConversationDerivation<unknown>; users: number }>
+>();
+
+/** Borrow a fact table; release the background scan after the last consumer. */
+export function acquireConversationDerivation<F>(
+  view: ConversationView,
+  derive: DeriveTurnFact<F>
+) {
+  let tables = sharedDerivations.get(view);
+  if (!tables) sharedDerivations.set(view, (tables = new Map()));
+  let entry = tables.get(derive);
+  if (!entry) {
+    entry = { table: createConversationDerivation(view, derive), users: 0 };
+    tables.set(derive, entry);
+  }
+  entry.users++;
+  let active = true;
+  return {
+    table: entry.table as ConversationDerivation<F>,
+    release() {
+      if (!active) return;
+      active = false;
+      if (--entry.users === 0) {
+        entry.table.dispose();
+        tables.delete(derive);
+      }
+    },
+  };
+}

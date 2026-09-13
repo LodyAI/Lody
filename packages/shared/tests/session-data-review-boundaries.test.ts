@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
-import { createLoroSessionData, requireSessionAccepted } from '../src/session-data';
+import { createLoroSessionData } from '../src/session-data';
 import { createHistoryWriter } from '../src/history-writer';
 import type { SessionId } from '../src/ids';
 const sessionId = 'review-boundaries' as SessionId;
@@ -24,13 +24,11 @@ it('inline legacy rows remain writable without changing their opaque data or sib
   const writer = createHistoryWriter(doc),
     data = createLoroSessionData({ doc, sessionId, writer });
   const sibling = list.get(1);
-  requireSessionAccepted(
-    await data.commands.applyHistoryAction({
-      kind: 'user-status',
-      turnId: 'old',
-      status: 'processing',
-    })
-  );
+  await data.commands.applyHistoryAction({
+    kind: 'user-status',
+    turnId: 'old',
+    status: 'processing',
+  });
   expect(list.get(0)).toMatchObject({
     status: 'processing',
     read: true,

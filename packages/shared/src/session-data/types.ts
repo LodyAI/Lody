@@ -6,35 +6,9 @@ import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
 import type { SessionEntry, SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
 
-// # Session data ports
-//
-// The CRDT-neutral seam between session *business* code (React UI, CLI, MCP)
-// and one concrete storage implementation (today Loro + Mirror + repo; later a
-// database CRDT). Nothing here names Loro, Mirror, a CID, a container id or a
-// storage offset, and its DTOs come from `./domain` rather than the storage
-// schema. Adapters keep storage details inside `session-data/loro.ts`.
-//
-// A field change is explicit. `set` writes a value, `clear` removes it, and an
-// omitted field is never a change. Callers do not rely on `undefined` surviving
-// a JSON/worker/Rust boundary to mean "delete".
-//
-// A command result states its phase. A validated pre-write rejection is not the
-// same as an accepted change, and an accepted-but-unacknowledged change is not a
-// rejection. Only the first is safe to retry blindly.
-
-export type {
-  SessionEntry,
-  SessionDirectoryRow,
-  SessionDirectoryScalars,
-  SessionTurn,
-  SessionTurnRole,
-  SessionTurnStatus,
-  SessionTurnRead,
-  SessionUnavailableReason,
-  SessionWritableField,
-  SessionTurnWritableValues,
-} from './domain';
-export { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
+// History reads and shared writes use domain DTOs rather than the storage schema.
+// Ordinary commands propagate errors. Import and editable-tail replacement
+// distinguish pre-write refusal from an unknown commit outcome; never retry the latter.
 
 /**
  * An explicit field change. `set` with an explicit value, or `clear` to remove
@@ -52,12 +26,6 @@ export const setFieldTo = <T>(value: T): SessionFieldChange<T> => ({ kind: 'set'
  * argument without repeating the field's type.
  */
 export const clearField = <T>(): SessionFieldChange<T> => ({ kind: 'clear' });
-
-/** Content-free rejection metadata: paths and codes, never conversation text. */
-export type SessionCommandRejection = {
-  readonly code: 'invalid_input' | 'not_found' | 'conflict' | 'unsupported';
-  readonly issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[];
-};
 
 /** A user's decision on a task proposal, resolved against the live notice. */
 export type TaskProposalResolution = {
@@ -81,21 +49,6 @@ export type OpenAssistantTurnInput = {
   /** Timestamp for a freshly created turn. */
   readonly timestamp: string;
 };
-
-/**
- * Three phases, deliberately distinct:
- *  - `accepted`   — the store holds the change; retrying would duplicate it.
- *  - `rejected`   — validated and refused before touching storage; the caller
- *                   may fix and retry.
- *  - `indeterminate` — the implementation cannot say whether the change
- *                   committed. Never auto-retry; surface it.
- */
-export type SessionCommandResult =
-  | {
-      readonly status: 'accepted';
-    }
-  | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
-  | { readonly status: 'indeterminate'; readonly cause: unknown };
 
 /**
  * Domain reasons a tail replacement is refused before any write.
@@ -164,25 +117,11 @@ export const sessionTurnReadIsReady = (
   read: SessionTurnRead
 ): read is { state: 'ready'; turn: SessionTurn } => read.state === 'ready';
 
-/**
- * A change notification after an observation's initial read. `changed` means the
- * consumer should re-read the affected raw positions; `reset` means continuity
- * was lost (for example the source was replaced) and the whole window must be
- * re-read. The token is local only and is never a storage/wire version.
- */
+/** Membership changes carry the shifted range; content edits carry identities,
+ * including turns whose bodies are not cached by any reader. */
 export type SessionDataChange =
-  | {
-      readonly kind: 'changed';
-      readonly from?: number;
-      readonly to?: number;
-      /**
-       * True when membership or order changed (append/insert/delete/replace),
-       * so a consumer can fence reads that started before the change. Omitted
-       * for a content-only change, which must not invalidate unrelated reads.
-       */
-      readonly structural?: boolean;
-    }
-  | { readonly kind: 'reset' };
+  | { readonly kind: 'structure'; readonly from: number; readonly to: number }
+  | { readonly kind: 'changed'; readonly ids: readonly string[] };
 
 export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
@@ -199,30 +138,36 @@ export interface SessionObservation {
   unsubscribe(): void;
 }
 
-/** Windowed authoritative reads. Every method is async so a database adapter
- *  can answer without blocking. */
+/** Authoritative reads. In-process storage returns synchronously; the display
+ * cache also accepts delayed reads and fences their results against events. */
 export interface SessionHistoryReader {
   /** Raw slot count, including slots no domain turn owns. */
-  count(): Promise<number>;
+  count(): number | Promise<number>;
   /** Authoritative read of one raw slot. */
-  readAt(position: number): Promise<SessionTurnRead>;
+  readAt(position: number): SessionTurnRead | Promise<SessionTurnRead>;
   /** Authoritative read of one business turn id. */
-  readTurn(turnId: string): Promise<SessionTurnRead>;
+  readTurn(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
   /** Authoritative read of raw slots `[from, to)`. */
-  readRange(from: number, to: number): Promise<readonly SessionTurnRead[]>;
+  readRange(
+    from: number,
+    to: number
+  ): readonly SessionTurnRead[] | Promise<readonly SessionTurnRead[]>;
   /** Shallow identity/state for raw slots `[from, to)`; never a turn body. */
-  readDirectory(from: number, to: number): Promise<readonly SessionDirectoryRow[]>;
+  readDirectory(
+    from: number,
+    to: number
+  ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
   /**
    * One consistent full read of the stored history, detached. Export/replay/hash
    * use this instead of stitching `count()` plus `readRange()` across a changing
    * source. It is a read capability, not copy provenance: a stored copy still
    * goes through the opaque snapshot handle.
    */
-  readAll(): Promise<SessionEntry[]>;
+  readAll(): SessionEntry[] | Promise<SessionEntry[]>;
   /** One observation of a user turn's output: user scalars, its first linked
    * assistant body, and later system notices only when the user failed.
    * Never materialize unrelated history bodies or join separate async reads. */
-  readTurnOutput(userTurnId: string): Promise<SessionEntry[]>;
+  readTurnOutput(userTurnId: string): SessionEntry[] | Promise<SessionEntry[]>;
   /** Live observation with a gap-free initial directory. */
   observe(listener: SessionDataChangeListener): SessionObservation;
 }
@@ -230,9 +175,9 @@ export interface SessionHistoryReader {
 export interface SessionHistoryCommands {
   applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
   /** Append a new turn. Rejects invalid input before touching storage. */
-  appendTurn(turn: SessionTurn): Promise<SessionCommandResult>;
+  appendTurn(turn: SessionTurn): Promise<void>;
   /** Replace an existing turn by business id. */
-  replaceTurn(turnId: string, turn: SessionTurn): Promise<SessionCommandResult>;
+  replaceTurn(turnId: string, turn: SessionTurn): Promise<void>;
   /**
    * Resolve a task proposal against the live notice in one entry. The adapter
    * re-locates the proposal inside its commit; a rendered history snapshot is
@@ -242,13 +187,13 @@ export interface SessionHistoryCommands {
     entryId: string,
     proposalId: string,
     resolution: TaskProposalResolution
-  ): Promise<SessionCommandResult>;
+  ): Promise<boolean>;
   /** Answer a permission request located by request id (optionally in one turn). */
   respondPermission(
     requestId: string,
     outcome: PermissionOutcome,
     options?: { readonly turnId?: string }
-  ): Promise<SessionCommandResult>;
+  ): Promise<boolean>;
   /**
    * Replace the editable tail user turn. The eligibility rule (last editable
    * user turn, delivered non-steer, with its provider boundary) and the
@@ -273,7 +218,7 @@ export interface SessionData {
 }
 
 export type SessionImportResult =
-  | (Extract<SessionCommandResult, { status: 'accepted' }> & { readonly appended: number })
+  | { readonly status: 'accepted'; readonly appended: number }
   | {
       readonly status: 'rejected';
       readonly reason: {
@@ -281,9 +226,9 @@ export type SessionImportResult =
         readonly issues?: readonly { path: readonly PropertyKey[]; code: string }[];
       };
     }
-  | Extract<SessionCommandResult, { status: 'indeterminate' }>;
+  | { readonly status: 'indeterminate'; readonly cause: unknown };
 
-export type SessionActionResult = SessionCommandResult & {
+export type SessionActionResult = {
   readonly matched?: boolean;
   readonly proposal?: import('./task-proposal').TaskProposalPublishResult;
 };

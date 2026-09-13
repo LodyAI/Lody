@@ -113,7 +113,7 @@ describe('F1 regression: revoke during in-flight backfill upload (S5/D10)', () =
     ] as unknown as SessionHistoryInput[];
 
     const sessionDoc = withHistoryPort({
-      getHistory: async () => history,
+      getHistory: () => history,
       updateHistory: async (updater: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },

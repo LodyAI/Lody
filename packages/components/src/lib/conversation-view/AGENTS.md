@@ -16,12 +16,11 @@
 - Derivations retain small facts and weak identity hints, not evicted bodies.
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes.
-- Use the one shared HistoryWriter in both read modes. A display projection is
-  never a write baseline or export/hash input. `readConversationHistory` uses
-  the authoritative reader's one consistent full read.
-- `LODY_CONVERSATION_VIEW` is a build-time rollback constant only. The temporary
-  `from-history` array adapter should be removed after two releases. No runtime
-  setting or localStorage override; there is no raw-doc reader implementation.
+- Use the one shared HistoryWriter. A display projection is never a write
+  baseline or export/hash input; `readAll` forwards the authoritative read.
+  The array adapter serves static shared pages, not a runtime fallback.
+- Goal, permission, scheduling and diff consumers acquire the same per-view
+  fact table. Only the final consumer release disposes its background scan.
 - Control-plane Mirror ignores history and does not enumerate its containers.
   Queue identity must retain non-enumerable `$cid` through Immer, not a
   `structuredClone` that drops it.

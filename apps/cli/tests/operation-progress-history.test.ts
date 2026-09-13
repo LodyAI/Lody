@@ -177,7 +177,7 @@ describe('operation progress history', () => {
       },
     ];
     const doc = withHistoryPort({
-      getHistory: async () => history,
+      getHistory: () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -277,7 +277,7 @@ describe('operation progress history', () => {
       },
     ];
     const doc = withHistoryPort({
-      getHistory: async () => history,
+      getHistory: () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -326,7 +326,7 @@ it.each(['failed', 'cancelled'] as const)(
   async (status) => {
     let history: SessionHistoryInput[] = [];
     const doc = withHistoryPort({
-      getHistory: async () => history,
+      getHistory: () => history,
       updateHistory: async (updater: (input: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = updater(history);
       },
@@ -377,7 +377,7 @@ it.each(['succeeded', 'failed', 'cancelled'] as const)(
       strict: false,
     });
     const sessionDoc = withHistoryPort({
-      getHistory: async () => mirror.getState().history,
+      getHistory: () => mirror.getState().history,
       updateHistory: async (updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         mirror.setState((state) => ({ ...state, history: updater(state.history) }));
       },
@@ -456,7 +456,7 @@ it.each(['cancelled', 'error'] as const)(
     const now = () => Date.parse('2026-01-01T00:00:01.000Z');
     let history: SessionHistoryInput[] = [];
     const doc = withHistoryPort({
-      getHistory: async () => history,
+      getHistory: () => history,
       updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         history = update(history);
       },
@@ -554,7 +554,7 @@ it('preserves all 25 merge transitions, including terminal labels and running-to
 it('keeps the original history object for identical progress snapshots', async () => {
   let history: SessionHistoryInput[] = [];
   const doc = withHistoryPort({
-    getHistory: async () => history,
+    getHistory: () => history,
     updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       history = update(history);
     },
@@ -597,7 +597,7 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
   const adapter = (mirror: typeof left) =>
     withHistoryPort({
       handle: { doc: mirror === left ? leftDoc : rightDoc },
-      getHistory: async () => mirror.getState().history,
+      getHistory: () => mirror.getState().history,
       updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         mirror.setState((state) => ({ ...state, history: update(state.history) }));
       },
@@ -615,7 +615,7 @@ it('compacts concurrent same-id inserts after a real two-replica merge without l
       upsertOperationProgressHistory(
         withHistoryPort({
           handle: { doc: leftDoc },
-          getHistory: async () => left.getState().history,
+          getHistory: () => left.getState().history,
           updateHistory: async () => {
             throw new Error('interrupted before writing');
           },
@@ -672,7 +672,7 @@ it('does not notify real Mirror subscribers when progress is unchanged or absent
     notifications++;
   });
   const doc = withHistoryPort({
-    getHistory: async () => mirror.getState().history,
+    getHistory: () => mirror.getState().history,
     updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
       mirror.setState((state) => ({ ...state, history: update(state.history) }));
     },

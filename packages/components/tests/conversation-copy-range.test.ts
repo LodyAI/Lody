@@ -2,10 +2,7 @@ import { openReaderView } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import { conversationCopyRange } from '../src/lib/conversation-copy-range';
 import { buildConversationMarkdown, type WorkspaceId } from '@lody/shared';
-import {
-  createProjectedConversationView,
-  readConversationHistory,
-} from '../src/lib/conversation-view';
+import { createProjectedConversationView } from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -42,7 +39,7 @@ describe('complete async history reads', () => {
         afterHistoryId: null,
       },
     ]);
-    const reading = readConversationHistory(projected);
+    const reading = projected.readAll();
     doc.getList('history').delete(0, 1);
     doc.commit();
     view.dispose();

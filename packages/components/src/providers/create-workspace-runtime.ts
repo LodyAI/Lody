@@ -72,7 +72,7 @@ import {
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
-import { createConversationSession, WINDOWED_CONVERSATIONS } from '@/lib/conversation-view';
+import { createConversationSession } from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -3732,7 +3732,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       dispose: disposeConversation,
     } = createConversationSession(sessionDoc, {
       sessionId,
-      windowed: WINDOWED_CONVERSATIONS,
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);

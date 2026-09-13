@@ -1,15 +1,14 @@
+import {
+  createControlPlaneDoc,
+  CONTROL_PLANE_IGNORED_ROOT_KEYS,
+  sessionControlPlaneSchema,
+} from '@lody/shared';
 import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory } from '@lody/shared';
 import { LoroDoc, type LoroList, type LoroMap, type LoroText } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import {
-  createConversationSession,
-  createControlPlaneDoc,
-  createHistoryWriter,
-  CONTROL_PLANE_IGNORED_ROOT_KEYS,
-  sessionControlPlaneSchema,
-} from '../src/lib/conversation-view';
+import { createConversationSession, createHistoryWriter } from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
   createManualIdle,

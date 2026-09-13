@@ -1,5 +1,4 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionAccepted } from '@lody/shared/session-data';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
@@ -1798,7 +1797,7 @@ export class SessionDispatchWatcher {
     await sessionDoc.sessionData.commands
       .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status: 'failed' })
       .then((result) => {
-        entryMatched = requireSessionAccepted(result).matched ?? false;
+        entryMatched = result.matched ?? false;
       });
     // An RPC-stashed turn can be denied before its history entry syncs; record
     // the failure so the late entry gets repaired to 'failed' instead of
@@ -2676,7 +2675,7 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
-    const history = await readSessionHistory(sessionDoc.sessionData.history);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
     if (!isActive()) {
       return { turn: null, history };
     }
@@ -2766,9 +2765,11 @@ export class SessionDispatchWatcher {
     this.deps.logger.debug(
       `[${sessionId}] Repairing late-arriving user turn ${turn.id} to '${status}' (already executed via fast path)`
     );
-    await sessionDoc.sessionData.commands
-      .applyHistoryAction({ kind: 'user-status', turnId: turn.id, status })
-      .then(requireSessionAccepted);
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: turn.id,
+      status,
+    });
     this.deps.executionService.clearTerminalUserTurnStatusWithoutEntry?.(sessionId, turn.id);
     this.consumeStashedRpcTurn(sessionId, turn.id);
     return true;

@@ -16,7 +16,6 @@ bench(
   async () => {
     const session = createConversationSession(doc, {
       sessionId: FIXTURE_SESSION_ID,
-      windowed: true,
       tailKeep: 0,
       scheduleIdle: () => () => {},
     });

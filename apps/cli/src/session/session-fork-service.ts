@@ -329,7 +329,7 @@ export class SessionForkService {
       return;
     }
 
-    const history = await readSessionHistory(targetDoc.sessionData.history);
+    const history = readSessionHistory(targetDoc.sessionData.history);
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -869,17 +869,10 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
+        await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
-        if (copyResult.status !== 'accepted') {
-          throw new SessionForkOperationError(
-            'TARGET_WRITE_FAILED',
-            'The forked history could not be written.',
-            copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
-          );
-        }
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -1018,17 +1011,10 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
+        await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
-        if (copyResult.status !== 'accepted') {
-          throw new SessionForkOperationError(
-            'TARGET_WRITE_FAILED',
-            'The forked history could not be written.',
-            copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
-          );
-        }
         targetDoc.setForkOperation(undefined);
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,

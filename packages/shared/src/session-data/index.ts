@@ -1,35 +1,6 @@
-export type {
-  SessionCommandRejection,
-  SessionCommandResult,
-  SessionData,
-  SessionDataChange,
-  SessionDataChangeListener,
-  SessionEditableTailRejection,
-  SessionEditableTailRejectionCode,
-  SessionEditableTailResult,
-  SessionFieldChange,
-  SessionHistoryCommands,
-  SessionHistoryReader,
-  SessionObservation,
-  SessionWritableField,
-  OpenAssistantTurnInput,
-  ReplaceEditableTailInput,
-  TaskProposalResolution,
-} from './types';
-export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
+export * from './types';
 export { type SessionSnapshot, type SessionSnapshotService } from './snapshot';
-export type {
-  SessionEntry,
-  SessionDirectoryRow,
-  SessionDirectoryScalars,
-  SessionTurn,
-  SessionTurnRead,
-  SessionTurnRole,
-  SessionTurnStatus,
-  SessionTurnWritableValues,
-  SessionUnavailableReason,
-} from './domain';
-export { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
+export * from './domain';
 export {
   applyMarkTurnSeen,
   applyOpenAssistantTurn,
@@ -55,7 +26,6 @@ export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOption
 export * from './history-import';
 
 export type { HistoryAction } from './history-actions';
-export { requireSessionAccepted } from './result';
 
 export {
   getOperationProgressTurnId,
@@ -68,3 +38,5 @@ export {
 export { readLatestTurn, readSessionHistory } from './read';
 
 export { markAssistantTurnFinished } from './assistant-finalize';
+
+export { HistoryActionRefused } from './task-proposal';

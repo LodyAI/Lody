@@ -144,7 +144,7 @@ const makeHarness = async (options?: {
         commands: {},
         durability: { waitDurable: async () => {} },
       },
-      getHistory: async () => histories.get(sessionId) ?? [],
+      getHistory: () => histories.get(sessionId) ?? [],
       updateHistory: async (update: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
         const current = histories.get(sessionId) ?? [];
         const next = update(current);

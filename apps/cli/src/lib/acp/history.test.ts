@@ -63,7 +63,7 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
       }
     ),
     setPlan: vi.fn(async () => {}),
-    getHistory: vi.fn(async () => history),
+    getHistory: vi.fn(() => history),
     agentWrites: { applyAgentBatch },
     sessionData: {
       commands: {},

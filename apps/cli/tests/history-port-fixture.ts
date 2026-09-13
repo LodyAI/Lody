@@ -3,7 +3,6 @@ import { pickDirectoryScalars } from '../../../packages/shared/src/session-data/
 import { createHistoryWriter } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
-import { HistoryActionRefused } from '../../../packages/shared/src/session-data/task-proposal';
 import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/session-data';
 
 /** Service-test storage owner. Preserve each fixture's injected persistence
@@ -11,56 +10,42 @@ import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/sess
  * Backend correctness is covered separately over real Loro storage. */
 export function withHistoryPort<T extends object>(fixture: T): T & { sessionData: SessionData } {
   const storage = fixture as T & {
-    getHistory?: () => Promise<SessionEntry[]>;
+    getHistory?: () => SessionEntry[];
     readHistorySnapshot?: () => SessionEntry[];
     updateHistory?: (update: (history: SessionEntry[]) => SessionEntry[]) => Promise<void>;
     sessionData?: Partial<SessionData>;
     mirror?: { subscribe: (listener: () => void) => () => void };
     subscribeAll?: (listener: () => void) => () => void;
   };
-  const read = () =>
-    storage.getHistory?.() ?? Promise.resolve(storage.readHistorySnapshot?.() ?? []);
-  const accepted = (kind: string) => ({
-    status: 'accepted' as const,
-    receipt: { kind, sessionId: 'fixture', turnIds: [] },
-  });
+  const read = () => storage.getHistory?.() ?? storage.readHistorySnapshot?.() ?? [];
   const commands = {
     async applyHistoryAction(action: HistoryAction) {
       let plan: ReturnType<typeof applyHistoryAction> | undefined;
-      try {
-        if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
-          plan = applyHistoryAction(structuredClone(await read()), action);
-          if (!plan.matched)
-            return { ...accepted('history-action'), matched: false, proposal: plan.proposal };
-        }
-        if (!storage.updateHistory) throw new Error('Fixture has no history writer');
-        await storage.updateHistory((history) => {
-          plan = applyHistoryAction(history, action);
-          return plan.turns;
-        });
-        return {
-          ...accepted('history-action'),
-          matched:
-            plan?.matched ?? (action.kind === 'user-status' && action.requeueUndelivered === true),
-          proposal: plan?.proposal,
-        };
-      } catch (error) {
-        if (error instanceof HistoryActionRefused)
-          return { status: 'rejected' as const, reason: { code: 'conflict' } };
-        throw error;
+      if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
+        plan = applyHistoryAction(structuredClone(read()), action);
+        if (!plan.matched) return { matched: false, proposal: plan.proposal };
       }
+      if (!storage.updateHistory) throw new Error('Fixture has no history writer');
+      await storage.updateHistory((history) => {
+        plan = applyHistoryAction(history, action);
+        return plan.turns;
+      });
+      return {
+        matched:
+          plan?.matched ?? (action.kind === 'user-status' && action.requeueUndelivered === true),
+        proposal: plan?.proposal,
+      };
     },
     async appendTurn(turn: SessionEntry) {
       if (!storage.updateHistory) throw new Error('Fixture has no history writer');
       await storage.updateHistory((history) => [...history, turn]);
-      return accepted('append');
     },
   };
   storage.sessionData = {
     ...storage.sessionData,
     history: {
-      readTurnOutput: async (userTurnId: string) => {
-        const snapshot = await read();
+      readTurnOutput: (userTurnId: string) => {
+        const snapshot = read();
         return selectTurnOutput(
           snapshot.length,
           userTurnId,
@@ -68,18 +53,20 @@ export function withHistoryPort<T extends object>(fixture: T): T & { sessionData
           (index) => snapshot[index]
         );
       },
-      count: async () => (await read()).length,
-      readTurn: async (id: string) => {
-        const turn = (await read()).find((t) => t.id === id);
+      count: () => read().length,
+      readTurn: (id: string) => {
+        const turn = read().find((t) => t.id === id);
         return turn ? { state: 'ready', turn } : { state: 'missing' };
       },
-      readDirectory: async (from: number, to: number) =>
-        (await read()).slice(from, to).map((t, i) => ({
-          position: from + i,
-          turnId: t.id,
-          state: 'ready',
-          scalars: { ...t, items: undefined },
-        })),
+      readDirectory: (from: number, to: number) =>
+        read()
+          .slice(from, to)
+          .map((t, i) => ({
+            position: from + i,
+            turnId: t.id,
+            state: 'ready',
+            scalars: { ...t, items: undefined },
+          })),
       observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
       ...storage.sessionData?.history,
       readAll: read,

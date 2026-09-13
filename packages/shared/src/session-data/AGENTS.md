@@ -10,12 +10,13 @@
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
-- Subscribe and capture the initial directory without a gap. Storage range
-  notifications distinguish membership changes from content changes. The display
-  cache translates them into turn identities and rejects stale async reads.
-- Validate and locate before writing. `rejected` means storage was untouched;
-  `indeterminate` must not be retried automatically. Acceptance does not promise
-  persistence or remote convergence; the repo owns those existing barriers.
+- Subscribe and capture the initial directory without a gap. Notifications carry structural ranges or changed turn ids. The display
+  cache rejects stale async reads. CLI reads in-process synchronously; auto-seen
+  scans directory scalars only and permission checks have no await gap.
+- Ordinary commands propagate writer errors; absence returns a boolean where the
+  caller needs it. Only import and editable-tail replacement use phased results:
+  `rejected` proves no write; `indeterminate` must not be retried automatically.
+  The repo owns persistence and remote convergence barriers.
 - A snapshot is the HistoryWriter's detached, unforgeable stored-copy handle.
   Its existing provenance WeakMap is authoritative. Source disposal does not
   invalidate a capture held by a fork. Do not add a second handle registry,

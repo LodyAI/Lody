@@ -1,5 +1,5 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionAccepted, readLatestTurn } from '@lody/shared/session-data';
+import { readLatestTurn } from '@lody/shared/session-data';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -988,18 +988,12 @@ export class MessageHandler {
       // turn (re)start via `openAssistantEntry`. See apps/cli/src/session/AGENTS.md
       // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
       // ("Worked for …").
-      const result = await sessionDoc.agentWrites.openAssistantTurn({
+      await sessionDoc.agentWrites.openAssistantTurn({
         turnId,
         ...(userTurnId !== undefined ? { userTurnId } : {}),
         ...(modelInfo !== undefined ? { modelInfo } : {}),
         timestamp: new Date(getServerNow()).toISOString(),
       });
-      if (result.status === 'rejected') {
-        throw new HistoryWriteError(
-          result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
-        );
-      }
-      if (result.status === 'indeterminate') throw result.cause;
       span.end();
       this.logger.debug(`[${sessionId}] Assistant entry created`);
     } catch (error) {
@@ -1086,7 +1080,7 @@ export class MessageHandler {
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = await readSessionHistory(sessionDoc.sessionData.history);
+        const history = readSessionHistory(sessionDoc.sessionData.history);
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
@@ -1478,9 +1472,7 @@ export class MessageHandler {
       const meta = await sessionDoc.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
       const current =
-        resolveLatestSessionGoalFromHistory(
-          await readSessionHistory(sessionDoc.sessionData.history)
-        ) ??
+        resolveLatestSessionGoalFromHistory(readSessionHistory(sessionDoc.sessionData.history)) ??
         legacyMeta?.latestGoal ??
         null;
       // Skip both the history sweep and the meta write when the snapshot is
@@ -1598,7 +1590,7 @@ export class MessageHandler {
       fileDiff: [],
       items: [noticeItem],
     };
-    await sessionDoc.sessionData.commands.appendTurn(systemNotice).then(requireSessionAccepted);
+    await sessionDoc.sessionData.commands.appendTurn(systemNotice);
   }
 
   private async applyAcpModeAndModel(
@@ -1785,7 +1777,7 @@ export class MessageHandler {
         items: [args.content],
       })
       .then((result) => {
-        appended = requireSessionAccepted(result).matched ?? false;
+        appended = result.matched ?? false;
       });
     return appended;
   }
@@ -1799,21 +1791,19 @@ export class MessageHandler {
     await this.awaitTurnHistoryGate(args.sessionId);
     const entryId = `assistant-image-${uuidV4()}`;
     const modelInfo = this.sessionManager.getSession(args.sessionId)?.agentClient?.currentModel;
-    await args.sessionDoc.sessionData.commands
-      .appendTurn({
-        id: entryId,
-        role: 'assistant',
-        items: args.content
-          ? ([args.content] as unknown as SessionHistoryInput['items'])
-          : ([] as unknown as SessionHistoryInput['items']),
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      })
-      .then(requireSessionAccepted);
+    await args.sessionDoc.sessionData.commands.appendTurn({
+      id: entryId,
+      role: 'assistant',
+      items: args.content
+        ? ([args.content] as unknown as SessionHistoryInput['items'])
+        : ([] as unknown as SessionHistoryInput['items']),
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
+    });
     return entryId;
   }
 
@@ -1831,7 +1821,7 @@ export class MessageHandler {
         items: [args.content],
       })
       .then((result) => {
-        replaced = requireSessionAccepted(result).matched ?? false;
+        replaced = result.matched ?? false;
       });
     return replaced;
   }
@@ -1844,7 +1834,7 @@ export class MessageHandler {
     await args.sessionDoc.sessionData.commands
       .applyHistoryAction({ kind: 'remove-turn', turnId: args.entryId })
       .then((result) => {
-        removed = requireSessionAccepted(result).matched ?? false;
+        removed = result.matched ?? false;
       });
     return removed;
   }
@@ -4775,19 +4765,13 @@ export class MessageHandler {
       if (contents.length === 0) {
         return;
       }
-      const result = await args.sessionDoc.agentWrites.applyAgentBatch({
+      await args.sessionDoc.agentWrites.applyAgentBatch({
         contents,
         targetAssistantEntryId: args.assistantEntryId,
         createId: () => args.assistantEntryId,
         now: () => new Date(getServerNow()).toISOString(),
         ...(args.modelInfo ? { model: args.modelInfo } : {}),
       });
-      if (result.status === 'rejected') {
-        throw new HistoryWriteError(
-          result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
-        );
-      }
-      if (result.status === 'indeterminate') throw result.cause;
     };
 
     let pendingNotifications: AcpSessionNotification[] = [];
@@ -4935,9 +4919,7 @@ export class MessageHandler {
         `[${sessionId}] ACP model info: ${JSON.stringify(this.summarizeModelInfo(modelInfo))}`
       );
       try {
-        const history = sessionDoc
-          ? await readSessionHistory(sessionDoc.sessionData.history)
-          : undefined;
+        const history = sessionDoc ? readSessionHistory(sessionDoc.sessionData.history) : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
             history ? JSON.stringify(this.summarizeSessionHistoryForDiagnostics(history)) : 'no doc'
@@ -5249,7 +5231,7 @@ export class MessageHandler {
         return false;
       }
       const updated =
-        requireSessionAccepted(
+        (
           await sessionDoc.sessionData.commands.applyHistoryAction({
             kind: 'assistant-file-diff',
             change: { kind: 'set', value: fileDiff },
@@ -5482,15 +5464,13 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.sessionData.commands
-        .applyHistoryAction({
-          kind: 'finish-assistant',
-          turnId,
-          endedAt,
-          permissionWaitMs,
-          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
-        })
-        .then(requireSessionAccepted);
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'finish-assistant',
+        turnId,
+        endedAt,
+        permissionWaitMs,
+        settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+      });
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
@@ -5649,7 +5629,7 @@ export class MessageHandler {
       logger: this.logger,
       sessionId,
       userTurnId,
-      readHistory: () => readSessionHistory(sessionDoc.sessionData.history),
+      readHistory: async () => readSessionHistory(sessionDoc.sessionData.history),
       subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
       onBeforeOpen: async () => {
         await this.writeAssistantEntryForTurn(
@@ -7085,7 +7065,7 @@ export class MessageHandler {
     await args.sessionDoc.sessionData.commands
       .applyHistoryAction({ kind: 'assistant-items', turnId: args.turnId, mode: 'append', items })
       .then((result) => {
-        appended = requireSessionAccepted(result).matched ?? false;
+        appended = result.matched ?? false;
       });
     return appended;
   }
@@ -7101,19 +7081,17 @@ export class MessageHandler {
     const items = args.files
       ? inputBlocksToHistoryItems(args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file))
       : ([] as NonNullable<SessionHistoryInput['items']>);
-    await args.sessionDoc.sessionData.commands
-      .appendTurn({
-        id: entryId,
-        role: 'assistant',
-        items: items as SessionHistoryInput['items'],
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      })
-      .then(requireSessionAccepted);
+    await args.sessionDoc.sessionData.commands.appendTurn({
+      id: entryId,
+      role: 'assistant',
+      items: items as SessionHistoryInput['items'],
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
+    });
     return entryId;
   }
 
@@ -7494,7 +7472,7 @@ export class MessageHandler {
       throw new Error('remote backfill is disabled');
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = await readSessionHistory(sessionDoc.sessionData.history);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -7575,9 +7553,11 @@ export class MessageHandler {
     this.throwIfBackfillSuperseded(generation);
     // Flip transport local -> r2 and adopt the relay-store key (see
     // flipFileTransportToR2 for why fileId must change).
-    await sessionDoc.sessionData.commands
-      .applyHistoryAction({ kind: 'file-backfilled', fileId, relayFileId })
-      .then(requireSessionAccepted);
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'file-backfilled',
+      fileId,
+      relayFileId,
+    });
     await markSessionFileBlobBackfilled(blobArgs);
     this.logger.info(`[${sessionId}] Backfilled local file ${fileId} -> relay ${relayFileId}`);
   }
@@ -8190,7 +8170,7 @@ export class MessageHandler {
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = await readSessionHistory(doc.sessionData.history);
+      const history = readSessionHistory(doc.sessionData.history);
       for (let i = history.length - 1; i >= 0; i -= 1) {
         const entry = history[i];
         if (!entry || entry.role !== 'user') continue;
@@ -8447,11 +8427,9 @@ export class MessageHandler {
       // whole history through the document's explicit full-history API.
       const checkForOutcome = () => {
         if (resolved) return;
-        void readSessionHistory(doc.sessionData.history).then((history) => {
-          if (resolved) return;
-          const outcome = findPermissionOutcomeInHistory(history, requestId);
-          if (outcome) void resolveWithOutcome(outcome);
-        });
+        const history = readSessionHistory(doc.sessionData.history);
+        const outcome = findPermissionOutcomeInHistory(history, requestId);
+        if (outcome) void resolveWithOutcome(outcome);
       };
 
       // Subscribe to control and history changes alike.
@@ -8614,9 +8592,11 @@ export class MessageHandler {
         fileDiff: [],
         items: [noticeItem],
       };
-      await sessionDoc.sessionData.commands
-        .applyHistoryAction({ kind: 'agent-warning', turn: systemNotice, message: warning.message })
-        .then(requireSessionAccepted);
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'agent-warning',
+        turn: systemNotice,
+        message: warning.message,
+      });
     } catch (error) {
       this.logger.debug(
         `[${sessionId}] Failed to record agent warning: ${formatErrorMessage(error)}`
@@ -9513,7 +9493,7 @@ export class MessageHandler {
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const historyGoal = resolveLatestSessionGoalFromHistory(
-      await readSessionHistory(sessionDoc.sessionData.history)
+      readSessionHistory(sessionDoc.sessionData.history)
     );
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }

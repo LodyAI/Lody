@@ -179,7 +179,7 @@ describe('SessionDispatchWatcher', () => {
         parentSessionId: 'parent-session-1',
         latestUserMsgId: 'turn-1',
       })),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-1', 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-1', 'hello')]),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -268,7 +268,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-chat-1', 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-chat-1', 'hello')]),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -346,7 +346,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -439,7 +439,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => metaRecord?.meta),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -548,7 +548,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -710,7 +710,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => currentMeta),
-      getHistory: vi.fn(async () => currentHistory),
+      getHistory: vi.fn(() => currentHistory),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -811,7 +811,7 @@ describe('SessionDispatchWatcher', () => {
       // legacy realtime wait resolves immediately without one.
       mirror: undefined,
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -881,7 +881,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionDoc = withHistoryPort({
       mirror: undefined,
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -949,7 +949,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         latestUserMsgId: 'turn-denied',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -1070,7 +1070,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionDoc = withHistoryPort({
       mirror: { subscribe: vi.fn(() => vi.fn()) },
       getMetaState: vi.fn(async () => meta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -1378,7 +1378,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         messageQueueUpdatedAt: 1,
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       peekReadyMessageQueue: vi.fn(async () => queue[0] ?? null),
       removeMessageQueueItem: vi.fn(async () => {
         queue.shift();
@@ -1874,7 +1874,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         lastCanceledTurn: 'assistant-turn-2',
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
     });
@@ -1964,7 +1964,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => meta),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-2b', 'hello again')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-2b', 'hello again')]),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
     });
@@ -2057,7 +2057,7 @@ describe('SessionDispatchWatcher', () => {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => fastMeta),
-      getHistory: vi.fn(async () => [createPendingUserTurn(turnId, 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn(turnId, 'hello')]),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
     });
@@ -2244,23 +2244,27 @@ describe('SessionDispatchWatcher', () => {
           } satisfies SessionMeta,
         ])
       );
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (sessionId === liveSessionId) {
+            liveStarted.resolve();
+          } else {
+            bootstrapHistoryReads += 1;
+            if (bootstrapHistoryReads === 3) bootstrapThreeStarted.resolve();
+          }
+          await releaseHistory.promise;
+          activeHistoryReads -= 1;
+        }
         return withSessionData(
           withHistoryPort({
             mirror: { subscribe: vi.fn(() => vi.fn()) },
             getMetaState: vi.fn(async () => meta),
-            getHistory: vi.fn(async () => {
-              activeHistoryReads += 1;
-              maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-              if (sessionId === liveSessionId) {
-                liveStarted.resolve();
-              } else {
-                bootstrapHistoryReads += 1;
-                if (bootstrapHistoryReads === 3) bootstrapThreeStarted.resolve();
-              }
-              await releaseHistory.promise;
-              activeHistoryReads -= 1;
+            getHistory: vi.fn(() => {
               return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
             }),
             updateHistory: vi.fn(async () => {}),
@@ -2357,20 +2361,24 @@ describe('SessionDispatchWatcher', () => {
       const getDocMeta = vi.fn(async (roomId: string) => ({
         meta: metaBySession.get(roomId.slice('session-'.length) as SessionId),
       }));
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          historyReadCount += 1;
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (historyReadCount === 4) firstBatchStarted.resolve();
+          if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
+          await releaseHistory.promise;
+          activeHistoryReads -= 1;
+        }
         return withSessionData(
           withHistoryPort({
             mirror: { subscribe: vi.fn(() => vi.fn()) },
             getMetaState: vi.fn(async () => meta),
-            getHistory: vi.fn(async () => {
-              historyReadCount += 1;
-              activeHistoryReads += 1;
-              maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-              if (historyReadCount === 4) firstBatchStarted.resolve();
-              if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
-              await releaseHistory.promise;
-              activeHistoryReads -= 1;
+            getHistory: vi.fn(() => {
               return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
             }),
             updateHistory: vi.fn(async () => {}),
@@ -2457,11 +2465,7 @@ describe('SessionDispatchWatcher', () => {
       const sessionDoc = withHistoryPort({
         mirror: { subscribe: mirrorSubscribe },
         getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(async () => {
-          historyStarted.resolve();
-          await releaseHistory.promise;
-          return [];
-        }),
+        getHistory: vi.fn(() => []),
         onDocRoomStatusChange: statusSubscribe,
         getDocRoomStatus: vi.fn(() => undefined),
         rejoinDocRoom,
@@ -2476,7 +2480,11 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta })),
           watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+        getOrCreateSessionDoc: vi.fn(async () => {
+          historyStarted.resolve();
+          await releaseHistory.promise;
+          return withSessionData(sessionDoc);
+        }),
         onMetaRoomSynced: vi.fn(() => vi.fn()),
       } as unknown as LoroDocumentManager;
       const dispatchPreparedSessionTurn = vi.fn(async () => {});
@@ -2539,7 +2547,7 @@ describe('SessionDispatchWatcher', () => {
       const sessionDoc = withHistoryPort({
         mirror: { subscribe: mirrorSubscribe },
         getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         onDocRoomStatusChange: statusSubscribe,
         getDocRoomStatus: vi.fn(() => 'connected' as const),
         rejoinDocRoom: vi.fn(async () => {}),
@@ -2614,7 +2622,7 @@ describe('SessionDispatchWatcher', () => {
         withHistoryPort({
           mirror: { subscribe },
           getMetaState: vi.fn(async () => meta),
-          getHistory: vi.fn(async () => [createPendingUserTurn(turnId, 'hello')]),
+          getHistory: vi.fn(() => [createPendingUserTurn(turnId, 'hello')]),
           updateHistory: vi.fn(async () => {}),
           setStatus: vi.fn(async () => {}),
         })
@@ -2758,21 +2766,25 @@ describe('SessionDispatchWatcher', () => {
           status: { type: 'idle' as const },
           latestUserMsgId: `turn-${sessionId}`,
         }) satisfies SessionMeta;
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = createMeta(sessionId);
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          historyReadCount += 1;
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (historyReadCount === 3) {
+            firstBatchStarted.resolve();
+          }
+          await releaseHistory.promise;
+          activeHistoryReads -= 1;
+        }
         return withSessionData(
           withHistoryPort({
             mirror: { subscribe: vi.fn(() => vi.fn()) },
             getMetaState: vi.fn(async () => meta),
-            getHistory: vi.fn(async () => {
-              historyReadCount += 1;
-              activeHistoryReads += 1;
-              maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-              if (historyReadCount === 3) {
-                firstBatchStarted.resolve();
-              }
-              await releaseHistory.promise;
-              activeHistoryReads -= 1;
+            getHistory: vi.fn(() => {
               return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
             }),
             updateHistory: vi.fn(async () => {}),
@@ -2945,7 +2957,7 @@ describe('SessionDispatchWatcher', () => {
           subscribe: vi.fn(() => vi.fn()),
         },
         getMetaState: vi.fn(async () => null),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
       })
@@ -3025,7 +3037,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         lastHandledUserMsgId: 'turn-3',
       })),
-      getHistory: vi.fn(async () => [
+      getHistory: vi.fn(() => [
         {
           ...createPendingUserTurn('turn-3', 'hello again'),
           status: 'handled',
@@ -3163,7 +3175,7 @@ describe('SessionDispatchWatcher', () => {
           subscribe: vi.fn(() => unsubscribeMirror),
         },
         getMetaState: vi.fn(async () => sessionMeta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -3266,7 +3278,7 @@ describe('SessionDispatchWatcher', () => {
           subscribe: vi.fn(() => vi.fn()),
         },
         getMetaState: vi.fn(async () => sessionMeta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -3377,7 +3389,7 @@ describe('SessionDispatchWatcher', () => {
           subscribe: vi.fn(() => vi.fn()),
         },
         getMetaState,
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -3471,7 +3483,7 @@ describe('SessionDispatchWatcher', () => {
       roomId: `session-${sessionId}`,
       mirror: { subscribe: vi.fn(() => vi.fn()) },
       getMetaState: vi.fn(async () => state.meta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       setStatus: vi.fn(async () => {}),
       // Reaching any of these means the bounded history wait was entered.
       waitUntilSynced: vi.fn(async () => true),

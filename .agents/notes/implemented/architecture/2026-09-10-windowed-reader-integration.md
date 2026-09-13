@@ -16,8 +16,13 @@ reuse the writer's provenance; they survive source disposal during a fork.
 
 View events are structure changes or explicit changed turn ids. Derivations
 invalidate evicted facts too. Async cache reads retain identity/epoch fences.
-The build-time rollback uses the temporary array adapter, to be removed after
-two releases. There is no raw-doc view or complete memory command backend.
+Storage and view events share structure/changed-id semantics. Goal, permission,
+scheduling and file-diff consumers share one reference-counted fact table.
+CLI reads are synchronous over the same storage reader; auto-seen reads only
+shallow fields and permission decisions are checked before auto-approval.
+Ordinary commands throw writer errors; only import and editable-tail replacement
+retain phased outcomes. The array adapter serves static sharing pages. There is
+no alternate session view, feature switch or complete memory command backend.
 
 ## Evidence boundary
 

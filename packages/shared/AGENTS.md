@@ -31,7 +31,7 @@
   edits in that range, except pending-to-seen on newly inserted user rows.
   External ACP imports remain new input.
 - Session data ports (`src/session-data`): UI/CLI business depends on `SessionData`
-  (explicit set/clear, phased results, separated durability), never raw Loro/Mirror.
+  (explicit set/clear and shared writer validation), never a second history writer.
   Invariants: [session-data scope](src/session-data/AGENTS.md).
 - Tool fields other than type/toolCallId are independent
   edits: derive their parsers from the tool message schema and validate changed fields,

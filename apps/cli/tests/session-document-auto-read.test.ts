@@ -1,3 +1,4 @@
+import { LoroMap } from 'loro-crdt';
 import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +19,43 @@ const createUserEntry = (id: string, text: string): SessionHistoryInput => ({
 });
 
 describe('SessionDocument auto read', () => {
+  it('acknowledges from shallow fields without reading assistant bodies on notifications', async () => {
+    const repo = await LoroRepo.create({});
+    const session = new SessionDocument(repo, uuidv4() as SessionId);
+    try {
+      await session.initOffline({
+        history: [
+          createUserEntry('user', 'hello'),
+          {
+            id: 'assistant',
+            role: 'assistant',
+            timestamp: 'synthetic',
+            items: [{ type: 'text', text: 'long body' }],
+          },
+        ],
+      });
+      const bodies: string[] = [];
+      const original = LoroMap.prototype.toJSON;
+      const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        const id = this.get('id');
+        if (typeof id === 'string') bodies.push(id);
+        return original.call(this);
+      });
+      try {
+        const doc = session.handle!.doc;
+        (doc.getList('history').get(1) as LoroMap).set('finished', true);
+        doc.commit();
+        expect(bodies).toEqual([]);
+        expect(session.sessionData.history.readDirectory(0, 1)[0]?.scalars?.status).toBe('seen');
+        expect(session.sessionData.history.readDirectory(1, 2)[0]?.scalars?.finished).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await repo.destroy();
+    }
+  });
+
   it('marks latest user entry as read on history updates', async () => {
     const repo = await LoroRepo.create({});
     try {

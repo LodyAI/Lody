@@ -31,7 +31,7 @@ export function fakeSessionData(
           }
           return next;
         });
-        return { status: 'accepted' as const };
+        return;
       },
     },
     commands: {
@@ -53,9 +53,7 @@ export function fakeSessionData(
           }
           return next;
         });
-        return matched
-          ? { status: 'accepted' as const }
-          : { status: 'rejected' as const, reason: { code: 'not_found' as const } };
+        return matched;
       },
     },
   };

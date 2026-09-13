@@ -1,5 +1,4 @@
 import { selectTurnOutput } from './read';
-import { HistoryActionRefused } from './task-proposal';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
   HistoryImportCursorSchema,
@@ -36,30 +35,17 @@ import {
   resolveTaskProposalOnEntry,
   type EditableTailPlan,
 } from './planner';
-import {
-  type SessionCommandResult,
-  type SessionData,
-  type SessionDirectoryRow,
-  type SessionEditableTailResult,
-  type SessionImportResult,
-  type SessionHistoryCommands,
-  type SessionHistoryReader,
-  type SessionObservation,
-  type SessionTurn,
-  type SessionTurnRead,
+import type {
+  SessionEditableTailResult,
+  SessionImportResult,
+  SessionHistoryCommands,
+  SessionHistoryReader,
+  SessionObservation,
 } from './types';
+import type { SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
 
-// # Loro-backed SessionData
-//
-// The one place that knows the `history` root list is a Loro list and that a
-// turn is a Loro map. Commands apply the shared planners (`./planner`) inside
-// the shared `HistoryWriter`'s conditional commit, so no business rule is
-// restated here and the write path stays the single writer used by the renderer.
-//
-// Phase discipline: input is validated and the target located *before* any
-// mutation, so a `rejected` result proves nothing was applied. Once the writer
-// is invoked, a throw is reported as `indeterminate` (a partial write cannot be
-// ruled out) rather than as a pre-write rejection.
+// Loro reads and shared HistoryWriter commands. Import and tail replacement
+// distinguish a validated pre-write refusal from an unknown commit outcome.
 
 const HISTORY_ROOT_KEY = 'history';
 
@@ -85,11 +71,7 @@ export type LoroSessionDataOptions = {
   };
 };
 
-export type LoroSessionData = SessionData & {
-  /** The shared writer, for storage-owned capabilities (capture/copy/rollback). */
-  readonly writer: HistoryWriter;
-  dispose(): void;
-};
+export type LoroSessionData = ReturnType<typeof createLoroSessionData>;
 
 const asStoredTurn = (value: unknown): SessionTurn | undefined => {
   if (isContainer(value)) {
@@ -122,29 +104,12 @@ const readSlot = (list: LoroList, position: number): SessionTurnRead => {
   return turn ? { state: 'ready', turn } : { state: 'invalid' };
 };
 
-export function createLoroSessionData(options: LoroSessionDataOptions): LoroSessionData {
+export function createLoroSessionData(options: LoroSessionDataOptions) {
   const { sessionId, doc } = options;
   const writer = options.writer ?? createHistoryWriter(doc);
   const list = doc.getList(HISTORY_ROOT_KEY);
 
-  const rejected = (
-    code: 'invalid_input' | 'not_found' | 'conflict' | 'unsupported',
-    issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[]
-  ): SessionCommandResult => ({
-    status: 'rejected',
-    reason: { code, ...(issues ? { issues } : {}) },
-  });
-  const indeterminate = (
-    cause: unknown
-  ): Extract<SessionCommandResult, { status: 'indeterminate' }> => ({
-    status: 'indeterminate',
-    cause,
-  });
-  const issuesOf = (error: unknown) =>
-    (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
-
-  const accepted = async (): Promise<SessionCommandResult> => ({ status: 'accepted' });
-
+  const issuesOf = (error: HistoryWriteError) => error.issues;
   /** Shallow send config for a user turn: small collections only, never the body. */
   const shallowInputConfig = (map: LoroMap): unknown => {
     const config = map.get('inputConfig');
@@ -293,8 +258,8 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     identityDirty = false;
   };
 
-  const history: SessionHistoryReader = {
-    async readTurnOutput(userTurnId) {
+  const history = {
+    readTurnOutput(userTurnId: string) {
       return selectTurnOutput(
         list.length,
         userTurnId,
@@ -314,33 +279,33 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         }
       );
     },
-    async count() {
+    count() {
       return list.length;
     },
-    async readAt(position) {
+    readAt(position: number) {
       return readSlot(list, position);
     },
-    async readTurn(turnId) {
+    readTurn(turnId: string): SessionTurnRead {
       ensureIdentityIndex();
       const position = positions.get(turnId);
       return position === undefined ? { state: 'missing' } : readSlot(list, position);
     },
-    async readRange(from, to) {
+    readRange(from: number, to: number) {
       const lo = Math.max(0, Math.min(from, list.length));
       const hi = Math.max(lo, Math.min(to, list.length));
       const out: SessionTurnRead[] = [];
       for (let position = lo; position < hi; position += 1) out.push(readSlot(list, position));
       return out;
     },
-    async readDirectory(from, to) {
+    readDirectory(from: number, to: number) {
       return directory(from, to);
     },
-    async readAll() {
+    readAll() {
       // One detached synchronous read of the stored list: a single consistent
       // snapshot, never a stitched count + paginated read.
       return writer.readStored();
     },
-    observe(listener) {
+    observe(listener: import('./types').SessionDataChangeListener) {
       // Subscribe first, then snapshot in the same synchronous block: a change
       // can neither be missed between the two nor delivered before `initial`.
       const unsubscribeDoc = doc.subscribe((batch) => {
@@ -348,12 +313,16 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         // A batch that does not touch `history` (e.g. a control root) is not a
         // history change; unrelated roots never invalidate the display cache.
         if (!range) return;
-        listener({
-          kind: 'changed',
-          from: range.from,
-          to: range.to,
-          ...(range.structural ? { structural: true } : {}),
-        });
+        if (range.structural) {
+          listener({ kind: 'structure', from: range.from, to: range.to });
+        } else {
+          const ids: string[] = [];
+          for (let i = range.from; i < range.to; i++) {
+            const id = readIdentity(list.get(i))?.turnId;
+            if (id !== undefined) ids.push(id);
+          }
+          listener({ kind: 'changed', ids });
+        }
       });
       const initial = Promise.resolve(directory(0, list.length));
       let active = true;
@@ -366,7 +335,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         },
       } satisfies SessionObservation;
     },
-  };
+  } satisfies SessionHistoryReader;
 
   const commands: SessionHistoryCommands = {
     async applyHistoryAction(action) {
@@ -378,96 +347,38 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         proposal = result.proposal;
         return result.turns;
       };
-      try {
-        if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
-          const current = writer.readStored();
-          const preview = applyHistoryAction(current, action);
-          if (!preview.matched)
-            return {
-              ...(await accepted()),
-              matched: false,
-              proposal: preview.proposal,
-            };
-        }
-        const target = historyActionTarget(action);
-        if (target !== undefined) writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
-        else writer.update(apply);
-      } catch (error) {
-        if (error instanceof HistoryActionRefused) return rejected('conflict');
-        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
-        return indeterminate(error);
+      if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
+        const preview = applyHistoryAction(writer.readStored(), action);
+        if (!preview.matched) return { matched: false, proposal: preview.proposal };
       }
-      return { ...(await accepted()), matched, proposal };
+      const target = historyActionTarget(action);
+      if (target !== undefined) writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
+      else writer.update(apply);
+      return { matched, proposal };
     },
     async appendTurn(turn) {
-      try {
-        parseHistoryWrite(HistoryEntryWriteSchema, turn);
-      } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
-      }
-      try {
-        writer.append(turn as unknown as SessionHistory);
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted();
+      writer.append(turn as unknown as SessionHistory);
     },
     async replaceTurn(turnId, turn) {
-      if (turn.id !== turnId)
-        return rejected('invalid_input', [{ path: ['id'], code: 'immutable_id' }]);
-      // Stage through the writer's prepare/commit boundary: only changed fields
-      // and items are validated, so unchanged opaque stored content survives.
-      let commit: (() => void) | undefined;
-      try {
-        commit = writer.prepareReplace(turnId, turn as unknown as SessionHistory);
-      } catch (error) {
-        if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
-        return indeterminate(error);
-      }
-      if (!commit) return rejected('not_found');
-      try {
-        commit();
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted();
+      if (turn.id !== turnId) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
+      const commit = writer.prepareReplace(turnId, turn as unknown as SessionHistory);
+      if (!commit) throw new HistoryWriteError([{ path: ['history'], code: 'not_found' }]);
+      commit();
     },
     async resolveTaskProposal(entryId, proposalId, resolution) {
-      try {
-        parseTaskProposalResolution(resolution);
-      } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
-      }
+      parseTaskProposalResolution(resolution);
       let found = false;
-      let updated: boolean;
-      try {
-        updated = writer.updateEntry(entryId, (entry) => {
-          if (!hasTaskProposal(entry, proposalId)) return entry;
-          resolveTaskProposalOnEntry(entry, proposalId, resolution);
-          found = true;
-          return entry;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (!updated) return rejected('not_found');
-      if (!found) return rejected('not_found');
-      return accepted();
+      writer.updateEntry(entryId, (entry) => {
+        if (!hasTaskProposal(entry, proposalId)) return entry;
+        resolveTaskProposalOnEntry(entry, proposalId, resolution);
+        found = true;
+        return entry;
+      });
+      return found;
     },
     async respondPermission(requestId, outcome, respondOptions) {
-      try {
-        parseHistoryWrite(PermissionOutcomeSchema, outcome);
-      } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
-      }
-      let answered: boolean;
-      try {
-        answered = writer.respondPermission(requestId, outcome, respondOptions);
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (!answered) return rejected('not_found');
-      return accepted();
+      parseHistoryWrite(PermissionOutcomeSchema, outcome);
+      return writer.respondPermission(requestId, outcome, respondOptions);
     },
     async replaceEditableTail(input): Promise<SessionEditableTailResult> {
       let plan: EditableTailPlan | undefined;
@@ -544,7 +455,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         options.historyImportCursor.write(nextCursor);
         return { status: 'accepted', appended };
       } catch (error) {
-        if (historyWritten) return indeterminate(error);
+        if (historyWritten) return { status: 'indeterminate', cause: error };
         if (error instanceof HistoryImportRefused)
           return { status: 'rejected', reason: { code: error.code } };
         if (!historyWritten && error instanceof HistoryWriteError)
@@ -561,22 +472,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       return writer.capture();
     },
     async copyFrom(snapshot, selection) {
-      try {
-        writer.copyFrom(snapshot, selection as unknown as SessionHistoryInput[]);
-      } catch (error) {
-        // The writer validates colliding ids and prepares every authored change
-        // before any mutation, so a HistoryWriteError here is a pre-write
-        // rejection; anything else is an indeterminate post-invocation throw.
-        if (error instanceof HistoryWriteError) {
-          if (error.issues?.some((issue) => issue.code === 'copy_target_conflict'))
-            return rejected('conflict', issuesOf(error));
-          return rejected('invalid_input', issuesOf(error));
-        }
-        return indeterminate(error);
-      }
-      return {
-        status: 'accepted',
-      };
+      writer.copyFrom(snapshot, selection as unknown as SessionHistoryInput[]);
     },
   };
 

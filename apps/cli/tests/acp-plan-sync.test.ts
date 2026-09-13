@@ -31,15 +31,15 @@ describe('handleACPUpdateMessage plan sync', () => {
     });
     await expect(
       doc.setPlan([{ content: 'bad', priority: 'invalid', status: 'pending' }] as never)
-    ).rejects.toThrow('Session write rejected: invalid_input');
+    ).rejects.toThrow('Invalid history write');
     expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([]);
     const cause = new Error('storage outcome unknown');
-    const stub = vi
-      .spyOn(doc, 'agentWrites', 'get')
-      .mockReturnValue({
-        ...doc.agentWrites,
-        setTurnField: async () => ({ status: 'indeterminate', cause }),
-      });
+    const stub = vi.spyOn(doc, 'agentWrites', 'get').mockReturnValue({
+      ...doc.agentWrites,
+      setTurnField: async () => {
+        throw cause;
+      },
+    });
     await expect(doc.setPlan([])).rejects.toBe(cause);
     stub.mockRestore();
     await expect(

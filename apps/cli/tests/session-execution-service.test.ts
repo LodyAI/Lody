@@ -529,7 +529,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1157,7 +1157,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false, latestGoal: activeGoal })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1238,7 +1238,7 @@ describe('SessionExecutionService', () => {
       })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1341,7 +1341,7 @@ describe('SessionExecutionService', () => {
         status = next;
       }),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1705,7 +1705,7 @@ describe('SessionExecutionService', () => {
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1855,7 +1855,7 @@ describe('SessionExecutionService', () => {
       },
     ];
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -1937,7 +1937,7 @@ describe('SessionExecutionService', () => {
       },
     ];
     const preparedSessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => preparedHistory),
+      getHistory: vi.fn(() => preparedHistory),
       updateHistory: vi.fn(
         async (updater: (prev: typeof preparedHistory) => typeof preparedHistory) => {
           preparedHistory = updater(preparedHistory);
@@ -2078,7 +2078,7 @@ describe('SessionExecutionService', () => {
         events.push(`status:${status.type}`);
       }),
       waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2206,7 +2206,7 @@ describe('SessionExecutionService', () => {
         getMetaState: vi.fn(async () => ({ isArchived: false })),
         setStatus: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => history),
+        getHistory: vi.fn(() => history),
         updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
           history = updater(history);
         }),
@@ -2316,7 +2316,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2396,7 +2396,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2466,7 +2466,7 @@ describe('SessionExecutionService', () => {
     const machineId = 'machine-1' as MachineId;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -2613,7 +2613,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2710,7 +2710,7 @@ describe('SessionExecutionService', () => {
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2826,7 +2826,7 @@ describe('SessionExecutionService', () => {
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -2929,7 +2929,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -3045,7 +3045,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
@@ -3152,7 +3152,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
@@ -3299,7 +3299,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -3420,7 +3420,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -3540,7 +3540,7 @@ describe('SessionExecutionService', () => {
       })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-restore-interrupt',
     });
@@ -3632,7 +3632,7 @@ describe('SessionExecutionService', () => {
   it('creates and starts a new session turn', async () => {
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -3761,7 +3761,7 @@ describe('SessionExecutionService', () => {
         project,
         latestUserMsgId: 'turn-local-branch',
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -3874,7 +3874,7 @@ describe('SessionExecutionService', () => {
     const localProjectId = 'local-project-diverged-tracking' as LocalProjectId;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -3972,7 +3972,7 @@ describe('SessionExecutionService', () => {
     const localProjectId = 'local-project-dirty' as LocalProjectId;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4048,7 +4048,7 @@ describe('SessionExecutionService', () => {
         project,
         acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4136,7 +4136,7 @@ describe('SessionExecutionService', () => {
   it('records an actionable diagnostic when Git is unavailable for a GitHub worktree', async () => {
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
@@ -4197,7 +4197,7 @@ describe('SessionExecutionService', () => {
     const localProjectId = 'local-project-missing-worktree-branch' as LocalProjectId;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4267,7 +4267,7 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => [
+      getHistory: vi.fn(() => [
         {
           id: 'turn-create-cancelled',
           role: 'user',
@@ -4361,7 +4361,7 @@ describe('SessionExecutionService', () => {
     });
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4461,7 +4461,7 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4528,7 +4528,7 @@ describe('SessionExecutionService', () => {
   it('reports authentication required when a first turn cannot create its session', async () => {
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -4661,7 +4661,7 @@ describe('SessionExecutionService', () => {
       })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async () => {}),
     });
     const sessionManager = {
@@ -4763,7 +4763,7 @@ describe('SessionExecutionService', () => {
         getMetaState: vi.fn(async () => ({ isArchived: false })),
         setStatus: vi.fn(async () => {}),
         setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         updateHistory: vi.fn(async () => {}),
       });
       const session = {
@@ -4835,7 +4835,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
     });
     const agentClient = {
@@ -4943,7 +4943,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
@@ -5035,7 +5035,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
     });
     const agentClient = {
@@ -5146,7 +5146,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
     });
     const agentClient = {
@@ -5248,7 +5248,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
     });
     const agentClient = {
@@ -5367,7 +5367,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
@@ -5531,7 +5531,7 @@ describe('SessionExecutionService', () => {
           status = next;
         }),
         setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => history),
+        getHistory: vi.fn(() => history),
         updateHistory: vi.fn(async (update: (prev: typeof history) => typeof history) => {
           history = update(history);
         }),
@@ -5748,7 +5748,7 @@ describe('SessionExecutionService', () => {
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
     });
     let activeTurnId: string | undefined;
@@ -5860,7 +5860,7 @@ describe('SessionExecutionService', () => {
     ];
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -5979,7 +5979,7 @@ describe('SessionExecutionService', () => {
     let abortObserved = false;
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -6104,7 +6104,7 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
@@ -6169,7 +6169,7 @@ describe('SessionExecutionService', () => {
   it('cancels an active session and reports success', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
     });
@@ -6229,7 +6229,7 @@ describe('SessionExecutionService', () => {
 
   it('keeps cancel successful when cancellation finalization side effects fail', async () => {
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {
         throw new Error('status write failed');
       }),
@@ -6285,7 +6285,7 @@ describe('SessionExecutionService', () => {
   it('ignores a cancel request for a stale turn id', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
     });
@@ -6356,7 +6356,7 @@ describe('SessionExecutionService', () => {
       },
     ];
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
         update(history);
@@ -6406,7 +6406,7 @@ describe('SessionExecutionService', () => {
   it('keeps a newer queued turn pending when cancelling the currently running turn', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
     });
@@ -7194,7 +7194,7 @@ describe('SessionExecutionService goal control', () => {
         agentType: 'codex',
         acpSessionId: 'acp-goal',
       }),
-      getHistory: async () => [],
+      getHistory: () => [],
       setStatus: async () => {},
       setLastMessageAt: async () => {},
       updateHistory: async () => {},

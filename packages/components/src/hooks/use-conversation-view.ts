@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { SessionHistory } from '@lody/shared';
 import {
   collectHydratedRange,
-  createConversationDerivation,
+  acquireConversationDerivation,
   findLastIndex,
   resolveTailStart,
   subscribeOnFrame,
@@ -150,10 +150,11 @@ export function useConversationDerivation<F>(
       setDerivation(null);
       return undefined;
     }
-    const next = createConversationDerivation(view, derive);
+    const lease = acquireConversationDerivation(view, derive);
+    const next = lease.table;
     setDerivation(next);
     return () => {
-      next.dispose();
+      lease.release();
       setDerivation((current) => (current === next ? null : current));
     };
   }, [view, derive]);

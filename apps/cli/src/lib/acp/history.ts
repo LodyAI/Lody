@@ -1,4 +1,3 @@
-import { requireSessionAccepted } from '@lody/shared/session-data';
 import { v4 as uuidV4 } from 'uuid';
 
 import type {
@@ -193,19 +192,13 @@ export const handleACPUpdateMessage = async (
           )
         );
         const createId = targetTurnId ? () => targetTurnId : uuidV4;
-        const result = await doc.agentWrites.applyAgentBatch({
+        await doc.agentWrites.applyAgentBatch({
           notifications: persistableBatch,
           ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
           ...(targetOnly ? { entryBound: true } : {}),
           createId,
           ...(model ? { model } : {}),
         });
-        if (result.status === 'rejected') {
-          throw new HistoryWriteError(
-            result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
-          );
-        }
-        if (result.status === 'indeterminate') throw result.cause;
       }
     }
     // Evidence is derived from the same enriched notification, but it is only
@@ -1171,16 +1164,14 @@ export const upsertThreadGoalInHistory = async (
     objective: sanitizeGoalObjective(goal.objective),
   };
 
-  await doc.sessionData.commands
-    .applyHistoryAction({
-      kind: 'upsert-goal',
-      goal: sanitizedGoal,
-      targetTurnId: options.targetEntryId,
-      fallback: createAssistantHistoryEntry(
-        options.targetEntryId ?? options.createId?.() ?? uuidV4()
-      ),
-    })
-    .then(requireSessionAccepted);
+  await doc.sessionData.commands.applyHistoryAction({
+    kind: 'upsert-goal',
+    goal: sanitizedGoal,
+    targetTurnId: options.targetEntryId,
+    fallback: createAssistantHistoryEntry(
+      options.targetEntryId ?? options.createId?.() ?? uuidV4()
+    ),
+  });
 };
 
 export const clearThreadGoalFromHistory = async (
@@ -1190,9 +1181,11 @@ export const clearThreadGoalFromHistory = async (
   // Mark the goal as cleared in-place so the snapshot remains visible until a new
   // goal arrives. The previous behavior removed the entry entirely, which made
   // the cleared state invisible to the user the moment they pressed clear.
-  await doc.sessionData.commands
-    .applyHistoryAction({ kind: 'clear-goal', threadId, updatedAt: getServerNow() })
-    .then(requireSessionAccepted);
+  await doc.sessionData.commands.applyHistoryAction({
+    kind: 'clear-goal',
+    threadId,
+    updatedAt: getServerNow(),
+  });
 };
 
 export const ensurePermissionRequestOnToolCall = async (
@@ -1205,7 +1198,7 @@ export const ensurePermissionRequestOnToolCall = async (
   await doc.sessionData.commands
     .applyHistoryAction({ kind: 'permission-request', requestId, request })
     .then((result) => {
-      persisted = requireSessionAccepted(result).matched ?? false;
+      persisted = result.matched ?? false;
     });
   return persisted;
 };
@@ -1222,18 +1215,7 @@ export const updatePermissionOutcomeInHistory = async (
     requestId,
     outcome as PermissionOutcome
   );
-  if (result.status === 'rejected') {
-    // A missing request was a silent no-op before; preserve that. A genuinely
-    // malformed outcome still throws, so the caller keeps its cancel fallback.
-    if (result.reason.code === 'not_found') {
-      logger.debug(`Permission outcome for ${requestId} not applied: ${result.reason.code}`);
-      return;
-    }
-    throw new HistoryWriteError(
-      result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
-    );
-  }
-  if (result.status === 'indeterminate') throw result.cause;
+  if (!result) logger.debug(`Permission outcome for ${requestId} not applied: not_found`);
 };
 
 /**

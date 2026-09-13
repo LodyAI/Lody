@@ -32,8 +32,8 @@ import {
 //   (and re-read while a lease still needs it); an unrelated turn's token is
 //   untouched, so one turn's token never cancels every read.
 // - `observe` is the only subscription: `initial` builds the index, then each
-//   `changed` re-reads only its affected raw range (directory + the hydrated
-//   turns inside it); `reset` is the only full re-read. A structural range
+//   `changed(ids)` invalidates those bodies and refreshes their directory rows.
+//   A structural range
 //   (membership/order change, including same-length replacement) emits
 //   `structure` and re-keys the lookups.
 
@@ -66,7 +66,6 @@ const IDLE_CHUNK_TURNS = 80;
 const IDLE_CHUNK_ITEMS = 1_200;
 
 /** Sentinel: the change carried no `to`, so the whole directory is re-read. */
-const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
 const defaultScheduleIdle: IdleScheduler = (task) => {
   if (typeof requestIdleCallback === 'function') {
@@ -130,7 +129,7 @@ export function createConversationViewFromReader(
    * The ONE async-result acceptance rule: a result is accepted only while the
    * membership epoch and the turn's own content epoch are the ones it captured.
    * It fences initial directory reads, leased/eager hydration, hydrated
-   * replacement, idle summaries, full reads and resets alike.
+   * replacement, idle summaries, full reads alike.
    */
   const acceptsToken = (id: string, token: { structure: number; turn: number }) =>
     !disposed && structureEpoch === token.structure && (turnEpoch.get(id) ?? 0) === token.turn;
@@ -152,8 +151,6 @@ export function createConversationViewFromReader(
   let dirtyFrom = Infinity;
   let dirtyTo = -1;
   let flushRunning = false;
-  /** A `reset` change rebuilds the whole snapshot instead of patching a range. */
-  let resetPending = false;
 
   const tailStart = () => conversationTailStart(ids.length, tailKeep);
 
@@ -593,67 +590,6 @@ export function createConversationViewFromReader(
     scheduleIdlePass();
   };
 
-  const applyFull = async (structural: boolean): Promise<void> => {
-    // Capture the membership epoch before reading the whole directory; if a
-    // structural change lands while the read is pending, the read is stale and
-    // the loop re-reads a coherent snapshot instead of applying a split one.
-    const structureBefore = structureEpoch;
-    const entries = await reader.readDirectory(0, FULL_RANGE);
-    if (disposed) return;
-    if (structureEpoch !== structureBefore) {
-      mergeDirty(0, FULL_RANGE);
-      return;
-    }
-    let structuralFrom = 0;
-    if (!structural) {
-      structuralFrom = Infinity;
-      const n = Math.min(rows.length, entries.length);
-      for (let i = 0; i < n; i += 1) {
-        if (ids[i] !== rowFromDirectory(entries[i]!).id) {
-          structuralFrom = i;
-          break;
-        }
-      }
-      if (!Number.isFinite(structuralFrom) && rows.length !== entries.length) {
-        structuralFrom = n;
-      }
-    }
-    if (!Number.isFinite(structuralFrom)) {
-      // Unknown-range content changes obey the same invalidation contract as
-      // ranged edits, including facts whose bodies have already been evicted.
-      await applyChange(0, entries, entries.length);
-      return;
-    }
-    // Continuity was lost: rebuild the whole index and re-hydrate the tail.
-    // A `reset` re-reads everything, so it drops every held body and pin. A
-    // positionless structural `changed` keeps ids that survived, so a lease on
-    // another viewport's turns is not released by this reload.
-    structureEpoch += 1;
-    if (structural) {
-      hydrated.clear();
-      pins.clear();
-    } else {
-      const surviving = new Set<string>();
-      for (const entry of entries) surviving.add(rowFromDirectory(entry).id);
-      for (const [id] of hydrated) if (!surviving.has(id)) hydrated.delete(id);
-      for (const [id] of pins) if (!surviving.has(id)) pins.delete(id);
-    }
-    rows.length = 0;
-    ids.length = 0;
-    indexById.clear();
-    for (const entry of entries) {
-      const row = rowFromDirectory(entry);
-      rows[entry.position] = row;
-      ids[entry.position] = row.id;
-    }
-    rebuildLookups(0);
-    await ensureTailHydrated(hydrateItemBudget, false);
-    if (disposed) return;
-    bump();
-    emit({ kind: 'structure', from: structuralFrom, to: ids.length });
-    scheduleIdlePass();
-  };
-
   const mergeDirty = (from: number, to: number) => {
     dirtyFrom = Math.min(dirtyFrom, from);
     dirtyTo = Math.max(dirtyTo, to);
@@ -667,14 +603,8 @@ export function createConversationViewFromReader(
         if (disposed) break;
         const from = dirtyFrom;
         const to = dirtyTo;
-        const reset = resetPending;
         dirtyFrom = Infinity;
         dirtyTo = -1;
-        resetPending = false;
-        if (to === FULL_RANGE) {
-          await applyFull(reset);
-          continue;
-        }
         // Read the directory and the count as ONE observation: capture the
         // membership epoch first, and if a structural change lands before the
         // pair is ready, re-dirty the window so the next iteration re-reads a
@@ -706,33 +636,17 @@ export function createConversationViewFromReader(
       pendingChanges.push(change);
       return;
     }
-    if (change.kind === 'reset') {
-      // Continuity is lost: fence every in-flight read immediately.
-      structureEpoch += 1;
-      resetPending = true;
-      mergeDirty(0, FULL_RANGE);
-      void flushDirty();
-      return;
-    }
-    // A membership/order change fences in-flight reads as soon as it is
-    // observed, before it is applied, so a directory+count pair read around the
-    // change is never applied as if it were coherent. A content change
-    // invalidates exactly the identities the event touched — a shallow
-    // directory comparison cannot see a body/inputConfig edit — and never the
-    // whole table.
-    if (change.structural) {
-      structureEpoch += 1;
-    } else if (change.from !== undefined && change.to !== undefined) {
-      const hi = Math.min(change.to, ids.length);
-      for (let i = Math.max(0, change.from); i < hi; i += 1) {
-        const id = ids[i];
-        if (id) bumpTurn(id);
-      }
+    if (change.kind === 'structure') {
+      // Fence pending membership/body reads before the directory refresh starts.
+      structureEpoch++;
+      mergeDirty(change.from, change.to);
     } else {
-      for (const id of hydrated.keys()) bumpTurn(id);
-      for (const id of pins.keys()) bumpTurn(id);
+      for (const id of change.ids) {
+        bumpTurn(id);
+        const position = indexById.get(id);
+        if (position !== undefined) mergeDirty(position, position + 1);
+      }
     }
-    mergeDirty(change.from ?? 0, change.to ?? FULL_RANGE);
     void flushDirty();
   };
 

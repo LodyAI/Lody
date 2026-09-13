@@ -105,7 +105,7 @@ function createForkHarness(
   sourceLoro.commit();
   const sourceDoc = withHistoryPort({
     getMetaState: vi.fn(async () => sourceMeta),
-    getHistory: vi.fn(async () => options.sourceHistory ?? sourceHistory),
+    getHistory: vi.fn(() => options.sourceHistory ?? sourceHistory),
     // The storage-owned snapshot service over the source doc: capture happens
     // through the port, and `read()` is the fork's full stored read.
     sessionData: createLoroSessionData({
@@ -125,7 +125,7 @@ function createForkHarness(
     sessionData: { snapshots: { copyFrom: targetCopyFrom } },
     waitUntilSynced: vi.fn(async () => false),
     getMetaState: vi.fn(async () => options.targetMeta),
-    getHistory: vi.fn(async () => options.targetHistory ?? []),
+    getHistory: vi.fn(() => options.targetHistory ?? []),
     getForkOperation: vi.fn(() => forkOperation),
     setForkOperation: vi.fn((operation) => {
       forkOperation = operation;

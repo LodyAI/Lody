@@ -82,7 +82,7 @@ function fixture(initialMode = 'ask') {
     }),
     setLastMessageAt: async () => {},
     getMetaState: async () => ({ title: 'Synthetic session', userId: 'user' }),
-    getHistory: async () => history,
+    getHistory: () => history,
     setStatus: vi.fn(async (_status: unknown, meta?: { awaitingUserSince?: number }) => {
       if (meta?.awaitingUserSince) awaitingUser = true;
     }),
@@ -238,8 +238,10 @@ describe('Grok Always Approve in the durable permission flow', () => {
     await f.waitForPending();
     expect(f.outcome('second')).toBeUndefined();
     const rejected: Outcome = { outcome: 'selected', optionId: 'reject' };
-    await f.answer('second', rejected);
+    const storing = f.answer('second', rejected);
+    // Same stack: the stored decision wins before any Promise callback runs.
     f.setMode('always-approve');
+    await storing;
     await expect(next).resolves.toEqual({ outcome: rejected });
     expect(f.outcome('second')).toEqual(rejected);
   });

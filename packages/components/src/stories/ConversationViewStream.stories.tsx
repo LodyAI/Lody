@@ -112,7 +112,7 @@ function buildHistory(rounds: number): SessionHistory[] {
 function openWindowedView(rounds: number): ConversationView {
   const doc = new LoroDoc();
   doc.getMap('session').set('id', sessionId);
-  const session = createConversationSession(doc, { sessionId, windowed: true });
+  const session = createConversationSession(doc, { sessionId });
   const view = session.history;
   const dispose = view.dispose;
   view.dispose = () => {

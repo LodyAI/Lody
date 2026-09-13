@@ -2,12 +2,10 @@ import {
   applyPreviewVisualCommentMutation,
   getServerNow,
   getSessionRoomId,
-  HistoryWriteError,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
-import type { SessionCommandResult } from '@lody/shared/session-data';
 import type { LoroRepo } from 'loro-repo';
 import type {
   PreviewVisualCommentDocStore,
@@ -15,15 +13,6 @@ import type {
   SessionDocStore,
 } from '../atoms/runtime';
 import type { WorkspaceWriter } from './workspace-writer';
-
-/** Fail the caller when a domain command did not apply; never silently drop a write. */
-function requireAccepted(result: SessionCommandResult): void {
-  if (result.status === 'accepted') return;
-  if (result.status === 'indeterminate') throw result.cause;
-  // Preserve the shared writer's content-free validation diagnostic.
-  if (result.reason.issues) throw new HistoryWriteError(result.reason.issues);
-  throw new Error(`Session command rejected: ${result.reason.code}`);
-}
 
 // # WorkspaceWriter implementation
 //
@@ -91,7 +80,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
         withSessionStore(sessionId, async (store) => {
-          requireAccepted(await store.sessionData.commands.appendTurn(entry));
+          await store.sessionData.commands.appendTurn(entry);
         }),
       ]);
       void dispatch;
@@ -142,7 +131,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionTurn(sessionId, entry, dispatch) {
       await withSessionStore(sessionId, async (store) => {
-        requireAccepted(await store.sessionData.commands.appendTurn(entry));
+        await store.sessionData.commands.appendTurn(entry);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -151,13 +140,13 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async appendSessionHistory(sessionId, entry) {
       await withSessionStore(sessionId, async (store) => {
-        requireAccepted(await store.sessionData.commands.appendTurn(entry));
+        await store.sessionData.commands.appendTurn(entry);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
       await withSessionStore(sessionId, async (store) => {
-        requireAccepted(await store.sessionData.commands.replaceTurn(entryId, entry));
+        await store.sessionData.commands.replaceTurn(entryId, entry);
       });
     },
 
@@ -171,16 +160,14 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
         // The UI decision is best-effort: a proposal removed by a peer is not an
         // error, matching the previous silent no-op. A malformed decision still
         // throws the writer's validation diagnostic.
-        if (result.status === 'rejected' && result.reason.code === 'not_found') return;
-        requireAccepted(result);
+        if (!result) return;
       });
     },
 
     async respondSessionPermission(sessionId, requestId, outcome, options) {
       await withSessionStore(sessionId, async (store) => {
-        requireAccepted(
-          await store.sessionData.commands.respondPermission(requestId, outcome, options)
-        );
+        if (!(await store.sessionData.commands.respondPermission(requestId, outcome, options)))
+          throw new Error('Permission request not found');
       });
     },
 

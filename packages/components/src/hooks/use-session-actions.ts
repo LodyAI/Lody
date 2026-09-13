@@ -1,4 +1,3 @@
-import { requireSessionAccepted } from '@lody/shared/session-data';
 import { useCallback } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -925,7 +924,7 @@ export function useSessionActions(): SessionActions {
         const promoted = await runtime.withSessionStore(
           sessionId,
           async (sessionStore) =>
-            requireSessionAccepted(
+            (
               await sessionStore.sessionData.commands.applyHistoryAction({
                 kind: 'user-status',
                 turnId: userTurnId,

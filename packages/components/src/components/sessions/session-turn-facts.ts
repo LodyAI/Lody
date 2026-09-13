@@ -101,6 +101,7 @@ export type SessionTurnFacts = {
   /** The turn's latest completed Codex proposed plan. */
   proposedPlan: CompletedCodexProposedPlan | null;
   permissionRequests: PermissionScanEntry[];
+  fileDiff: SessionHistory['fileDiff'];
 };
 
 export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (turn) => {
@@ -121,6 +122,7 @@ export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (turn) =
         : null,
     proposedPlan: findLatestCompletedCodexProposedPlan([turn] as never),
     permissionRequests: scanPermissionRequests([turn]),
+    fileDiff: turn.fileDiff,
   };
 };
 
@@ -138,7 +140,9 @@ const EMPTY_ORDERED: readonly SessionTurnFacts[] = [];
  * reader. The newest turns are derived first, so readers converge from the
  * tail outward while the background pass runs.
  */
-export function useSessionTurnFacts(view: ConversationView | null | undefined): SessionTurnFactsResult {
+export function useSessionTurnFacts(
+  view: ConversationView | null | undefined
+): SessionTurnFactsResult {
   const rows = useConversationIndexRows(view);
   const { facts, complete, version } = useConversationDerivation(view, deriveSessionTurnFacts);
   const ordered = useMemo(() => {
@@ -156,7 +160,9 @@ export function useSessionTurnFacts(view: ConversationView | null | undefined): 
 }
 
 /** The newest goal item anywhere in the conversation. */
-export const latestGoalFromFacts = (ordered: readonly SessionTurnFacts[]): SessionGoalMessage | null => {
+export const latestGoalFromFacts = (
+  ordered: readonly SessionTurnFacts[]
+): SessionGoalMessage | null => {
   for (let i = ordered.length - 1; i >= 0; i -= 1) {
     const goal = ordered[i]?.goal;
     if (goal) return goal;

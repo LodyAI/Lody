@@ -105,7 +105,7 @@ export class SessionEditAndResendService {
       );
     }
 
-    const history = await readSessionHistory(sessionDoc.sessionData.history);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
       return this.success(spec);

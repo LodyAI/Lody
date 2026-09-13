@@ -43,11 +43,7 @@ const FORBIDDEN: { pattern: RegExp; why: string }[] = [
  * that trips the patterns, so an entry that stops being needed fails here
  * instead of quietly widening the exemption.
  */
-const OWNERS = [
-  // The view, the writer, and the rollback adapter over the full Mirror.
-  'lib/conversation-view',
-  // Builds the rollback store: reads the old Mirror's array into the adapter.
-];
+const OWNERS: string[] = [];
 
 const ROOT = path.resolve(__dirname, '../src');
 

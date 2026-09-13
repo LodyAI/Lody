@@ -395,7 +395,7 @@ function ExtremeConversationViewFrame() {
     });
     mirror.setState((previous) => ({ ...previous, history: history as never }));
     mirror.dispose();
-    const session = createConversationSession(doc, { sessionId, windowed: true });
+    const session = createConversationSession(doc, { sessionId });
     const next = session.history;
     setView(next);
     return () => {

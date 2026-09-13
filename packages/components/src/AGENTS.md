@@ -23,10 +23,7 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
 so the ordinary spellings of a second path do not compile. What types cannot
 close is a deliberate escape — a cast that puts the key back, or reaching past
 the store into the raw `LoroDoc` — and
-`tests/no-materialized-history-in-components.test.ts` fails on those. Only
-`lib/conversation-view` (and the rollback branch that builds its adapter from
-the old full Mirror) may touch the raw list; that exemption list is asserted to
-be exact.
+`tests/no-materialized-history-in-components.test.ts` fails on those. No component reads the raw history list; composition injects the shared reader.
 
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.

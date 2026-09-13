@@ -113,7 +113,7 @@ describe('MessageHandler permission notifications', () => {
         userId: 'meta-user',
         cliType: 'claude',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       mirror: {
         subscribe: vi.fn((callback: () => void) => {
           subscriptionCallbacks.push(callback);
@@ -305,7 +305,7 @@ describe('MessageHandler permission notifications', () => {
         userId: 'meta-user',
         cliType: 'claude',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       mirror: {
         subscribe: vi.fn((callback: () => void) => {
           subscriptionCallbacks.push(callback);
@@ -515,7 +515,7 @@ describe('MessageHandler permission notifications', () => {
         userId: 'meta-user',
         cliType: 'claude',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       mirror: {
         subscribe: vi.fn((callback: () => void) => {
           subscriptionCallbacks.push(callback);
@@ -652,7 +652,7 @@ describe('MessageHandler permission notifications', () => {
         userId: 'meta-user',
         cliType: 'claude',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       mirror: {
         subscribe: vi.fn(() => () => {}),
         getState: () => ({ history }),

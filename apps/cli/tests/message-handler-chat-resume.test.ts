@@ -47,7 +47,7 @@ describe('MessageHandler chat resume', () => {
       getStatus: vi.fn(async () => SessionStatusFactory.idle()),
       setLastMessageAt: vi.fn(async () => {}),
       popMessageQueue: vi.fn(async () => null),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),

@@ -1,5 +1,4 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionAccepted } from '@lody/shared/session-data';
 import { randomUUID } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -462,7 +461,7 @@ export class LodyOperationCoordinator {
         operation.state === 'finished' &&
         this.progressIsSettled(
           operation,
-          await readSessionHistory(sessionDoc.sessionData.history),
+          readSessionHistory(sessionDoc.sessionData.history),
           statusByTarget
         )
       ) {
@@ -536,7 +535,7 @@ export class LodyOperationCoordinator {
         target.sessionId
       );
       this.subscribeTarget(target.sessionId, sessionDoc);
-      const history = await readSessionHistory(sessionDoc.sessionData.history);
+      const history = readSessionHistory(sessionDoc.sessionData.history);
       const userTurn = history.find(
         (entry) => entry.id === target.userTurnId && entry.role === 'user'
       );
@@ -697,7 +696,7 @@ export class LodyOperationCoordinator {
       item.target.sessionId
     );
     this.subscribeTarget(item.target.sessionId, sessionDoc);
-    const history = await readSessionHistory(sessionDoc.sessionData.history);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
     const userTurn = history.find(
       (entry) => entry.id === item.target.userTurnId && entry.role === 'user'
     );
@@ -750,7 +749,7 @@ export class LodyOperationCoordinator {
       return false;
     }
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = await readSessionHistory(sessionDoc.sessionData.history);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
     const userTurn = history.find((entry) => entry.id === userTurnId && entry.role === 'user');
     if (!userTurn) return false;
     const meta = metaRecord.meta as SessionMeta;
@@ -1550,12 +1549,10 @@ export class LodyOperationCoordinator {
         },
       };
     };
-    requireSessionAccepted(
-      await sessionDoc.sessionData.commands.applyHistoryAction({
-        kind: 'operation-completion',
-        operation,
-        turn: buildTurn(undefined),
-      })
-    );
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'operation-completion',
+      operation,
+      turn: buildTurn(undefined),
+    });
   }
 }

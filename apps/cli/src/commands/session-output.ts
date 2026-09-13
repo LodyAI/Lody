@@ -245,25 +245,14 @@ export async function waitForTurnCompletion(options: {
       }
     };
 
-    // Start each consistent read at observation time, then deliver results in
-    // observation order even when the backend completes requests out of order.
-    let delivery = Promise.resolve();
+    // The in-process reader captures and inspects one observation synchronously.
     const refresh = () => {
       if (settled) return;
-      const snapshot = options.sessionDoc.sessionData.history.readTurnOutput(options.userTurnId);
-      // Attach immediately: a later read may reject before an earlier one finishes.
-      const captured = snapshot.then(
-        (history) => ({ history }),
-        (error) => ({ error })
-      );
-      delivery = delivery
-        .then(async () => {
-          const result = await captured;
-          if (settled) return;
-          if ('error' in result) rejectWith(result.error);
-          else inspect(result.history);
-        })
-        .catch(rejectWith);
+      try {
+        inspect(options.sessionDoc.sessionData.history.readTurnOutput(options.userTurnId));
+      } catch (error) {
+        rejectWith(error instanceof Error ? error : new Error(String(error)));
+      }
     };
 
     const handleAbort = () => {

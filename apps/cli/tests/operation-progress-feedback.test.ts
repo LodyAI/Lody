@@ -53,7 +53,7 @@ describe('nested operation progress feedback', () => {
           commands: {},
           durability: { waitDurable: async () => {} },
         },
-        getHistory: async () => mirror.getState().history,
+        getHistory: () => mirror.getState().history,
         updateHistory: async (
           update: (history: SessionHistoryInput[]) => SessionHistoryInput[]
         ) => {

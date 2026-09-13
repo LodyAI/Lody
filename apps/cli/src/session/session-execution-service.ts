@@ -1,5 +1,5 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionAccepted, readLatestTurn } from '@lody/shared/session-data';
+import { readLatestTurn } from '@lody/shared/session-data';
 import {
   type ACPSessionId,
   type AgentConfigId,
@@ -1725,7 +1725,7 @@ export class SessionExecutionService {
         requeueUndelivered: true,
       })
       .then((result) => {
-        queueable = requireSessionAccepted(result).matched ?? false;
+        queueable = result.matched ?? false;
       });
     return queueable;
   }
@@ -3327,7 +3327,7 @@ export class SessionExecutionService {
     await sessionDoc.sessionData.commands
       .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status })
       .then((result) => {
-        matched = requireSessionAccepted(result).matched ?? false;
+        matched = result.matched ?? false;
       });
     return matched;
   }
@@ -3454,14 +3454,12 @@ export class SessionExecutionService {
         'handled'
       );
     }
-    await options.sessionDoc.sessionData.commands
-      .applyHistoryAction({
-        kind: 'user-status',
-        turnId: options.nextUserTurnId,
-        status: 'processing',
-        deliveredSteer: true,
-      })
-      .then(requireSessionAccepted);
+    await options.sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: options.nextUserTurnId,
+      status: 'processing',
+      deliveredSteer: true,
+    });
     await this.upsertSessionMeta(options.sessionId, {
       latestUserMsgId: options.nextUserTurnId,
       ...(options.previousUserTurnId ? { lastHandledUserMsgId: options.previousUserTurnId } : {}),
@@ -4037,9 +4035,7 @@ export class SessionExecutionService {
             // to resume, even though the user turn is durable in Loro history.
             // This freshly created ACP session has no knowledge of that turn,
             // so reconstruct its context before sending the current request.
-            const history = yield* self.tryPromise(() =>
-              readSessionHistory(sessionDoc.sessionData.history)
-            );
+            const history = readSessionHistory(sessionDoc.sessionData.history);
             if (history.length > 0) {
               replayPromptResult = buildReplayPromptFromHistory({
                 history,
@@ -4235,9 +4231,7 @@ export class SessionExecutionService {
             if (!usedHistoryReplay || !replayPromptResult) {
               return undefined;
             }
-            const history = yield* self.tryPromise(() =>
-              readSessionHistory(sessionDoc.sessionData.history)
-            );
+            const history = readSessionHistory(sessionDoc.sessionData.history);
             if (hasRecentResumeNotice(history)) {
               return undefined;
             }
@@ -4268,13 +4262,11 @@ export class SessionExecutionService {
               items: [noticeItem],
             };
             yield* self.tryPromise(() =>
-              sessionDoc.sessionData.commands
-                .applyHistoryAction({
-                  kind: 'upsert-turn',
-                  turn: systemNotice,
-                  beforeLastUser: true,
-                })
-                .then(requireSessionAccepted)
+              sessionDoc.sessionData.commands.applyHistoryAction({
+                kind: 'upsert-turn',
+                turn: systemNotice,
+                beforeLastUser: true,
+              })
             );
             return undefined;
           });
@@ -5304,7 +5296,7 @@ export class SessionExecutionService {
               this.currentTurnBySession.get(sessionId) ??
               this.turnRuntimeBySession.get(sessionId)?.turnId;
             if (liveTurnId == null) {
-              const history = await readSessionHistory(sessionDoc.sessionData.history);
+              const history = readSessionHistory(sessionDoc.sessionData.history);
               const hasUnfinishedRequestedTurn = history.some(
                 (entry) =>
                   entry.id === turnId &&
@@ -5323,15 +5315,13 @@ export class SessionExecutionService {
                   `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
                 );
                 this.deps.clearSessionActivePresence(sessionId);
-                await sessionDoc.sessionData.commands
-                  .applyHistoryAction({
-                    kind: 'finish-assistant',
-                    turnId,
-                    endedAt: getServerNow(),
-                    force: true,
-                    settleContextCompactionAsFailed: true,
-                  })
-                  .then(requireSessionAccepted);
+                await sessionDoc.sessionData.commands.applyHistoryAction({
+                  kind: 'finish-assistant',
+                  turnId,
+                  endedAt: getServerNow(),
+                  force: true,
+                  settleContextCompactionAsFailed: true,
+                });
 
                 await this.finalizeCancelledTurn({
                   sessionId,

@@ -1,6 +1,8 @@
 import { normalizeSessionTurnInputConfig } from '../message-schemas';
 import type { SessionEntry } from './domain';
-import type { SessionHistoryReader, SessionTurn } from './types';
+import type { SessionHistoryReader } from './types';
+import type { SessionTurn } from './domain';
+
 /** Read the latest matching body after scanning only directory scalars. */
 export async function readLatestTurn(
   reader: SessionHistoryReader,
@@ -19,8 +21,8 @@ export async function readLatestTurn(
 /** Legacy business projection. Keep the authoritative readAll/snapshot unchanged
  * for export and hashes; dispatch consumers normalize their input configuration.
  * Invalid raw slots are skipped here, never removed from stored history. */
-export async function readSessionHistory(reader: SessionHistoryReader): Promise<SessionEntry[]> {
-  const snapshot: readonly unknown[] = await reader.readAll();
+export function readSessionHistory(reader: { readAll(): readonly unknown[] }): SessionEntry[] {
+  const snapshot = reader.readAll();
   return snapshot
     .filter(
       (entry): entry is SessionEntry =>

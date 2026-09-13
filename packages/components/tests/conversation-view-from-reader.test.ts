@@ -205,7 +205,10 @@ const resetWrapper = (base: SessionHistoryReader) => {
       return observation;
     },
   };
-  return { reader, triggerReset: () => listener?.({ kind: 'reset' }) };
+  return {
+    reader,
+    triggerReset: () => listener?.({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER }),
+  };
 };
 
 const scalarsOf = (row: Record<string, unknown>) => ({
@@ -569,7 +572,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
     }
   });
 
-  it('rebuilds the whole snapshot on reset, keeping later reads as no-ops after dispose', async () => {
+  it('refreshes a structural range, keeping later reads as no-ops after dispose', async () => {
     const harness = openView(backend, 12, { tailKeep: 4 });
     const { idle, data } = harness;
     const wrapped = resetWrapper(data.history);
@@ -591,7 +594,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       wrapped.triggerReset();
       await flush();
 
-      expect(changes.some((change) => change.kind === 'structure')).toBe(true);
+      expect(changes.length).toBeGreaterThan(0);
       expect(wrappedView.turnCount).toBe(harness.expected.length);
       // Continuity was lost: the tail was re-read, not trusted.
       const tailTurnAfter = wrappedView.turn(wrappedView.turnCount - 1)!;
@@ -647,7 +650,6 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
     const idle = createManualIdle();
     const session = createConversationSession(doc, {
       sessionId: FIXTURE_SESSION_ID,
-      windowed: true,
       scheduleIdle: idle.scheduleIdle,
     });
     try {
@@ -687,7 +689,6 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
       await import('../src/lib/conversation-view/create-conversation-session');
     const session = createConversationSession(doc, {
       sessionId: FIXTURE_SESSION_ID,
-      windowed: true,
       scheduleIdle: idle.scheduleIdle,
     });
     try {

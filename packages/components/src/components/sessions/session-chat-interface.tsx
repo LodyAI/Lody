@@ -313,11 +313,7 @@ import {
   useConversationVersion,
   useTurn,
 } from '@/hooks/use-conversation-view';
-import {
-  collectConversationConfigSources,
-  readConversationHistory,
-  countUserTurns,
-} from '@/lib/conversation-view';
+import { collectConversationConfigSources, countUserTurns } from '@/lib/conversation-view';
 import {
   latestGoalFromFacts,
   latestProposedPlanFromFacts,
@@ -3394,10 +3390,7 @@ export const SessionChatInterface = memo(
 
         const turnCount = conversationView.turnCount;
         try {
-          const history = conversationCopyRange(
-            await readConversationHistory(conversationView),
-            throughMessageId
-          );
+          const history = conversationCopyRange(await conversationView.readAll(), throughMessageId);
           const last = history.at(-1);
           const { markdown, stats } = buildConversationMarkdown({
             history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
@@ -4907,7 +4900,7 @@ export const SessionChatInterface = memo(
         getShareImageData: async () => {
           if (!conversationView?.turnCount) return null;
           return {
-            messages: collectConversationMessages(await readConversationHistory(conversationView)),
+            messages: collectConversationMessages(await conversationView.readAll()),
             agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
           };
         },

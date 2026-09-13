@@ -1,5 +1,4 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionAccepted } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -1251,7 +1250,7 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await readSessionHistory(sessionDoc.sessionData.history);
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1267,7 +1266,7 @@ async function appendUserPromptHistory(args: {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
+    const history = args.knownHistory ?? readSessionHistory(sessionDoc.sessionData.history);
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1299,7 +1298,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.sessionData.commands.appendTurn(entry).then(requireSessionAccepted);
+  await sessionDoc.sessionData.commands.appendTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1648,7 +1647,7 @@ async function resolveSessionTurnDispatchDefaults(
   agentConfig: AgentConfigMeta
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await readSessionHistory(sessionDoc.sessionData.history);
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1699,9 +1698,10 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.sessionData.commands
-    .applyHistoryAction({ kind: 'remove-turn', turnId: historyId })
-    .then(requireSessionAccepted);
+  await sessionDoc.sessionData.commands.applyHistoryAction({
+    kind: 'remove-turn',
+    turnId: historyId,
+  });
 }
 
 export async function updateSessionActivityTimestamps(
@@ -3496,7 +3496,7 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await readSessionHistory(sessionDoc.sessionData.history);
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4200,7 +4200,7 @@ const sessionHistoryCommand = new Command('history')
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
         const transcript = toSessionTranscriptEntries(
-          await readSessionHistory(sessionDoc.sessionData.history)
+          readSessionHistory(sessionDoc.sessionData.history)
         );
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,

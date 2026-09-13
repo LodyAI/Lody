@@ -1,4 +1,5 @@
-import { requireSessionAccepted, type SessionData } from '@lody/shared/session-data';
+import { HistoryActionRefused } from '@lody/shared/session-data';
+import { type SessionData } from '@lody/shared/session-data';
 import { getServerNow, type SessionId, type TaskProposalMeta } from '@lody/shared';
 import { LodyOperationStoreError } from '@/orchestration/operation-store';
 
@@ -82,19 +83,22 @@ export const publishTaskProposal = async (
   let changed = false;
   let result: TaskProposalPublishResult = { pending: true };
 
-  const applied = await doc.sessionData.commands.applyHistoryAction({
-    kind: 'task-proposal',
-    turnId,
-    meta: desiredMeta,
-    timestamp: new Date((options.now ?? getServerNow)()).toISOString(),
-  });
-  if (applied.status === 'rejected' && applied.reason.code === 'conflict')
-    throw new LodyOperationStoreError(
-      'TASK_PROPOSAL_ID_CONFLICT',
-      `History entry ${turnId} belongs to a different proposal. Use a different proposalId.`,
-      false
-    );
-  const accepted = requireSessionAccepted(applied);
+  const applied = await doc.sessionData.commands
+    .applyHistoryAction({
+      kind: 'task-proposal',
+      turnId,
+      meta: desiredMeta,
+      timestamp: new Date((options.now ?? getServerNow)()).toISOString(),
+    })
+    .catch((error: unknown) => {
+      if (!(error instanceof HistoryActionRefused)) throw error;
+      throw new LodyOperationStoreError(
+        'TASK_PROPOSAL_ID_CONFLICT',
+        'History turn already belongs to a different task proposal',
+        false
+      );
+    });
+  const accepted = applied;
   changed = accepted.matched ?? false;
   result = accepted.proposal ?? { pending: true };
 

@@ -1,4 +1,5 @@
-import type { SessionHistoryReader, SessionTurn } from './types';
+import type { SessionHistoryReader } from './types';
+import type { SessionTurn } from './domain';
 
 // # Shared visible-transcript paging
 //

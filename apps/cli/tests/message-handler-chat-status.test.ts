@@ -45,7 +45,7 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
     getStatus: vi.fn(async () => SessionStatusFactory.running()),
     popMessageQueue: vi.fn(async () => null),
     updateHistory: vi.fn(async () => {}),
-    getHistory: vi.fn(async () => []),
+    getHistory: vi.fn(() => []),
     waitUntilSynced: vi.fn(async () => {}),
     ...overrides.sessionDoc,
   });

@@ -1,5 +1,5 @@
 import { getServerNow, type StoredLodyOperation } from '@lody/shared';
-import { requireSessionAccepted, type SessionData } from '@lody/shared/session-data';
+import { type SessionData } from '@lody/shared/session-data';
 import type { OperationProgressStatusByTarget } from '@lody/shared/session-data';
 export {
   getOperationProgressTurnId,
@@ -15,12 +15,10 @@ export const upsertOperationProgressHistory = async (
   now: () => number = getServerNow,
   statusByTarget?: OperationProgressStatusByTarget
 ): Promise<void> => {
-  requireSessionAccepted(
-    await sessionDoc.sessionData.commands.applyHistoryAction({
-      kind: 'operation-progress',
-      operation,
-      timestamp: new Date(now()).toISOString(),
-      statuses: statusByTarget ? [...statusByTarget] : undefined,
-    })
-  );
+  await sessionDoc.sessionData.commands.applyHistoryAction({
+    kind: 'operation-progress',
+    operation,
+    timestamp: new Date(now()).toISOString(),
+    statuses: statusByTarget ? [...statusByTarget] : undefined,
+  });
 };

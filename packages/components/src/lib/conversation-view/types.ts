@@ -116,11 +116,7 @@ export interface ConversationView {
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */
   indexOf(turnId: string): number;
-  /**
-   * One consistent full read for export/replay/hash, when the backing reader can
-   * provide it. Absent on the raw-Loro/rollback views, which fall back to a
-   * lease-guarded read in `readConversationHistory`.
-   */
+  /** One authoritative, consistent full read for explicit export/replay/hash. */
   readAll(): Promise<SessionHistory[]>;
   /** The hydrated turn, or `undefined` until an acquired range covers it. */
   turn(i: number): SessionHistory | undefined;

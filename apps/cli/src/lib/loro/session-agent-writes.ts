@@ -12,7 +12,6 @@ import type {
   SessionFieldChange,
   SessionWritableField,
   SessionTurnWritableValues,
-  SessionCommandResult,
   OpenAssistantTurnInput,
 } from '@lody/shared/session-data';
 import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/shared';
@@ -42,117 +41,59 @@ export interface SessionAgentWrites {
     turnId: string,
     key: K,
     change: SessionFieldChange<SessionTurnWritableValues[K]>
-  ): Promise<SessionCommandResult>;
-  markTurnSeen(turnId: string): Promise<SessionCommandResult>;
-  openAssistantTurn(input: OpenAssistantTurnInput): Promise<SessionCommandResult>;
-  applyAgentBatch(input: ApplyAgentBatchInput): Promise<SessionCommandResult>;
+  ): Promise<void>;
+  markTurnSeen(turnId: string): boolean;
+  openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
+  applyAgentBatch(input: ApplyAgentBatchInput): Promise<void>;
 }
 export function createSessionAgentWrites(writer: HistoryWriter): SessionAgentWrites {
-  const rejected = (
-    code: 'invalid_input' | 'not_found' | 'conflict' | 'unsupported',
-    issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[]
-  ): SessionCommandResult => ({
-    status: 'rejected',
-    reason: { code, ...(issues ? { issues } : {}) },
-  });
-  const indeterminate = (
-    cause: unknown
-  ): Extract<SessionCommandResult, { status: 'indeterminate' }> => ({
-    status: 'indeterminate',
-    cause,
-  });
-  const issuesOf = (error: unknown) =>
-    (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
-
-  const accepted = async (): Promise<SessionCommandResult> => ({ status: 'accepted' });
-
   return {
     async setTurnField<K extends SessionWritableField>(
       turnId: string,
       key: K,
       change: SessionFieldChange<SessionTurnWritableValues[K]>
     ) {
-      if (change.kind === 'set') {
-        try {
-          parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
-        } catch (error) {
-          return rejected('invalid_input', issuesOf(error));
-        }
-      }
-      let updated: boolean;
-      try {
-        updated = writer.setField(
+      if (change.kind === 'set')
+        parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
+      if (
+        !writer.setField(
           turnId,
           key,
           (change.kind === 'set' ? change.value : undefined) as SessionHistoryInput[typeof key]
-        );
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      // `setField` locates by id and diffs only this field; `false` means the
-      // turn is absent, without materializing the turn body as a preflight.
-      if (!updated) return rejected('not_found');
-      return accepted();
+        )
+      )
+        throw new HistoryWriteError([{ path: ['history'], code: 'not_found' }]);
     },
-    async markTurnSeen(turnId) {
-      let updated: boolean;
+    markTurnSeen(turnId) {
       let blocked = false;
-      try {
-        updated = writer.updateEntry(turnId, (turn) => {
-          // Re-check the business condition inside the commit: a status advanced
-          // by a concurrent writer since the caller's read is never regressed.
-          if (markTurnSeenBlocked(turn as unknown as Record<string, unknown>)) {
-            blocked = true;
-            return turn;
-          }
-          applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
+      const found = writer.updateEntry(turnId, (turn) => {
+        if (markTurnSeenBlocked(turn as unknown as Record<string, unknown>)) {
+          blocked = true;
           return turn;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (!updated) return rejected('not_found');
-      if (blocked) return rejected('conflict');
-      return accepted();
+        }
+        applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
+        return turn;
+      });
+      return found && !blocked;
     },
     async openAssistantTurn(input) {
-      let roleMismatch = false;
-      let updated: boolean;
-      try {
-        updated = writer.updateEntry(input.turnId, (turn) => {
-          if (turn.role !== 'assistant') {
-            roleMismatch = true;
-            return turn;
-          }
+      if (
+        writer.updateEntry(input.turnId, (turn) => {
+          if (turn.role !== 'assistant')
+            throw new HistoryWriteError([{ path: ['role'], code: 'invalid_input' }]);
           applyOpenAssistantTurn(turn as unknown as Record<string, unknown>, input);
           return turn;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (updated) {
-        if (roleMismatch) return rejected('invalid_input');
-        return accepted();
-      }
-      const entry = createAssistantTurn(input);
-      try {
-        parseHistoryWrite(HistoryEntryWriteSchema, entry);
-      } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
-      }
-      try {
-        writer.append(entry as unknown as SessionHistory);
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted();
+        })
+      )
+        return;
+      writer.append(createAssistantTurn(input) as unknown as SessionHistory);
     },
     async applyAgentBatch(input) {
       const notifications = input.notifications ?? [];
       const contents = input.contents ?? [];
       const targetId = input.targetAssistantEntryId;
       if (notifications.length === 0 && contents.length === 0) {
-        return accepted();
+        return;
       }
       const applyTo = (turns: SessionHistoryInput[]): SessionHistoryInput[] => {
         let next = turns;
@@ -174,27 +115,22 @@ export function createSessionAgentWrites(writer: HistoryWriter): SessionAgentWri
         return next;
       };
       if (input.entryBound) {
-        if (targetId === undefined) return rejected('invalid_input');
+        if (targetId === undefined)
+          throw new HistoryWriteError([
+            { path: ['targetAssistantEntryId'], code: 'invalid_input' },
+          ]);
         // A bound batch whose target does not exist yet still creates it with the
         // caller's id, matching the historical targeted-then-create fallthrough.
         if (writer.read(targetId)) {
-          try {
-            writer.updateEntry(targetId, (entry) => {
-              const next = applyTo([entry as unknown as SessionHistoryInput]);
-              return (next[0] ?? entry) as unknown as SessionHistoryInput;
-            });
-          } catch (cause) {
-            return indeterminate(cause);
-          }
-          return accepted();
+          writer.updateEntry(targetId, (entry) => {
+            const next = applyTo([entry as unknown as SessionHistoryInput]);
+            return (next[0] ?? entry) as unknown as SessionHistoryInput;
+          });
+          return;
         }
       }
-      try {
-        writer.update((turns) => applyTo(turns));
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted();
+      writer.update((turns) => applyTo(turns));
+      return;
     },
   };
 }

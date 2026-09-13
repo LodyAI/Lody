@@ -1,6 +1,6 @@
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { readSessionHistory } from '@lody/shared/session-data';
-import { readLatestTurn, type SessionData } from '@lody/shared/session-data';
+import { readLatestTurn } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
   ACPSessionId,
@@ -12,7 +12,6 @@ import {
   createSessionControlPlaneMirror,
   SessionControlPlaneMirror,
   SessionControlPlaneState,
-  HistoryWriteError,
   SessionStatusFactory,
   SessionId,
   WorkspaceId,
@@ -97,7 +96,6 @@ import {
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 import {
   createLoroSessionData,
-  requireSessionAccepted,
   setFieldTo,
   type LoroSessionData,
   type SessionTurn,
@@ -1286,12 +1284,12 @@ export class LoroDocumentManager {
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
     const active = this.sessions.get(sessionId);
     if (active) {
-      return await readSessionHistory(active.sessionData.history);
+      return readSessionHistory(active.sessionData.history);
     }
 
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
-      return await readSessionHistory((await pending).sessionData.history);
+      return readSessionHistory((await pending).sessionData.history);
     }
 
     const docId = getSessionRoomId(sessionId);
@@ -1308,7 +1306,7 @@ export class LoroDocumentManager {
       );
       await sessionDoc.init({ skipAutoRead: true });
       try {
-        return await readSessionHistory(sessionDoc.sessionData.history);
+        return readSessionHistory(sessionDoc.sessionData.history);
       } finally {
         await sessionDoc.destroy({ preserveStatus: true });
       }
@@ -1868,7 +1866,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
    * Loro doc, the Mirror, or a container id.
    */
-  get sessionData(): SessionData {
+  get sessionData(): LoroSessionData {
     if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
     return this.sessionDataInstance;
   }
@@ -2284,8 +2282,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       throw new Error('SessionDocument not initialized');
     }
     this.logger.debug(`Marking session ${this.sessionId} history as seen`);
-    const result = await this.agentWrites.markTurnSeen(turnId);
-    if (result.status === 'indeterminate') throw result.cause;
+    this.agentWrites.markTurnSeen(turnId);
   }
 
   async markLatestUserHistoryAsSeenIfNeeded(): Promise<void> {
@@ -2666,13 +2663,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
     // Queue promotion is a dispatch producer: append through the domain command
     // (which validates before writing), then publish the activation pointer.
-    const result = await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
-    if (result.status === 'rejected') {
-      throw new HistoryWriteError(
-        result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
-      );
-    }
-    if (result.status === 'indeterminate') throw result.cause;
+    await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
     await this.repo.upsertDocMeta(this.roomId, {
       latestUserMsgId: entry.id,
     } satisfies Partial<SessionMeta>);
@@ -2723,7 +2714,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
     const id = this.shallowLatestTurnId('assistant');
     if (!id) return;
-    requireSessionAccepted(await this.agentWrites.setTurnField(id, 'plan', setFieldTo(entries)));
+    await this.agentWrites.setTurnField(id, 'plan', setFieldTo(entries));
   }
 
   async getMessageQueue(): Promise<MessageQueueItem[]> {

@@ -130,9 +130,7 @@ it("finalizes only the owning turn's unanswered requests through durable history
   // The permission waiter uses this same history subscription to release the ACP request.
   const observed: unknown[] = [];
   const unsubscribe = doc.subscribeAll(() => {
-    void doc.sessionData.history
-      .readAll()
-      .then((history) => observed.push(findPermissionOutcomeInHistory(history, 'request')));
+    observed.push(findPermissionOutcomeInHistory(doc.sessionData.history.readAll(), 'request'));
   });
   try {
     await doc.sessionData.commands.applyHistoryAction({
@@ -213,7 +211,7 @@ describe.each(['unknown', 'malformed'] as const)(
 
         await expect(
           ensurePermissionRequestOnToolCall(doc, 'invalid', invalidRequest)
-        ).rejects.toThrow('Session write rejected: invalid_input');
+        ).rejects.toThrow('Invalid history write');
         expect(currentClient.version().toJSON()).toEqual(version);
         expect(currentClient.toJSON()).toEqual(json);
         expect(readStored()).toEqual(before);
