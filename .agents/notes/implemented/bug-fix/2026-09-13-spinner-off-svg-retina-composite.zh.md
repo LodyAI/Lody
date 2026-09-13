@@ -65,6 +65,18 @@ device scale factor 乘进 layout zoom，所以 DPR 2 下每个 `<svg>` 的 effe
   刷新/旋转图标。
 - 在 `prefers-reduced-motion` 下暂停。不是修复，只是对关闭动效的用户隐藏了开销。
 
+## 后续：原语的默认值是转发陷阱
+
+迁移复查发现，`Spinner` 把 `spinning` 默认为 `true` 在调用点是安全的，但经过包装组件
+就不是：`undefined` 与「未传」无法区分，因此转发自身可选 `spinning` / `spin` 属性的
+状态面板在其余所有状态都会落到该默认值——桌面端与移动端的「No machines available」
+面板，以及移动端文件浏览器的「Files unavailable」、空文件夹和预览不可用面板，图标都在
+永久旋转。三个面板辅助组件现在把该属性默认为 `false`。
+
+原语保留 `true`：在它几乎所有调用点上，裸写 `<Spinner />` 就表示「加载中」，翻转默认值
+只会让这些调用点失声。「转发用的包装组件必须自带默认值」这条约束已写入 `src/ui/AGENTS.md`
+和属性本身的注释。其余九处转发传的是比较表达式或必填布尔值，已确认不受影响。
+
 ## 验证
 
 - 在本工作区的 Electron 39.5.1 / Chromium 142.0.7444.265、主显示器 scale factor 2 上，
@@ -80,7 +92,9 @@ device scale factor 乘进 layout zoom，所以 DPR 2 下每个 `<svg>` 的 effe
   Playwright 的 headless Chromium 145.0.7632.6 在模拟 DPR 2 下两种写法都能合成，说明该
   检查可能随版本或模拟方式不同；决定以与发布运行时一致的 Electron 实测为准。
 
-- `tests/spinner-rotates-in-place.test.tsx` 对 sidebar 工作行、同步指示器、移动端状态
+- `tests/spinner-rotates-in-place.test.tsx` 还渲染桌面端与移动端机器选择器，以及不带
+  provider 的移动端文件浏览器，断言静止态没有动画、加载态恰好一个，因此「干脆不转」的
+  修法同样会失败。它对 sidebar 工作行、同步指示器、移动端状态
   胶囊和 `Spinner` 原语断言：唯一的动画元素是 HTML span、显式正方形、`shrink-0`、只含
   图标，且图标本身不再旋转。PR 标签页刷新和 sidebar PR 徽标测试已适配 wrapper。
 - 在 macOS 上运行了 `pnpm check` 与 `pnpm format`；未在打包版中带真实会话重新剖析。

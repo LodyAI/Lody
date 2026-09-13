@@ -807,12 +807,18 @@ function StatusPanel({
   icon: Icon,
   title,
   description,
-  spin,
+  spin = false,
   tone = 'muted',
 }: {
   readonly icon: typeof FileText;
   readonly title: ReactNode;
   readonly description?: ReactNode;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
   readonly spin?: boolean;
   readonly tone?: 'muted' | 'destructive';
 }) {

@@ -9,6 +9,14 @@ export type SpinnerProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & 
   /**
    * `false` renders the glyph at rest. Lets a refresh button keep one element
    * and only spin it while its request is in flight.
+   *
+   * Defaults to TRUE, because a bare `<Spinner />` is a loading indicator and
+   * that is what almost every call site means. The cost is that `undefined`
+   * is indistinguishable from omitted: a wrapper component that forwards its
+   * own optional `spinning`/`loading` prop spins in every state where that
+   * prop is absent. Such a wrapper must default the prop itself — the status
+   * panels in `local-projects/` and `files/` shipped a permanently spinning
+   * "No machines available" and "Files unavailable" icon that way.
    */
   spinning?: boolean;
   strokeWidth?: number | string;

@@ -594,14 +594,19 @@ function DirectorySkeleton() {
 
 function StatusPanel({
   icon: Icon,
-  spinning,
+  spinning = false,
   title,
   description,
   action,
   tone = 'muted',
 }: {
   icon: LucideIcon;
-  /** Rotates the icon: the panel is a loading state. */
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
   spinning?: boolean;
   title: React.ReactNode;
   description?: React.ReactNode;

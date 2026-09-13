@@ -79,6 +79,22 @@ will-change-transform">` around the icon, which fills the span with
 - Pausing under `prefers-reduced-motion`. Not a fix; only hides the cost for
   users who opt out of motion.
 
+## Follow-up: the primitive's default is a forwarding hazard
+
+Review of the migration found that `Spinner` defaulting `spinning` to `true` is
+safe at a call site but not through a wrapper. `undefined` is indistinguishable
+from an omitted prop, so a status panel that forwarded its OWN optional
+`spinning` / `spin` prop reached the default in every state: the desktop and
+mobile "No machines available" panels and the mobile file browser's "Files
+unavailable", empty-folder and preview-unavailable panels rotated their icons
+forever. The three panel helpers now default the prop to `false`.
+
+The primitive keeps `true`, because a bare `<Spinner />` means "loading" at
+almost every one of its call sites and flipping the default would silence them
+instead. The constraint that a forwarding wrapper supplies its own default is
+recorded in `src/ui/AGENTS.md` and on the prop itself. The other nine forwards
+pass comparisons or required booleans and were verified unaffected.
+
 ## Verification
 
 - Controlled trace in this workspace's Electron 39.5.1 / Chromium 142.0.7444.265,
@@ -96,7 +112,10 @@ will-change-transform">` around the icon, which fills the span with
   emulation; the decision rests on the Electron measurement, which matches the
   shipped runtime.
 
-- `tests/spinner-rotates-in-place.test.tsx` asserts for the sidebar working row,
+- `tests/spinner-rotates-in-place.test.tsx` also renders the desktop and mobile
+  machine pickers and the provider-less mobile file browser, asserting no
+  animation in the resting states and exactly one in the loading state, so a
+  fix that simply never spins fails too. It asserts for the sidebar working row,
   the syncing indicator, the mobile status pill and the `Spinner` primitive that
   the single animated element is an HTML span, explicitly square, `shrink-0`,
   icon-only, and that the glyph does not also spin. The PR tab refresh and
