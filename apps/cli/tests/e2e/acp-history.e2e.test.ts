@@ -306,7 +306,7 @@ e2eDescribe('acp history e2e (codex stream)', () => {
 
       await appendAutonomousACPNotifications(doc, notifications);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const allText = history
         .flatMap((h) => parseContents(h))
         .filter((c) => c.type === 'text')
@@ -455,7 +455,7 @@ e2eDescribe('acp history e2e (codex stream)', () => {
       }
 
       await appendAutonomousACPNotifications(doc, notifications);
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const summarizedHistory = summarizeHistory(history);
 
       console.log('=== ACP E2E Debug ===');
@@ -804,7 +804,7 @@ e2eDescribe('acp history e2e (codex stream)', () => {
         },
       });
       console.log(JSON.stringify(editCalls, null, 2));
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       // fs.writeFileSync("./e2e-notifications.json", JSON.stringify(notifications, null, 2));
       // fs.writeFileSync("./e2e-history.json", JSON.stringify(history, null, 2));
 

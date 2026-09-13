@@ -1,8 +1,10 @@
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import { v4 as uuidV4 } from 'uuid';
 
 import type {
   AcpSessionNotification,
   MessageContent,
+  PermissionOutcome,
   SessionHistoryInput,
   SessionId,
 } from '@lody/shared';
@@ -21,11 +23,7 @@ import type { Logger } from '@/utils/logger';
 import { captureMessage } from '@/instrument';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionPlanEntry } from '@lody/shared';
-import { applyNotificationOnHistory } from './history-apply';
-import {
-  deriveLocationsFromToolCallContent,
-  stripToolCallContentForHistory,
-} from './tool-call-history';
+import { deriveLocationsFromToolCallContent } from './tool-call-history';
 import { buildMessageContentFromNotification } from './history-apply';
 
 export type { ApplyNotificationOnHistoryOptions } from './history-apply';
@@ -178,32 +176,37 @@ export const handleACPUpdateMessage = async (
   try {
     if (persistableBatch.length > 0) {
       const targetTurnId = getTargetTurnId();
-      // Tool/subagent updates can belong to older turns. Only text/thought
-      // chunks have a target-local ownership contract; retain full routing otherwise.
-      const targetOnly =
-        targetTurnId &&
-        persistableBatch.every(
-          ({ update }) =>
-            (update.sessionUpdate === 'agent_message_chunk' ||
-              update.sessionUpdate === 'agent_thought_chunk') &&
-            update.content.type === 'text'
+      if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
+        callbacks?.logger?.warn(
+          `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
         );
-      await doc.updateHistory(
-        (history) => {
-          if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
-            callbacks?.logger?.warn(
-              `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
-            );
-            return history;
-          }
-          const createId = targetTurnId ? () => targetTurnId : uuidV4;
-          return applyNotificationOnHistory(history, persistableBatch, model, {
-            createId,
-            ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
-          });
-        },
-        targetOnly ? { onlyEntryId: targetTurnId } : undefined
-      );
+      } else {
+        // Tool/subagent updates can belong to older turns. Only text/thought
+        // chunks have a target-local ownership contract; retain full routing otherwise.
+        const targetOnly = Boolean(
+          targetTurnId &&
+          persistableBatch.every(
+            ({ update }) =>
+              (update.sessionUpdate === 'agent_message_chunk' ||
+                update.sessionUpdate === 'agent_thought_chunk') &&
+              update.content.type === 'text'
+          )
+        );
+        const createId = targetTurnId ? () => targetTurnId : uuidV4;
+        const result = await doc.agentWrites.applyAgentBatch({
+          notifications: persistableBatch,
+          ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
+          ...(targetOnly ? { entryBound: true } : {}),
+          createId,
+          ...(model ? { model } : {}),
+        });
+        if (result.status === 'rejected') {
+          throw new HistoryWriteError(
+            result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+          );
+        }
+        if (result.status === 'indeterminate') throw result.cause;
+      }
     }
     // Evidence is derived from the same enriched notification, but it is only
     // safe to publish after the corresponding history write commits. Otherwise
@@ -1136,25 +1139,12 @@ const extractLatestPlanSnapshot = (batch: AcpSessionNotification[]): SessionPlan
   }
   return null;
 };
-
-// ---------------------------------------------------------------------------
-// Loro history entry helpers (bridge the CRDT item type to MessageContent[])
-// ---------------------------------------------------------------------------
-
-type ToolCallMessageContent = Extract<MessageContent, { type: 'tool_call' }>;
 type GoalMessageContent = Extract<MessageContent, { type: 'goal' }>;
 
 const readEntryItems = (entry: SessionHistoryInput): MessageContent[] => {
   const rawItems = entry.items;
   return Array.isArray(rawItems) ? (rawItems as unknown as MessageContent[]) : [];
 };
-
-const writeEntryItems = (entry: SessionHistoryInput, items: MessageContent[]) => {
-  entry.items = items as unknown as SessionHistoryInput['items'];
-};
-
-const isUnfinishedAssistantEntry = (entry: SessionHistoryInput | undefined): boolean =>
-  entry?.role === 'assistant' && entry.finished !== true && typeof entry.endedAt !== 'number';
 
 const createAssistantHistoryEntry = (id: string): SessionHistoryInput => ({
   id,
@@ -1165,18 +1155,6 @@ const createAssistantHistoryEntry = (id: string): SessionHistoryInput => ({
   userId: undefined,
   fileDiff: [],
 });
-
-const findLatestUnfinishedAssistantEntry = (
-  history: SessionHistoryInput[]
-): SessionHistoryInput | undefined => {
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (isUnfinishedAssistantEntry(entry)) {
-      return entry;
-    }
-  }
-  return undefined;
-};
 
 export type ThreadGoalHistoryOptions = {
   targetEntryId?: string;
@@ -1193,56 +1171,16 @@ export const upsertThreadGoalInHistory = async (
     objective: sanitizeGoalObjective(goal.objective),
   };
 
-  await doc.updateHistory((history) => {
-    // Single sweep: replace an existing snapshot for this thread in place, and
-    // drop any prior `cleared` snapshots for OTHER threads so only the most
-    // recent goal stays visible in the banner.
-    let replaced = false;
-    for (const entry of history) {
-      const items = readEntryItems(entry);
-      let touched = false;
-      const nextItems: MessageContent[] = [];
-      for (const item of items) {
-        if (item.type === 'goal' && item.threadId === sanitizedGoal.threadId) {
-          nextItems.push(sanitizedGoal);
-          replaced = true;
-          touched = true;
-          continue;
-        }
-        if (item.type === 'goal' && item.status === 'cleared') {
-          touched = true;
-          continue;
-        }
-        nextItems.push(item);
-      }
-      if (touched) {
-        writeEntryItems(entry, nextItems);
-      }
-    }
-
-    if (replaced) {
-      return history;
-    }
-
-    let targetEntry =
-      options.targetEntryId !== undefined
-        ? history.find((entry) => entry.id === options.targetEntryId && entry.role === 'assistant')
-        : undefined;
-
-    if (!targetEntry) {
-      targetEntry = findLatestUnfinishedAssistantEntry(history);
-    }
-
-    if (!targetEntry) {
-      targetEntry = createAssistantHistoryEntry(
+  await doc.sessionData.commands
+    .applyHistoryAction({
+      kind: 'upsert-goal',
+      goal: sanitizedGoal,
+      targetTurnId: options.targetEntryId,
+      fallback: createAssistantHistoryEntry(
         options.targetEntryId ?? options.createId?.() ?? uuidV4()
-      );
-      history.push(targetEntry);
-    }
-
-    writeEntryItems(targetEntry, [...readEntryItems(targetEntry), sanitizedGoal]);
-    return history;
-  });
+      ),
+    })
+    .then(requireSessionAccepted);
 };
 
 export const clearThreadGoalFromHistory = async (
@@ -1252,31 +1190,9 @@ export const clearThreadGoalFromHistory = async (
   // Mark the goal as cleared in-place so the snapshot remains visible until a new
   // goal arrives. The previous behavior removed the entry entirely, which made
   // the cleared state invisible to the user the moment they pressed clear.
-  await doc.updateHistory((history) => {
-    for (const entry of history) {
-      const items = readEntryItems(entry);
-      let touched = false;
-      const nextItems = items.map((item) => {
-        if (item.type !== 'goal' || item.threadId !== threadId) return item;
-        if (item.status === 'cleared') return item;
-        touched = true;
-        return { ...item, status: 'cleared' as const, updatedAt: getServerNow() };
-      });
-      if (touched) {
-        writeEntryItems(entry, nextItems);
-      }
-    }
-    return history;
-  });
-};
-
-const sanitizeToolCallContentForHistory = (
-  content: ToolCallMessageContent['content'] | undefined,
-  kind: ToolCallMessageContent['kind'] | undefined
-): ToolCallMessageContent['content'] | undefined => {
-  if (!content) return undefined;
-  const filtered = stripToolCallContentForHistory(kind ?? null, content);
-  return filtered.length ? filtered : undefined;
+  await doc.sessionData.commands
+    .applyHistoryAction({ kind: 'clear-goal', threadId, updatedAt: getServerNow() })
+    .then(requireSessionAccepted);
 };
 
 export const ensurePermissionRequestOnToolCall = async (
@@ -1285,46 +1201,12 @@ export const ensurePermissionRequestOnToolCall = async (
   request: RequestPermissionRequest,
   _model?: ModelInfo
 ): Promise<boolean> => {
-  const toolCallId = request.toolCall.toolCallId;
   let persisted = false;
-  await doc.updateHistory((history) => {
-    let updated = false;
-    history.forEach((entry) => {
-      const parsed = readEntryItems(entry);
-      let entryUpdated = false;
-      const nextContents = parsed.map((content) => {
-        if (content.type === 'tool_call' && content.toolCallId === toolCallId) {
-          updated = true;
-          // A delayed request still belongs to this tool, never the next turn.
-          if (entry.finished === true || typeof entry.endedAt === 'number') return content;
-          entryUpdated = true;
-          return mergeToolCallWithPermission(content, requestId, request);
-        }
-        return content;
-      });
-      if (entryUpdated) {
-        persisted = true;
-        writeEntryItems(entry, nextContents);
-      }
+  await doc.sessionData.commands
+    .applyHistoryAction({ kind: 'permission-request', requestId, request })
+    .then((result) => {
+      persisted = requireSessionAccepted(result).matched ?? false;
     });
-
-    if (!updated) {
-      const latestEntry = history[history.length - 1];
-      if (
-        latestEntry?.role === 'assistant' &&
-        latestEntry.finished !== true &&
-        typeof latestEntry.endedAt !== 'number'
-      ) {
-        persisted = true;
-        writeEntryItems(latestEntry, [
-          ...readEntryItems(latestEntry),
-          buildToolCallFromPermissionRequest(requestId, request),
-        ]);
-      }
-    }
-
-    return history;
-  });
   return persisted;
 };
 
@@ -1332,92 +1214,26 @@ export const updatePermissionOutcomeInHistory = async (
   doc: SessionDocument,
   requestId: string,
   outcome: RequestPermissionResponse['outcome'],
-  _logger: Logger
+  logger: Logger
 ) => {
-  await doc.updateHistory((history) => {
-    history.forEach((entry) => {
-      const parsed = readEntryItems(entry);
-      let entryUpdated = false;
-      const nextContents = parsed.map((content) => {
-        if (content.type === 'tool_call' && content.permissionRequest?.requestId === requestId) {
-          entryUpdated = true;
-          return {
-            ...content,
-            permissionRequest: content.permissionRequest
-              ? { ...content.permissionRequest, outcome }
-              : content.permissionRequest,
-          };
-        }
-        return content;
-      });
-      if (entryUpdated) {
-        writeEntryItems(entry, nextContents);
-      }
-    });
-    return history;
-  });
-};
-
-const mergeToolCallWithPermission = (
-  toolCall: ToolCallMessageContent,
-  requestId: string,
-  request: RequestPermissionRequest
-): ToolCallMessageContent => {
-  const tool = request.toolCall;
-  const kind = (toolCall.kind ?? tool.kind ?? undefined) as
-    | ToolCallMessageContent['kind']
-    | undefined;
-  const content = sanitizeToolCallContentForHistory(
-    toolCall.content ?? tool.content ?? undefined,
-    kind
+  // Domain command instead of a whole-history callback: the adapter locates the
+  // matching tool call by request id and writes only that turn's outcome.
+  const result = await doc.sessionData.commands.respondPermission(
+    requestId,
+    outcome as PermissionOutcome
   );
-  const locations =
-    toolCall.locations ??
-    (Array.isArray(tool.locations) && tool.locations.length > 0 ? tool.locations : undefined) ??
-    deriveLocationsFromToolCallContent(tool.content);
-  const requestMeta = (request as { _meta?: unknown })._meta;
-  const permissionMeta =
-    typeof requestMeta === 'object' && requestMeta !== null && !Array.isArray(requestMeta)
-      ? (requestMeta as Record<string, unknown>)
-      : undefined;
-  return {
-    ...toolCall,
-    title: toolCall.title ?? tool.title ?? null,
-    kind,
-    status: toolCall.status ?? tool.status ?? 'pending',
-    content,
-    locations,
-    permissionRequest: {
-      requestId,
-      options: request.options,
-      ...(permissionMeta ? { _meta: permissionMeta } : {}),
-      outcome: toolCall.permissionRequest?.outcome,
-    },
-  };
-};
-
-const buildToolCallFromPermissionRequest = (
-  requestId: string,
-  request: RequestPermissionRequest
-): ToolCallMessageContent => {
-  const kind = request.toolCall.kind ?? undefined;
-  const content = sanitizeToolCallContentForHistory(request.toolCall.content ?? undefined, kind);
-  const explicitLocations =
-    Array.isArray(request.toolCall.locations) && request.toolCall.locations.length > 0
-      ? request.toolCall.locations
-      : undefined;
-  const locations =
-    explicitLocations ?? deriveLocationsFromToolCallContent(request.toolCall.content);
-  const base: ToolCallMessageContent = {
-    type: 'tool_call',
-    toolCallId: request.toolCall.toolCallId,
-    title: request.toolCall.title ?? null,
-    status: request.toolCall.status ?? 'pending',
-    kind,
-    content,
-    locations,
-  };
-  return mergeToolCallWithPermission(base, requestId, request);
+  if (result.status === 'rejected') {
+    // A missing request was a silent no-op before; preserve that. A genuinely
+    // malformed outcome still throws, so the caller keeps its cancel fallback.
+    if (result.reason.code === 'not_found') {
+      logger.debug(`Permission outcome for ${requestId} not applied: ${result.reason.code}`);
+      return;
+    }
+    throw new HistoryWriteError(
+      result.reason.issues ?? [{ path: ['history'], code: result.reason.code }]
+    );
+  }
+  if (result.status === 'indeterminate') throw result.cause;
 };
 
 /**

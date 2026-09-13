@@ -7,7 +7,12 @@
  * `@container` box wide enough to satisfy that query — a narrower frame renders
  * nothing, which is the production behaviour, not a broken story.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { LoroDoc } from 'loro-crdt';
+import { Mirror } from 'loro-mirror';
+import { sessionDocSchema } from '@lody/shared';
+import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
+import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import { ConversationOutlineRail } from '@/components/ai-gui/conversation-outline-rail';
@@ -225,6 +230,7 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
   {
     type: 'message' as const,
     sessionId: integrationSessionId,
+    turnIndex: round * 2,
     message: historyMessage(
       `user-${round}`,
       'user',
@@ -238,6 +244,7 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
   {
     type: 'message' as const,
     sessionId: integrationSessionId,
+    turnIndex: round * 2 + 1,
     message: historyMessage(
       `assistant-${round}`,
       'assistant',
@@ -313,6 +320,7 @@ const extremeItems: ChatStreamItem[] = (() => {
     items.push({
       type: 'message',
       sessionId: extremeSessionId,
+      turnIndex: items.length,
       message: historyMessage(`x-user-${round}`, 'user', extremeUserText(round)),
     });
 
@@ -326,6 +334,7 @@ const extremeItems: ChatStreamItem[] = (() => {
     items.push({
       type: 'message',
       sessionId: extremeSessionId,
+      turnIndex: items.length,
       message: historyMessage(
         `x-assistant-${round}`,
         'assistant',
@@ -354,4 +363,77 @@ export const ExtremeConversation: Story = {
       />
     </div>
   ),
+};
+
+/** The superseded renderer's long-doc story, using the production window hook.
+ * Summaries are deliberately absent in storage, as on existing conversations.
+ * Fixture construction is not an opening benchmark.
+ */
+function ExtremeConversationViewFrame() {
+  const sessionId = 'extreme-windowed-view' as SessionId;
+  const [view, setView] = useState<ConversationView | null>(null);
+  useEffect(() => {
+    const doc = new LoroDoc();
+    const history = Array.from({ length: 6000 }, (_, index) => ({
+      id: `window-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      finished: true,
+      fileDiff: [],
+      items: [
+        {
+          type: 'text',
+          text: `Round ${Math.floor(index / 2) + 1}. ${paragraphs(1 + (index % 4), index)}`,
+        },
+      ],
+    }));
+    const mirror = new Mirror({
+      doc,
+      schema: sessionDocSchema,
+      initialState: { session: { id: sessionId }, history: [] },
+      ignoreUnknownProperties: true,
+    });
+    mirror.setState((previous) => ({ ...previous, history: history as never }));
+    mirror.dispose();
+    const session = createConversationSession(doc, { sessionId, windowed: true });
+    const next = session.history;
+    setView(next);
+    return () => {
+      session.dispose();
+      doc.free();
+    };
+  }, [sessionId]);
+  const {
+    items,
+    lastAssistantMessageId,
+    lastCompletedAssistantMessageId,
+    onVisibleTurnRangeChange,
+    onOutlinePreviewRound,
+  } = useConversationStreamItems(view, sessionId);
+  return (
+    <div className="flex h-[720px] w-full flex-col bg-background">
+      <div className="border-b px-3 py-1 font-mono text-xs text-muted-foreground">
+        3000 rounds · {view?.turnCount ?? 0} turns ·{' '}
+        {items.filter((item) => item.type === 'message').length} hydrated
+      </div>
+      <div className="min-h-0 flex-1">
+        <SessionChatStreamView
+          items={items}
+          sessionId={sessionId}
+          className="h-full"
+          renderMessageRow={renderMessageRow}
+          showScrollToLatest={false}
+          lastAssistantMessageId={lastAssistantMessageId}
+          lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+          onVisibleTurnRangeChange={onVisibleTurnRangeChange}
+          onOutlinePreviewRound={onOutlinePreviewRound}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const ExtremeConversationView: Story = {
+  args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
+  render: () => <ExtremeConversationViewFrame />,
 };

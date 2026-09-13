@@ -2,6 +2,35 @@
 
 Parent `AGENTS.md` files also apply.
 
+## Session turns have one read path and one write path
+
+A session document's `history` is the one piece of state that grows without
+bound, so the windowed path avoids mirroring it into memory as an array. Everything goes through
+`SessionDocStore`:
+
+- **Read** `store.history` — a `ConversationView`: `index(i)` for the always-present
+  per-turn row, `turn(i)` for a hydrated turn, `acquireRange` and its release handle to hold a
+  window. In React use `useSessionDoc().history`, `useConversationTail`,
+  `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
+- **Write** domain commands through `store.sessionData` (`@lody/shared/session-data`):
+  `applyHistoryAction`, `appendTurn`, `replaceTurn`, `resolveTaskProposal` and
+  `respondPermission`. It is composed over the same doc and the
+  one shared writer; a rejected command surfaces as a failure, never a silent drop.
+- The composition owns one HistoryWriter; the UI store does not expose it.
+  Do not add a second writer or bypass `sessionData` for ordinary turn writes.
+
+`getState()` has no `history` key and `setState` receives a draft without one,
+so the ordinary spellings of a second path do not compile. What types cannot
+close is a deliberate escape — a cast that puts the key back, or reaching past
+the store into the raw `LoroDoc` — and
+`tests/no-materialized-history-in-components.test.ts` fails on those. Only
+`lib/conversation-view` (and the rollback branch that builds its adapter from
+the old full Mirror) may touch the raw list; that exemption list is asserted to
+be exact.
+
+Full-history actions use the authoritative consistent full-read operation.
+Performance comparisons must use the current full-Mirror baseline.
+
 ## Lightweight hosted entries
 
 - Public/auth entry points that bypass the full product router import route-agnostic

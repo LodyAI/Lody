@@ -1,3 +1,4 @@
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import {
   getSessionRoomId,
   resolveBaseBranchPreference,
@@ -191,7 +192,13 @@ export class TurnPostProcessingService {
     if (options.skipHistoryFileDiff !== true) {
       try {
         const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        sessionDoc.setLatestAssistantHistoryFileDiff(fileDiff, options.turnId);
+        requireSessionAccepted(
+          await sessionDoc.sessionData.commands.applyHistoryAction({
+            kind: 'assistant-file-diff',
+            change: { kind: 'set', value: fileDiff },
+            turnId: options.turnId,
+          })
+        );
       } catch (error) {
         this.deps.logger.debug(`[${sessionId}] Failed to persist history fileDiff:`, error);
       }

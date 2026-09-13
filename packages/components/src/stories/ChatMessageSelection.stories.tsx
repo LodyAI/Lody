@@ -67,7 +67,8 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
       : messages
   );
   const [items] = useState<ChatStreamItem[]>(() =>
-    displayMessages.map((message) => ({
+    displayMessages.map((message, turnIndex) => ({
+      turnIndex,
       type: 'message',
       sessionId,
       message: {

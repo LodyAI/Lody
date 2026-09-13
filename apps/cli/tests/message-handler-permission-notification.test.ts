@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SessionStatusFactory, type SessionId, type WorkspaceId } from '@lody/shared';
@@ -33,6 +34,30 @@ const createSilentLogger = (): Logger => ({
   child: () => createSilentLogger(),
   close: async () => {},
 });
+
+/**
+ * Give a fake session doc the session-data surface `subscribeSessionChanges`
+ * needs. The fakes drive change notification through their own
+ * `mirror.subscribe`; history reads still go through the fake's `getHistory`, so
+ * the observe stream is inert.
+ */
+const withSessionData = <T extends object>(doc: T): T => {
+  Object.assign(doc, {
+    sessionData: {
+      history: {
+        count: async () => 0,
+        readAt: async () => ({ state: 'missing' as const }),
+        readTurn: async () => ({ state: 'missing' as const }),
+        readRange: async () => [],
+        readDirectory: async () => [],
+        observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+      },
+      commands: {},
+      durability: { waitDurable: async () => {} },
+    },
+  });
+  return withHistoryPort(doc);
+};
 
 const createNotificationPort = (
   overrides: Partial<CloudNotificationsPort> = {}
@@ -76,7 +101,7 @@ describe('MessageHandler permission notifications', () => {
         fileDiff: [],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -99,7 +124,8 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
+    withSessionData(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
@@ -267,7 +293,7 @@ describe('MessageHandler permission notifications', () => {
         fileDiff: [],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -290,7 +316,8 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
+    withSessionData(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
@@ -470,7 +497,7 @@ describe('MessageHandler permission notifications', () => {
       },
     ];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       currentStatus: SessionStatusFactory.requestPermission(),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
@@ -499,7 +526,8 @@ describe('MessageHandler permission notifications', () => {
         }),
         getState: () => ({ history }),
       },
-    };
+    });
+    withSessionData(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),
@@ -612,7 +640,7 @@ describe('MessageHandler permission notifications', () => {
       },
     ];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -629,7 +657,8 @@ describe('MessageHandler permission notifications', () => {
         subscribe: vi.fn(() => () => {}),
         getState: () => ({ history }),
       },
-    };
+    });
+    withSessionData(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),

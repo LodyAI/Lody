@@ -27,12 +27,12 @@ describe('TurnPostProcessingService diff stats base branch', () => {
     const sessionId = 's-1' as SessionId;
 
     const upsertDocMeta = vi.fn(async () => {});
-    const setLatestAssistantHistoryFileDiff = vi.fn();
+    const applyHistoryAction = vi.fn(async () => ({ status: 'accepted', receipt: {} }));
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({
         parentSessionId: 'parent-session-1' as SessionId,
       })),
-      setLatestAssistantHistoryFileDiff,
+      sessionData: { commands: { applyHistoryAction } },
     };
 
     const workspaceDocument = {
@@ -100,10 +100,11 @@ describe('TurnPostProcessingService diff stats base branch', () => {
       false
     );
     expect(exec).not.toHaveBeenCalledWith('git', ['merge-base', 'main', 'HEAD'], '/tmp', false);
-    expect(setLatestAssistantHistoryFileDiff).toHaveBeenCalledWith(
-      [{ filePath: 'b.ts', add: 2, del: 0 }],
-      'turn-1'
-    );
+    expect(applyHistoryAction).toHaveBeenCalledWith({
+      kind: 'assistant-file-diff',
+      change: { kind: 'set', value: [{ filePath: 'b.ts', add: 2, del: 0 }] },
+      turnId: 'turn-1',
+    });
     expect(upsertDocMeta).toHaveBeenCalledWith(
       'session-parent-session-1',
       expect.objectContaining({

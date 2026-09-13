@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
@@ -71,7 +72,7 @@ describe('session history storage (integration)', () => {
       locations: [{ path: '/tmp/file.txt' }],
     } as unknown as MessageContent;
 
-    await doc.updateHistory((history) => [
+    await updateTestHistory(doc, (history) => [
       ...history,
       {
         id: 'assistant-1',
@@ -81,7 +82,7 @@ describe('session history storage (integration)', () => {
         fileDiff: [],
       },
     ]);
-    await doc.updateHistory((history) => {
+    await updateTestHistory(doc, (history) => {
       const existing = findToolCall(history, 'call_with_undefined');
       if (existing) {
         existing.title = undefined;
@@ -96,7 +97,7 @@ describe('session history storage (integration)', () => {
       return history;
     });
 
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     const toolCall = findToolCall(history, 'call_with_undefined');
     expect(toolCall).not.toBeNull();
     expect(toolCall?.locations).toBeUndefined();
@@ -115,7 +116,7 @@ describe('session history storage (integration)', () => {
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
     await appendAutonomousACPNotifications(doc, terminalUpdates as SessionNotification[]);
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     expect(history).toMatchObject([
       {
         id: expect.any(String),
@@ -155,7 +156,7 @@ describe('session history storage (integration)', () => {
     for (const u of e2eUpdates as SessionNotification[]) {
       await appendAutonomousACPNotifications(doc, u);
     }
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     console.log(JSON.stringify(history, null, 2));
     console.log(JSON.stringify(history).length);
     expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(6500);
@@ -225,7 +226,7 @@ describe('session history storage (integration)', () => {
       }
 
       // Intermediate streaming output should not be persisted into the Loro history.
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       const execToolBeforeComplete = findToolCall(history, execId);
       if (!execToolBeforeComplete) {
         throw new Error(`Expected tool_call ${execId} to exist`);
@@ -249,7 +250,7 @@ describe('session history storage (integration)', () => {
         }),
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const execTool = findToolCall(history, execId);
       if (!execTool) {
         throw new Error(`Expected tool_call ${execId} to exist`);
@@ -302,7 +303,7 @@ describe('session history storage (integration)', () => {
         }),
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const readTool = findToolCall(history, readId);
       if (!readTool) {
         throw new Error(`Expected tool_call ${readId} to exist`);
@@ -397,7 +398,7 @@ describe('session history storage (integration)', () => {
         { path: '/tmp/new-file.txt', changeType: 'add', fullNewText: 'created\n' },
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const editTool = findToolCall(history, editId);
       if (!editTool) {
         throw new Error(`Expected tool_call ${editId} to exist`);
@@ -425,7 +426,7 @@ describe('session history storage (integration)', () => {
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
     await appendAutonomousACPNotifications(doc, kimiShellUpdates as SessionNotification[]);
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
 
     // First tool call: successful shell command
     const tool1 = findToolCall(history, 'kimi-session-sample/tool_shell_1');
@@ -541,7 +542,7 @@ describe('session history storage (integration)', () => {
 
     await appendAutonomousACPNotifications(doc, [invalidNotification], { logger }, undefined);
 
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     expect(history.length).toBe(0);
     expect(warnings.length).toBe(1);
   });

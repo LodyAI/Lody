@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it } from 'vitest';
 import { type SessionHistoryInput, type SessionId, type TaskProposalMeta } from '@lody/shared';
 import { LodyOperationStoreError } from '@/orchestration/operation-store';
@@ -28,12 +29,12 @@ const makePersistence = (initialHistory: SessionHistoryInput[] = []) => {
       },
     },
     async getOrCreateSessionDoc() {
-      return {
+      return withHistoryPort({
         roomId: 'session-session-1',
         async updateHistory(updateFn) {
           history = updateFn(history);
         },
-      };
+      });
     },
     async syncDocOrThrow(_docId, options) {
       const reason = options?.reason ?? '';

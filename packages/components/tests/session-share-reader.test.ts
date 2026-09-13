@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { compressStreamsSnapshot } from '@lody/shared';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { createSharedChatStreamBuilder } from '../src/components/sharing/session-share-stream-items';
 import type { SessionId } from '@lody/shared';
 import {
   createSessionShareReader,
@@ -46,6 +46,7 @@ function event(update: Uint8Array, offset: string) {
 
 describe('anonymous session reader with real Loro and Streams transport', () => {
   it('preserves unchanged messages and render rows across a long streaming response', async () => {
+    const streamBuilder = createSharedChatStreamBuilder();
     const original = new LoroDoc();
     const history = original.getList('history');
     for (let index = 0; index < 1_000; index++)
@@ -108,7 +109,13 @@ describe('anonymous session reader with real Loro and Streams transport', () => 
       const connection = await live.promise;
       expect(snapshot.history).toHaveLength(1_001);
       const first = snapshot.history[0];
-      let rows = buildChatStreamItems(snapshot.history, 'session' as SessionId);
+      let rows = streamBuilder.build(snapshot.history, 'session' as SessionId);
+      expect(rows.items).toHaveLength(1_001);
+      expect(rows.items.every((row) => row.type === 'message')).toBe(true);
+      expect(rows.items.at(-1)).toMatchObject({
+        type: 'message',
+        message: { id: 'streaming', items: [{ type: 'text', text: 'Start' }] },
+      });
       const firstRow = rows.items[0];
       const start = performance.now();
       for (let index = 0; index < 100; index++) {
@@ -120,8 +127,15 @@ describe('anonymous session reader with real Loro and Streams transport', () => 
         connection.enqueue(event(delta, String(index + 2)));
         await next.promise;
         expect(snapshot.history[0]).toBe(first);
-        rows = buildChatStreamItems(snapshot.history, 'session' as SessionId, rows.cache);
+        rows = streamBuilder.build(snapshot.history, 'session' as SessionId);
         expect(rows.items[0]).toBe(firstRow);
+        expect(rows.items.at(-1)).toMatchObject({
+          type: 'message',
+          message: {
+            id: 'streaming',
+            items: [{ type: 'text', text: 'Start' + '.'.repeat(index + 1) }],
+          },
+        });
       }
       expect(snapshot.history.at(-1)?.items).toEqual([
         { type: 'text', text: 'Start' + '.'.repeat(100) },
@@ -132,7 +146,7 @@ describe('anonymous session reader with real Loro and Streams transport', () => 
       const baselineStart = performance.now();
       for (let index = 0; index < 100; index++) {
         const json = original.toJSON() as { history: SessionShareReaderSnapshot['history'] };
-        buildChatStreamItems(json.history, 'session' as SessionId);
+        streamBuilder.build(json.history, 'session' as SessionId);
       }
       console.info(
         'share-reader-incremental',
@@ -152,6 +166,7 @@ describe('anonymous session reader with real Loro and Streams transport', () => 
       await next.promise;
       expect(snapshot.history).toBe(unchangedHistory);
     } finally {
+      streamBuilder.dispose();
       await reader.close();
       original.free();
     }

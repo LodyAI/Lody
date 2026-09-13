@@ -39,7 +39,6 @@ import {
   SESSION_DOC_PREFIX,
   type SessionStatus,
   LORO_STREAMS_BUCKET_ID,
-  createSessionMirror,
   ClientToServerSchema,
   ServerToClientSchema,
   type ClientToServer,
@@ -73,6 +72,7 @@ import {
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
+import { createConversationSession, WINDOWED_CONVERSATIONS } from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -84,6 +84,7 @@ import { LoroDoc, EphemeralStore } from 'loro-crdt';
 import {
   WorkspaceRuntime,
   type PreviewVisualCommentDocStore,
+  type SessionDocState,
   type SessionDocStore,
   type TaskDocStore,
 } from '@/atoms/runtime';
@@ -3721,6 +3722,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Open persisted doc immediately - this reads from local IndexedDB
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
+    const sessionDoc = persistedDoc.doc as LoroDoc;
 
     // Only an actual store consumer materializes a prefetched snapshot. Import
     // merges with this replica's unsent user edits; never replace its document.
@@ -3737,10 +3739,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
     }
 
-    const mirror = createSessionMirror({
-      doc: persistedDoc.doc as LoroDoc,
-      // Plan is now stored per-turn on history entries, not at root level
-      initialState: { session: { id: sessionId }, history: [] },
+    const {
+      mirror,
+      history,
+      sessionData,
+      dispose: disposeConversation,
+    } = createConversationSession(sessionDoc, {
+      sessionId,
+      windowed: WINDOWED_CONVERSATIONS,
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
@@ -3871,18 +3877,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         syncTracker.subscribeSyncState((state) => {
           listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
         }),
-      getState: () => mirror.getState(),
-      historyWriter: mirror.historyWriter,
+      getState: () => mirror.getState() as SessionDocState,
       setState: (updater) => {
         mirror.setState(updater as never);
       },
-      subscribe: (listener) => mirror.subscribe(listener),
+      subscribe: (listener) => mirror.subscribe(listener as never),
+      history,
+      sessionData,
       dispose: () => {
         disposed = true;
         materializedSessionIds.delete(sessionId);
         stopSyncNow();
         syncTracker.dispose();
-        mirror.dispose();
+        disposeConversation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
         await transportReady.promise;

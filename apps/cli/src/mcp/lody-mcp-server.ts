@@ -122,7 +122,6 @@ import {
   selectDefaultAgentConfigForCreate,
   resolveTurnDispatchConfig,
   sendSessionChatResult,
-  toSessionTranscriptEntries,
   validateSessionChatTarget,
   validateSessionCreateOptions,
   type CreateOptions,
@@ -143,6 +142,8 @@ import {
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
 import { publishTaskProposal } from '@/mcp/task-proposal';
+import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
+import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import { version as cliVersion } from '@/pkg';
 import { uploadTaskImages } from '@/lib/task-image-upload';
 import {
@@ -1598,13 +1599,13 @@ const readSessionExecutionSnapshot = async (
   live: SessionLiveWorking
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
-  const [history, docState] = await Promise.all([
-    sessionDoc.getHistory(),
-    sessionDoc.getDocState(),
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
   ]);
-  const activeTurnId = resolveActiveAssistantTurnId(history);
+  const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
   const queuedTurnCount =
-    docState?.mq?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+    queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
   return resolveSessionExecutionSnapshot({
     live,
     ...(activeTurnId ? { activeTurnId } : {}),
@@ -1976,70 +1977,6 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   });
 };
 
-type SessionHistoryCursor = { v: 1; sessionId: string; beforeIndex: number };
-
-const parseSessionHistoryCursor = (
-  cursor: string | undefined,
-  sessionId: string,
-  newestBeforeIndex: number
-): number => {
-  if (!cursor) return newestBeforeIndex;
-  try {
-    const value = JSON.parse(
-      Buffer.from(cursor, 'base64url').toString('utf8')
-    ) as SessionHistoryCursor;
-    if (
-      value.v !== 1 ||
-      value.sessionId !== sessionId ||
-      !Number.isInteger(value.beforeIndex) ||
-      value.beforeIndex < 0
-    ) {
-      throw new Error('cursor mismatch');
-    }
-    return value.beforeIndex;
-  } catch {
-    throw new LodyOperationStoreError(
-      'CURSOR_INVALID',
-      'History cursor is malformed or belongs to a different Session.',
-      false
-    );
-  }
-};
-
-const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
-
-const truncateUtf8HeadTail = (text: string, maxBytes: number) => {
-  const originalBytes = Buffer.byteLength(text, 'utf8');
-  if (originalBytes <= maxBytes) return { text };
-  const marker = maxBytes >= 5 ? '\n…\n' : '';
-  const characters = Array.from(text);
-  const split = (keptCharacters: number) => {
-    const headCount = Math.ceil(keptCharacters / 2);
-    const tailCount = keptCharacters - headCount;
-    const head = characters.slice(0, headCount).join('');
-    const tail = characters.slice(characters.length - tailCount).join('');
-    return { head, tail, text: `${head}${marker}${tail}` };
-  };
-  let low = 0;
-  let high = characters.length;
-  let best = split(0);
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const candidate = split(middle);
-    if (Buffer.byteLength(candidate.text, 'utf8') <= maxBytes) {
-      best = candidate;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-  return {
-    text: best.text,
-    truncated: true as const,
-    omittedBytes: originalBytes - Buffer.byteLength(best.head + best.tail, 'utf8'),
-  };
-};
-
 const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unknown> => {
   const ctx = getSessionContext();
   const auth = getCliAuthContextOrThrow('mcp');
@@ -2055,51 +1992,15 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-    const all = toSessionTranscriptEntries(await sessionDoc.getHistory());
-    const beforeIndex = parseSessionHistoryCursor(input.cursor, sessionId, Number.MAX_SAFE_INTEGER);
-    const candidates = all.filter((entry) => entry.index < beforeIndex);
-    const selected = candidates.slice(-(input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT));
-    let items: Array<Record<string, unknown>> = selected.map((entry) => ({ ...entry }));
-    const makeResponse = () => {
-      const firstIndex = typeof items[0]?.index === 'number' ? items[0].index : undefined;
-      const hasOlder = firstIndex !== undefined && all.some((entry) => entry.index < firstIndex);
-      return {
-        sessionId,
-        items,
-        ...(hasOlder
-          ? {
-              nextCursor: encodeCursor({
-                v: 1,
-                sessionId,
-                beforeIndex: firstIndex,
-              } satisfies SessionHistoryCursor),
-            }
-          : {}),
-      };
-    };
-    while (items.length > 1 && jsonBytes(makeResponse()) > MAX_MCP_SESSION_HISTORY_BYTES) {
-      items.shift();
-    }
-    if (items.length === 1 && jsonBytes(makeResponse()) > MAX_MCP_SESSION_HISTORY_BYTES) {
-      const entry = items[0]!;
-      const originalText = typeof entry.text === 'string' ? entry.text : '';
-      let low = 0;
-      let high = Buffer.byteLength(originalText, 'utf8');
-      let best = truncateUtf8HeadTail(originalText, 0);
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2);
-        const candidate = truncateUtf8HeadTail(originalText, middle);
-        items = [{ ...entry, ...candidate }];
-        if (jsonBytes(makeResponse()) <= MAX_MCP_SESSION_HISTORY_BYTES) {
-          best = candidate;
-          low = middle + 1;
-        } else {
-          high = middle - 1;
-        }
-      }
-      items = [{ ...entry, ...best }];
-    }
-    return makeResponse();
+    // Bounded business paging: `limit` counts displayable turns, the cursor is a
+    // raw position, and entries removed by the 128 KiB byte cap stay reachable.
+    return await buildSessionHistoryForReader({
+      sessionId,
+      history: sessionDoc.sessionData.history,
+      limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
+      ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
+      maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
+    });
   });
 };
 
@@ -4061,6 +3962,7 @@ export const __lodyMcpServerInternals = {
   buildOperationTargetCancelArgs,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
+  readSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   startSessionChatOperation,
   startSessionChatManyOperation,

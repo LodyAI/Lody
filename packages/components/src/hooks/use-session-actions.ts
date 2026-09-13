@@ -1,3 +1,4 @@
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import { useCallback } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -12,7 +13,6 @@ import type {
   SessionToCreate,
   MachineId,
   MachineLegacyMetaFields,
-  SessionDocMeta,
   SessionTurnInputConfig,
   MachineFlockKey,
   SessionGoalAction,
@@ -748,11 +748,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig =
         options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
       const dispatchUserId = entry?.userId?.trim();
@@ -884,11 +883,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
       const userId = entry?.userId?.trim();
       const roomId = getSessionRoomId(sessionId);
@@ -924,20 +922,18 @@ export function useSessionActions(): SessionActions {
         // provider may already have committed the steer.
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
-        const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
-          let didPromote = false;
-          sessionStore.setState((draft: SessionDocMeta) => {
-            const pendingEntry = draft.history.find(
-              (item) => item.id === userTurnId && item.role === 'user'
-            );
-            if (pendingEntry?.status === 'pending_apply') {
-              pendingEntry.status = 'pending';
-              pendingEntry.read = false;
-              didPromote = true;
-            }
-          });
-          return didPromote;
-        });
+        const promoted = await runtime.withSessionStore(
+          sessionId,
+          async (sessionStore) =>
+            requireSessionAccepted(
+              await sessionStore.sessionData.commands.applyHistoryAction({
+                kind: 'user-status',
+                turnId: userTurnId,
+                status: 'pending',
+                onlyPendingApply: true,
+              })
+            ).matched ?? false
+        );
         // A duplicate response must not reset a turn that another request has
         // already promoted, started, or completed.
         if (!promoted) {

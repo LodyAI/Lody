@@ -1,10 +1,11 @@
+import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 // @vitest-environment jsdom
 
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
 import { SessionChatStreamView } from '../src/components/ai-gui/view';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { buildChatStreamItems as buildFromView } from '../src/components/ai-gui/build-chat-stream-items';
 import { initI18n } from '../src/i18n';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -139,19 +140,23 @@ describe('SessionForkDestinationPopover', () => {
     async (finished) => {
       await initI18n('en');
       const sessionId = 'copy-stream' as SessionId;
-      const { items } = buildChatStreamItems(
-        [
-          {
-            id: 'partial',
-            role: 'assistant',
-            timestamp: '2026-09-10T00:00:00Z',
-            items: [{ type: 'text', text: 'Partial answer' }],
-            fileDiff: [],
-            finished,
-          } as never,
-        ],
-        sessionId
-      );
+      const history = [
+        {
+          id: 'partial',
+          role: 'assistant',
+          timestamp: '2026-09-10T00:00:00Z',
+          items: [{ type: 'text', text: 'Partial answer' }],
+          fileDiff: [],
+          finished,
+        } as never,
+      ];
+      const view = createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => history,
+        subscribe: () => () => {},
+      });
+      const { items } = buildFromView(view, sessionId);
+      view.dispose();
       let copied: string | undefined;
       await act(async () =>
         root.render(

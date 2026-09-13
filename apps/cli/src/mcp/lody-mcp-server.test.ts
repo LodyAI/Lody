@@ -1,3 +1,6 @@
+import { LoroDoc, LoroMap } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -1080,6 +1083,39 @@ describe('session MCP input schemas', () => {
       error: 'Timed out waiting for session turn completion after 1s.',
     });
     expect(response).not.toHaveProperty('wait');
+  });
+
+  it('reads status from shallow history and queue without materializing bodies', async () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    for (let i = 0; i < 100; i++)
+      writer.append({
+        id: `a-${i}`,
+        role: 'assistant',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [{ type: 'text', text: 'large body'.repeat(100) }],
+        fileDiff: [],
+        finished: i < 99,
+      });
+    const sessionId = 'status-session' as SessionId;
+    const data = createLoroSessionData({ sessionId, doc, writer });
+    const manager = {
+      getOrCreateSessionDoc: async () => ({ sessionData: data, getMessageQueue: async () => [{}] }),
+    };
+    const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(() => {
+      throw new Error('Status must not materialize a body');
+    });
+    try {
+      const result = await __lodyMcpServerInternals.readSessionExecutionSnapshot(
+        manager as never,
+        { id: sessionId } as never,
+        { working: false, source: 'none' }
+      );
+      expect(result).toMatchObject({ activeTurnId: 'a-99', queuedTurnCount: 1 });
+    } finally {
+      spy.mockRestore();
+      data.dispose();
+    }
   });
 
   it('derives one authoritative execution phase and state', () => {

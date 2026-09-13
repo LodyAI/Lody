@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
@@ -931,7 +932,7 @@ describe('acp history permission', () => {
     ];
 
     await doc.initOffline();
-    await doc.updateHistory(() => initialHistory);
+    await updateTestHistory(doc, () => initialHistory);
 
     try {
       const request: RequestPermissionRequest = {
@@ -970,7 +971,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       let contents = (history[0]!.items ?? []) as MessageContent[];
       const toolCall = contents[0] as Extract<MessageContent, { type: 'tool_call' }>;
@@ -983,7 +984,7 @@ describe('acp history permission', () => {
       };
       await updatePermissionOutcomeInHistory(doc, 'req1', outcome, logger);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       contents = (history[0]!.items ?? []) as MessageContent[];
       const updated = contents[0] as Extract<MessageContent, { type: 'tool_call' }>;
       expect(updated.permissionRequest?.outcome).toEqual(outcome);
@@ -1010,7 +1011,7 @@ describe('acp history permission', () => {
     ];
 
     await doc.initOffline();
-    await doc.updateHistory(() => initialHistory);
+    await updateTestHistory(doc, () => initialHistory);
 
     try {
       const request: RequestPermissionRequest = {
@@ -1032,7 +1033,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       let contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1042,7 +1043,7 @@ describe('acp history permission', () => {
       expect(toolCall.toolCallId).toBe('tc_late');
       expect(toolCall.permissionRequest?.requestId).toBe('req1');
 
-      await doc.updateHistory((currentHistory) =>
+      await updateTestHistory(doc, (currentHistory) =>
         applyMessageContentsBatch(currentHistory, [
           {
             type: 'tool_call',
@@ -1054,7 +1055,7 @@ describe('acp history permission', () => {
         ])
       );
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1073,7 +1074,7 @@ describe('acp history permission', () => {
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();
-    await doc.updateHistory(() => [
+    await updateTestHistory(doc, () => [
       {
         id: 'user-1',
         role: 'user',
@@ -1106,7 +1107,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(false);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.role).toBe('user');
     } finally {
@@ -1121,7 +1122,7 @@ describe('acp history permission', () => {
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();
-    await doc.updateHistory(() => [
+    await updateTestHistory(doc, () => [
       {
         id: 'turn-1',
         role: 'assistant',
@@ -1167,7 +1168,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       const contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1190,7 +1191,7 @@ describe('acp history permission', () => {
       };
       await updatePermissionOutcomeInHistory(doc, 'req1', outcome, logger);
 
-      const updatedHistory = await doc.getHistory();
+      const updatedHistory = await doc.sessionData.history.readAll();
       const updatedJson = JSON.stringify(updatedHistory);
       expect(updatedJson.includes(oldSentinel)).toBe(false);
       expect(updatedJson.includes(newSentinel)).toBe(false);

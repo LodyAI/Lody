@@ -58,8 +58,11 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   snapshot codec so existing Zstd and raw snapshots remain readable. No persistence.
   Its schema-free Mirror is read-only: never provide initialState, schema defaults,
   setState or an ephemeral store. It preserves unchanged message identity across
-  stream updates. The surface reuses buildChatStreamItems' previous cache locally;
-  never use the authenticated app's global history cache for anonymous content.
+  stream updates. `createSharedChatStreamBuilder` owns the surface's ConversationView
+  adapter and render cache; filter invalid items only in its read projection and
+  reuse unchanged entries across snapshots. Dispose on unmount and reset on target
+  changes; never pass a history array directly to the windowed renderer or
+  use the authenticated app's global history cache for anonymous content.
 - `share-attachments.tsx` uses the share bearer API and existing file/image UI.
   Never fall back to workspace auth, public R2 URLs, or an unchecked storage session
   ID. Revoke object URLs and abort reads when the target or grant becomes unavailable.

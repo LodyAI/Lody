@@ -3,16 +3,7 @@ import type { SessionDocument } from '@/lib/loro/doc';
 
 export type StructuredSessionOutputMode = 'json' | 'jsonl';
 
-type SessionDocMirrorState = {
-  history?: SessionHistoryInput[];
-};
-
-type SessionDocMirror = {
-  subscribe: (listener: (next: SessionDocMirrorState) => void) => () => void;
-  getState: () => SessionDocMirrorState;
-};
-
-type SessionDocForOutput = Pick<SessionDocument, 'sessionId' | 'mirror'>;
+type SessionDocForOutput = Pick<SessionDocument, 'sessionId' | 'sessionData' | 'subscribeAll'>;
 
 export type SessionTurnOutputEvent =
   | {
@@ -138,8 +129,7 @@ export async function waitForTurnCompletion(options: {
   signal?: AbortSignal;
   onEvent?: (event: SessionTurnOutputEvent) => void;
 }): Promise<CompletedAssistantTurn> {
-  const mirror = options.sessionDoc.mirror as SessionDocMirror | null;
-  if (!mirror) {
+  if (!options.sessionDoc.sessionData || !options.sessionDoc.subscribeAll) {
     throw new Error('SessionDocument not initialized');
   }
 
@@ -175,12 +165,11 @@ export async function waitForTurnCompletion(options: {
       settle(() => reject(error));
     };
 
-    const inspect = (next: SessionDocMirrorState) => {
+    const inspect = (history: SessionHistoryInput[]) => {
       if (settled) {
         return;
       }
 
-      const history = Array.isArray(next.history) ? (next.history as SessionHistoryInput[]) : [];
       const userTurn = findUserTurn(history, options.userTurnId);
       if (userTurn?.status === 'failed') {
         rejectWith(
@@ -256,13 +245,32 @@ export async function waitForTurnCompletion(options: {
       }
     };
 
+    // Start each consistent read at observation time, then deliver results in
+    // observation order even when the backend completes requests out of order.
+    let delivery = Promise.resolve();
+    const refresh = () => {
+      if (settled) return;
+      const snapshot = options.sessionDoc.sessionData.history.readTurnOutput(options.userTurnId);
+      // Attach immediately: a later read may reject before an earlier one finishes.
+      const captured = snapshot.then(
+        (history) => ({ history }),
+        (error) => ({ error })
+      );
+      delivery = delivery
+        .then(async () => {
+          const result = await captured;
+          if (settled) return;
+          if ('error' in result) rejectWith(result.error);
+          else inspect(result.history);
+        })
+        .catch(rejectWith);
+    };
+
     const handleAbort = () => {
       rejectWith(new Error('Turn completion wait aborted.'));
     };
 
-    unsubscribe = mirror.subscribe((next) => {
-      inspect(next);
-    });
+    unsubscribe = options.sessionDoc.subscribeAll(refresh);
     options.signal?.addEventListener('abort', handleAbort, { once: true });
 
     if (options.timeoutMs > 0) {
@@ -280,6 +288,6 @@ export async function waitForTurnCompletion(options: {
       }, options.timeoutMs);
     }
 
-    inspect(mirror.getState());
+    refresh();
   });
 }

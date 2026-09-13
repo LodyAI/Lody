@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import {
@@ -18,6 +19,7 @@ import type { SessionDoc } from '../src/lib/loro/session-doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 // Permission tests need no code-collaboration database or user-profile writes.
 vi.mock('../src/lib/code-collab/code-collab-v2-diff-store', () => ({
@@ -73,7 +75,7 @@ function fixture(initialMode = 'ask') {
         client: AgentClient
       ) => Promise<RequestPermissionResponse>)
     | undefined;
-  const doc = {
+  const doc = withHistoryPort({
     updateHistory: vi.fn(async (update: (prev: unknown[]) => unknown[]) => {
       history = update(history);
       for (const listener of historyListeners) listener();
@@ -97,7 +99,10 @@ function fixture(initialMode = 'ask') {
       },
       getState: () => ({ history }),
     },
-  };
+  });
+  (doc as { sessionData?: unknown }).sessionData = fakeSessionData(doc.updateHistory as never);
+  Object.assign(doc, { agentWrites: (doc as any).sessionData.agentWrites });
+  withHistoryPort(doc);
   const workspace = {
     sessions: new Map(),
     repo: {

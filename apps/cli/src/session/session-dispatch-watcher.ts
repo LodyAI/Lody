@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
@@ -5,7 +7,6 @@ import {
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   getSessionRoomId,
-  getLegacyReadForSessionHistoryStatus,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
   isSessionDocRoomId,
@@ -31,6 +32,7 @@ import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { SessionExecutionService, type SessionDispatchSource } from './session-execution-service';
 import {
   extractPromptPreviewFromInputBlocks,
@@ -223,7 +225,7 @@ const isConfigOptionValueRecord = (
  *    CRDT metadata changes (e.g. new session created, status updated, cancel requested).
  *    This is the primary trigger for new sessions and cancel requests.
  *
- * 2. **Mirror subscribe** (`sessionDoc.mirror.subscribe()`) — fires when a session
+ * 2. **Session subscription** (`sessionDoc.subscribeAll()`) — fires when a session
  *    doc's content changes (e.g. new user message synced from the web client).
  *    This handles follow-up messages on already-watched sessions.
  *
@@ -1182,14 +1184,12 @@ export class SessionDispatchWatcher {
         // Bootstrap and live metadata can race on the same session. Re-check
         // after the awaited open so only one subscription is installed.
         if (!this.watchedSessions.has(sessionId)) {
-          const unsubscribe = sessionDoc.mirror?.subscribe(() => {
+          const unsubscribe = subscribeSessionChanges(sessionDoc, () => {
             if (isActive()) {
               void this.enqueueSessionCheck(sessionId, { lifecycleGeneration });
             }
           });
-          if (unsubscribe) {
-            this.watchedSessions.set(sessionId, { unsubscribe });
-          }
+          this.watchedSessions.set(sessionId, { unsubscribe });
         }
       }
 
@@ -1795,19 +1795,11 @@ export class SessionDispatchWatcher {
     this.deps.logger.warn(`[${sessionId}] Refusing dispatch: ${message}`);
 
     let entryMatched = false;
-    await sessionDoc.updateHistory((history) =>
-      history.map((entry) => {
-        if (entry.id !== userTurnId || entry.role !== 'user') {
-          return entry;
-        }
-        entryMatched = true;
-        return {
-          ...entry,
-          status: 'failed' as const,
-          read: getLegacyReadForSessionHistoryStatus('failed'),
-        };
-      })
-    );
+    await sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status: 'failed' })
+      .then((result) => {
+        entryMatched = requireSessionAccepted(result).matched ?? false;
+      });
     // An RPC-stashed turn can be denied before its history entry syncs; record
     // the failure so the late entry gets repaired to 'failed' instead of
     // re-dispatched, and drop the stash copy so it cannot loop back in.
@@ -2528,7 +2520,7 @@ export class SessionDispatchWatcher {
       // arrives during join retries is a complete turn source and must preempt
       // the CRDT wait without bypassing the serialized dispatch chain.
       unsubscribeRpcOffers = this.subscribeToRpcTurnOffers(sessionId, requestTurnCheck);
-      unsubscribeMirror = sessionDoc.mirror?.subscribe(requestTurnCheck);
+      unsubscribeMirror = subscribeSessionChanges(sessionDoc, requestTurnCheck);
       if (!unsubscribeMirror) {
         this.deps.logger.debug(
           `[${sessionId}] Session mirror is unavailable during history sync wait`
@@ -2684,7 +2676,7 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
-    const history = await sessionDoc.getHistory();
+    const history = await readSessionHistory(sessionDoc.sessionData.history);
     if (!isActive()) {
       return { turn: null, history };
     }
@@ -2774,17 +2766,9 @@ export class SessionDispatchWatcher {
     this.deps.logger.debug(
       `[${sessionId}] Repairing late-arriving user turn ${turn.id} to '${status}' (already executed via fast path)`
     );
-    await sessionDoc.updateHistory((entries) =>
-      entries.map((entry) =>
-        entry.id === turn.id && entry.role === 'user'
-          ? {
-              ...entry,
-              status,
-              read: getLegacyReadForSessionHistoryStatus(status),
-            }
-          : entry
-      )
-    );
+    await sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'user-status', turnId: turn.id, status })
+      .then(requireSessionAccepted);
     this.deps.executionService.clearTerminalUserTurnStatusWithoutEntry?.(sessionId, turn.id);
     this.consumeStashedRpcTurn(sessionId, turn.id);
     return true;

@@ -72,7 +72,7 @@ const buildHistory = async (
         await appendAutonomousACPNotifications(doc, notification);
       }
     }
-    return await doc.getHistory();
+    return await doc.sessionData.history.readAll();
   } finally {
     await repo.destroy();
   }

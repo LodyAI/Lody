@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { z } from 'zod';
@@ -6,7 +6,7 @@ import { parseHistoryWrite } from '../src/history-write-schema';
 import { createSessionMirror } from '../src/session-mirror';
 import { sessionDocSchema, type SessionHistory } from '../src/schema';
 import type { SessionId } from '../src/ids';
-import type { StoredHistorySnapshot } from '../src/history-writer';
+import { createHistoryWriter, type StoredHistorySnapshot } from '../src/history-writer';
 
 const id = 'synthetic-session' as SessionId;
 const entry = (turnId = 'turn'): SessionHistory => ({
@@ -20,6 +20,82 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it.each(['containers', 'legacy JSON'] as const)(
+    'responds to permissions without reading unrelated bodies: %s',
+    (representation) => {
+      const doc = new Loro();
+      const writer = createHistoryWriter(doc);
+      const turn = (turnId: string): SessionHistory => ({
+        ...entry(turnId),
+        role: 'assistant',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: turnId,
+            status: 'pending',
+            permissionRequest: { requestId: 'request', options: [] },
+          },
+        ],
+      });
+      writer.append(turn('older'));
+      if (representation === 'containers') writer.append(turn('target'));
+      else {
+        const row = doc.getList('history').pushContainer(new LoroMap());
+        for (const [key, value] of Object.entries(turn('target'))) row.set(key, value);
+        doc.commit();
+      }
+      writer.append(entry('unrelated'));
+      const list = doc.getList('history');
+      const unrelated = list.get(2) as LoroMap;
+      unrelated.set('future', { opaque: true });
+      doc.commit();
+      const before = unrelated.toJSON();
+      const listToJSON = LoroList.prototype.toJSON;
+      const mapToJSON = LoroMap.prototype.toJSON;
+      const listGuard = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(function () {
+        if (this.id === list.id) throw new Error('Full history body read');
+        return listToJSON.call(this);
+      });
+      const mapGuard = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        if (this.id === unrelated.id) throw new Error('Unrelated turn body read');
+        return mapToJSON.call(this);
+      });
+      try {
+        expect(writer.respondPermission('request', { outcome: 'cancelled' })).toBe(true);
+        expect(writer.read('target')?.items?.[0]).toMatchObject({
+          permissionRequest: { outcome: { outcome: 'cancelled' } },
+        });
+        expect(writer.read('older')?.items?.[0]).not.toHaveProperty('permissionRequest.outcome');
+        expect(
+          writer.respondPermission(
+            'request',
+            { outcome: 'selected', optionId: 'allow' },
+            { turnId: 'older' }
+          )
+        ).toBe(true);
+        expect(writer.read('older')?.items?.[0]).toMatchObject({
+          permissionRequest: { outcome: { outcome: 'selected', optionId: 'allow' } },
+        });
+        const version = doc.version().toJSON();
+        expect(writer.respondPermission('missing', { outcome: 'cancelled' })).toBe(false);
+        expect(
+          writer.respondPermission('request', { outcome: 'cancelled' }, { turnId: 'missing' })
+        ).toBe(false);
+        expect(
+          writer.respondPermission('request', { outcome: 'cancelled' }, { turnId: 'unrelated' })
+        ).toBe(false);
+        expect(() =>
+          writer.respondPermission('request', { outcome: 'invalid' } as never)
+        ).toThrow();
+        expect(doc.version().toJSON()).toEqual(version);
+      } finally {
+        listGuard.mockRestore();
+        mapGuard.mockRestore();
+      }
+      expect(unrelated.toJSON()).toEqual(before);
+    }
+  );
+
   it('filters nested config extensions on append and resend without rewriting stored input', () => {
     const doc = new Loro();
     const stored = {

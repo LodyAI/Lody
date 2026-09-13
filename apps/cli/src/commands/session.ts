@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { requireSessionAccepted } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -55,7 +57,6 @@ import {
   type MachineId,
   type MachineMeta,
   type ProjectRef,
-  type SessionDocMeta,
   type SessionHistory,
   type SessionHistoryInput,
   type SessionQuotaKind,
@@ -65,6 +66,7 @@ import {
   type TaskId,
   type WorkspaceId,
 } from '@lody/shared';
+import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { AuthClient } from '@/lib/auth';
 import {
@@ -432,7 +434,7 @@ export function shouldWaitForSessionCompletion(options: {
   return options.wait === true;
 }
 
-function isTranscriptRole(role: SessionHistoryInput['role']): role is SessionTranscriptRole {
+function isTranscriptRole(role: SessionTurn['role']): role is SessionTranscriptRole {
   return role === 'user' || role === 'assistant' || role === 'system';
 }
 
@@ -497,34 +499,52 @@ function extractTranscriptText(
   return text || undefined;
 }
 
+/**
+ * Whether a raw history row is part of the displayable transcript. Shared by the
+ * whole-history formatter and by bounded paging, so both agree on `limit`
+ * counting displayable entries while positions stay raw.
+ */
+export function isVisibleTranscriptTurn(
+  entry: SessionTurn
+): entry is SessionTurn & { role: SessionTranscriptRole } {
+  if (!isTranscriptRole(entry.role)) return false;
+  if (
+    entry.role === 'system' &&
+    !(entry.items as Array<{ type?: string }> | undefined)?.some(
+      (item) => item.type === 'operation_completion'
+    )
+  ) {
+    return false;
+  }
+  return (
+    extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role) !== undefined
+  );
+}
+
+/** Format one raw row at its raw position, or `undefined` when not displayable. */
+export function toSessionTranscriptEntry(
+  index: number,
+  entry: SessionTurn
+): SessionTranscriptEntry | undefined {
+  if (!isVisibleTranscriptTurn(entry)) return undefined;
+  const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
+  if (!text) return undefined;
+  return {
+    index,
+    id: entry.id,
+    role: entry.role,
+    timestamp: entry.timestamp,
+    text,
+  };
+}
+
 export function toSessionTranscriptEntries(
-  history: SessionHistoryInput[]
+  history: readonly SessionTurn[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
-
   for (const [index, entry] of history.entries()) {
-    if (!isTranscriptRole(entry.role)) {
-      continue;
-    }
-    if (
-      entry.role === 'system' &&
-      !entry.items?.some((item) => item.type === 'operation_completion')
-    ) {
-      continue;
-    }
-
-    const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
-    if (!text) {
-      continue;
-    }
-
-    entries.push({
-      index,
-      id: entry.id,
-      role: entry.role,
-      timestamp: entry.timestamp,
-      text,
-    });
+    const formatted = toSessionTranscriptEntry(index, entry);
+    if (formatted) entries.push(formatted);
   }
 
   return entries;
@@ -926,7 +946,7 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const [history, queue] = await Promise.all([
-    args.sessionDoc.getHistory(),
+    readSessionHistory(args.sessionDoc.sessionData.history),
     args.sessionDoc.getMessageQueue(),
   ]);
   if (
@@ -1231,7 +1251,7 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = await readSessionHistory(sessionDoc.sessionData.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1247,7 +1267,7 @@ async function appendUserPromptHistory(args: {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await sessionDoc.getHistory());
+    const history = args.knownHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1279,7 +1299,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.updateHistory((history) => [...history, entry]);
+  await sessionDoc.sessionData.commands.appendTurn(entry).then(requireSessionAccepted);
   return {
     id: historyId,
     timestamp,
@@ -1628,7 +1648,7 @@ async function resolveSessionTurnDispatchDefaults(
   agentConfig: AgentConfigMeta
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = await readSessionHistory(sessionDoc.sessionData.history);
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1679,7 +1699,9 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.updateHistory((history) => history.filter((entry) => entry.id !== historyId));
+  await sessionDoc.sessionData.commands
+    .applyHistoryAction({ kind: 'remove-turn', turnId: historyId })
+    .then(requireSessionAccepted);
 }
 
 export async function updateSessionActivityTimestamps(
@@ -3293,15 +3315,17 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const docState = (await sessionDoc.getDocState()) as SessionDocMeta | undefined;
-  const history = docState?.history ?? [];
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
+  ]);
 
   return {
     workspace,
     session,
-    historyCount: history.length,
-    latestHistoryAt: history[history.length - 1]?.timestamp,
-    messageQueueCount: docState?.mq?.length ?? 0,
+    historyCount: directory.length,
+    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    messageQueueCount: queue.length,
   };
 }
 
@@ -3472,7 +3496,7 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = await readSessionHistory(sessionDoc.sessionData.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4175,7 +4199,9 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(await sessionDoc.getHistory());
+        const transcript = toSessionTranscriptEntries(
+          await readSessionHistory(sessionDoc.sessionData.history)
+        );
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,
           limit: options.limit,

@@ -1,3 +1,4 @@
+import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
 // Type-only, so the cycle with `review.ts` (which needs
 // `SessionPullRequestStateMeta` for the merge gate) is erased at compile time.
@@ -24,14 +25,12 @@ import {
   PreviewCandidate,
   PreviewConnection,
   Role,
-  SessionTurnInputConfig,
   SessionId,
   TaskId,
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from '.';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
-import type { ModelInfo } from './ai';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
@@ -345,21 +344,8 @@ const historyMessageItemSchema = schema
 
 export type SerializedLoroOpId = `${string}:${number}`;
 
-export type FileDiffCodeCollabCheckpoint = {
-  v: 1;
-  fileId: string;
-  opId?: SerializedLoroOpId;
-  baseOpId?: SerializedLoroOpId;
-  base?: 'missing';
-  deleted?: true;
-};
-
-export type FileDiff = {
-  filePath: string;
-  add: number;
-  del: number;
-  cc?: FileDiffCodeCollabCheckpoint;
-};
+export type FileDiffCodeCollabCheckpoint = NonNullable<SessionFileDiff['cc']>;
+export type FileDiff = SessionFileDiff;
 
 export type ParsedSerializedLoroOpId = {
   readonly peer: string;
@@ -1206,44 +1192,7 @@ export type SessionToCreate = Omit<
   };
 export type SessionToUpdate = Pick<Session, 'id' | 'status' | 'history'>;
 export type SessionToDelete = Pick<Session, 'id'>;
-export type SessionHistoryInput = Omit<
-  InferInputType<typeof sessionHistorySchema>,
-  | 'userTurnId'
-  | 'acpTurnId'
-  | 'modelInfo'
-  | 'fileDiff'
-  | 'startedAt'
-  | 'endedAt'
-  | 'permissionWaitMs'
-  | 'plan'
-  | 'finished'
-  | 'sendStatus'
-  | 'status'
-  | 'inputConfig'
-  | 'items'
-  | 'read'
-  | 'userId'
-> & {
-  items?: Array<MessageContent & { text?: string | undefined }>;
-  read?: boolean;
-  userId?: string;
-  userTurnId?: string | undefined;
-  acpTurnId?: string | undefined;
-  modelInfo?: ModelInfo | undefined;
-  fileDiff: FileDiff[];
-  status?: SessionHistoryStatus;
-  inputConfig?: SessionTurnInputConfig | undefined;
-  /**
-   * @deprecated Use `timestamp` for the start time of this turn.
-   * Kept for backward compatibility with older clients.
-   */
-  startedAt?: number;
-  endedAt?: number;
-  permissionWaitMs?: number;
-  plan?: SessionPlanEntry[];
-  finished?: boolean;
-  sendStatus?: SessionHistorySendStatus;
-};
+export type SessionHistoryInput = SessionEntry;
 export type SessionHistory = Omit<SessionHistoryInput, '$cid'> & {
   $cid?: string;
 };

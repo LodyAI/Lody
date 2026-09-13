@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -15,6 +16,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -58,7 +60,7 @@ const createHarness = (): TestHarness => {
     status: { type: 'idle' } as SessionStatus,
   };
 
-  const sessionDoc = {
+  const sessionDoc = withHistoryPort({
     getMetaState: vi.fn(async () => ({
       isArchived: false,
       status: state.status,
@@ -74,7 +76,11 @@ const createHarness = (): TestHarness => {
     setStatus: vi.fn(async (status: SessionStatus) => {
       state.status = status;
     }),
-  };
+  });
+  (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
+    sessionDoc.updateHistory as never
+  );
+  Object.assign(sessionDoc, { agentWrites: (sessionDoc as any).sessionData.agentWrites });
 
   const workspaceDocument = {
     isTransportConnected: vi.fn(() => true),

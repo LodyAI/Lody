@@ -2,14 +2,28 @@ import {
   applyPreviewVisualCommentMutation,
   getServerNow,
   getSessionRoomId,
+  HistoryWriteError,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
-  type SessionDocMeta,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
+import type { SessionCommandResult } from '@lody/shared/session-data';
 import type { LoroRepo } from 'loro-repo';
-import type { PreviewVisualCommentDocStore, SessionDocStore } from '../atoms/runtime';
+import type {
+  PreviewVisualCommentDocStore,
+  SessionDocDraft,
+  SessionDocStore,
+} from '../atoms/runtime';
 import type { WorkspaceWriter } from './workspace-writer';
+
+/** Fail the caller when a domain command did not apply; never silently drop a write. */
+function requireAccepted(result: SessionCommandResult): void {
+  if (result.status === 'accepted') return;
+  if (result.status === 'indeterminate') throw result.cause;
+  // Preserve the shared writer's content-free validation diagnostic.
+  if (result.reason.issues) throw new HistoryWriteError(result.reason.issues);
+  throw new Error(`Session command rejected: ${result.reason.code}`);
+}
 
 // # WorkspaceWriter implementation
 //
@@ -76,8 +90,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           getSessionRoomId(sessionId as SessionId),
           meta as Parameters<LoroRepo['upsertDocMeta']>[1]
         ),
-        withSessionStore(sessionId, (store) => {
-          store.historyWriter.append(entry);
+        withSessionStore(sessionId, async (store) => {
+          requireAccepted(await store.sessionData.commands.appendTurn(entry));
         }),
       ]);
       void dispatch;
@@ -127,8 +141,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async appendSessionTurn(sessionId, entry, dispatch) {
-      await withSessionStore(sessionId, (store) => {
-        store.historyWriter.append(entry);
+      await withSessionStore(sessionId, async (store) => {
+        requireAccepted(await store.sessionData.commands.appendTurn(entry));
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -136,45 +150,43 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async appendSessionHistory(sessionId, entry) {
-      await withSessionStore(sessionId, (store) => {
-        store.historyWriter.append(entry);
+      await withSessionStore(sessionId, async (store) => {
+        requireAccepted(await store.sessionData.commands.appendTurn(entry));
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
-      await withSessionStore(sessionId, (store) => {
-        store.historyWriter.replace(entryId, entry);
+      await withSessionStore(sessionId, async (store) => {
+        requireAccepted(await store.sessionData.commands.replaceTurn(entryId, entry));
       });
     },
 
     async resolveSessionTaskProposal(sessionId, entryId, proposalId, resolution) {
-      await withSessionStore(sessionId, (store) => {
-        store.historyWriter.update((history) => {
-          const entry = history.find((item) => item.id === entryId);
-          const target = entry?.items?.find(
-            (item) =>
-              item?.type === 'system_notice' &&
-              item.name === 'task_proposal' &&
-              item.meta?.proposalId === proposalId
-          );
-          if (target?.type === 'system_notice' && target.name === 'task_proposal' && target.meta) {
-            target.meta.outcome = resolution.outcome;
-            if (resolution.taskId !== undefined) target.meta.taskId = resolution.taskId;
-          }
-          return history;
-        });
+      await withSessionStore(sessionId, async (store) => {
+        const result = await store.sessionData.commands.resolveTaskProposal(
+          entryId,
+          proposalId,
+          resolution
+        );
+        // The UI decision is best-effort: a proposal removed by a peer is not an
+        // error, matching the previous silent no-op. A malformed decision still
+        // throws the writer's validation diagnostic.
+        if (result.status === 'rejected' && result.reason.code === 'not_found') return;
+        requireAccepted(result);
       });
     },
 
-    async respondSessionPermission(sessionId, requestId, outcome) {
-      await withSessionStore(sessionId, (store) => {
-        store.historyWriter.respondPermission(requestId, outcome);
+    async respondSessionPermission(sessionId, requestId, outcome, options) {
+      await withSessionStore(sessionId, async (store) => {
+        requireAccepted(
+          await store.sessionData.commands.respondPermission(requestId, outcome, options)
+        );
       });
     },
 
     async enqueueSessionMessage(sessionId, item) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = [...mq, item as MessageQueueItem];
         });
@@ -184,7 +196,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async removeSessionMessage(sessionId, itemId) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
@@ -194,7 +206,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async updateSessionMessage(sessionId, itemId, patch) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
             item.$cid === itemId
@@ -208,7 +220,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
       await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
           const ordered: MessageQueueItem[] = [];

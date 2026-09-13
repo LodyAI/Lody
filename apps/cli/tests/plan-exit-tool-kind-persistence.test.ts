@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
@@ -80,7 +81,7 @@ const planExitPermission = (sessionId: SessionId): RequestPermissionRequest =>
 const readStoredPlanExit = async (
   doc: SessionDocument
 ): Promise<Extract<MessageContent, { type: 'tool_call' }> | undefined> => {
-  const history = await doc.getHistory();
+  const history = await doc.sessionData.history.readAll();
   for (const entry of history) {
     for (const item of (entry.items ?? []) as unknown as MessageContent[]) {
       if (item?.type === 'tool_call' && item.toolCallId === PLAN_EXIT_TOOL_CALL_ID) {
@@ -96,7 +97,7 @@ const withDoc = async (run: (doc: SessionDocument, sessionId: SessionId) => Prom
   const repo = await LoroRepo.create({});
   const doc = new SessionDocument(repo, sessionId);
   await doc.initOffline();
-  await doc.updateHistory(() => [assistantEntry()]);
+  await updateTestHistory(doc, () => [assistantEntry()]);
   try {
     await run(doc, sessionId);
   } finally {
