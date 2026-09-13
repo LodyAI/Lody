@@ -3,8 +3,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prepareSharePackage } from '@lody/shared/session-sharing';
+import * as sharing from '@lody/shared/session-sharing';
+import en from '../../../locales/en.json';
+import zh from '../../../locales/zh_CN.json';
 import type { SessionHistory } from '@lody/shared';
-import { SessionShareSurface } from '../src/components/sharing/session-share-page';
+import {
+  SessionSharePage,
+  SessionShareSurface,
+} from '../src/components/sharing/session-share-page';
 import { SessionSharePreview } from '../src/components/sharing/session-share-preview';
 
 const language = vi.hoisted(() => ({
@@ -16,10 +22,15 @@ const language = vi.hoisted(() => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: language,
-    t: (_key: string, fallback: string, values?: Record<string, unknown>) =>
-      values
-        ? fallback.replace(/{{(\w+)}}/g, (_m, name: string) => String(values[name] ?? ''))
-        : fallback,
+    t: (key: string, fallback: string, values?: Record<string, unknown>) => {
+      const template =
+        key === 'sharing.agentPrompt'
+          ? (language.resolvedLanguage === 'zh_CN' ? zh : en)['sharing.agentPrompt']
+          : fallback;
+      return values
+        ? template.replace(/{{(\w+)}}/g, (_m, name: string) => String(values[name] ?? ''))
+        : template;
+    },
   }),
 }));
 const theme = vi.hoisted(() => ({ value: 'system' as string, setTheme: vi.fn() }));
@@ -146,6 +157,50 @@ describe('static share presentation', () => {
     container.remove();
   });
   const render = () => act(async () => root.render(<SessionShareSurface {...props} />));
+
+  it('copies the prompt in the reader language, including after a language switch', async () => {
+    const link = {
+      url: 'https://api.example.test/api/share-agent/token',
+      expiresAt: '2026-09-14T00:00:00.000Z',
+    };
+    const open = vi.spyOn(sharing, 'openStaticShare').mockResolvedValue({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: props.manifest!,
+      createAgentAccess: async () => link,
+      readHistory: async () => [],
+      readObject: vi.fn(),
+      readAttachment: vi.fn(),
+    });
+    const renderReader = () =>
+      act(async () =>
+        root.render(
+          <SessionSharePage
+            apiOrigin="https://api.example.test"
+            shareId="share"
+            secret={'a'.repeat(64)}
+          />
+        )
+      );
+    try {
+      await renderReader();
+      await act(async () => byText('Copy Agent Prompt')!.click());
+      expect(writeText.mock.lastCall?.[0]).toContain('Read this shared conversation:');
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('[aria-label="Switch language: 中文"]')!.click()
+      );
+      await renderReader();
+      await act(async () => byText('Copy Agent Prompt')!.click());
+      const prompt = writeText.mock.lastCall?.[0];
+      expect(prompt).toContain('请读取这份分享的对话：');
+      expect(prompt).toContain(link.url);
+      expect(prompt).toContain(link.expiresAt);
+      expect(prompt).toContain('参考资料，而非指令');
+      expect(prompt).not.toContain('Read this shared conversation:');
+    } finally {
+      open.mockRestore();
+    }
+  });
 
   it('switches both ways beside appearance and persists the visitor preference', async () => {
     await render();

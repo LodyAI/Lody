@@ -1,7 +1,9 @@
 # Static conversation sharing
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](session-sharing.zh.md)
 
 A workspace writer publishes a selected conversation and related conversations
 as an independent readable copy. Later source edits do not change that copy.
@@ -111,7 +113,7 @@ new context, never a restored source agent thread or runtime session.
 
 The reader instead offers **Copy Agent Prompt** beside Markdown copy. A deliberate
 click obtains a short-lived read-only link pinned to the displayed deployment and
-selected conversation; the prompt is English regardless of UI language. Its index
+selected conversation; the prompt follows the reader's current i18n language. Its index
 lists the existing conversation relations, history URLs and image URLs. Recipients
 need HTTP access, not a Lody account or MCP. No workspace import or agent dispatch
 occurs. Recipients can save downloaded content; the visible disclosure must say

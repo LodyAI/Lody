@@ -70,7 +70,7 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   agent-control and workspace-navigation callbacks. Malformed reader errors
   unmount content and must not send history/error payloads to telemetry.
 - Copy Agent Prompt is an explicit short-lived capability export, not a fork.
-  Keep the prompt English, UI localized, and token URLs out of telemetry. Pass the
+  Localize the prompt with the reader's current i18n language and keep token URLs out of telemetry. Pass the
   selected conversation and pinned deployment; hide issuance in embedded previews.
   Clipboard rejection must leave a manual-copy prompt, not claim success.
 - Reader chrome: the Lody mark leads the header — the packaged app icon's own
