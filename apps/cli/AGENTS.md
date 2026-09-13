@@ -39,6 +39,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   only and never authorize PID killing.
 - Read context/terminal-output-lifecycle.md before changing ACP terminal notification handling or
   history compaction.
+- Windows non-UTF-8 child output uses the active console code page from the trusted system
+  utility, then falls back to locale inference; never select that utility from caller-controlled
+  environment paths. See the [code-page decision](../../.agents/notes/implemented/bug-fix/2026-09-09-windows-console-code-page-detection.md).
 
 ## Cross-entry agent contracts
 
