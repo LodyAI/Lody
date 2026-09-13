@@ -1,8 +1,93 @@
 # @lody/e2ee-core
 
-**Design review in progress:** the [updated ledger types and API](../../specs/e2ee-ledger.zh.md)
-specify the intended single-signer format and pure verification boundary. The implementation
-described below is an earlier prototype, not that design's frozen API. Lody integration is paused.
+**P1 surface (D1–D5 semantics frozen; V4 SHA not frozen):** [ledger spec §§8–11](../../specs/e2ee-ledger.zh.md)
+defines the DAG-CBOR single-signer chain. Import `Ledger` from `@lody/e2ee-core` and
+builders from `@lody/e2ee-core/ledger`. Owner transfer (D1 A) is unilateral:
+`[6, successorMembershipId]`; the predecessor becomes Admin.
+The JSON/hex prototype below is internalized as `src/legacy.ts` (in-package tests
+only, not a public export). Lody integration is paused.
+
+```ts
+import { Ledger } from '@lody/e2ee-core';
+import {
+  encodeGenesisBody,
+  encodeSignedRecord,
+  hashRecord,
+  signingBytesForBody,
+} from '@lody/e2ee-core/ledger';
+
+const body = encodeGenesisBody({
+  signer,
+  userId,
+  membershipId,
+  encryptionPublicKey,
+  epochCommitment,
+});
+const genesis = encodeSignedRecord(body, await sign(signingBytesForBody(body)));
+const ledger = await Ledger.verify({
+  anchor: await hashRecord(genesis),
+  records: [genesis],
+});
+const next = await ledger.extend(suffix);
+```
+
+CAS on exact DAG-CBOR bytes: `LedgerClient` from `@lody/e2ee-core/ledger`. Streams
+adapter: `StreamsLedgerStream` / `frameLedgerRecord` from `@lody/e2ee-core/streams`.
+Local Loro Streams CAS: official `@loro-dev/sqlite-riverrun` (`POST /ds/{bucket}/{stream}/append-cas`,
+`Stream-Extensions: append-cas, snapshot, bootstrap`). In-tree `bench/ds-cas-server.ts`
+is a protocol peer for tests. Hosted `streams-api.loro.dev` still returns 501 for
+`/append-cas` (host precondition, not this package).
+Experimental local journal (not frozen): `@lody/e2ee-core/ledger-node`. Epoch history
+unwrap and HPKE device envelopes: `sealHistoryPacket` / `recoverHistory` /
+`sealEpochEnvelope` from `@lody/e2ee-core/ledger`. `openEpochEnvelope` returns
+plaintext only when `epoch` matches the current ledger epoch and
+`commitEpochKey` equals that epoch's commitment. Exact-byte key outbox:
+`LedgerKeyDelivery` / `MemoryLedgerKeyOutbox`; experimental sqlite
+`SqliteLedgerKeyOutbox` from `@lody/e2ee-core/ledger-node`. Owner transfer is
+unilateral (D1 A).
+
+Commands: `pnpm --filter @lody/e2ee-core check`. New ledger tests: `test/ledger*.ts`.
+Public-package consumer loop (no `src/` imports): `test/ledger-consumer.test.ts`.
+Confirmed-rule keys/recovery/content loop: `test/ledger-krc-loop.test.ts`.
+C1 real Loro/Flock + streams-crdt over a local Durable Streams peer:
+`pnpm --filter @lody/e2ee-core exec vitest run test/ledger-content-c1.test.ts`.
+Lean model correspondence: `test/ledger-model-correspondence.test.ts`.
+Desktop 10k from-zero bench (not in default vitest):
+`pnpm --filter @lody/e2ee-core bench:ledger-10k`. Desktop Chromium harness:
+`pnpm --filter @lody/e2ee-core bench:ledger-10k-browser`. `Ledger.verify` still
+parses, hashes, checks every signature (including nested proofs) and replays
+policy from zero; it caches parsed prime-subgroup public keys and uses
+`@noble/hashes` SHA-512/SHA-256 so the hot path is synchronous. Measured 10k from-zero (16,250 signatures) on Node with parallel Ed25519
+workers is ~2.9s hot vs ~11.5s single-thread; still far above 100ms. The bar
+is not lowered. Set `LODY_E2EE_VERIFY_WORKERS=0` to force sequential verify.
+README-only consumer (import the public package twice, real
+`verify`/`extend` plus D1 transfer): `pnpm --filter @lody/e2ee-core exec tsx bench/readme-consumer.ts`.
+V3 maintainer trial (someone who did **not** implement this package, clean
+checkout, follow only this README):
+
+```sh
+pnpm --filter @lody/e2ee-core exec tsx bench/readme-consumer.ts
+pnpm --filter @lody/e2ee-core exec vitest run test/ledger-consumer.test.ts
+```
+
+Paste env with the stdout (`uname -a`, `node -v`, `pwd`). Expect
+`verifyLength: 1`, `extendLength: 2`, `transferLength: 4`,
+`fromZeroMatchesExtend: true`, and consumer 1 passed. Trust input is an
+out-of-band genesis hash; do not pass `verified=true`. Conflicts never
+re-sign; retry the exact pending bytes.
+Lean lives in the private `proofs/e2ee` model (finite; not a protocol proof).
+
+**P4 handoff draft (V1+V2 workspace SHA, not V4 / not a git commit).** After V2
+internalization, ledger concat SHA-256
+`c5f51a0bd4323ff53e86d1ec0cea6d2912e62aa7f383197d933f992a01a6dd56`.
+V1 review SHA was ledger `aba164b…` / public-e2ee `194b4ad8…`.
+Integrators should use `Ledger` / `@lody/e2ee-core/ledger` / `./streams` /
+`./streams-content` / recovery-file helpers. Host must supply atomic Streams CAS,
+15-minute JWT freshness, and an out-of-band genesis hash; this package does not
+verify those. Tag 6 is D1 A unilateral Owner transfer (predecessor becomes Admin).
+10k from-zero is still far above 100ms. Full host/limit/gap list: private
+`plans/e2ee-next.md` “P4 交付草稿”. Do not treat this SHA as an integration
+contract until V4 is checked. P1 semantics (D1–D5) are written; this SHA is not V4.
 
 Experimental control-log and signed content-encryption primitives. **Electron main imports the device store only;
 it is not end-to-end encryption for Lody.** [Protocol draft](../../specs/e2ee-control-log.zh.md).

@@ -22,6 +22,8 @@ import type { HistoryPublicationRemote } from './history-publisher';
 import type { KeyDeliveryRemote } from './key-delivery';
 import type { OrgKeyExchange } from './org-key-exchange';
 import { MAX_KEY_ENVELOPE_BYTES } from './key-envelope';
+import { MAX_RECORD_BYTES } from './ledger/cbor';
+import type { LedgerReadPage, LedgerStream } from './ledger/submit';
 
 export const CONTROL_STREAM_CONTENT_TYPE = 'application/octet-stream';
 const encoder = new TextEncoder();
@@ -252,5 +254,101 @@ export class StreamsKeyDeliveryRemote implements KeyDeliveryRemote {
     const bytes = await this.remote.read(id);
     invariant(bytes === null || bytes.length <= MAX_KEY_ENVELOPE_BYTES, 'invalid-key-envelope');
     return bytes;
+  }
+}
+
+/** Length-prefixed DAG-CBOR ledger record. Not UTF-8 JSON. */
+export function frameLedgerRecord(record: Uint8Array): Uint8Array {
+  invariant(
+    record instanceof Uint8Array && record.byteLength > 0 && record.byteLength <= MAX_RECORD_BYTES,
+    'invalid-control-frame-size'
+  );
+  const framed = new Uint8Array(4 + record.byteLength);
+  new DataView(framed.buffer).setUint32(0, record.byteLength, false);
+  framed.set(record, 4);
+  return framed;
+}
+
+/** Opt-in SDK adapter for the DAG-CBOR ledger. Caller owns URL, credentials and stream. */
+export class StreamsLedgerStream implements LedgerStream {
+  readonly initialOffset = '-1';
+
+  constructor(private readonly client: Pick<StreamsClient, 'read' | 'appendCas'>) {}
+
+  async readAfter(offset: string): Promise<LedgerReadPage> {
+    checkOffset(offset);
+    const visited = new Set([offset]);
+    const records: Uint8Array[] = [];
+    let cursor = offset;
+    let pending = new Uint8Array(0);
+    let bytesRead = 0;
+
+    for (let count = 0; count < MAX_READ_PAGES; count++) {
+      const response = await this.client.read({ offset: cursor });
+      if (!response.ok) throw new ControlLogError(`stream-read-${response.result.code}`);
+      const page = response.result;
+      invariant(page.requestOffset === cursor, 'read-offset-mismatch');
+      checkOffset(page.nextOffset);
+      invariant(typeof page.upToDate === 'boolean', 'invalid-page');
+      invariant(
+        page.payload.contentType.split(';')[0]?.trim().toLowerCase() ===
+          CONTROL_STREAM_CONTENT_TYPE,
+        'wrong-control-content-type'
+      );
+      const body = page.payload.body;
+      bytesRead += body.byteLength;
+      invariant(bytesRead <= MAX_READ_BYTES, 'read-too-large');
+      if (body.length > 0 || !page.upToDate) {
+        invariant(body.length > 0, 'incomplete-read');
+        invariant(!visited.has(page.nextOffset), 'invalid-offset');
+      } else {
+        invariant(page.nextOffset === cursor || !visited.has(page.nextOffset), 'invalid-offset');
+      }
+      visited.add(page.nextOffset);
+      cursor = page.nextOffset;
+
+      const bytes = new Uint8Array(pending.length + body.length);
+      bytes.set(pending);
+      bytes.set(body, pending.length);
+      const view = new DataView(bytes.buffer);
+      let start = 0;
+      while (bytes.length - start >= 4) {
+        const length = view.getUint32(start, false);
+        invariant(length > 0 && length <= MAX_RECORD_BYTES, 'invalid-control-frame-size');
+        if (bytes.length - start - 4 < length) break;
+        invariant(records.length < MAX_READ_RECORDS, 'read-too-large');
+        records.push(bytes.slice(start + 4, start + 4 + length));
+        start += 4 + length;
+      }
+      pending = bytes.slice(start);
+      if (pending.length === 0) {
+        return { records, nextOffset: cursor, upToDate: page.upToDate };
+      }
+      invariant(!page.upToDate, 'incomplete-control-frame');
+    }
+    throw new ControlLogError('read-too-large');
+  }
+
+  async appendCas(
+    offset: string,
+    record: Uint8Array
+  ): Promise<'accepted' | 'conflict' | 'unsupported'> {
+    checkOffset(offset);
+    const response = await this.client.appendCas({
+      expectedOffset: offset,
+      part: { contentType: CONTROL_STREAM_CONTENT_TYPE, body: frameLedgerRecord(record) },
+    });
+    if (!response.ok) {
+      if ('status' in response.result && response.result.status === 501) return 'unsupported';
+      throw new ControlLogError(`stream-append-${response.result.code}`);
+    }
+    if (response.result.kind === 'mismatch') {
+      invariant(response.result.expectedOffset === offset, 'cas-offset-mismatch');
+      checkOffset(response.result.currentOffset);
+      return 'conflict';
+    }
+    invariant(response.result.kind === 'ok', 'invalid-cas-result');
+    checkOffset(response.result.value.nextOffset);
+    return 'accepted';
   }
 }

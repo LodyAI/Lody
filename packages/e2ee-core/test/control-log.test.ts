@@ -15,7 +15,7 @@ import {
   type ControlEvent,
   type ControlPolicy,
   type TrustAnchor,
-} from '../src';
+} from '../src/legacy';
 
 const crypto = new WebCryptoControl();
 const genesis = 'a1'.repeat(32);

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lody E2EE ledger 10k from-zero bench</title>
+  </head>
+  <body>
+    <pre id="out">loading</pre>
+    <script src="/bundle.js"></script>
+    <script>
+      function percentile(sorted, p) {
+        if (sorted.length === 0) return NaN;
+        const rank = Math.ceil((p / 100) * sorted.length) - 1;
+        return sorted[Math.max(0, Math.min(sorted.length - 1, rank))];
+      }
+      function hex(bytes) {
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      }
+      function u32(view, offset) {
+        return view.getUint32(offset, false);
+      }
+      async function main() {
+        const out = document.getElementById('out');
+        const raw = new Uint8Array(await (await fetch('/fixture.bin')).arrayBuffer());
+        const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+        if (String.fromCharCode(raw[0], raw[1], raw[2], raw[3]) !== 'E2EE') {
+          throw new Error('bad-magic');
+        }
+        const count = u32(view, 4);
+        const warmup = u32(view, 8);
+        const samples = u32(view, 12);
+        const signatures = u32(view, 16);
+        const epoch = u32(view, 20);
+        const members = u32(view, 24);
+        const devices = u32(view, 28);
+        const anchor = raw.subarray(32, 64);
+        const expectedHead = raw.subarray(64, 96);
+        let offset = 96;
+        const records = [];
+        for (let i = 0; i < count; i++) {
+          const length = u32(view, offset);
+          offset += 4;
+          records.push(raw.subarray(offset, offset + length));
+          offset += length;
+        }
+        const bytes = records.reduce((sum, record) => sum + record.byteLength, 0);
+        const Ledger = globalThis.Ledger;
+        const check = await Ledger.verify({ anchor, records });
+        if (check.length !== count) throw new Error('fixture-length');
+        if (hex(check.head) !== hex(expectedHead)) throw new Error('fixture-head');
+        async function run() {
+          const start = performance.now();
+          const verified = await Ledger.verify({ anchor, records });
+          const ms = performance.now() - start;
+          if (verified.length !== count) throw new Error('verify-length');
+          if (hex(verified.head) !== hex(expectedHead)) throw new Error('verify-head');
+          return ms;
+        }
+        const warm = [];
+        for (let i = 0; i < warmup; i++) {
+          const ms = await run();
+          warm.push(ms);
+          await fetch('/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'warmup', i, ms }),
+          });
+        }
+        const measured = [];
+        for (let i = 0; i < samples; i++) {
+          const ms = await run();
+          measured.push(ms);
+          await fetch('/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'sample', i, ms }),
+          });
+        }
+        const sorted = [...measured].sort((a, b) => a - b);
+        const report = {
+          env: {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+          },
+          load: {
+            records: count,
+            bytes,
+            signatures,
+            head: hex(expectedHead),
+            epoch,
+            members,
+            devices,
+          },
+          warmup: warm,
+          samples: measured,
+          p50: percentile(sorted, 50),
+          p95: percentile(sorted, 95),
+          max: sorted[sorted.length - 1],
+        };
+        out.textContent = JSON.stringify(report, null, 2);
+        await fetch('/result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(report),
+        });
+      }
+      main().catch((error) => {
+        const message = error && error.stack ? error.stack : String(error);
+        document.getElementById('out').textContent = 'FAILED\n' + message;
+        fetch('/result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: message }),
+        });
+      });
+    </script>
+  </body>
+</html>

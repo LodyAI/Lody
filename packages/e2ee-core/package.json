@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ledger": "./src/ledger/index.ts",
+    "./ledger-node": "./src/ledger/node-store.ts",
     "./node-store": "./src/node-store.ts",
     "./node-epoch-store": "./src/node-epoch-store.ts",
     "./node-history-store": "./src/node-history-store.ts",
@@ -19,16 +21,26 @@
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test",
-    "format": "prettier --write src test package.json tsconfig.json README.md AGENTS.md",
-    "format:check": "prettier --check src test package.json tsconfig.json README.md AGENTS.md"
+    "bench:ledger-10k": "tsx bench/ledger-10k.ts",
+    "bench:ledger-10k-breakdown": "tsx bench/ledger-10k-breakdown.ts",
+    "bench:ledger-10k-browser": "tsx bench/ledger-10k-browser.ts",
+    "bench:ledger-extend": "tsx bench/ledger-extend.ts",
+    "bench:c3-browser": "tsx bench/c3-browser.ts",
+    "bench:l7-production-cas": "tsx bench/l7-production-cas.ts",
+    "bench:l7-sqlite-riverrun-race": "tsx bench/l7-sqlite-riverrun-race.ts",
+    "bench:device-gap": "tsx bench/device-gap.ts",
+    "format": "prettier --write src test bench package.json tsconfig.json README.md AGENTS.md",
+    "format:check": "prettier --check src test bench package.json tsconfig.json README.md AGENTS.md"
   },
   "dependencies": {
     "@hpke/chacha20poly1305": "1.8.0",
     "@hpke/core": "1.9.0",
+    "@ipld/dag-cbor": "10.0.2",
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@noble/ciphers": "2.1.1",
-    "@noble/ed25519": "3.2.0"
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.2.0"
   },
   "devDependencies": {
     "@loro-dev/flock-wasm": "catalog:",

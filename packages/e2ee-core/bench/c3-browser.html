@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lody E2EE C3 desktop recovery smoke</title>
+  </head>
+  <body>
+    <pre id="out">loading</pre>
+    <script src="/bundle.js"></script>
+    <script>
+      function fromHex(value) {
+        return Uint8Array.from(value.match(/../g).map((byte) => Number.parseInt(byte, 16)));
+      }
+      function hex(bytes) {
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      }
+      async function probeWebAuthn() {
+        const publicKeyCredential = typeof PublicKeyCredential !== 'undefined';
+        let isUVPAA = false;
+        if (
+          publicKeyCredential &&
+          PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
+        ) {
+          try {
+            isUVPAA = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+          } catch {
+            isUVPAA = false;
+          }
+        }
+        let prfAttempt = { attempted: false, created: false, error: 'not-attempted' };
+        if (publicKeyCredential && navigator.credentials && navigator.credentials.create) {
+          try {
+            const cred = await Promise.race([
+              navigator.credentials.create({
+                publicKey: {
+                  challenge: crypto.getRandomValues(new Uint8Array(32)),
+                  rp: { name: 'lody-e2ee-c3', id: location.hostname },
+                  user: {
+                    id: crypto.getRandomValues(new Uint8Array(32)),
+                    name: 'c3-probe',
+                    displayName: 'c3-probe',
+                  },
+                  pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+                  authenticatorSelection: {
+                    residentKey: 'discouraged',
+                    userVerification: 'discouraged',
+                  },
+                  extensions: { prf: {} },
+                  timeout: 3000,
+                },
+              }),
+              new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('prf-probe-timeout')), 4000);
+              }),
+            ]);
+            const ext =
+              cred && cred.getClientExtensionResults ? cred.getClientExtensionResults() : {};
+            prfAttempt = {
+              attempted: true,
+              created: true,
+              error: ext && ext.prf ? 'prf-present' : 'created-without-prf',
+            };
+          } catch (error) {
+            prfAttempt = {
+              attempted: true,
+              created: false,
+              error: error instanceof Error ? error.name + ':' + error.message : String(error),
+            };
+          }
+        }
+        return {
+          publicKeyCredential,
+          credentials: typeof navigator !== 'undefined' && 'credentials' in navigator,
+          isUVPAA,
+          prfAttempt,
+          prfUnsupported: !prfAttempt.created || prfAttempt.error !== 'prf-present',
+        };
+      }
+      async function main() {
+        const out = document.getElementById('out');
+        const fixture = await (await fetch('/fixture.json')).json();
+        const records = fixture.records.map(fromHex);
+        const extra = fromHex(fixture.extra);
+        const verified = await Ledger.verify({
+          anchor: fromHex(fixture.anchor),
+          records,
+        });
+        if (verified.length !== records.length) throw new Error('verify-length');
+        const extended = await verified.extend([extra]);
+        if (extended.length !== records.length + 1) throw new Error('extend-length');
+        const opened = openRecoveryBackup(
+          fromHex(fixture.recoveryFile),
+          { identity: fixture.identity, revision: 1 },
+          fromHex(fixture.recoveryBackup)
+        );
+        if (hex(opened) !== fixture.epochKey) throw new Error('recovery-mismatch');
+        let wrongIdentity = false;
+        try {
+          openRecoveryBackup(
+            fromHex(fixture.recoveryFile),
+            { identity: '00'.repeat(32), revision: 1 },
+            fromHex(fixture.recoveryBackup)
+          );
+        } catch {
+          wrongIdentity = true;
+        }
+        if (!wrongIdentity) throw new Error('wrong-identity-opened');
+        const webauthn = await probeWebAuthn();
+        const result = {
+          userAgent: navigator.userAgent,
+          verifyLength: verified.length,
+          extendLength: extended.length,
+          recoveryOpened: true,
+          wrongIdentityRejected: true,
+          webauthn,
+        };
+        out.textContent = JSON.stringify(result, null, 2);
+        await fetch('/result', { method: 'POST', body: JSON.stringify(result) });
+      }
+      main().catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        document.getElementById('out').textContent = message;
+        await fetch('/result', { method: 'POST', body: JSON.stringify({ error: message }) });
+      });
+    </script>
+  </body>
+</html>

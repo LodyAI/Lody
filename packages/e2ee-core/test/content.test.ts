@@ -9,7 +9,7 @@ import {
   MAX_CONTENT_BYTES,
   type ContentScope,
 } from '../src/content';
-import { fromHex, toHex } from '../src';
+import { fromHex, toHex } from '../src/wire';
 import { deferred } from './control-fixtures';
 
 const encoder = new TextEncoder();

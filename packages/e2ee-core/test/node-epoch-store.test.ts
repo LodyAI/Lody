@@ -11,7 +11,7 @@ import { SqliteEpochControlStore } from '../src/node-epoch-store';
 import { SqliteControlStore } from '../src/node-store';
 import { SqliteHistoryPublicationStore } from '../src/node-history-store';
 import { MemoryStore } from './control-fixtures';
-import { HistoryPublisher, ContentCipher, sealEpochHistory } from '../src';
+import { HistoryPublisher, ContentCipher, sealEpochHistory } from '../src/legacy';
 import { commitEpochKey, VerifiedEpochKeys } from '../src/epoch-keys';
 import {
   ControlLogClient,
@@ -25,7 +25,7 @@ import {
   type ControlStream,
   type ControlEvent,
   type EpochPublicationStore,
-} from '../src';
+} from '../src/legacy';
 import {
   createLocalEpochProtection,
   createLocalDeviceProtection,

@@ -1,0 +1,302 @@
+import { copyBytes } from './cbor';
+import {
+  assertSignature,
+  bytesEqual,
+  checkHash,
+  checkSigningPublicKey,
+  hashRecordBytes,
+  recordSigningBytes,
+  verifySignature,
+  type Hash,
+  type Signature,
+  type SigningPublicKey,
+} from './crypto';
+import { LedgerError, fail } from './error';
+import {
+  applyGenesis,
+  applyOperation,
+  cloneState,
+  publicState,
+  verifyOperationProofs,
+  type InternalState,
+  type OrgState,
+} from './policy';
+import {
+  decodeRecord,
+  encodeOrdinaryBody,
+  encodeSignedRecord,
+  joinRequestSigningBytes,
+  possessionSigningBytes,
+  signingBytesForBody,
+  type DecodedRecord,
+  type Operation,
+} from './schema';
+import type { SigJob } from './node-sig-pool';
+
+export interface TrustAnchor {
+  readonly genesis: Hash;
+}
+
+export interface LedgerSummary {
+  readonly genesis: Hash;
+  readonly length: number;
+  readonly head: Hash;
+}
+
+export interface Proposal {
+  readonly signer: SigningPublicKey;
+  readonly operation: Operation;
+  readonly previousHash: Hash;
+  readonly bodyBytes: Uint8Array;
+  readonly signingBytes: Uint8Array;
+}
+
+function withPosition(position: number, run: () => void): void {
+  try {
+    run();
+  } catch (error: unknown) {
+    if (error instanceof LedgerError && error.position === undefined) {
+      throw new LedgerError(error.code, position);
+    }
+    throw error;
+  }
+}
+
+function collectProofJobs(genesis: Hash, decoded: DecodedRecord): SigJob[] {
+  if (decoded.body.type !== 'ordinary') return [];
+  const op = decoded.body.fields.operation;
+  if (op.type === 'admitMember') {
+    return [
+      {
+        pk: op.request.signingPublicKey,
+        msg: joinRequestSigningBytes(genesis, op.request),
+        sig: op.request.signature,
+      },
+    ];
+  }
+  if (op.type === 'admitDevice') {
+    return [
+      {
+        pk: op.signingPublicKey,
+        msg: possessionSigningBytes({
+          genesis,
+          signingPublicKey: op.signingPublicKey,
+          encryptionPublicKey: op.encryptionPublicKey,
+          kind: op.kind,
+          canManage: op.canManage,
+        }),
+        sig: op.possessionSignature,
+      },
+    ];
+  }
+  return [];
+}
+
+function applyDecoded(
+  state: InternalState | undefined,
+  decoded: DecodedRecord,
+  recordHash: Hash,
+  position: number,
+  expectedAnchor?: Hash,
+  proofsChecked = false
+): InternalState {
+  if (decoded.body.type === 'genesis') {
+    if (position !== 0) fail('genesis-mismatch', position);
+    if (expectedAnchor && !bytesEqual(recordHash, expectedAnchor)) fail('wrong-anchor', position);
+    if (state) fail('genesis-mismatch', position);
+    return applyGenesis(decoded.body.fields, recordHash);
+  }
+  if (!state) fail('genesis-mismatch', position);
+  if (position === 0) fail('genesis-mismatch', position);
+  if (decoded.body.type !== 'ordinary') fail('genesis-mismatch', position);
+  const ordinary = decoded.body.fields;
+  if (!bytesEqual(ordinary.previousHash, state.hashes[state.hashes.length - 1]!)) {
+    fail('wrong-parent', position);
+  }
+  withPosition(position, () => {
+    if (!proofsChecked) verifyOperationProofs(state.genesis, ordinary.operation);
+    applyOperation(state, ordinary.signer, ordinary.operation);
+  });
+  state.hashes.push(recordHash);
+  return state;
+}
+
+function applyRecord(
+  state: InternalState | undefined,
+  recordBytes: Uint8Array,
+  position: number,
+  expectedAnchor?: Hash
+): InternalState {
+  const record = decodeRecord(recordBytes);
+  withPosition(position, () => {
+    assertSignature(
+      record.body.fields.signer,
+      recordSigningBytes(record.bodyBytes),
+      record.signature
+    );
+  });
+  const recordHash = hashRecordBytes(record.recordBytes);
+  return applyDecoded(state, record, recordHash, position, expectedAnchor, false);
+}
+
+async function verifyJobs(
+  jobs: SigJob[],
+  positions: number[],
+  codes: Array<'bad-signature' | 'bad-proof'>
+): Promise<void> {
+  if (jobs.length === 0) return;
+  let results: boolean[];
+  if (
+    jobs.length >= 32 &&
+    typeof process !== 'undefined' &&
+    process.versions?.node &&
+    process.env.LODY_E2EE_VERIFY_WORKERS !== '0'
+  ) {
+    try {
+      const { verifyJobsParallel } = await import('./node-sig-pool');
+      results = await verifyJobsParallel(jobs);
+    } catch {
+      results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
+    }
+  } else {
+    results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
+  }
+  if (results.length !== jobs.length) {
+    results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
+  }
+  for (let i = 0; i < jobs.length; i++) {
+    if (!results[i]) fail(codes[i]!, positions[i]);
+  }
+}
+
+export class Ledger {
+  private constructor(private readonly internal: InternalState) {
+    Object.freeze(this);
+  }
+
+  get head(): Hash {
+    return copyBytes(this.internal.hashes[this.internal.hashes.length - 1]!);
+  }
+
+  get length(): number {
+    return this.internal.hashes.length;
+  }
+
+  get state(): OrgState {
+    return publicState(this.internal);
+  }
+
+  summary(): LedgerSummary {
+    return Object.freeze({
+      genesis: copyBytes(this.internal.genesis),
+      length: this.length,
+      head: this.head,
+    });
+  }
+
+  hashAt(position: number): Hash {
+    if (!Number.isSafeInteger(position) || position < 0 || position >= this.length) {
+      fail('invalid-operation');
+    }
+    return copyBytes(this.internal.hashes[position]!);
+  }
+
+  static async verify(input: { anchor: Hash; records: readonly Uint8Array[] }): Promise<Ledger> {
+    const anchor = checkHash(input.anchor);
+    if (input.records.length === 0) fail('genesis-mismatch', 0);
+    const records = input.records.map((record, position) => {
+      if (!(record instanceof Uint8Array)) fail('canonical', position);
+      return copyBytes(record);
+    });
+    const decoded: DecodedRecord[] = [];
+    const hashes: Hash[] = [];
+    const outerJobs: SigJob[] = [];
+    const outerPos: number[] = [];
+    const outerCodes: Array<'bad-signature' | 'bad-proof'> = [];
+    for (let position = 0; position < records.length; position++) {
+      try {
+        const record = decodeRecord(records[position]!);
+        decoded.push(record);
+        hashes.push(hashRecordBytes(record.recordBytes));
+        outerJobs.push({
+          pk: record.body.fields.signer,
+          msg: recordSigningBytes(record.bodyBytes),
+          sig: record.signature,
+        });
+        outerPos.push(position);
+        outerCodes.push('bad-signature');
+      } catch (error: unknown) {
+        if (error instanceof LedgerError && error.position === undefined) {
+          throw new LedgerError(error.code, position);
+        }
+        throw error;
+      }
+    }
+    await verifyJobs(outerJobs, outerPos, outerCodes);
+    const genesisHash = hashes[0]!;
+    const proofJobs: SigJob[] = [];
+    const proofPos: number[] = [];
+    const proofCodes: Array<'bad-signature' | 'bad-proof'> = [];
+    for (let position = 1; position < decoded.length; position++) {
+      const extra = collectProofJobs(genesisHash, decoded[position]!);
+      for (const job of extra) {
+        proofJobs.push(job);
+        proofPos.push(position);
+        proofCodes.push('bad-proof');
+      }
+    }
+    await verifyJobs(proofJobs, proofPos, proofCodes);
+    let state: InternalState | undefined;
+    for (let position = 0; position < decoded.length; position++) {
+      state = applyDecoded(
+        state,
+        decoded[position]!,
+        hashes[position]!,
+        position,
+        position === 0 ? anchor : undefined,
+        true
+      );
+    }
+    if (!state) fail('genesis-mismatch', 0);
+    if (!bytesEqual(state.genesis, anchor) || !bytesEqual(state.hashes[0]!, anchor)) {
+      fail('wrong-anchor', 0);
+    }
+    return new Ledger(state);
+  }
+
+  async extend(suffix: readonly Uint8Array[]): Promise<Ledger> {
+    if (suffix.length === 0) return this;
+    const next = cloneState(this.internal);
+    const records = suffix.map((record, offset) => {
+      if (!(record instanceof Uint8Array)) fail('canonical', this.length + offset);
+      return copyBytes(record);
+    });
+    for (let offset = 0; offset < records.length; offset++) {
+      applyRecord(next, records[offset]!, this.length + offset);
+    }
+    return new Ledger(next);
+  }
+
+  prepare(operation: Operation, signerPublicKey: SigningPublicKey): Proposal {
+    const signer = checkSigningPublicKey(signerPublicKey);
+    const bodyBytes = encodeOrdinaryBody({
+      previousHash: this.head,
+      signer,
+      operation,
+    });
+    return Object.freeze({
+      signer,
+      operation,
+      previousHash: this.head,
+      bodyBytes,
+      signingBytes: signingBytesForBody(bodyBytes),
+    });
+  }
+
+  async finalize(proposal: Proposal, signature: Signature): Promise<Uint8Array> {
+    if (!bytesEqual(proposal.previousHash, this.head)) fail('wrong-parent');
+    const recordBytes = encodeSignedRecord(proposal.bodyBytes, signature);
+    await this.extend([recordBytes]);
+    return recordBytes;
+  }
+}

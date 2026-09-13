@@ -5,12 +5,18 @@ Translation: pending
 
 ## 摘要
 
-当前原型已有单链权限、真实密码学、持久 outbox 和 Streams SDK 密钥交付，但生产
-准入仍未接入。新加 `ControlFreshnessLease` 将已认证的观察绑定到精确链头与原始
-绝对期限，避免接收、缓存或重建对象时重新起算 15 分钟；到期、登出或时钟失效
-使该实例永久失效。它只实现本地守卫，不另造凭证协议，也不把普通读取或本机时钟
-当作可信证明。另补 SDK fetch 入口的流式限长及整个请求截止，避免 SDK 已缓冲
-整包后才拒绝超限。生产观察认证、可信时间、服务端长连接截止及真实端验收仍须落实。
+独立 DAG-CBOR 账本（`Ledger.verify`/`extend`，公开 spec §8–11）已实现；D1–D5
+书面确认后 P1 A1–A5 冻结。P2 L1–L7 与 P3 除 B/R2/C3 外均有执行证据。JSON/hex
+原型内部化为 `src/legacy.ts`，不作为公开入口。V1 对抗 landed=0、V2 清理已勾。
+剩余未勾：10k/100ms 未达标（不放宽、不勾 B）、Passkey/真机为宿主前提（不勾
+R2/C3）、第二人 README 试接（不勾 V3）、无 git freeze（不勾 V4）。生产 Streams
+CAS 仍 501。旧 `ControlFreshnessLease` 仍只是本地守卫，不是 JWT。
+
+2026-09-13 C3 改在 `http://localhost` 探测（有效 WebAuthn RP ID，不再用 127.0.0.1
+的 invalid domain）。Chrome 152 headless：`isUVPAA=true`，`credentials.create({prf})`
+4s 硬超时 `prf-probe-timeout`（无用户在场），verify/extend/recovery-file 仍成功。
+Chromium 99：`isUVPAA=false`，同样超时。不勾选 C3/R2。`packages/e2ee-core/AGENTS.md`
+改为以 DAG-CBOR `Ledger` 为绑定面，JSON/hex 仅 `src/legacy.ts`。
 
 ### 恢复文件包装
 
@@ -49,6 +55,95 @@ Guest 确认为只读用户角色，与 recovery 设备类型不同。代价是�
 成员/设备关系等元数据，不等于公开发布，也不包含秘密密钥或业务内容。
 完整类型、API、对账和待审点集中于[独立账本设计](../../../../specs/e2ee-ledger.zh.md)。
 现有代码没有迁移，不以旧测试证明新设计已经实现。
+
+2026-09-13 P1 草案：公开 spec 第 8–11 节给出完整操作数组、`Ledger.verify/extend/prepare/finalize`
+调用示例、旧 export 分类和基准口径。D1–D5 集中在私有 `plans/e2ee-next.md` 确认简报；
+Owner 转让在确认前解码即拒绝。已落地的确认规则：`@ipld/dag-cbor` 固定数组、单签、
+不可变视图、Guest 只读、撤设备非连带、换代携带 72 字节历史包、R 可按当前角色显式
+授予 canManage。创世代承诺与 genesis hash 的循环绑定留在 D2，核心不重算承诺。
+`test/ledger.test.ts` 用真实 Ed25519 覆盖上述路径；A1–A5 未勾选。
+
+同日 P2 推进（不依赖 D1–D5，不实现 Owner 转让）：`LedgerClient` 按记录 hash 对账，CAS 前先持久 pending；
+丢 ACK/假 ACK/冲突/unsupported 与显式 in-flight 屏障有确定性测试。实验性 SQLite 日志
+`lody-e2ee-journal/v0` 仅存原文，重启须再 `Ledger.verify`；子进程 SIGKILL 保留 pending。
+L1–L7 均未勾选通过。随后补 L3 确认角色×设备矩阵（跳过转让与未确认 Guest 入口）、
+L6 坏页/cursor/uncommitted sqlite 回滚，以及 L7 `StreamsLedgerStream` 真实 SDK 拼帧/CAS/410/501。
+再补 L1 全确认操作黄金向量、L2 长链每个切分 from-zero=extend、L4 opaque 分页双端对账。
+L5 补冲突后必须重 prepare、unknown pending 防突变；L6 sqlite 丢 ACK 重启 resume；L7 SDK lost ACK/超长帧/截止。
+P3 起步：真实 HPKE 发钥、三代历史包仅用最新钥恢复、R 可收钥不可换代；streams-crdt provider 用恢复钥开关。
+Lean `proofs/e2ee`：`lake build` 无 sorry；定理仅依赖 propext/Quot.sound；转让/Guest setRole 未建模。
+续：`LedgerKeyDelivery` 先持久精确密文再 PUT，重试不重加密，保存后二次验权；实验 sqlite
+`lody-e2ee-key-outbox/v0`。C1 补旧文档更新、新文档、丢失 POST 精确重试、换代后双代 catchup，
+均拒绝 snapshot bootstrap。桌面 10k 从零验证脚本在 `packages/e2ee-core/bench/ledger-10k.ts`，
+不进入默认 vitest。L3 现为 4 角色×3 设备确认操作矩阵（不含转让、不含冻结 setRole→guest）；
+Guest 只读与 guest-machine 不可达已覆盖，from-zero 与 extend 在成功链每个切分相等。
+C2 黑盒消费者 `test/ledger-consumer.test.ts` 只导入 `@lody/e2ee-core`、`./ledger`、`./ledger-node`，
+覆盖建 Org→加入→分页同步→撤设备/成员→换代恢复历史钥→R 授管新个人设备→sqlite 重启→对账冲突；
+不实现转让或 Guest setRole。旧 JSON/hex 测试仍隔离在 `control-log.test.ts` / `team.test.ts`。
+`test/ledger-krc-loop.test.ts` 用同一公开入口覆盖三代历史恢复、撤 A 保留 R/C、跨 Org R 拒绝、
+Member R 不能授管、恢复钥内容 catchup。Lean `proofs/e2ee` `lake build` 公理仅 propext/Quot.sound。
+桌面 10k 未达 100ms；无手机/PRF harness。D1–D5 与 A1–A5 仍未勾选。
+
+2026-09-13 `Ledger.verify` 热路径：同一公钥的质数子群检查只做一次并缓存 Point；
+Ed25519 改为 noble 同步 `verify`（`zip215: false`）+ `@noble/hashes` SHA-512，
+记录 hash 用同一套 SHA-256；R 仍逐条 `isTorsionFree`。不省略签名、不用快照或跨次
+verify 缓存。400 条剖析中重复 A 检查占解码和验签的大部分。优化后同一 10k/16250 签名
+负载：Node 热 p95 11.4s（前 24.6s），Chromium 99 热 p95 95.2s（前 201.4s），仍远高于
+100ms，不放宽。
+
+2026-09-13 P4 V1 对抗：独立攻击脚本覆盖缓存公钥、body 切片、hash 别名、CAS/sqlite、Guest/R
+矩阵。复现 P1：`openEpochEnvelope` 曾对非成员签名的 HPKE 假钥返回明文；现核对当前代承诺。
+假钥路径 vitest 拒绝。不勾选 V1/P4（无冻结 SHA）。低阶 X25519 加密公钥仍可入账，本机
+WebCrypto DH 失败，不视为已证明的机密性破坏。
+
+2026-09-13 M2 独立复跑：`proofs/e2ee` Lean 4.33.1 `lake build` 无 sorry/admit；公理仅 `propext`/
+`Quot.sound`（`genesis_owner` 无公理）。M3 对照补 retired 再入账与 Member R 授管拒绝。
+README 消费者 `bench/readme-consumer.ts` 两次 import 公开包并 `verify`/`extend`。M2/P1/P4
+不勾选。D1 转让与 10k/100ms 取舍排队等 Zixuan。
+
+2026-09-13 对当前 SHA `12a008e2cb1d…` 再做独立确认规则对抗（codec / 权限重放 / 恢复边界 / 钥包装）。
+102 项 HOLD、0 LAND。实现者复跑 `p4-confirmed/attack.ts` 一致；vitest 补跨 Org 历史包与非连带撤销后仍可 admit。
+P1/P4 仍不勾选。
+
+2026-09-13 向 Zixuan 再次出示 D1–D5 确认简报；Owner 单方转让保持待决定，tag 6 仍拒绝。
+L7 公开 SDK+受控对端补 false ACK resume、双端 CAS 竞争、注入时钟 freshness lease（9 tests）；
+仍不勾选生产 CAS。C2/M3/README 消费者本轮复跑通过。
+
+2026-09-13 D1–D5 确认表单未作答，转让保持待决定。M1 对 Lean `step` 授权投影做有界穷举：4290 可达态 / depth 6；
+明确列出未纳入的 CAS/发钥/PRF/转让/Guest setRole，不把未探索风险算通过。M1 不勾选。
+
+2026-09-13 M2：Lean 有限授权模型补 `unique_owner_replay`、`ValidTrace`、machine/guest 守卫、R 不能登记 machine。
+`lake build` 无 sorry/admit；公理仅 `propext`/`Quot.sound`。勾选 M2 只覆盖该有限模型，不证明协议或实现。
+
+2026-09-13 C1/C2 黑盒复跑：`ledger-content.test.ts` 5 passed（含 Flock streams-crdt catchup）；
+`ledger-consumer.test.ts` 与 `ledger-krc-loop.test.ts` 覆盖 create→join→sync→revoke→rotate→recover→restart→reconcile。
+不勾选 C1/C2/P1；不放宽 10k/100ms。
+
+2026-09-13 续补 D1/D5 无关的 P3 缺口：`sealEpochEnvelope` 核对收件设备已登记的 X25519 公钥。
+K1 拒绝未入账/互换/截断/篡改/错 genesis/历史包冒充信封/撤后重放；K3 在第一次 authorize 等待时撤收件不落 outbox。
+R3 缺当前代信封失败、仅用 R 打开当前钥后恢复历史并授管；R4 撤 R 留 C、`removeMember` 清三种设备、跨 Org 独立登记。
+C1 snapshot kind fail-closed；C2 独立 throwaway 目录 `file:` 安装后两次 import `verify`/`extend`。
+`vitest` keys+delivery+krc-loop+content **19 passed**；typecheck 过。不勾选 K/R/C/P1；不放宽 10k/100ms。
+
+2026-09-13 D1–D5 确认表单再次未作答；转让保持拒绝 tag 6，100ms 不放宽。B5：10k 已验证视图上 extend(+1) 热 p95 2.3ms、extend(+100) 热 p95 138ms，from-zero head 一致，证明增量不是全量重验。不勾选 B。
+
+2026-09-13 对当前拼接 SHA `c576e7437e98…`（含登记 enc 绑定）做独立确认规则对抗：harness `p4-current/attack.ts` **landed=0 held=97**；实现者复跑同一命令一致。另 22 项定向 HOLD。无 P0/P1。不勾选 V1/P1；不放宽 100ms。已知笔记仍是 K0 重包、未用 `r-wrap/v1`、低阶 X25519 入账、epoch0 不绑 genesis。
+
+2026-09-13 C3 桌面 Chromium 99 smoke：真实浏览器 `Ledger.verify`/`extend` 与 recovery-file 打开；错 identity 拒绝。WebAuthn `isUVPAA=false`、无 PRF，明确 `prfUnsupported`。不勾选 C3（无手机、无真实 Passkey）。L7 仍不勾选（无生产 CAS）。不放宽 100ms。
+
+2026-09-13 R2：两个独立 recovery-file 包装同一材料，交叉打开失败，删一文件不撤账本 R；Node 无 `PublicKeyCredential`。P4 交付草稿绑定 SHA `c576e743…`（入口/限制/宿主前提/缺口），明确未冻结。不勾选 R2/V4/P1；不放宽 100ms。
+
+2026-09-13 C3/B/L7 缺口实测：Google Chrome 152 上 verify/extend/recovery-file 成功；真实 `credentials.create`+`prf` 因 127.0.0.1 RP ID 抛 `SecurityError`，恢复文件仍可用。`device-gap.ts`：无 USB 手机、无 adb、Simulator 不作真机、无生产 CAS 环境变量。不勾选 C3/B/L7；不放宽 100ms。
+
+2026-09-13 D1–D5 确认表单第三次未作答。tag 6 仍拒绝；100ms 不放宽。关闭 C3/B/L7 需真机、有效 RP 上的 PRF passkey、`LORO_STREAMS_URL`。ledger 测试 29 passed；拼接 SHA 仍 `c576e743…`。
+
+2026-09-13 K2 公开包两房间/跨 Org 换代：同 Org room-a 跨 epoch0+1、room-b 仅新代，仅用最新钥恢复后 catchup；旧钥打不开新代房间；错 resource/错 Org 失败。`ledger-krc-loop.test.ts` 5 passed。不勾选 K2/P1/C3/B/L7；不放宽 100ms。
+
+2026-09-13 D1 确认 A：单方 Owner 转让已实现。tag 6 `[successorMembershipId]`，前任 Admin，接任者须已是成员。矩阵与 from-zero=extend 覆盖。D2–D5 仍未冻结（要 context 已写入计划）。10k：独立 Ed25519 在 Node worker 并行，热 ~2.9s vs 单线程 11.5s，仍远高于 100ms，不放宽。
+
+2026-09-13 D1 进入有限模型：Lean `Op.transferOwner` 与 TS oracle/`Ledger` 对照；`unique_owner_replay` 在转让后仍唯一 Owner；`recovery_cannot_transfer` / `machine_cannot_transfer`。`lake build` Lean 4.33.1 无 sorry，公理仅 `propext`/`Quot.sound`。M1 穷举含转让：6398 态 / depth 6。L7 真实 `StreamsClient` + 本机 TCP HTTP CAS：双端竞争、丢 ACK 读回 committed、假 ACK 保留 pending 后 resume、opaque 分页；**仍不勾选**（本机 TCP ≠ 生产原子 CAS）。K/R/C 公开导出 loop 5 passed。P1/L7/B/100ms 不放宽、不勾选。
+
+2026-09-13 D2–D5 书面确认全部「同意」实现表；10k/100ms **保持**为 B 门槛，不放宽。P1 A1–A5 冻结（spec §8–11 + ledger concat `aba164b356cb…`）。L3 将 setRole→guest 升为冻结拒绝行；Lean `setRoleGuest` 已纳入。不勾选 B/L7/P4。
 
 新增显式空设备恢复主进程接口：原生选择只返回账号与文件定位 ID，不保留秘密句柄；
 调用方取回密文后重新选择文件，校验定位 ID、当前账号、认证加密及身份公私钥，
@@ -520,3 +615,13 @@ Owner、账本及 Epoch。`team.ts` 和现有导出/wire 名称暂留为原型�
 权限边界。此前新增页级存储和 SDK 适配时未改变角色规则或签名 wire，仍未实现
 异步邀请或 15 分钟云端准入。没有创建 PR，也不以这些核心测试证明完整产品目标。
 后续验收优先落实独立邀请/接受证据与当前状态提交包装，再接密钥信封及生产边界。
+
+2026-09-13 L7：用 Loro Streams 源码中的官方 `@loro-dev/sqlite-riverrun`（`POST /ds/{bucket}/{stream}/append-cas`）作为本地后端，真实 SDK 双端竞争一条 committed、一条 conflict、head 相同。shipped probe `atomicCas=true`。已发布 `loro` CLI 0.4.4 的 `loro dev` 与 hosted gateway 仍无可用 CAS（404/501），列为宿主前提，不把 loopback 当生产。P2 按书面「本地或授权测试后端」勾选 L7。B/C3/V3/V4 仍开。
+
+2026-09-13 C1：公开 API 黑盒 `test/ledger-content-c1.test.ts` 用真实 `loro-crdt` / Flock 与 `streams-crdt` `StreamsCrdt`，对端是本机 TCP `listenDurableContent`（ordinary POST、`GET /bootstrap`、snapshot/410）。覆盖旧文档更新、新文档、lost POST 精确重试、切代、错钥不回退明文；snapshot 仍 fail-closed（无 provenance）。不新增平行内容 API。
+
+2026-09-13 V1：工作区冻结 SHA ledger `aba164b…`、public-e2ee `194b4ad8…`（非 git commit）。独立对抗 landed=0 held=149 notes=6，实现者复跑一致；内容窄复审 landed=0 held=8。无 P0/P1。不勾选 B/R2/C3/V3/V4；生产网关 append-cas 仍 501。
+
+2026-09-13 V2：删除未接线的 `RECOVERY_WRAP_DOMAIN`。JSON/hex 原型（`HistoryPublisher`/`EpochPublisher`/`replayChain`/`KeyDelivery`）从 `@lody/e2ee-core` 根入口撤到包内 `src/legacy.ts`，旧 journal 拒绝测试仍走该模块。根入口保留 `Ledger`/`ContentCipher`/recovery-file/`restoreUserIdentity`（Electron 已用）。`vitest run` 328 passed；`docs check`/`check:public-boundary` 通过；browser 根 bundle 无 Node sqlite。新 ledger concat `c5f51a0b…`。不勾 V3/V4。
+
+2026-09-13 阻塞收口：代理侧 P1–P2、K/R/C 除 R2/C3/B、V1/V2 已做完。V4/git freeze 等待 Zixuan 书面三件事：10k/100ms 取舍；真机+PRF 或把 R2/C3 列为宿主前提；指定第二人跑 README V3。不自行放宽、不假装真机/第二人。

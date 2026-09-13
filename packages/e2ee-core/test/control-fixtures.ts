@@ -79,7 +79,7 @@ import type {
   ControlStream,
   JournalTransaction,
   ControlReadPage,
-} from '../src';
+} from '../src/legacy';
 
 function fail(message: string): never {
   throw new Error(message);

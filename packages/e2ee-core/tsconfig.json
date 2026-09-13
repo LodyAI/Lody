@@ -10,5 +10,5 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "bench"]
 }

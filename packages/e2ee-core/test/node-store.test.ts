@@ -31,7 +31,7 @@ import {
   type ControlPolicy,
   type JournalTransaction,
   type TeamGenesis,
-} from '../src';
+} from '../src/legacy';
 import { deferred, MemoryStream, HttpLedger } from './control-fixtures';
 
 const dirs: string[] = [];

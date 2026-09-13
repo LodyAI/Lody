@@ -33,7 +33,7 @@ import {
   verifyJoinRequest,
   assertJoinRequestFresh,
   type JoinRequest,
-} from '../src';
+} from '../src/legacy';
 import { MemoryStore, MemoryStream, deferred } from './control-fixtures';
 
 const crypto = new WebCryptoControl();

@@ -7,7 +7,7 @@ import {
   toHex,
   WebCryptoControl,
   type ControlPolicy,
-} from '../src';
+} from '../src/legacy';
 import { MAX_READ_BYTES, MAX_READ_RECORDS } from '../src/client';
 import {
   CONTROL_STREAM_CONTENT_TYPE,
