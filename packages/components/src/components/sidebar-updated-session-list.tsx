@@ -41,6 +41,7 @@ import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
   SessionMergeablePill,
+  SessionRowAgentIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -67,6 +68,7 @@ import {
 } from '@/lib/session-opened-by-tree';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type {
+  AgentConfigCliType,
   LocalProjectHistoryProvider,
   PrStatus,
   SessionId,
@@ -86,6 +88,8 @@ export type SidebarUpdatedItem = {
   id: string;
   kind: SidebarUpdatedItemKind;
   title: string;
+  cliType?: AgentConfigCliType;
+  agentType?: string;
   /**
    * PRECISE opener: the Session that created/opened this one
    * (`SessionMeta.openedBySessionId`). Presentation-only provenance; see
@@ -877,6 +881,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             className="relative -top-px h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
           />
         ) : null}
+        <SessionRowAgentIcon cliType={item.cliType} agentType={item.agentType} />
         <div
           className={cn('min-w-0 flex-1 flex items-center truncate text-sm')}
           // Double-click to rename is scoped to the title only, so double-clicking
