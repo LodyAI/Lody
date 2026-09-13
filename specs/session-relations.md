@@ -35,16 +35,26 @@ behavior for malformed or legacy nested children.
 
 ## Operation contract
 
-| Operation                           | Targets                                                                         | Metadata readiness                                                             |
-| ----------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Archive a Session                   | The selected Session and direct children whose `parentSessionId` equals its id. | Target discovery reads the repository metadata index directly.                 |
-| Restore a Session                   | The selected Session and the same direct children.                              | Target discovery must use complete metadata.                                   |
-| Permanently delete an archived root | The selected Session and the same direct children.                              | Reject before mutation unless the metadata set used for discovery is complete. |
-| Delete exact Session ids            | Exactly the ids supplied by the caller.                                         | Must not wait for global metadata hydration or discover additional Sessions.   |
+| Operation                           | Targets                                                                         | Metadata readiness                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Archive a Session                   | The selected Session and direct children whose `parentSessionId` equals its id. | Target discovery reads the repository metadata snapshot observed by the action. |
+| Restore a Session                   | The selected Session and the same direct children.                              | Target discovery must use complete metadata.                                    |
+| Permanently delete an archived root | The selected Session and the same direct children.                              | Reject before mutation unless the metadata set used for discovery is complete.  |
+| Delete exact Session ids            | Exactly the ids supplied by the caller.                                         | Must not wait for global metadata hydration or discover additional Sessions.    |
 
 Every side effect follows the same target set as the state or document operation.
 Terminal closure, machine commands and queues, launch-config removal, and worktree
 cleanup must not affect a Session excluded from the operation targets.
+
+Archive metadata writes have no cross-document transaction. Direct children must be
+written before the root, making the root the final commit point. A failed write must
+attempt to compensate every attempted target to its pre-action lifecycle state. Root
+compensation precedes child compensation; if it fails, children remain archived and the
+write and rollback errors are surfaced together, preserving the root-archived
+implication. Terminal closure starts only after all metadata writes succeed; a metadata
+failure therefore closes no target terminal. Once the first write starts, the action
+remains pinned to the captured workspace runtime until the write set commits or
+compensation finishes.
 
 Exact deletion exists for compensation and explicit cleanup where the caller already
 knows the complete set, including a partially created child, an empty child Tab, or a
@@ -79,8 +89,10 @@ remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
 Archive reads the repository metadata index for every action, so an interactive root
 does not depend on the client projection having discovered its direct children. The
 query must complete before the first archive write, and query failure aborts the action
-without mutation. Restore still discovers direct children from the client metadata
-cache and therefore retains the cold-start implementation gap.
+without mutation. Its result is complete for the repository snapshot observed by that
+query; it is not a transaction boundary and does not include children created after the
+snapshot. Restore still discovers direct children from the client metadata cache and
+therefore retains the cold-start implementation gap.
 
 ## Evidence
 

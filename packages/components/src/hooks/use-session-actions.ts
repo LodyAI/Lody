@@ -246,7 +246,7 @@ function getArchiveStateTargets(
   ];
 }
 
-async function listCompleteSessionMetadata(runtime: WorkspaceRuntime): Promise<SessionMeta[]> {
+async function listSessionMetadataSnapshot(runtime: WorkspaceRuntime): Promise<SessionMeta[]> {
   const entries = await listDocMetaEntries(runtime.repo);
   return entries.flatMap((entry) => {
     if (
@@ -258,6 +258,76 @@ async function listCompleteSessionMetadata(runtime: WorkspaceRuntime): Promise<S
     }
     return [withDerivedDocMetaId(entry.docId, entry.meta) as SessionMeta];
   });
+}
+
+async function writeArchiveStateFailureSafe(
+  runtime: WorkspaceRuntime,
+  rootSessionId: SessionId,
+  archiveTargets: readonly SessionMeta[]
+): Promise<void> {
+  const root = archiveTargets.find((session) => session.id === rootSessionId);
+  if (!root) {
+    throw new Error(`Archive root metadata missing for ${rootSessionId}`);
+  }
+
+  // There is no cross-document transaction in LoroRepo. Commit children before
+  // the root so a later child failure can never leave the root archived while
+  // that child remains active. The root is the final commit point.
+  const writeTargets = [...archiveTargets.filter((session) => session.id !== rootSessionId), root];
+  const attemptedTargets: SessionMeta[] = [];
+
+  try {
+    for (const session of writeTargets) {
+      // Include the current target before awaiting: a rejected writer call may
+      // have accepted a local mutation before surfacing a later failure.
+      attemptedTargets.push(session);
+      await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      } as Partial<SessionMeta>);
+    }
+  } catch (archiveError) {
+    const rollbackErrors: unknown[] = [];
+    const attemptedRoot = attemptedTargets.find((session) => session.id === rootSessionId);
+
+    // Restore the root first when its final write was attempted. Only then may
+    // children be restored, preserving root-archived => children-archived even
+    // if a compensating child write also fails.
+    if (attemptedRoot) {
+      try {
+        await runtime.writer.upsertDocMeta(getSessionRoomId(attemptedRoot.id), {
+          isArchived: attemptedRoot.isArchived,
+          status: attemptedRoot.status,
+        } as Partial<SessionMeta>);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+
+    if (!attemptedRoot || rollbackErrors.length === 0) {
+      for (const session of [...attemptedTargets].reverse()) {
+        if (session.id === rootSessionId) continue;
+        try {
+          await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+            isArchived: session.isArchived,
+            status: session.status,
+          } as Partial<SessionMeta>);
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+    }
+
+    if (rollbackErrors.length > 0) {
+      const failure = new Error(
+        `Archive failed and ${rollbackErrors.length} lifecycle rollback(s) also failed`,
+        { cause: archiveError }
+      );
+      Object.assign(failure, { rollbackErrors });
+      throw failure;
+    }
+    throw archiveError;
+  }
 }
 
 async function assertArchivedLocalProjectCanRestore(
@@ -1183,15 +1253,15 @@ export function useSessionActions(): SessionActions {
       }
 
       const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMetadata = await listCompleteSessionMetadata(runtime);
+      const sessionMetadata = await listSessionMetadataSnapshot(runtime);
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed while loading session metadata');
       }
       const repoMeta = sessionMetadata.find((session) => session.id === sessionId);
-      // The complete repository index is preferred, but it can lag a Session
+      // The repository snapshot is preferred, but it can lag a Session
       // the UI already renders. The archive write below is an idempotent patch,
       // so rendered root metadata is enough to proceed. Descendant discovery
-      // still comes exclusively from the complete index above.
+      // still comes exclusively from the queried snapshot above.
       const sessionMeta =
         repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
       if (!sessionMeta) {
@@ -1203,16 +1273,25 @@ export function useSessionActions(): SessionActions {
       });
 
       const archiveTargets = getArchiveStateTargets(sessionId, sessionMeta, sessionMetadata);
-      for (const session of archiveTargets) {
-        if (typeof window !== 'undefined') {
-          sendIpc('terminal.closeSession', { sessionId: session.id });
+      // The first write is the commit boundary. From here the captured runtime
+      // must finish the old-workspace write set or compensate it; switching the
+      // active workspace cannot redirect or cancel an in-flight commit.
+      await writeArchiveStateFailureSafe(runtime, sessionId, archiveTargets);
+
+      // Metadata is authoritative. Close terminals only after every lifecycle
+      // target has committed so a failed archive has no partial terminal side
+      // effects. IPC cleanup is best effort and must not hide a durable commit.
+      if (typeof window !== 'undefined') {
+        for (const session of archiveTargets) {
+          try {
+            sendIpc('terminal.closeSession', { sessionId: session.id });
+          } catch (error) {
+            log('[session-archive] terminal close failed after metadata commit', {
+              sessionId: session.id,
+              error,
+            });
+          }
         }
-        // The archived state is the whole request: the owning machine observes
-        // it, releases the runtime, and reconciles the worktree directory.
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
-          isArchived: true,
-          status: SessionStatusFactory.idle(),
-        } as Partial<SessionMeta>);
       }
       log('[session-archive] archived', {
         sessionId,

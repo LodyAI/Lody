@@ -3,6 +3,7 @@
 import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
+import { LoroRepo } from 'loro-repo';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
@@ -1186,40 +1187,185 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('discovers child tabs from complete metadata before the UI cache hydrates', async () => {
+  it('discovers child tabs through the production metadata scan before the UI cache hydrates', async () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('archive', false);
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
+    const repo = await LoroRepo.create({});
+
+    try {
+      for (const session of Object.values(sessionMetaCache)) {
+        await repo.upsertDocMeta(getSessionRoomId(session.id), session);
+      }
+      const runtime = createRuntime({ repo });
+      const actions = await renderActions(runtime, {
+        docMetaCacheReady: false,
+        sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+      });
+      sendIpcMock.mockClear();
+
+      await actions.archiveSession(rootSession.id);
+
+      for (const session of [rootSession, tabSession]) {
+        await expect(repo.getDocMeta(getSessionRoomId(session.id))).resolves.toMatchObject({
+          meta: { isArchived: true, status: { type: 'idle' } },
+        });
+      }
+      for (const session of [openedSession, openedFromTabSession]) {
+        await expect(repo.getDocMeta(getSessionRoomId(session.id))).resolves.toMatchObject({
+          meta: { isArchived: false },
+        });
+      }
+
+      expect(sendIpcMock.mock.calls).toEqual([
+        ['terminal.closeSession', { sessionId: rootSession.id }],
+        ['terminal.closeSession', { sessionId: tabSession.id }],
+      ]);
+      expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('keeps the root active and compensates child writes when a later child write fails', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'archive-child-failure',
+      false
+    );
+    const secondTabSession = {
+      ...tabSession,
+      id: 'archive-child-failure-tab-2' as SessionId,
+      createdAt: '2026-08-24T00:01:30.000Z',
+    } as SessionMeta;
+    tabSession.status = { type: 'running' };
+    secondTabSession.status = { type: 'requestPermission' };
+    const metaRepo = createSessionMetaRepo([...sessions, secondTabSession]);
     const runtime = createRuntime({ repo: metaRepo.repo });
+    const upsertDocMeta = vi.mocked(runtime.writer.upsertDocMeta);
+    let rejectedChildWrite = false;
+    upsertDocMeta.mockImplementation(async (roomId, patch) => {
+      if (
+        roomId === getSessionRoomId(secondTabSession.id) &&
+        patch.isArchived === true &&
+        !rejectedChildWrite
+      ) {
+        rejectedChildWrite = true;
+        throw new Error('child archive failed');
+      }
+      await metaRepo.repo.upsertDocMeta(roomId, patch);
+    });
     const actions = await renderActions(runtime, {
-      docMetaCacheReady: false,
       sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
     });
     sendIpcMock.mockClear();
 
-    await actions.archiveSession(rootSession.id);
+    await expect(actions.archiveSession(rootSession.id)).rejects.toThrow('child archive failed');
 
-    for (const session of [rootSession, tabSession]) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({
-        isArchived: true,
-        status: { type: 'idle' },
-      });
-    }
-    for (const session of [openedSession, openedFromTabSession]) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
-    }
-
-    expect(sendIpcMock.mock.calls).toEqual([
-      ['terminal.closeSession', { sessionId: rootSession.id }],
-      ['terminal.closeSession', { sessionId: tabSession.id }],
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({
+      isArchived: false,
+      status: { type: 'running' },
+    });
+    expect(metaRepo.getSession(secondTabSession.id)).toMatchObject({
+      isArchived: false,
+      status: { type: 'requestPermission' },
+    });
+    expect(upsertDocMeta.mock.calls.map(([roomId, patch]) => [roomId, patch.isArchived])).toEqual([
+      [getSessionRoomId(tabSession.id), true],
+      [getSessionRoomId(secondTabSession.id), true],
+      [getSessionRoomId(secondTabSession.id), false],
+      [getSessionRoomId(tabSession.id), false],
     ]);
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
-    for (const session of [rootSession, openedSession, openedFromTabSession]) {
-      expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
-    }
+    expect(sendIpcMock).not.toHaveBeenCalled();
   });
 
-  it('fails archive without writes when complete metadata cannot be read', async () => {
+  it('compensates children and closes no terminals when the final root write fails', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'archive-root-failure',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    rootSession.status = { type: 'running' };
+    tabSession.status = { type: 'requestPermission' };
+    metaRepo.setMeta(getSessionRoomId(rootSession.id), rootSession);
+    metaRepo.setMeta(getSessionRoomId(tabSession.id), tabSession);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const upsertDocMeta = vi.mocked(runtime.writer.upsertDocMeta);
+    let rejectedRootWrite = false;
+    upsertDocMeta.mockImplementation(async (roomId, patch) => {
+      if (
+        roomId === getSessionRoomId(rootSession.id) &&
+        patch.isArchived === true &&
+        !rejectedRootWrite
+      ) {
+        rejectedRootWrite = true;
+        throw new Error('root archive failed');
+      }
+      await metaRepo.repo.upsertDocMeta(roomId, patch);
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+    sendIpcMock.mockClear();
+
+    await expect(actions.archiveSession(rootSession.id)).rejects.toThrow('root archive failed');
+
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({
+      isArchived: false,
+      status: { type: 'running' },
+    });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({
+      isArchived: false,
+      status: { type: 'requestPermission' },
+    });
+    expect(upsertDocMeta.mock.calls.map(([roomId, patch]) => [roomId, patch.isArchived])).toEqual([
+      [getSessionRoomId(tabSession.id), true],
+      [getSessionRoomId(rootSession.id), true],
+      [getSessionRoomId(rootSession.id), false],
+      [getSessionRoomId(tabSession.id), false],
+    ]);
+    expect(sendIpcMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps children archived when an accepted root write and its compensation both fail', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'archive-root-rollback-failure',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const upsertDocMeta = vi.mocked(runtime.writer.upsertDocMeta);
+    upsertDocMeta.mockImplementation(async (roomId, patch) => {
+      if (roomId === getSessionRoomId(rootSession.id) && patch.isArchived === false) {
+        throw new Error('root rollback failed');
+      }
+      await metaRepo.repo.upsertDocMeta(roomId, patch);
+      if (roomId === getSessionRoomId(rootSession.id) && patch.isArchived === true) {
+        throw new Error('root archive acknowledgement failed');
+      }
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+    sendIpcMock.mockClear();
+
+    const failure = await actions.archiveSession(rootSession.id).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      message: 'Archive failed and 1 lifecycle rollback(s) also failed',
+      cause: { message: 'root archive acknowledgement failed' },
+      rollbackErrors: [{ message: 'root rollback failed' }],
+    });
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: true });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({ isArchived: true });
+    expect(upsertDocMeta.mock.calls.map(([roomId, patch]) => [roomId, patch.isArchived])).toEqual([
+      [getSessionRoomId(tabSession.id), true],
+      [getSessionRoomId(rootSession.id), true],
+      [getSessionRoomId(rootSession.id), false],
+    ]);
+    expect(sendIpcMock).not.toHaveBeenCalled();
+  });
+
+  it('fails archive without writes when the repository metadata snapshot cannot be read', async () => {
     const sessionId = 'archive-scan-failure' as SessionId;
     const sessionMeta = {
       id: sessionId,
@@ -1284,6 +1430,50 @@ describe('useSessionActions', () => {
 
     await archiveRejection;
     expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('finishes the captured workspace commit after the first archive write starts', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'archive-runtime-commit',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const jotaiStore = createStore();
+    const nextRuntimeUpsert = vi.fn(async () => undefined);
+    const nextRuntime = createRuntime({
+      workspaceId: 'workspace-2' as WorkspaceId,
+      repo: {
+        upsertDocMeta: nextRuntimeUpsert,
+      } as unknown as WorkspaceRuntime['repo'],
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const upsertDocMeta = vi.mocked(runtime.writer.upsertDocMeta);
+    let archiveWriteCount = 0;
+    upsertDocMeta.mockImplementation(async (roomId, patch) => {
+      await metaRepo.repo.upsertDocMeta(roomId, patch);
+      if (patch.isArchived === true && ++archiveWriteCount === 1) {
+        jotaiStore.set(runtimeAtom, nextRuntime);
+      }
+    });
+    const actions = await renderActions(runtime, {
+      jotaiStore,
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+    sendIpcMock.mockClear();
+
+    await actions.archiveSession(rootSession.id);
+
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: true });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({ isArchived: true });
+    expect(upsertDocMeta.mock.calls.map(([roomId, patch]) => [roomId, patch.isArchived])).toEqual([
+      [getSessionRoomId(tabSession.id), true],
+      [getSessionRoomId(rootSession.id), true],
+    ]);
+    expect(nextRuntimeUpsert).not.toHaveBeenCalled();
+    expect(sendIpcMock.mock.calls).toEqual([
+      ['terminal.closeSession', { sessionId: rootSession.id }],
+      ['terminal.closeSession', { sessionId: tabSession.id }],
+    ]);
   });
 
   it('restores child tabs without restoring independently opened session workspaces', async () => {
