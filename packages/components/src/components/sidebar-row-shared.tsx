@@ -131,7 +131,7 @@ function MaskedPrCiIcon({
  * its ├/└ connectors and the nesting silently disappeared exactly on the rows a
  * user watches most.
  */
-function SessionRowStatusIndicator({
+export function SessionRowStatusIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,

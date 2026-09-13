@@ -6,6 +6,7 @@ import {
   buildChildSessionsByParent,
   buildSessionListRows,
   getEffectiveLatestMessageAt,
+  getEffectiveProjectActivitySummary,
   getEffectiveSessionActivitySummary,
 } from '../src/components/sessions/session-list-rows';
 
@@ -207,6 +208,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const activity = getEffectiveSessionActivitySummary(parent, map, liveSessionStatuses);
 
     expect(activity).toMatchObject({
+      status: 'requestPermission',
       isWorking: true,
       isWaitingPermission: true,
       hasUnreadMessages: true,
@@ -272,10 +274,39 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     const map = buildChildSessionsByParent([parent, archivedChild]);
 
     expect(getEffectiveSessionActivitySummary(parent, map)).toEqual({
+      status: null,
       isWorking: false,
       isWaitingPermission: false,
       hasUnreadMessages: false,
       latestMessageAt: parent.lastMessageAt,
+    });
+  });
+});
+
+describe('getEffectiveProjectActivitySummary', () => {
+  test('counts unique live Sessions and child Tabs, preserving unread alongside active', () => {
+    const parent = makeSession({
+      id: 'parent',
+      isPinned: true,
+      lastMessageAt: 2_000,
+      lastReadAt: 1_000,
+    });
+    const child = makeSession({ id: 'child', parentSessionId: parent.id });
+    const archived = makeSession({ id: 'archived', parentSessionId: parent.id, isArchived: true });
+    const stale = makeSession({ id: 'stale', status: { type: 'running' } });
+    const live = new Map<string, SessionStatus>([
+      [parent.id, { type: 'running' }],
+      [child.id, { type: 'requestPermission' }],
+      [archived.id, { type: 'running' }],
+    ]);
+    const children = buildChildSessionsByParent([parent, child, archived]);
+    expect(
+      getEffectiveProjectActivitySummary([parent, parent, child, stale, archived], children, live)
+    ).toEqual({ permission: 1, unread: 1, active: 1 });
+    expect(getEffectiveProjectActivitySummary([stale])).toEqual({
+      permission: 0,
+      unread: 0,
+      active: 0,
     });
   });
 });

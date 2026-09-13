@@ -13,6 +13,7 @@ import {
   parseGitHubPrNumber,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
+import { getProjectActivityCounts } from '@/components/project-activity';
 import type { SessionListRow, SessionListRowOwner } from '@/components/session-list';
 import { getLineChangeDeltaForScope, type LineChangeScope } from '@/lib/file-change-category';
 
@@ -180,11 +181,26 @@ function sessionHasUnreadMessages(session: SessionMeta): boolean {
 }
 
 export type EffectiveSessionActivitySummary = {
+  status: Exclude<SessionStatus['type'], 'idle'> | null;
   isWorking: boolean;
   isWaitingPermission: boolean;
   hasUnreadMessages: boolean;
   latestMessageAt: number;
 };
+
+type ActiveSessionStatus = EffectiveSessionActivitySummary['status'];
+
+function mergeActiveSessionStatus(
+  current: ActiveSessionStatus,
+  candidate: SessionStatus | null | undefined
+): ActiveSessionStatus {
+  if (!candidate || candidate.type === 'idle') return current;
+  if (candidate.type === 'requestPermission' || current === 'requestPermission') {
+    return 'requestPermission';
+  }
+  if (candidate.type === 'running' || current === 'running') return 'running';
+  return 'initializing';
+}
 
 export function getEffectiveSessionActivitySummary(
   session: SessionMeta,
@@ -195,8 +211,8 @@ export function getEffectiveSessionActivitySummary(
   // Sidebar working state is live presence only. A goal may remain active while
   // quiescent, and meta dispatch pointers can be stale in this client — deriving
   // a spinner from either shows sessions as working long after the prompt finished.
+  let status = mergeActiveSessionStatus(null, liveStatus);
   let isWorking = liveStatus != null;
-  let isWaitingPermission = liveStatus?.type === 'requestPermission';
   let hasUnreadMessages = sessionHasUnreadMessages(session);
   let latestMessageAt =
     parseTimestamp(session.lastMessageAt) ?? parseTimestamp(session.createdAt) ?? 0;
@@ -205,12 +221,8 @@ export function getEffectiveSessionActivitySummary(
   if (children) {
     for (const child of children) {
       const childLiveStatus = liveSessionStatuses?.get(child.id);
-      if (!isWorking && childLiveStatus != null) {
-        isWorking = true;
-      }
-      if (!isWaitingPermission && childLiveStatus?.type === 'requestPermission') {
-        isWaitingPermission = true;
-      }
+      status = mergeActiveSessionStatus(status, childLiveStatus);
+      if (childLiveStatus != null) isWorking = true;
       if (!hasUnreadMessages && sessionHasUnreadMessages(child)) {
         hasUnreadMessages = true;
       }
@@ -222,11 +234,36 @@ export function getEffectiveSessionActivitySummary(
   }
 
   return {
+    status,
     isWorking,
-    isWaitingPermission,
+    isWaitingPermission: status === 'requestPermission',
     hasUnreadMessages,
     latestMessageAt,
   };
+}
+
+/** Count each Session/child Tab once per status; unread can coexist with live work. */
+export function getEffectiveProjectActivitySummary(
+  sessions: SessionMeta[],
+  childSessionsByParent?: Map<string, SessionMeta[]>,
+  liveSessionStatuses?: ReadonlyMap<string, SessionStatus>
+) {
+  const candidates = new Map(
+    sessions
+      .flatMap((session) => [session, ...(childSessionsByParent?.get(session.id) ?? [])])
+      .filter((session) => !session.isArchived)
+      .map((session) => [session.id, session] as const)
+  );
+  return getProjectActivityCounts(
+    [...candidates.values()].map((session) => {
+      const status = liveSessionStatuses?.get(session.id)?.type;
+      return {
+        isWaitingPermission: status === 'requestPermission',
+        isWorking: status === 'running' || status === 'initializing',
+        hasUnreadMessages: sessionHasUnreadMessages(session),
+      };
+    })
+  );
 }
 
 type LatestPullRequestInfo = {
@@ -367,17 +404,13 @@ function aggregateChildStatus(
       ? activity.latestMessageAt
       : task.latestMessageAt;
 
-  if (
-    activity.isWorking === task.isWorking &&
-    activity.isWaitingPermission === task.isWaitingPermission &&
-    activity.hasUnreadMessages === task.hasUnreadMessages &&
-    latestMessageAt === task.latestMessageAt
-  ) {
-    return task;
-  }
-
   return {
     ...task,
+    projectActivityCounts: getEffectiveProjectActivitySummary(
+      [session],
+      childSessionsByParent,
+      liveSessionStatuses
+    ),
     isWorking: activity.isWorking,
     isWaitingPermission: activity.isWaitingPermission,
     hasUnreadMessages: activity.hasUnreadMessages,

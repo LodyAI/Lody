@@ -1,3 +1,5 @@
+import { getProjectActivityCounts, type ProjectActivityCounts } from './project-activity';
+import { getProjectActivityLabel, ProjectActivityIndicator } from './project-activity-indicator';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -46,7 +48,7 @@ import {
 } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -145,6 +147,8 @@ export type SessionListRow = {
   addedLines: number;
   deletedLines: number;
   isWorking: boolean;
+  /** Exact parent + child-Tab counts, before row status takes precedence. */
+  projectActivityCounts?: ProjectActivityCounts;
   hasUnreadMessages: boolean;
   isOffline: boolean;
   isWaitingPermission: boolean;
@@ -177,6 +181,8 @@ export type SessionListPullRequestOpen = {
 
 export type SessionListProps = {
   sessions: SessionListRow[];
+  /** Aggregate source before pinned rows are moved into their own section. */
+  activitySessions?: SessionListRow[];
   repos: SessionListRepoState[];
   isLoading?: boolean;
   chatsCollapsed?: boolean;
@@ -229,6 +235,7 @@ export type SessionRowGroup = {
   repoFullName: string | null;
   collapsed: boolean;
   sessions: SessionListRow[];
+  activityCounts?: ProjectActivityCounts;
 };
 
 export const MAX_VISIBLE_SESSIONS = 5;
@@ -338,7 +345,8 @@ export function buildGroups(
   sessions: SessionListRow[],
   repos: SessionListRepoState[],
   chatsCollapsed: boolean,
-  chatsLabel: string = 'Chats'
+  chatsLabel: string = 'Chats',
+  activitySessions: SessionListRow[] = sessions
 ): SessionRowGroup[] {
   const sessionsByRepo = new Map<string, SessionListRow[]>();
   const onlyChats: SessionListRow[] = [];
@@ -354,6 +362,14 @@ export function buildGroups(
     else sessionsByRepo.set(repoFullName, [session]);
   }
 
+  const activityByRepo = new Map<string, SessionListRow[]>();
+  for (const session of activitySessions) {
+    const repo = normalizeRepoFullName(session.repoFullName);
+    if (!repo) continue;
+    const list = activityByRepo.get(repo);
+    if (list) list.push(session);
+    else activityByRepo.set(repo, [session]);
+  }
   const ordered: SessionRowGroup[] = [];
 
   if (onlyChats.length) {
@@ -380,6 +396,7 @@ export function buildGroups(
       kind: 'repo',
       repoFullName: repoName,
       collapsed: repo.collapsed,
+      activityCounts: getProjectActivityCounts(activityByRepo.get(repoName) ?? []),
       sessions: sortSessionRowsByLatestMessage(repoSessions),
     });
   }
@@ -569,6 +586,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const { t } = useTranslation();
   const moreActionsLabel = t('sessions.moreActions', 'More actions');
   const showGroupHeaderIcon = group.kind === 'repo';
+  const groupActivity = group.activityCounts ?? getProjectActivityCounts(group.sessions);
+  const groupIndicatorLabel =
+    group.kind === 'repo' && group.collapsed ? getProjectActivityLabel(groupActivity, t) : '';
   const [renameTarget, setRenameTarget] = useState<RenameSessionDialogTarget | null>(null);
   const beginRename = useCallback((sessionId: string, currentTitle: string) => {
     setRenameTarget({ sessionId: sessionId as SessionId, initialTitle: currentTitle });
@@ -748,6 +768,21 @@ const SessionGroupSection = memo(function SessionGroupSection({
             />
           ) : null}
           <span className="flex-1" aria-hidden="true" />
+          {groupIndicatorLabel ? (
+            <Tooltip delayDuration={500}>
+              <TooltipTrigger asChild>
+                <span
+                  data-sidebar-repo-activity=""
+                  className="shrink-0"
+                  role="img"
+                  aria-label={groupIndicatorLabel}
+                >
+                  <ProjectActivityIndicator counts={groupActivity} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{groupIndicatorLabel}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
 
         {resolvedTrailingContent}
@@ -1378,6 +1413,7 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
 
 export const SessionList = memo(function SessionList({
   sessions,
+  activitySessions,
   repos,
   isLoading = false,
   chatsCollapsed = false,
@@ -1430,8 +1466,8 @@ export const SessionList = memo(function SessionList({
   const isMobile = useIsMobile();
   const chatsGroupLabel = t('sessions.chats', 'Chats');
   const groups = useMemo(
-    () => buildGroups(sessions, repos, chatsCollapsed, chatsGroupLabel),
-    [sessions, repos, chatsCollapsed, chatsGroupLabel]
+    () => buildGroups(sessions, repos, chatsCollapsed, chatsGroupLabel, activitySessions),
+    [sessions, repos, chatsCollapsed, chatsGroupLabel, activitySessions]
   );
   const [whetherShowFullListByGroup, setWhetherShowFullListByGroup] =
     useAtom(sidebarShowFullListAtom);

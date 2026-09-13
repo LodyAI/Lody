@@ -14,6 +14,10 @@ explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
 
+`project-activity.ts` owns aggregate counts and the two-item selection;
+`project-activity-indicator.tsx` shares rendering and accessible labels between
+local-project and GitHub headers. [Draft contract](../../../../specs/collapsed-project-activity.zh.md).
+
 ## Entry points and layout
 
 - Sidebar Search, immediately below New Chat, opens the shared command palette
