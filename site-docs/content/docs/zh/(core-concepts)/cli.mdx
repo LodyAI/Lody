@@ -171,6 +171,16 @@ Project 命令用于管理本地项目注册。注册之后，session 创建时�
 | `lody project list`       | 列出已注册的本地项目 | `lody project list --help`   |
 | `lody project delete`     | 删除已注册的本地项目 | `lody project delete --help` |
 
+不带 selector 时，`lody project list` 会通过本机 daemon 读取当前机器。如果客户端没有运行
+daemon，但需要查看 workspace 内某台机器注册的项目，可以使用 cloud catalog 路径：
+
+```bash
+lody project list --workspace <id|slug|name> [--machine <id|name>] --json
+```
+
+省略 `--machine` 时，Lody 会选择当前 CLI 登录所关联的机器。结果只包含已认证用户有权请求的
+机器和本地项目。开源 local platform 不执行 cloud I/O，因此不支持远程列出项目。
+
 精确参数请直接查看：
 
 ```bash

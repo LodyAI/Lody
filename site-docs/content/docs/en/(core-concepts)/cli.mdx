@@ -186,6 +186,18 @@ Project commands manage local-project registrations that can later be selected i
 | `lody project list`       | List registered local projects     | `lody project list --help`   |
 | `lody project delete`     | Delete registered local projects   | `lody project delete --help` |
 
+Without selectors, `lody project list` reads the current machine through its local daemon. To
+inspect projects registered on a workspace machine without running a daemon on the client, use the
+cloud catalog path:
+
+```bash
+lody project list --workspace <id|slug|name> [--machine <id|name>] --json
+```
+
+If `--machine` is omitted, Lody selects the machine associated with the current CLI login. The
+result includes only machines and local projects the authenticated user may request. Remote listing
+is unavailable in the open-source local platform because that mode performs no cloud I/O.
+
 For the exact current flags, always check the built-in help:
 
 ```bash
