@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   DEFAULT_SPARKLE_APPCAST_URL,
   resolveSparkleAddonPath,
@@ -11,19 +13,19 @@ import {
   sparklePackageJsonPathFromModuleEntry
 } from './app-updater-sparkle-policy.ts'
 
+const require = createRequire(import.meta.url)
+
+async function loadElectronBuilderConfig() {
+  const electronBuilderRequire = createRequire(require.resolve('electron-builder/package.json'))
+  const { getConfig } = electronBuilderRequire('app-builder-lib/out/util/config/config')
+  const projectDir = fileURLToPath(new URL('../../../', import.meta.url))
+  return getConfig(projectDir, 'electron-builder.yml', null)
+}
+
 void test('keeps OSS local updater off unless explicitly force-enabled', () => {
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: false }),
-    false
-  )
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: true }),
-    true
-  )
-  assert.equal(
-    shouldConstructUpdaterEnabled({ localPlatform: false, forceEnable: false }),
-    true
-  )
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: false }), false)
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: true, forceEnable: true }), true)
+  assert.equal(shouldConstructUpdaterEnabled({ localPlatform: false, forceEnable: false }), true)
 })
 
 void test('uses Sparkle only for packaged macOS when the native bridge is available', () => {
@@ -101,6 +103,19 @@ void test('electron-builder SUFeedURL matches the runtime Sparkle appcast', asyn
     'sparkle-packaging.mjs must keep the same appcast URL'
   )
   assert.equal(yml.includes('SUPublicEDKey: SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER'), true)
+})
+
+void test('macOS packaging explains configured LAN access without declaring Bonjour', async () => {
+  const config = await loadElectronBuilderConfig()
+  const extendInfo = config.mac?.extendInfo
+
+  assert.equal(config.appId, 'dev.loro.lody.oss')
+  assert.equal(config.productName, 'Lody OSS')
+  assert.equal(
+    extendInfo?.NSLocalNetworkUsageDescription,
+    'Lody connects to local network services that you configure.'
+  )
+  assert.equal(Object.hasOwn(extendInfo ?? {}, 'NSBonjourServices'), false)
 })
 
 void test('prefers the unpacked native addon next to the resolved package', () => {

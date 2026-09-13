@@ -103,6 +103,9 @@ contracts, and window/renderer integration rules live in
 - macOS releases must be signed and notarized. `generate_appcast` refuses archives
   that fail `codesign --verify --deep --strict`, and Gatekeeper needs a notarized
   first-install DMG. Windows and Linux do not have this constraint.
+- The public OSS macOS app declares `NSLocalNetworkUsageDescription` for
+  user-configured LAN endpoints. Do not add `NSBonjourServices` unless that
+  composition starts browsing for or registering specific Bonjour service types.
 - `snap` stays in the target list for local builds and needs snapcraft on the machine.
 
 ## Verification
