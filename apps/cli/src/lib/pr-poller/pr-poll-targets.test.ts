@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import {
   computeDiscoveryFingerprint,
+  computeTerminalVerificationFingerprint,
   enumeratePrPollTargets,
   getCurrentPullRequest,
   resolveDiscoveryBranch,
@@ -51,7 +52,7 @@ describe('enumeratePrPollTargets', () => {
     ]);
   });
 
-  it('excludes terminal PRs (merged/closed) from status targets', () => {
+  it('projects only the current terminal PR as an exact verification target', () => {
     const [entry] = enumeratePrPollTargets([
       alive(
         's1',
@@ -64,7 +65,16 @@ describe('enumeratePrPollTargets', () => {
       ),
     ]);
 
-    expect(entry?.statusTargets).toEqual([]);
+    expect(entry?.statusTargets).toEqual([
+      {
+        url: 'https://github.com/owner/repo/pull/2',
+        repoFullName: 'owner/repo',
+        prNumber: 2,
+        status: 'closed',
+        terminalVerificationFingerprint:
+          'owner/repo|pr|2|https://github.com/owner/repo/pull/2|closed',
+      },
+    ]);
   });
 
   it('skips PR entries whose url does not parse as a GitHub PR url', () => {
@@ -167,11 +177,7 @@ describe('enumeratePrPollTargets', () => {
       branchName: 'feat/x',
       pullRequests: [{ url: 'https://github.com/owner/repo/pull/9', status: 'merged' }],
     });
-    const fingerprint = computeDiscoveryFingerprint(
-      'owner/repo',
-      'feat/x',
-      'https://github.com/owner/repo/pull/9'
-    );
+    const fingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
 
     const [idle] = enumeratePrPollTargets([alive('s1', meta)], { s1: fingerprint });
     expect(idle?.discoveryTarget).toBeNull();
@@ -183,7 +189,6 @@ describe('enumeratePrPollTargets', () => {
     expect(resumed?.discoveryTarget).toEqual({
       repoFullName: 'owner/repo',
       branch: 'feat/next',
-      terminalCurrentUrl: 'https://github.com/owner/repo/pull/9',
     });
 
     // No recorded fingerprint (fresh daemon) → one discovery is still allowed.
@@ -191,11 +196,10 @@ describe('enumeratePrPollTargets', () => {
     expect(fresh?.discoveryTarget).toEqual({
       repoFullName: 'owner/repo',
       branch: 'feat/x',
-      terminalCurrentUrl: 'https://github.com/owner/repo/pull/9',
     });
   });
 
-  it('rechecks a newly terminal PR even when the branch was already discovered', () => {
+  it('exact-verifies a newly terminal PR even when branch discovery is already idle', () => {
     const branchFingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
     const [entry] = enumeratePrPollTargets(
       [
@@ -211,11 +215,46 @@ describe('enumeratePrPollTargets', () => {
       { s1: branchFingerprint }
     );
 
-    expect(entry?.discoveryTarget).toEqual({
-      repoFullName: 'owner/repo',
-      branch: 'feat/x',
-      terminalCurrentUrl: 'https://github.com/owner/repo/pull/649',
+    expect(entry?.discoveryTarget).toBeNull();
+    expect(entry?.statusTargets).toEqual([
+      {
+        repoFullName: 'owner/repo',
+        prNumber: 649,
+        status: 'closed',
+        terminalVerificationFingerprint:
+          'owner/repo|pr|649|https://github.com/owner/repo/pull/649|closed',
+        url: 'https://github.com/owner/repo/pull/649',
+      },
+    ]);
+  });
+
+  it('re-enables exact verification when the same terminal PR lifecycle changes', () => {
+    const mergedFingerprint = computeTerminalVerificationFingerprint(
+      'owner/repo',
+      649,
+      'https://github.com/owner/repo/pull/649',
+      'merged'
+    );
+    const meta = makeMeta({
+      pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'merged' }],
     });
+    const [verified] = enumeratePrPollTargets([alive('s1', meta)], {}, undefined, {
+      s1: mergedFingerprint,
+    });
+    expect(verified?.statusTargets).toEqual([]);
+
+    const [staleClosed] = enumeratePrPollTargets(
+      [
+        alive('s1', {
+          ...meta,
+          pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'closed' }],
+        }),
+      ],
+      {},
+      undefined,
+      { s1: mergedFingerprint }
+    );
+    expect(staleClosed?.statusTargets[0]?.status).toBe('closed');
   });
 
   it('does NOT fall back to baseBranch when branchName is missing', () => {

@@ -1,4 +1,4 @@
-# Verify terminal PR status before the reconciler becomes idle
+# Verify terminal PR status by exact identity
 
 Status: implemented
 Translation: current
@@ -9,42 +9,73 @@ Pull request: [#670](https://github.com/LodyAI/Lody/pull/670)
 
 ## Abstract
 
-The session sidebar could retain a red `closed` icon after GitHub had merged the same pull request,
-while the active conversation showed `merged` from a fresh details request. The local reconciler
-previously treated an already-discovered branch plus any terminal metadata as permanently idle.
-Terminal discovery generations now include the current PR URL, forcing one final authoritative
-query before becoming idle again; this costs one request per terminal transition and avoids
-continuous terminal polling.
+The session sidebar could retain `closed` after GitHub had merged the same pull request because
+hosted fan-out may overwrite lifecycle metadata out of order. Terminal reconciliation now queries
+the known current PR through exact `pullRequest(number:)` identity and persists a generation that
+includes repository, URL/number, and stored lifecycle. A lifecycle overwrite therefore re-enables
+verification; `closed` requires two spaced matching observations to cover GitHub's post-merge
+read window, while `merged` is accepted immediately. Live hosted fan-out remains unexercised.
 
 ## Problem
 
-The compact sidebar reads `SessionMeta.pullRequests`, while the active conversation fetches GitHub
-details and derives lifecycle state from that response. PR #649 exposed a split view: the stored
-metadata was `closed`, but GitHub's authoritative state was `MERGED`. The reconciler could not repair
-the stored value because status targets intentionally include only open/draft PRs, and the existing
-branch discovery fingerprint suppressed discovery as soon as the stored current PR became terminal.
+The sidebar reads `SessionMeta.pullRequests`, while the active conversation fetches PR details from
+GitHub. PR #649 exposed a split view: stored metadata said `closed`, but GitHub reported `MERGED`.
+The hosted webhook-to-Streams path performs a blind single-PR overwrite, so the reconciler must also
+recover when an older `closed` update arrives after a local correction.
+
+A branch query cannot verify that contract. Discovery asks for the newest terminal PR with a given
+head branch; multiple historical PRs may share that branch, and a valid response may omit the
+stored current PR. Treating successful branch discovery as verification could stamp the wrong URL
+and make the stale lifecycle permanent.
 
 ## Decision
 
-Keep terminal PRs out of recurring status polling. Instead, define a terminal discovery generation
-as `(repository, branch, current PR URL)`, distinct from the ordinary `(repository, branch)`
-generation used while a PR is open or absent. The transition therefore creates a never-refreshed
-target that is due immediately. A successful discovery can correct `closed` to `merged` through the
-existing fresh-meta write-back path, then records the terminal fingerprint so subsequent passes stop.
+Branch discovery retains its `(repository, runtime branch)` identity and remains responsible only
+for association and current-PR ordering. The current terminal PR additionally produces an exact
+status target using its parsed repository and number. Its persisted verification generation is:
 
-Including lifecycle state itself in the fingerprint was rejected because correcting `closed` to
-`merged` would create a second generation and an unnecessary second request. Polling all terminal
-PRs on a fixed cadence was also rejected because terminal lifecycle is stable after this final
-verification.
+```text
+repository | PR number | PR URL | stored lifecycle
+```
 
-## Evidence and verification
+The scheduler records that generation only after the exact alias returned the identified PR and
+fresh-meta write-back completed. If the exact terminal alias is missing or malformed, branch
+discovery from the same owner cannot associate, write, or stamp its fingerprint because it lacks
+the current PR evidence needed for safe ranking.
 
-- `gh pr view 649 --repo LodyAI/Lody` reported `MERGED` while the captured sidebar rendered the
-  stored `closed` icon.
-- The target regression reproduces the suppression caused by an existing branch fingerprint.
-- The scheduler regression moves an associated PR from open to stored `closed`, returns `merged`
-  from branch discovery, verifies the metadata correction, and advances 45 minutes to prove that no
-  recurring terminal poll remains.
+A matching `merged` result completes verification immediately. The first matching `closed` result
+records target success but not the verification generation; a second result at the normal status
+cadence confirms a genuinely closed PR. If the second result is `merged`, write-back creates a new
+merged generation, which is exact-queried once before idling. Any later overwrite from `merged` to
+`closed` changes the generation and automatically repeats this process, including after restart.
 
-The test uses deterministic fake timers and a synthetic PR observation. It does not exercise the
-hosted webhook or make a live write to session metadata.
+Scheduling state lives in the disposable SQLite `terminal_verification_fingerprints` table. It is
+not a PR status cache; session metadata remains the write predicate and GitHub remains the source of
+the observation.
+
+## Alternatives
+
+Using the terminal branch-discovery result was rejected because its identity is a branch, not the
+known PR. Omitting lifecycle from the generation was rejected because a later same-URL overwrite
+would match the old fingerprint and never self-heal. Indefinite terminal polling was rejected in
+favor of one exact merged verification or two spaced exact closed observations.
+
+## Failure recovery and rollback
+
+Provider, parsing, association, or write-back failure leaves the generation unstamped and due for
+retry. Operators can disable the reconciler with `LODY_PR_POLL_DISABLED=1`, deploy the previous
+scheduler, and delete `terminal_verification_fingerprints` rows or the whole disposable
+`pr-poller-state.sqlite3`; deletion causes conservative re-polling and loses no PR status data.
+
+## Evidence and limits
+
+Deterministic target, scheduler, and SQLite tests cover exact alias construction, a different PR
+returned by branch discovery, `closed` followed by `merged`, a late same-URL `closed` overwrite,
+restart with a persisted merged generation, and two owners sharing one repository and branch while
+pointing at different terminal PRs. The full PR-poller suite exercises the real GraphQL batch
+builder and parsed-result contracts around these scheduler tests.
+
+The tests use synthetic observations and fake timers. A real merge timeline containing GitHub
+responses, hosted fan-out writes, reconciler logs, final session metadata, and SQLite row changes
+has not yet been captured; that operational evidence must be collected in a signed-in hosted
+environment and must not be represented as completed here.

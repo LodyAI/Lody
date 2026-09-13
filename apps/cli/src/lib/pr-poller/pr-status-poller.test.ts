@@ -35,6 +35,8 @@ function makeFakeStateStore(): PrPollerStateStore {
     deleteTarget: vi.fn(),
     upsertDiscoveryFingerprint: vi.fn(),
     deleteDiscoveryFingerprint: vi.fn(),
+    upsertTerminalVerificationFingerprint: vi.fn(),
+    deleteTerminalVerificationFingerprint: vi.fn(),
     close: vi.fn(),
   } as unknown as PrPollerStateStore;
 }

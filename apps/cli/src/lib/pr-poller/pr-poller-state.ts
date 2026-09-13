@@ -14,11 +14,11 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
  *
  * This holds ONLY disposable scheduling memory: per-scope quota, per-repo
  * error cooldowns, per-target last-success stamps, per-owner discovery
- * fingerprints. PR status itself is never cached here — fresh session meta
- * is the write predicate — so deleting the database is always safe (the
- * cost is one conservative re-poll round). Writes are row-level
- * write-through (no whole-state serialization) and best-effort: a failed
- * write must never break polling.
+ * fingerprints, and per-owner terminal-verification generations. PR status
+ * itself is never cached here — fresh session meta is the write predicate —
+ * so deleting the database is always safe (the cost is one conservative
+ * re-poll round). Writes are row-level write-through (no whole-state
+ * serialization) and best-effort: a failed write must never break polling.
  */
 
 export type PrPollScopeQuotaState = {
@@ -55,10 +55,21 @@ export type PrPollerState = {
    * fingerprint of the owner's last successful discovery (idle-terminal).
    */
   discoveryFingerprints: Record<string, string>;
+  /**
+   * Keyed by `${workspaceId}:${ownerSessionId}`; value identifies the exact
+   * PR URL/number and stored terminal lifecycle most recently verified.
+   */
+  terminalVerificationFingerprints: Record<string, string>;
 };
 
 export function emptyPrPollerState(): PrPollerState {
-  return { scopes: {}, repoCooldowns: {}, targets: {}, discoveryFingerprints: {} };
+  return {
+    scopes: {},
+    repoCooldowns: {},
+    targets: {},
+    discoveryFingerprints: {},
+    terminalVerificationFingerprints: {},
+  };
 }
 
 export function getDefaultPrPollerStateDbPath(): string {
@@ -127,15 +138,21 @@ export class PrPollerStateStore {
           lastErrorKind: row.last_error_kind,
         };
       }
-      for (const row of db
-        .prepare('SELECT key, last_success_at_ms FROM targets')
-        .all() as Array<{ key: string; last_success_at_ms: number }>) {
+      for (const row of db.prepare('SELECT key, last_success_at_ms FROM targets').all() as Array<{
+        key: string;
+        last_success_at_ms: number;
+      }>) {
         state.targets[row.key] = { lastSuccessAtMs: row.last_success_at_ms };
       }
       for (const row of db
         .prepare('SELECT key, fingerprint FROM discovery_fingerprints')
         .all() as Array<{ key: string; fingerprint: string }>) {
         state.discoveryFingerprints[row.key] = row.fingerprint;
+      }
+      for (const row of db
+        .prepare('SELECT key, fingerprint FROM terminal_verification_fingerprints')
+        .all() as Array<{ key: string; fingerprint: string }>) {
+        state.terminalVerificationFingerprints[row.key] = row.fingerprint;
       }
     } catch (error) {
       this.logger.debug(`[pr-poller] Failed to load state db: ${formatErrorMessage(error)}`);
@@ -189,6 +206,18 @@ export class PrPollerStateStore {
 
   deleteDiscoveryFingerprint(key: string): void {
     this.run('DELETE FROM discovery_fingerprints WHERE key = ?', [key]);
+  }
+
+  upsertTerminalVerificationFingerprint(key: string, fingerprint: string): void {
+    this.run(
+      `INSERT INTO terminal_verification_fingerprints (key, fingerprint) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET fingerprint = excluded.fingerprint`,
+      [key, fingerprint]
+    );
+  }
+
+  deleteTerminalVerificationFingerprint(key: string): void {
+    this.run('DELETE FROM terminal_verification_fingerprints WHERE key = ?', [key]);
   }
 
   close(): void {
@@ -273,6 +302,10 @@ export class PrPollerStateStore {
         key TEXT PRIMARY KEY,
         fingerprint TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS terminal_verification_fingerprints (
+        key TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL
+      );
     `);
     return db;
   }
@@ -298,6 +331,7 @@ export class PrPollerStateStore {
         repoCooldowns?: Record<string, PrPollRepoCooldownState>;
         targets?: Record<string, PrPollTargetState>;
         discoveryFingerprints?: Record<string, string>;
+        terminalVerificationFingerprints?: Record<string, string>;
       };
       const importAll = db.transaction(() => {
         for (const [scope, quota] of Object.entries(parsed.scopes ?? {})) {
@@ -338,6 +372,14 @@ export class PrPollerStateStore {
           if (typeof fingerprint !== 'string') continue;
           db.prepare(
             'INSERT OR IGNORE INTO discovery_fingerprints (key, fingerprint) VALUES (?, ?)'
+          ).run(key, fingerprint);
+        }
+        for (const [key, fingerprint] of Object.entries(
+          parsed.terminalVerificationFingerprints ?? {}
+        )) {
+          if (typeof fingerprint !== 'string') continue;
+          db.prepare(
+            'INSERT OR IGNORE INTO terminal_verification_fingerprints (key, fingerprint) VALUES (?, ?)'
           ).run(key, fingerprint);
         }
       });

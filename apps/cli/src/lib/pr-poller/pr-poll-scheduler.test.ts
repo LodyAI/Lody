@@ -13,6 +13,7 @@ import type { ResolvedGitHubCredential } from './github-credential-resolver';
 import { loadPrPollerConfig, type PrPollerConfig } from './pr-poller-config';
 import { INITIAL_SYNC_RETRY_MS, INITIAL_SYNC_WAIT_MS, PrPollScheduler } from './pr-poll-scheduler';
 import { emptyPrPollerState, type PrPollerState, type PrPollerStateStore } from './pr-poller-state';
+import { computeTerminalVerificationFingerprint } from './pr-poll-targets';
 import type {
   AssociatePullRequestArgs,
   PrPollMetaPatch,
@@ -59,15 +60,18 @@ function observation(prNumber: number, overrides: Partial<PrObservation> = {}): 
   };
 }
 
-/** Success outcome mirroring the request: every status PR open, empty valid discoveries. */
-function successOutcome(batch: PrPollBatchQuery): PrPollQueryOutcome {
+/** Success outcome mirroring the request, with optional exact-query lifecycle results. */
+function successOutcome(
+  batch: PrPollBatchQuery,
+  statusByPr: Readonly<Partial<Record<number, PrObservation['status']>>> = {}
+): PrPollQueryOutcome {
   const branches = Array.from(new Set(batch.discoveryAliases.map(({ branch }) => branch)));
   return {
     kind: 'success',
     batch: {
       pullRequests: batch.statusAliases.map(({ prNumber }) => ({
         prNumber,
-        pr: observation(prNumber),
+        pr: observation(prNumber, { status: statusByPr[prNumber] ?? 'open' }),
         ok: true,
       })),
       discoveries: branches.map((branch) => ({ branch, prs: [], ok: true })),
@@ -197,6 +201,12 @@ function makeStateStore(initial?: PrPollerState) {
     }),
     deleteDiscoveryFingerprint: vi.fn((key: string) => {
       delete stored.discoveryFingerprints[key];
+    }),
+    upsertTerminalVerificationFingerprint: vi.fn((key: string, fingerprint: string) => {
+      stored.terminalVerificationFingerprints[key] = fingerprint;
+    }),
+    deleteTerminalVerificationFingerprint: vi.fn((key: string) => {
+      delete stored.terminalVerificationFingerprints[key];
     }),
     close: vi.fn(),
   } as unknown as PrPollerStateStore;
@@ -776,13 +786,20 @@ describe('PrPollScheduler', () => {
     expect(meta?.pullRequests).toEqual([prMeta(11, 'merged')]);
     expect(meta?.pullRequestState?.['https://github.com/owner/repo/pull/11']).toBeUndefined();
 
-    // Terminal + no repository context → no further polling at all.
+    // The lifecycle transition creates one exact merged-generation lookup,
+    // even without branch/repository discovery context.
+    await advance(3_000);
+    expect(calls().at(-1)?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 11 }]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBe(
+      'owner/repo|pr|11|https://github.com/owner/repo/pull/11|merged'
+    );
+
     const callsAfterTerminal = calls().length;
     await advance(30 * 60_000);
     expect(calls()).toHaveLength(callsAfterTerminal);
   });
 
-  it('corrects an ambiguous closed event with one final terminal discovery pass', async () => {
+  it('corrects an ambiguous closed event through exact PR lookup, then verifies merged', async () => {
     const workspace = new FakeWorkspace('ws1');
     workspace.metas.set(
       sid('s1'),
@@ -797,34 +814,187 @@ describe('PrPollScheduler', () => {
     expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
 
     // Reproduce the screenshot: hosted metadata says `closed`, while GitHub's
-    // authoritative branch discovery reports that the same PR was merged.
+    // exact pullRequest(number:) result reports the same PR as merged.
     workspace.metas.set(sid('s1'), {
       ...workspace.metas.get(sid('s1'))!,
       pullRequests: [prMeta(649, 'closed')],
     });
     workspace.notifyMetaChanged(sid('s1'));
     clientHandler = async (batch) => {
-      const outcome = successOutcome(batch);
-      if (outcome.kind === 'success') {
-        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
-          ...discovery,
-          prs: [observation(649, { status: 'merged' })],
-        }));
-      }
-      return outcome;
+      return successOutcome(batch, { 649: 'merged' });
     };
-    await advance(3_000);
+    await advance(5_000);
 
-    expect(calls()).toHaveLength(2);
-    expect(calls()[1]?.batch.statusAliases).toEqual([]);
+    expect(calls()).toHaveLength(3);
+    expect(calls()[1]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
+    expect(calls()[1]?.batch.discoveryAliases).toEqual([]);
+    expect(calls()[2]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'merged')]);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
-      'owner/repo|feat/x|terminal|https://github.com/owner/repo/pull/649'
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBe(
+      'owner/repo|pr|649|https://github.com/owner/repo/pull/649|merged'
     );
 
     const callsAfterVerification = calls().length;
     await advance(45 * 60_000);
     expect(calls()).toHaveLength(callsAfterVerification);
+  });
+
+  it('never treats another terminal PR from branch discovery as verification of the current PR', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+        pullRequests: [prMeta(649, 'closed')],
+      })
+    );
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success') {
+        outcome.batch.pullRequests = [{ prNumber: 649, pr: null, ok: true }];
+        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
+          ...discovery,
+          prs: [
+            observation(648, {
+              status: 'merged',
+              updatedAt: '2026-07-16T00:00:00Z',
+            }),
+          ],
+        }));
+      }
+      return outcome;
+    };
+
+    await startWith([workspace]);
+
+    expect(calls()[0]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
+    expect(calls()[0]?.batch.discoveryAliases).toHaveLength(2);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBeUndefined();
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'closed')]);
+  });
+
+  it('retries an initially closed exact result and converges when GitHub later reports merged', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'closed')] }));
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'closed' });
+
+    await startWith([workspace]);
+
+    expect(calls()).toHaveLength(1);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBeUndefined();
+
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'merged' });
+    await advance(config.lowStatusIntervalMs);
+    await advance(3_000);
+
+    expect(calls()).toHaveLength(3);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'merged')]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBe(
+      computeTerminalVerificationFingerprint(
+        'owner/repo',
+        649,
+        'https://github.com/owner/repo/pull/649',
+        'merged'
+      )
+    );
+  });
+
+  it('re-verifies after a late closed overwrite of an already verified merged PR', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'merged')] }));
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'merged' });
+    await startWith([workspace]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toContain('|merged');
+
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'closed')] }));
+    workspace.notifyMetaChanged(sid('s1'));
+    await advance(5_000);
+
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'merged')]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toContain('|merged');
+  });
+
+  it('clears terminal verification memory when a closed PR reopens', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'merged')] }));
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'merged' });
+    await startWith([workspace]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBeDefined();
+
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'open')] }));
+    workspace.notifyMetaChanged(sid('s1'));
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'open' });
+    await advance(3_000);
+
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBeUndefined();
+  });
+
+  it('repairs stale terminal metadata after restart despite a persisted prior fingerprint', async () => {
+    const mergedFingerprint = computeTerminalVerificationFingerprint(
+      'owner/repo',
+      649,
+      'https://github.com/owner/repo/pull/649',
+      'merged'
+    );
+    stateStore = makeStateStore({
+      ...emptyPrPollerState(),
+      terminalVerificationFingerprints: { 'ws1:s1': mergedFingerprint },
+    });
+    scheduler = makeScheduler();
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(649, 'closed')] }));
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'merged' });
+
+    await startWith([workspace]);
+    await advance(3_000);
+
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'merged')]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBe(
+      mergedFingerprint
+    );
+  });
+
+  it('verifies different terminal PRs independently for owners sharing one repo and branch', async () => {
+    stateStore = makeStateStore({
+      ...emptyPrPollerState(),
+      discoveryFingerprints: {
+        'ws1:s1': 'owner/repo|feat/x',
+        'ws1:s2': 'owner/repo|feat/x',
+      },
+    });
+    scheduler = makeScheduler();
+    const workspace = new FakeWorkspace('ws1');
+    const project = { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'];
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({ project, branchName: 'feat/x', pullRequests: [prMeta(649, 'closed')] })
+    );
+    workspace.metas.set(
+      sid('s2'),
+      makeMeta({ project, branchName: 'feat/x', pullRequests: [prMeta(650, 'merged')] })
+    );
+    clientHandler = async (batch) => successOutcome(batch, { 649: 'closed', 650: 'merged' });
+
+    await startWith([workspace]);
+
+    expect(calls()[0]?.batch.statusAliases.map(({ prNumber }) => prNumber)).toEqual([649, 650]);
+    expect(calls()[0]?.batch.discoveryAliases).toEqual([]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBeUndefined();
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s2']).toContain(
+      '/pull/650|merged'
+    );
+
+    await advance(config.lowStatusIntervalMs);
+    expect(calls()[1]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 649 }]);
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toContain(
+      '/pull/649|closed'
+    );
   });
 
   it('discovery associates through the backend endpoint, then writes meta', async () => {
@@ -877,7 +1047,7 @@ describe('PrPollScheduler', () => {
       })
     );
     clientHandler = async (batch) => {
-      const outcome = successOutcome(batch);
+      const outcome = successOutcome(batch, { 9: 'merged' });
       if (outcome.kind === 'success') {
         outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
           ...discovery,
@@ -916,7 +1086,7 @@ describe('PrPollScheduler', () => {
       })
     );
     clientHandler = async (batch) => {
-      const outcome = successOutcome(batch);
+      const outcome = successOutcome(batch, { 9: 'merged' });
       if (outcome.kind === 'success') {
         outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
           ...discovery,
@@ -945,11 +1115,13 @@ describe('PrPollScheduler', () => {
         pullRequests: [prMeta(9, 'merged')],
       })
     );
+    clientHandler = async (batch) => successOutcome(batch, { 9: 'merged' });
     await startWith([workspace]);
     // One discovery pass records the context fingerprint...
     expect(calls()).toHaveLength(1);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
-      'owner/repo|feat/x|terminal|https://github.com/owner/repo/pull/9'
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().terminalVerificationFingerprints['ws1:s1']).toBe(
+      'owner/repo|pr|9|https://github.com/owner/repo/pull/9|merged'
     );
 
     // ...after which the terminal owner consumes no quota at all.

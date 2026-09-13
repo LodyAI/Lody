@@ -1,4 +1,4 @@
-# Reconciler 休眠前校验 PR 终态
+# 按精确身份校验 PR 终态
 
 Status: implemented
 Translation: current
@@ -9,36 +9,65 @@ Pull request: [#670](https://github.com/LodyAI/Lody/pull/670)
 
 ## 摘要
 
-GitHub 已合并同一个 Pull Request 后，会话侧栏仍可能保留红色 `closed` 图标，而当前会话
-通过新鲜详情请求显示 `merged`。本地 reconciler 此前会把“分支已 discovery 且元数据为任意
-终态”直接视为永久休眠。现在，终态 discovery generation 会包含当前 PR URL，从而在再次
-休眠前强制执行一次权威查询；代价是每次进入终态增加一个请求，同时避免持续轮询终态 PR。
+托管 fan-out 可能乱序覆盖生命周期元数据，导致 GitHub 已合并同一个 Pull Request 后，会话
+侧栏仍显示 `closed`。终态 reconciliation 现在通过精确的 `pullRequest(number:)` 查询已知
+current PR，并持久化包含仓库、URL/number 和存储 lifecycle 的 generation。生命周期覆盖会
+因此重新启用校验；`closed` 需要两次有间隔的同值观察，以覆盖 GitHub 合并后的读取窗口，
+`merged` 则立即生效。真实托管 fan-out 尚未实测。
 
 ## 问题
 
-紧凑侧栏读取 `SessionMeta.pullRequests`，当前会话则请求 GitHub 详情，并从响应推导生命周期
-状态。PR #649 暴露了两个视图的分裂：存储元数据是 `closed`，GitHub 权威状态却是 `MERGED`。
-Reconciler 无法修复存储值，因为 status target 按设计只包含 open/draft PR，而且一旦存储中的
-当前 PR 进入终态，已有的分支 discovery fingerprint 会立即抑制后续 discovery。
+侧栏读取 `SessionMeta.pullRequests`，当前会话则从 GitHub 获取 PR 详情。PR #649 暴露了两个
+视图的分裂：存储元数据是 `closed`，GitHub 却报告 `MERGED`。托管 webhook 到 Streams 的
+路径会盲写单个 PR，因此较旧的 `closed` 更新在本地修正后才到达时，reconciler 也必须恢复。
+
+Branch query 无法证明这个约束。Discovery 按 head branch 查询最近的终态 PR；多个历史 PR
+可能共用同一 branch，而且有效响应也可能不包含存储中的 current PR。把 branch discovery
+成功当成校验成功，会给错误 URL 盖章，并让陈旧 lifecycle 永久保留。
 
 ## 决策
 
-继续让终态 PR 退出周期性 status 轮询；同时把终态 discovery generation 定义为
-`(repository, branch, current PR URL)`，使其区别于 PR 打开或不存在时使用的普通
-`(repository, branch)` generation。进入终态时会因此产生一个从未刷新、立即到期的新 target。
-成功的 discovery 可以沿用 fresh-meta 写回路径把 `closed` 校正为 `merged`，随后记录终态
-fingerprint，使后续轮询再次停止。
+Branch discovery 保留 `(repository, runtime branch)` 身份，只负责关联和 current PR 排序。
+当前终态 PR 会额外产生一个使用解析后仓库与 number 的精确 status target。持久化的校验
+generation 是：
 
-没有把生命周期状态本身放进 fingerprint，因为从 `closed` 校正到 `merged` 会生成第二个
-generation，并多发一次没有必要的请求。也没有按固定周期轮询所有终态 PR，因为完成这次
-最终校验后，终态生命周期应保持稳定。
+```text
+repository | PR number | PR URL | stored lifecycle
+```
 
-## 证据与验证
+只有 exact alias 返回指定 PR，且 fresh-meta 写回完成后，scheduler 才记录这个 generation。
+如果终态 exact alias 缺失或格式错误，同一个 owner 的 branch discovery 不能关联、写回或
+记录 fingerprint，因为它缺少安全排序所需的 current PR 证据。
 
-- `gh pr view 649 --repo LodyAI/Lody` 报告 `MERGED`，而截取的侧栏显示存储的 `closed` 图标。
-- Target 回归测试复现了已有分支 fingerprint 抑制校验的问题。
-- Scheduler 回归测试把已关联 PR 从 open 改为存储的 `closed`，让 branch discovery 返回
-  `merged`，验证元数据得到校正，并推进 45 分钟以证明不会残留周期性终态轮询。
+匹配的 `merged` 结果会立即完成校验。第一次匹配的 `closed` 只记录 target success，不记录
+verification generation；按正常 status cadence 得到第二次同值结果后，才确认 PR 确实关闭。
+如果第二次返回 `merged`，写回会产生新的 merged generation，并在休眠前再做一次 exact
+query。以后任何 `merged` 到 `closed` 的覆盖都会改变 generation，从而自动重复此流程，
+daemon 重启后同样成立。
 
-测试使用确定性的假时钟和合成 PR observation；它不会运行托管 webhook，也不会实时写入
-会话元数据。
+调度状态保存在可丢弃的 SQLite `terminal_verification_fingerprints` 表中。它不是 PR status
+缓存；Session metadata 仍是写入判据，GitHub 仍提供 observation。
+
+## 替代方案
+
+没有使用终态 branch-discovery 结果，因为它标识 branch，而不是已知 PR。没有从 generation
+中移除 lifecycle，因为同 URL 的迟到覆盖会命中旧 fingerprint，之后无法自愈。也没有无限
+轮询全部终态 PR，而是对 merged 做一次 exact 校验，或对 closed 做两次有间隔的 exact 观察。
+
+## 故障恢复与回滚
+
+Provider、解析、关联或写回失败时，不记录 generation，并保持到期重试。运维可设置
+`LODY_PR_POLL_DISABLED=1` 禁用 reconciler，部署旧 scheduler，并删除
+`terminal_verification_fingerprints` 表中的行或整个可丢弃的 `pr-poller-state.sqlite3`；删除只会
+触发保守重查，不会丢失 PR status 数据。
+
+## 证据与限制
+
+确定性的 target、scheduler 与 SQLite 测试覆盖 exact alias 构造、branch discovery 返回其他
+PR、先 `closed` 后 `merged`、同 URL 的迟到 `closed` 覆盖、携带 merged generation 重启，以及
+同仓库同 branch 的两个 owner 指向不同终态 PR。完整 PR-poller 测试套件还覆盖这些 scheduler
+测试周围的真实 GraphQL batch builder 与解析结果契约。
+
+测试使用合成 observation 和假时钟。包含 GitHub 响应、托管 fan-out 写入、reconciler 日志、
+最终 Session metadata 与 SQLite 行变化的真实 merge timeline 尚未采集；这项运维证据必须在
+已登录的托管环境中取得，不能在此声称已经完成。

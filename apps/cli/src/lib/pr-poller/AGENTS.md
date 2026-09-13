@@ -16,8 +16,8 @@ logic to the scheduler, the GraphQL client, or the workspace adapter.
 Pure modules (deterministic, unit-tested without IO):
 
 - `pr-poll-targets.ts` — metadata replica → status/discovery targets; owner
-  normalization (`parentSessionId ?? sessionId`); final terminal verification
-  and idle fingerprint rule; archived/deleted exclusion; current PR = LAST
+  normalization (`parentSessionId ?? sessionId`); exact current-terminal
+  verification generations; archived/deleted exclusion; current PR = LAST
   `pullRequests` item.
 - `pr-poll-priority.ts` — viewing presence + `lastMessageAt` → high/low lane
   (top-100 cap). Priority only shortens intervals; never a precondition.
@@ -26,9 +26,9 @@ Pure modules (deterministic, unit-tested without IO):
 - `pr-poll-select.ts` — dueness (`max(lastSuccess + interval, lastAttempt +
 floor)`, never a stored next-poll time), `(workspace, repo)` batching, lane
   fairness (≥1 of every N dispatches is low under contention), next wake.
-- `graphql-batch-builder.ts` — batched query: status aliases + two bounded
-  discovery aliases per branch (newest open + newest merged/closed) +
-  `rateLimit`. No review decision/threads/check-run details.
+- `graphql-batch-builder.ts` — batched query: exact status/terminal aliases +
+  two bounded discovery aliases per branch (newest open + newest
+  merged/closed) + `rateLimit`. No review decision/threads/check-run details.
 - `github-graphql-client.ts` — pure parsing/mapping exports (CI, merge state,
   error taxonomy) + a thin fetch transport class.
 - `pr-poll-writeback.ts` — deterministic current-PR selection (branch match →
@@ -56,17 +56,15 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   revalidates `machineId` (migrated owners are not this daemon's to write)
   and, for discovery results, the repo/branch context — a mid-flight branch
   switch invalidates the old branch's candidates.
-- **Success stamps commit AFTER effects.** `lastSuccessAt` (and the discovery
-  fingerprint) are recorded only when the alias was actually queried, the
-  provider result was valid (a malformed alias is never a confirmed empty),
-  and the owner's association + write-back effects succeeded. Failed rounds
-  keep the target due and retry — GitHub query included — at the attempt
-  floor. Committing the fingerprint before effects loses newly discovered
-  PRs forever on terminal owners (review finding; regression-tested).
-- **Target keys identify the actual target.** Status keys carry the PR
-  number, discovery keys the branch — a new PR / switched branch is
-  never-refreshed and immediately due. Truncated (over-alias-budget) targets
-  are NOT stamped as attempted; they stay due and form the next batch.
+- **Success stamps commit AFTER effects.** `lastSuccessAt` and fingerprints
+  are recorded only when the alias was queried, its result was valid, and the
+  owner's association + write-back effects succeeded. Terminal verification
+  additionally requires its exact PR observation; a branch result can never
+  verify it. Failed rounds retry the GitHub query at the attempt floor.
+- **Target keys identify the actual target.** Recurring status keys carry the
+  PR number; terminal keys also carry lifecycle; discovery keys carry branch.
+  New generations are immediately due. Truncated targets are not stamped as
+  attempted and stay due for the next batch.
 - **Current PR is the LAST `pullRequests` item; the reconciler is the
   ordering authority.** The hosted webhook fan-out is a blind single-PR
   overwrite and must not load Loro Streams;
@@ -85,9 +83,13 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   replacement scope's own gates before the second call.
 - **Discovery requires `branchName`.** Never query by `baseBranch` (the
   starting ref — would associate unrelated PRs). Discovery continues while an
-  open/draft PR exists (newer-PR detection). A transition to a terminal current
-  PR gets one final discovery keyed by its URL, so a stale `closed` fan-out can
-  be corrected to `merged`; only the successfully verified terminal owner stops.
+  open/draft PR exists (newer-PR detection); its fingerprint remains only
+  `repo|branch`. The current terminal PR is verified separately through exact
+  `pullRequest(number:)`, keyed by repo + URL/number + stored lifecycle. A
+  lifecycle overwrite therefore re-enables verification. Do not stamp or act
+  on branch discovery when that round failed to observe the terminal exact
+  alias. Require two spaced exact `closed` observations before idling; a
+  matching `merged` observation is authoritative immediately.
 - **GitHub-capable direct local projects are tracked.** A local project using
   its original directory gets the same PR discovery and status targets when
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared
