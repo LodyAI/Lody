@@ -2,7 +2,7 @@
 
 import { useNavigate } from '@tanstack/react-router';
 import { useTheme } from 'fumadocs-ui/provider/base';
-import { type MouseEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 type SiteNavLocale = 'en' | 'zh';
 
@@ -182,6 +182,12 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
   const t = copy[locale];
   const menuId = useId();
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    // Preserve a native disclosure opened before hydration completed.
+    setOpen(menuRef.current?.open ?? false);
+  }, []);
   const routeLink = useRouteLink();
 
   const navItems = [
@@ -264,50 +270,49 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
               >
                 <DiscordIcon />
               </a>
-              <button
-                aria-controls={menuId}
-                aria-expanded={open}
-                aria-label={t.menu}
-                className="site-nav__toggle"
-                onClick={() => setOpen((value) => !value)}
-                type="button"
+              <details
+                className="site-nav__mobile"
+                ref={menuRef}
+                open={open}
+                onToggle={(event) => setOpen(event.currentTarget.open)}
               >
-                {open ? <CloseIcon /> : <MenuIcon />}
-              </button>
+                <summary aria-controls={menuId} aria-label={t.menu} className="site-nav__toggle">
+                  {open ? <CloseIcon /> : <MenuIcon />}
+                </summary>
+                <div className="site-nav__menu" data-open={open} id={menuId}>
+                  <nav aria-label="Primary mobile" className="site-nav__menu-links">
+                    {navItems.map((item) => (
+                      <a
+                        className="site-nav__menu-link"
+                        href={item.href}
+                        key={item.href}
+                        onClick={routeLink(item.href, () => setOpen(false))}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  </nav>
+                  <div className="site-nav__menu-footer">
+                    <a
+                      className="site-nav__menu-secondary"
+                      href={languageHref}
+                      onClick={routeLink(languageHref, () => setOpen(false))}
+                    >
+                      {t.language}
+                    </a>
+                    <a
+                      aria-label="Discord"
+                      className="site-nav__menu-secondary site-nav__menu-social"
+                      href={DISCORD_HREF}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <DiscordIcon />
+                    </a>
+                  </div>
+                </div>
+              </details>
             </div>
-          </div>
-        </div>
-
-        <div className="site-nav__menu" data-open={open} id={menuId}>
-          <nav aria-label="Primary mobile" className="site-nav__menu-links">
-            {navItems.map((item) => (
-              <a
-                className="site-nav__menu-link"
-                href={item.href}
-                key={item.href}
-                onClick={routeLink(item.href, () => setOpen(false))}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-          <div className="site-nav__menu-footer">
-            <a
-              className="site-nav__menu-secondary"
-              href={languageHref}
-              onClick={routeLink(languageHref, () => setOpen(false))}
-            >
-              {t.language}
-            </a>
-            <a
-              aria-label="Discord"
-              className="site-nav__menu-secondary site-nav__menu-social"
-              href={DISCORD_HREF}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <DiscordIcon />
-            </a>
           </div>
         </div>
       </header>
