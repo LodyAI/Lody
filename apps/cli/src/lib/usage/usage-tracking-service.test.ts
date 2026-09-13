@@ -64,19 +64,24 @@ describe('usage delivery', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('preserves each Grok prompt and every token bucket across a skipped flush', async () => {
+  it('coalesces Grok cumulative snapshots without adding their delta again', async () => {
     const first = input(100);
     service.recordSessionUsageUpdate(first);
-    service.recordSessionUsageUpdate(input(200));
+    const latest = input(200);
+    latest.update.delta = {
+      usage: input(100).update.usage,
+      modelUsage: { synthetic: input(100).update.usage },
+    };
+    service.recordSessionUsageUpdate(latest);
     // Mutating caller-owned input must not change an enqueued bill.
     first.update.usage.inputTokens = 999;
     first.update.modelUsage = {};
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
-    expect(persisted[0]?.modelUsage?.synthetic).toEqual(input(100).update.usage);
+    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200]);
+    expect(persisted[0]?.modelUsage?.synthetic).toEqual(input(200).update.usage);
     expect(persisted[0]?.modelUsage?.synthetic.costUSD).toBeUndefined();
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
+    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200]);
   });
 
   it('retains a rejected head ahead of later prompts and retries on a later flush', async () => {
@@ -91,7 +96,7 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(input(300));
     deliver = accept;
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200, 300]);
+    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200, 300]);
   });
 
   it('treats success false as unacknowledged instead of discarding usage', async () => {

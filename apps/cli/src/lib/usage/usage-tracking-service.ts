@@ -28,8 +28,7 @@ type PendingState = {
   latestMeta: Omit<RecordSessionUsageInput, 'update'>;
   staged: SessionUsageUpdate | null;
   compacted: SessionUsageUpdate | null;
-  // Grok sends prompt totals, unlike the cumulative providers. Preserve each
-  // payload and its order instead of interpreting the hosted aggregation here.
+  // A failed cumulative snapshot stays queued until acknowledged.
   queued: RecordSessionUsageInput[];
   inFlight: Promise<void> | null;
 };
@@ -216,10 +215,6 @@ export class UsageTrackingService {
     cliType: CliType,
     update: SessionUsageUpdate
   ): void {
-    if (cliType === 'grok') {
-      state.queued.push({ ...state.latestMeta, update });
-      return;
-    }
     if (cliType === 'codex' && this.isCodexCompaction(update)) {
       if (state.staged) {
         state.compacted = state.compacted

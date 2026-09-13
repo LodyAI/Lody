@@ -6,8 +6,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Message hub and transports
 
-- `usage/usage-tracking-service.ts` — ordered delivery of Grok prompt usage,
-  cumulative-provider staging, and acknowledgement-based retry retention.
+- `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and
+  acknowledgement-based retry retention; deltas are never added again.
   Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).
 
 - `message-handler.ts` — the CLI's central message hub (largest file): session chat

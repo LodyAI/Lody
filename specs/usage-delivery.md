@@ -1,33 +1,52 @@
-# Client usage delivery
+# Usage snapshots and delivery
 
 Status: draft
 Translation: current
 
 [中文](usage-delivery.zh.md)
 
-When several Grok prompts finish while cloud delivery is unavailable, a later
-flush must send every accepted prompt's usage in order. The latest prompt must
-not replace earlier prompts. Token buckets and absent costs retain their meaning.
+When multiple requests finish before delivery, the latest accounting snapshot must
+contain all their usage. Adapters own native counter semantics; Core owns the
+contract; consumers persist cumulative snapshots, not a sum of notifications.
+Local composition still disables cloud usage entirely.
 
-The client queues Grok prompt totals without changing the hosted request shape
-or inventing session totals. Other providers retain their existing snapshot
-coalescing and Codex compaction handling. Queue ownership is isolated by workspace,
-Lody session, ACP session, and user; each payload retains its attribution.
+## Contract
 
-A successful `{success:true}` response removes that payload. Rejection, exception,
-or unsuccessful acknowledgement leaves it ahead of newer updates for the next
-flush. Concurrent flushes share one drain; a failure ends that attempt. New updates
-arriving during a successful drain are sent by the same drain. Missing model usage
-still prevents persistence, but cannot block later valid records.
+`modelUsage` is cumulative per model within one ACP accounting lifetime.
+`usage` is the latest operation snapshot (legacy providers may differ).
+Optional `delta` carries newly accounted aggregate/per-model buckets since the
+previous emitted update, already included in `modelUsage`: never add both.
+Delta delivery is not an exactly-once ledger. Cache reads/writes, ordinary input/
+output and reasoning are disjoint. Unknown costs are omitted, not zero.
 
-This is process-local delivery, not durable accounting. It cannot restore usage
-lost before the fix, survive process exit, correct upstream partial snapshots, or
-establish the hosted service's delta/snapshot or ambiguous-acknowledgement semantics.
-Those contracts need separate verification; this change preserves the ordinary
-per-prompt request sequence rather than selecting a new aggregation rule.
-OSS local composition continues to disable cloud usage entirely.
+Replay adds nothing; model changes and compaction preserve counters. A new
+accounting lifetime requires a fresh consumer accounting identity or a restored
+baseline. Process-local state does not guarantee restart continuity.
+Grok deduplicates prompt contributions across both completion channels and permits
+monotonic late corrections. DSH counts committed per-request events using their
+actual request route, not the currently selected UI model.
 
-## Evidence
+## Delivery and pricing
 
-- [Implementation and behavioral tests](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
-- [Research and remaining limits](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md)
+The CLI coalesces cumulative snapshots, including Grok. Failed payloads retain
+their attribution until acknowledged; concurrent flushes share one drain. Delta
+is neither added to totals nor forwarded to the legacy persistence endpoint.
+Codex's legacy compaction handling stays separate.
+
+DSH estimates official DeepSeek USD per request at the event's completion time,
+using the published UTC weekday peak/off-peak schedule, then accumulates costs.
+Unknown routes, custom endpoints or missing timestamps do not receive invented
+prices. This dated list-price estimate is not an invoice; requests crossing a
+pricing boundary may differ from billing. Unreported runtime activity cannot be counted.
+
+## Evidence and rollout
+
+- [Core contract](../packages/acp-extension-core/src/usage.ts)
+- [DSH tests](../packages/acp-extension-dsh/src/usage.test.ts)
+- [Grok tests](../packages/acp-extension-grok/test/proxy.test.js)
+- [Delivery tests](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
+- [Research correction](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md)
+
+Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release
+adapters before updating consuming gitlinks/artifacts. Local changes do not
+publish packages, repair historical data, or prove deployed hosted behavior.
