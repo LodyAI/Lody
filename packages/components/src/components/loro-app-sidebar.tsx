@@ -170,6 +170,7 @@ import { writePreferredWorkspaceSlug } from '@/lib/workspace';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
+  SessionRowAgentIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SessionRowWorktreeIndicator,
@@ -720,6 +721,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           {isPinned ? (
             <Pin aria-hidden="true" className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80" />
           ) : null}
+          <SessionRowAgentIcon cliType={session.cliType} agentType={session.agentType} />
           {titleContent}
         </div>
         {/* ③ A relative time on mobile only (no hover info card on touch); on desktop
@@ -2201,6 +2203,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         id: task.sessionId,
         kind: 'chat',
         title: task.title,
+        cliType: task.cliType,
+        agentType: task.agentType,
         sectionLabel: chatsLabel,
         subtitle: null,
         machineName: task.machineName ?? null,
@@ -2225,6 +2229,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         id: task.sessionId,
         kind: 'github',
         title: task.title,
+        cliType: task.cliType,
+        agentType: task.agentType,
         sectionLabel: repoName || 'GitHub Worktrees',
         subtitle: repoName || null,
         repoFullName: repoName || null,
@@ -2274,6 +2280,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             id: session.id,
             kind: 'local',
             title,
+            cliType: session.cliType,
+            agentType: session.agentType,
             sectionLabel,
             subtitle: project.name,
             repoFullName: resolveProjectGitHubRepo(session.project) ?? null,

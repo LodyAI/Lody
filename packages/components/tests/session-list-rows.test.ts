@@ -281,6 +281,23 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
 });
 
 describe('buildSessionListRows repo + PR mapping', () => {
+  test('preserves the agent identity needed by sidebar rows', () => {
+    const session = makeSession({
+      id: 'session',
+      title: 'Imported session',
+      cliType: 'registry',
+      agentType: 'kimi',
+    });
+
+    const tasks = buildSessionListRows([session], {
+      scope: 'my',
+      currentUserId: 'user-1',
+      defaultTitle: 'Untitled',
+    });
+
+    expect(tasks[0]).toMatchObject({ cliType: 'registry', agentType: 'kimi' });
+  });
+
   test('resolves repoFullName from a github project when legacy repoFullName is absent', () => {
     const session = makeSession({
       id: 'session',

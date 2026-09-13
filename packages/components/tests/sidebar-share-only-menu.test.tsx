@@ -108,6 +108,64 @@ describe('sidebar share-only context menus', () => {
     expect(onShareSessionWithTeam).toHaveBeenCalledWith('task-list-session');
   });
 
+  it('renders agent identity beside titles in grouped and Updated rows', () => {
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [
+            {
+              sessionId: 'codex-session',
+              title: 'Imported Codex session',
+              cliType: 'builtin',
+              agentType: 'codex',
+              repoFullName: null,
+              branchName: '',
+              latestMessageAt: '2026-07-19T00:00:00.000Z',
+              addedLines: 0,
+              deletedLines: 0,
+              isWorking: false,
+              hasUnreadMessages: false,
+              isOffline: false,
+              isWaitingPermission: false,
+            },
+          ],
+          repos: [],
+        })
+      );
+    });
+
+    expect(
+      container
+        ?.querySelector('[data-sidebar-session-id="codex-session"]')
+        ?.querySelector('[data-session-agent-icon]')
+    ).not.toBeNull();
+
+    flushSync(() => {
+      root?.render(
+        React.createElement(SidebarUpdatedSessionList, {
+          now: new Date('2026-07-19T01:00:00.000Z'),
+          items: [
+            {
+              id: 'claude-session',
+              kind: 'chat',
+              title: 'Imported Claude session',
+              cliType: 'builtin',
+              agentType: 'claude',
+              sectionLabel: 'Chats',
+              latestMessageAt: new Date('2026-07-19T00:00:00.000Z'),
+            },
+          ],
+        })
+      );
+    });
+
+    expect(
+      container
+        ?.querySelector('[data-sidebar-updated-id="claude-session"]')
+        ?.querySelector('[data-session-agent-icon]')
+    ).not.toBeNull();
+  });
+
   it('keeps the Updated list menu reachable when Share is its only action', () => {
     const onShareItemWithTeam = vi.fn();
 

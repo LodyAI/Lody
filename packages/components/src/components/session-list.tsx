@@ -55,6 +55,7 @@ import {
   ContextMenuTrigger,
 } from '@/ui/context-menu';
 import type {
+  AgentConfigCliType,
   LocalProjectHistoryProvider,
   MachineId,
   PrStatus,
@@ -84,6 +85,7 @@ import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-
 import {
   GitHubOwnerIcon,
   SessionPrIcon,
+  SessionRowAgentIcon,
   SessionRowAuthorAvatar,
   SessionRowLeadingSlot,
   SidebarRowArchiveButton,
@@ -111,6 +113,8 @@ export type SessionListRowOwner = {
 export type SessionListRow = {
   sessionId: string;
   title: string;
+  cliType?: AgentConfigCliType;
+  agentType?: string;
   /**
    * PRECISE opener: the Session that created/opened this one
    * (`SessionMeta.openedBySessionId`). Presentation-only provenance; it is NOT
@@ -988,6 +992,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                         className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
                       />
                     ) : null}
+                    <SessionRowAgentIcon cliType={session.cliType} agentType={session.agentType} />
                     {renderTitle()}
                   </div>
                   {/* Keep PR at the right edge, with All Changes totals immediately before it. */}

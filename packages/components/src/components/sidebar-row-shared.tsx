@@ -13,7 +13,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
+import type { AgentConfigCliType, PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { ContextMenuItem } from '@/ui/context-menu';
@@ -23,6 +23,7 @@ import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archiv
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { UserAvatar } from '@/components/user-avatar';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
+import { AgentIcon } from '@/components/icons/agent-icon';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 
 /**
@@ -31,7 +32,7 @@ import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
  * flat Updated list in `sidebar-updated-task-list.tsx`) render the same anatomy,
  * so the pieces live here once instead of being copied three times.
  *
- * Row anatomy: `[① tree affordance | more][② author avatar? + title][③ status | diff/mergeable? + worktree? + PR icon? | archive]`.
+ * Row anatomy: `[① tree affordance | more][② author avatar? + agent icon + title][③ status | diff/mergeable? + worktree? + PR icon? | archive]`.
  * The author avatar (`SessionRowAuthorAvatar`) only appears in team ("All Tasks") scope on a
  * multi-member workspace; otherwise the title owns the leading edge of slot ②. The leading slot
  * stays reserved even when empty (the ⋯ menu button reveals there on hover). A local worktree
@@ -275,6 +276,25 @@ export function SessionRowAuthorAvatar({
       className="h-[18px] w-[18px] shrink-0"
       fallbackClassName="text-[9px] font-medium"
     />
+  );
+}
+
+/** Identifies the ACP agent without consuming the row's status slot. */
+export function SessionRowAgentIcon({
+  cliType,
+  agentType,
+}: {
+  cliType?: AgentConfigCliType | null;
+  agentType?: string | null;
+}) {
+  if (!cliType || !agentType) return null;
+  return (
+    <span
+      data-session-agent-icon=""
+      className="inline-flex h-3 w-3 shrink-0 items-center justify-center text-sidebar-foreground-muted/80"
+    >
+      <AgentIcon cliType={cliType} agentType={agentType} className="h-3 w-3" />
+    </span>
   );
 }
 

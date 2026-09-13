@@ -35,6 +35,9 @@ Ownership and explanations: [README.md](README.md).
   slot. Status replaces resting line diff, `Mergeable`, worktree glyph, PR icon, or mobile
   time with one 14px mark; retain metrics in the desktop hover info card. Mobile chat
   leading-node rules remain in [mobile/AGENTS.md](mobile/AGENTS.md).
+- Keep the Session's agent icon immediately before its title in Workspace, Local
+  Project, Updated, and Pinned rows; agent identity stays visible independently
+  from the trailing working/waiting/unread status slot.
 - Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
   or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
