@@ -2124,11 +2124,10 @@ pre,
   }
 }
 
-/* Share publication: capture and the publish commit have no byte total, so
-   their bar sweeps instead of inventing a percentage. Under reduced-motion it
-   holds a static partial fill, which still reads as "in progress" without
-   implying a measured position. */
-@keyframes share-progress-sweep {
+/* Indeterminate `ui/progress.tsx`: work with no known total sweeps instead of
+   inventing a percentage. Under reduced-motion it holds a static partial fill,
+   which still reads as "in progress" without implying a measured position. */
+@keyframes progress-sweep {
   0% {
     transform: translateX(-100%);
   }
@@ -2137,11 +2136,11 @@ pre,
   }
 }
 
-.animate-share-progress-sweep {
-  animation: share-progress-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+.animate-progress-sweep {
+  animation: progress-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-share-progress-sweep {
+  .animate-progress-sweep {
     animation: none;
     transform: translateX(50%);
   }

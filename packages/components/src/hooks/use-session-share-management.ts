@@ -370,16 +370,6 @@ export function useSessionShareManagement(
         setPhase('idle');
       }
     });
-  const confirm = () =>
-    actions.run(async () => {
-      const existing = pendingRef.current;
-      if (!existing || conflict) throw new Error('Share confirmation changed');
-      try {
-        await publishPrepared(existing);
-      } finally {
-        setPhase('idle');
-      }
-    });
   const shareLink = entry ? actions.linkFor(entry) : null;
   return {
     entry,
@@ -406,7 +396,6 @@ export function useSessionShareManagement(
     },
     onPrepare: prepare,
     onPublish: publishNow,
-    onConfirm: confirm,
     onDiscard: () => setPending(null),
     onCopy: () =>
       result

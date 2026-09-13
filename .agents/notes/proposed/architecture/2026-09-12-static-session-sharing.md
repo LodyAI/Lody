@@ -34,6 +34,16 @@ erase those assignments. Idempotent begin requests must bind initial credentials
 and confirmation identity as well as object hashes, or a retry can report success
 for a different link credential.
 
+Publication is one human action rather than a prepare-then-confirm pair. Splitting
+it made the common case two decisions about the same intent, while the guarantee
+that matters — nothing uploads until a human acts on a screen that states the
+disclosure — is unaffected: the package is still frozen in full before the first
+byte moves, and the frozen copy stays reviewable behind a disclosure, opened
+automatically for agent-requested confirmations where the human did not choose the
+targets. Progress reporting follows the same honesty rule as the rest of the
+protocol: only the object upload has a byte total, so only it shows a percentage,
+and auto-copy claims a copied link only after the clipboard write resolves.
+
 MCP responses echo the caller's `requestId` retry key and separately expose the
 server's `shareRequestId`; the document ID is never substituted for the retry key.
 Upload credentials live only in the open editor. After it closes, unfinished

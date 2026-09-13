@@ -6,6 +6,7 @@ import type { useSessionShareManagement } from '@/hooks/use-session-share-manage
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
+import { Progress } from '@/ui/progress';
 import { SessionSharePreview } from './session-share-preview';
 import {
   AlertDialog,
@@ -61,28 +62,6 @@ function StepTransition({ step, children }: { step: ShareStep; children: ReactNo
           {children}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Determinate only while bytes are moving; otherwise an honest indeterminate sweep. */
-function SharePublishProgress({ indeterminate, value }: { indeterminate: boolean; value: number }) {
-  return (
-    <div
-      className="h-1 w-full overflow-hidden rounded-full bg-muted"
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={indeterminate ? undefined : value}
-    >
-      {indeterminate ? (
-        <div className="h-full w-1/3 rounded-full bg-primary animate-share-progress-sweep" />
-      ) : (
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none"
-          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-        />
-      )}
     </div>
   );
 }
@@ -214,7 +193,11 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           <p role="status" className="text-sm text-foreground">
             {label}
           </p>
-          <SharePublishProgress indeterminate={phase !== 'uploading'} value={props.progress} />
+          <Progress
+            className="h-1 bg-muted"
+            indeterminate={phase !== 'uploading'}
+            value={props.progress}
+          />
           <Note>{t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}</Note>
         </div>
       );

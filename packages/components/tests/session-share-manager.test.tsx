@@ -69,7 +69,6 @@ describe('static share dialog steps', () => {
       onSelect: vi.fn(),
       onPrepare: vi.fn(),
       onPublish: vi.fn(),
-      onConfirm: vi.fn(),
       onDiscard: vi.fn(),
       onCopy: vi.fn(),
       onReset: vi.fn(),

@@ -69,7 +69,6 @@ const meta = {
     onSelect: () => {},
     onPrepare: noop,
     onPublish: noop,
-    onConfirm: noop,
     onDiscard: () => {},
     onCopy: noop,
     onReset: noop,

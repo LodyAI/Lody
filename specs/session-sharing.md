@@ -57,8 +57,10 @@ bytes already downloaded.
 
 ## Deployment consistency
 
-A client confirms the frozen package before upload. Upload authority is limited
-to one immutable inventory and cannot publish. Only the authenticated app commits
+A client freezes the complete package before upload, and only a human action in
+the authenticated app starts that publication; the frozen copy is reviewable
+before the action. Upload authority is limited to one immutable inventory and
+cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
 request, rather than silently accepting changed parameters.

@@ -131,7 +131,7 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
-  it('does no upload before human confirmation and only saves the secret after publication', async () => {
+  it('uploads only after the human action and saves the secret only after publication', async () => {
     await render();
     await act(async () => control.onPrepare());
     expect(cloud.capture).toHaveBeenCalledOnce();
@@ -139,7 +139,7 @@ describe('static publication client lifecycle', () => {
     expect(cloud.upload).not.toHaveBeenCalled();
     expect(control.pending).not.toBeNull();
     expect(readSessionShareSecret(localStorage, key, 1)).toBeNull();
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
       'sessionSharing:beginDeployment',
       'sessionSharing:publishDeployment',
@@ -251,20 +251,20 @@ describe('static publication client lifecycle', () => {
     });
     await render();
     await act(async () => control.onPrepare());
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(control.pending).not.toBeNull();
     expect(control.error).not.toBeNull();
     cloud.state = { ...entry, currentDeploymentId: 'deployment' };
     await render();
     expect(control.conflict).toBe(false);
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(cloud.upload).toHaveBeenCalledOnce();
     expect(
       cloud.mutation.mock.calls.filter(([name]) => name === 'sessionSharing:beginDeployment')
     ).toHaveLength(1);
     expect(control.pending).toBeNull();
   });
-  it('requires the frozen MCP target set and passes its approval identity only at final confirmation', async () => {
+  it('requires the frozen MCP target set and sends its approval identity only when publishing', async () => {
     confirmation = { requestId: 'request', sessionIds: ['root'] };
     await render();
     await act(async () => control.onSelect(['root', 'foreign']));
@@ -273,14 +273,14 @@ describe('static publication client lifecycle', () => {
       cloud.capture.mock.calls[0]?.[0].sessions.map((session: { id: string }) => session.id)
     ).toEqual(['root']);
     expect(cloud.mutation).not.toHaveBeenCalled();
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(cloud.mutation.mock.calls[0]?.[1]).toMatchObject({ confirmationRequestId: 'request' });
   });
   it('updates the same share without creating or sending a new reader secret', async () => {
     cloud.state = entry;
     await render();
     await act(async () => control.onPrepare());
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(cloud.mutation.mock.calls[0]?.[1]).toMatchObject({
       shareId: 'share',
       expectedRevision: 1,
@@ -309,7 +309,7 @@ describe('static publication client lifecycle', () => {
     cloud.state = { ...entry, revision: 2 };
     await render();
     expect(control.conflict).toBe(true);
-    await act(async () => control.onConfirm());
+    await act(async () => control.onPublish());
     expect(cloud.mutation).not.toHaveBeenCalled();
   });
 });
