@@ -6,7 +6,7 @@ PR: https://github.com/LodyAI/Lody/pull/633
 
 ## Abstract
 
-The components package and standalone review helper now target Vite 8.3. The CLI
+The components package and standalone review helper now target Vite 8.2.2. The CLI
 remains explicitly on Vite 7 because its bundled logging dependency is not
 compatible with Rolldown's CommonJS interop, while the desktop remains on Vite 7
 because electron-vite 5 does not declare Vite 8 support. This boundary adopts
@@ -24,7 +24,7 @@ gaps into local patches and obscure which build path caused a regression.
 
 ## Decision
 
-Raise the shared catalog to Vite 8.3 after the compatible plugin and Storybook
+Raise the shared catalog to Vite 8.2.2 after the compatible plugin and Storybook
 layers, then pin both the CLI and desktop to stable Vite 7. Verify components
 library and Storybook builds plus
 review-helper standalone and Storybook builds under Rolldown. Raise the CLI's
@@ -38,14 +38,14 @@ Rolldown's runtime Storybook graph. Keep shared alias helpers structurally typed
 so their Vite 8 implementation types do not leak into the Vite 7 CLI and desktop
 configs.
 
-The first macOS ARM CI run exposed an incomplete lockfile snapshot: the
+The first macOS ARM CI run exposed an incomplete lockfile snapshot: the original
 `rolldown@1.2.8` JavaScript wrapper had no matching optional native dependencies,
 so pnpm could only install the older 1.1.5 bindings retained elsewhere in the
 graph. The resulting hook-bit mismatch caused Rolldown to panic before module
-transforms began. Regenerate the lockfile with pnpm 10.20.0's fix-lockfile path so
-every supported 1.2.8 native binding is recorded alongside the wrapper. Treat
-wrapper/native version equality as an installation invariant for future Rolldown
-updates.
+transforms began. Resolving the dependency graph under the workspace release-age
+policy selects Vite 8.2.2 and Rolldown 1.2.7, with every supported 1.2.7 native
+binding recorded alongside the wrapper. Treat wrapper/native version equality as
+an installation invariant for future Rolldown updates.
 
 A macOS ARM desktop smoke demonstrated why the CLI cannot join this migration.
 `file-stream-rotator@0.6.1`, pulled by the current
@@ -58,11 +58,12 @@ or the transport is deliberately replaced.
 
 ## Validation
 
-- A frozen pnpm 10.20.0 install in a clean macOS ARM clone installed both
-  `rolldown` and `@rolldown/binding-darwin-arm64` at 1.2.8.
+- The pnpm 10.20.0 lockfile records both `rolldown` and each supported native
+  binding, including `@rolldown/binding-darwin-arm64`, at 1.2.7; a frozen install
+  accepts the resulting graph.
 - The previously failing review-helper standalone build transformed 2,334 modules
-  and produced the complete single-file artifact under Vite 8.3.0.
+  and produced the complete single-file artifact under Vite 8.2.2.
 - Components library and Storybook builds and both review-helper build modes pass
-  under Vite 8.3.0.
+  under Vite 8.2.2.
 - The CLI development builder passes with esbuild 0.28 while its published bundle
   remains on Vite 7.
