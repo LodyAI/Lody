@@ -35,6 +35,12 @@ export type PrPollStatusTarget = {
 export type PrPollDiscoveryTarget = {
   repoFullName: string;
   branch: string;
+  /**
+   * Present for the final verification pass after the current PR first
+   * becomes terminal. It makes that pass distinct from ordinary branch
+   * discovery, then becomes part of the persisted idle fingerprint.
+   */
+  terminalCurrentUrl?: string;
 };
 
 /** Polling view of one owner session (child tabs folded into their owner). */
@@ -73,13 +79,21 @@ export function resolveDiscoveryBranch(meta: SessionMeta): string | undefined {
 }
 
 /**
- * The idle-terminal fingerprint: "this exact `(repository, branch)` context
- * has already had a successful discovery". Stored per owner in the local
- * scheduling state; a branch switch changes the fingerprint and re-enables
- * discovery automatically.
+ * The idle fingerprint: "this exact discovery generation has succeeded".
+ * Open/no-PR generations identify `(repository, branch)`; a terminal
+ * generation additionally identifies the current PR URL, forcing one final
+ * verification when an already-discovered branch enters a terminal state.
+ * Stored per owner in local scheduling state.
  */
-export function computeDiscoveryFingerprint(repoFullName: string, branch: string): string {
-  return `${repoFullName}|${branch}`;
+export function computeDiscoveryFingerprint(
+  repoFullName: string,
+  branch: string,
+  terminalCurrentUrl?: string
+): string {
+  const branchFingerprint = `${repoFullName}|${branch}`;
+  return terminalCurrentUrl
+    ? `${branchFingerprint}|terminal|${terminalCurrentUrl}`
+    : branchFingerprint;
 }
 
 /**
@@ -203,16 +217,24 @@ function collectDiscoveryTarget(
     // Unresolvable repository context: explicit skip, no guessing.
     return null;
   }
-  // Idle-terminal: the current PR (last array item) is terminal AND this exact
-  // (repo, branch) context has already had a successful discovery. Only a
-  // context change (fingerprint mismatch) re-enables discovery.
+  // A terminal transition gets one final discovery pass. This is deliberately
+  // keyed by the terminal PR URL rather than only (repo, branch): a branch
+  // discovery that succeeded while the PR was open cannot suppress the pass
+  // that verifies whether an ambiguous hosted `closed` update was actually a
+  // merge. After that pass succeeds, the expanded fingerprint makes the owner
+  // idle until its branch or current PR changes.
   const current = (ownerMeta.pullRequests ?? []).at(-1);
-  if (
-    current &&
-    (current.status === 'merged' || current.status === 'closed') &&
-    ownerFingerprint === computeDiscoveryFingerprint(repoFullName, runtimeBranch)
-  ) {
+  const terminalCurrentUrl =
+    current && (current.status === 'merged' || current.status === 'closed')
+      ? current.url
+      : undefined;
+  const fingerprint = computeDiscoveryFingerprint(repoFullName, runtimeBranch, terminalCurrentUrl);
+  if (terminalCurrentUrl && ownerFingerprint === fingerprint) {
     return null;
   }
-  return { repoFullName, branch: runtimeBranch };
+  return {
+    repoFullName,
+    branch: runtimeBranch,
+    ...(terminalCurrentUrl ? { terminalCurrentUrl } : {}),
+  };
 }

@@ -782,6 +782,51 @@ describe('PrPollScheduler', () => {
     expect(calls()).toHaveLength(callsAfterTerminal);
   });
 
+  it('corrects an ambiguous closed event with one final terminal discovery pass', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+        pullRequests: [prMeta(649)],
+      })
+    );
+    await startWith([workspace]);
+    expect(calls()).toHaveLength(1);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+
+    // Reproduce the screenshot: hosted metadata says `closed`, while GitHub's
+    // authoritative branch discovery reports that the same PR was merged.
+    workspace.metas.set(sid('s1'), {
+      ...workspace.metas.get(sid('s1'))!,
+      pullRequests: [prMeta(649, 'closed')],
+    });
+    workspace.notifyMetaChanged(sid('s1'));
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success') {
+        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
+          ...discovery,
+          prs: [observation(649, { status: 'merged' })],
+        }));
+      }
+      return outcome;
+    };
+    await advance(3_000);
+
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1]?.batch.statusAliases).toEqual([]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(649, 'merged')]);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      'owner/repo|feat/x|terminal|https://github.com/owner/repo/pull/649'
+    );
+
+    const callsAfterVerification = calls().length;
+    await advance(45 * 60_000);
+    expect(calls()).toHaveLength(callsAfterVerification);
+  });
+
   it('discovery associates through the backend endpoint, then writes meta', async () => {
     const workspace = new FakeWorkspace('ws1');
     workspace.metas.set(
@@ -903,7 +948,9 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
     // One discovery pass records the context fingerprint...
     expect(calls()).toHaveLength(1);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      'owner/repo|feat/x|terminal|https://github.com/owner/repo/pull/9'
+    );
 
     // ...after which the terminal owner consumes no quota at all.
     await advance(45 * 60_000);

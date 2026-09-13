@@ -16,8 +16,9 @@ logic to the scheduler, the GraphQL client, or the workspace adapter.
 Pure modules (deterministic, unit-tested without IO):
 
 - `pr-poll-targets.ts` — metadata replica → status/discovery targets; owner
-  normalization (`parentSessionId ?? sessionId`); idle-terminal fingerprint
-  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item.
+  normalization (`parentSessionId ?? sessionId`); final terminal verification
+  and idle fingerprint rule; archived/deleted exclusion; current PR = LAST
+  `pullRequests` item.
 - `pr-poll-priority.ts` — viewing presence + `lastMessageAt` → high/low lane
   (top-100 cap). Priority only shortens intervals; never a precondition.
 - `pr-poll-quota.ts` — per-scope token bucket, provider safety-floor freeze,
@@ -84,8 +85,9 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   replacement scope's own gates before the second call.
 - **Discovery requires `branchName`.** Never query by `baseBranch` (the
   starting ref — would associate unrelated PRs). Discovery continues while an
-  open/draft PR exists (newer-PR detection); only idle-terminal owners
-  (terminal current PR + unchanged `repo|branch` fingerprint) stop entirely.
+  open/draft PR exists (newer-PR detection). A transition to a terminal current
+  PR gets one final discovery keyed by its URL, so a stale `closed` fan-out can
+  be corrected to `merged`; only the successfully verified terminal owner stops.
 - **GitHub-capable direct local projects are tracked.** A local project using
   its original directory gets the same PR discovery and status targets when
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared

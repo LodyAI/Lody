@@ -485,7 +485,9 @@ export class PrPollScheduler {
               repoFullName: entry.discoveryTarget.repoFullName,
               lane,
               desiredIntervalMs: lane === 'high' ? config.highIntervalMs : lowIntervalMs,
-              qualifier: entry.discoveryTarget.branch,
+              qualifier: entry.discoveryTarget.terminalCurrentUrl
+                ? `${entry.discoveryTarget.branch}|terminal|${entry.discoveryTarget.terminalCurrentUrl}`
+                : entry.discoveryTarget.branch,
               discovery: entry.discoveryTarget,
             })
           );
@@ -913,7 +915,11 @@ export class PrPollScheduler {
           continue;
         }
         const fingerprintKey = `${target.workspaceId}:${target.ownerSessionId}`;
-        const fingerprint = computeDiscoveryFingerprint(target.repoFullName, branch);
+        const fingerprint = computeDiscoveryFingerprint(
+          target.repoFullName,
+          branch,
+          target.discovery.terminalCurrentUrl
+        );
         if (this.state.discoveryFingerprints[fingerprintKey] !== fingerprint) {
           this.state.discoveryFingerprints[fingerprintKey] = fingerprint;
           this.deps.stateStore.upsertDiscoveryFingerprint(fingerprintKey, fingerprint);

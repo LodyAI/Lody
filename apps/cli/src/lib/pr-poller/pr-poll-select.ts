@@ -16,7 +16,8 @@ export type PrPollTargetKind = 'status' | 'discovery';
 export type SchedulableTarget = {
   /**
    * Stable key for last-success persistence:
-   * `ws|owner|repo|status|<prNumber>` or `ws|owner|repo|discovery|<branch>`.
+   * `ws|owner|repo|status|<prNumber>`, `ws|owner|repo|discovery|<branch>`, or
+   * `ws|owner|repo|discovery|<branch>|terminal|<currentUrl>`.
    * The qualifier identifies the ACTUAL target, so a newly associated PR or a
    * switched branch starts as never-refreshed (immediately due) instead of
    * inheriting a stale success stamp. Only the FIRST segment is ever parsed

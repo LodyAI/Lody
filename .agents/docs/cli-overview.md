@@ -54,6 +54,12 @@ the scheduler is a thin orchestrator. Priority comes from `session-viewing` pres
 turn-end hook. Requests batch GraphQL per `(workspace, repo)` under a per-credential-scope point
 bucket, with a provider safety-floor freeze and 15min→2h repo cooldowns.
 
+An open or draft PR is refreshed on its lane cadence. When the current PR first becomes terminal,
+the discovery generation changes from the branch alone to the branch plus that PR URL. This makes
+one final GitHub discovery immediately due even if the branch was just refreshed, allowing an
+ambiguous `closed` metadata update to be corrected to `merged`; after a successful verification,
+the terminal owner becomes idle again.
+
 Write-back plans against freshly read owner meta: `pullRequests` upserts by URL with the current
 PR as the LAST item (legacy fields stripped once), while CI and merge state live in
 `SessionMeta.pullRequestState` (`{s,m,t}`, ≤50B per entry; legacy `r` readiness is no longer

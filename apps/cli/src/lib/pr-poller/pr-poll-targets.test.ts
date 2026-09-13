@@ -167,7 +167,11 @@ describe('enumeratePrPollTargets', () => {
       branchName: 'feat/x',
       pullRequests: [{ url: 'https://github.com/owner/repo/pull/9', status: 'merged' }],
     });
-    const fingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
+    const fingerprint = computeDiscoveryFingerprint(
+      'owner/repo',
+      'feat/x',
+      'https://github.com/owner/repo/pull/9'
+    );
 
     const [idle] = enumeratePrPollTargets([alive('s1', meta)], { s1: fingerprint });
     expect(idle?.discoveryTarget).toBeNull();
@@ -176,11 +180,42 @@ describe('enumeratePrPollTargets', () => {
     const [resumed] = enumeratePrPollTargets([alive('s1', { ...meta, branchName: 'feat/next' })], {
       s1: fingerprint,
     });
-    expect(resumed?.discoveryTarget).toEqual({ repoFullName: 'owner/repo', branch: 'feat/next' });
+    expect(resumed?.discoveryTarget).toEqual({
+      repoFullName: 'owner/repo',
+      branch: 'feat/next',
+      terminalCurrentUrl: 'https://github.com/owner/repo/pull/9',
+    });
 
     // No recorded fingerprint (fresh daemon) → one discovery is still allowed.
     const [fresh] = enumeratePrPollTargets([alive('s1', meta)]);
-    expect(fresh?.discoveryTarget).toEqual({ repoFullName: 'owner/repo', branch: 'feat/x' });
+    expect(fresh?.discoveryTarget).toEqual({
+      repoFullName: 'owner/repo',
+      branch: 'feat/x',
+      terminalCurrentUrl: 'https://github.com/owner/repo/pull/9',
+    });
+  });
+
+  it('rechecks a newly terminal PR even when the branch was already discovered', () => {
+    const branchFingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
+    const [entry] = enumeratePrPollTargets(
+      [
+        alive(
+          's1',
+          makeMeta({
+            project: githubProject,
+            branchName: 'feat/x',
+            pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'closed' }],
+          })
+        ),
+      ],
+      { s1: branchFingerprint }
+    );
+
+    expect(entry?.discoveryTarget).toEqual({
+      repoFullName: 'owner/repo',
+      branch: 'feat/x',
+      terminalCurrentUrl: 'https://github.com/owner/repo/pull/649',
+    });
   });
 
   it('does NOT fall back to baseBranch when branchName is missing', () => {
