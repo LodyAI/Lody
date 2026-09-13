@@ -31,3 +31,32 @@ export async function readSessionHistory(reader: SessionHistoryReader): Promise<
       inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
     }));
 }
+
+/** Adapter-side selection for a consistent output observation. `scalars` never
+ * reads items; only the selected assistant (and failure notices) needs a body. */
+export function selectTurnOutput(
+  count: number,
+  userTurnId: string,
+  scalars: (index: number) => import('./domain').SessionDirectoryScalars | undefined,
+  body: (index: number) => SessionEntry | undefined
+): SessionEntry[] {
+  for (let i = 0; i < count; i++) {
+    const user = scalars(i);
+    if (user?.id !== userTurnId || user.role !== 'user') continue;
+    const selected: SessionEntry[] = [{ ...user, role: 'user', items: [], fileDiff: [] }];
+    let assistantFound = false;
+    for (let j = i + 1; j < count; j++) {
+      const row = scalars(j);
+      const assistant =
+        !assistantFound && row?.role === 'assistant' && row.userTurnId === userTurnId;
+      if (assistant || (user.status === 'failed' && row?.role === 'system')) {
+        const turn = body(j);
+        if (turn) selected.push(turn);
+        if (assistant) assistantFound = true;
+      }
+      if (assistantFound && user.status !== 'failed') break;
+    }
+    return selected;
+  }
+  return [];
+}

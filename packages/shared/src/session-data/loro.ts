@@ -1,3 +1,4 @@
+import { selectTurnOutput } from './read';
 import { HistoryActionRefused } from './task-proposal';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import {
@@ -371,6 +372,26 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   };
 
   const history: SessionHistoryReader = {
+    async readTurnOutput(userTurnId) {
+      return selectTurnOutput(
+        list.length,
+        userTurnId,
+        (index) => {
+          const value = list.get(index);
+          return pickDirectoryScalars(
+            isContainer(value) && value.kind() === 'Map'
+              ? (value as LoroMap).getShallowValue()
+              : value
+          );
+        },
+        (index) => {
+          const read = readSlot(list, index);
+          return read.state === 'ready'
+            ? (read.turn as import('./domain').SessionEntry)
+            : undefined;
+        }
+      );
+    },
     async count() {
       return list.length;
     },
@@ -788,7 +809,8 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   // minted against the issuing store's identity and session id, only the
   // issuing store can `release` it, a handle from a different backend is
   // `cross_store`, and after `closeSource` (the owning store's teardown hook)
-  // every operation reports `source_closed`. `copyFrom` admits same-backend
+  // store-scoped handles report `source_closed`; operation captures remain
+  // usable until release. `copyFrom` admits same-backend
   // cross-store handles: the fork flow copies a source snapshot into a target
   // doc, and the writer's module-level provenance is what makes that safe.
   const snapshotToken = {};
@@ -797,7 +819,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   let snapshotSourceClosed = false;
 
   const snapshotRead = async (snapshot: object): Promise<readonly SessionTurn[]> => {
-    if (snapshotSourceClosed)
+    if (sessionSnapshotContext(snapshot)?.isClosed())
       throw new SessionSnapshotError('source_closed', 'The session store is closed.');
     if (!issuedSnapshots.has(snapshot))
       throw new SessionSnapshotError('released', 'The snapshot was released.');
@@ -808,18 +830,19 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
 
   const snapshots: LoroSessionSnapshotService = {
     capabilities: { copy: true },
-    async capture() {
+    async capture(captureOptions) {
       if (snapshotSourceClosed)
         throw new SessionSnapshotError('source_closed', 'The session store is closed.');
       // One consistent capture of the stored document, never a stitched read.
       const stored = writer.capture();
+      const operationOwned = captureOptions?.lifetime === 'operation';
       const snapshot = mintSessionSnapshot(
         {
           token: snapshotToken,
           backend: 'loro',
           payload: stored,
           issued: issuedSnapshots,
-          isClosed: () => snapshotSourceClosed,
+          isClosed: () => snapshotSourceClosed && !operationOwned,
         },
         sessionId,
         () => snapshotRead(snapshot)
@@ -829,8 +852,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       return snapshot;
     },
     release(snapshot) {
-      if (snapshotSourceClosed)
-        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
       const issuer = sessionSnapshotContext(snapshot);
       if (issuer === undefined)
         throw new SessionSnapshotError(

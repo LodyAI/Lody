@@ -37,6 +37,11 @@ storage offset.
   read `id` shallowly and materialize only the target body. The Loro reader keeps
   an ID index, invalidated by structural/id changes; content tokens do not rescan it.
   Store teardown closes snapshot handles and removes the identity subscription.
+- Status queries use directory scalars and the control queue, never full bodies.
+  `readTurnOutput(userTurnId)` captures one coherent output observation: user
+  scalars, its first linked assistant body, and later system notices only on
+  failure. Unrelated bodies are not materialized; streaming consumers do not
+  assemble this from async reads at different document versions.
 - **Display paging is business logic.** `pageVisibleTranscript` scans raw rows through the
   reader, counts displayable turns, keeps the cursor a raw position and never reports an
   empty tail as the end. A caller-supplied visibility predicate stays on this side of the
@@ -53,8 +58,11 @@ storage offset.
   use it instead of stitching paginated reads). `release` is idempotent and
   issuing-store-only; forged/foreign/released handles throw `SessionSnapshotError` with
   the matching code, and `source_closed` applies once the issuing store closes
-  (`LoroSessionData.snapshots.closeSource()`, the store teardown hook called by
-  `SessionDocument.destroy`). `copyFrom` admits same-backend cross-store handles (the
+  (`LoroSessionData.snapshots.closeSource()`, called by `SessionDocument.destroy`).
+  A fork explicitly captures with `lifetime: 'operation'`: its detached stored
+  snapshot survives source teardown until the operation releases it. No new
+  capture or target write is allowed on a closed store. Release of an owned
+  handle remains idempotent after teardown. `copyFrom` admits same-backend cross-store handles (the
   fork flow: capture on the source, copy into the target) and rejects a different
   backend with `cross_store`. Provenance stays in `history-writer.ts`; adapters only
   scope handles to the issuing store identity + `sessionId`. A backend without stored

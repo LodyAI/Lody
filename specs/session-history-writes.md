@@ -30,6 +30,9 @@ That tolerance must not authorize creating new malformed items locally.
   and opaque items. Explicit changes and new fork notices still require parsing.
   Prepend copied rows and reject id collisions; retain target containers.
   Caller-created JSON cannot claim this provenance. Copying does not modify the source.
+  A fork's detached capture belongs to the fork operation and survives source-cache
+  eviction until explicitly released. Ordinary store-scoped captures become invalid
+  on teardown; release remains safe after teardown.
 - Failed edit-and-resend can restore captured old history without reparsing it as
   new input. A one-use local rollback receipt restores only the changed range, preserving
   current content of untouched rows and subsequent appends. It captures only the affected

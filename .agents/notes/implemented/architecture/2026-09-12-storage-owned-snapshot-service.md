@@ -1,7 +1,7 @@
 # Storage-owned snapshot service for session-data
 
 Status: implemented
-Translation: current
+Translation: stale
 
 [中文](2026-09-12-storage-owned-snapshot-service.zh.md)
 
@@ -12,7 +12,9 @@ module-level handle passed through the CLI facade. `SessionData.snapshots` issue
 opaque, branded `SessionSnapshot` handles bound to the issuing store and `sessionId`;
 callers pass only a selection plus the handle, `release` invalidates it idempotently,
 foreign/forged handles throw `cross_store`/`invalid_snapshot`, and closing the source
-store turns every outstanding handle into `source_closed`. `snapshot.read()` is the
+store turns ordinary store-scoped handles into `source_closed`. A fork requests
+`capture({ lifetime: 'operation' })`; its detached payload survives source-cache
+teardown until explicit release, without retaining a live synchronization room. `snapshot.read()` is the
 handle's own full, detached stored read, and `copyFrom` admits same-backend cross-store
 handles, so the real fork flow runs capture-on-source/copy-into-target through the port.
 The guarded editable-tail replacement and the no-gap composed history import also moved to
@@ -30,7 +32,7 @@ business caller → target.snapshots.copyFrom(snapshot, selection) → SessionCo
                         ↑ selection only; the stored payload never crosses the port
 business caller → data.commands.replaceEditableTail({expectedUserTurnId, expectedForkTurnId, …})
                         → { previousUserTurnId, rollback }
-business caller → data.commands.applyHistoryImport({update, createCursor})
+business caller → data.commands.applyHistoryImport(explicitImportInputs)
 store teardown   → SessionDocument.destroy → snapshots.closeSource()
 ```
 
@@ -79,8 +81,7 @@ Local-project history sync drives
 `sessionDoc.sessionData.commands.applyHistoryImport(...)` at all three sites through one
 `applyBoundHistoryImport` helper. No business code calls the raw
 `SessionDocument.captureStoredHistory/copyStoredHistory` facades anymore; those raw-writer
-facades and `updateHistoryAndCursor` remain only as back-compat surface (the latter now
-delegates to the port command, reconstructing a `HistoryWriteError` on rejection).
+facades and `updateHistoryAndCursor` have been removed.
 
 ## Trade-offs
 
@@ -126,3 +127,9 @@ still throwing for foreign handles. The Loro suite covers `source_closed` after
 rewired to the port and assert the same behavior; a memory-backed import is explicitly
 rejected in `local-project-history-sync-service.test.ts`. Full `packages/shared` and
 `apps/cli` typechecks and test suites pass with a redirected `HOME`.
+
+Operation captures are acquired from a live store and keep only captured stored
+history valid after teardown. Closed stores still reject new capture and target
+writes. Releasing an authentic owned handle remains idempotent after teardown;
+forged/foreign release is still rejected. A gated worktree-creation test closes the
+source before resuming the copy and verifies copied content and terminal cleanup.

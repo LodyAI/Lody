@@ -1,3 +1,5 @@
+import { selectTurnOutput } from '../../../packages/shared/src/session-data/read';
+import { pickDirectoryScalars } from '../../../packages/shared/src/session-data/directory';
 import { createHistoryWriter } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
@@ -57,6 +59,15 @@ export function withHistoryPort<T extends object>(fixture: T): T & { sessionData
   storage.sessionData = {
     ...storage.sessionData,
     history: {
+      readTurnOutput: async (userTurnId: string) => {
+        const snapshot = await read();
+        return selectTurnOutput(
+          snapshot.length,
+          userTurnId,
+          (index) => pickDirectoryScalars(snapshot[index]),
+          (index) => snapshot[index]
+        );
+      },
       count: async () => (await read()).length,
       readTurn: async (id: string) => {
         const turn = (await read()).find((t) => t.id === id);

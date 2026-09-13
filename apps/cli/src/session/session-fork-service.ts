@@ -475,9 +475,12 @@ export class SessionForkService {
     // agent-config lookup scans the machine flock and user resolution is a
     // Convex query. Awaiting them in sequence put their sum on the fork click
     // path; the rejection order below is unchanged.
+    // This detached capture belongs to the fork operation, which may outlive
+    // the cached source document while git creates the new worktree.
+    const sourceSnapshots = requireSessionSnapshots(sourceDoc.sessionData);
     const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
       this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      requireSessionSnapshots(sourceDoc.sessionData).capture(),
+      sourceSnapshots.capture({ lifetime: 'operation' }),
       this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
       reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
     ]);
@@ -768,8 +771,7 @@ export class SessionForkService {
         marker,
         historyResult,
         sourceSnapshot,
-        releaseSourceSnapshot: () =>
-          requireSessionSnapshots(sourceDoc.sessionData).release(sourceSnapshot),
+        releaseSourceSnapshot: () => sourceSnapshots.release(sourceSnapshot),
         agentConfig,
         user,
         operation,
@@ -882,7 +884,7 @@ export class SessionForkService {
             copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
           );
         }
-        requireSessionSnapshots(sourceDoc.sessionData).release(sourceSnapshot);
+        sourceSnapshots.release(sourceSnapshot);
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(

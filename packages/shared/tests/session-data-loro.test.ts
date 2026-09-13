@@ -225,9 +225,43 @@ describe('loro session data adapter', () => {
     snapshots.closeSource();
     const closed = expect.objectContaining({ code: 'source_closed' });
     await expect(snapshots.capture()).rejects.toThrowError(closed);
-    expect(() => snapshots.release(snapshot)).toThrowError(closed);
     await expect(snapshot.read()).rejects.toThrowError(closed);
     await expect(snapshots.copyFrom(snapshot, [])).rejects.toThrowError(closed);
+    expect(() => snapshots.release(snapshot)).not.toThrow();
+  });
+
+  it('keeps an operation capture usable after source teardown until release', async () => {
+    const source = createLoroSessionData({
+      sessionId: contractSessionId,
+      doc: new Loro(),
+      durability: 'unavailable',
+    });
+    const target = createLoroSessionData({
+      sessionId: 'fork-target' as SessionId,
+      doc: new Loro(),
+      durability: 'unavailable',
+    });
+    await source.commands.appendTurn({
+      id: 'u',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00Z',
+      items: [{ type: 'text', text: 'captured' }],
+      fileDiff: [],
+    });
+    const snapshot = await source.snapshots.capture({ lifetime: 'operation' });
+    source.snapshots.closeSource();
+    const selection = await snapshot.read();
+    expect((await target.snapshots.copyFrom(snapshot, selection)).status).toBe('accepted');
+    expect(await target.history.readTurn('u')).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'captured' }] },
+    });
+    source.snapshots.release(snapshot);
+    source.snapshots.release(snapshot);
+    await expect(snapshot.read()).rejects.toMatchObject({ code: 'released' });
+    await expect(target.snapshots.copyFrom(snapshot, selection)).rejects.toMatchObject({
+      code: 'released',
+    });
   });
 
   it('reports source_closed on a cross-store copy after the source store closes', async () => {

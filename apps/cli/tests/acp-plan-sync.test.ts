@@ -1,3 +1,5 @@
+import { SessionDocument } from '../src/lib/loro/doc';
+import { composeTestSessionDoc } from './session-doc-fixture';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +15,39 @@ const makeNotification = (update: SessionNotification['update']): SessionNotific
 });
 
 describe('handleACPUpdateMessage plan sync', () => {
+  it('surfaces refused and unknown plan writes without reporting success', async () => {
+    const doc = new SessionDocument({} as never, 'plan-session' as SessionId);
+    composeTestSessionDoc(doc, {
+      history: [
+        {
+          id: 'a',
+          role: 'assistant',
+          timestamp: '2026-01-01T00:00:00Z',
+          items: [],
+          fileDiff: [],
+          plan: [],
+        },
+      ],
+    });
+    await expect(
+      doc.setPlan([{ content: 'bad', priority: 'invalid', status: 'pending' }] as never)
+    ).rejects.toThrow('Session write rejected: invalid_input');
+    expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([]);
+    const cause = new Error('storage outcome unknown');
+    const stub = vi
+      .spyOn(doc.sessionData.commands, 'setTurnField')
+      .mockResolvedValue({ status: 'indeterminate', cause });
+    await expect(doc.setPlan([])).rejects.toBe(cause);
+    stub.mockRestore();
+    await expect(
+      doc.setPlan([{ content: 'valid', priority: 'low', status: 'pending' }])
+    ).resolves.toBeUndefined();
+    expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([
+      { content: 'valid', priority: 'low', status: 'pending' },
+    ]);
+    expect(await doc.getDocState()).not.toHaveProperty('history');
+  });
+
   it('writes the latest plan snapshot onto the session doc', async () => {
     let history: any[] = [];
     const updateHistory = vi.fn(async (updateFn: (history: any[]) => any[]) => {

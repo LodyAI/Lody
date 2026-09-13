@@ -70,6 +70,43 @@ export function runSessionDataContract(
   create: () => Promise<SessionDataHarness> | SessionDataHarness
 ): void {
   describe(`${name}: session data contract`, () => {
+    it('captures only the linked turn output and preserves observation order', async () => {
+      const { data } = await create();
+      await data.commands.appendTurn(userTurn('before'));
+      await data.commands.appendTurn(userTurn('user-1'));
+      await data.commands.appendTurn({ ...assistantTurn('unrelated'), userTurnId: 'before' });
+      await data.commands.appendTurn({
+        ...assistantTurn('a1'),
+        finished: false,
+        endedAt: undefined,
+      });
+      const first = data.history.readTurnOutput('user-1');
+      await data.commands.setTurnField('a1', 'finished', setFieldTo(true));
+      expect((await first).map((t) => t.id)).toEqual(['user-1', 'a1']);
+      expect((await first)[1]?.finished).toBe(false);
+      expect((await data.history.readTurnOutput('user-1'))[1]?.finished).toBe(true);
+      expect(await data.history.readTurnOutput('missing')).toEqual([]);
+      await data.commands.setTurnField('user-1', 'status', setFieldTo('failed'));
+      await data.commands.appendTurn({
+        id: 'failure',
+        role: 'system',
+        timestamp: '2026-01-01T00:00:02Z',
+        items: [
+          {
+            type: 'system_notice',
+            name: 'chat_failed',
+            meta: { reason: 'acp_provider_overloaded', message: 'busy' },
+          },
+        ],
+        fileDiff: [],
+      });
+      expect((await data.history.readTurnOutput('user-1')).map((t) => t.id)).toEqual([
+        'user-1',
+        'a1',
+        'failure',
+      ]);
+    });
+
     it('reads turns by business id and raw range', async () => {
       const { data } = await create();
       await data.commands.appendTurn(userTurn('a'));

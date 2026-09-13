@@ -96,6 +96,7 @@ import {
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 import {
   createLoroSessionData,
+  requireSessionAccepted,
   setFieldTo,
   type LoroSessionData,
   type SessionTurn,
@@ -1754,7 +1755,7 @@ export function subscribeSessionChanges(
   return sessionDoc.subscribeAll(listener);
 }
 
-export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta> {
+export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
   mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
@@ -2081,15 +2082,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   }
 
   /**
-   * Explicit full-history read through the domain reader. Used only by callers
-   * whose contract IS the whole history (`getHistory`, `getDocState`, export);
-   * the windowed UI never routes through here.
-   */
-  private async readFullHistory(): Promise<SessionHistoryInput[]> {
-    return readSessionHistory(this.sessionData.history);
-  }
-
-  /**
    * Shallow user-turn index for control writes that need a history precondition
    * synchronously (ACP runtime config must stay targeted). Reads only `role`/`id`
    * scalars, never a turn body.
@@ -2125,16 +2117,15 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     return undefined;
   }
 
-  async getDocState(): Promise<SessionDocMeta | undefined> {
+  /** Control state only. Full history is an explicit sessionData.history.readAll(). */
+  async getDocState(): Promise<Omit<SessionDocMeta, 'history'> | undefined> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
     const state = this.mirror.getState();
-    const history = await this.readFullHistory();
 
     return {
       session: state.session,
-      history,
       mq: state.mq as SessionDocMeta['mq'],
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
@@ -2726,7 +2717,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }
     const id = this.shallowLatestTurnId('assistant');
     if (!id) return;
-    await this.sessionData.commands.setTurnField(id, 'plan', setFieldTo(entries));
+    requireSessionAccepted(
+      await this.sessionData.commands.setTurnField(id, 'plan', setFieldTo(entries))
+    );
   }
 
   async getMessageQueue(): Promise<MessageQueueItem[]> {

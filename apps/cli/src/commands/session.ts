@@ -57,7 +57,6 @@ import {
   type MachineId,
   type MachineMeta,
   type ProjectRef,
-  type SessionDocMeta,
   type SessionHistory,
   type SessionHistoryInput,
   type SessionQuotaKind,
@@ -3316,15 +3315,17 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const docState = (await sessionDoc.getDocState()) as SessionDocMeta | undefined;
-  const history = docState?.history ?? [];
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
+  ]);
 
   return {
     workspace,
     session,
-    historyCount: history.length,
-    latestHistoryAt: history[history.length - 1]?.timestamp,
-    messageQueueCount: docState?.mq?.length ?? 0,
+    historyCount: directory.length,
+    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    messageQueueCount: queue.length,
   };
 }
 

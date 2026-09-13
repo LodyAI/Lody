@@ -516,6 +516,7 @@ export function createConversationViewFromReader(
 
     if (!structural) {
       const toReRead: string[] = [];
+      const evictedChanges: number[] = [];
       let lo = Infinity;
       let hi = -1;
       let invalidatedSummary = false;
@@ -537,11 +538,17 @@ export function createConversationViewFromReader(
         rows[pos] = row;
         if (row.id !== old?.id) rebuildLookups(pos);
         if (hydrated.has(row.id)) toReRead.push(row.id);
+        else evictedChanges.push(pos);
         lo = Math.min(lo, pos);
         hi = Math.max(hi, pos);
       }
       bump();
       if (hi >= 0) emit({ kind: 'index', from: lo, to: hi + 1 });
+      // Index notifications also occur for summary maintenance. A storage
+      // content edit must separately invalidate body-derived facts even when
+      // this view no longer holds the body. Otherwise an old goal/file diff
+      // stays cached forever in derivations outside the hydrated tail.
+      for (const pos of evictedChanges) emit({ kind: 'range', from: pos, to: pos + 1 });
       if (toReRead.length > 0) await applyHydratedReplacement(toReRead);
       // A summary that was invalidated needs the background pass again; restart
       // from the end so a cursor that already moved past this row revisits it.
@@ -619,22 +626,9 @@ export function createConversationViewFromReader(
       }
     }
     if (!Number.isFinite(structuralFrom)) {
-      // Content-only full refresh: keep identities and bodies, refresh rows.
-      const toReRead: string[] = [];
-      for (const entry of entries) {
-        const row = rowFromDirectory(entry);
-        const old = rows[entry.position];
-        if (rowChanged(old, row)) bumpTurn(row.id);
-        rows[entry.position] = row;
-        if (row.id !== old?.id) rebuildLookups(entry.position);
-        if (hydrated.has(row.id)) toReRead.push(row.id);
-      }
-      bump();
-      emit({ kind: 'index', from: 0, to: ids.length });
-      await applyHydratedReplacement(toReRead);
-      // Summaries of non-hydrated rows were dropped by the directory refresh:
-      // re-fill them in the background rather than trusting possibly stale ones.
-      scheduleIdlePass();
+      // Unknown-range content changes obey the same invalidation contract as
+      // ranged edits, including facts whose bodies have already been evicted.
+      await applyChange(0, entries, entries.length);
       return;
     }
     // Continuity was lost: rebuild the whole index and re-hydrate the tail.
@@ -843,7 +837,10 @@ export function createConversationViewFromReader(
         const id = ids[i]!;
         if (hydrated.has(id)) continue;
         const turnWeight = Math.max(1, rows[i]?.itemCount ?? 0);
-        if (chunk.length > 0 && (chunk.length >= hydrateChunkSize || weight + turnWeight > hydrateItemBudget)) {
+        if (
+          chunk.length > 0 &&
+          (chunk.length >= hydrateChunkSize || weight + turnWeight > hydrateItemBudget)
+        ) {
           chunks.push(chunk);
           chunk = [];
           weight = 0;

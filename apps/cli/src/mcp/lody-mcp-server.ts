@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import { spawn } from 'child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1600,13 +1599,13 @@ const readSessionExecutionSnapshot = async (
   live: SessionLiveWorking
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
-  const [history, docState] = await Promise.all([
-    readSessionHistory(sessionDoc.sessionData.history),
-    sessionDoc.getDocState(),
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
   ]);
-  const activeTurnId = resolveActiveAssistantTurnId(history);
+  const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
   const queuedTurnCount =
-    docState?.mq?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
+    queue?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
   return resolveSessionExecutionSnapshot({
     live,
     ...(activeTurnId ? { activeTurnId } : {}),
@@ -3963,6 +3962,7 @@ export const __lodyMcpServerInternals = {
   buildOperationTargetCancelArgs,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
+  readSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   startSessionChatOperation,
   startSessionChatManyOperation,

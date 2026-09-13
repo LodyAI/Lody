@@ -240,3 +240,22 @@ full repository or end-to-end acceptance.
 
 Related: [shared writer](2026-09-07-single-history-writer.md),
 [PR #376](https://github.com/LodyAI/Lody/pull/376).
+
+## Shipped reader and packaging acceptance
+
+Content edits on an evicted turn now emit a range invalidation as well as an index
+notification. Both ranged and positionless updates use that path; index-only idle
+summary updates do not discard valid facts. The combined reader/derivation test
+pauses, resumes and clears a goal beyond the last 64 turns, and updates a late file
+diff, over real Loro and memory backends.
+
+CLI status/list reads use shallow scalars and the queue. `getDocState` contains
+control state only. The output waiter uses `readTurnOutput`, an adapter-owned,
+consistent selection of user scalars, linked assistant output and failure notices;
+it no longer serializes unrelated history on each notification.
+
+The CLI SSR bundle crossed the 2048 MB heap limit while a browser TLA compatibility
+plugin re-parsed its full output graph. Node 22 can execute native top-level await;
+removing that redundant transform retains source maps, assets and native dependency
+policy. An isolated locked-dependency build failed before the change and passed
+with the original heap cap afterward. Device-scale UI performance remains unmeasured.

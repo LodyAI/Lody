@@ -1,3 +1,4 @@
+import { selectTurnOutput } from './read';
 import { HistoryActionRefused } from './task-proposal';
 import { applyHistoryAction, historyActionTarget } from './history-actions';
 import type { z } from 'zod';
@@ -238,6 +239,15 @@ export function createMemorySessionData(options: MemorySessionDataOptions): Memo
   };
 
   const reader: SessionHistoryReader = {
+    async readTurnOutput(userTurnId) {
+      return selectTurnOutput(
+        turns.length,
+        userTurnId,
+        (index) => pickDirectoryScalars(turns[index]),
+        (index) =>
+          turns[index] ? (clone(turns[index]!) as import('./domain').SessionEntry) : undefined
+      );
+    },
     async count() {
       return turns.length;
     },

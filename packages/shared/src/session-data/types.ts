@@ -283,6 +283,10 @@ export interface SessionHistoryReader {
    * goes through the opaque snapshot handle.
    */
   readAll(): Promise<SessionEntry[]>;
+  /** One observation of a user turn's output: user scalars, its first linked
+   * assistant body, and later system notices only when the user failed.
+   * Never materialize unrelated history bodies or join separate async reads. */
+  readTurnOutput(userTurnId: string): Promise<SessionEntry[]>;
   /** Live observation with a gap-free initial directory. */
   observe(listener: SessionDataChangeListener): SessionObservation;
 }

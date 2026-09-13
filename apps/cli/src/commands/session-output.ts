@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
 
@@ -251,7 +250,7 @@ export async function waitForTurnCompletion(options: {
     let delivery = Promise.resolve();
     const refresh = () => {
       if (settled) return;
-      const snapshot = readSessionHistory(options.sessionDoc.sessionData.history);
+      const snapshot = options.sessionDoc.sessionData.history.readTurnOutput(options.userTurnId);
       // Attach immediately: a later read may reject before an earlier one finishes.
       const captured = snapshot.then(
         (history) => ({ history }),

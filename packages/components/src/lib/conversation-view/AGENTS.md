@@ -48,6 +48,10 @@ Do not claim O(window) cold open or a hard whole-process memory bound.
   Never recreate its parser, materializer, rollback or stored-copy behavior here.
   `createConversationSession` owns reader composition; windowed writes do not
   receive a full-history callback. Read caches are never a write baseline.
+- Content edits must emit a body-range invalidation even for evicted turns,
+  including positionless updates. An index/summary notification alone cannot
+  invalidate goal, permission or file-diff facts. Test the shipped reader and
+  its derivation together; the raw-doc fallback is not that coverage.
 - **Cache ownership**: derivations keep weak identity hints, not strong turn
   references. Facts must contain only the data their consumer needs. Disposal
   clears facts and releases in-flight pins. LRU limits exclude pinned/tail turns.

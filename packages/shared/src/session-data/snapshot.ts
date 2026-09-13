@@ -16,8 +16,9 @@ import type { SessionCommandResult } from './types';
 // A handle is scoped to its issuing store and session: only that store can
 // `release` it (idempotently), a handle issued by another store's `release`
 // throws `cross_store`, a never-issued shape throws `invalid_snapshot`, and
-// once the issuing store closes every outstanding handle reports
-// `source_closed`. `copyFrom` additionally admits same-backend cross-store
+// closing the issuing store invalidates store-scoped handles. An explicitly
+// operation-owned detached capture survives until release, as a worktree fork
+// can outlive source-cache eviction. `copyFrom` additionally admits same-backend cross-store
 // handles (the fork flow copies a source snapshot into a target doc), while a
 // backend that cannot perform stored copy declares `capabilities.copy = false`
 // and returns `rejected('unsupported')` instead of pretending.
@@ -29,7 +30,7 @@ declare const sessionSnapshotBrand: unique symbol;
  * never constructible from JSON or plain objects: the brand symbol is not
  * exported and each store only honours handles minted by a store of its own
  * backend. `read()` is part of the capability: a released or closed-source
- * handle refuses to read.
+ * store-scoped handle refuses to read.
  */
 export interface SessionSnapshot {
   readonly [sessionSnapshotBrand]: true;
@@ -71,10 +72,12 @@ export interface SessionSnapshotService {
   /**
    * One consistent capture of the store's stored history. Async so a database
    * backend can capture without blocking (the Loro adapter answers
-   * synchronously and its handle read is a detached clone).
+   * synchronously and its handle read is a detached clone). `operation` captures
+   * retain that detached snapshot until explicit release, even after source
+   * teardown; ordinary store-scoped handles still become source_closed.
    */
-  capture(): Promise<SessionSnapshot>;
-  /** Invalidate a handle. Idempotent for this store's already-released handles. */
+  capture(options?: { readonly lifetime?: 'store' | 'operation' }): Promise<SessionSnapshot>;
+  /** Invalidate an owned handle, idempotently even after source teardown. */
   release(snapshot: SessionSnapshot): void;
   /**
    * Copy the business-authored `selection` into this store, using the captured

@@ -241,6 +241,7 @@ function createForkHarness(
     repo,
     sessionManager,
     targetDoc,
+    sourceDoc,
     workspaceDocument,
     forkOperationStore,
     markers,
@@ -663,6 +664,47 @@ describe('SessionForkService durability boundary', () => {
     });
     expect(harness.targetDoc.setForkOperation).not.toHaveBeenCalled();
     expect(harness.sessionManager.createSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the fork snapshot alive while the source unloads during worktree creation', async () => {
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    const harness = createForkHarness(undefined, {
+      worktree: { dirty: false, headSha: 'a'.repeat(40) },
+    });
+    harness.sessionManager.createSession.mockImplementation(async () => {
+      entered.resolve();
+      await gate.promise;
+    });
+    const snapshots = harness.sourceDoc.sessionData.snapshots;
+    const release = snapshots.release.bind(snapshots);
+    vi.spyOn(snapshots, 'release').mockImplementation((snapshot) => {
+      release(snapshot);
+      released.resolve();
+    });
+    const copied: string[] = [];
+    const target = createLoroSessionData({
+      sessionId: targetSessionId,
+      doc: new LoroDoc(),
+      durability: 'unavailable',
+    });
+    harness.targetDoc.sessionData.snapshots.copyFrom = async (snapshot, history) => {
+      const result = await target.snapshots.copyFrom(snapshot, history);
+      copied.push(...(await target.history.readAll()).map((t) => t.id));
+      return result;
+    };
+    const result = await harness.service.fork({
+      ...forkSpec,
+      targetContext: { kind: 'new-worktree' },
+    });
+    expect(result.success).toBe(true);
+    await entered.promise;
+    snapshots.closeSource();
+    gate.resolve();
+    await released.promise;
+    expect(copied).toContain('assistant-1');
+    expect(harness.targetDoc.setForkOperation).toHaveBeenLastCalledWith(undefined);
   });
 
   it('accepts durably before creating an independent worktree from captured HEAD', async () => {
