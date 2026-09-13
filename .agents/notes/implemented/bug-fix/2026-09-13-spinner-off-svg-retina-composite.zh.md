@@ -39,6 +39,28 @@ device scale factor 乘进 layout zoom，所以 DPR 2 下每个 `<svg>` 的 effe
 `<g class="agent-readiness-orbit">` 的弧线也是同样下场。Tailwind 的 `animate-spin`
 只是普通的 `rotate(360deg)` keyframe，唯一的变量是它挂在哪个元素上。
 
+### 这算谁的缺陷
+
+主要在上游，但只是部分。这个拒绝是有意的能力判定，而非计算错误：合成器无法复现 Blink
+对 SVG 的 zoom 相关 transform 解析，与其冒险画错，不如放弃并把动画交还主线程。渲染结果
+在视觉上仍然正确，错的只是开销，因此它是一个「带有保正确回退的优化缺失」，而不是渲染
+缺陷。追踪于
+[crbug.com/1186312](https://issues.chromium.org/issues/40172437)；其当前处理状态未经
+核实，因为该追踪器需要登录。
+
+图标库并不背锅。`lucide-react` 调用 `createElement("svg", ...)` 并把调用方的
+`className` 合并到该根元素上，这是图标组件的正常行为；而且下文的受控 trace 在页面中
+完全没有 `lucide-react`、只用手写 `<svg>` 时同样复现了失败。元素类型才是唯一的区分点。
+
+我们的用法同样普通——给图标加 `animate-spin` 是多数 Tailwind 应用的写法——所以让它变贵
+的是运行条件而非这个写法本身：device pixel ratio 为 2，这是触发的必要条件；120 Hz 屏幕，
+使每秒开销翻倍；spinner 会在会话运行的数小时内一直挂载，而不是几百毫秒；每个运行中的
+会话一个；以及 Electron，其 renderer CPU 会直接体现为耗电。同样的标记在 60 Hz 非 Retina
+屏上是免费的，这也是为什么代码评审永远抓不到它，而 CPU profile 可以。
+
+即使浏览器修复了也保留这个 wrapper。桌面端随 Electron 锁定的 Chromium 版本发布，上游
+修复要很久才能到达用户，而 wrapper 本身没有成本。
+
 ## 决定
 
 - `packages/components/src/ui/spinner.tsx` 是唯一施加 `animate-spin` 的地方。它渲染

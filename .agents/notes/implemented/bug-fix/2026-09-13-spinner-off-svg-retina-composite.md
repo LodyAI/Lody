@@ -45,6 +45,36 @@ elements as well, which is why the `<g class="agent-readiness-orbit">` arc had t
 same fate. Tailwind's `animate-spin` is a plain `rotate(360deg)` keyframe, so the
 only variable is which element carries it.
 
+### Whose defect is it
+
+Upstream, but only partly. The rejection is a deliberate capability gate, not a
+miscomputation: the compositor cannot reproduce Blink's zoom-aware transform
+resolution for SVG, so rather than risk drawing the wrong thing it declines and
+returns the animation to the main thread. Rendering stays visually correct and
+only the cost is wrong, which is why this is a missing optimization with a
+correctness-preserving fallback rather than a rendering defect. Tracked as
+[crbug.com/1186312](https://issues.chromium.org/issues/40172437); its current
+triage status was not verified, because the tracker requires sign-in.
+
+The icon library is not implicated. `lucide-react` calls
+`createElement("svg", ...)` and merges the caller's `className` onto that root,
+which is ordinary behaviour for an icon component, and the controlled trace below
+reproduces the failure on a hand-written `<svg>` with no `lucide-react` in the
+page at all. The element type is the whole discriminator.
+
+Our usage was equally ordinary — an `animate-spin` class on an icon is what most
+Tailwind applications write — so what made it expensive was the operating
+conditions, not the pattern: a device pixel ratio of 2, which is required to
+trigger it at all; a 120 Hz panel, doubling the per-second cost; spinners that
+stay mounted for the hours a session can run rather than a few hundred
+milliseconds; one per running session; and Electron, where renderer CPU is felt
+as battery drain. The same markup is free on a 60 Hz non-Retina display, which is
+why a code review would never have caught it and a CPU profile did.
+
+Keep the wrapper even if the browser is fixed. The desktop ships on whichever
+Chromium version Electron pins, so an upstream fix would take a long time to
+reach users, and the wrapper costs nothing.
+
 ## Decision
 
 - `packages/components/src/ui/spinner.tsx` is the one place `animate-spin` is
