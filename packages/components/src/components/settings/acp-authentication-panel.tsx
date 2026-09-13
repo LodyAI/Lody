@@ -84,7 +84,12 @@ export function areAcpAuthenticationTargetsEqual(
   left: MachineAcpAuthenticationArgs,
   right: MachineAcpAuthenticationArgs
 ): boolean {
-  return left.machineId === right.machineId && left.configId === right.configId;
+  return (
+    left.machineId === right.machineId &&
+    left.configId === right.configId &&
+    left.purpose === right.purpose &&
+    left.setupRevision === right.setupRevision
+  );
 }
 
 export function AcpAuthenticationPanel({
@@ -96,6 +101,8 @@ export function AcpAuthenticationPanel({
   compact = false,
   reauthentication = false,
   providerName,
+  purpose,
+  setupRevision,
   onBeforeStart,
   onAuthenticated,
 }: {
@@ -114,6 +121,8 @@ export function AcpAuthenticationPanel({
    * the config.
    */
   providerName?: string;
+  purpose?: 'authenticate' | 'provision-provider-credential';
+  setupRevision?: string;
   /** Persist the exact Provider config that the daemon will resolve before launch. */
   onBeforeStart?: () => void | Promise<void>;
   onAuthenticated?: () => void | Promise<void>;
@@ -149,8 +158,10 @@ export function AcpAuthenticationPanel({
 
   const authArgs: MachineAcpAuthenticationArgs | null = useMemo(
     () =>
-      machineId && configId && (cliType !== 'custom' || customAcp) ? { machineId, configId } : null,
-    [cliType, configId, customAcp, machineId]
+      machineId && configId && (cliType !== 'custom' || customAcp)
+        ? { machineId, configId, purpose, setupRevision }
+        : null,
+    [cliType, configId, customAcp, machineId, purpose, setupRevision]
   );
 
   const closePendingAuthorizationWindow = (): void => {

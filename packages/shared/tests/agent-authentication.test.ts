@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildLodyCodexCustomProviderEnv } from '../src/codex-provider-config';
 import {
   hasBuiltinEnvAuthentication,
   supportsAuthenticationWhenRequired,
@@ -28,13 +29,23 @@ describe('hasBuiltinEnvAuthentication', () => {
     expect(hasBuiltinEnvAuthentication('claude', { ANTHROPIC_API_KEY: undefined })).toBe(false);
   });
 
-  it('does not infer env authentication for agents that report it themselves', () => {
+  it('does not infer authentication from arbitrary provider env keys', () => {
     // Codex custom model providers may set `requires_openai_auth = false`, so the
     // agent — not an env heuristic — decides whether sign-in is required.
     expect(hasBuiltinEnvAuthentication('codex', { OPENAI_API_KEY: 'sk-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('kimi', { MOONSHOT_API_KEY: 'sk-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('grok', { XAI_API_KEY: 'xai-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('auggie', { ANTHROPIC_API_KEY: 'sk-test' })).toBe(false);
+  });
+
+  it('recognizes the Codex custom provider owned by the credential form', () => {
+    const env = buildLodyCodexCustomProviderEnv(
+      {},
+      {
+        baseUrl: 'https://relay.example.com/v1',
+      }
+    );
+    expect(hasBuiltinEnvAuthentication('codex', env)).toBe(true);
   });
 });
 

@@ -329,6 +329,34 @@ describe('desktop onboarding flow', () => {
     });
   });
 
+  it('keeps Codex directly available in the onboarding provider showcase', async () => {
+    const onAdd = vi.fn();
+    await act(async () => {
+      root?.render(
+        <ProvidersScreenView
+          configs={[]}
+          setups={[]}
+          testStatuses={{}}
+          noLocalMachine={false}
+          onEdit={vi.fn()}
+          onTest={vi.fn()}
+          onDelete={vi.fn()}
+          onAdd={onAdd}
+          onBack={vi.fn()}
+          onSkip={vi.fn()}
+          onNext={vi.fn()}
+        />
+      );
+    });
+
+    const codexButton = container.querySelector<HTMLButtonElement>('button[title="Codex"]');
+    expect(codexButton).not.toBeNull();
+    await act(async () => {
+      codexButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onAdd).toHaveBeenCalledWith({ kind: 'builtin', agentType: 'codex' });
+  });
+
   it('continues with an AgentConfig only after it is published', async () => {
     const onNext = vi.fn();
     const config: AgentConfigMeta = {

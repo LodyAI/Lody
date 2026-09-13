@@ -78,3 +78,6 @@ Parent `AGENTS.md` files also apply.
   changing that target cancels the old request, and a late reply must not clear or report an error
   over a newer interaction. Clear manual codes and form values on completion, cancellation, target
   change, and failure; never seed a secret field from retained progress.
+- Re-enabling a provider after a wildcard setup cancellation writes the fresh setup revision and
+  retracts that barrier in one Flock transaction. Never expose a cancellation-only delete before
+  the replacement setup exists; a stale setup could otherwise regain publication authority.

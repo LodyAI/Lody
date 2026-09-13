@@ -23,9 +23,11 @@ import {
   ACP_AUTHORIZATION_URL_MAX_LENGTH,
   getLodyElicitationMeta,
   getManagedBuiltinRuntimeByAgentType,
+  getLodyCodexCustomProvider,
   hasBuiltinEnvAuthentication,
   isAcpAuthenticationFormWithinByteLimit,
   isManagedBuiltinAgentType,
+  LODY_CODEX_API_KEY_ENV,
 } from '@lody/shared';
 
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
@@ -80,6 +82,7 @@ export type AcpAuthenticationResult =
   | {
       success: true;
       disposition: 'authenticated' | 'cancelled' | 'not-running' | 'input-accepted';
+      publicationDurability?: 'durable' | 'uncertain';
     }
   | {
       success: false;
@@ -136,6 +139,7 @@ type RunningAuthentication = {
   cancelled: boolean;
   timedOut: boolean;
   terminating: boolean;
+  publicationPhase: 'cancelable' | 'committed';
   acceptsAuthorizationCode: boolean;
   authorizationCodeSubmitted: boolean;
   abortController: AbortController;
@@ -532,6 +536,19 @@ export class AcpAuthenticationManager {
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
     env?: Record<string, string>;
+    prepare?: (signal: AbortSignal) => Promise<{
+      cliType: AgentConfigCliType;
+      agentType: string;
+      customAcp?: CustomAcpLaunchSpec;
+      runtimeOverrides?: BuiltinRuntimeOverrides;
+      env?: Record<string, string>;
+    }>;
+    storeCodexApiKey?: (
+      apiKey: string,
+      signal: AbortSignal,
+      markCommitted: () => void
+    ) => Promise<{ publicationDurability: 'durable' | 'uncertain' }>;
+    forceCodexApiKeyInput?: boolean;
     onProgress?: (event: AcpAuthenticationProgressEvent) => void;
   }): Promise<AcpAuthenticationResult> {
     const isBuiltinAuthentication =
@@ -553,6 +570,7 @@ export class AcpAuthenticationManager {
       cancelled: false,
       timedOut: false,
       terminating: false,
+      publicationPhase: 'cancelable',
       acceptsAuthorizationCode: false,
       authorizationCodeSubmitted: false,
       abortController: new AbortController(),
@@ -576,7 +594,7 @@ export class AcpAuthenticationManager {
     };
 
     timeoutHandle = setTimeout(() => {
-      if (running.cancelled) return;
+      if (running.cancelled || running.publicationPhase === 'committed') return;
       running.timedOut = true;
       running.abortController.abort();
       running.pendingInteraction?.resolve({ action: 'cancel' });
@@ -589,10 +607,52 @@ export class AcpAuthenticationManager {
     timeoutHandle.unref?.();
 
     try {
+      if (options.prepare) {
+        const prepared = await options.prepare(running.abortController.signal);
+        if (prepared.cliType !== options.cliType || prepared.agentType !== options.agentType) {
+          throw new Error('Authentication preparation changed the reserved provider identity');
+        }
+        options = { ...options, ...prepared, prepare: undefined };
+      }
       if (!isBuiltinAuthentication) {
         return await this.authenticateProtocolDrivenAcp(options, running);
       }
       const agentType = options.agentType as BuiltinCliType;
+      const codexProvider = agentType === 'codex' ? getLodyCodexCustomProvider(options.env) : null;
+      if (
+        codexProvider &&
+        (options.forceCodexApiKeyInput || !options.env?.[LODY_CODEX_API_KEY_ENV]?.trim()) &&
+        options.storeCodexApiKey
+      ) {
+        const interactionId = randomUUID();
+        const inputPromise = this.waitForAuthenticationInput(running, interactionId);
+        if (!inputPromise) throw new Error('Codex credential input is already pending');
+        options.onProgress?.({
+          status: 'input-required',
+          interactionId,
+          message: 'Enter the API key for this Codex endpoint',
+          form: {
+            title: 'Codex API Key',
+            fields: [{ id: 'apiKey', type: 'secret', label: 'API Key', required: true }],
+          },
+        });
+        const input = await inputPromise;
+        if (input.action !== 'accept') {
+          throw new DOMException('Codex credential setup was cancelled', 'AbortError');
+        }
+        const apiKey = typeof input.content?.apiKey === 'string' ? input.content.apiKey.trim() : '';
+        if (!apiKey) throw new Error('Codex API key is required');
+        const publication = await options.storeCodexApiKey(
+          apiKey,
+          running.abortController.signal,
+          () => {
+            running.abortController.signal.throwIfAborted();
+            running.publicationPhase = 'committed';
+          }
+        );
+        options.onProgress?.({ status: 'authenticated' });
+        return { success: true, disposition: 'authenticated', ...publication };
+      }
       const launch = await resolveBuiltinAuthenticationProcessLaunch({
         cliType: options.cliType,
         agentType: options.agentType,
@@ -697,9 +757,15 @@ export class AcpAuthenticationManager {
   cancel(requestId: string): AcpAuthenticationResult {
     const active = this.findRunningAuthentication(requestId);
     if (!active) {
+      this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=not-running`);
       return { success: true, disposition: 'not-running' };
     }
     const { agentType, running } = active;
+
+    if (running.publicationPhase === 'committed') {
+      this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=committed`);
+      return { success: true, disposition: 'not-running' };
+    }
 
     running.cancelled = true;
     running.abortController.abort();
@@ -709,6 +775,7 @@ export class AcpAuthenticationManager {
       this.runningByAgentType.delete(agentType);
     }
     this.terminateAuthentication(agentType, running, 'cancelled');
+    this.logger.debug(`[acp-auth] Cancel requestId=${requestId} outcome=cancelled`);
     return { success: true, disposition: 'cancelled' };
   }
 

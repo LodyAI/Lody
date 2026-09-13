@@ -1993,6 +1993,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               ...common,
               action: message.action,
               configId: message.configId,
+              purpose: message.purpose,
+              setupRevision: message.setupRevision,
+              expectedBindingDigest: message.expectedBindingDigest,
             });
           case 'cancel':
             return client.requestMachineAcpAuthenticate({

@@ -6,6 +6,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, Plus, Trash2, XCircle } fro
 import { Spinner } from '@/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
+  getLodyCodexCustomProvider,
   getBuiltinAgentByAgentType,
   isManagedBuiltinAgentType,
   type AgentBrandId,
@@ -51,6 +52,7 @@ import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
+import { useCodexProviderCredential } from '@/hooks/use-codex-provider-credential';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
@@ -148,6 +150,7 @@ function presetShowcase(presetId: string, label: string, brandId: AgentBrandId):
 const FEATURED_SHOWCASE_AGENTS: ShowcaseAgent[] = [
   builtinShowcase('kimi', 'Kimi'),
   builtinShowcase('grok', 'Grok'),
+  builtinShowcase('codex', 'Codex'),
   registryShowcase('amp-acp', 'Amp'),
   registryShowcase('cursor', 'Cursor'),
   registryShowcase('opencode', 'OpenCode'),
@@ -684,6 +687,7 @@ export function ProvidersScreen({
   const analytics = useOnboardingAnalytics();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const provisionCodexCredential = useCodexProviderCredential(runtime, workspaceId);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
   const { machines } = useVisibleMachineMetas();
@@ -1046,14 +1050,44 @@ export function ProvidersScreen({
             machineId: localMachineId,
           };
           if (payload.backgroundSetup) {
-            await createSetup(config);
+            await createSetup({ config, setupRevision: payload.setupRevision });
           } else {
             await createConfig(config);
+          }
+          if (payload.codexApiKey) {
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            try {
+              const provision = await provisionCodexCredential({
+                config,
+                setupRevision: payload.setupRevision,
+                apiKey: payload.codexApiKey,
+              });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
+            } catch (error) {
+              if (payload.backgroundSetup) {
+                await deleteSetup({
+                  id: config.id,
+                  machineId: config.machineId,
+                  expectedSetupRevision: payload.setupRevision,
+                });
+              } else await deleteConfig(config);
+              throw error;
+            }
           }
           setSelectedProviderId(config.id);
         } else {
           invalidateTestRun(dialogMode.config.id);
-          await updateConfig({
+          const removingCodexCredential =
+            getLodyCodexCustomProvider(dialogMode.config.env) !== null &&
+            getLodyCodexCustomProvider(payload.env) === null;
+          const nextConfig: AgentConfigMeta = {
             id: dialogMode.config.id,
             machineId: dialogMode.config.machineId,
             name: payload.name,
@@ -1066,7 +1100,51 @@ export function ProvidersScreen({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-          });
+          };
+          if (payload.codexApiKey) {
+            if (!payload.setupRevision) throw new Error('Missing Codex setup revision');
+            await updateConfig({
+              ...dialogMode.config,
+              name: nextConfig.name,
+              description: nextConfig.description,
+              prompt: nextConfig.prompt,
+              titleGeneration: nextConfig.titleGeneration,
+              brandId: nextConfig.brandId,
+            });
+            await createSetup({ config: nextConfig, setupRevision: payload.setupRevision });
+            try {
+              const provision = await provisionCodexCredential({
+                config: nextConfig,
+                setupRevision: payload.setupRevision,
+                apiKey: payload.codexApiKey,
+              });
+              if (provision.publicationDurability === 'uncertain') {
+                toast.warning(
+                  t(
+                    'agents.credentialPublicationUncertain',
+                    'Provider updated, but durable storage could not be confirmed. Review the current configuration before retrying.'
+                  )
+                );
+              }
+            } catch (error) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                expectedSetupRevision: payload.setupRevision,
+                preservePublishedConfig: true,
+              });
+              throw error;
+            }
+          } else {
+            if (removingCodexCredential) {
+              await deleteSetup({
+                id: nextConfig.id,
+                machineId: nextConfig.machineId,
+                preservePublishedConfig: true,
+              });
+            }
+            await updateConfig(nextConfig);
+          }
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.
           clearFailureReason(dialogMode.config.id);
@@ -1099,9 +1177,12 @@ export function ProvidersScreen({
       clearFailureReason,
       createConfig,
       createSetup,
+      deleteConfig,
+      deleteSetup,
       dialogMode,
       invalidateTestRun,
       localMachineId,
+      provisionCodexCredential,
       t,
       updateConfig,
     ]
@@ -1150,7 +1231,12 @@ export function ProvidersScreen({
         operation: 'agent_setup_cancel',
       });
       try {
-        await deleteSetup(setup.id);
+        await deleteSetup({
+          id: setup.id,
+          machineId: setup.machineId,
+          expectedSetupRevision: setup.setupRevision,
+          preservePublishedConfig: setup.replacesPublishedConfig === true,
+        });
         analytics.capture('onboarding/operation_succeeded', {
           step: 'providers',
           operation: 'agent_setup_cancel',
@@ -1184,7 +1270,15 @@ export function ProvidersScreen({
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
-      await deleteConfig(pendingDelete.id);
+      const provider = getLodyCodexCustomProvider(pendingDelete.env);
+      if (provider) {
+        await deleteSetup({
+          id: pendingDelete.id,
+          machineId: pendingDelete.machineId,
+          preservePublishedConfig: false,
+        });
+      }
+      await deleteConfig(pendingDelete);
       clearFailureReason(pendingDelete.id);
       setTestStatuses((prev) => {
         const { [pendingDelete.id]: _, ...rest } = prev;

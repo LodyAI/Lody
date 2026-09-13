@@ -103,8 +103,8 @@ project add/update flows fail after the local write is durable.
 ## Durable commands are scanned, not evented
 
 `machine-flock-command-watcher.ts` owns the machine's durable COMMAND subscription
-(archive/delete/delete-local-project/provider-setup), separately from the sync
-coordinator's write room. Flock rows are durable, so reconnect correctness is
+(archive/delete/delete-local-project/provider-setup), separately from the sync coordinator's
+write room. Flock rows are durable, so reconnect correctness is
 SCAN-based: every authoritative join rescans every queue, and join or initial-sync
 failures retry with bounded backoff. Events are only low-latency wakeups and carry
 `authoritative`, which gates provider setup — a stale local setup row must not outrun

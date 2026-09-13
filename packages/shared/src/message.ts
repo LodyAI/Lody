@@ -409,6 +409,12 @@ export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
         action: 'start';
         /** Daemon-authoritative persisted Provider config. No launch fields cross RPC. */
         configId: AgentConfigId;
+        /** Explicit credential mutation; ordinary authentication never rotates stored keys. */
+        purpose?: 'authenticate' | 'provision-provider-credential';
+        /** Exact staged setup generation required for credential provisioning. */
+        setupRevision?: string;
+        /** Digest of the exact credential-bound launch config approved by the renderer. */
+        expectedBindingDigest?: string;
       }
     | {
         action: 'cancel';
@@ -452,6 +458,8 @@ export interface MachineAcpAuthenticateResponse {
     | 'error';
   /** Present when a post-login capability refresh was requested. */
   capabilitiesRefreshed?: boolean;
+  /** Durability of an irreversible provider publication on the target machine. */
+  publicationDurability?: 'durable' | 'uncertain';
   /** A successful login command can still leave the runtime requiring auth. */
   authRequired?: boolean;
   authMethods?: MachineAcpAuthMethodSummary[];

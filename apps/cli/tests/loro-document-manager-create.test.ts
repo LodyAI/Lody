@@ -2,12 +2,21 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { Flock } from '@loro-dev/flock-wasm';
 import {
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared/local-loro-data-plane';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
-import type { WorkspaceId } from '@lody/shared';
+import {
+  buildLodyCodexCustomProviderEnv,
+  machineFlockKeys,
+  writeMachineFlockRowToFlock,
+  type AgentConfigId,
+  type MachineId,
+  type ProviderSetupTask,
+  type WorkspaceId,
+} from '@lody/shared';
 
 import type { Logger } from '../src/utils/logger';
 
@@ -227,12 +236,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     mocks.repoCreate.mockRejectedValueOnce(new Error('repo create failed'));
 
     await expect(
-      LoroDocumentManager.create(
-        'workspace-1' as WorkspaceId,
-        'user-1',
-        createSilentLogger(),
-        { attachRemoteOnCreate: true, streamsTokens: testStreamsTokens }
-      )
+      LoroDocumentManager.create('workspace-1' as WorkspaceId, 'user-1', createSilentLogger(), {
+        attachRemoteOnCreate: true,
+        streamsTokens: testStreamsTokens,
+      })
     ).rejects.toThrow('repo create failed');
 
     // The remote transport is attached only after the local repo exists.
@@ -256,12 +263,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     });
 
     await expect(
-      LoroDocumentManager.create(
-        'workspace-2' as WorkspaceId,
-        'user-1',
-        createSilentLogger(),
-        { attachRemoteOnCreate: true, streamsTokens: testStreamsTokens }
-      )
+      LoroDocumentManager.create('workspace-2' as WorkspaceId, 'user-1', createSilentLogger(), {
+        attachRemoteOnCreate: true,
+        streamsTokens: testStreamsTokens,
+      })
     ).rejects.toThrow('join meta failed');
 
     expect(joinMetaRoom).toHaveBeenCalledTimes(1);
@@ -987,5 +992,68 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     } finally {
       randomSpy.mockRestore();
     }
+  });
+});
+
+describe('LoroDocumentManager provider setup visibility', () => {
+  it('waits for the exact setup revision to arrive from a delayed Flock replica', async () => {
+    const workspaceId = 'workspace-causal' as WorkspaceId;
+    const machineId = 'machine-causal' as MachineId;
+    const configId = 'config-causal' as AgentConfigId;
+    const setupRevision = 'revision-2';
+    const rendererFlock = new Flock('renderer-causal');
+    const daemonFlock = new Flock('daemon-causal');
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock: daemonFlock })),
+    };
+    const manager = Object.assign(Object.create(LoroDocumentManager.prototype), {
+      repo,
+      workspaceId,
+    }) as LoroDocumentManager;
+
+    const pending = manager.waitForProviderSetupConfig(configId, machineId, setupRevision, {
+      timeoutMs: 1_000,
+    });
+    let settled = false;
+    void pending.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    const setup: ProviderSetupTask = {
+      v: 1,
+      id: configId,
+      machineId,
+      config: {
+        id: configId,
+        machineId,
+        name: 'Codex relay',
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://relay.example.test/v1' }
+        ),
+        prompt: '',
+      },
+      status: 'awaiting-auth',
+      setupRevision,
+      attempt: 1,
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    writeMachineFlockRowToFlock(rendererFlock, {
+      key: machineFlockKeys.providerSetup(configId),
+      value: setup,
+    });
+
+    daemonFlock.importJson(rendererFlock.exportJson());
+
+    await expect(pending).resolves.toMatchObject({
+      id: configId,
+      machineId,
+      env: expect.objectContaining({ LODY_CODEX_CUSTOM_ENDPOINT_STATE: expect.any(String) }),
+    });
   });
 });

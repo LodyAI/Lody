@@ -167,6 +167,30 @@ function DeepSeekPresetWrapper() {
   );
 }
 
+function CodexCustomEndpointWrapper() {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'create',
+        initialForm: {
+          name: 'Codex Relay',
+          cliType: 'builtin',
+          agentType: 'codex',
+          codexAuthenticationMode: 'api-key',
+          codexBaseUrl: 'https://relay.example.com/v1',
+          codexApiKey: 'sk-storybook-demo-token',
+        },
+      }}
+      machine={makeMachineWithClaudeCaps()}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={refreshCapabilities}
+    />
+  );
+}
+
 function DeepSeekHarnessWrapper({
   initialForm,
   config,
@@ -351,6 +375,10 @@ export const DeepSeekPreset: Story = {
   render: () => <DeepSeekPresetWrapper />,
 };
 
+export const CodexCustomEndpoint: Story = {
+  render: () => <CodexCustomEndpointWrapper />,
+};
+
 export const DeepSeekHarness: Story = {
   render: () => <DeepSeekHarnessWrapper />,
 };
@@ -428,6 +456,13 @@ export const MobileEditEnvCredentialProvider: Story = {
 
 export const MobileDeepSeekPreset: Story = {
   render: () => <DeepSeekPresetWrapper />,
+  parameters: {
+    viewport: { defaultViewport: 'mobile1' },
+  },
+};
+
+export const MobileCodexCustomEndpoint: Story = {
+  render: () => <CodexCustomEndpointWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },
