@@ -306,7 +306,6 @@ import {
   type AuthContext,
 } from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
-import { AutoPromptRunner } from '@/session/auto-prompt-runner';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
@@ -813,7 +812,6 @@ export class MessageHandler {
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
-  private autoPromptRunner: AutoPromptRunner;
   private turnPostProcessingService: TurnPostProcessingService;
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
@@ -2949,24 +2947,12 @@ export class MessageHandler {
         agentClient
       )
     );
-    this.autoPromptRunner = new AutoPromptRunner({
-      workspaceId: this.workspaceId,
-      beginConversationTurn: (sessionId, userTurnId) =>
-        this.beginConversationTurn(sessionId, userTurnId),
-      clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
-        await this.createAssistantEntryForTurn(sessionId, sessionDoc, turnId, modelInfo),
-      finalizeACPState: async (sessionId) => await this.finalizeACPState(sessionId),
-      flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-    });
     this.turnPostProcessingService = new TurnPostProcessingService({
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
-      runAutoPrompt: async (ctx) => await this.autoPromptRunner.run(ctx),
     });
     this.executionService = new SessionExecutionService({
       logger: this.logger,
@@ -3028,8 +3014,8 @@ export class MessageHandler {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
-        autoCommitAndPushForPR: async (ctx) =>
-          await this.turnPostProcessingService.autoCommitAndPushForPR(ctx),
+        syncWorkspaceGitState: async (sessionId, session) =>
+          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session),
         notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
           await this.notifySessionCompleted(sessionId, userId, occurrenceId),
       },

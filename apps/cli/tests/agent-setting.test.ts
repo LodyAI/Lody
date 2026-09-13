@@ -49,6 +49,7 @@ describe('resolveBuiltinACPSetting', () => {
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('kimi')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('grok')).toThrow(/resolveACPProcessLaunchAsync/);
+    expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
   it('keys builtin capability versions on the bundled adapter and managed runtime', () => {
@@ -162,6 +163,31 @@ describe('resolveBuiltinACPSetting', () => {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
     }
+  });
+
+  it('launches Bub through the user-installed `bub acp` command', async () => {
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp'],
+      capabilitySourceVersion: 'builtin-bub:acp',
+    });
+
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+        extraArgs: ['--verbose'],
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp', '--verbose'],
+      capabilitySourceVersion: 'builtin-bub:acp',
+    });
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {

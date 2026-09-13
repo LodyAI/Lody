@@ -9,6 +9,7 @@
 | `world-utils.ts`                                     | Stable artifact paths, port reservation, and cleanup assertions            |
 | `fixtures/synthetic-review-repository.ts`            | Deterministic large Git diff fixture                                       |
 | `pages/onboarding-page.ts`                           | First-run user interaction and local bootstrap contract                    |
+| `pages/desktop-window-cache-page.ts`                 | Auxiliary renderer readiness and IndexedDB cache-namespace evidence        |
 | `pages/review-page.ts`                               | Review-panel project setup and observable diff interactions                |
 | `pages/session-page.ts`                              | Deterministic ACP conversation and Stop lifecycle                          |
 | `pages/work-session-page.ts`                         | Worktree Session, terminal, deletion, and cleanup contract                 |

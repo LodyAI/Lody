@@ -55,9 +55,10 @@ Repository map and entry points: [README.md](README.md#repository).
   `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
   contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
   Read it before any PR/Issue work as well.
-- Node.js 22+; use the pnpm in `package.json`. `pnpm install` (nested checkouts
-  skip it); standalone work uses a separate clone. `pnpm start:local` starts the
-  desktop; root `pnpm build` uses the same local composition.
+- Node.js 22.14-22.x or 23.6+ (Node-API 10+); use the pnpm in `package.json`. See the
+  [runtime-floor decision](.agents/notes/implemented/bug-fix/2026-09-09-node-api-runtime-floor.md).
+  `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
+  `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
 - Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
   type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits

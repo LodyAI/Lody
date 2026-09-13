@@ -7,7 +7,7 @@ import {
   getServerNow,
   hasBuiltinRuntimeOverrideValues,
   isAgentBrandId,
-  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
   isBuiltinRuntimeOverrides,
   isCustomAcpLaunchSpec,
   isLoroRepoDocDeleted,
@@ -378,10 +378,10 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
   if (!runtime) throw new Error('Runtime not ready');
   if (
     config.cliType !== 'builtin' ||
-    !isManagedBuiltinAgentType(config.agentType) ||
+    !supportsBuiltinProviderSetup(config.agentType) ||
     hasBuiltinRuntimeOverrideValues(config.runtimeOverrides)
   ) {
-    throw new Error('Provider setup is only supported for managed builtin agents');
+    throw new Error('Provider setup is not supported for this agent');
   }
   const now = getServerNow();
   const setup: ProviderSetupTask = {
