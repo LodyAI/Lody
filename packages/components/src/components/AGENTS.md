@@ -22,7 +22,7 @@ Ownership and explanations: [README.md](README.md).
   `openedByRowSessionId` is its sidebar row. `buildSidebarOpenerRowResolver` in
   `sessions/session-list-rows.ts` walks `parentSessionId` to the root row using the
   sidebar's `allActiveSessions`, never a set re-derived from visible rows. Never rewrite
-  the precise opener to the root. Opened Sessions retain independent workspace/lifecycle;
+  the precise opener to the root. Opened Sessions retain independent workspaces;
   `parentSessionId` children remain excluded from `sessionListAtom` sidebar rows.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
@@ -45,9 +45,9 @@ Ownership and explanations: [README.md](README.md).
   successful create Operations / the precise opener. Mobile lists use the same two
   fields and per-bucket tree without disclosure, per [mobile/AGENTS.md](mobile/AGENTS.md).
 - Follow the [Session relation contract](../../../../specs/session-relations.md): root
-  archive, restore, and archived-root permanent delete include only direct child
-  Tabs whose `parentSessionId` equals the root id. Independently opened Sessions keep
-  their own state and resources. `deleteArchivedSession` requires a complete metadata
+  archive recursively includes contained Tabs and opened Sessions, using the shared
+  archive selector and a complete metadata cache. Restore and archived-root permanent
+  delete include only direct child Tabs. `deleteArchivedSession` requires a complete metadata
   cache before selecting that destructive set; `deleteSessions(ids)` deletes exactly
   the supplied ids without relation discovery or a cache-readiness requirement so
   compensation and explicit child/side-session cleanup remain available during
@@ -66,8 +66,8 @@ Ownership and explanations: [README.md](README.md).
   reintroduce a create-then-hand-off flow (pending-turn refs, post-mount ref flushes): a
   promoted tab must not exist before its first message is locally durable, and preserved
   composer text crosses the promotion via the input draft cache, not a component ref.
-  `archiveSession` falls back to the rendered meta cache when the repo read lags
-  hydration, and a close failure surfaces a toast — never a silent no-op.
+  After global metadata readiness, `archiveSession` falls back to the rendered meta
+  cache when an individual repo read lags; close failures must surface to the user.
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.

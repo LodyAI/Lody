@@ -19,8 +19,10 @@ opts out.
 ## Two fields, not one
 
 `SessionMeta.openedBySessionId` records the Session that created another one — for
-example through the `lody_session_create` MCP tool. It is presentation only: opened
-Sessions keep their own workspace and lifecycle and stay first-class rows, while
+example through the `lody_session_create` MCP tool. Opened Sessions keep their own
+workspace and stay first-class rows. Archive follows the opened-by descendants as
+well as contained Tabs; restore and deletion still use direct containment only. See
+[Session relations](../../specs/session-relations.md). Meanwhile,
 `parentSessionId` children never reach the sidebar at all, so nothing can nest twice.
 
 `openedByRowSessionId` exists because the precise opener may be a child Tab, which has

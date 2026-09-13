@@ -20,6 +20,7 @@ import type {
 } from '@lody/shared';
 import {
   getMachineRoomId,
+  collectSessionArchiveTargets,
   getMachineFlockDocId,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
@@ -230,17 +231,6 @@ function getDirectChildSessions(
   return sessions.filter(
     (session) => session.id !== sessionId && session.parentSessionId === sessionId
   );
-}
-
-function getArchiveStateTargets(
-  sessionId: SessionId,
-  rootMeta: SessionMeta,
-  sessions: readonly SessionMeta[]
-): SessionMeta[] {
-  return [
-    { ...rootMeta, id: rootMeta.id ?? sessionId },
-    ...getDirectChildSessions(sessionId, sessions),
-  ];
 }
 
 async function assertArchivedLocalProjectCanRestore(
@@ -1164,6 +1154,9 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      if (!store.get(docMetaCacheReadyAtom)) {
+        throw new Error('Session metadata is still loading');
+      }
 
       const sessionRoomId = getSessionRoomId(sessionId);
       const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
@@ -1183,11 +1176,10 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = [
+        { ...sessionMeta, id: sessionId },
+        ...collectSessionArchiveTargets(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
+      ];
       for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
@@ -1222,11 +1214,10 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = [
+        { ...sessionMeta, id: sessionMeta.id ?? sessionId },
+        ...getDirectChildSessions(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
+      ];
 
       for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {

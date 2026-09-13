@@ -2,6 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
+Archive uses `collectSessionArchiveTargets` for contained/opened descendants;
+restore/delete retain containment-only targets. See [relations](../../specs/session-relations.md).
+
 ## Session history
 
 - Session history storage tolerates unknown string item types from newer peers without
@@ -52,6 +55,7 @@
   Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
   paths retain the general reader. Future Mirror patches must compose with this patch,
   never silently replace it. No storage schema or write validation depends on this optimization.
+
 These contracts bind producers and consumers, including UI and CLI callers outside
 this package. Read them when changing daemon protocol negotiation, MCP/Role catalogs,
 per-turn MCP selection, or Role-based session creation and dispatch.

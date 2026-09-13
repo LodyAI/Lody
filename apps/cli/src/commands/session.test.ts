@@ -34,6 +34,7 @@ import {
   filterSessionMetas,
   hasNonPositionalPromptSource,
   listChildSessionIds,
+  listArchiveDescendantSessionIds,
   normalizeCliValue,
   rollbackPendingSessionCreate,
   renderSessionTranscript,
@@ -945,7 +946,7 @@ describe('session command helpers', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('lists child sessions for lifecycle cascade commands', async () => {
+  it('selects opened descendants for archive but only contained tabs for deletion and restore', async () => {
     const parentSessionId = 'parent-session' as SessionId;
     const childSessionId = 'child-session' as SessionId;
     const otherSessionId = 'other-session' as SessionId;
@@ -962,7 +963,9 @@ describe('session command helpers', () => {
         };
       }
       if (roomId === getSessionRoomId(otherSessionId)) {
-        return { meta: createSessionMeta({ id: otherSessionId }) };
+        return {
+          meta: createSessionMeta({ id: otherSessionId, openedBySessionId: childSessionId }),
+        };
       }
       return undefined;
     });
@@ -980,6 +983,10 @@ describe('session command helpers', () => {
     } as any;
 
     await expect(listChildSessionIds(manager, parentSessionId)).resolves.toEqual([childSessionId]);
+    await expect(listArchiveDescendantSessionIds(manager, parentSessionId)).resolves.toEqual([
+      childSessionId,
+      otherSessionId,
+    ]);
   });
 
   it('builds archive and restore patches without changing archive semantics', () => {
