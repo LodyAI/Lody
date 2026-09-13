@@ -8,6 +8,32 @@ import { prepareSharePackage } from '../src/session-share-export';
 
 const origin = 'https://api.example.test';
 const secret = 'a'.repeat(64);
+it('rejects file uploads before making any network request', async () => {
+  const prepared = await prepareSharePackage({
+    rootSourceId: 'root',
+    capturedAt: '2026-09-12T00:00:00.000Z',
+    fileAttachmentsEnabled: true,
+    conversations: [
+      {
+        sourceId: 'root',
+        title: '',
+        history: [
+          {
+            id: 'm',
+            role: 'user',
+            items: [{ type: 'file', fileId: 'file', fileName: 'report.txt' }],
+          },
+        ],
+      },
+    ],
+    readAttachment: async () => ({ bytes: new Uint8Array([1]), mediaType: 'text/plain' }),
+  });
+  const fetch = vi.fn();
+  await expect(
+    uploadPreparedShare({ origin, deploymentId: 'deployment', secret, prepared, fetch })
+  ).rejects.toThrow('share_file_attachments_disabled');
+  expect(fetch).not.toHaveBeenCalled();
+});
 async function fixture() {
   return prepareSharePackage({
     rootSourceId: 'source-root',

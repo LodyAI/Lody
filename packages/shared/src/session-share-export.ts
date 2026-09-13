@@ -1,5 +1,6 @@
 import {
   SHARE_LIMITS,
+  SESSION_SHARE_FILE_ATTACHMENTS_ENABLED,
   SharePackageManifestSchema,
   ShareResourceId,
   encodeShareJson,
@@ -49,6 +50,9 @@ export async function prepareSharePackage(options: {
   conversations: readonly ShareSourceConversation[];
   previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
   capturedAt: string;
+  /** Capture policy only; the server independently authorizes the inventory. */
+  fileAttachmentsEnabled?: boolean;
+  fileAttachmentOmissionText?: string;
   readAttachment: (
     source: ShareAttachmentSource,
     signal?: AbortSignal
@@ -176,6 +180,19 @@ export async function prepareSharePackage(options: {
       return;
     }
     if (!value || typeof value !== 'object') return;
+    if (
+      value.type === 'file' &&
+      !(options.fileAttachmentsEnabled ?? SESSION_SHARE_FILE_ATTACHMENTS_ENABLED)
+    ) {
+      // Replace the detached display block, never read the original file or retain
+      // its source IDs, paths, metadata, or nested content in the published copy.
+      for (const key of Object.keys(value)) delete value[key];
+      value.type = 'text';
+      value.text =
+        options.fileAttachmentOmissionText ?? 'File attachment not included in this share';
+      uncopiedResourceCount++;
+      return;
+    }
     if (
       (value.type === 'resource_link' && typeof value.uri === 'string') ||
       (value.type === 'image' &&

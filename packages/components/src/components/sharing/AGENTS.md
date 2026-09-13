@@ -40,6 +40,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   `session-row-leading-slot.tsx`, not a second connector/disclosure implementation.
 - Markdown is dynamic and uses the existing conversation-copy builder, range
   selection, budget/truncation rules and result notices. No stored Markdown object.
+- The shared file-attachment rollout switch defaults off: capture replaces typed
+  files with localized text, without reading them; images remain enabled.
 - Share attachment reads resolve manifest IDs only. Never use source
   `storageSessionId`, a source expiry clock, public bucket URLs, or arbitrary
   resource links as read authority. Release object URLs and cancel disposed reads.

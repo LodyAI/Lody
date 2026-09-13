@@ -27,6 +27,14 @@ but retain that dependency. A thin JSON manifest plus the existing stored-histor
 format removes it without inventing another message representation. This deliberately
 preserves tool and thinking fields; no claim of automatic secret removal is made.
 
+The temporary `SESSION_SHARE_FILE_ATTACHMENTS_ENABLED` product switch is off.
+Capture replaces typed file blocks (including input blocks) with localized plain
+text before reading attachments; images still copy normally. The upload client
+and hosting publication authorization reject inventories containing files. The
+capture option alone is not an entitlement. This does not redact opaque tool
+payloads, change existing publications, or implement billing; reopening requires
+shipping the switch change to client and host, then redeploying omitted files.
+
 Conversation identity must outlive deployment retention. Reusing a removed child's
 ID for another child makes an existing deep link silently display different content.
 Persistent bounded identity assignments prevent this; garbage collection must not

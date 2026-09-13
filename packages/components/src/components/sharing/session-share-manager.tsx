@@ -141,7 +141,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
                 <p role="status" className="mt-2 text-xs text-muted-foreground">
                   {t(
                     'sharing.static.uncopiedResources',
-                    '{{count}} embedded resource links are not copied. Their text is preserved, but the share cannot load resources from the original workspace or remote image URLs.',
+                    '{{count}} file attachments or embedded resources are not included. File attachments are replaced with a notice; external links cannot load original workspace resources or remote images.',
                     { count: pending.uncopiedResourceCount }
                   )}
                 </p>

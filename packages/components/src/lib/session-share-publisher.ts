@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import {
   getSessionFileDownloadApiPath,
   getSessionImageDownloadApiPath,
@@ -50,6 +51,10 @@ export async function captureSessionShare(options: {
     );
     options.signal.throwIfAborted();
     const prepared = prepareSharePackage({
+      fileAttachmentOmissionText: i18next.t(
+        'sharing.fileAttachmentOmitted',
+        'File attachment not included in this share'
+      ),
       rootSourceId: options.rootSessionId,
       previousSourceIds: options.previousSourceIds,
       capturedAt: new Date().toISOString(),

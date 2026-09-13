@@ -20,7 +20,15 @@ History itself can contain sensitive text: publication is disclosure, not
 automatic sanitization.
 
 A versioned manifest describes conversations, their relationships, immutable
-history objects and copied attachments. Every object has an exact ID, byte length
+history objects and copied attachments. The rollout switch
+`SESSION_SHARE_FILE_ATTACHMENTS_ENABLED` defaults to false: typed `file` blocks
+are replaced with a localized ordinary text notice before any attachment reads;
+only typed images/image groups are copied. File names, source IDs and paths from
+those blocks are omitted too. Publication rejects file inventories independently
+of the client. This is not a sanitizer for opaque tool payloads or text, and does
+not alter already published versions. Reopening requires a new deployment to add
+previously omitted files; future paid entitlements are outside this change.
+Every object has an exact ID, byte length
 and SHA-256 checksum. Sharing never authorizes access to a source workspace,
 inherited attachment namespace, original Stream or agent runtime. Unavailable
 attachments must block capture or be explicitly disclosed as unavailable; they
