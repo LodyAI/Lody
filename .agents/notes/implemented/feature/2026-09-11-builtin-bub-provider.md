@@ -7,7 +7,7 @@ Translation: pending
 
 Bub was not reachable from Lody's Agent Config picker even though its
 `bub-acp-server` plugin exposes the workspace over ACP. Bub is now a builtin
-provider that launches the user-installed `bub acp serve` command. Lody does not
+provider that launches the user-installed `bub acp` command. Lody does not
 download, version, sign in to, or auto-register Bub; the command is spawned from
 the same augmented login-shell PATH as other local ACP agents. Explicit creation
 first writes a durable setup row, and only a successful live probe publishes the
@@ -27,9 +27,9 @@ Config picker. The trade-off is visible: builtin rows carry no `Registry` badge
 even though Lody owns the integration, not the runtime.
 
 - `resolveBuiltinACPProcessLaunch` in `apps/cli/src/agent/setting.ts` owns the
-  launch spec: `bub acp serve`, with caller extra args appended.
+  launch spec: `bub acp`, with caller extra args appended.
 - `getAcpCapabilitySourceVersion` returns the static
-  `builtin-bub:local` key. A runtime version probe was rejected for now: the
+  `builtin-bub:acp` key. A runtime version probe was rejected for now: the
   request explicitly deferred install-state handling, and a probe would add a
   spawn on every capability lookup.
 - `STATIC_BUILTIN_ACP_CAPABILITIES.bub` is deliberately empty. Bub publishes its
@@ -63,7 +63,7 @@ config was rejected by the local control validator.
 - `packages/shared`: typecheck plus the full suite (1125 tests), including the
   new `ai-bub` contract tests and the updated title/validator coverage.
 - `apps/cli`: typecheck plus the `agent-setting`, `provider-setup-manager`, and
-  `acp-capabilities` suites, including the new `bub acp serve` launch and
+  `acp-capabilities` suites, including the new `bub acp` launch and
   extra-arg cases.
 - `@lody/components`: typecheck plus the `agent-config-dialog`,
   `onboarding-flow`, `acp-selector-options`, `provider-row-reauthentication`,

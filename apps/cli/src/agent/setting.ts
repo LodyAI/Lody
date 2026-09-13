@@ -149,10 +149,10 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
 
 /**
  * Capability-cache source version for Bub. Bub is a user-installed CLI
- * (`bub acp serve`) that Lody does not manage or version; the static key keeps
+ * (`bub acp`) that Lody does not manage or version; the static key keeps
  * a capability probe valid until the next explicit refresh.
  */
-export const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:local';
+export const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -411,14 +411,14 @@ async function resolveBuiltinACPProcessLaunch(
     };
   }
   if (input.agentType === 'bub') {
-    // Bub ships its own `bub acp serve` ACP server and is installed by the user
+    // Bub ships its own `bub acp` ACP server and is installed by the user
     // (`bub install bub-acp-server`). Lody neither downloads nor versions it;
     // when the command is missing the spawn fails and the UI points at the
     // install guide. `bub` is resolved from the same augmented PATH as other
     // user-installed local ACP agents.
     return {
       command: 'bub',
-      args: ['acp', 'serve', ...(input.extraArgs ?? [])],
+      args: ['acp', ...(input.extraArgs ?? [])],
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }

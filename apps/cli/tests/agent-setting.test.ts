@@ -166,7 +166,7 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('launches Bub through the user-installed `bub acp serve` command', async () => {
+  it('launches Bub through the user-installed `bub acp` command', async () => {
     await expect(
       resolveACPProcessLaunchAsync({
         cliType: 'builtin',
@@ -174,7 +174,7 @@ describe('resolveBuiltinACPSetting', () => {
       })
     ).resolves.toEqual({
       command: 'bub',
-      args: ['acp', 'serve'],
+      args: ['acp'],
       capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
     });
 
@@ -186,7 +186,7 @@ describe('resolveBuiltinACPSetting', () => {
       })
     ).resolves.toEqual({
       command: 'bub',
-      args: ['acp', 'serve', '--verbose'],
+      args: ['acp', '--verbose'],
       capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
     });
 

@@ -1047,7 +1047,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
   // Bub is builtin but user-installed, so there is no managed runtime to
   // prepare. It still must pass a live probe on create: that is how a missing
-  // `bub acp serve` becomes an actionable "install Bub" prompt instead of a
+  // `bub acp` becomes an actionable "install Bub" prompt instead of a
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
   const bubInstallDocsUrl = isBubBuiltin
@@ -2241,7 +2241,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   <span>
                     {t(
                       'settings.agent.dialog.bubInstallHint',
-                      'Bub is not installed on this machine, or `bub acp serve` failed to start. Install the Bub ACP server plugin, then retry.'
+                      'Bub is not installed on this machine, or `bub acp` failed to start. Install the Bub ACP server plugin, then retry.'
                     )}
                   </span>
                   <Button
