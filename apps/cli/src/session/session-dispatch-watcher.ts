@@ -150,6 +150,9 @@ type InitialProbeObserver = {
 type InitialProbeRecord = {
   promise: Promise<void>;
   observer: InitialProbeObserver;
+  /** The whole-check chain promise this probe belongs to (resolves after any agent turn). */
+  chain: Promise<void>;
+  lifecycleGeneration: number | undefined;
   started: boolean;
   settled: boolean;
 };
@@ -290,7 +293,15 @@ const isConfigOptionValueRecord = (
  * Each session has two independent serialized promise chains:
  * - `sessionCheckChains` — at most one `maybeHandleSession` runs per session at a time.
  *   If multiple events fire while a check is in progress, exactly one follow-up check
- *   runs after it completes (coalescing).
+ *   runs after it completes (coalescing): `enqueueSessionCheck` reuses the queued,
+ *   not-yet-started check instead of appending another one. This matters because
+ *   the dispatch branch awaits the whole agent turn, and the session mirror fires
+ *   once per commit while the agent streams output — a long turn would otherwise
+ *   leave hundreds of backlogged checks, each re-reading the full history
+ *   (~130 ms on a 13 MB doc), and drain them back-to-back on microtasks without
+ *   ever yielding to timers (observed: 42 s of event-loop starvation). A check that
+ *   follows another one in the chain also yields one macrotask first, so even a
+ *   real drain cannot starve timers or the Loro heartbeat.
  * - `cancelCheckChains` — same pattern for cancel requests. Separate from dispatch
  *   so that a cancel can be processed without waiting for a long-running dispatch.
  *
@@ -545,6 +556,15 @@ export class SessionDispatchWatcher {
   /**
    * Enqueue a dispatch check for a session. Multiple calls while a check is in-flight
    * are coalesced: exactly one follow-up check will run after the current one finishes.
+   *
+   * Every check reads meta and history fresh when it starts, so a check that is
+   * queued but has not started yet already covers any trigger that arrives
+   * before it. Such calls return the queued check's promises instead of
+   * appending a new link, which bounds the post-turn backlog to one check no
+   * matter how many mirror commits fired during the turn. Callers that await
+   * the result keep their contract: `resolveAfterInitialProbe` still resolves
+   * once that check's probe finishes, and the default still resolves once the
+   * whole check (including a dispatched turn) finishes.
    */
   enqueueSessionCheck(sessionId: SessionId, options: SessionCheckOptions = {}): Promise<void> {
     // Tests may drive an as-yet-unstarted watcher directly (generation 0). Once
@@ -572,8 +592,16 @@ export class SessionDispatchWatcher {
       const firstQueuedProbe = [...(probes ?? [])].find((probe) => !probe.settled);
       return firstQueuedProbe?.promise ?? existing;
     }
+    if (existing !== undefined) {
+      const queued = [...(this.sessionInitialProbes.get(sessionId) ?? [])].find(
+        (probe) => !probe.started && probe.lifecycleGeneration === lifecycleGeneration
+      );
+      if (queued) {
+        return options.resolveAfterInitialProbe === true ? queued.promise : queued.chain;
+      }
+    }
 
-    const previous = this.sessionCheckChains.get(sessionId) ?? Promise.resolve();
+    const previous = existing ?? Promise.resolve();
     let resolveProbe!: () => void;
     let rejectProbe!: (error: unknown) => void;
     let probeSettled = false;
@@ -603,6 +631,8 @@ export class SessionDispatchWatcher {
     probeRecord = {
       promise: probe,
       observer: initialProbe,
+      chain: Promise.resolve(),
+      lifecycleGeneration,
       started: false,
       settled: false,
     };
@@ -615,6 +645,13 @@ export class SessionDispatchWatcher {
     const next = previous
       .catch(() => {})
       .then(async () => {
+        if (existing !== undefined) {
+          // This check follows another one in the chain. Every await inside a
+          // check settles on in-memory objects (microtasks), so a drain would
+          // otherwise run back-to-back without ever reaching the timer phase.
+          // Triggers that land during this yield still coalesce into this check.
+          await SessionDispatchWatcher.yieldToEventLoop();
+        }
         probeRecord.started = true;
         await this.maybeHandleSession(sessionId, initialProbe, lifecycleGeneration);
       })
@@ -629,6 +666,7 @@ export class SessionDispatchWatcher {
           this.sessionCheckChains.delete(sessionId);
         }
       });
+    probeRecord.chain = next;
     this.sessionCheckChains.set(sessionId, next);
     // The maps own these promises even when an event handler intentionally
     // ignores the returned handle. Attach observers to avoid unhandled rejects;
@@ -2184,6 +2222,17 @@ export class SessionDispatchWatcher {
   private static readonly HISTORY_RECONNECT_JITTER_MAX_MS = 1_500;
   private static readonly HISTORY_RECONNECT_BASE_DELAY_MS = 1_000;
   private static readonly HISTORY_RECONNECT_MAX_DELAY_MS = 15_000;
+  /**
+   * One macrotask yield. `setImmediate` runs after the timer phase, so a queued
+   * check gives pending timers (Loro heartbeat, event-loop lag monitor, other
+   * sessions' waits) a turn before the next history read.
+   */
+  private static yieldToEventLoop(): Promise<void> {
+    return new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+
   private static setUnrefTimeout(
     callback: () => void,
     delayMs: number

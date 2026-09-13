@@ -1997,6 +1997,159 @@ describe('SessionDispatchWatcher', () => {
     resolveContinue?.();
   });
 
+  it('coalesces mirror-triggered checks during a turn into one post-turn history read and yields to timers between drained checks', async () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = 'session-coalesce' as SessionId;
+      const roomId = `session-${sessionId}`;
+      const turnId = 'turn-coalesce';
+      let history: SessionHistoryInput[] = [createPendingUserTurn(turnId, 'hello')];
+      let meta = {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date(0).toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' as const },
+        acpSessionId: 'acp-session-coalesce',
+        latestUserMsgId: turnId,
+      } as SessionMeta;
+      const events: string[] = [];
+      let historyReads = 0;
+      let mirrorListener: (() => void) | undefined;
+      const sessionDoc = {
+        mirror: {
+          subscribe: vi.fn((listener: () => void) => {
+            mirrorListener = listener;
+            return vi.fn();
+          }),
+        },
+        getMetaState: vi.fn(async () => meta),
+        getHistory: vi.fn(async () => {
+          historyReads += 1;
+          events.push(`history-read:${historyReads}`);
+          if (historyReads === 2) {
+            // A commit that lands while the follow-up check is already reading
+            // history is a genuinely new trigger: it must queue one more check,
+            // and a timer armed before that check must fire before it reads.
+            mirrorListener?.();
+            setTimeout(() => {
+              events.push('timer-2');
+            }, 0);
+          }
+          return history;
+        }),
+        setStatus: vi.fn(async () => {}),
+        updateHistory: vi.fn(async () => {}),
+      };
+      const workspaceDocument = {
+        repo: {
+          getMeta: () => ({
+            scan: vi.fn(async () => [{ key: ['e', roomId], value: true }]),
+          }),
+          getDocMeta: vi.fn(async () => ({ meta })),
+          upsertDocMeta: vi.fn(async () => {}),
+          watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        onMetaRoomSynced: vi.fn(() => vi.fn()),
+      } as unknown as LoroDocumentManager;
+      const turn = createDeferred();
+      let activeTurnId: string | undefined;
+      const dispatchPreparedSessionTurn = vi.fn(
+        async (options: {
+          accessPromise: Promise<unknown>;
+          requestPromise: Promise<unknown>;
+          onAccessAllowed: () => void | Promise<void>;
+        }) => {
+          activeTurnId = 'assistant-coalesce';
+          await options.accessPromise;
+          await options.onAccessAllowed();
+          await options.requestPromise;
+          await turn.promise;
+          history = [{ ...history[0], status: 'handled', read: true }];
+          meta = { ...meta, lastHandledUserMsgId: turnId };
+          activeTurnId = undefined;
+        }
+      );
+      const watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        executionService: {
+          getExecutionSnapshot: vi.fn(() => ({
+            ...(activeTurnId ? { activeTurnId } : {}),
+            hasActiveTurn: activeTurnId !== undefined,
+            hasBlockingPendingCreate: false,
+            hasReusableSession: true,
+          })),
+          dispatchPreparedSessionTurn,
+          cancelSession: vi.fn(async () => ({ success: true })),
+        } as unknown as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+
+      await watcher.start();
+      await vi.waitFor(() => {
+        expect(dispatchPreparedSessionTurn).toHaveBeenCalledTimes(1);
+      });
+      expect(mirrorListener).toBeDefined();
+      expect(historyReads).toBe(1);
+
+      // The agent streams output: every commit fires the mirror subscription,
+      // and turn completion also enqueues a queue-promotion check.
+      for (let i = 0; i < 300; i += 1) {
+        mirrorListener?.();
+      }
+      const postTurnCheck = watcher.enqueueSessionCheck(sessionId);
+      void postTurnCheck.then(() => {
+        events.push('check-resolved');
+      });
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(1);
+
+      setTimeout(() => {
+        events.push('timer-1');
+      }, 0);
+      turn.resolve();
+      await flushMicrotasks(50);
+      // The drained follow-up is parked on a macrotask, not run on microtasks.
+      expect(historyReads).toBe(1);
+      await vi.runOnlyPendingTimersAsync();
+      await flushMicrotasks(20);
+      await postTurnCheck;
+      // 300 commits plus the post-turn enqueue cost exactly one follow-up read,
+      // and the coalesced caller's promise resolved only after that read. The
+      // trigger that landed during the read queued a third check, which is
+      // parked on its own macrotask, so the timer armed during the turn fired
+      // while that check was still waiting.
+      expect(historyReads).toBe(2);
+      expect(events).toEqual([
+        'history-read:1',
+        'history-read:2',
+        'check-resolved',
+        'timer-1',
+      ]);
+      await flushMicrotasks(50);
+      expect(historyReads).toBe(2);
+      await vi.runOnlyPendingTimersAsync();
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(3);
+      expect(events).toContain('timer-2');
+      expect(dispatchPreparedSessionTurn).toHaveBeenCalledTimes(1);
+
+      // The chain is drained and still live: a fresh trigger costs one read.
+      mirrorListener?.();
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(4);
+      watcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('bootstraps owned sessions concurrently while isolating failed reconciles', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
