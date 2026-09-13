@@ -3,8 +3,9 @@ import { motion } from 'framer-motion';
 import { Github } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface DesktopGithubInstallPageProps {

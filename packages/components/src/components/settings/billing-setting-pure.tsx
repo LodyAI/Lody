@@ -333,16 +333,16 @@ export function BillingSettingsView({
           {/* A gift always ends at its schedule boundary; its status line says
               so already, and a cancel badge would read as an error state. */}
           {overview.cancelAtPeriodEnd && !isPromotional ? (
-            <Badge variant="outline">{t('billing.cancelAtPeriodEnd')}</Badge>
+            <Badge>{t('billing.cancelAtPeriodEnd')}</Badge>
           ) : null}
           {checkoutInProgress ? (
-            <Badge variant="secondary">{t('billing.checkoutPending')}</Badge>
+            <Badge tone="running">{t('billing.checkoutPending')}</Badge>
           ) : null}
           {hasGiftTimeline && overview.autoRenewAfterGift ? (
-            <Badge variant="secondary">{t('billing.postGiftBillingScheduled')}</Badge>
+            <Badge>{t('billing.postGiftBillingScheduled')}</Badge>
           ) : null}
           {overview.yearlyEarlyBirdEligible ? (
-            <Badge variant="secondary">{t('billing.yearlyPromoPrice')}</Badge>
+            <Badge>{t('billing.yearlyPromoPrice')}</Badge>
           ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
@@ -502,9 +502,7 @@ export function BillingSettingsView({
                 {t('billing.perSeatMonth')}
               </span>
               {selectedOfferLabel ? (
-                <Badge variant="secondary" className="mb-1">
-                  {selectedOfferLabel}
-                </Badge>
+                <Badge className="mb-1">{selectedOfferLabel}</Badge>
               ) : null}
             </div>
 
@@ -756,7 +754,7 @@ export function BillingSettingsView({
                         {formatMoney(invoice.amountPaid, invoice.currency)}
                       </span>
                       <Badge
-                        variant={invoice.status === 'paid' ? 'secondary' : 'outline'}
+                        tone={invoice.status === 'paid' ? 'success' : 'neutral'}
                         className="capitalize"
                       >
                         {invoice.status}

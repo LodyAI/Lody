@@ -6,7 +6,7 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import { ExternalLink, TimerReset } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -185,10 +185,7 @@ function ActiveForecast({
             </p>
           )}
           {watch.level ? (
-            <Badge
-              variant={watch.level === 'strong' ? 'warning' : 'secondary'}
-              className="shrink-0 font-normal"
-            >
+            <Badge tone={watch.level === 'strong' ? 'warning' : 'neutral'}>
               {watch.level === 'strong'
                 ? t('codexReset.levelStrong', 'Strong signal')
                 : t('codexReset.levelElevated', 'Elevated signal')}

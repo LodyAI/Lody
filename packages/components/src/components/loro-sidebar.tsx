@@ -23,7 +23,7 @@ import {
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';

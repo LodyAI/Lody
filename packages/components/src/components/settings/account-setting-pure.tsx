@@ -1019,7 +1019,7 @@ export function AccountSettingsPure({
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
                       {sourceLabel && (
-                        <Badge variant="outline" className="h-5 rounded-md px-1.5 text-[10px]">
+                        <Badge>
                           {sourceLabel}
                         </Badge>
                       )}

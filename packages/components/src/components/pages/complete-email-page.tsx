@@ -5,7 +5,7 @@ import { Spinner } from '@/ui/spinner';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@lody/ui/card';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 
@@ -57,52 +57,67 @@ export function CompleteEmailPage({
               )}
             </Button>
           </div>
-          <div className="space-y-1 text-center">
-            <div className="mb-4 flex justify-center">
-              <div className="rounded-full bg-primary/10 p-3">
-                <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
-              </div>
-            </div>
-            <CardTitle id="complete-email-title" as="h1" className="text-2xl font-bold">
-              {t('completeEmail.title', 'Add your email')}
-            </CardTitle>
-            <CardDescription>
-              {t(
-                'completeEmail.description',
-                'Your OAuth provider did not share an email. Add one so we can finish setting up your account.'
-              )}
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={onSubmit}
-            className="space-y-4"
-            aria-labelledby="complete-email-title"
-            aria-describedby={submitError ? 'complete-email-error' : undefined}
-            aria-busy={submitting || signingOut}
+          <Button
+            type="button"
+            variant="ghost"
+            size="small"
+            onClick={onSignOut}
+            disabled={signingOut || submitting}
           >
-            <div className="space-y-2">
-              <UiField.Label htmlFor="email">
-                {t('completeEmail.emailLabel', 'Email address')}
-              </UiField.Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder={t('completeEmail.emailPlaceholder', 'you@example.com')}
-                value={email}
-                onChange={(event) => onEmailChange(event.target.value)}
-                disabled={submitting || signingOut}
-              />
-            </div>
+            {signingOut ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('completeEmail.loggingOut', 'Logging out')}
+              </>
+            ) : (
+              t('completeEmail.logout', 'Logout')
+            )}
+          </Button>
+        </div>
+        <div className="flex justify-center">
+          <div className="rounded-full bg-primary/10 p-3">
+            <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
+          </div>
+        </div>
+        <Card.Header className="text-center">
+          <Card.Title id="complete-email-title" as="h1">
+            {t('completeEmail.title', 'Add your email')}
+          </Card.Title>
+          <Card.Description>
+            {t(
+              'completeEmail.description',
+              'Your OAuth provider did not share an email. Add one so we can finish setting up your account.'
+            )}
+          </Card.Description>
+        </Card.Header>
+        <form
+          onSubmit={onSubmit}
+          className="space-y-4"
+          aria-labelledby="complete-email-title"
+          aria-describedby={submitError ? 'complete-email-error' : undefined}
+          aria-busy={submitting || signingOut}
+        >
+          <div className="space-y-2">
+            <UiField.Label htmlFor="email">
+              {t('completeEmail.emailLabel', 'Email address')}
+            </UiField.Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              required
+              placeholder={t('completeEmail.emailPlaceholder', 'you@example.com')}
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              disabled={submitting || signingOut}
+            />
+          </div>
 
-            {submitError ? (
-              <Alert.Root tone="danger">
-                <Alert.Description id="complete-email-error">{submitError}</Alert.Description>
-              </Alert.Root>
-            ) : null}
+          {submitError ? (
+            <Alert.Root tone="danger">
+              <Alert.Description id="complete-email-error">{submitError}</Alert.Description>
+            </Alert.Root>
+          ) : null}
 
             <Button type="submit" className="w-full" disabled={submitting || signingOut}>
               {submitting ? (

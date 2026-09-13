@@ -438,7 +438,7 @@ function MobileCloudIntegrationsSettings() {
         title={t('settings.integrations.github.authorizedReposTitle', 'Authorized Repositories')}
         actions={
           repos.length > 0 ? (
-            <Badge variant="outline" className="text-[11px]">
+            <Badge>
               {searchQuery && filteredRepos.length !== repos.length
                 ? `${filteredRepos.length} / ${repos.length}`
                 : `${enabledCount} / ${repos.length}`}{' '}
@@ -490,7 +490,7 @@ function MobileCloudIntegrationsSettings() {
                       {repo.repoFullName}
                     </span>
                     {repo.private && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                      <Badge>
                         {t('settings.integrations.github.private')}
                       </Badge>
                     )}
