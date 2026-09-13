@@ -1,34 +1,44 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SessionShareManager,
   type SessionShareManagerProps,
 } from '../src/components/sharing/session-share-manager';
-
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+  useTranslation: () => ({
+    t: (_key: string, fallback: string, values?: Record<string, unknown>) =>
+      values
+        ? fallback.replace(/{{(\w+)}}/g, (_match, name: string) => String(values[name] ?? ''))
+        : fallback,
+  }),
 }));
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-describe('session share management surface', () => {
-  let root: Root;
-  let container: HTMLDivElement;
-  let props: SessionShareManagerProps;
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as typeof globalThis & { ResizeObserver?: unknown }).ResizeObserver =
+  TestResizeObserver;
+const link = `https://share.test/s/demo#access=v1.${'demo'.repeat(16)}`;
+describe('static share dialog steps', () => {
+  let root: Root, container: HTMLDivElement, props: SessionShareManagerProps;
   const entry = {
-    title: 'Root',
     shareId: 'share',
     rootSessionId: 'root',
-    authorUserId: 'alice',
+    publisherUserId: 'alice',
+    title: 'Root',
     status: 'active' as const,
-    scopeVersion: 1,
+    revision: 1,
     credentialVersion: 1,
-    sessionIds: ['root'],
-    readableSessionIds: ['root'],
-    validUntil: 200,
+    createdAt: 1,
+    updatedAt: 1,
+    sourceIds: [{ sourceId: 'root', conversationId: 'c1' }],
+    selectedSourceIds: ['root'],
     canManage: true,
     canRevoke: true,
   };
@@ -38,164 +48,224 @@ describe('session share management surface', () => {
     root = createRoot(container);
     props = {
       sessionId: 'root',
-      state: {
-        root: entry,
-        sources: [entry],
-        candidates: [
-          { sessionId: 'root', title: 'Root', available: true, validUntil: 200 },
-          { sessionId: 'child', title: 'Child', available: true, validUntil: 200 },
-          { sessionId: 'local', title: 'Local', available: false, validUntil: null },
-        ],
-      },
+      entry,
+      selected: ['root'],
+      hasPending: false,
+      phase: 'idle',
+      progress: 0,
+      result: null,
+      shareLink: link,
+      canCapture: true,
       candidates: [
         { sessionId: 'root', title: 'Root' },
         { sessionId: 'child', title: 'Child' },
-        { sessionId: 'local', title: 'Local' },
       ],
-      selected: ['root'],
-      copyableShareIds: ['share'],
-      now: 100,
       busy: false,
       conflict: false,
+      hasSecret: true,
       error: null,
       notice: null,
       onSelect: vi.fn(),
-      onReload: vi.fn(),
-      onCreate: vi.fn(),
-      onSave: vi.fn(),
-      onReset: vi.fn(),
+      onPublish: vi.fn(),
+      onDiscard: vi.fn(),
       onCopy: vi.fn(),
+      onReset: vi.fn(),
       onRevoke: vi.fn(),
+      onClose: vi.fn(),
     };
   });
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    document.querySelectorAll('[role="alertdialog"]').forEach((node) => node.remove());
   });
-  async function render() {
-    await act(async () => root.render(<SessionShareManager {...props} />));
-  }
-  function button(label: string) {
-    return [...document.querySelectorAll<HTMLButtonElement>('button')].find(
-      (node) => node.textContent === label
+  const render = () => act(async () => root.render(<SessionShareManager {...props} />));
+  const button = (name: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent === name
     );
+  async function click(name: string) {
+    expect(button(name), `missing button: ${name}`).toBeTruthy();
+    await act(async () => button(name)!.click());
   }
-  async function click(node: HTMLElement | undefined | null) {
-    expect(node).toBeTruthy();
-    await act(async () => node?.click());
-  }
-  const toggle = () => container.querySelector<HTMLButtonElement>('[role="switch"]');
 
-  it('creates a root-only link without extra confirmation and never widens it silently', async () => {
-    props.state = { ...props.state!, root: null, sources: [] };
+  it('offers one publish action from the first screen and never uploads on its own', async () => {
+    props.entry = null;
+    props.hasSecret = false;
+    props.shareLink = null;
     await render();
-    // One decision, and it starts off: a new link covers only this conversation.
-    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    expect(button('Create share link')?.disabled).toBe(false);
-    await click(button('Create share link'));
-    expect(props.onCreate).toHaveBeenCalledOnce();
-    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Anyone with the link can view this conversation.');
+    expect(button('Share conversation')).toBeTruthy();
+    expect(button('Cancel')).toBeTruthy();
+    expect(props.onPublish).not.toHaveBeenCalled();
+    await click('Share conversation');
+    expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
-  it('adds every ready sub-conversation at once and excludes the ones that are not', async () => {
-    props.state = { ...props.state!, root: null, sources: [] };
+  it('freezes only the explicit current sub-conversation selection', async () => {
+    props.entry = null;
     await render();
-    await click(toggle());
-    // 'local' is unavailable, so the switch must not pull it in.
+    expect(container.textContent).toContain('Also share 1 sub-conversations');
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
     expect(props.onSelect).toHaveBeenCalledWith(['root', 'child']);
+    expect(props.onPublish).not.toHaveBeenCalled();
   });
 
-  it('turns the switch off back to the root alone', async () => {
+  it('does not overstate scope when a share carries only some current children', async () => {
+    props.entry = null;
+    props.candidates = [
+      { sessionId: 'root', title: 'Root' },
+      { sessionId: 'child', title: 'Child' },
+      { sessionId: 'child-2', title: 'Child 2' },
+    ];
     props.selected = ['root', 'child'];
     await render();
-    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    await click(toggle());
-    expect(props.onSelect).toHaveBeenCalledWith(['root']);
+    const box = container.querySelector<HTMLButtonElement>('[role="checkbox"]')!;
+    expect(box.getAttribute('data-state')).toBe('indeterminate');
+    expect(container.textContent).toContain('Also share sub-conversations (1 of 2)');
+    await act(async () => box.click());
+    expect(props.onSelect).toHaveBeenCalledWith(['root', 'child', 'child-2']);
   });
 
-  it('explains a root that cannot be shared yet instead of only disabling the action', async () => {
-    props.state = {
-      ...props.state!,
-      root: null,
-      sources: [],
-      candidates: props.state!.candidates.map((candidate) => ({
-        ...candidate,
-        available: false,
-        validUntil: null,
-      })),
-    };
-    await render();
-    expect(button('Create share link')?.disabled).toBe(true);
-    expect(container.textContent).toContain('Not synced to the cloud yet');
-  });
-
-  it('requires reset on a device without the secret and invalidates an open reset confirmation after a concurrent change', async () => {
-    props.copyableShareIds = [];
-    props.selected = ['root', 'child'];
-    await render();
-    expect(button('Copy share link')).toBeUndefined();
-    expect(button('Save changes')?.disabled).toBe(true);
-    await click(button('Reset link'));
-    props.state = { ...props.state!, root: { ...entry, credentialVersion: 2 } };
-    await render();
-    expect(button('Confirm')?.disabled).toBe(true);
-    await click(button('Confirm'));
-    expect(props.onReset).not.toHaveBeenCalled();
-  });
-
-  it('offers administrators revocation without author actions and confirms the exact independent grant', async () => {
-    props.state = { ...props.state!, root: { ...entry, canManage: false } };
-    props.copyableShareIds = [];
-    await render();
-    expect(button('Reset link')).toBeUndefined();
-    expect(button('Save changes')).toBeUndefined();
-    expect(container.querySelector('[role="switch"]')).toBeNull();
-    await click(button('Revoke link'));
-    expect(props.onRevoke).not.toHaveBeenCalled();
-    await click(button('Confirm'));
-    expect(props.onRevoke).toHaveBeenCalledWith(props.state.root);
-  });
-
-  it('does not surface other links that include this conversation', async () => {
-    const foreign = {
-      ...entry,
-      title: 'Another conversation',
-      shareId: 'foreign-share',
-      rootSessionId: 'other',
-      sessionIds: ['other', 'root'],
-      readableSessionIds: ['other', 'root'],
-    };
-    props.state = { ...props.state!, sources: [entry, foreign] };
-    await render();
-    expect(container.textContent).not.toContain('Another conversation');
-    // The only revocation offered is for this conversation's own link.
-    expect(
-      [...container.querySelectorAll('button')].filter((node) => node.textContent === 'Revoke link')
-    ).toHaveLength(1);
-  });
-
-  it('hides the sub-conversation switch entirely when there is nothing to include', async () => {
-    props.state = {
-      ...props.state!,
-      candidates: [{ sessionId: 'root', title: 'Root', available: true, validUntil: 200 }],
-    };
-    props.candidates = [{ sessionId: 'root', title: 'Root' }];
-    await render();
-    expect(toggle()).toBeNull();
-    expect(container.textContent).not.toContain('Include sub-conversations');
-  });
-
-  it('freezes the sub-conversation switch while a mutation is in flight', async () => {
+  it('shows an indeterminate bar while freezing and a measured one only while uploading', async () => {
+    props.phase = 'capturing';
     props.busy = true;
     await render();
-    expect(toggle()?.disabled).toBe(true);
+    expect(container.textContent).toContain('Freezing this conversation…');
+    expect(
+      container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
+    ).toBeNull();
+    expect(button('Share conversation')).toBeUndefined();
+    props.phase = 'uploading';
+    props.progress = 62;
+    await render();
+    expect(container.textContent).toContain('Uploading the copy… 62%');
+    expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(
+      '62'
+    );
+    props.phase = 'publishing';
+    await render();
+    expect(container.textContent).toContain('Publishing…');
+    expect(
+      container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
+    ).toBeNull();
   });
 
-  it('stops presenting an expired grant as active without a new server record', async () => {
-    props.now = 201;
+  it('claims a copied link only when the clipboard write succeeded', async () => {
+    props.result = { url: link, copied: true };
     await render();
-    expect(container.textContent).toContain('Link is currently unavailable');
-    expect(button('Copy share link')).toBeUndefined();
-    expect(button('Reset link')?.disabled).toBe(true);
+    expect(container.textContent).toContain('Link copied to your clipboard');
+    expect(container.textContent).not.toContain('Automatic copying was blocked');
+    props.result = { url: link, copied: false };
+    await render();
+    expect(container.textContent).not.toContain('Link copied to your clipboard');
+    expect(container.textContent).toContain('Automatic copying was blocked');
+    expect(container.querySelector<HTMLInputElement>('input[readonly]')?.value).toBe(link);
+    await click('Copy link');
+    expect(props.onCopy).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the published screen to copy and revoke', async () => {
+    props.result = { url: link, copied: true };
+    await render();
+    expect(button('Copy link')).toBeTruthy();
+    expect(button('Revoke share')).toBeTruthy();
+    expect(button('Update share')).toBeUndefined();
+  });
+
+  it('offers update, copy and revoke for an existing share', async () => {
+    props.selected = ['root', 'child'];
+    await render();
+    expect(button('Update share')).toBeTruthy();
+    expect(button('Copy link')).toBeTruthy();
+    expect(button('Revoke share')).toBeTruthy();
+    await click('Update share');
+    expect(props.onPublish).toHaveBeenCalledOnce();
+  });
+
+  it('retries a failed publication with the frozen package instead of restarting', async () => {
+    props.hasPending = true;
+    props.error = 'Could not update sharing.';
+    await render();
+    expect(button('Update share')).toBeUndefined();
+    await click('Retry');
+    expect(props.onPublish).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a conflicting frozen package by starting over rather than publishing it', async () => {
+    props.conflict = true;
+    props.hasPending = true;
+    await render();
+    await click('Start over');
+    expect(props.onDiscard).toHaveBeenCalledOnce();
+    expect(props.onPublish).not.toHaveBeenCalled();
+  });
+
+  it('waits for explicit approval of an agent-requested target set', async () => {
+    props.entry = null;
+    props.selectionLocked = true;
+    await render();
+    expect(props.onPublish).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="checkbox"]')).toBeNull();
+    await click('Share conversation');
+    expect(props.onPublish).toHaveBeenCalledOnce();
+  });
+
+  it('routes an unfinished draft to discard instead of a dead publish button', async () => {
+    props.entry = { ...entry, status: 'draft' };
+    props.hasSecret = false;
+    props.shareLink = null;
+    await render();
+    expect(container.textContent).toContain('This share was never finished.');
+    expect(button('Share conversation')).toBeUndefined();
+    expect(button('Update share')).toBeUndefined();
+    await click('Discard and start over');
+    expect(props.onRevoke).toHaveBeenCalledOnce();
+  });
+
+  it('lets an administrator revoke but not publish another member’s share', async () => {
+    props.entry = { ...entry, canManage: false };
+    props.hasSecret = false;
+    props.shareLink = null;
+    await render();
+    expect(button('Update share')).toBeUndefined();
+    expect(button('Reset link')).toBeUndefined();
+    expect(container.textContent).toContain('Published by another workspace member');
+    expect(container.textContent).not.toContain('Updating replaces');
+    await click('Revoke share');
+    expect(props.onRevoke).not.toHaveBeenCalled();
+    await click('Confirm');
+    expect(props.onRevoke).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates a stale revoke confirmation when the revision changes', async () => {
+    await render();
+    await click('Revoke share');
+    props.entry = { ...entry, revision: 2 };
+    await render();
+    expect(button('Confirm')?.disabled).toBe(true);
+    await click('Confirm');
+    expect(props.onRevoke).not.toHaveBeenCalled();
+  });
+
+  it('offers a link reset when this device has no credential', async () => {
+    props.hasSecret = false;
+    props.shareLink = null;
+    await render();
+    expect(container.textContent).toContain('link credential is not saved on this device');
+    expect(button('Copy link')).toBeUndefined();
+    await click('Reset link');
+    expect(props.onReset).not.toHaveBeenCalled();
+    await click('Confirm');
+    expect(props.onReset).toHaveBeenCalledOnce();
+  });
+
+  it('keeps revoke and copy usable when the source is gone', async () => {
+    props.canCapture = false;
+    await render();
+    expect(button('Update share')?.disabled).toBe(true);
+    expect(button('Copy link')?.disabled).toBe(false);
+    expect(button('Revoke share')?.disabled).toBe(false);
+    expect(container.textContent).toContain('published copy is unchanged');
   });
 });

@@ -1,80 +1,105 @@
-# Session sharing
+# Static session sharing
 
 Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file only.
 
-- `session-share-dialog.tsx` and controlled `session-share-manager.tsx` implement
-  authenticated management from the common session header menu. Only the open editor
-  subscribes to metadata/cloud state; local platforms hide the entry via capability.
-  Never import this management graph from the anonymous reader entry.
-- Mobile hides that Header. `session-detail.tsx` mounts `session-share-mobile-menu.tsx`
-  for its separate sheet; use the active persisted Tab, never the parent fallback for
-  drafts/viewers. Key it by workspace/Tab so switching releases the open manager.
-- `SessionShareDialogFrame` is shared by the manager stories and product dialog;
-  its portal must shrink/lift for `--native-keyboard-height` and keep focused fields
-  in its own scroll region. Root layout keyboard padding does not reach this portal.
-  It is a fixed header over ONE scrolling body: the keyboard hook observes that body,
-  and the manager's action row stays pinned to the body's bottom.
-  Sub-conversations are ONE switch, not a checklist, and there is no separate consent
-  checkbox: the disclosure on the link card is the notice. The preview notice states that the root title is public
-  without the access fragment; it must not imply public body/attachment access.
-  The switch resolves to an explicit id set of the descendants that are eligible RIGHT NOW, capped at
-  `SESSION_SHARE_MAX_TARGETS`; never let it imply that later ones join by themselves,
-  and never let it pull in an ineligible target. State each meaning once, next to what
-  it describes. Explain a blocked action rather than only disabling it — an unshareable
-  root says why — and render Save only when something actually changed.
-  The dialog currently shows ONLY this conversation's own link. Other grants that also
-  cover it are deliberately not listed, so revoking here does not necessarily stop all
-  outside access; keep `state.sources` intact for `copyableShareIds` and do not present
-  revocation as a full stop.
-- `hooks/use-session-share-management.ts` uses public cloud descriptors and server
-  verified eligibility. Relationships only discover candidates; the stored grant stays
-  an explicit id list the server verifies target by target, whatever the UI shows.
-  Preserve the draft's expected versions across concurrent edits. Expire displayed
-  access on the lease clock even without a reactive query update.
-- `lib/session-share-secrets.ts` owns device-local secrets scoped to user/workspace/link
-  and credential version, not scope version. Persist only successful create/reset results;
-  a missing secret requires reset. These are credentials, not recoverable cache entries;
-  ordinary cache clear preserves them, hard reset removes them. Never log credentials.
+- This subsystem is undergoing a breaking static-publication cutover. Do not
+  deploy until the anonymous reader, MCP confirmation, GC and integration fixtures
+  have switched together. [Intent](../../../../../specs/session-sharing.md).
+- `session-share-dialog.tsx` and controlled `session-share-manager.tsx` own
+  authenticated publication. The manager is one screen at a time — setup,
+  publishing, published, unfinished draft — with exactly one primary action each.
+  A human action always starts publication, and the package is frozen in full
+  before any byte is uploaded. Include all selected stored history, including
+  thought/tool fields except task-proposal notices; disclose the sensitivity and public title on the first
+  screen, never behind a disclosure. `onPublish` freezes (or reuses the frozen
+  retry keys), uploads and commits. There is no publication preview or prepare-only action.
+- Progress must stay honest: only the object upload has a byte total, so only it
+  may show a percentage. Capture and the publish commit use the indeterminate
+  sweep. Auto-copy on success may claim "copied" only after the clipboard write
+  resolves; a rejected write shows the manual-copy field instead.
+- MCP requests still require explicit human confirmation of the locked target set.
+  Opening the dialog does not capture or publish; confirmation starts freeze/upload.
+- `SessionShareDialogFrame` keeps its fixed header and one keyboard-aware scroll
+  body; the manager's action row sticks to the bottom of that body. Opening must
+  not autofocus a control — focus the panel, so the link field is not preselected
+  and the sub-conversation checkbox is not armed. The portal must shrink/lift for
+  the native keyboard. Closed editors must not load source documents or run cloud
+  queries.
+- The sub-conversation checkbox resolves to an explicit current set, capped at 32;
+  future children never join automatically. A share that carries only some of the
+  current children renders indeterminate with the exact count, never a plain tick. Client capture is not server
+  materialization and source metadata is not a publisher identity certificate.
+- `hooks/use-session-share-management.ts` owns prepare/confirm/upload/publish.
+  Settings reuses `useSessionShareLinkActions` for copy/reset/revoke. Keep retry
+  credentials and request identity stable; publish only after sealing.
+- `session-share-request-cards.tsx` reads canonical pending requests, not history flags.
+  Review locks the explicit target set; confirmation is app-only. Keep its editor
+  mounted when begin consumes the request. Confirmed half-deployments remain visible
+  and can be abandoned; a published request cannot use cancellation to revoke a share.
+- `lib/session-share-publisher.ts` is app-only: hydrate all sources before
+  synchronous capture, copy attachments under app authority, and release every
+  source lease. It must never be imported by the anonymous entry. Workspace E2EE
+  will decrypt here before plaintext publication, not on a server or reader.
+- `lib/session-share-secrets.ts` owns device-local credentials scoped by
+  user/workspace/share and credential version. Ordinary cache clear preserves them.
+  Missing credentials require reset, never recovery from cloud data or Flock.
+  New publication must durably save and read back the begin response's reader
+  credential before uploading or committing. Storage failure stops publication;
+  closing a dialog during the final commit cannot discard its only reader secret.
+  Upload secrets remain editor-local. Reset-link behavior is separate.
+- The anonymous reader must use the static package client, pin one deployment,
+  and never create a workspace runtime, Repo, Flock, machine connection, source
+  attachment request or local durable history cache. Navigation is manifest-only.
+  `session-share-reader.ts` reads a single immutable history; no polling, Loro
+  document or source fallback. One conversation is selected at a time.
+  Capture removes `system_notice/task_proposal` from display containers before
+  attachment I/O; reader validation rejects it. Preserve `subagent_task` and
+  opaque tool/text content. This is not keyword-based task redaction.
+- Preserve app presentation: independent conversations in the left tree and
+  child Tabs in the one main pane. The reader has NO right pane and no toggle
+  for one, so a side-panel child renders as an ordinary Tab — it is published
+  content and must stay reachable, never dropped with the pane. Reuse controlled
+  presentation only, not workspace runtime hooks. The left tree uses the app's
+  `session-row-leading-slot.tsx`, not a second connector/disclosure implementation.
+- Markdown is dynamic and uses the existing conversation-copy builder, range
+  selection, budget/truncation rules and result notices. No stored Markdown object.
+- The shared file-attachment rollout switch defaults off: capture replaces typed
+  files with localized text, without reading them; images remain enabled.
+- Share attachment reads resolve manifest IDs only. Never use source
+  `storageSessionId`, a source expiry clock, public bucket URLs, or arbitrary
+  resource links as read authority. Release object URLs and cancel disposed reads.
+- Ordinary Markdown/ACP renderers also honor readonly context: no source task
+  image hook, remote image URI or resource download fallback. Only inline bytes
+  and manifest attachments are media authority. Hosts restrict image CSP as defense
+  in depth. Credentials must never enter React keys; reset with a local epoch.
+- Keep the read-only context free of composer, edit, retry, fork, permission,
+  agent-control and workspace-navigation callbacks. Malformed reader errors
+  unmount content and must not send history/error payloads to telemetry.
+- Copy Agent Prompt is an explicit short-lived capability export, not a fork.
+  Localize the prompt with the reader's current i18n language and keep token URLs out of telemetry. Pass the
+  selected conversation and pinned deployment; issue access only for published deployments.
+  Clipboard rejection must leave a manual-copy prompt, not claim success.
+- Reader chrome: the Lody mark leads the header — the packaged app icon's own
+  black tile, which does not repaint with the reader's appearance — and links
+  back to the product in a new tab; right to left the header ends with viewer
+  identity, language toggle, then the theme control. Language toggles English/Chinese
+  and saves the existing `lody-language` preference without app/OneSignal hooks;
+  The conversation tree is a left sidebar on a
+  wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
+  per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
+  any other stored value; the reader deliberately does not follow the app's
+  appearance setting. It drives the reader's ThemeProvider; publication does not embed the reader.
+- `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
+  authenticates and, on its own origin, cannot read the app's session cookie:
+  showing a name or avatar requires the host to establish it. Signed-out renders
+  no identity placeholder or login entry, on either wide or narrow viewports.
+- Each pane is named by the app's tab pill (`shared/tab-pill-strip.tsx`), never a
+  second title bar, so one conversation and a set of child Tabs read alike. The
+  foot is `session-share-composer.tsx`: the product composer's exact resting
+  surface from `chat/composer-surface.ts`, inert and `aria-hidden`, with the
+  visitor's real actions floated over it. Keep Markdown copy there, per pane.
+- The host owns origin/build/CSP and an isolated anonymous platform/store.
 
-- `session-share-page.tsx` exports the controlled surface and hosted reader state.
-  It must not import the app router or create a workspace runtime, Repo, Flock,
-  read receipt, dispatch, or membership subscription. Navigation comes only from
-  the authorized manifest; a stream's references do not authorize other streams.
-  Read-only is expressed by offering no write affordance, not by a standing banner;
-  the header's status region announces interruptions only. Its appearance control
-  reuses `theme-provider`'s cycle, `system` default and storage key — never a
-  reader-specific mode or key, which would compete with the app's cached choice.
-- `lib/session-share-navigation.ts` derives the target from `?tab` and the current
-  manifest. Browser history preserves the access fragment; unsupported targets fall
-  back to the root and never issue their own read. Tag snapshots with their target so
-  switching cannot render the previous history under a new title. The shared stream
-  view's existing memory LRU owns per-session scroll positions.
-- `session-share-error-boundary.tsx` unmounts a malformed reader (closing streams and
-  attachments) and offers only an explicit reload. Unlike the authenticated app's
-  diagnostic boundary it retains/reports no error payload and imports no telemetry.
-  The hosted root suppresses React's default caught-error logger for the same reason.
-- `lib/session-share-reader.ts` owns one in-memory LoroDoc and Streams transport.
-  Keep both its read-only adapter and network method/path gate. Include the shared
-  snapshot codec so existing Zstd and raw snapshots remain readable. No persistence.
-  Its schema-free Mirror is read-only: never provide initialState, schema defaults,
-  setState or an ephemeral store. It preserves unchanged message identity across
-  stream updates. `createSharedChatStreamBuilder` owns the surface's ConversationView
-  adapter and render cache; filter invalid items only in its read projection and
-  reuse unchanged entries across snapshots. Dispose on unmount and reset on target
-  changes; never pass a history array directly to the windowed renderer or
-  use the authenticated app's global history cache for anonymous content.
-- `share-attachments.tsx` uses the share bearer API and existing file/image UI.
-  Never fall back to workspace auth, public R2 URLs, or an unchecked storage session
-  ID. Revoke object URLs and abort reads when the target or grant becomes unavailable.
-  Preserve inherited `storageSessionId` as a selector on the authorized target's API;
-  the server verifies the original stream reference before using it. Never navigate
-  to that storage session or silently substitute the target namespace. Local attachments
-  show unavailable, not a promise of background uploading. Text previews provide
-  a source download action and render only as text.
-- `../ai-gui/session-readonly-context.tsx` provides attachment rendering and disables
-  permission actions. The hosted entry supplies no composer, editing, retry, fork,
-  navigation-to-workspace, or machine-control callbacks to the shared stream renderer.
-- The private Web host owns domain/build/CSP configuration and an isolated anonymous
-  platform/store. It must not mount auth/telemetry providers. Public UI stays here.
-- Stories: `src/stories/SessionSharePage.stories.tsx`. Protocol tests:
-  `tests/session-share-reader.test.ts`; built-page tests live in the private Web host.
+- Static share snapshots render through `createSharedChatStreamBuilder`, which owns
+  the page-local ConversationView adapter and cache. Dispose it on unmount; never
+  pass history arrays directly to the windowed renderer.

@@ -8,474 +8,464 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as NotFoundRouteImport } from './routes/notFound'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as EmailVerifiedRouteImport } from './routes/email-verified'
-import { Route as DeviceRouteImport } from './routes/device'
-import { Route as CompleteEmailRouteImport } from './routes/complete-email'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index'
-import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create'
-import { Route as JoinTokenRouteImport } from './routes/join/$token'
-import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId'
-import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install'
-import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return'
-import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth'
-import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings'
-import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions'
-import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat'
-import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive'
-import { Route as WorkspaceNameAuthTasksIndexRouteImport } from './routes/$workspaceName/_auth/tasks.index'
-import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index'
-import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId'
-import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace'
-import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats'
-import { Route as WorkspaceNameAuthSettingsPromptShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/prompt-shortcuts'
-import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects'
-import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences'
-import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people'
-import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines'
-import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp'
-import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines'
-import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts'
-import { Route as WorkspaceNameAuthSettingsGithubRouteImport } from './routes/$workspaceName/_auth/settings/github'
-import { Route as WorkspaceNameAuthSettingsGeneralRouteImport } from './routes/$workspaceName/_auth/settings/general'
-import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices'
-import { Route as WorkspaceNameAuthSettingsBillingRouteImport } from './routes/$workspaceName/_auth/settings/billing'
-import { Route as WorkspaceNameAuthSettingsAppearanceRouteImport } from './routes/$workspaceName/_auth/settings/appearance'
-import { Route as WorkspaceNameAuthSettingsAiUsageRouteImport } from './routes/$workspaceName/_auth/settings/ai-usage'
-import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents'
-import { Route as WorkspaceNameAuthSettingsAgentRolesRouteImport } from './routes/$workspaceName/_auth/settings/agent-roles'
-import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config'
-import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account'
-import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about'
-import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId'
-import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId'
+import { Route as rootRouteImport } from './routes/__root';
+import { Route as ResetPasswordRouteImport } from './routes/reset-password';
+import { Route as OnboardingRouteImport } from './routes/onboarding';
+import { Route as NotFoundRouteImport } from './routes/notFound';
+import { Route as LoginRouteImport } from './routes/login';
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
+import { Route as EmailVerifiedRouteImport } from './routes/email-verified';
+import { Route as DeviceRouteImport } from './routes/device';
+import { Route as CompleteEmailRouteImport } from './routes/complete-email';
+import { Route as AppRouteImport } from './routes/app';
+import { Route as WorkspaceNameRouteImport } from './routes/$workspaceName';
+import { Route as IndexRouteImport } from './routes/index';
+import { Route as WorkspaceNameIndexRouteImport } from './routes/$workspaceName/index';
+import { Route as WorkspaceCreateRouteImport } from './routes/workspace/create';
+import { Route as JoinTokenRouteImport } from './routes/join/$token';
+import { Route as InviteInvitationIdRouteImport } from './routes/invite/$invitationId';
+import { Route as DesktopGithubInstallRouteImport } from './routes/desktop/github-install';
+import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/checkout-return';
+import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
+import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
+import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
+import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
+import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive';
+import { Route as WorkspaceNameAuthTasksIndexRouteImport } from './routes/$workspaceName/_auth/tasks.index';
+import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
+import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId';
+import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace';
+import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats';
+import { Route as WorkspaceNameAuthSettingsSharesRouteImport } from './routes/$workspaceName/_auth/settings/shares';
+import { Route as WorkspaceNameAuthSettingsPromptShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/prompt-shortcuts';
+import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
+import { Route as WorkspaceNameAuthSettingsPreferencesRouteImport } from './routes/$workspaceName/_auth/settings/preferences';
+import { Route as WorkspaceNameAuthSettingsPeopleRouteImport } from './routes/$workspaceName/_auth/settings/people';
+import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
+import { Route as WorkspaceNameAuthSettingsMcpRouteImport } from './routes/$workspaceName/_auth/settings/mcp';
+import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/$workspaceName/_auth/settings/machines';
+import { Route as WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport } from './routes/$workspaceName/_auth/settings/keyboard-shortcuts';
+import { Route as WorkspaceNameAuthSettingsGithubRouteImport } from './routes/$workspaceName/_auth/settings/github';
+import { Route as WorkspaceNameAuthSettingsGeneralRouteImport } from './routes/$workspaceName/_auth/settings/general';
+import { Route as WorkspaceNameAuthSettingsDevicesRouteImport } from './routes/$workspaceName/_auth/settings/devices';
+import { Route as WorkspaceNameAuthSettingsBillingRouteImport } from './routes/$workspaceName/_auth/settings/billing';
+import { Route as WorkspaceNameAuthSettingsAppearanceRouteImport } from './routes/$workspaceName/_auth/settings/appearance';
+import { Route as WorkspaceNameAuthSettingsAiUsageRouteImport } from './routes/$workspaceName/_auth/settings/ai-usage';
+import { Route as WorkspaceNameAuthSettingsAgentsRouteImport } from './routes/$workspaceName/_auth/settings/agents';
+import { Route as WorkspaceNameAuthSettingsAgentRolesRouteImport } from './routes/$workspaceName/_auth/settings/agent-roles';
+import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './routes/$workspaceName/_auth/settings/agent-config';
+import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account';
+import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about';
+import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId';
+import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId';
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const NotFoundRoute = NotFoundRouteImport.update({
   id: '/notFound',
   path: '/notFound',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const EmailVerifiedRoute = EmailVerifiedRouteImport.update({
   id: '/email-verified',
   path: '/email-verified',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const DeviceRoute = DeviceRouteImport.update({
   id: '/device',
   path: '/device',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const CompleteEmailRoute = CompleteEmailRouteImport.update({
   id: '/complete-email',
   path: '/complete-email',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const WorkspaceNameRoute = WorkspaceNameRouteImport.update({
   id: '/$workspaceName',
   path: '/$workspaceName',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const WorkspaceNameIndexRoute = WorkspaceNameIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkspaceNameRoute,
-} as any)
+} as any);
 const WorkspaceCreateRoute = WorkspaceCreateRouteImport.update({
   id: '/workspace/create',
   path: '/workspace/create',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const JoinTokenRoute = JoinTokenRouteImport.update({
   id: '/join/$token',
   path: '/join/$token',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
   id: '/invite/$invitationId',
   path: '/invite/$invitationId',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const DesktopGithubInstallRoute = DesktopGithubInstallRouteImport.update({
   id: '/desktop/github-install',
   path: '/desktop/github-install',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const DesktopCheckoutReturnRoute = DesktopCheckoutReturnRouteImport.update({
   id: '/desktop/checkout-return',
   path: '/desktop/checkout-return',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const WorkspaceNameAuthRoute = WorkspaceNameAuthRouteImport.update({
   id: '/_auth',
   getParentRoute: () => WorkspaceNameRoute,
-} as any)
-const WorkspaceNameAuthSettingsRoute =
-  WorkspaceNameAuthSettingsRouteImport.update({
-    id: '/settings',
-    path: '/settings',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthSessionsRoute =
-  WorkspaceNameAuthSessionsRouteImport.update({
-    id: '/sessions',
-    path: '/sessions',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
+} as any);
+const WorkspaceNameAuthSettingsRoute = WorkspaceNameAuthSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
+const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
 const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
   id: '/chat',
   path: '/chat',
   getParentRoute: () => WorkspaceNameAuthRoute,
-} as any)
-const WorkspaceNameAuthArchiveRoute =
-  WorkspaceNameAuthArchiveRouteImport.update({
-    id: '/archive',
-    path: '/archive',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthTasksIndexRoute =
-  WorkspaceNameAuthTasksIndexRouteImport.update({
-    id: '/tasks/',
-    path: '/tasks/',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
-const WorkspaceNameAuthSettingsIndexRoute =
-  WorkspaceNameAuthSettingsIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthTasksTaskIdRoute =
-  WorkspaceNameAuthTasksTaskIdRouteImport.update({
-    id: '/tasks/$taskId',
-    path: '/tasks/$taskId',
-    getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
+} as any);
+const WorkspaceNameAuthArchiveRoute = WorkspaceNameAuthArchiveRouteImport.update({
+  id: '/archive',
+  path: '/archive',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
+const WorkspaceNameAuthTasksIndexRoute = WorkspaceNameAuthTasksIndexRouteImport.update({
+  id: '/tasks/',
+  path: '/tasks/',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
+const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthTasksTaskIdRoute = WorkspaceNameAuthTasksTaskIdRouteImport.update({
+  id: '/tasks/$taskId',
+  path: '/tasks/$taskId',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
 const WorkspaceNameAuthSettingsWorkspaceRoute =
   WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
     id: '/workspace',
     path: '/workspace',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsStatsRoute =
-  WorkspaceNameAuthSettingsStatsRouteImport.update({
-    id: '/stats',
-    path: '/stats',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsStatsRoute = WorkspaceNameAuthSettingsStatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsSharesRoute = WorkspaceNameAuthSettingsSharesRouteImport.update({
+  id: '/shares',
+  path: '/shares',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsPromptShortcutsRoute =
   WorkspaceNameAuthSettingsPromptShortcutsRouteImport.update({
     id: '/prompt-shortcuts',
     path: '/prompt-shortcuts',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsProjectsRoute =
-  WorkspaceNameAuthSettingsProjectsRouteImport.update({
-    id: '/projects',
-    path: '/projects',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsProjectsRoute = WorkspaceNameAuthSettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsPreferencesRoute =
   WorkspaceNameAuthSettingsPreferencesRouteImport.update({
     id: '/preferences',
     path: '/preferences',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsPeopleRoute =
-  WorkspaceNameAuthSettingsPeopleRouteImport.update({
-    id: '/people',
-    path: '/people',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsPeopleRoute = WorkspaceNameAuthSettingsPeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsMyMachinesRoute =
   WorkspaceNameAuthSettingsMyMachinesRouteImport.update({
     id: '/my-machines',
     path: '/my-machines',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsMcpRoute =
-  WorkspaceNameAuthSettingsMcpRouteImport.update({
-    id: '/mcp',
-    path: '/mcp',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsMachinesRoute =
-  WorkspaceNameAuthSettingsMachinesRouteImport.update({
-    id: '/machines',
-    path: '/machines',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsMcpRoute = WorkspaceNameAuthSettingsMcpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsMachinesRoute = WorkspaceNameAuthSettingsMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsKeyboardShortcutsRoute =
   WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport.update({
     id: '/keyboard-shortcuts',
     path: '/keyboard-shortcuts',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsGithubRoute =
-  WorkspaceNameAuthSettingsGithubRouteImport.update({
-    id: '/github',
-    path: '/github',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsGeneralRoute =
-  WorkspaceNameAuthSettingsGeneralRouteImport.update({
-    id: '/general',
-    path: '/general',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsDevicesRoute =
-  WorkspaceNameAuthSettingsDevicesRouteImport.update({
-    id: '/devices',
-    path: '/devices',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsBillingRoute =
-  WorkspaceNameAuthSettingsBillingRouteImport.update({
-    id: '/billing',
-    path: '/billing',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsGithubRoute = WorkspaceNameAuthSettingsGithubRouteImport.update({
+  id: '/github',
+  path: '/github',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsGeneralRoute = WorkspaceNameAuthSettingsGeneralRouteImport.update({
+  id: '/general',
+  path: '/general',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsDevicesRoute = WorkspaceNameAuthSettingsDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsBillingRoute = WorkspaceNameAuthSettingsBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsAppearanceRoute =
   WorkspaceNameAuthSettingsAppearanceRouteImport.update({
     id: '/appearance',
     path: '/appearance',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAiUsageRoute =
-  WorkspaceNameAuthSettingsAiUsageRouteImport.update({
-    id: '/ai-usage',
-    path: '/ai-usage',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAgentsRoute =
-  WorkspaceNameAuthSettingsAgentsRouteImport.update({
-    id: '/agents',
-    path: '/agents',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsAiUsageRoute = WorkspaceNameAuthSettingsAiUsageRouteImport.update({
+  id: '/ai-usage',
+  path: '/ai-usage',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsAgentsRoute = WorkspaceNameAuthSettingsAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSettingsAgentRolesRoute =
   WorkspaceNameAuthSettingsAgentRolesRouteImport.update({
     id: '/agent-roles',
     path: '/agent-roles',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
 const WorkspaceNameAuthSettingsAgentConfigRoute =
   WorkspaceNameAuthSettingsAgentConfigRouteImport.update({
     id: '/agent-config',
     path: '/agent-config',
     getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAccountRoute =
-  WorkspaceNameAuthSettingsAccountRouteImport.update({
-    id: '/account',
-    path: '/account',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
-const WorkspaceNameAuthSettingsAboutRoute =
-  WorkspaceNameAuthSettingsAboutRouteImport.update({
-    id: '/about',
-    path: '/about',
-    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-  } as any)
+  } as any);
+const WorkspaceNameAuthSettingsAccountRoute = WorkspaceNameAuthSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSettingsAboutRoute = WorkspaceNameAuthSettingsAboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
 const WorkspaceNameAuthSessionsSessionIdRoute =
   WorkspaceNameAuthSessionsSessionIdRouteImport.update({
     id: '/$sessionId',
     path: '/$sessionId',
     getParentRoute: () => WorkspaceNameAuthSessionsRoute,
-  } as any)
+  } as any);
 const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport.update({
     id: '/local/$machineId/$localProjectId',
     path: '/local/$machineId/$localProjectId',
     getParentRoute: () => WorkspaceNameAuthRoute,
-  } as any)
+  } as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/$workspaceName': typeof WorkspaceNameAuthRouteWithChildren
-  '/app': typeof AppRoute
-  '/complete-email': typeof CompleteEmailRoute
-  '/device': typeof DeviceRoute
-  '/email-verified': typeof EmailVerifiedRoute
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/notFound': typeof NotFoundRoute
-  '/onboarding': typeof OnboardingRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute
-  '/desktop/github-install': typeof DesktopGithubInstallRoute
-  '/invite/$invitationId': typeof InviteInvitationIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/workspace/create': typeof WorkspaceCreateRoute
-  '/$workspaceName/': typeof WorkspaceNameIndexRoute
-  '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute
-  '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute
-  '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren
-  '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren
-  '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute
-  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute
-  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute
-  '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute
-  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute
-  '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute
-  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute
-  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute
-  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute
-  '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute
-  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute
-  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute
-  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute
-  '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute
-  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute
-  '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute
-  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
-  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
-  '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
-  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
-  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
-  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
-  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
-  '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute
-  '/$workspaceName/tasks/': typeof WorkspaceNameAuthTasksIndexRoute
-  '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute
+  '/': typeof IndexRoute;
+  '/$workspaceName': typeof WorkspaceNameAuthRouteWithChildren;
+  '/app': typeof AppRoute;
+  '/complete-email': typeof CompleteEmailRoute;
+  '/device': typeof DeviceRoute;
+  '/email-verified': typeof EmailVerifiedRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
+  '/login': typeof LoginRoute;
+  '/notFound': typeof NotFoundRoute;
+  '/onboarding': typeof OnboardingRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
+  '/desktop/github-install': typeof DesktopGithubInstallRoute;
+  '/invite/$invitationId': typeof InviteInvitationIdRoute;
+  '/join/$token': typeof JoinTokenRoute;
+  '/workspace/create': typeof WorkspaceCreateRoute;
+  '/$workspaceName/': typeof WorkspaceNameIndexRoute;
+  '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
+  '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
+  '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
+  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
+  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
+  '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
+  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
+  '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
+  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
+  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
+  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
+  '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
+  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
+  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
+  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
+  '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
+  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
+  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
+  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
+  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
+  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
+  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
+  '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
+  '/$workspaceName/tasks/': typeof WorkspaceNameAuthTasksIndexRoute;
+  '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/app': typeof AppRoute
-  '/complete-email': typeof CompleteEmailRoute
-  '/device': typeof DeviceRoute
-  '/email-verified': typeof EmailVerifiedRoute
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/notFound': typeof NotFoundRoute
-  '/onboarding': typeof OnboardingRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/$workspaceName': typeof WorkspaceNameIndexRoute
-  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute
-  '/desktop/github-install': typeof DesktopGithubInstallRoute
-  '/invite/$invitationId': typeof InviteInvitationIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/workspace/create': typeof WorkspaceCreateRoute
-  '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute
-  '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute
-  '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren
-  '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute
-  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute
-  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute
-  '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute
-  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute
-  '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute
-  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute
-  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute
-  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute
-  '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute
-  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute
-  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute
-  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute
-  '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute
-  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute
-  '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute
-  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
-  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
-  '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
-  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
-  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
-  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
-  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
-  '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute
-  '/$workspaceName/tasks': typeof WorkspaceNameAuthTasksIndexRoute
-  '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute
+  '/': typeof IndexRoute;
+  '/app': typeof AppRoute;
+  '/complete-email': typeof CompleteEmailRoute;
+  '/device': typeof DeviceRoute;
+  '/email-verified': typeof EmailVerifiedRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
+  '/login': typeof LoginRoute;
+  '/notFound': typeof NotFoundRoute;
+  '/onboarding': typeof OnboardingRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/$workspaceName': typeof WorkspaceNameIndexRoute;
+  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
+  '/desktop/github-install': typeof DesktopGithubInstallRoute;
+  '/invite/$invitationId': typeof InviteInvitationIdRoute;
+  '/join/$token': typeof JoinTokenRoute;
+  '/workspace/create': typeof WorkspaceCreateRoute;
+  '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
+  '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
+  '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
+  '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
+  '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
+  '/$workspaceName/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
+  '/$workspaceName/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
+  '/$workspaceName/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
+  '/$workspaceName/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
+  '/$workspaceName/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
+  '/$workspaceName/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
+  '/$workspaceName/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
+  '/$workspaceName/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
+  '/$workspaceName/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
+  '/$workspaceName/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
+  '/$workspaceName/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
+  '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
+  '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
+  '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
+  '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
+  '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
+  '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
+  '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
+  '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute;
+  '/$workspaceName/tasks': typeof WorkspaceNameAuthTasksIndexRoute;
+  '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/$workspaceName': typeof WorkspaceNameRouteWithChildren
-  '/app': typeof AppRoute
-  '/complete-email': typeof CompleteEmailRoute
-  '/device': typeof DeviceRoute
-  '/email-verified': typeof EmailVerifiedRoute
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/login': typeof LoginRoute
-  '/notFound': typeof NotFoundRoute
-  '/onboarding': typeof OnboardingRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/$workspaceName/_auth': typeof WorkspaceNameAuthRouteWithChildren
-  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute
-  '/desktop/github-install': typeof DesktopGithubInstallRoute
-  '/invite/$invitationId': typeof InviteInvitationIdRoute
-  '/join/$token': typeof JoinTokenRoute
-  '/workspace/create': typeof WorkspaceCreateRoute
-  '/$workspaceName/': typeof WorkspaceNameIndexRoute
-  '/$workspaceName/_auth/archive': typeof WorkspaceNameAuthArchiveRoute
-  '/$workspaceName/_auth/chat': typeof WorkspaceNameAuthChatRoute
-  '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren
-  '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren
-  '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute
-  '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute
-  '/$workspaceName/_auth/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute
-  '/$workspaceName/_auth/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute
-  '/$workspaceName/_auth/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute
-  '/$workspaceName/_auth/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute
-  '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute
-  '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute
-  '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute
-  '/$workspaceName/_auth/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute
-  '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute
-  '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute
-  '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute
-  '/$workspaceName/_auth/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute
-  '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute
-  '/$workspaceName/_auth/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute
-  '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute
-  '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute
-  '/$workspaceName/_auth/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute
-  '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
-  '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute
-  '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute
-  '/$workspaceName/_auth/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute
-  '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute
-  '/$workspaceName/_auth/tasks/': typeof WorkspaceNameAuthTasksIndexRoute
-  '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute
+  __root__: typeof rootRouteImport;
+  '/': typeof IndexRoute;
+  '/$workspaceName': typeof WorkspaceNameRouteWithChildren;
+  '/app': typeof AppRoute;
+  '/complete-email': typeof CompleteEmailRoute;
+  '/device': typeof DeviceRoute;
+  '/email-verified': typeof EmailVerifiedRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
+  '/login': typeof LoginRoute;
+  '/notFound': typeof NotFoundRoute;
+  '/onboarding': typeof OnboardingRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/$workspaceName/_auth': typeof WorkspaceNameAuthRouteWithChildren;
+  '/desktop/checkout-return': typeof DesktopCheckoutReturnRoute;
+  '/desktop/github-install': typeof DesktopGithubInstallRoute;
+  '/invite/$invitationId': typeof InviteInvitationIdRoute;
+  '/join/$token': typeof JoinTokenRoute;
+  '/workspace/create': typeof WorkspaceCreateRoute;
+  '/$workspaceName/': typeof WorkspaceNameIndexRoute;
+  '/$workspaceName/_auth/archive': typeof WorkspaceNameAuthArchiveRoute;
+  '/$workspaceName/_auth/chat': typeof WorkspaceNameAuthChatRoute;
+  '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
+  '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
+  '/$workspaceName/_auth/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
+  '/$workspaceName/_auth/settings/agent-config': typeof WorkspaceNameAuthSettingsAgentConfigRoute;
+  '/$workspaceName/_auth/settings/agent-roles': typeof WorkspaceNameAuthSettingsAgentRolesRoute;
+  '/$workspaceName/_auth/settings/agents': typeof WorkspaceNameAuthSettingsAgentsRoute;
+  '/$workspaceName/_auth/settings/ai-usage': typeof WorkspaceNameAuthSettingsAiUsageRoute;
+  '/$workspaceName/_auth/settings/appearance': typeof WorkspaceNameAuthSettingsAppearanceRoute;
+  '/$workspaceName/_auth/settings/billing': typeof WorkspaceNameAuthSettingsBillingRoute;
+  '/$workspaceName/_auth/settings/devices': typeof WorkspaceNameAuthSettingsDevicesRoute;
+  '/$workspaceName/_auth/settings/general': typeof WorkspaceNameAuthSettingsGeneralRoute;
+  '/$workspaceName/_auth/settings/github': typeof WorkspaceNameAuthSettingsGithubRoute;
+  '/$workspaceName/_auth/settings/keyboard-shortcuts': typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
+  '/$workspaceName/_auth/settings/machines': typeof WorkspaceNameAuthSettingsMachinesRoute;
+  '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpRoute;
+  '/$workspaceName/_auth/settings/my-machines': typeof WorkspaceNameAuthSettingsMyMachinesRoute;
+  '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleRoute;
+  '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  '/$workspaceName/_auth/settings/projects': typeof WorkspaceNameAuthSettingsProjectsRoute;
+  '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
+  '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
+  '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
+  '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/_auth/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
+  '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
+  '/$workspaceName/_auth/tasks/': typeof WorkspaceNameAuthTasksIndexRoute;
+  '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
+  fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | '/'
     | '/$workspaceName'
@@ -518,13 +508,14 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
+    | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/tasks/$taskId'
     | '/$workspaceName/settings/'
     | '/$workspaceName/tasks/'
-    | '/$workspaceName/local/$machineId/$localProjectId'
-  fileRoutesByTo: FileRoutesByTo
+    | '/$workspaceName/local/$machineId/$localProjectId';
+  fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
     | '/app'
@@ -565,12 +556,13 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/projects'
     | '/$workspaceName/settings/prompt-shortcuts'
+    | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/tasks/$taskId'
     | '/$workspaceName/settings'
     | '/$workspaceName/tasks'
-    | '/$workspaceName/local/$machineId/$localProjectId'
+    | '/$workspaceName/local/$machineId/$localProjectId';
   id:
     | '__root__'
     | '/'
@@ -615,468 +607,458 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/preferences'
     | '/$workspaceName/_auth/settings/projects'
     | '/$workspaceName/_auth/settings/prompt-shortcuts'
+    | '/$workspaceName/_auth/settings/shares'
     | '/$workspaceName/_auth/settings/stats'
     | '/$workspaceName/_auth/settings/workspace'
     | '/$workspaceName/_auth/tasks/$taskId'
     | '/$workspaceName/_auth/settings/'
     | '/$workspaceName/_auth/tasks/'
-    | '/$workspaceName/_auth/local/$machineId/$localProjectId'
-  fileRoutesById: FileRoutesById
+    | '/$workspaceName/_auth/local/$machineId/$localProjectId';
+  fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  WorkspaceNameRoute: typeof WorkspaceNameRouteWithChildren
-  AppRoute: typeof AppRoute
-  CompleteEmailRoute: typeof CompleteEmailRoute
-  DeviceRoute: typeof DeviceRoute
-  EmailVerifiedRoute: typeof EmailVerifiedRoute
-  ForgotPasswordRoute: typeof ForgotPasswordRoute
-  LoginRoute: typeof LoginRoute
-  NotFoundRoute: typeof NotFoundRoute
-  OnboardingRoute: typeof OnboardingRoute
-  ResetPasswordRoute: typeof ResetPasswordRoute
-  DesktopCheckoutReturnRoute: typeof DesktopCheckoutReturnRoute
-  DesktopGithubInstallRoute: typeof DesktopGithubInstallRoute
-  InviteInvitationIdRoute: typeof InviteInvitationIdRoute
-  JoinTokenRoute: typeof JoinTokenRoute
-  WorkspaceCreateRoute: typeof WorkspaceCreateRoute
+  IndexRoute: typeof IndexRoute;
+  WorkspaceNameRoute: typeof WorkspaceNameRouteWithChildren;
+  AppRoute: typeof AppRoute;
+  CompleteEmailRoute: typeof CompleteEmailRoute;
+  DeviceRoute: typeof DeviceRoute;
+  EmailVerifiedRoute: typeof EmailVerifiedRoute;
+  ForgotPasswordRoute: typeof ForgotPasswordRoute;
+  LoginRoute: typeof LoginRoute;
+  NotFoundRoute: typeof NotFoundRoute;
+  OnboardingRoute: typeof OnboardingRoute;
+  ResetPasswordRoute: typeof ResetPasswordRoute;
+  DesktopCheckoutReturnRoute: typeof DesktopCheckoutReturnRoute;
+  DesktopGithubInstallRoute: typeof DesktopGithubInstallRoute;
+  InviteInvitationIdRoute: typeof InviteInvitationIdRoute;
+  JoinTokenRoute: typeof JoinTokenRoute;
+  WorkspaceCreateRoute: typeof WorkspaceCreateRoute;
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/reset-password';
+      path: '/reset-password';
+      fullPath: '/reset-password';
+      preLoaderRoute: typeof ResetPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/onboarding';
+      path: '/onboarding';
+      fullPath: '/onboarding';
+      preLoaderRoute: typeof OnboardingRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/notFound': {
-      id: '/notFound'
-      path: '/notFound'
-      fullPath: '/notFound'
-      preLoaderRoute: typeof NotFoundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/notFound';
+      path: '/notFound';
+      fullPath: '/notFound';
+      preLoaderRoute: typeof NotFoundRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/login';
+      path: '/login';
+      fullPath: '/login';
+      preLoaderRoute: typeof LoginRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/forgot-password';
+      path: '/forgot-password';
+      fullPath: '/forgot-password';
+      preLoaderRoute: typeof ForgotPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/email-verified': {
-      id: '/email-verified'
-      path: '/email-verified'
-      fullPath: '/email-verified'
-      preLoaderRoute: typeof EmailVerifiedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/email-verified';
+      path: '/email-verified';
+      fullPath: '/email-verified';
+      preLoaderRoute: typeof EmailVerifiedRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/device': {
-      id: '/device'
-      path: '/device'
-      fullPath: '/device'
-      preLoaderRoute: typeof DeviceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/device';
+      path: '/device';
+      fullPath: '/device';
+      preLoaderRoute: typeof DeviceRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/complete-email': {
-      id: '/complete-email'
-      path: '/complete-email'
-      fullPath: '/complete-email'
-      preLoaderRoute: typeof CompleteEmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/complete-email';
+      path: '/complete-email';
+      fullPath: '/complete-email';
+      preLoaderRoute: typeof CompleteEmailRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/app';
+      path: '/app';
+      fullPath: '/app';
+      preLoaderRoute: typeof AppRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/$workspaceName': {
-      id: '/$workspaceName'
-      path: '/$workspaceName'
-      fullPath: '/$workspaceName'
-      preLoaderRoute: typeof WorkspaceNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/$workspaceName';
+      path: '/$workspaceName';
+      fullPath: '/$workspaceName';
+      preLoaderRoute: typeof WorkspaceNameRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/$workspaceName/': {
-      id: '/$workspaceName/'
-      path: '/'
-      fullPath: '/$workspaceName/'
-      preLoaderRoute: typeof WorkspaceNameIndexRouteImport
-      parentRoute: typeof WorkspaceNameRoute
-    }
+      id: '/$workspaceName/';
+      path: '/';
+      fullPath: '/$workspaceName/';
+      preLoaderRoute: typeof WorkspaceNameIndexRouteImport;
+      parentRoute: typeof WorkspaceNameRoute;
+    };
     '/workspace/create': {
-      id: '/workspace/create'
-      path: '/workspace/create'
-      fullPath: '/workspace/create'
-      preLoaderRoute: typeof WorkspaceCreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/workspace/create';
+      path: '/workspace/create';
+      fullPath: '/workspace/create';
+      preLoaderRoute: typeof WorkspaceCreateRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/join/$token': {
-      id: '/join/$token'
-      path: '/join/$token'
-      fullPath: '/join/$token'
-      preLoaderRoute: typeof JoinTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/join/$token';
+      path: '/join/$token';
+      fullPath: '/join/$token';
+      preLoaderRoute: typeof JoinTokenRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/invite/$invitationId': {
-      id: '/invite/$invitationId'
-      path: '/invite/$invitationId'
-      fullPath: '/invite/$invitationId'
-      preLoaderRoute: typeof InviteInvitationIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/invite/$invitationId';
+      path: '/invite/$invitationId';
+      fullPath: '/invite/$invitationId';
+      preLoaderRoute: typeof InviteInvitationIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/desktop/github-install': {
-      id: '/desktop/github-install'
-      path: '/desktop/github-install'
-      fullPath: '/desktop/github-install'
-      preLoaderRoute: typeof DesktopGithubInstallRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/desktop/github-install';
+      path: '/desktop/github-install';
+      fullPath: '/desktop/github-install';
+      preLoaderRoute: typeof DesktopGithubInstallRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/desktop/checkout-return': {
-      id: '/desktop/checkout-return'
-      path: '/desktop/checkout-return'
-      fullPath: '/desktop/checkout-return'
-      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/desktop/checkout-return';
+      path: '/desktop/checkout-return';
+      fullPath: '/desktop/checkout-return';
+      preLoaderRoute: typeof DesktopCheckoutReturnRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/$workspaceName/_auth': {
-      id: '/$workspaceName/_auth'
-      path: ''
-      fullPath: '/$workspaceName'
-      preLoaderRoute: typeof WorkspaceNameAuthRouteImport
-      parentRoute: typeof WorkspaceNameRoute
-    }
+      id: '/$workspaceName/_auth';
+      path: '';
+      fullPath: '/$workspaceName';
+      preLoaderRoute: typeof WorkspaceNameAuthRouteImport;
+      parentRoute: typeof WorkspaceNameRoute;
+    };
     '/$workspaceName/_auth/settings': {
-      id: '/$workspaceName/_auth/settings'
-      path: '/settings'
-      fullPath: '/$workspaceName/settings'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/settings';
+      path: '/settings';
+      fullPath: '/$workspaceName/settings';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/sessions': {
-      id: '/$workspaceName/_auth/sessions'
-      path: '/sessions'
-      fullPath: '/$workspaceName/sessions'
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/sessions';
+      path: '/sessions';
+      fullPath: '/$workspaceName/sessions';
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/chat': {
-      id: '/$workspaceName/_auth/chat'
-      path: '/chat'
-      fullPath: '/$workspaceName/chat'
-      preLoaderRoute: typeof WorkspaceNameAuthChatRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/chat';
+      path: '/chat';
+      fullPath: '/$workspaceName/chat';
+      preLoaderRoute: typeof WorkspaceNameAuthChatRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/archive': {
-      id: '/$workspaceName/_auth/archive'
-      path: '/archive'
-      fullPath: '/$workspaceName/archive'
-      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/archive';
+      path: '/archive';
+      fullPath: '/$workspaceName/archive';
+      preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/tasks/': {
-      id: '/$workspaceName/_auth/tasks/'
-      path: '/tasks'
-      fullPath: '/$workspaceName/tasks/'
-      preLoaderRoute: typeof WorkspaceNameAuthTasksIndexRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/tasks/';
+      path: '/tasks';
+      fullPath: '/$workspaceName/tasks/';
+      preLoaderRoute: typeof WorkspaceNameAuthTasksIndexRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/settings/': {
-      id: '/$workspaceName/_auth/settings/'
-      path: '/'
-      fullPath: '/$workspaceName/settings/'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/';
+      path: '/';
+      fullPath: '/$workspaceName/settings/';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/tasks/$taskId': {
-      id: '/$workspaceName/_auth/tasks/$taskId'
-      path: '/tasks/$taskId'
-      fullPath: '/$workspaceName/tasks/$taskId'
-      preLoaderRoute: typeof WorkspaceNameAuthTasksTaskIdRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/tasks/$taskId';
+      path: '/tasks/$taskId';
+      fullPath: '/$workspaceName/tasks/$taskId';
+      preLoaderRoute: typeof WorkspaceNameAuthTasksTaskIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/settings/workspace': {
-      id: '/$workspaceName/_auth/settings/workspace'
-      path: '/workspace'
-      fullPath: '/$workspaceName/settings/workspace'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/workspace';
+      path: '/workspace';
+      fullPath: '/$workspaceName/settings/workspace';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsWorkspaceRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/stats': {
-      id: '/$workspaceName/_auth/settings/stats'
-      path: '/stats'
-      fullPath: '/$workspaceName/settings/stats'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/stats';
+      path: '/stats';
+      fullPath: '/$workspaceName/settings/stats';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsStatsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/settings/shares': {
+      id: '/$workspaceName/_auth/settings/shares';
+      path: '/shares';
+      fullPath: '/$workspaceName/settings/shares';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsSharesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/prompt-shortcuts': {
-      id: '/$workspaceName/_auth/settings/prompt-shortcuts'
-      path: '/prompt-shortcuts'
-      fullPath: '/$workspaceName/settings/prompt-shortcuts'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/prompt-shortcuts';
+      path: '/prompt-shortcuts';
+      fullPath: '/$workspaceName/settings/prompt-shortcuts';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/projects': {
-      id: '/$workspaceName/_auth/settings/projects'
-      path: '/projects'
-      fullPath: '/$workspaceName/settings/projects'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/projects';
+      path: '/projects';
+      fullPath: '/$workspaceName/settings/projects';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsProjectsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/preferences': {
-      id: '/$workspaceName/_auth/settings/preferences'
-      path: '/preferences'
-      fullPath: '/$workspaceName/settings/preferences'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/preferences';
+      path: '/preferences';
+      fullPath: '/$workspaceName/settings/preferences';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPreferencesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/people': {
-      id: '/$workspaceName/_auth/settings/people'
-      path: '/people'
-      fullPath: '/$workspaceName/settings/people'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/people';
+      path: '/people';
+      fullPath: '/$workspaceName/settings/people';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/my-machines': {
-      id: '/$workspaceName/_auth/settings/my-machines'
-      path: '/my-machines'
-      fullPath: '/$workspaceName/settings/my-machines'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/my-machines';
+      path: '/my-machines';
+      fullPath: '/$workspaceName/settings/my-machines';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMyMachinesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/mcp': {
-      id: '/$workspaceName/_auth/settings/mcp'
-      path: '/mcp'
-      fullPath: '/$workspaceName/settings/mcp'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/mcp';
+      path: '/mcp';
+      fullPath: '/$workspaceName/settings/mcp';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMcpRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/machines': {
-      id: '/$workspaceName/_auth/settings/machines'
-      path: '/machines'
-      fullPath: '/$workspaceName/settings/machines'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/machines';
+      path: '/machines';
+      fullPath: '/$workspaceName/settings/machines';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsMachinesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/keyboard-shortcuts': {
-      id: '/$workspaceName/_auth/settings/keyboard-shortcuts'
-      path: '/keyboard-shortcuts'
-      fullPath: '/$workspaceName/settings/keyboard-shortcuts'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/keyboard-shortcuts';
+      path: '/keyboard-shortcuts';
+      fullPath: '/$workspaceName/settings/keyboard-shortcuts';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/github': {
-      id: '/$workspaceName/_auth/settings/github'
-      path: '/github'
-      fullPath: '/$workspaceName/settings/github'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/github';
+      path: '/github';
+      fullPath: '/$workspaceName/settings/github';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGithubRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/general': {
-      id: '/$workspaceName/_auth/settings/general'
-      path: '/general'
-      fullPath: '/$workspaceName/settings/general'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/general';
+      path: '/general';
+      fullPath: '/$workspaceName/settings/general';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsGeneralRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/devices': {
-      id: '/$workspaceName/_auth/settings/devices'
-      path: '/devices'
-      fullPath: '/$workspaceName/settings/devices'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/devices';
+      path: '/devices';
+      fullPath: '/$workspaceName/settings/devices';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsDevicesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/billing': {
-      id: '/$workspaceName/_auth/settings/billing'
-      path: '/billing'
-      fullPath: '/$workspaceName/settings/billing'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/billing';
+      path: '/billing';
+      fullPath: '/$workspaceName/settings/billing';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsBillingRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/appearance': {
-      id: '/$workspaceName/_auth/settings/appearance'
-      path: '/appearance'
-      fullPath: '/$workspaceName/settings/appearance'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/appearance';
+      path: '/appearance';
+      fullPath: '/$workspaceName/settings/appearance';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAppearanceRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/ai-usage': {
-      id: '/$workspaceName/_auth/settings/ai-usage'
-      path: '/ai-usage'
-      fullPath: '/$workspaceName/settings/ai-usage'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/ai-usage';
+      path: '/ai-usage';
+      fullPath: '/$workspaceName/settings/ai-usage';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAiUsageRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/agents': {
-      id: '/$workspaceName/_auth/settings/agents'
-      path: '/agents'
-      fullPath: '/$workspaceName/settings/agents'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/agents';
+      path: '/agents';
+      fullPath: '/$workspaceName/settings/agents';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentsRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/agent-roles': {
-      id: '/$workspaceName/_auth/settings/agent-roles'
-      path: '/agent-roles'
-      fullPath: '/$workspaceName/settings/agent-roles'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/agent-roles';
+      path: '/agent-roles';
+      fullPath: '/$workspaceName/settings/agent-roles';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentRolesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/agent-config': {
-      id: '/$workspaceName/_auth/settings/agent-config'
-      path: '/agent-config'
-      fullPath: '/$workspaceName/settings/agent-config'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/agent-config';
+      path: '/agent-config';
+      fullPath: '/$workspaceName/settings/agent-config';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAgentConfigRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/account': {
-      id: '/$workspaceName/_auth/settings/account'
-      path: '/account'
-      fullPath: '/$workspaceName/settings/account'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/account';
+      path: '/account';
+      fullPath: '/$workspaceName/settings/account';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAccountRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/about': {
-      id: '/$workspaceName/_auth/settings/about'
-      path: '/about'
-      fullPath: '/$workspaceName/settings/about'
-      preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutRouteImport
-      parentRoute: typeof WorkspaceNameAuthSettingsRoute
-    }
+      id: '/$workspaceName/_auth/settings/about';
+      path: '/about';
+      fullPath: '/$workspaceName/settings/about';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsAboutRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/sessions/$sessionId': {
-      id: '/$workspaceName/_auth/sessions/$sessionId'
-      path: '/$sessionId'
-      fullPath: '/$workspaceName/sessions/$sessionId'
-      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport
-      parentRoute: typeof WorkspaceNameAuthSessionsRoute
-    }
+      id: '/$workspaceName/_auth/sessions/$sessionId';
+      path: '/$sessionId';
+      fullPath: '/$workspaceName/sessions/$sessionId';
+      preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSessionsRoute;
+    };
     '/$workspaceName/_auth/local/$machineId/$localProjectId': {
-      id: '/$workspaceName/_auth/local/$machineId/$localProjectId'
-      path: '/local/$machineId/$localProjectId'
-      fullPath: '/$workspaceName/local/$machineId/$localProjectId'
-      preLoaderRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport
-      parentRoute: typeof WorkspaceNameAuthRoute
-    }
+      id: '/$workspaceName/_auth/local/$machineId/$localProjectId';
+      path: '/local/$machineId/$localProjectId';
+      fullPath: '/$workspaceName/local/$machineId/$localProjectId';
+      preLoaderRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
   }
 }
 
 interface WorkspaceNameAuthSessionsRouteChildren {
-  WorkspaceNameAuthSessionsSessionIdRoute: typeof WorkspaceNameAuthSessionsSessionIdRoute
+  WorkspaceNameAuthSessionsSessionIdRoute: typeof WorkspaceNameAuthSessionsSessionIdRoute;
 }
 
-const WorkspaceNameAuthSessionsRouteChildren: WorkspaceNameAuthSessionsRouteChildren =
-  {
-    WorkspaceNameAuthSessionsSessionIdRoute:
-      WorkspaceNameAuthSessionsSessionIdRoute,
-  }
+const WorkspaceNameAuthSessionsRouteChildren: WorkspaceNameAuthSessionsRouteChildren = {
+  WorkspaceNameAuthSessionsSessionIdRoute: WorkspaceNameAuthSessionsSessionIdRoute,
+};
 
-const WorkspaceNameAuthSessionsRouteWithChildren =
-  WorkspaceNameAuthSessionsRoute._addFileChildren(
-    WorkspaceNameAuthSessionsRouteChildren,
-  )
+const WorkspaceNameAuthSessionsRouteWithChildren = WorkspaceNameAuthSessionsRoute._addFileChildren(
+  WorkspaceNameAuthSessionsRouteChildren
+);
 
 interface WorkspaceNameAuthSettingsRouteChildren {
-  WorkspaceNameAuthSettingsAboutRoute: typeof WorkspaceNameAuthSettingsAboutRoute
-  WorkspaceNameAuthSettingsAccountRoute: typeof WorkspaceNameAuthSettingsAccountRoute
-  WorkspaceNameAuthSettingsAgentConfigRoute: typeof WorkspaceNameAuthSettingsAgentConfigRoute
-  WorkspaceNameAuthSettingsAgentRolesRoute: typeof WorkspaceNameAuthSettingsAgentRolesRoute
-  WorkspaceNameAuthSettingsAgentsRoute: typeof WorkspaceNameAuthSettingsAgentsRoute
-  WorkspaceNameAuthSettingsAiUsageRoute: typeof WorkspaceNameAuthSettingsAiUsageRoute
-  WorkspaceNameAuthSettingsAppearanceRoute: typeof WorkspaceNameAuthSettingsAppearanceRoute
-  WorkspaceNameAuthSettingsBillingRoute: typeof WorkspaceNameAuthSettingsBillingRoute
-  WorkspaceNameAuthSettingsDevicesRoute: typeof WorkspaceNameAuthSettingsDevicesRoute
-  WorkspaceNameAuthSettingsGeneralRoute: typeof WorkspaceNameAuthSettingsGeneralRoute
-  WorkspaceNameAuthSettingsGithubRoute: typeof WorkspaceNameAuthSettingsGithubRoute
-  WorkspaceNameAuthSettingsKeyboardShortcutsRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute
-  WorkspaceNameAuthSettingsMachinesRoute: typeof WorkspaceNameAuthSettingsMachinesRoute
-  WorkspaceNameAuthSettingsMcpRoute: typeof WorkspaceNameAuthSettingsMcpRoute
-  WorkspaceNameAuthSettingsMyMachinesRoute: typeof WorkspaceNameAuthSettingsMyMachinesRoute
-  WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute
-  WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute
-  WorkspaceNameAuthSettingsProjectsRoute: typeof WorkspaceNameAuthSettingsProjectsRoute
-  WorkspaceNameAuthSettingsPromptShortcutsRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRoute
-  WorkspaceNameAuthSettingsStatsRoute: typeof WorkspaceNameAuthSettingsStatsRoute
-  WorkspaceNameAuthSettingsWorkspaceRoute: typeof WorkspaceNameAuthSettingsWorkspaceRoute
-  WorkspaceNameAuthSettingsIndexRoute: typeof WorkspaceNameAuthSettingsIndexRoute
+  WorkspaceNameAuthSettingsAboutRoute: typeof WorkspaceNameAuthSettingsAboutRoute;
+  WorkspaceNameAuthSettingsAccountRoute: typeof WorkspaceNameAuthSettingsAccountRoute;
+  WorkspaceNameAuthSettingsAgentConfigRoute: typeof WorkspaceNameAuthSettingsAgentConfigRoute;
+  WorkspaceNameAuthSettingsAgentRolesRoute: typeof WorkspaceNameAuthSettingsAgentRolesRoute;
+  WorkspaceNameAuthSettingsAgentsRoute: typeof WorkspaceNameAuthSettingsAgentsRoute;
+  WorkspaceNameAuthSettingsAiUsageRoute: typeof WorkspaceNameAuthSettingsAiUsageRoute;
+  WorkspaceNameAuthSettingsAppearanceRoute: typeof WorkspaceNameAuthSettingsAppearanceRoute;
+  WorkspaceNameAuthSettingsBillingRoute: typeof WorkspaceNameAuthSettingsBillingRoute;
+  WorkspaceNameAuthSettingsDevicesRoute: typeof WorkspaceNameAuthSettingsDevicesRoute;
+  WorkspaceNameAuthSettingsGeneralRoute: typeof WorkspaceNameAuthSettingsGeneralRoute;
+  WorkspaceNameAuthSettingsGithubRoute: typeof WorkspaceNameAuthSettingsGithubRoute;
+  WorkspaceNameAuthSettingsKeyboardShortcutsRoute: typeof WorkspaceNameAuthSettingsKeyboardShortcutsRoute;
+  WorkspaceNameAuthSettingsMachinesRoute: typeof WorkspaceNameAuthSettingsMachinesRoute;
+  WorkspaceNameAuthSettingsMcpRoute: typeof WorkspaceNameAuthSettingsMcpRoute;
+  WorkspaceNameAuthSettingsMyMachinesRoute: typeof WorkspaceNameAuthSettingsMyMachinesRoute;
+  WorkspaceNameAuthSettingsPeopleRoute: typeof WorkspaceNameAuthSettingsPeopleRoute;
+  WorkspaceNameAuthSettingsPreferencesRoute: typeof WorkspaceNameAuthSettingsPreferencesRoute;
+  WorkspaceNameAuthSettingsProjectsRoute: typeof WorkspaceNameAuthSettingsProjectsRoute;
+  WorkspaceNameAuthSettingsPromptShortcutsRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsRoute;
+  WorkspaceNameAuthSettingsSharesRoute: typeof WorkspaceNameAuthSettingsSharesRoute;
+  WorkspaceNameAuthSettingsStatsRoute: typeof WorkspaceNameAuthSettingsStatsRoute;
+  WorkspaceNameAuthSettingsWorkspaceRoute: typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  WorkspaceNameAuthSettingsIndexRoute: typeof WorkspaceNameAuthSettingsIndexRoute;
 }
 
-const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChildren =
-  {
-    WorkspaceNameAuthSettingsAboutRoute: WorkspaceNameAuthSettingsAboutRoute,
-    WorkspaceNameAuthSettingsAccountRoute:
-      WorkspaceNameAuthSettingsAccountRoute,
-    WorkspaceNameAuthSettingsAgentConfigRoute:
-      WorkspaceNameAuthSettingsAgentConfigRoute,
-    WorkspaceNameAuthSettingsAgentRolesRoute:
-      WorkspaceNameAuthSettingsAgentRolesRoute,
-    WorkspaceNameAuthSettingsAgentsRoute: WorkspaceNameAuthSettingsAgentsRoute,
-    WorkspaceNameAuthSettingsAiUsageRoute:
-      WorkspaceNameAuthSettingsAiUsageRoute,
-    WorkspaceNameAuthSettingsAppearanceRoute:
-      WorkspaceNameAuthSettingsAppearanceRoute,
-    WorkspaceNameAuthSettingsBillingRoute:
-      WorkspaceNameAuthSettingsBillingRoute,
-    WorkspaceNameAuthSettingsDevicesRoute:
-      WorkspaceNameAuthSettingsDevicesRoute,
-    WorkspaceNameAuthSettingsGeneralRoute:
-      WorkspaceNameAuthSettingsGeneralRoute,
-    WorkspaceNameAuthSettingsGithubRoute: WorkspaceNameAuthSettingsGithubRoute,
-    WorkspaceNameAuthSettingsKeyboardShortcutsRoute:
-      WorkspaceNameAuthSettingsKeyboardShortcutsRoute,
-    WorkspaceNameAuthSettingsMachinesRoute:
-      WorkspaceNameAuthSettingsMachinesRoute,
-    WorkspaceNameAuthSettingsMcpRoute: WorkspaceNameAuthSettingsMcpRoute,
-    WorkspaceNameAuthSettingsMyMachinesRoute:
-      WorkspaceNameAuthSettingsMyMachinesRoute,
-    WorkspaceNameAuthSettingsPeopleRoute: WorkspaceNameAuthSettingsPeopleRoute,
-    WorkspaceNameAuthSettingsPreferencesRoute:
-      WorkspaceNameAuthSettingsPreferencesRoute,
-    WorkspaceNameAuthSettingsProjectsRoute:
-      WorkspaceNameAuthSettingsProjectsRoute,
-    WorkspaceNameAuthSettingsPromptShortcutsRoute:
-      WorkspaceNameAuthSettingsPromptShortcutsRoute,
-    WorkspaceNameAuthSettingsStatsRoute: WorkspaceNameAuthSettingsStatsRoute,
-    WorkspaceNameAuthSettingsWorkspaceRoute:
-      WorkspaceNameAuthSettingsWorkspaceRoute,
-    WorkspaceNameAuthSettingsIndexRoute: WorkspaceNameAuthSettingsIndexRoute,
-  }
+const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChildren = {
+  WorkspaceNameAuthSettingsAboutRoute: WorkspaceNameAuthSettingsAboutRoute,
+  WorkspaceNameAuthSettingsAccountRoute: WorkspaceNameAuthSettingsAccountRoute,
+  WorkspaceNameAuthSettingsAgentConfigRoute: WorkspaceNameAuthSettingsAgentConfigRoute,
+  WorkspaceNameAuthSettingsAgentRolesRoute: WorkspaceNameAuthSettingsAgentRolesRoute,
+  WorkspaceNameAuthSettingsAgentsRoute: WorkspaceNameAuthSettingsAgentsRoute,
+  WorkspaceNameAuthSettingsAiUsageRoute: WorkspaceNameAuthSettingsAiUsageRoute,
+  WorkspaceNameAuthSettingsAppearanceRoute: WorkspaceNameAuthSettingsAppearanceRoute,
+  WorkspaceNameAuthSettingsBillingRoute: WorkspaceNameAuthSettingsBillingRoute,
+  WorkspaceNameAuthSettingsDevicesRoute: WorkspaceNameAuthSettingsDevicesRoute,
+  WorkspaceNameAuthSettingsGeneralRoute: WorkspaceNameAuthSettingsGeneralRoute,
+  WorkspaceNameAuthSettingsGithubRoute: WorkspaceNameAuthSettingsGithubRoute,
+  WorkspaceNameAuthSettingsKeyboardShortcutsRoute: WorkspaceNameAuthSettingsKeyboardShortcutsRoute,
+  WorkspaceNameAuthSettingsMachinesRoute: WorkspaceNameAuthSettingsMachinesRoute,
+  WorkspaceNameAuthSettingsMcpRoute: WorkspaceNameAuthSettingsMcpRoute,
+  WorkspaceNameAuthSettingsMyMachinesRoute: WorkspaceNameAuthSettingsMyMachinesRoute,
+  WorkspaceNameAuthSettingsPeopleRoute: WorkspaceNameAuthSettingsPeopleRoute,
+  WorkspaceNameAuthSettingsPreferencesRoute: WorkspaceNameAuthSettingsPreferencesRoute,
+  WorkspaceNameAuthSettingsProjectsRoute: WorkspaceNameAuthSettingsProjectsRoute,
+  WorkspaceNameAuthSettingsPromptShortcutsRoute: WorkspaceNameAuthSettingsPromptShortcutsRoute,
+  WorkspaceNameAuthSettingsSharesRoute: WorkspaceNameAuthSettingsSharesRoute,
+  WorkspaceNameAuthSettingsStatsRoute: WorkspaceNameAuthSettingsStatsRoute,
+  WorkspaceNameAuthSettingsWorkspaceRoute: WorkspaceNameAuthSettingsWorkspaceRoute,
+  WorkspaceNameAuthSettingsIndexRoute: WorkspaceNameAuthSettingsIndexRoute,
+};
 
-const WorkspaceNameAuthSettingsRouteWithChildren =
-  WorkspaceNameAuthSettingsRoute._addFileChildren(
-    WorkspaceNameAuthSettingsRouteChildren,
-  )
+const WorkspaceNameAuthSettingsRouteWithChildren = WorkspaceNameAuthSettingsRoute._addFileChildren(
+  WorkspaceNameAuthSettingsRouteChildren
+);
 
 interface WorkspaceNameAuthRouteChildren {
-  WorkspaceNameAuthArchiveRoute: typeof WorkspaceNameAuthArchiveRoute
-  WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute
-  WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren
-  WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren
-  WorkspaceNameAuthTasksTaskIdRoute: typeof WorkspaceNameAuthTasksTaskIdRoute
-  WorkspaceNameAuthTasksIndexRoute: typeof WorkspaceNameAuthTasksIndexRoute
-  WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute
+  WorkspaceNameAuthArchiveRoute: typeof WorkspaceNameAuthArchiveRoute;
+  WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute;
+  WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  WorkspaceNameAuthTasksTaskIdRoute: typeof WorkspaceNameAuthTasksTaskIdRoute;
+  WorkspaceNameAuthTasksIndexRoute: typeof WorkspaceNameAuthTasksIndexRoute;
+  WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 
 const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
@@ -1088,24 +1070,25 @@ const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthTasksIndexRoute: WorkspaceNameAuthTasksIndexRoute,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:
     WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute,
-}
+};
 
-const WorkspaceNameAuthRouteWithChildren =
-  WorkspaceNameAuthRoute._addFileChildren(WorkspaceNameAuthRouteChildren)
+const WorkspaceNameAuthRouteWithChildren = WorkspaceNameAuthRoute._addFileChildren(
+  WorkspaceNameAuthRouteChildren
+);
 
 interface WorkspaceNameRouteChildren {
-  WorkspaceNameAuthRoute: typeof WorkspaceNameAuthRouteWithChildren
-  WorkspaceNameIndexRoute: typeof WorkspaceNameIndexRoute
+  WorkspaceNameAuthRoute: typeof WorkspaceNameAuthRouteWithChildren;
+  WorkspaceNameIndexRoute: typeof WorkspaceNameIndexRoute;
 }
 
 const WorkspaceNameRouteChildren: WorkspaceNameRouteChildren = {
   WorkspaceNameAuthRoute: WorkspaceNameAuthRouteWithChildren,
   WorkspaceNameIndexRoute: WorkspaceNameIndexRoute,
-}
+};
 
 const WorkspaceNameRouteWithChildren = WorkspaceNameRoute._addFileChildren(
-  WorkspaceNameRouteChildren,
-)
+  WorkspaceNameRouteChildren
+);
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -1124,7 +1107,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteInvitationIdRoute: InviteInvitationIdRoute,
   JoinTokenRoute: JoinTokenRoute,
   WorkspaceCreateRoute: WorkspaceCreateRoute,
-}
+};
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();

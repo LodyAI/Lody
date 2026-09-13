@@ -2,6 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
+Archive uses `collectSessionArchiveTargets` for contained/opened descendants;
+restore/delete retain containment-only targets. See [relations](../../specs/session-relations.md).
+
 ## Session history
 
 - Session history storage tolerates unknown string item types from newer peers without
@@ -17,13 +20,10 @@
 - New inputs use the shared message parsers. Known protocol extension dictionaries
   retain JSON data, not arbitrary JS objects. Storage layout stays separate: coordinate
   any `Any.storageSchema` adoption with its Mirror patch, including rollback.
-  Rationale: [single writer](../../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md).
+
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the
   actual SessionDocument/HistoryWriter boundary; a mock updateHistory cannot prove it.
-- The pinned Mirror text-event patch copies one existing single text leaf's path. Preserve
-  descriptors, old snapshots and subscriber delivery; structural/multi-event/tree paths use
-  the general reader. Future patches must compose with it, never replace it.
 - Copying stored history uses a writer-captured snapshot, never a caller-supplied "trusted"
   array. Preserve unchanged opaque content; parse authored changes and new notices. Prepend
   copies without replacing target initialization containers; reject colliding ids. Rollback
@@ -56,10 +56,11 @@
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
   `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
+- The pinned Mirror text-event patch copies only an existing single text leaf's path.
+  Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
+  paths retain the general reader. Future Mirror patches must compose with this patch,
+  never silently replace it. No storage schema or write validation depends on this optimization.
 
-These contracts bind producers and consumers, including UI and CLI callers outside
-this package. Read them when changing daemon protocol negotiation, MCP/Role catalogs,
-per-turn MCP selection, or Role-based session creation and dispatch.
 
 ## Machine protocol negotiation
 

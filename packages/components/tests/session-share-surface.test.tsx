@@ -3,10 +3,14 @@ import { act, StrictMode, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionHistory } from '@lody/shared';
+import { prepareSharePackage } from '@lody/shared/session-sharing';
 import { SessionShareSurface } from '../src/components/sharing/session-share-page';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+  useTranslation: () => ({
+    t: (_key: string, fallback: string) => fallback,
+    i18n: { language: 'en', changeLanguage: async () => {} },
+  }),
 }));
 vi.mock('../src/theme-provider', () => ({
   useTheme: () => ({ theme: 'light', setTheme: () => {} }),
@@ -58,26 +62,26 @@ const turn = (text: string): SessionHistory => ({
   fileDiff: [],
   items: [{ type: 'text', text }],
 });
-async function render(history: readonly SessionHistory[], sessionId = 'main') {
+async function render(history: readonly SessionHistory[], sessionId = 'c1') {
+  const { manifest } = await prepareSharePackage({
+    rootSourceId: 'main',
+    capturedAt: '2026-09-12T00:00:00Z',
+    conversations: [
+      { sourceId: 'main', title: 'Main', history: [] },
+      { sourceId: 'other', title: 'Other', history: [] },
+    ],
+    readAttachment: async () => {
+      throw new Error('Unexpected attachment');
+    },
+  });
   await act(async () =>
     root.render(
       <StrictMode>
         <SessionShareSurface
-          manifest={{
-            shareId: 'fixture',
-            rootSessionId: 'main',
-            workspaceName: 'Fixture',
-            scopeVersion: 1,
-            credentialVersion: 1,
-            validUntil: 2_000_000_000_000,
-            targets: [
-              { sessionId: 'main', title: 'Main' },
-              { sessionId: 'other', title: 'Other' },
-            ],
-          }}
+          manifest={manifest}
           sessionId={sessionId}
           status="ready"
-          snapshot={{ status: 'live', history }}
+          snapshot={{ status: 'ready', history }}
           onSelect={() => {}}
           attachmentAccess={{
             read: async () => {
@@ -102,10 +106,10 @@ it('shows the initial shared answer and its streamed replacement', async () => {
 
 it('clears old rows when the target becomes empty and shows the new target', async () => {
   await render([turn('Old target')]);
-  await render([], 'other');
+  await render([], 'c2');
   expect(container.querySelector('[data-message]')).toBeNull();
   expect(container.textContent).toContain('No messages yet');
-  await render([turn('New target')], 'other');
+  await render([turn('New target')], 'c2');
   expect(container.querySelector('[data-message="answer"]')?.textContent).toBe('New target');
   expect(container.textContent).not.toContain('Old target');
 });

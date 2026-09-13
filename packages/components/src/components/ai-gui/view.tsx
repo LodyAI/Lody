@@ -6402,15 +6402,17 @@ const StandardToolContentBlock = ({
   onFilePathClick?: (filePath: string) => void;
   fontSize: ConversationFontSize;
 }) => {
+  const readonly = useContext(SessionReadonlyContext);
   switch (content.type) {
     case 'text':
       return (
         <MarkdownBlock text={content.text} size={fontSize} onFilePathClick={onFilePathClick} />
       );
     case 'image': {
-      const src = content.uri
-        ? sanitizeToolContentHref(content.uri)
-        : buildSafeBase64DataUrl(content.mimeType, content.data);
+      const src =
+        content.uri && !readonly
+          ? sanitizeToolContentHref(content.uri)
+          : buildSafeBase64DataUrl(content.mimeType, content.data);
       if (!src) return null;
       return (
         <div className="space-y-2">
@@ -6436,7 +6438,7 @@ const StandardToolContentBlock = ({
       );
     }
     case 'resource_link': {
-      const href = sanitizeToolContentHref(content.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.uri);
       if (!href) {
         return (
           <div
@@ -6471,7 +6473,7 @@ const StandardToolContentBlock = ({
           />
         );
       }
-      const href = sanitizeToolContentHref(content.resource.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
         <div className="space-y-2">

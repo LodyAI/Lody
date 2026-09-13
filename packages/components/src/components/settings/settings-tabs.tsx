@@ -17,6 +17,7 @@ import {
   Plug,
   FileText,
   SlidersHorizontal,
+  Share2,
   UserRound,
   UserRoundCog,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ export type SettingsTabId =
   | 'appearance'
   | 'keyboard-shortcuts'
   | 'workspace'
+  | 'shares'
   | 'people'
   | 'machines'
   | 'agents'
@@ -47,6 +49,7 @@ export type SettingsPath =
   | '/$workspaceName/settings/appearance'
   | '/$workspaceName/settings/keyboard-shortcuts'
   | '/$workspaceName/settings/workspace'
+  | '/$workspaceName/settings/shares'
   | '/$workspaceName/settings/people'
   | '/$workspaceName/settings/machines'
   | '/$workspaceName/settings/agents'
@@ -75,6 +78,15 @@ export type SettingsTabConfig = {
 export const SETTINGS_DEFAULT_TAB: SettingsTabId = 'account';
 
 export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
+  {
+    id: 'shares',
+    section: 'workspace',
+    labelKey: 'settings.tabs.shares',
+    descriptionKey: 'settings.shares.description',
+    icon: Share2,
+    capability: 'teamSharing',
+    path: '/$workspaceName/settings/shares',
+  },
   {
     id: 'account',
     section: 'account',
@@ -228,6 +240,7 @@ export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
     ['/settings/keyboard-shortcuts', 'keyboard-shortcuts'],
     ['/settings/my-machines', 'machines'],
     ['/settings/workspace', 'workspace'],
+    ['/settings/shares', 'shares'],
     ['/settings/people', 'workspace'],
     ['/settings/machines', 'machines'],
     ['/settings/devices', 'machines'],

@@ -2123,3 +2123,25 @@ pre,
     animation: none;
   }
 }
+
+/* Indeterminate `ui/progress.tsx`: work with no known total sweeps instead of
+   inventing a percentage. Under reduced-motion it holds a static partial fill,
+   which still reads as "in progress" without implying a measured position. */
+@keyframes progress-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.animate-progress-sweep {
+  animation: progress-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-sweep {
+    animation: none;
+    transform: translateX(50%);
+  }
+}

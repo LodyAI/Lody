@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Alias, Plugin } from 'vite';
+import type { Plugin } from 'vite';
+import type { BundlerAlias } from './vite-wasm-workarounds.ts';
 
 const beautifulMermaidEntry = fs.realpathSync(
   path.join(
@@ -18,7 +19,7 @@ export function isMermaidRuntimeDependency(id: string): boolean {
   );
 }
 
-export function rendererBundleAliases(): Alias[] {
+export function rendererBundleAliases(): BundlerAlias[] {
   return [
     {
       find: 'shiki/bundle/full',

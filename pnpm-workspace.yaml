@@ -26,7 +26,7 @@ catalog:
   '@types/node': ^24.10.1
   '@types/react': 19.2.17
   '@types/react-dom': 19.2.3
-  '@vitejs/plugin-react': ^4.6.0
+  '@vitejs/plugin-react': ^5.2.0
   better-auth: 1.5.5
   better-auth-capacitor: 0.3.6
   # >=13.0.2 ships prebuilt N-API binaries and has no install script. Keep this
@@ -48,9 +48,9 @@ catalog:
   react-dom: 19.2.0
   typescript: ^5.9.3
   undici: ^6.26.0
-  vite: ^6.0.0
+  vite: ^8.2.2
   vite-plugin-top-level-await: ^1.6.0
-  vite-plugin-wasm: ^3.5.0
+  vite-plugin-wasm: ^3.6.0
   zod: ^4.1.5
 
 ignoredBuiltDependencies:
@@ -60,6 +60,15 @@ ignoredBuiltDependencies:
   - better-sqlite3
 
 managePackageManagerVersions: true
+
+# Delay newly published package versions for seven days before pnpm may resolve them.
+minimumReleaseAge: 10080
+
+# Grandfather versions already locked on main; later releases remain quarantined.
+minimumReleaseAgeExclude:
+  - loro-mirror@2.3.2
+  - loro-mirror-jotai@2.3.2
+  - loro-mirror-react@2.3.2
 
 onlyBuiltDependencies:
   - '@moonshot-ai/kimi-code'
