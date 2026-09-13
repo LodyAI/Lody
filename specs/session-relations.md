@@ -74,7 +74,9 @@ Presentation must not expand the target set of archive, restore, or deletion.
 
 This Spec does not define worker supervision, status or result aggregation, unread or
 permission routing, worker panels, settle, or handoff behavior. Those product choices
-remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
+belong to the draft
+[supervised agent-opened Sessions contract](session-worker-supervision.md), based on
+[#529](https://github.com/LodyAI/Lody/issues/529).
 
 Archive and restore currently discover direct children from a client metadata cache
 that can be incomplete while Session Detail is already interactive. They can therefore
