@@ -14,10 +14,17 @@ import type {
 import { ProviderSetupRow } from '../src/components/settings/provider-setup-row';
 import { initI18n } from '../src/i18n';
 
-const clipboard = vi.hoisted(() => ({ write: vi.fn(async () => true) }));
+const mocks = vi.hoisted(() => ({
+  openExternalUrl: vi.fn(async () => {}),
+  writeClipboard: vi.fn(async () => true),
+}));
 
 vi.mock('../src/lib/clipboard', () => ({
-  writeTextToClipboard: (text: string) => clipboard.write(text),
+  writeTextToClipboard: (text: string) => mocks.writeClipboard(text),
+}));
+
+vi.mock('../src/lib/native-browser', () => ({
+  openExternalUrl: (url: string) => mocks.openExternalUrl(url),
 }));
 
 const machineId = 'machine-bub-setup' as MachineId;
@@ -61,7 +68,8 @@ describe('ProviderSetupRow Bub recovery', () => {
   beforeEach(async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     await initI18n('en');
-    clipboard.write.mockClear();
+    mocks.openExternalUrl.mockClear();
+    mocks.writeClipboard.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -94,8 +102,19 @@ describe('ProviderSetupRow Bub recovery', () => {
       copy?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(clipboard.write).toHaveBeenCalledWith(installCommand);
+    expect(mocks.writeClipboard).toHaveBeenCalledWith(installCommand);
     expect(container.querySelector('button[aria-label="Copied"]')).not.toBeNull();
+
+    const installGuide = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === 'Open install guide'
+    );
+    await act(async () => {
+      installGuide?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mocks.openExternalUrl).toHaveBeenCalledWith(
+      'https://bub.build/docs/tutorials/acp-server/?utm_source=lody'
+    );
   });
 
   it('does not suggest reinstalling Bub for an unrelated verification failure', async () => {

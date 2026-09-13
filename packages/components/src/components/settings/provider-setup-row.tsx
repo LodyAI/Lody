@@ -21,7 +21,7 @@ import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
 
-const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/';
+const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/?utm_source=lody';
 const BUB_ACP_INSTALL_COMMAND = 'curl -fsSL https://bub.build/install.sh | bash -- --preset acp';
 
 export type ProviderSetupRowProps = {
