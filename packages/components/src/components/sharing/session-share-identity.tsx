@@ -1,9 +1,6 @@
-import { useTranslation } from 'react-i18next';
-import { LogIn } from 'lucide-react';
 import lodyLogo from '@/assets/lody-icon.png';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
 
 /**
  * Who is looking at this share, as far as the reader can tell.
@@ -45,15 +42,8 @@ function initialsOf(name: string): string {
     .slice(0, 2);
 }
 
-/** Top-right identity slot: the signed-in visitor, or a way to go and sign in. */
-export function ShareViewerIdentity({
-  viewer,
-  appOrigin,
-}: {
-  viewer: ShareViewer;
-  appOrigin: string | null;
-}) {
-  const { t } = useTranslation();
+/** Top-right identity slot, empty for anonymous visitors. */
+export function ShareViewerIdentity({ viewer }: { viewer: ShareViewer }) {
   if (viewer.status === 'signed-in')
     return (
       <div className="flex min-w-0 items-center gap-2 pl-1">
@@ -68,21 +58,7 @@ export function ShareViewerIdentity({
         </Avatar>
       </div>
     );
-  if (!appOrigin) return null;
-  return (
-    <Button asChild size="sm" variant="outline" className="h-8">
-      {/* A new tab: signing in must never navigate away from the shared page. */}
-      <a
-        href={`${appOrigin}/login`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={t('sharing.signIn', 'Sign in to Lody')}
-      >
-        <LogIn className="size-3.5" aria-hidden />
-        <span className="hidden sm:inline">{t('sharing.signIn', 'Sign in to Lody')}</span>
-      </a>
-    </Button>
-  );
+  return null;
 }
 
 /**

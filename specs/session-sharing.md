@@ -97,6 +97,9 @@ abandoned uploads require quota-accounted, fenced garbage collection.
 
 ## Reader and agent interactions
 
+The share page has no login entry, including for anonymous visitors. The header
+identity slot is empty unless the host supplies an established viewer identity.
+
 The share page preserves the application's layout for what a reader needs:
 independent child conversations appear in the left conversation tree and child
 Tabs in the main tab bar. It has no right pane, so a side-panel child appears in

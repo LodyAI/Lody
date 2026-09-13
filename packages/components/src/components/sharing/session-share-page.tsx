@@ -382,7 +382,7 @@ export function SessionShareSurface(props: {
         <div className="flex items-center gap-2">
           <ShareThemeToggle />
           <ShareLanguageToggle />
-          <ShareViewerIdentity viewer={viewer} appOrigin={appOrigin} />
+          <ShareViewerIdentity viewer={viewer} />
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">

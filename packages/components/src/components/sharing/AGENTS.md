@@ -91,9 +91,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   appearance setting. It drives the reader's ThemeProvider; publication does not embed the reader.
 - `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
   authenticates and, on its own origin, cannot read the app's session cookie:
-  showing a name or avatar requires the host to establish it. Signed-out offers
-  only a new-tab link to the app's `/login`, resolved from `VITE_SITE_URL` or by
-  dropping a leading `share.` label, and nothing when neither yields an origin.
+  showing a name or avatar requires the host to establish it. Signed-out renders
+  no identity placeholder or login entry, on either wide or narrow viewports.
 - Each pane is named by the app's tab pill (`shared/tab-pill-strip.tsx`), never a
   second title bar, so one conversation and a set of child Tabs read alike. The
   foot is `session-share-composer.tsx`: the product composer's exact resting

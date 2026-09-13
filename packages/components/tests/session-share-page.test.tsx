@@ -329,13 +329,11 @@ describe('static share presentation', () => {
     expect(brand.querySelector('img')).not.toBeNull();
   });
 
-  it('sends an anonymous visitor to the app to sign in, in a new tab', async () => {
+  it('shows no sign-in entry for an anonymous visitor', async () => {
     await render();
-    const signIn = byText('Sign in to Lody') as HTMLAnchorElement;
-    expect(signIn.tagName).toBe('A');
-    expect(signIn.target).toBe('_blank');
-    expect(signIn.rel).toContain('noopener');
-    expect(signIn.getAttribute('href')?.endsWith('/login')).toBe(true);
+    expect(byText('Sign in to Lody')).toBeUndefined();
+    expect(container.querySelector('a[href$="/login"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Sign in to Lody"]')).toBeNull();
   });
 
   it('shows the viewer a host resolved instead of a sign-in prompt', async () => {
