@@ -163,8 +163,7 @@ export class SessionEditAndResendService {
 
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
     const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
-    const execution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-    if (meta.autoReview || execution.hasActiveAutomation || isSessionGoalActive(latestGoal)) {
+    if (meta.autoReview || isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
         'ACTIVE_AUTOMATION',
@@ -258,11 +257,7 @@ export class SessionEditAndResendService {
         const freshGoal =
           resolveLatestSessionGoalFromHistory(freshHistory) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-        if (
-          freshMeta.autoReview ||
-          freshExecution.hasActiveAutomation ||
-          isSessionGoalActive(freshGoal)
-        ) {
+        if (freshMeta.autoReview || isSessionGoalActive(freshGoal)) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(
@@ -308,7 +303,6 @@ export class SessionEditAndResendService {
         }
 
         const preCommitMeta = await sessionDoc.getMetaState();
-        const preCommitExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (
           !preCommitMeta ||
           preCommitMeta.isArchived ||
@@ -325,7 +319,7 @@ export class SessionEditAndResendService {
             'The session changed before the replacement could be committed.'
           );
         }
-        if (preCommitMeta.autoReview || preCommitExecution.hasActiveAutomation) {
+        if (preCommitMeta.autoReview) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(

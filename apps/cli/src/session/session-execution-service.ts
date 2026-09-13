@@ -137,12 +137,10 @@ type FinalizeTurnContext = {
   project?: ProjectRef;
   isTurnCancelled?: () => boolean;
   abortSignal?: AbortSignal;
-  onAutoPromptStart?: () => void | Promise<void>;
-  onAutoPromptEnd?: () => void | Promise<void>;
   /**
    * False when the prompt returned without the agent ever emitting output. The
-   * turn is still finalized (diff stats, PR detection, auto-commit all stay
-   * correct), but it must not be announced as a completed answer.
+   * turn is still finalized (diff stats, dirty-worktree probe, and PR detection
+   * all stay correct), but it must not be announced as a completed answer.
    */
   producedOutput?: boolean;
 };
@@ -211,18 +209,8 @@ type TurnFinalizationEffects = {
     project?: ProjectRef;
     branchName?: string | null;
   }) => Promise<{ readonly baseBranch: string } | null>;
-  autoCommitAndPushForPR: (ctx: {
-    sessionId: SessionId;
-    session: ISession;
-    sessionDoc: SessionDocument;
-    project?: ProjectRef;
-    preferredBaseBranch?: string;
-    userId: string;
-    isTurnCancelled?: () => boolean;
-    abortSignal?: AbortSignal;
-    onAutoPromptStart?: () => void | Promise<void>;
-    onAutoPromptEnd?: () => void | Promise<void>;
-  }) => Promise<void>;
+  /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
+  syncWorkspaceGitState: (sessionId: SessionId, session: ISession) => Promise<void>;
   refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
   notifySessionCompleted: (
     sessionId: SessionId,
@@ -271,10 +259,11 @@ type TurnRuntimeState = {
   turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
   promptStarted: boolean;
   promptInFlight: boolean;
-  autoPromptInFlight: boolean;
   promptFailed: boolean;
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
+  /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
+  workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
   cancelRequested: boolean;
   cancelFinalized: boolean;
@@ -308,8 +297,6 @@ export type SessionExecutionSnapshot = {
   hasReusableSession: boolean;
   /** True while edit-and-resend owns the durable history tail. */
   hasRewriteBarrier: boolean;
-  /** True while post-turn automation owns an ACP prompt. */
-  hasActiveAutomation: boolean;
 };
 
 type TurnCancellationFinalizerOptions = {
@@ -871,29 +858,6 @@ export class SessionExecutionService {
     void this.syncLiveActivitySummary(userId, fields);
   }
 
-  private async markPromptWorkingStarted(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument,
-    userId: string,
-    triggerReason: string
-  ): Promise<void> {
-    try {
-      this.deps.setSessionActivePresencePhase(sessionId, 'thinking');
-      await sessionDoc.setStatus(SessionStatusFactory.running());
-      this.captureStatusChanged(sessionId, 'running', undefined, triggerReason);
-    } catch (error) {
-      this.deps.logger.warn(
-        `[${sessionId}] Failed to mark prompt working: ${formatErrorMessage(error)}`
-      );
-      return;
-    }
-    this.scheduleLiveActivitySummarySync(userId, {
-      sessionId,
-      triggerReason,
-      status: 'running',
-    });
-  }
-
   private async markPromptWorkingEnded(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
@@ -1128,7 +1092,6 @@ export class SessionExecutionService {
       hasBlockingPendingCreate: Boolean(runtime?.pendingSession || (runtime && pendingSession)),
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),
       hasRewriteBarrier: this.rewriteBarrierSessions.has(sessionId),
-      hasActiveAutomation: Boolean(runtime?.autoPromptInFlight),
     };
   }
 
@@ -1838,10 +1801,10 @@ export class SessionExecutionService {
       session: options.session,
       promptStarted: false,
       promptInFlight: false,
-      autoPromptInFlight: false,
       promptFailed: false,
       finalizeStarted: false,
       finalizeCompleted: false,
+      workspaceGitStateSynced: false,
       prePromptFailureRecorded: false,
       cancelRequested: false,
       cancelFinalized: false,
@@ -2140,6 +2103,19 @@ export class SessionExecutionService {
           options.sessionId,
           'Failed to refresh Code Collab v2 shared state for cancelled turn',
           self.tryPromise(() => self.refreshCodeCollabSharedStateAfterTurn(options.sessionId))
+        );
+      }
+
+      // A stopped turn leaves the agent's edits on disk and nothing commits them
+      // or pushes on the session's behalf, so the dirty/unpushed flags that
+      // raise the Info Bar's Commit & Push have to be refreshed here too. This is the
+      // route a Stop during the PROMPT takes; the one in `finalizeTurn` only
+      // covers a Stop that raced finalization. Publish before idle so the flag
+      // has landed by the time the UI stops showing Working.
+      const cancelledSession = options.session;
+      if (cancelledSession) {
+        yield* self.tryPromise(() =>
+          self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, cancelledSession)
         );
       }
 
@@ -2643,6 +2619,39 @@ export class SessionExecutionService {
     }
   }
 
+  /**
+   * Publish `workspaceDirty` / `workspaceUnpushed` at most once per turn.
+   *
+   * A cancelled turn reaches this from `finalizeTurn`'s bail-out AND from
+   * `finalizeCancelledTurnEffect` (the `acquireRelease` handler runs for every
+   * cancelled turn), so without the shared latch a single Stop spawns both git
+   * probes twice and rewrites the same values. `syncWorkspaceGitState` swallows
+   * its own failures, so no caller needs to guard this.
+   */
+  private markWorkspaceGitStateSynced(sessionId: SessionId, turnId: string): void {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+  }
+
+  private async syncWorkspaceGitStateOnce(
+    sessionId: SessionId,
+    turnId: string,
+    session: ISession
+  ): Promise<void> {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime?.workspaceGitStateSynced) {
+      return;
+    }
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+    await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
+    });
+  }
+
   private async runTurnFinalizationStage<T>(
     sessionId: SessionId,
     turnId: string,
@@ -2726,6 +2735,7 @@ export class SessionExecutionService {
       project,
     } = ctx;
     const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
+    const githubProject = resolveProjectGitHubRepo(project);
     const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
       if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
         return false;
@@ -2733,6 +2743,12 @@ export class SessionExecutionService {
       this.deps.logger.debug(
         `[${sessionId}] Turn ${turnId} was cancelled during ${stage}; skipping remaining completion post-processing`
       );
+      // The rest of finalization is skipped, but the agent's edits are still on
+      // disk. The dirty/unpushed flags are what raise the Info Bar's Commit &
+      // Push, and nothing commits or pushes on the session's behalf, so an
+      // interrupted turn that left stale `false`s here would hide real
+      // unpublished work behind a PR that looks current.
+      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session);
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.deps.touchSession(sessionId);
       return true;
@@ -2744,7 +2760,6 @@ export class SessionExecutionService {
       return;
     }
 
-    const githubProject = resolveProjectGitHubRepo(project);
     let branchName: string | null = null;
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
@@ -2800,41 +2815,10 @@ export class SessionExecutionService {
           preferredBaseBranch: preferredStatsBaseBranch,
           skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
         });
+        this.markWorkspaceGitStateSynced(sessionId, turnId);
       });
 
       if (await stopIfTurnCancelled('diff recording')) {
-        return;
-      }
-    }
-
-    if (githubProject) {
-      try {
-        await this.runTurnFinalizationStage(
-          sessionId,
-          turnId,
-          'autoCommitAndPushForPR',
-          async () => {
-            await this.deps.turnFinalization.autoCommitAndPushForPR({
-              sessionId,
-              session,
-              sessionDoc,
-              project,
-              preferredBaseBranch: preferredStatsBaseBranch,
-              userId,
-              isTurnCancelled,
-              abortSignal: ctx.abortSignal,
-              onAutoPromptStart: ctx.onAutoPromptStart,
-              onAutoPromptEnd: ctx.onAutoPromptEnd,
-            });
-          }
-        );
-      } catch (error) {
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push failed: ${formatErrorMessage(error)}`
-        );
-      }
-
-      if (await stopIfTurnCancelled('auto-commit/push')) {
         return;
       }
     }
@@ -4530,24 +4514,6 @@ export class SessionExecutionService {
                 producedOutput,
                 isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),
                 abortSignal: signal,
-                onAutoPromptStart: async () => {
-                  runtime.autoPromptInFlight = true;
-                  await self.markPromptWorkingStarted(
-                    sessionId,
-                    sessionDoc,
-                    completedRequesterUserId,
-                    'auto_prompt_started'
-                  );
-                },
-                onAutoPromptEnd: async () => {
-                  runtime.autoPromptInFlight = false;
-                  await self.markPromptWorkingEnded(
-                    sessionId,
-                    sessionDoc,
-                    completedRequesterUserId,
-                    'auto_prompt_completed'
-                  );
-                },
               })
           )
         );
@@ -5211,24 +5177,6 @@ export class SessionExecutionService {
                   producedOutput,
                   isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),
                   abortSignal: signal,
-                  onAutoPromptStart: async () => {
-                    runtime.autoPromptInFlight = true;
-                    await self.markPromptWorkingStarted(
-                      sessionId,
-                      sessionDoc,
-                      completedRequesterUserId,
-                      'auto_prompt_started'
-                    );
-                  },
-                  onAutoPromptEnd: async () => {
-                    runtime.autoPromptInFlight = false;
-                    await self.markPromptWorkingEnded(
-                      sessionId,
-                      sessionDoc,
-                      completedRequesterUserId,
-                      'auto_prompt_completed'
-                    );
-                  },
                 })
             )
           );
@@ -5405,9 +5353,6 @@ export class SessionExecutionService {
           `[${sessionId}] Stop request received while turn ${turnId} is finalizing; interrupting owner turn`
         );
         this.requestTurnInterrupt(runtime);
-        if (runtime.autoPromptInFlight) {
-          this.requestAgentCancelInBackground(runtime, 'finalizing');
-        }
         return { success: true };
       }
       const runtimeSession = runtime.session ?? this.deps.sessionManager.getSession(sessionId);

@@ -23,7 +23,6 @@ import { detectPullRequestForBranch, type DetectedPullRequest } from '@/lib/pr-d
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from '@/session/session-manager';
-import type { AutoPromptContext, AutoPromptResult } from './auto-prompt-runner';
 import type { CloudPrAssociationPort } from '@lody/platform';
 
 export type TurnPostProcessingServiceDeps = {
@@ -32,7 +31,6 @@ export type TurnPostProcessingServiceDeps = {
   workspaceId: WorkspaceId;
   preferredBaseBranch: string;
   prAssociation: CloudPrAssociationPort | null;
-  runAutoPrompt: (ctx: AutoPromptContext) => Promise<AutoPromptResult>;
 };
 
 type SessionPullRequestMeta = NonNullable<SessionMeta['pullRequests']>[number];
@@ -41,6 +39,8 @@ type WorkspaceSessionContext = {
   ownerSessionId: SessionId;
   ownerDoc: SessionDocument;
   ownerMeta: SessionMeta | undefined;
+  /** The active session's own meta, already read to find the owner. */
+  activeMeta: SessionMeta | undefined;
   ownerRoomId: ReturnType<typeof getSessionRoomId>;
   pullRequests: readonly SessionPullRequestMeta[];
 };
@@ -70,6 +70,7 @@ export class TurnPostProcessingService {
         ownerSessionId,
         ownerDoc: activeDoc,
         ownerMeta: activeMeta,
+        activeMeta,
         ownerRoomId: getSessionRoomId(ownerSessionId),
         pullRequests: this.resolvePullRequests(activeMeta, activeMeta),
       };
@@ -81,6 +82,7 @@ export class TurnPostProcessingService {
       ownerSessionId,
       ownerDoc,
       ownerMeta,
+      activeMeta,
       ownerRoomId: getSessionRoomId(ownerSessionId),
       pullRequests: this.resolvePullRequests(ownerMeta, activeMeta),
     };
@@ -124,6 +126,66 @@ export class TurnPostProcessingService {
     return branchName;
   }
 
+  /**
+   * Probe the checkout and publish `SessionMeta.workspaceDirty` +
+   * `workspaceUnpushed` on the OWNER session, without touching diff stats.
+   *
+   * A CANCELLED turn skips the rest of finalization, but whatever the agent
+   * reached is still on disk. These two flags are the only signals that raise
+   * the Info Bar's `Commit & Push` action, and nothing commits or pushes on the
+   * session's behalf anymore, so leaving stale `false`s here would hide real
+   * unpublished work behind a PR that looks current.
+   */
+  async syncWorkspaceGitState(sessionId: SessionId, session: ISession): Promise<void> {
+    try {
+      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
+      // Gate here rather than at the cancellation callers: they reach this from
+      // several sites that carry no `ProjectRef`, and a second copy of the rule
+      // is how those routes drift apart. A child Tab's own meta may omit
+      // `project`; it shares the owner's checkout, so the owner's binding is the
+      // correct fallback.
+      const project = workspace.activeMeta?.project ?? workspace.ownerMeta?.project;
+      if (!resolveProjectGitHubRepo(project)) {
+        return;
+      }
+      const runGit: GitRunner = (args) => session.exec('git', args, session.getWorkdir(), false);
+      const metaPatch = await this.probeWorkspaceGitState(sessionId, runGit);
+      if (Object.keys(metaPatch).length === 0) {
+        return;
+      }
+      await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
+    } catch (error) {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to persist workspace git state: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
+  /**
+   * The publishable subset of `{workspaceDirty, workspaceUnpushed}`.
+   *
+   * An inconclusive probe (git could not be queried) contributes NO key, so the
+   * durable value survives instead of being overwritten with a stale `false`.
+   * The two probes are independent: one failing must not suppress the other.
+   */
+  private async probeWorkspaceGitState(
+    sessionId: SessionId,
+    runGit: GitRunner
+  ): Promise<Pick<Partial<SessionMeta>, 'workspaceDirty' | 'workspaceUnpushed'>> {
+    const [workspaceDirty, workspaceUnpushed] = await Promise.all([
+      isWorkspaceDirty(runGit),
+      hasUnpushedCommits(runGit),
+    ]);
+    this.deps.logger.debug(
+      `[${sessionId}] Workspace dirty: ${workspaceDirty}, unpushed: ${workspaceUnpushed}`
+    );
+    return {
+      ...(workspaceDirty !== undefined ? { workspaceDirty } : {}),
+      ...(workspaceUnpushed !== undefined ? { workspaceUnpushed } : {}),
+    };
+  }
+
   async updateSessionDiffStats(
     sessionId: SessionId,
     session: ISession,
@@ -140,6 +202,10 @@ export class TurnPostProcessingService {
 
     let fileDiff: SessionHistoryInput['fileDiff'] = [];
     let diffStats: SessionMeta['diffStats'] = { allChange: { add: 0, del: 0 } };
+
+    // Runs alongside the diff-stats pipeline rather than after it; the two share
+    // nothing but `runGit`, and this one swallows its own failures.
+    const workspaceGitState = this.probeWorkspaceGitState(sessionId, runGit);
 
     try {
       const preferredBaseBranch = resolveBaseBranchPreference({
@@ -160,27 +226,14 @@ export class TurnPostProcessingService {
       this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
     }
 
-    let workspaceDirty: boolean | undefined;
-    try {
-      workspaceDirty = await isWorkspaceDirty(runGit);
-      this.deps.logger.debug(`[${sessionId}] Workspace dirty: ${workspaceDirty}`);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to check workspace dirty state: ${formatErrorMessage(error)}`
-      );
-    }
-
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      const metaPatch: Partial<SessionMeta> = { diffStats };
-      // Only persist workspaceDirty when the probe was conclusive. `undefined`
-      // means git could not be queried (transient spawn failure); overwriting the
-      // durable value with a stale `false` would hide Create PR / Commit & Push on
-      // a genuinely dirty session until a later turn recomputes it.
-      if (workspaceDirty !== undefined) {
-        metaPatch.workspaceDirty = workspaceDirty;
-      }
+      // Only conclusive probes contribute a key. `undefined` means git could not
+      // be queried (transient spawn failure); overwriting the durable value with
+      // a stale `false` would hide Create PR / Commit & Push on a session that
+      // really does have unpublished work, until a later turn recomputes it.
+      const metaPatch: Partial<SessionMeta> = { diffStats, ...(await workspaceGitState) };
       await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(
@@ -267,163 +320,5 @@ export class TurnPostProcessingService {
       );
     }
     return detected;
-  }
-
-  async autoCommitAndPushForPR(ctx: {
-    sessionId: SessionId;
-    session: ISession;
-    sessionDoc: SessionDocument;
-    project?: ProjectRef;
-    preferredBaseBranch?: string;
-    isTurnCancelled?: () => boolean;
-    abortSignal?: AbortSignal;
-    onAutoPromptStart?: () => void | Promise<void>;
-    onAutoPromptEnd?: () => void | Promise<void>;
-  }): Promise<void> {
-    const { sessionId, session, sessionDoc, project } = ctx;
-    const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
-    const shouldStop = (stage: string): boolean => {
-      if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
-        return false;
-      }
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: turn cancelled during ${stage}; skipping remaining work`
-      );
-      return true;
-    };
-
-    if (
-      !resolveProjectGitHubRepo(project) ||
-      (project?.kind === 'local' && project.useWorktree !== true)
-    ) {
-      return;
-    }
-
-    const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-    if (workspace.pullRequests.length === 0) {
-      return;
-    }
-
-    const preferredBaseBranch = ctx.preferredBaseBranch ?? project?.branch;
-    const workdir = session.getWorkdir();
-    const runGit: GitRunner = (args) => session.exec('git', args, workdir, false);
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (shouldStop('dirty state check')) {
-        return;
-      }
-
-      let dirty: boolean | undefined = false;
-      try {
-        dirty = await isWorkspaceDirty(runGit);
-      } catch (error) {
-        this.deps.logger.debug(
-          `[${sessionId}] auto-commit-push: failed to check dirty state: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-
-      // `undefined` (indeterminate) is treated as "nothing to commit" here: a
-      // transient git failure must not spuriously prompt the agent to commit.
-      if (!dirty) {
-        break;
-      }
-
-      if (shouldStop('commit prompt')) {
-        return;
-      }
-
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: workspace dirty, prompting agent to commit+push (attempt ${attempt + 1}/2)`
-      );
-
-      try {
-        const result = await this.deps.runAutoPrompt({
-          sessionId,
-          session,
-          sessionDoc,
-          abortSignal: ctx.abortSignal,
-          onPromptStart: ctx.onAutoPromptStart,
-          onPromptEnd: ctx.onAutoPromptEnd,
-          promptText:
-            'Your workspace has uncommitted changes. Please commit all changes with an appropriate commit message and push to the remote branch.',
-        });
-        if (shouldStop('commit prompt completion')) {
-          return;
-        }
-        await this.updateSessionDiffStats(sessionId, session, {
-          turnId: result.turnId,
-          baseCommitHash: result.baseCommitHash ?? undefined,
-          turnStartWorkingTreeDiff: result.turnStartWorkingTreeDiff,
-          preferredBaseBranch,
-        });
-      } catch (error) {
-        if (shouldStop('commit prompt failure')) {
-          return;
-        }
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push: agent prompt failed: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-    }
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (shouldStop('unpushed state check')) {
-        return;
-      }
-
-      let unpushed = false;
-      try {
-        unpushed = await hasUnpushedCommits(runGit);
-      } catch (error) {
-        this.deps.logger.debug(
-          `[${sessionId}] auto-commit-push: failed to check unpushed state: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-
-      if (!unpushed) {
-        break;
-      }
-
-      if (shouldStop('push prompt')) {
-        return;
-      }
-
-      this.deps.logger.debug(
-        `[${sessionId}] auto-commit-push: unpushed commits detected, prompting agent to push (attempt ${attempt + 1}/2)`
-      );
-
-      try {
-        const result = await this.deps.runAutoPrompt({
-          sessionId,
-          session,
-          sessionDoc,
-          abortSignal: ctx.abortSignal,
-          onPromptStart: ctx.onAutoPromptStart,
-          onPromptEnd: ctx.onAutoPromptEnd,
-          promptText:
-            'You have local commits that have not been pushed to the remote. Please push your changes now.',
-        });
-        if (shouldStop('push prompt completion')) {
-          return;
-        }
-        await this.updateSessionDiffStats(sessionId, session, {
-          turnId: result.turnId,
-          baseCommitHash: result.baseCommitHash ?? undefined,
-          turnStartWorkingTreeDiff: result.turnStartWorkingTreeDiff,
-          preferredBaseBranch,
-        });
-      } catch (error) {
-        if (shouldStop('push prompt failure')) {
-          return;
-        }
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push: push prompt failed: ${formatErrorMessage(error)}`
-        );
-        break;
-      }
-    }
   }
 }

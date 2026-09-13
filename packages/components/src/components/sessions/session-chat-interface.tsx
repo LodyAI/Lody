@@ -229,8 +229,10 @@ import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge
 import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
-  CREATE_DRAFT_PR_PROMPT,
-  CREATE_PR_PROMPT,
+  CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
 } from './create-pr-prompt';
 import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -2315,6 +2317,7 @@ export const SessionChatInterface = memo(
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     } = useMemo(
       () => getSessionGitHubState(session, workspaceSession),
@@ -4402,8 +4405,17 @@ export const SessionChatInterface = memo(
       [sessionDoc?.history]
     );
 
-    const createPrPrompt = t('sessions.prompts.createPr', CREATE_PR_PROMPT);
-    const createDraftPrPrompt = t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_PROMPT);
+    // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
+    // one key per language instead of being repeated inside both prompts.
+    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
+    const createPrPrompt = withPrBranchUpkeep(
+      t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT),
+      prBranchUpkeep
+    );
+    const createDraftPrPrompt = withPrBranchUpkeep(
+      t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+      prBranchUpkeep
+    );
     const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
 
     const handleCreatePr = useCallback(() => {
@@ -4717,6 +4729,7 @@ export const SessionChatInterface = memo(
         canShowGitHubActions,
         hasExistingPr,
         workspaceDirty,
+        workspaceUnpushed,
         hasChanges,
         isAgentBusy,
         prCiState: liveCiFailed ? 'f' : latestPrState?.s,
@@ -4812,6 +4825,7 @@ export const SessionChatInterface = memo(
       sessionDocReady,
       t,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     ]);
 

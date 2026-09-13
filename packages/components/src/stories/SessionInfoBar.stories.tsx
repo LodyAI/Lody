@@ -136,21 +136,28 @@ function StoryHarness({
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
-  const contextActions: ContextChipAction[] | undefined = mergeAction
-    ? [
-        {
-          kind: 'merge',
-          id: 'merge',
-          method: mergeMethod,
-          onMerge: fn(),
-          onSelectMethod: setMergeMethod,
-        },
-      ]
-    : actionLabels?.map((label) => ({
-        id: label.toLowerCase().replaceAll(' ', '-'),
-        label,
-        onClick: fn(),
-      }));
+  // Priority order, highest first: `mergeAction` appends the merge control after
+  // any labelled actions, so a story can show it BOTH as the leading split button
+  // and demoted into the chevron behind a higher-priority Commit & Push.
+  const actions: ContextChipAction[] = [
+    ...(actionLabels ?? []).map((label) => ({
+      id: label.toLowerCase().replaceAll(' ', '-'),
+      label,
+      onClick: fn(),
+    })),
+    ...(mergeAction
+      ? [
+          {
+            kind: 'merge' as const,
+            id: 'merge' as const,
+            method: mergeMethod,
+            onMerge: fn(),
+            onSelectMethod: setMergeMethod,
+          },
+        ]
+      : []),
+  ];
+  const contextActions = actions.length > 0 ? actions : undefined;
   return (
     <div className="flex max-w-full flex-col" style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}
@@ -359,6 +366,19 @@ export const DraftReadyForReview: Story = {
     pr: draftPr,
     prCiRuns: CI_PASSING,
     actionLabels: ['Ready for review'],
+  },
+};
+
+/** Uncommitted work on a mergeable PR. Commit & Push outranks Merge, so the
+ *  split button is demoted to a plain chevron item that still merges with the
+ *  selected method — merging a stale PR head is exactly the mistake this ranking
+ *  exists to prevent. */
+export const DirtyWorktreeOutranksMerge: Story = {
+  name: 'Dirty worktree outranks Merge',
+  args: {
+    prCiRuns: CI_PASSING,
+    actionLabels: ['Commit & Push'],
+    mergeAction: true,
   },
 };
 
