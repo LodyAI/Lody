@@ -61,6 +61,15 @@ ignoredBuiltDependencies:
 
 managePackageManagerVersions: true
 
+# Delay newly published package versions for seven days before pnpm may resolve them.
+minimumReleaseAge: 10080
+
+# Grandfather versions already locked on main; later releases remain quarantined.
+minimumReleaseAgeExclude:
+  - loro-mirror@2.3.2
+  - loro-mirror-jotai@2.3.2
+  - loro-mirror-react@2.3.2
+
 onlyBuiltDependencies:
   - '@moonshot-ai/kimi-code'
   - '@posthog/cli'
