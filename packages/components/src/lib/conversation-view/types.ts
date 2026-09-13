@@ -77,19 +77,11 @@ export type TurnIndexRow = Pick<SessionHistory, IndexScalarKey> & {
   inputConfig?: TurnIndexInputConfig;
 };
 
-export type ConversationViewChange = {
-  /**
-   * `index`: rows, ids, or `turnCount` changed (append, delete, scalar update,
-   * summary arrival). `tail`: a hydrated turn inside the always-hydrated tail
-   * window changed. `range`: a hydrated turn outside the tail changed or was
-   * hydrated on demand. `structure`: list membership or order changed; `from`
-   * is the first affected position and `to` is the new length. Rebind positional
-   * readers on this event, including same-length replacements.
-   */
-  kind: 'index' | 'range' | 'tail' | 'structure';
-  from?: number;
-  to?: number;
-};
+export type ConversationViewChange =
+  | { kind: 'structure'; from: number; to: number }
+  // Body identities to invalidate. Empty for summary-only/cache bookkeeping;
+  // subscribers still receive a version change, but no body fact became stale.
+  | { kind: 'changed'; ids: readonly string[] };
 
 export type ConversationViewListener = (change: ConversationViewChange) => void;
 
@@ -129,7 +121,7 @@ export interface ConversationView {
    * provide it. Absent on the raw-Loro/rollback views, which fall back to a
    * lease-guarded read in `readConversationHistory`.
    */
-  readAll?(): Promise<SessionHistory[]>;
+  readAll(): Promise<SessionHistory[]>;
   /** The hydrated turn, or `undefined` until an acquired range covers it. */
   turn(i: number): SessionHistory | undefined;
   isHydrated(i: number): boolean;

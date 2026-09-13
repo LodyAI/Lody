@@ -76,7 +76,7 @@ export function createProjectedConversationView(
 
   const translate = (change: ConversationViewChange): ConversationViewChange => {
     rebuild();
-    if (change.from === undefined || change.to === undefined) return change;
+    if (change.kind === 'changed') return change;
     const from = baseToSlot[change.from] ?? change.from;
     const last = baseToSlot[Math.max(change.from, change.to - 1)];
     return { kind: change.kind, from, to: last === undefined ? change.to : last + 1 };
@@ -123,7 +123,7 @@ export function createProjectedConversationView(
     subscribe: (listener) => base.subscribe((change) => listener(translate(change))),
     // Export/replay/hash read the authoritative base, never the accepted display
     // projection, so the consistent full-read path still covers this wrapper.
-    ...(base.readAll ? { readAll: () => base.readAll!() } : {}),
+    readAll: () => base.readAll(),
     dispose: () => {},
   };
 }

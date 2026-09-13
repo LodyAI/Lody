@@ -13,11 +13,10 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
   window. In React use `useSessionDoc().history`, `useConversationTail`,
   `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
 - **Write** domain commands through `store.sessionData` (`@lody/shared/session-data`):
-  `appendTurn`, `replaceTurn`, `setTurnField` (explicit set/clear), `openAssistantTurn`,
-  `resolveTaskProposal`, `respondPermission`. It is composed over the same doc and the
+  `applyHistoryAction`, `appendTurn`, `replaceTurn`, `resolveTaskProposal` and
+  `respondPermission`. It is composed over the same doc and the
   one shared writer; a rejected command surfaces as a failure, never a silent drop.
-- `store.historyWriter` is the storage-owned writer behind that seam: keep it for
-  capture/copy/rollback and read-modify-write flows that already need its raw rules.
+- The composition owns one HistoryWriter; the UI store does not expose it.
   Do not add a second writer or bypass `sessionData` for ordinary turn writes.
 
 `getState()` has no `history` key and `setState` receives a draft without one,
@@ -29,7 +28,7 @@ the store into the raw `LoroDoc` — and
 the old full Mirror) may touch the raw list; that exemption list is asserted to
 be exact.
 
-Full-history actions must be explicit and release their ranges after use.
+Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.
 
 ## Lightweight hosted entries

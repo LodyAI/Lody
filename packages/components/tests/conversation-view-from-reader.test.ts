@@ -1,13 +1,12 @@
+import { writeStoredField } from './conversation-view-fixtures';
 import { describe, expect, it, vi } from 'vitest';
 import type { LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import { createHistoryWriter } from '@lody/shared';
 import {
   createLoroSessionData,
-  createMemorySessionData,
   setFieldTo,
-  type MemorySessionData,
-  type SessionData,
+  type LoroSessionData,
   type SessionDataChangeListener,
   type SessionHistoryReader,
   type SessionTurn,
@@ -17,6 +16,7 @@ import {
   type ConversationView,
 } from '../src/lib/conversation-view';
 import {
+  flushReaderChanges,
   buildFixtureHistory,
   buildSessionDoc,
   createManualIdle,
@@ -24,17 +24,11 @@ import {
   type ManualIdle,
 } from './conversation-view-fixtures';
 
-/**
- * The same UI-facing `ConversationView`, driven over BOTH session-data
- * backends. The Loro arm builds a real doc (fixtures may touch it) and reads
- * exclusively through the port; the memory arm has no Loro/CID anywhere. Every
- * case runs against both, which is what proves the display cache no longer
- * depends on Loro.
- */
+/** Exercise the shipped reader against real Loro storage. */
 
 type Backend = {
   name: string;
-  create(history: SessionHistory[]): { data: SessionData; teardown(): void };
+  create(history: SessionHistory[]): { data: LoroSessionData; teardown(): void };
 };
 
 const backends: Backend[] = [
@@ -44,16 +38,6 @@ const backends: Backend[] = [
       const doc = buildSessionDoc(history);
       const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
       return { data, teardown: () => doc.free() };
-    },
-  },
-  {
-    name: 'memory',
-    create: (history) => {
-      const data = createMemorySessionData({
-        sessionId: FIXTURE_SESSION_ID,
-        initialTurns: history as SessionTurn[],
-      });
-      return { data, teardown: () => {} };
     },
   },
 ];
@@ -89,7 +73,12 @@ const fixtureHistory = (rounds: number): SessionHistory[] => {
 const openView = (
   backend: Backend,
   rounds: number,
-  options: { tailKeep?: number; maxHydrated?: number; hydrateChunkSize?: number; hydrateItemBudget?: number } = {}
+  options: {
+    tailKeep?: number;
+    maxHydrated?: number;
+    hydrateChunkSize?: number;
+    hydrateItemBudget?: number;
+  } = {}
 ) => {
   const history = fixtureHistory(rounds);
   const { data, teardown } = backend.create(history);
@@ -107,15 +96,14 @@ const openView = (
   // Loro arm goes through the shared writer, the memory arm through the peer
   // mutation hook. Both produce an observer event, not a command receipt.
   const mutateHistory = (update: (turns: SessionTurn[]) => SessionTurn[]): void => {
-    const writer = (data as { writer?: { update: (updater: (history: unknown[]) => unknown[]) => void } }).writer;
+    const writer = (
+      data as { writer?: { update: (updater: (history: unknown[]) => unknown[]) => void } }
+    ).writer;
     if (writer) {
       writer.update((current) => update(current as SessionTurn[]) as unknown[]);
       return;
     }
-    (data as MemorySessionData).applyPeerMutation((turns) => {
-      const next = update(turns);
-      turns.splice(0, turns.length, ...next);
-    });
+    throw new Error('fixture requires its Loro writer');
   };
   return { expected: history, idle, view, data, teardown, mutateHistory };
 };
@@ -331,10 +319,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
 
       // A structural insert at the head: every captured id stays hydrated at its
       // NEW position, keyed by turnId rather than the old position.
-      mutateHistory((turns) => [
-        { ...turns[0]!, id: 'u-inserted' } as SessionTurn,
-        ...turns,
-      ]);
+      mutateHistory((turns) => [{ ...turns[0]!, id: 'u-inserted' } as SessionTurn, ...turns]);
       await flush();
       expect(view.indexOf('u-inserted')).toBe(0);
       expect(view.indexOf('u-0')).toBe(1);
@@ -437,9 +422,10 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       const range = probeView.acquireRange(0, 2);
       await flush();
       // A structural change lands while the first chunk's reads are gated.
-      await data.commands.appendTurn(
-        { ...customUserTurn(), id: 'u-discard' } as unknown as SessionTurn
-      );
+      await data.commands.appendTurn({
+        ...customUserTurn(),
+        id: 'u-discard',
+      } as unknown as SessionTurn);
       await flush();
       probe.release('u-0');
       await flush();
@@ -477,7 +463,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       probe.directories.length = 0;
       probe.turns.length = 0;
 
-      await data.commands.setTurnField(lastId, 'finished', setFieldTo(false));
+      await writeStoredField(data, lastId, 'finished', setFieldTo(false));
       await flush();
 
       // Exactly the affected raw range was re-read — never a full reload.
@@ -524,7 +510,9 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       expect(after).not.toBe(before);
       expect(after.items!.length).toBe((before.items?.length ?? 0) + 1);
       expect(probeView.turn(last - 1)).toBe(untouched);
-      expect(changes.some((change) => change.kind === 'tail' && change.from === last)).toBe(true);
+      expect(
+        changes.some((change) => change.kind === 'changed' && change.ids.includes(lastId))
+      ).toBe(true);
       // The ranged event re-read only the affected turn's directory row and body.
       expect(probe.directories.every(([from, to]) => to - from === 1 && from === last)).toBe(true);
       expect(probe.turns).toEqual([lastId]);
@@ -613,9 +601,10 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       wrappedView.dispose();
       expect(wrappedView.turnCount).toBe(0);
       const versionAfterDispose = wrappedView.version;
-      await data.commands.appendTurn(
-        { ...customUserTurn(), id: 'u-after-dispose' } as unknown as SessionTurn
-      );
+      await data.commands.appendTurn({
+        ...customUserTurn(),
+        id: 'u-after-dispose',
+      } as unknown as SessionTurn);
       await flush();
       expect(wrappedView.turnCount).toBe(0);
       expect(wrappedView.version).toBe(versionAfterDispose);
@@ -638,7 +627,7 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       const range = view.acquireRange(0, expected.length);
       await range.ready;
       for (let i = 0; i < expected.length; i += 1) expect(view.turn(i)).toEqual(expected[i]);
-      expect(changes.filter((kind) => kind === 'range').length).toBeGreaterThan(1);
+      expect(changes.filter((kind) => kind === 'changed').length).toBeGreaterThan(1);
       range.release();
       view.dispose();
     } finally {
@@ -652,7 +641,8 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
     // The Loro arm of the shared suite proves the port reads; this pins the
     // production composition: the windowed session's `history` reads through
     // `sessionData.history`, never the raw doc.
-    const { createConversationSession } = await import('../src/lib/conversation-view/create-conversation-session');
+    const { createConversationSession } =
+      await import('../src/lib/conversation-view/create-conversation-session');
     const doc = buildSessionDoc(buildFixtureHistory(2));
     const idle = createManualIdle();
     const session = createConversationSession(doc, {
@@ -678,7 +668,7 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
       // A domain write surfaces through the reader view's subscription.
       const updates: number[] = [];
       session.history.subscribe((change) => updates.push(change.kind));
-      await session.sessionData.commands.setTurnField('a-1', 'finished', setFieldTo(false));
+      await writeStoredField(session.sessionData, 'a-1', 'finished', setFieldTo(false));
       await vi.waitFor(() => {
         expect(session.history.index(3)?.finished).toBe(false);
       });
@@ -693,7 +683,8 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
   it('keeps the raw writer for targeted writes and forwards peer edits', async () => {
     const doc = buildSessionDoc(buildFixtureHistory(1));
     const idle = createManualIdle();
-    const { createConversationSession } = await import('../src/lib/conversation-view/create-conversation-session');
+    const { createConversationSession } =
+      await import('../src/lib/conversation-view/create-conversation-session');
     const session = createConversationSession(doc, {
       sessionId: FIXTURE_SESSION_ID,
       windowed: true,
@@ -716,7 +707,10 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
       const entry = buildFixtureHistory(1)[1]!;
       peer.update((history) => {
         const next = history.slice();
-        next[1] = { ...next[1]!, items: [...(next[1]!.items ?? []), { type: 'text', text: ' peer' }] } as SessionHistory;
+        next[1] = {
+          ...next[1]!,
+          items: [...(next[1]!.items ?? []), { type: 'text', text: ' peer' }],
+        } as SessionHistory;
         return next;
       });
       await vi.waitFor(() => {
@@ -747,7 +741,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     const view = createConversationViewFromReader(data.history, {
       sessionId: FIXTURE_SESSION_ID,
@@ -757,7 +750,7 @@ describe('createConversationViewFromReader audit regressions', () => {
     try {
       await checkpoint();
       expect(view.turnCount).toBe(6);
-      const result = await data.commands.setTurnField('a-0', 'finished', setFieldTo(false));
+      const result = await writeStoredField(data, 'a-0', 'finished', setFieldTo(false));
       expect(result.status).toBe('accepted');
       await checkpoint();
       expect(await data.history.count()).toBe(6);
@@ -776,7 +769,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     const view = createConversationViewFromReader(data.history, {
       sessionId: FIXTURE_SESSION_ID,
@@ -791,6 +783,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       (list.get(1) as LoroMap).set('finished', false);
       list.push({ ...history[0], id: 'new' } as never);
       doc.commit();
+      await flushReaderChanges();
       await checkpoint();
       expect(view.turnCount).toBe(7);
       expect(view.turn(1)?.finished).toBe(false);
@@ -806,7 +799,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let started!: () => void;
@@ -840,6 +832,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       await entered;
       doc.getList('history').insert(0, { ...history[0], id: 'new' } as never);
       doc.commit();
+      await flushReaderChanges();
       await checkpoint();
       expect(view.index(5)?.id).toBe('u-2');
       release();
@@ -860,7 +853,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     const view = createConversationViewFromReader(data.history, {
       sessionId: FIXTURE_SESSION_ID,
@@ -873,7 +865,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       for (const id of ['a-0', 'a-1', 'a-2']) {
         // `turn(a-0)`'s fixture value differs per turn; setting a new value must
         // update only its row and leave the six-row directory intact.
-        const result = await data.commands.setTurnField(id, 'finished', setFieldTo(false));
+        const result = await writeStoredField(data, id, 'finished', setFieldTo(false));
         expect(result.status).toBe('accepted');
         await checkpoint();
         expect(view.turnCount).toBe(6);
@@ -882,6 +874,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       // A real structural shrink: deleting the tail row must reduce the count.
       doc.getList('history').delete(5, 1);
       doc.commit();
+      await flushReaderChanges();
       await checkpoint();
       expect(view.turnCount).toBe(5);
       expect(Array.from({ length: view.turnCount }, (_, i) => view.index(i)?.id)).toEqual(
@@ -899,7 +892,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let started!: () => void;
@@ -933,7 +925,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       await entered;
       // Same turn, no positional shift: the row object is replaced, so the
       // delayed summary must not write its stale capture back.
-      const result = await data.commands.setTurnField('a-2', 'finished', setFieldTo(false));
+      const result = await writeStoredField(data, 'a-2', 'finished', setFieldTo(false));
       expect(result.status).toBe('accepted');
       release();
       await checkpoint();
@@ -953,7 +945,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let entered!: () => void;
@@ -981,7 +972,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       await checkpoint();
       const lease = view.acquireRange(5, 6);
       await started;
-      expect((await data.commands.setTurnField('a-2', 'finished', setFieldTo(false))).status).toBe(
+      expect((await writeStoredField(data, 'a-2', 'finished', setFieldTo(false))).status).toBe(
         'accepted'
       );
       await checkpoint();
@@ -1006,7 +997,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let entered!: () => void;
@@ -1031,10 +1021,11 @@ describe('createConversationViewFromReader audit regressions', () => {
     });
     try {
       await checkpoint();
-      await data.commands.setTurnField('a-0', 'finished', setFieldTo(false));
+      await writeStoredField(data, 'a-0', 'finished', setFieldTo(false));
       await started;
       doc.getList('history').push({ ...original[0], id: 'new' } as never);
       doc.commit();
+      await flushReaderChanges();
       release();
       await checkpoint();
       expect(view.turnCount).toBe(7);
@@ -1057,7 +1048,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let entered!: () => void;
@@ -1094,9 +1084,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       release();
       await lease.ready;
       await checkpoint();
-      expect(
-        (view.turn(5)?.items?.[2] as { text?: string } | undefined)?.text
-      ).toBe('NEW CONTENT');
+      expect((view.turn(5)?.items?.[2] as { text?: string } | undefined)?.text).toBe('NEW CONTENT');
       lease.release();
     } finally {
       release();
@@ -1110,7 +1098,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let entered!: () => void;
@@ -1149,9 +1136,9 @@ describe('createConversationViewFromReader audit regressions', () => {
       release();
       await lease.ready;
       await checkpoint();
-      expect(
-        (view.turn(4)?.inputConfig as { modelId?: string } | undefined)?.modelId
-      ).toBe('model-new');
+      expect((view.turn(4)?.inputConfig as { modelId?: string } | undefined)?.modelId).toBe(
+        'model-new'
+      );
       lease.release();
     } finally {
       release();
@@ -1166,7 +1153,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let writes = 0;
     const reader: SessionHistoryReader = {
@@ -1175,7 +1161,7 @@ describe('createConversationViewFromReader audit regressions', () => {
         const result = await data.history.readTurn(id);
         if (id === 'a-2' && writes < 3) {
           writes += 1;
-          await data.commands.setTurnField('a-2', 'finished', setFieldTo(writes % 2 === 0));
+          await writeStoredField(data, 'a-2', 'finished', setFieldTo(writes % 2 === 0));
           await checkpoint();
         }
         return result;
@@ -1203,7 +1189,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     const reads = new Map<string, number>();
     let releaseA2!: () => void;
@@ -1245,9 +1230,7 @@ describe('createConversationViewFromReader audit regressions', () => {
       await lease.ready;
       await checkpoint();
       expect(reads.get('a-2')).toBe(1);
-      expect(
-        (view.turn(4)?.items?.[2] as { text?: string } | undefined)?.text
-      ).toBe('U2 NEW');
+      expect((view.turn(4)?.items?.[2] as { text?: string } | undefined)?.text).toBe('U2 NEW');
       lease.release();
     } finally {
       releaseA2();
@@ -1261,7 +1244,6 @@ describe('createConversationViewFromReader audit regressions', () => {
     const data = createLoroSessionData({
       sessionId: FIXTURE_SESSION_ID,
       doc,
-      durability: 'unavailable',
     });
     let release!: () => void;
     let entered!: () => void;

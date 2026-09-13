@@ -1,3 +1,4 @@
+import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import {
   HistoryEntryWriteSchema,
@@ -8,7 +9,7 @@ import {
 } from '@lody/shared';
 import { LoroDoc, LoroText, type LoroList, type LoroMap } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/conversation-view';
+import { createHistoryWriter } from '../src/lib/conversation-view';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -36,10 +37,10 @@ const shapeOf = (doc: LoroDoc): unknown => {
   return strip((doc as unknown as { getDeepValueWithID(): unknown }).getDeepValueWithID());
 };
 
-const openWriterDoc = (history: readonly SessionHistory[] = []) => {
+const openWriterDoc = async (history: readonly SessionHistory[] = []) => {
   const doc = buildSessionDoc(history, PEER);
   const idle = createManualIdle();
-  const view = createConversationViewFromDoc(doc, {
+  const view = await openReaderView(doc, {
     sessionId: FIXTURE_SESSION_ID,
     tailKeep: 2,
     maxHydrated: 4,
@@ -61,7 +62,7 @@ describe('createHistoryWriter', () => {
     const history = buildFixtureHistory(8).map((entry) =>
       parseHistoryWrite(HistoryEntryWriteSchema, entry)
     ) as SessionHistory[];
-    const { doc, view, writer } = openWriterDoc();
+    const { doc, view, writer } = await openWriterDoc();
     for (const entry of history) writer.append(entry);
 
     // Raw Mirror writes are not the storage oracle: schema storage hints can
@@ -69,7 +70,7 @@ describe('createHistoryWriter', () => {
     // authored input, and the streaming contract against real containers.
     const restored = reimport(doc);
     expect(mirrorHistoryOf(restored)).toEqual(history);
-    const restoredView = createConversationViewFromDoc(restored, {
+    const restoredView = await openReaderView(restored, {
       sessionId: FIXTURE_SESSION_ID,
       scheduleIdle: createManualIdle().scheduleIdle,
     });
@@ -84,6 +85,7 @@ describe('createHistoryWriter', () => {
     const cid = text.id;
     text.insert(text.length, ' continued');
     restored.commit();
+    await flushReaderChanges();
     expect((item.get('text') as LoroText).id).toBe(cid);
     expect(restoredView.turn(0)?.items?.[0]).toEqual({
       type: 'text',
@@ -99,8 +101,8 @@ describe('createHistoryWriter', () => {
     view.dispose();
   });
 
-  it('rejects an entry that fails the session history schema', () => {
-    const { writer } = openWriterDoc();
+  it('rejects an entry that fails the session history schema', async () => {
+    const { writer } = await openWriterDoc();
     expect(() =>
       writer.append({
         id: 'bad',
@@ -146,7 +148,7 @@ describe('createHistoryWriter', () => {
   ];
 
   for (const [label, mutate] of replaceCases) {
-    it(`replaces a turn in place like Mirror: ${label}`, () => {
+    it(`replaces a turn in place like Mirror: ${label}`, async () => {
       const history = buildFixtureHistory(3);
       const target = history[3]!; // a-1
       const reference = buildSessionDoc(history, PEER);
@@ -158,11 +160,13 @@ describe('createHistoryWriter', () => {
         draft.history[index] = mutate(referenceTurn);
       });
 
-      const { doc, view, writer } = openWriterDoc(history);
+      const { doc, view, writer } = await openWriterDoc(history);
       const targetIndex = view.indexOf(target.id);
-      const range = view.acquireRange(targetIndex, targetIndex + 1); // hydrates synchronously
+      const range = view.acquireRange(targetIndex, targetIndex + 1);
+      await range.ready;
       const current = view.turn(targetIndex)!;
       expect(writer.replace(target.id, mutate(current))).toBe(true);
+      await flushReaderChanges();
 
       expect(shapeOf(doc)).toEqual(shapeOf(reference));
       expect(mirrorHistoryOf(reimport(doc))).toEqual(mirrorHistoryOf(reimport(reference)));
@@ -173,9 +177,9 @@ describe('createHistoryWriter', () => {
     });
   }
 
-  it('replaces a turn the view has evicted by reading it back from the doc', () => {
+  it('replaces a turn the view has evicted by reading it back from the doc', async () => {
     const history = buildFixtureHistory(6);
-    const { doc, view, writer } = openWriterDoc(history);
+    const { doc, view, writer } = await openWriterDoc(history);
     expect(view.isHydrated(1)).toBe(false);
     const before = writer.read('a-0')!;
     expect(before).toEqual(history[1]);
@@ -184,7 +188,7 @@ describe('createHistoryWriter', () => {
     expect(writer.replace('missing', before)).toBe(false);
   });
 
-  it('records a permission outcome exactly like the Mirror draft mutation', () => {
+  it('records a permission outcome exactly like the Mirror draft mutation', async () => {
     const history = buildFixtureHistory(4); // a-3 carries req-3 without an outcome
     const outcome = { outcome: 'selected', optionId: 'allow' } as PermissionOutcome;
     const reference = buildSessionDoc(history, PEER);
@@ -203,12 +207,12 @@ describe('createHistoryWriter', () => {
       }
     });
 
-    const { doc, writer } = openWriterDoc(history);
+    const { doc, writer } = await openWriterDoc(history);
     expect(writer.respondPermission('req-3', outcome)).toBe(true);
     expect(shapeOf(doc)).toEqual(shapeOf(reference));
     expect(mirrorHistoryOf(reimport(doc))).toEqual(mirrorHistoryOf(reimport(reference)));
 
-    const { doc: hinted, writer: hintedWriter } = openWriterDoc(history);
+    const { doc: hinted, writer: hintedWriter } = await openWriterDoc(history);
     expect(hintedWriter.respondPermission('req-3', outcome, { turnId: 'a-3' })).toBe(true);
     expect(shapeOf(hinted)).toEqual(shapeOf(reference));
     expect(hintedWriter.respondPermission('nope', outcome)).toBe(false);

@@ -49,7 +49,6 @@ export function createConversationDerivation<F>(
   let disposed = false;
   let passRunning = false;
   let passRequested = false;
-  let lastTurnCount = view.turnCount;
   let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
 
   const notify = () => {
@@ -105,13 +104,16 @@ export function createConversationDerivation<F>(
       changed = pruneRemoved();
       changed = deriveRange(change.from ?? 0, change.to ?? view.turnCount, true) || changed;
       requestPass();
-    } else if (change.kind === 'index') {
-      if (view.turnCount < lastTurnCount) changed = pruneRemoved() || changed;
-      lastTurnCount = view.turnCount;
-      // Appended turns land in the hydrated tail; derive whatever is there.
-      changed = deriveRange(Math.max(0, view.turnCount - 64), view.turnCount) || changed;
-    } else if (change.from !== undefined && change.to !== undefined) {
-      changed = deriveRange(change.from, change.to, true) || changed;
+    } else {
+      for (const id of change.ids) {
+        changed = facts.delete(id) || changed;
+        derivedFrom.delete(id);
+        const position = view.indexOf(id);
+        if (position >= 0) {
+          changed = deriveRange(position, position + 1) || changed;
+          if (!view.isHydrated(position)) requestPass();
+        }
+      }
     }
     if (changed) notify();
   });

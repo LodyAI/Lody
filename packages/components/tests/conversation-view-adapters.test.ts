@@ -53,7 +53,7 @@ describe('createConversationViewFromHistory', () => {
     for (const listener of listeners) listener();
     expect(view.turnCount).toBe(7);
     expect(view.indexOf('u-new')).toBe(6);
-    expect(changes).toEqual(['structure', 'index', 'tail']);
+    expect(changes).toEqual(['structure']);
   });
 });
 

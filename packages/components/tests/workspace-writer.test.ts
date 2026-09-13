@@ -158,7 +158,6 @@ describe('createDirectWorkspaceWriter', () => {
               sessionId: 'session' as never,
               doc,
               writer: historyWriter,
-              durability: 'unavailable',
             }),
           } as never;
         },
@@ -253,7 +252,6 @@ describe('createDirectWorkspaceWriter', () => {
             sessionId: 'session-1' as never,
             doc,
             writer: mirror.historyWriter,
-            durability: 'unavailable',
           }),
         }) as never,
       releaseSessionStoreRef: () => {},

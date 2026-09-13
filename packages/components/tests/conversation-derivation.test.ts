@@ -1,3 +1,5 @@
+import { writeStoredField } from './conversation-view-fixtures';
+import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import { LoroMap, type ContainerID, type LoroList } from 'loro-crdt';
 import {
@@ -5,14 +7,9 @@ import {
   resolveLatestSessionGoalFromHistory,
   type SessionGoalMessage,
 } from '@lody/shared';
-import {
-  createLoroSessionData,
-  createMemorySessionData,
-  type SessionData,
-} from '@lody/shared/session-data';
+import { createLoroSessionData, type LoroSessionData } from '@lody/shared/session-data';
 import {
   createConversationDerivation,
-  createConversationViewFromDoc,
   createConversationViewFromReader,
   type ConversationView,
 } from '../src/lib/conversation-view';
@@ -31,13 +28,13 @@ const drain = async (done: () => boolean, bound = 200): Promise<void> => {
 
 const immediate = () => Promise.resolve();
 
-const openView = (
+const openView = async (
   rounds: number,
   options: { tailKeep?: number; maxHydrated?: number; hydrateChunkSize?: number } = {}
 ) => {
   const doc = reimport(buildSessionDoc(buildFixtureHistory(rounds)));
   const idle = createManualIdle();
-  const view = createConversationViewFromDoc(doc, {
+  const view = await openReaderView(doc, {
     sessionId: FIXTURE_SESSION_ID,
     tailKeep: options.tailKeep ?? 2,
     maxHydrated: options.maxHydrated ?? 4,
@@ -67,7 +64,7 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 
 describe('createConversationDerivation', () => {
   it('fills all facts after a completed pass receives a bulk remote append', async () => {
-    const { doc, view, idle } = openView(1);
+    const { doc, view, idle } = await openView(1);
     const derivation = createConversationDerivation(view, deriveDiffCount, {
       yieldToEventLoop: immediate,
     });
@@ -76,6 +73,7 @@ describe('createConversationDerivation', () => {
     const writer = createHistoryWriter(peer);
     for (const entry of buildFixtureHistory(51).slice(2)) writer.append(entry);
     doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    await flushReaderChanges();
     idle.runAll();
     await drain(() => derivation.complete, 1000);
     expect(derivation.complete).toBe(true);
@@ -86,7 +84,7 @@ describe('createConversationDerivation', () => {
   });
 
   it('invalidates same-id replacements and prunes removed facts in a same-length rewrite', async () => {
-    const { doc, view } = openView(50);
+    const { doc, view } = await openView(50);
     const derivation = createConversationDerivation(view, deriveDiffCount, {
       yieldToEventLoop: immediate,
     });
@@ -101,6 +99,7 @@ describe('createConversationDerivation', () => {
       turn.set('fileDiff', []);
     }
     doc.commit();
+    await flushReaderChanges();
     await drain(() => derivation.complete, 1000);
     expect(derivation.facts.has('u-10')).toBe(false);
     expect(derivation.facts.get('a-10')).toEqual({ diffs: 0 });
@@ -110,7 +109,7 @@ describe('createConversationDerivation', () => {
   });
 
   it('drops and re-derives a fact when an evicted turn changes', async () => {
-    const { doc, view } = openView(12, { tailKeep: 2, maxHydrated: 4 });
+    const { doc, view } = await openView(12, { tailKeep: 2, maxHydrated: 4 });
     const derivation = createConversationDerivation(view, deriveDiffCount, {
       chunkSize: 8,
       yieldToEventLoop: immediate,
@@ -137,6 +136,7 @@ describe('createConversationDerivation', () => {
     added.set('add', 3);
     added.set('del', 0);
     doc.commit();
+    await flushReaderChanges();
 
     // Never served stale: the fact is dropped on the change event, and the
     // restarted pass re-hydrates the turn to derive it again.
@@ -149,7 +149,7 @@ describe('createConversationDerivation', () => {
     view.dispose();
   });
 
-  it.each(['loro', 'memory'] as const)(
+  it.each(['loro'] as const)(
     'refreshes evicted goal and diff facts through the shipped reader (%s)',
     async (backend) => {
       const history = buildFixtureHistory(50);
@@ -161,10 +161,12 @@ describe('createConversationDerivation', () => {
       };
       history[1]!.items.push(goal);
       const doc = buildSessionDoc(history);
-      const data: SessionData =
+      const data: LoroSessionData =
         backend === 'loro'
-          ? createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc, durability: 'unavailable' })
-          : createMemorySessionData({ sessionId: FIXTURE_SESSION_ID, initialTurns: history });
+          ? createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc })
+          : (() => {
+              throw new Error('unknown fixture backend');
+            })();
       const idle = createManualIdle();
       const view = createConversationViewFromReader(data.history, {
         sessionId: FIXTURE_SESSION_ID,
@@ -204,7 +206,7 @@ describe('createConversationDerivation', () => {
         );
         expect(derivation.facts.get('a-0')?.goal?.status).toBe(status);
       }
-      const result = await data.commands.setTurnField('a-0', 'fileDiff', {
+      const result = await writeStoredField(data, 'a-0', 'fileDiff', {
         kind: 'set',
         value: [
           { filePath: 'src/new.ts', add: 1, del: 0 },
@@ -228,7 +230,7 @@ describe('createConversationDerivation', () => {
     const idle = createManualIdle();
     const maxHydrated = 4;
     const tailKeep = 2;
-    const view = createConversationViewFromDoc(doc, {
+    const view = await openReaderView(doc, {
       sessionId: FIXTURE_SESSION_ID,
       tailKeep,
       maxHydrated,

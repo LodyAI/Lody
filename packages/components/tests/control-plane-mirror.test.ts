@@ -1,3 +1,4 @@
+import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory } from '@lody/shared';
 import { LoroDoc, type LoroList, type LoroMap, type LoroText } from 'loro-crdt';
@@ -5,7 +6,6 @@ import { Mirror } from 'loro-mirror';
 import {
   createConversationSession,
   createControlPlaneDoc,
-  createConversationViewFromDoc,
   createHistoryWriter,
   CONTROL_PLANE_IGNORED_ROOT_KEYS,
   sessionControlPlaneSchema,
@@ -46,7 +46,7 @@ const buildLargeDoc = (turnCount = 1_000): LoroDoc => {
 };
 
 describe('control-plane Mirror (history: Ignore)', () => {
-  it('does not materialize history when opening a long doc', () => {
+  it('does not materialize history when opening a long doc', async () => {
     // Warm the wasm and JIT paths on a small doc so the measurement is the construction alone.
     const warm = new LoroDoc();
     controlPlaneMirror(warm).dispose();
@@ -60,7 +60,7 @@ describe('control-plane Mirror (history: Ignore)', () => {
     mirror!.dispose();
   });
 
-  it('leaves an untouched root from a newer peer intact when writing', () => {
+  it('leaves an untouched root from a newer peer intact when writing', async () => {
     // Forward compatibility (see providers/AGENTS.md): the facade answers root
     // enumeration with nothing, so a root this build does not declare and that
     // never changes during the session is invisible to Mirror state. What must
@@ -70,6 +70,7 @@ describe('control-plane Mirror (history: Ignore)', () => {
     doc.getMap('session').set('id', FIXTURE_SESSION_ID);
     doc.getMap('futureFeature').set('state', 'preparing');
     doc.commit();
+    await flushReaderChanges();
     const before = JSON.stringify(doc.getMap('futureFeature').toJSON());
 
     const mirror = controlPlaneMirror(doc);
@@ -83,14 +84,14 @@ describe('control-plane Mirror (history: Ignore)', () => {
     mirror.dispose();
   });
 
-  it('keeps a stray write to the history key out of the document', () => {
+  it('keeps a stray write to the history key out of the document', async () => {
     // Nothing should reach `setState` with a `history` key any more. If a path
     // is ever missed, an ignored field is skipped on WRITE, so the durable list
     // is untouched — the miss stays an in-memory phantom on that Mirror rather
     // than a second, divergent copy of the conversation in the doc. Reading it
     // back is what `SessionDocState` (which omits `history`) rules out.
     const doc = buildLargeDoc(4);
-    const view = createConversationViewFromDoc(doc, {
+    const view = await openReaderView(doc, {
       sessionId: FIXTURE_SESSION_ID,
       scheduleIdle: createManualIdle().scheduleIdle,
     });
@@ -112,10 +113,10 @@ describe('control-plane Mirror (history: Ignore)', () => {
     view.dispose();
   });
 
-  it('does not see history events, but still sees other roots and unknown roots', () => {
+  it('does not see history events, but still sees other roots and unknown roots', async () => {
     const doc = new LoroDoc();
     const idle = createManualIdle();
-    const view = createConversationViewFromDoc(doc, {
+    const view = await openReaderView(doc, {
       sessionId: FIXTURE_SESSION_ID,
       scheduleIdle: idle.scheduleIdle,
     });
@@ -134,7 +135,9 @@ describe('control-plane Mirror (history: Ignore)', () => {
     const items = last.get('items') as LoroList;
     ((items.get(items.length - 1) as LoroMap).get('text') as LoroText).insert(0, 'more ');
     doc.commit();
+    await flushReaderChanges();
     writer.append(buildFixtureHistory(3)[4] as SessionHistory);
+    await flushReaderChanges();
     expect(notifications).toBe(0);
     expect((mirror.getState() as { history?: unknown }).history).toBeUndefined();
     expect(view.turnCount).toBe(5);
@@ -142,12 +145,14 @@ describe('control-plane Mirror (history: Ignore)', () => {
     // A control-plane root written directly on the doc still flows through.
     doc.getMap('session').set('title', 'renamed');
     doc.commit();
+    await flushReaderChanges();
     expect(notifications).toBe(1);
     expect((mirror.getState().session as { title?: string }).title).toBe('renamed');
 
     // A root this build does not declare (a newer peer's) also arrives via events.
     doc.getMap('futureFeature').set('state', 'preparing');
     doc.commit();
+    await flushReaderChanges();
     expect((mirror.getState() as Record<string, unknown>).futureFeature).toEqual({
       state: 'preparing',
     });
@@ -164,7 +169,7 @@ describe('control-plane Mirror (history: Ignore)', () => {
 });
 
 describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
-  it('preserves opaque history while appending and updating known fields', () => {
+  it('preserves opaque history while appending and updating known fields', async () => {
     const doc = new LoroDoc();
     const seed = createHistoryWriter(doc);
     const entry = buildFixtureHistory(1)[0]!;
@@ -174,6 +179,7 @@ describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
     items.push({ type: 'future-card', opaque: { body: 'keep' } });
     map.set('futureField', { value: 42 });
     doc.commit();
+    await flushReaderChanges();
     const before = map.toJSON();
     const idle = createManualIdle();
     const session = createConversationSession(doc, {
@@ -193,16 +199,14 @@ describe.each([true, false])('shared writer with windowed=%s', (windowed) => {
 });
 
 it.each([true, false])(
-  'closing the composed store invalidates snapshots in windowed=%s',
+  'store disposal leaves detached captures readable in windowed=%s',
   async (windowed) => {
-    const doc = new LoroDoc();
-    const store = createConversationSession(doc, { sessionId: FIXTURE_SESSION_ID, windowed });
+    const store = createConversationSession(new LoroDoc(), {
+      sessionId: FIXTURE_SESSION_ID,
+      windowed,
+    });
     const snapshot = await store.sessionData.snapshots.capture();
     store.dispose();
-    store.dispose();
-    await expect(snapshot.read()).rejects.toMatchObject({ code: 'source_closed' });
-    await expect(store.sessionData.snapshots.capture()).rejects.toMatchObject({
-      code: 'source_closed',
-    });
+    expect(snapshot.history).toEqual([]);
   }
 );

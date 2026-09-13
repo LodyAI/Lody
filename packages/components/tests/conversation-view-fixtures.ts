@@ -62,7 +62,11 @@ export function buildFixtureHistory(rounds: number): SessionHistory[] {
       { type: 'text', text: `Answer for round ${round}. `.repeat(3) },
     ];
     if (round % 5 === 2) {
-      items.push({ type: 'system_notice', name: 'chat_failed', meta: { reason: 'acp_provider_overloaded' } });
+      items.push({
+        type: 'system_notice',
+        name: 'chat_failed',
+        meta: { reason: 'acp_provider_overloaded' },
+      });
     }
     if (round % 7 === 3) {
       items.push({
@@ -84,7 +88,14 @@ export function buildFixtureHistory(rounds: number): SessionHistory[] {
       permissionWaitMs: round,
       fileDiff:
         round % 2 === 0
-          ? [{ filePath: `src/module-${round}.ts`, add: round, del: 1, cc: { v: 1, fileId: `f-${round}` } }]
+          ? [
+              {
+                filePath: `src/module-${round}.ts`,
+                add: round,
+                del: 1,
+                cc: { v: 1, fileId: `f-${round}` },
+              },
+            ]
           : [],
       modelInfo: { modelId: 'sonnet', name: 'sonnet', _meta: { provider: 'anthropic' } },
       items,
@@ -156,4 +167,54 @@ export function createManualIdle(): ManualIdle {
     },
     pending: () => tasks.length,
   };
+}
+
+/** Test composition uses the shipped reader; the structure signal marks initial indexing. */
+export async function openReaderView(
+  doc: LoroDoc,
+  options: import('../src/lib/conversation-view/create-conversation-view-from-reader').CreateConversationViewFromReaderOptions
+) {
+  const { createLoroSessionData } = await import('@lody/shared/session-data');
+  const { createConversationViewFromReader } =
+    await import('../src/lib/conversation-view/create-conversation-view-from-reader');
+  const data = createLoroSessionData({ sessionId: options.sessionId, doc });
+  const view = createConversationViewFromReader(data.history, options);
+  await new Promise<void>((resolve) => {
+    const unsubscribe = view.subscribe((change) => {
+      if (change.kind === 'structure') {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+  const tail = view.acquireRange(
+    Math.max(0, view.turnCount - (options.tailKeep ?? 20)),
+    view.turnCount
+  );
+  await tail.ready;
+  tail.release();
+  const dispose = view.dispose;
+  view.dispose = () => {
+    dispose();
+    data.snapshots.closeSource();
+  };
+  return view;
+}
+
+export async function flushReaderChanges() {
+  // All reader operations in these fixtures resolve as microtasks.
+  for (let i = 0; i < 100; i++) await Promise.resolve();
+}
+
+/** A peer-side field edit, deliberately outside the display reader. */
+export function writeStoredField(
+  data: import('@lody/shared/session-data').LoroSessionData,
+  id: string,
+  key: import('@lody/shared/session-data').SessionWritableField,
+  change: { kind: 'set'; value: unknown } | { kind: 'clear' }
+) {
+  if (!data.writer.setField(id, key, (change.kind === 'set' ? change.value : undefined) as never)) {
+    throw new Error(`Missing fixture turn ${id}`);
+  }
+  return { status: 'accepted' as const };
 }

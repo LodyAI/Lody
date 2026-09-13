@@ -1,12 +1,10 @@
+import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import { schema, Mirror, type SchemaType } from 'loro-mirror';
 import { LoroDoc, LoroMap, LoroText, type LoroList } from 'loro-crdt';
 import { sessionHistorySchema } from '@lody/shared';
-import { createConversationViewFromDoc, createHistoryWriter } from '../src/lib/conversation-view';
-import {
-  getMapFieldSchema,
-  writeMapEntry,
-} from '../../shared/src/history-materializer';
+import { createHistoryWriter } from '../src/lib/conversation-view';
+import { getMapFieldSchema, writeMapEntry } from '../../shared/src/history-materializer';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -22,7 +20,7 @@ const hinted = (storageSchema: SchemaType) => {
 };
 
 describe('optional string storage layouts', () => {
-  it('writes the same fresh container shape as an explicit Mirror layout', () => {
+  it('writes the same fresh container shape as an explicit Mirror layout', async () => {
     const layout = schema.LoroList(
       schema.LoroMap({
         output: schema.LoroText(),
@@ -61,7 +59,7 @@ describe('optional string storage layouts', () => {
     mirror.dispose();
   });
 
-  it('HistoryWriter preserves old Text ids and primitive strings with hinted schemas', () => {
+  it('HistoryWriter preserves old Text ids and primitive strings with hinted schemas', async () => {
     const history = buildFixtureHistory(1);
     const doc = buildSessionDoc(history);
     const turn = doc.getList('history').get(1) as LoroMap;
@@ -71,6 +69,7 @@ describe('optional string storage layouts', () => {
     const titleId = legacyTitle.id;
     item.set('toolName', 'legacy primitive');
     doc.commit();
+    await flushReaderChanges();
     const itemSchema = sessionHistorySchema.definition.items.itemSchema;
     const definition = itemSchema.definition as Record<string, SchemaType>;
     const previousToolName = definition.toolName;
@@ -79,7 +78,7 @@ describe('optional string storage layouts', () => {
       definition.toolName = hinted(schema.LoroText());
       itemSchema.catchallType.options.defaultLoroText = false;
       const idle = createManualIdle();
-      const view = createConversationViewFromDoc(doc, {
+      const view = await openReaderView(doc, {
         sessionId: FIXTURE_SESSION_ID,
         scheduleIdle: idle.scheduleIdle,
       });

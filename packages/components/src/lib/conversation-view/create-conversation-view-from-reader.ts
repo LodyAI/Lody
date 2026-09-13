@@ -19,8 +19,7 @@ import {
 
 // # Reader-backed ConversationView
 //
-// The same `ConversationView` contract as `createConversationViewFromDoc`, but
-// over the CRDT-neutral `SessionHistoryReader` port: this module never imports
+// Windowed display cache over `SessionHistoryReader`: this module never imports
 // loro-crdt, never names a CID or container id, and never touches a raw doc.
 // Every synchronous accessor reads an in-memory snapshot that asynchronous
 // port reads populate; `readDirectory` supplies the index rows (scalars, send
@@ -305,10 +304,7 @@ export function createConversationViewFromReader(
         evict();
         if (!emitEvents || hi < 0) continue;
         bump();
-        emit({ kind: 'index', from: lo, to: hi + 1 });
-        for (const pos of positions) {
-          emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
-        }
+        emit({ kind: 'changed', ids: positions.map((pos) => ids[pos]!) });
       }
       if (disposed || cancelled?.()) return;
       for (const id of stale) {
@@ -410,8 +406,7 @@ export function createConversationViewFromReader(
     if (disposed) return;
     if (changed) {
       bump();
-      emit({ kind: 'index' });
-      emit({ kind: 'tail', from: tailStart(), to: ids.length });
+      emit({ kind: 'changed', ids: ids.slice(tailStart()) });
     }
     if (complete) resolveReady();
     else scheduleIdlePass(false);
@@ -473,9 +468,7 @@ export function createConversationViewFromReader(
       if (loPositions.length > 0) {
         evict();
         bump();
-        for (const pos of loPositions) {
-          emit({ kind: pos >= tailStart() ? 'tail' : 'range', from: pos, to: pos + 1 });
-        }
+        emit({ kind: 'changed', ids: loPositions.map((pos) => ids[pos]!) });
       }
       if (stale.length === 0) return;
       for (const id of stale) if (indexById.has(id)) nextPending.push(id);
@@ -543,12 +536,13 @@ export function createConversationViewFromReader(
         hi = Math.max(hi, pos);
       }
       bump();
-      if (hi >= 0) emit({ kind: 'index', from: lo, to: hi + 1 });
+      if (hi >= 0) emit({ kind: 'changed', ids: [] });
       // Index notifications also occur for summary maintenance. A storage
       // content edit must separately invalidate body-derived facts even when
       // this view no longer holds the body. Otherwise an old goal/file diff
       // stays cached forever in derivations outside the hydrated tail.
-      for (const pos of evictedChanges) emit({ kind: 'range', from: pos, to: pos + 1 });
+      if (evictedChanges.length > 0)
+        emit({ kind: 'changed', ids: evictedChanges.map((pos) => ids[pos]!) });
       if (toReRead.length > 0) await applyHydratedReplacement(toReRead);
       // A summary that was invalidated needs the background pass again; restart
       // from the end so a cursor that already moved past this row revisits it.
@@ -596,7 +590,6 @@ export function createConversationViewFromReader(
     }
     bump();
     emit({ kind: 'structure', from: fromIndex, to: ids.length });
-    emit({ kind: 'index', from: fromIndex, to: ids.length });
     scheduleIdlePass();
   };
 
@@ -658,7 +651,6 @@ export function createConversationViewFromReader(
     if (disposed) return;
     bump();
     emit({ kind: 'structure', from: structuralFrom, to: ids.length });
-    emit({ kind: 'index', from: 0, to: ids.length });
     scheduleIdlePass();
   };
 
@@ -755,7 +747,6 @@ export function createConversationViewFromReader(
     // Everything appeared in one go: positional consumers must (re)acquire,
     // and index consumers see the whole window.
     emit({ kind: 'structure', from: 0, to: ids.length });
-    emit({ kind: 'index', from: 0, to: ids.length });
   };
 
   // ---- observation (the only subscription) -------------------------------------

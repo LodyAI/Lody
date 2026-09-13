@@ -1,3 +1,4 @@
+import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -11,7 +12,6 @@ import {
 } from '../src/hooks/use-conversation-view';
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
 import {
-  createConversationViewFromDoc,
   createConversationSession,
   collectConversationConfigSources,
   type ConversationView,
@@ -45,10 +45,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-function openView(rounds: number) {
+async function openView(rounds: number) {
   const doc = reimport(buildSessionDoc(buildFixtureHistory(rounds)));
   const idle = createManualIdle();
-  const view = createConversationViewFromDoc(doc, {
+  const view = await openReaderView(doc, {
     sessionId: FIXTURE_SESSION_ID,
     maxHydrated: 4,
     tailKeep: 2,
@@ -66,7 +66,7 @@ const flush = async () => {
 
 describe('conversation view React readers', () => {
   it('rehydrates a mounted viewport after same-length replacement and releases it on unmount', async () => {
-    const { doc, view, idle } = openView(150);
+    const { doc, view, idle } = await openView(150);
     function Probe() {
       useConversationVersion(view);
       useTurnRange(view, 20, 30);
@@ -84,6 +84,7 @@ describe('conversation view React readers', () => {
         turn.set('role', 'assistant');
       }
       doc.commit();
+      await flushReaderChanges();
       idle.runAll();
     });
     await flush();
@@ -96,7 +97,7 @@ describe('conversation view React readers', () => {
   });
 
   it('indexes bulk appends while search remains open and releases all history on close', async () => {
-    const { doc, view, idle } = openView(1);
+    const { doc, view, idle } = await openView(1);
     let blocks: SessionSearchBlock[] = [];
     function Probe({ open }: { open: boolean }) {
       blocks = useIncrementalSearchBlocks(view, open);
@@ -121,7 +122,7 @@ describe('conversation view React readers', () => {
   });
 
   it('refreshes cached search positions after insertion and deletion', async () => {
-    const { doc, view } = openView(3);
+    const { doc, view } = await openView(3);
     let blocks: SessionSearchBlock[] = [];
     function Probe() {
       blocks = useIncrementalSearchBlocks(view, true);
@@ -134,13 +135,15 @@ describe('conversation view React readers', () => {
       turn.set('id', 'prepended');
       turn.set('role', 'system');
       doc.commit();
+      await flushReaderChanges();
     });
     await flush();
-    expect(view.turn(2)).toBe(original);
+    expect(view.turn(2)).toEqual(original);
     expect(blocks.find((block) => block.messageId === 'a-0')?.messageIndex).toBe(2);
     await act(async () => {
       doc.getList('history').delete(0, 1);
       doc.commit();
+      await flushReaderChanges();
     });
     await flush();
     expect(blocks.find((block) => block.messageId === 'a-0')?.messageIndex).toBe(1);

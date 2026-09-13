@@ -1,12 +1,6 @@
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { indexRowFromEntry } from './index-row';
-import {
-  conversationTailStart,
-  DEFAULT_TAIL_KEEP,
-  type ConversationView,
-  type ConversationViewListener,
-  type TurnIndexRow,
-} from './types';
+import { type ConversationView, type ConversationViewListener, type TurnIndexRow } from './types';
 
 export type CreateConversationViewFromHistoryOptions = {
   sessionId: SessionId;
@@ -25,7 +19,6 @@ export type CreateConversationViewFromHistoryOptions = {
 export function createConversationViewFromHistory(
   options: CreateConversationViewFromHistoryOptions
 ): ConversationView {
-  const tailKeep = options.tailKeep ?? DEFAULT_TAIL_KEEP;
   const rowsByEntry = new WeakMap<SessionHistory, TurnIndexRow>();
   const listeners = new Set<ConversationViewListener>();
   let history = options.getHistory();
@@ -53,23 +46,16 @@ export function createConversationViewFromHistory(
       indexById = buildIndexById(next);
     }
     version += 1;
-    const tailFrom = conversationTailStart(next.length, tailKeep);
-    if (structural)
+    if (structural) {
       for (const listener of listeners) listener({ kind: 'structure', from: 0, to: next.length });
-    for (const listener of listeners) listener({ kind: 'index' });
-    for (const listener of listeners) listener({ kind: 'tail', from: tailFrom, to: next.length });
-    let lo = Number.POSITIVE_INFINITY;
-    let hi = -1;
-    for (let i = 0; i < Math.min(tailFrom, previous.length); i += 1) {
-      if (previous[i] === next[i]) continue;
-      lo = Math.min(lo, i);
-      hi = Math.max(hi, i);
+    } else {
+      const ids = next.filter((entry, i) => entry !== previous[i]).map((entry) => entry.id);
+      for (const listener of listeners) listener({ kind: 'changed', ids });
     }
-    if (hi >= 0)
-      for (const listener of listeners) listener({ kind: 'range', from: lo, to: hi + 1 });
   });
 
   return {
+    readAll: async () => history.slice(),
     sessionId: options.sessionId,
     get turnCount() {
       return history.length;

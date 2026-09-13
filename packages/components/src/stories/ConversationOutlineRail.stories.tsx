@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { sessionDocSchema } from '@lody/shared';
-import { createConversationViewFromDoc, type ConversationView } from '@/lib/conversation-view';
+import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
@@ -395,10 +395,11 @@ function ExtremeConversationViewFrame() {
     });
     mirror.setState((previous) => ({ ...previous, history: history as never }));
     mirror.dispose();
-    const next = createConversationViewFromDoc(doc, { sessionId });
+    const session = createConversationSession(doc, { sessionId, windowed: true });
+    const next = session.history;
     setView(next);
     return () => {
-      next.dispose();
+      session.dispose();
       doc.free();
     };
   }, [sessionId]);

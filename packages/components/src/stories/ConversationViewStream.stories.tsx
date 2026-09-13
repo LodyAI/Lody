@@ -7,18 +7,14 @@
  * "Worked for …" group to check that expansion still lands rows under the
  * same rail.
  */
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
-import {
-  createConversationViewFromDoc,
-  createHistoryWriter,
-  type ConversationView,
-} from '@/lib/conversation-view';
+import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 
 const meta = {
   title: 'Sessions/ConversationView',
@@ -34,12 +30,13 @@ const ROUNDS = 1500; // 3,000 turns
 /** Deterministic — no `Math.random`, no clock. */
 const LOREM =
   'Only the viewport is hydrated; every other turn is a placeholder sized from its index row until the reader gets there. ';
-const CJK =
-  '只有视口附近的轮次会被加载；其余轮次先用索引行估算高度，等滚动到达时再换成真实内容。';
+const CJK = '只有视口附近的轮次会被加载；其余轮次先用索引行估算高度，等滚动到达时再换成真实内容。';
 
 const paragraphs = (count: number, seed: number): string =>
   Array.from({ length: count }, (_unused, index) =>
-    (index + seed) % 3 === 2 ? CJK.repeat(2 + ((index + seed) % 3)) : LOREM.repeat(2 + ((index + seed) % 4))
+    (index + seed) % 3 === 2
+      ? CJK.repeat(2 + ((index + seed) % 3))
+      : LOREM.repeat(2 + ((index + seed) % 4))
   ).join('\n\n');
 
 const at = (n: number) => new Date(Date.UTC(2026, 7, 19, 9, 0, 0) + n * 60_000).toISOString();
@@ -101,7 +98,10 @@ function buildHistory(rounds: number): SessionHistory[] {
           kind: 'edit',
           rawInput: { path: `src/module-${round}.ts` },
         },
-        { type: 'text', text: `Answer for round ${round + 1}.\n\n${paragraphs(paragraphCount, round)}` },
+        {
+          type: 'text',
+          text: `Answer for round ${round + 1}.\n\n${paragraphs(paragraphCount, round)}`,
+        },
       ],
     } as unknown as SessionHistory);
   }
@@ -112,8 +112,15 @@ function buildHistory(rounds: number): SessionHistory[] {
 function openWindowedView(rounds: number): ConversationView {
   const doc = new LoroDoc();
   doc.getMap('session').set('id', sessionId);
-  const view = createConversationViewFromDoc(doc, { sessionId });
-  const writer = createHistoryWriter(doc);
+  const session = createConversationSession(doc, { sessionId, windowed: true });
+  const view = session.history;
+  const dispose = view.dispose;
+  view.dispose = () => {
+    view.dispose = dispose;
+    session.dispose();
+    doc.free();
+  };
+  const writer = session.historyWriter;
   for (const entry of buildHistory(rounds)) writer.append(entry);
   return view;
 }
@@ -124,7 +131,12 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
 }) => <MessageRowView message={message} sessionId={rowSessionId} />;
 
 function WindowedStream({ rounds }: { rounds: number }) {
-  const view = useMemo(() => openWindowedView(rounds), [rounds]);
+  const [view, setView] = useState<ConversationView | null>(null);
+  useEffect(() => {
+    const next = openWindowedView(rounds);
+    setView(next);
+    return () => next.dispose();
+  }, [rounds]);
   const {
     items,
     lastAssistantMessageId,

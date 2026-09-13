@@ -1,11 +1,21 @@
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
-import { createMemorySessionData } from '@lody/shared/session-data';
-import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+const createFixtureData = (options: { sessionId: SessionId; initialTurns: SessionHistory[] }) => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  for (const turn of options.initialTurns) writer.append(turn);
+  return {
+    ...createLoroSessionData({ sessionId: options.sessionId, doc, writer }),
+    readStored: () => writer.readStored(),
+  };
+};
 
-// The renderer's real writer runs against the independent in-memory
-// `SessionData`: no Loro, Mirror, CID or storage offset. This is what proves the
-// UI consumer depends on the port contract, not on the Loro adapter.
+// The renderer's real writer runs against the real Loro
+// `SessionData`: using the same shared writer as production.
 
 const sessionId = 'session-1' as SessionId;
 
@@ -46,11 +56,11 @@ const proposalTurn = (): SessionHistory => ({
   fileDiff: [],
 });
 
-describe('renderer session writer over the in-memory SessionData', () => {
-  const createWriter = (memory: ReturnType<typeof createMemorySessionData>) =>
+describe('renderer session writer over the in-storage SessionData', () => {
+  const createWriter = (storage: ReturnType<typeof createFixtureData>) =>
     createDirectWorkspaceWriter({
       repo: { upsertDocMeta: async () => {} } as never,
-      acquireSessionStore: async () => ({ sessionData: memory }) as never,
+      acquireSessionStore: async () => ({ sessionData: storage }) as never,
       releaseSessionStoreRef: () => {},
       acquirePreviewVisualCommentStore: async () => {
         throw new Error('not used');
@@ -59,11 +69,11 @@ describe('renderer session writer over the in-memory SessionData', () => {
     });
 
   it('appends, replaces and answers domain commands through the port', async () => {
-    const memory = createMemorySessionData({
+    const storage = createFixtureData({
       sessionId,
       initialTurns: [permissionTurn(), proposalTurn()],
     });
-    const writer = createWriter(memory);
+    const writer = createWriter(storage);
 
     await writer.appendSessionTurn(sessionId, userTurn('user-1'));
     await writer.appendSessionHistory(sessionId, userTurn('user-2'));
@@ -82,7 +92,7 @@ describe('renderer session writer over the in-memory SessionData', () => {
       taskId: 'task-1',
     });
 
-    const stored = memory.readStored();
+    const stored = storage.readStored();
     expect(stored.map((turn) => turn.id)).toEqual([
       'assistant-1',
       'proposal-1',
@@ -101,8 +111,8 @@ describe('renderer session writer over the in-memory SessionData', () => {
   });
 
   it('surfaces a rejected domain command instead of silently dropping the write', async () => {
-    const memory = createMemorySessionData({ sessionId, initialTurns: [] });
-    const writer = createWriter(memory);
+    const storage = createFixtureData({ sessionId, initialTurns: [] });
+    const writer = createWriter(storage);
 
     await expect(
       writer.appendSessionTurn(sessionId, {
@@ -110,7 +120,7 @@ describe('renderer session writer over the in-memory SessionData', () => {
         items: [{ type: 'text' }],
       } as SessionHistory)
     ).rejects.toThrow('Invalid history write');
-    expect(memory.readStored()).toEqual([]);
+    expect(storage.readStored()).toEqual([]);
 
     // A proposal a peer removed is a best-effort no-op, not a failure.
     await expect(

@@ -1,6 +1,5 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import { CONVERSATION_VIEW_STORAGE_KEY } from '@/lib/conversation-view/feature-flag';
 import type { MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { isSymbolFontFamily } from '@/lib/local-fonts';
@@ -278,19 +277,6 @@ export const REVIEW_AGENT_EXPERIMENT_STORAGE_KEY = 'lody-review-agent-enabled';
 export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   EXPERIMENTAL_FEATURES_STORAGE_KEY,
   false,
-  undefined,
-  { getOnInit: true }
-);
-
-/**
- * Rollback switch for windowed conversation rendering (on by default; the
- * build-time env `LODY_CONVERSATION_VIEW=0` overrides it). Read once per
- * session store creation, so a change applies to conversations opened next.
- * See `lib/conversation-view/feature-flag.ts`.
- */
-export const conversationViewEnabledAtom = atomWithStorage<boolean>(
-  CONVERSATION_VIEW_STORAGE_KEY,
-  true,
   undefined,
   { getOnInit: true }
 );
