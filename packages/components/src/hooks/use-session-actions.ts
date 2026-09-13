@@ -233,17 +233,6 @@ function getDirectChildSessions(
   );
 }
 
-function getArchiveStateTargets(
-  sessionId: SessionId,
-  rootMeta: SessionMeta,
-  sessions: readonly SessionMeta[]
-): SessionMeta[] {
-  return [
-    { ...rootMeta, id: rootMeta.id ?? sessionId },
-    ...getDirectChildSessions(sessionId, sessions),
-  ];
-}
-
 async function assertArchivedLocalProjectCanRestore(
   runtime: WorkspaceRuntime,
   sessionMeta: SessionMeta
@@ -1225,11 +1214,10 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = [
+        { ...sessionMeta, id: sessionMeta.id ?? sessionId },
+        ...getDirectChildSessions(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
+      ];
 
       for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {

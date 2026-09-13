@@ -1587,9 +1587,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
       void archiveSession(sessionId as SessionId)
-        .then(() => {
+        .then(async () => {
           if (!workspaceSlug || selectedSessionId !== sessionId) return;
-          return router.navigate({
+          await router.navigate({
             to: '/$workspaceName/chat',
             params: { workspaceName: workspaceSlug },
           });

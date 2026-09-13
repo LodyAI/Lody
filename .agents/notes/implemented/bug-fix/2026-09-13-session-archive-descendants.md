@@ -37,3 +37,16 @@ metadata-readiness gap remains outside this change.
 The hook suite passed 35 tests and the CLI command suite passed 66 tests. Shared
 package type checking, changed-code lint and document checks passed. Sidebar archive
 failures now display an error and navigation waits for successful completion.
+
+## Ablation and CI follow-up
+
+| Experiment                                                           | Evidence                                                                                       | Decision                                              |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Remove the separate traversal queue; iterate the growing visited Set | All 35 action tests pass, including nested descendants and cycles                              | Keep: one collection owns discovery and deduplication |
+| Inline the single-use restore target wrapper                         | All 35 action tests pass, including restore and deletion isolation                             | Keep: remove the obsolete archive-named abstraction   |
+| Remove the metadata readiness guard                                  | The cold-cache archive regression fails: archive resolves instead of rejecting before mutation | Reject; restore the guard                             |
+
+CI's Static checks failed on `typescript-eslint(consistent-return)` in the sidebar:
+the success callback mixed an empty return with a returned navigation Promise. Making
+the callback async and awaiting navigation retains error propagation and passes the
+same type-aware lint locally. Non-type-aware lint had missed this error previously.

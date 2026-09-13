@@ -15,14 +15,12 @@ export function collectSessionArchiveTargets(
     children.set(owner, siblings);
   }
   const visited = new Set<SessionId>([sessionId]);
-  const queue = [sessionId];
   const targets: SessionMeta[] = [];
-  for (const parentId of queue) {
+  for (const parentId of visited) {
     for (const child of children.get(parentId) ?? []) {
       if (visited.has(child.id)) continue;
       visited.add(child.id);
       targets.push(child);
-      queue.push(child.id);
     }
   }
   return targets;
