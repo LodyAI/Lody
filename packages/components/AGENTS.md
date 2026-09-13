@@ -24,8 +24,7 @@ mobile surfaces. Background for the rules below:
   before choosing the secondary: one remaining type uses its icon; multiple types use
   `+N` with their unique Session count (`+1` is valid). Require ids for nested/duplicate inputs.
   Omit single counts unless the second item is mixed `+N`; initializing uses running. Expanded/removing groups hide the
-  aggregate. Preserve disclosure and Session end-slot status. See the
-  [draft contract](../../specs/collapsed-project-activity.zh.md).
+  aggregate. Preserve disclosure and Session end-slot status.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
