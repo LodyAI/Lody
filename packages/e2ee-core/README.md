@@ -77,17 +77,16 @@ out-of-band genesis hash; do not pass `verified=true`. Conflicts never
 re-sign; retry the exact pending bytes.
 Lean lives in the private `proofs/e2ee` model (finite; not a protocol proof).
 
-**P4 handoff draft (V1+V2 workspace SHA, not V4 / not a git commit).** After V2
-internalization, ledger concat SHA-256
+**P4 freeze (V4口径 1).** Git `feat-e2ee-core`
+`147e8224c83c3753a7c81e59377ecbf50a47fdad` (not pushed). Ledger concat SHA-256
 `c5f51a0bd4323ff53e86d1ec0cea6d2912e62aa7f383197d933f992a01a6dd56`.
-V1 review SHA was ledger `aba164b…` / public-e2ee `194b4ad8…`.
 Integrators should use `Ledger` / `@lody/e2ee-core/ledger` / `./streams` /
 `./streams-content` / recovery-file helpers. Host must supply atomic Streams CAS,
 15-minute JWT freshness, and an out-of-band genesis hash; this package does not
 verify those. Tag 6 is D1 A unilateral Owner transfer (predecessor becomes Admin).
-10k from-zero is still far above 100ms. Full host/limit/gap list: private
-`plans/e2ee-next.md` “P4 交付草稿”. Do not treat this SHA as an integration
-contract until V4 is checked. P1 semantics (D1–D5) are written; this SHA is not V4.
+10k from-zero is still far above 100ms (recorded miss, bar not lowered). Passkey
+PRF and real phones are host/device preconditions. Full host/limit/gap list:
+private `plans/e2ee-next.md` “P4 交付草稿”. Do not enable product E2EE.
 
 Experimental control-log and signed content-encryption primitives. **Electron main imports the device store only;
 it is not end-to-end encryption for Lody.** [Protocol draft](../../specs/e2ee-control-log.zh.md).
