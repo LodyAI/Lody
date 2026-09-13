@@ -1,8 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { prepareSharePackage, readPreparedShareHistory } from '../src/session-share-export';
+import {
+  prepareSharePackage as captureSharePackage,
+  readPreparedShareHistory,
+} from '../src/session-share-export';
 import { verifyShareObject } from '../src/session-share-package';
 
 const capturedAt = '2026-09-12T00:00:00.000Z';
+// Retain coverage of the file-copy path for the future rollout.
+const prepareSharePackage = (options: Parameters<typeof captureSharePackage>[0]) =>
+  captureSharePackage({ ...options, fileAttachmentsEnabled: true });
+
+it('omits file blocks by default without reading them, while still copying images', async () => {
+  const file = history()[0]!.items[1]!;
+  const source = [
+    {
+      id: 'm',
+      role: 'user',
+      items: [
+        file,
+        { type: 'image', imageId: 'image', mimeType: 'image/png' },
+        { type: 'content', content: [{ ...file, transport: 'r2' }] },
+      ],
+      inputConfig: { inputBlocks: [file] },
+    },
+  ];
+  const before = JSON.stringify(source);
+  const reads: string[] = [];
+  const prepared = await captureSharePackage({
+    rootSourceId: 'root',
+    capturedAt,
+    conversations: [{ sourceId: 'root', title: '', history: source }],
+    fileAttachmentOmissionText: '文件附件未包含在此次分享中',
+    readAttachment: async ({ kind }) => {
+      reads.push(kind);
+      if (kind !== 'image') throw new Error('File must never be read');
+      return { bytes: new Uint8Array([1, 2, 3]), mediaType: 'image/png' };
+    },
+  });
+  expect(reads).toEqual(['image']);
+  expect(prepared.manifest.attachments.map((a) => a.kind)).toEqual(['image']);
+  expect(prepared.objects.size).toBe(2);
+  expect(prepared.uncopiedResourceCount).toBe(3);
+  const output = readPreparedShareHistory(prepared, 'c1');
+  const notice = { type: 'text', text: '文件附件未包含在此次分享中' };
+  expect(output[0]).toMatchObject({
+    items: [notice, { type: 'image' }, { type: 'content', content: [notice] }],
+    inputConfig: { inputBlocks: [notice] },
+  });
+  expect(JSON.stringify(output)).not.toMatch(/source-file|inherited-source|private.txt|report.txt/);
+  expect(JSON.stringify(source)).toBe(before);
+});
 const history = () => [
   {
     id: 'm1',

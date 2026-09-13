@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+/** Product rollout switch, shared by capture and publication authorization. */
+export const SESSION_SHARE_FILE_ATTACHMENTS_ENABLED: boolean = false;
+
+export function assertShareAttachmentPolicy(manifest: SharePackageManifest): void {
+  if (
+    !SESSION_SHARE_FILE_ATTACHMENTS_ENABLED &&
+    manifest.attachments.some((a) => a.kind === 'file')
+  )
+    throw new Error('share_file_attachments_disabled');
+}
+
 /** Portable published data, deliberately independent of Loro and workspace auth. */
 export const SHARE_LIMITS = {
   conversations: 32,

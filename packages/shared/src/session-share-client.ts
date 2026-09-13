@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   SHARE_LIMITS,
+  assertShareAttachmentPolicy,
   SharePackageManifestSchema,
   ShareResourceId,
   validateShareHistory,
@@ -177,6 +178,7 @@ export async function uploadPreparedShare(options: {
   fetch?: typeof globalThis.fetch;
   onProgress?: (uploadedBytes: number, totalBytes: number) => void;
 }): Promise<void> {
+  assertShareAttachmentPolicy(options.prepared.manifest);
   const deploymentId = ShareResourceId.parse(options.deploymentId);
   const request = shareFetch(options);
   const totalBytes = options.prepared.manifest.objects.reduce(
