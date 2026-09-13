@@ -179,11 +179,43 @@ describe('usage delivery', () => {
     persisted = [];
     service.recordSessionUsageUpdate(input(100, 'codex'));
     const reset = input(0, 'codex');
-    reset.update.usage.outputTokens = 0;
+    reset.update.usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+    reset.update.modelUsage = { synthetic: { ...reset.update.usage } };
     service.recordSessionUsageUpdate(reset);
     service.recordSessionUsageUpdate(input(20, 'codex'));
     await service.flushSessionUsage('s');
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([120]);
+  });
+
+  it('keeps legacy Codex compaction offsets after acknowledgement without inventing cost', async () => {
+    service.recordSessionUsageUpdate(input(1000, 'codex'));
+    await service.flushSessionUsage('s');
+    const reset = input(0, 'codex');
+    reset.update.usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+    reset.update.modelUsage = { synthetic: { ...reset.update.usage } };
+    service.recordSessionUsageUpdate(reset);
+    await service.flushSessionUsage('s');
+    service.recordSessionUsageUpdate(input(50, 'codex'));
+    await service.flushSessionUsage('s');
+    await service.flushSessionUsage('s');
+    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 1000, 1050]);
+    expect(persisted[2]?.modelUsage?.synthetic.costUSD).toBeUndefined();
+  });
+
+  it('does not apply legacy compaction to adapter-owned cumulative accounting', async () => {
+    const update = input(1000, 'codex');
+    update.update.delta = {
+      usage: update.update.usage,
+      modelUsage: { synthetic: update.update.usage },
+    };
+    service.recordSessionUsageUpdate(update);
+    await service.flushSessionUsage('s');
+    const next = input(1050, 'codex');
+    next.update.usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+    next.update.delta = { usage: next.update.usage, modelUsage: { synthetic: next.update.usage } };
+    service.recordSessionUsageUpdate(next);
+    await service.flushSessionUsage('s');
+    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 1050]);
   });
 
   it('keeps failed cumulative snapshots before newer cumulative snapshots', async () => {

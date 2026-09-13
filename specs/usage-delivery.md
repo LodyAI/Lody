@@ -31,7 +31,14 @@ actual request route, not the currently selected UI model.
 The CLI coalesces cumulative snapshots, including Grok. Failed payloads retain
 their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
-Codex's legacy compaction handling stays separate.
+Codex's legacy compaction offsets survive successful flushes in the same process;
+adapter-owned cumulative updates carrying delta bypass that compatibility path.
+Codex thread totals without model attribution use an explicit unattributed bucket,
+never the currently selected UI model or its price. Claude query and Kimi activation
+snapshots can provide delta without changing their cumulative scope. Kimi source
+changes require a new managed artifact before they affect the consuming runtime.
+Provider costs are preserved; missing cache-write tariffs cannot be replaced with
+cache-read prices. An empty aggregate does not imply a known zero cost.
 
 Eligibility follows the builtin agent catalog, including DeepSeek Harness, not
 the managed-download catalog. Receiving a provider's delta does not prove its

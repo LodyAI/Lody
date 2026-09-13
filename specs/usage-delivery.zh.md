@@ -25,7 +25,11 @@ Replay 不新增用量，模型切换与压缩不清零。新计量生命周期�
 
 CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直至确认，
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
-Codex 原有压缩兼容处理保持独立。
+Codex 旧压缩偏移在同一进程内跨成功 flush 保留；带 delta 的 adapter 自有累计值不走
+该兼容路径。没有模型归属的 Codex thread 总量使用明确的未归属桶，不能使用当前 UI
+模型或其价格。Claude query 和 Kimi activation 快照可提供 delta，而不改变累计范围。
+Kimi 源码变更需新 managed artifact 才会影响实际运行版本。保留 provider 费用；
+缺失 cache-write 费率不能用 cache-read 价格替代。空聚合不代表已知零费用。
 
 是否接收用量取决于 builtin agent catalog（包含 DeepSeek Harness），而非 managed
 下载列表。收到 provider 的 delta 不证明其累计值已符合生命周期契约；

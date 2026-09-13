@@ -56,6 +56,9 @@ DSH 按请求完成时间和 UTC 工作日高峰规则逐请求估算，再累�
 
 ## Builtin 审计更正（2026-09-13）
 
+本审计矩阵描述 e2b55096 基线；下文后续修复仅替代明确修复的条目，不代表解决了
+剩余生命周期和覆盖范围限制。
+
 Adapter 测试通过不代表端到端投递正确。CLI 原先只接受 managed runtime，
 因此排除了 builtin `deepseek`。接收端现改用 builtin catalog，服务类型改为
 `BuiltinAgentType`；不把 DSH 加入 managed 下载，也不为 local composition 启用云服务。
@@ -94,6 +97,42 @@ Codex 先需归一化并解决模型/生命周期归属。不能编造 delta 费
 基线。每条通知随机生成身份、盲加可重放 delta 都不能替代这一设计。尚未修复生命周期，
 也不声称所有 provider 完全合规。隔离 harness 中 13 项投递、16 项解析测试通过。
 指令要求的 `context/message-flow.md` 在此 checkout 不存在；接收端改动仅限 provider 筛选。
+
+## 审查后续：范围内修复
+
+关联审查 PR：[Codex #42](https://github.com/LodyAI/acp-extension-codex/pull/42)、
+[Claude #26](https://github.com/LodyAI/acp-extension-claude/pull/26)、
+[Kimi #10](https://github.com/LodyAI/acp-extension-kimi/pull/10)。Core #9 和 DSH #16
+在原 PR 更新，消费端仍在 Lody #662。
+
+- DSH 改为对实际注册的 `deepseek-official` route 估价。ACP 边界测试对官方与自定义
+  endpoint 输入相同用量，验证只有官方路径带 USD；先前 fixture 的 route 值不正确。
+- Codex 将包含式 input/output 归一化，并保留 cache creation。原生 thread 事件没有
+  per-model 贡献，因此使用明确的 `codex:unattributed` 未归属桶，而不编造模型或估价键。
+  会话持有统计状态，跨原生 context-window fill 重置信号和 prompt handler 保留偏移，
+  返回已包含在累计值内的 delta；顶层仍保持原有累计语义。这不是持久化重启恢复。
+- Claude 拆出可用 thinking，保留历史未知费率状态，上报取消结果中已消耗的用量，
+  并对含子 agent 的 query model totals 求 delta。计数下降时省略 delta，不猜测新生命周期。
+  SDK 未记录的 thinking 明细无法恢复。
+- Kimi 从上次成功发出的 activation 快照求 delta。仓库要求的只读审查发现发送失败被
+  吞掉及并发发送问题，已改为串行发送、成功后推进基线。源码修复仍需构建新的 managed
+  artifact；本次不更新已有锁定 artifact，也不声称运行版本已包含这些改动。
+- CLI 跨确认保留旧 Codex 偏移；带 delta 的 adapter 累计值不再走旧压缩路径。保留未知
+  费用和 provider 估价，缺少 cache-write 费率时省略旧式估价而不是套用 cache-read 价格。
+  Core 空聚合不再返回零费用。
+
+合成验证：隔离依赖 harness 中 Core 3、DSH 16、Codex usage 9、Claude usage 10、Kimi
+projection 7、CLI delivery 15 项通过。提取的实际 Kimi 发送方法还验证了阻塞发送失败后
+补发 delta=150、重复 delta=0；已增加完整 session suite 回归，但未在完整引擎工作区运行。
+Codex bundle、Core build/typecheck、DSH build 通过。完整 Codex typecheck 遇到 harness
+Vitest 下无关 mock 签名错误；Claude build 遇到修改行以外的 SDK union 不匹配，lint 缺
+ESLint。未声称完整工作区或鉴权 runtime 验证通过。
+根 `pnpm check` 停在同一 Claude SDK 不匹配；`pnpm format` 停在 cloud-api 缺少
+Prettier。定向格式化、文档检查、公共/平台边界检查通过。
+
+仍未解决：同 ID resume/reset 需要持久化基线恢复，或消费端支持显式统计生命周期。
+这些范围内修复未授权/实施私有 backend 改动、包发布、历史数据修复或 Kimi artifact
+上线。Codex 未归属模型的 USD 仍未知，不能为了填值恢复按 UI 模型猜价。
 
 ## 取舍与限制
 

@@ -66,6 +66,9 @@ historical request estimates when a later turn crosses a pricing boundary.
 
 ## Builtin audit correction (2026-09-13)
 
+This audit matrix describes baseline e2b55096; the follow-up below supersedes the
+items it explicitly fixes, not the remaining lifetime/coverage limitations.
+
 Adapter tests alone did not establish end-to-end delivery. The CLI accepted only
 managed runtimes, excluding builtin `deepseek`. The receiver now uses the builtin
 catalog and the service accepts `BuiltinAgentType`, without adding DSH to managed
@@ -110,6 +113,55 @@ blindly adding replayable deltas are not substitutes. No lifecycle repair or com
 provider conformance is claimed. The receiver repair passes 13 delivery and 16 parser
 tests in the isolated harness. The required `context/message-flow.md` instruction
 target is absent here; the receiver edit is limited to provider eligibility.
+
+## Review follow-up: scoped repairs
+
+Dependency review PRs: [Codex #42](https://github.com/LodyAI/acp-extension-codex/pull/42),
+[Claude #26](https://github.com/LodyAI/acp-extension-claude/pull/26), and
+[Kimi #10](https://github.com/LodyAI/acp-extension-kimi/pull/10). Core #9 and DSH #16
+are updated in place; the consuming PR remains Lody #662.
+
+- DSH now prices the real registered `deepseek-official` route. ACP-boundary
+  tests exercise official and custom endpoints with identical usage and verify
+  that only the official route receives USD. Earlier tests used the wrong route.
+- Codex normalizes inclusive input/output and keeps cache creation. Native thread
+  events do not identify per-model contributions, so `codex:unattributed` is an
+  explicit unknown-attribution bucket, not a fabricated model or a pricing key.
+  Session-owned accounting retains offsets across native context-window fill
+  sentinels and prompt handlers, emits already-included delta, and preserves the
+  legacy top-level cumulative scope. This is not durable restart restoration.
+- Claude splits available thinking tokens, propagates unknown-price history,
+  reports billed cancelled results, and differences query-wide model totals for
+  delta (including subagents). A decreasing counter omits delta; it does not
+  guess a fresh lifetime. Unrecorded thinking detail cannot be reconstructed.
+- Kimi derives delta from the last successfully emitted activation snapshot.
+  A required read-only review found swallowed send failures and overlapping
+  emissions; these were repaired with serialized emission and success-only
+  baseline advancement. Source changes still require a new managed artifact;
+  the existing locked artifact is not changed or claimed to contain this work.
+- CLI retains legacy Codex offsets after acknowledgement, bypasses that path for
+  adapter-owned cumulative updates with delta, and preserves unknown costs and
+  provider estimates. Without a cache-write tariff it omits a legacy estimate
+  rather than charging the cache-read tariff. Empty Core aggregates have no cost.
+
+Synthetic verification: Core 3, DSH 16, Codex usage 9, Claude usage 10, Kimi
+projection 7, and CLI delivery 15 tests pass in isolated dependency harnesses.
+Actual extracted Kimi emission methods also verify blocked-send failure followed
+by delta=150 recovery and a zero duplicate delta; the full Kimi session suite is
+added but not run in a complete engine workspace. Codex bundles successfully;
+Core build/typecheck and DSH build pass. Full Codex typecheck hits unrelated mock
+signature errors with the harness Vitest; Claude build hits an SDK union mismatch
+outside the edited lines and its lint requires absent ESLint. No full-workspace
+or authenticated runtime pass is claimed.
+Root `pnpm check` stops at the same Claude SDK mismatch; `pnpm format` stops at
+missing Prettier in cloud-api. Targeted formatting, docs check, and public/platform
+boundary checks pass.
+
+Still unresolved: same-ID resume/reset needs durable baseline restoration or an
+explicit accounting-lifetime identity accepted by the consumer. No private backend
+change, package publication, historical data repair, or Kimi artifact rollout is
+authorized/performed by these scoped fixes. Model-unattributed Codex USD remains
+unknown; do not restore guessed UI-model pricing just to fill the field.
 
 ## Alternatives and limits
 

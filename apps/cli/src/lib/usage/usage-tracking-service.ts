@@ -28,6 +28,8 @@ type PendingState = {
   latestMeta: Omit<RecordSessionUsageInput, 'update'>;
   staged: SessionUsageUpdate | null;
   compacted: SessionUsageUpdate | null;
+  // Legacy Codex accounting baseline outlives delivery acknowledgement.
+  lastLegacyCodex: SessionUsageUpdate | null;
   // A failed cumulative snapshot stays queued until acknowledged.
   queued: RecordSessionUsageInput[];
   inFlight: Promise<void> | null;
@@ -54,6 +56,14 @@ const cloneUsageUpdate = (update: SessionUsageUpdate): SessionUsageUpdate => ({
   sessionId: update.sessionId,
   usage: { ...update.usage },
   ...(update.modelUsage ? { modelUsage: cloneModelUsage(update.modelUsage) } : {}),
+  ...(update.delta
+    ? {
+        delta: {
+          usage: { ...update.delta.usage },
+          modelUsage: cloneModelUsage(update.delta.modelUsage) ?? {},
+        },
+      }
+    : {}),
 });
 
 const mergeModelUsage = (
@@ -81,7 +91,10 @@ const mergeModelUsage = (
       reasoningOutputTokens:
         (prev?.reasoningOutputTokens ?? 0) + (usage.reasoningOutputTokens ?? 0),
       webSearchRequests: (prev?.webSearchRequests ?? 0) + (usage.webSearchRequests ?? 0),
-      costUSD: (prev?.costUSD ?? 0) + (usage.costUSD ?? 0),
+      ...((!prev || prev.costUSD !== undefined) && usage.costUSD !== undefined
+        ? { costUSD: (prev?.costUSD ?? 0) + usage.costUSD }
+        : {}),
+      contextWindow: usage.contextWindow ?? prev?.contextWindow,
     };
   }
 
@@ -101,6 +114,10 @@ const mergeUsageUpdate = (
       (base.usage.cacheCreationInputTokens ?? 0) + (delta.usage.cacheCreationInputTokens ?? 0),
     reasoningOutputTokens:
       (base.usage.reasoningOutputTokens ?? 0) + (delta.usage.reasoningOutputTokens ?? 0),
+    webSearchRequests: (base.usage.webSearchRequests ?? 0) + (delta.usage.webSearchRequests ?? 0),
+    ...(base.usage.costUSD !== undefined && delta.usage.costUSD !== undefined
+      ? { costUSD: base.usage.costUSD + delta.usage.costUSD }
+      : {}),
     contextWindow: delta.usage.contextWindow ?? base.usage.contextWindow,
   },
   modelUsage: mergeModelUsage(base.modelUsage, delta.modelUsage),
@@ -142,6 +159,7 @@ export class UsageTrackingService {
       latestMeta,
       staged: null,
       compacted: null,
+      lastLegacyCodex: null,
       queued: [],
       inFlight: null,
     };
@@ -178,7 +196,6 @@ export class UsageTrackingService {
         if (!update) return;
         state.queued.push({ ...state.latestMeta, update });
         state.staged = null;
-        state.compacted = null;
       }
       const snapshot = state.queued[0];
       if (!snapshot) return;
@@ -215,34 +232,42 @@ export class UsageTrackingService {
     cliType: BuiltinAgentType,
     update: SessionUsageUpdate
   ): void {
-    if (cliType === 'codex' && this.isCodexCompaction(update)) {
-      if (state.staged) {
+    if (cliType === 'codex' && !update.delta && this.isCodexCompaction(update)) {
+      if (state.lastLegacyCodex && !this.isCodexCompaction(state.lastLegacyCodex)) {
         state.compacted = state.compacted
-          ? mergeUsageUpdate(state.compacted, state.staged)
-          : cloneUsageUpdate(state.staged);
+          ? mergeUsageUpdate(state.compacted, state.lastLegacyCodex)
+          : cloneUsageUpdate(state.lastLegacyCodex);
       }
+      state.lastLegacyCodex = update;
       state.staged = update;
       return;
     }
-
+    if (cliType === 'codex' && !update.delta) state.lastLegacyCodex = update;
+    else {
+      state.lastLegacyCodex = null;
+      state.compacted = null;
+    }
     state.staged = update;
   }
 
   private buildFinalUpdate(state: PendingState): SessionUsageUpdate | null {
-    if (!state.staged && !state.compacted) {
+    if (!state.staged) {
       return null;
     }
     if (!state.compacted) {
       return state.staged ? cloneUsageUpdate(state.staged) : null;
     }
-    if (!state.staged) {
-      return cloneUsageUpdate(state.compacted);
-    }
     return mergeUsageUpdate(state.compacted, state.staged);
   }
 
   private isCodexCompaction(update: SessionUsageUpdate): boolean {
-    return update.usage.inputTokens === 0 && update.usage.outputTokens === 0;
+    return (
+      update.usage.inputTokens === 0 &&
+      update.usage.outputTokens === 0 &&
+      update.usage.cacheReadInputTokens === 0 &&
+      (update.usage.cacheCreationInputTokens ?? 0) === 0 &&
+      (update.usage.reasoningOutputTokens ?? 0) === 0
+    );
   }
 
   private addPendingKeyToSession(sessionId: string, key: PendingKey): void {
@@ -268,6 +293,7 @@ export class UsageTrackingService {
     if (!state) return;
     if (state.inFlight) return;
     if (state.staged || state.compacted || state.queued.length > 0) return;
+    if (state.lastLegacyCodex) return;
 
     this.pending.delete(key);
     this.removePendingKeyFromSession(state.latestMeta.sessionId, key);
@@ -284,6 +310,10 @@ export class UsageTrackingService {
       case 'kimi':
         if (!update.modelUsage) return update;
         for (const [model, usage] of Object.entries(update.modelUsage)) {
+          if (usage.costUSD !== undefined) continue;
+          // No cache-write tariff is known in this legacy price table. A read
+          // tariff is not a substitute; preserve unknown rather than underprice.
+          if ((usage.cacheCreationInputTokens ?? 0) > 0) continue;
           let costUSD = 0;
           const modelName = model.split('/')[0];
           if (!modelName) continue;
