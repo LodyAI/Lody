@@ -12,7 +12,7 @@ import {
 import type { CommentReferencePayload } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
 import { Badge } from '@lody/ui/badge';
@@ -48,10 +48,10 @@ export function GitHubCommentItem({ comment, className }: GitHubCommentItemProps
 
   return (
     <div className={cn('group/gh-comment flex gap-2 px-3 py-2', className)}>
-      <Avatar className="h-6 w-6 shrink-0 mt-0.5">
-        {avatarUrl && <AvatarImage src={avatarUrl} alt={login} />}
-        <AvatarFallback className="text-[10px]">{login.slice(0, 2).toUpperCase()}</AvatarFallback>
-      </Avatar>
+      <Avatar.Root size="medium" className="mt-0.5">
+        {avatarUrl && <Avatar.Image src={avatarUrl} alt={login} />}
+        <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+      </Avatar.Root>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium leading-none text-foreground">{login}</span>

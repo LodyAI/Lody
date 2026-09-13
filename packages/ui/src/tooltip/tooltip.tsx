@@ -2,6 +2,7 @@ import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
+import { kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { chip, hiddenChipForSide } from './chip';
@@ -69,7 +70,17 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
               const hidden =
                 state.transitionStatus === 'starting' || state.transitionStatus === 'ending';
               return appendClassName(
-                stylex.props(chip.popup, hidden && hiddenChipForSide(state.side)).className,
+                stylex.props(
+                  chip.popup,
+                  // A tooltip inverts, so anything with a surface of its own
+                  // that lands on it has to be told what it is standing on. A
+                  // key cap is the one such part, and the theme is how it is
+                  // told: StyleX has no descendant selector, and a component
+                  // token group re-declared here reaches a cap however deeply a
+                  // caller wrapped it.
+                  kbdOnInvertedTheme,
+                  hidden && hiddenChipForSide(state.side)
+                ).className,
                 className
               );
             }}

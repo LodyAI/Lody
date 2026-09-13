@@ -256,6 +256,29 @@ finished saying it rather than while they are still typing, since every
 half-typed number would otherwise be somewhere the surface had to go. Every
 word it says is the surface's, because this package carries no dictionary.
 
+The composition also names two things that are not part of this interface at
+all: a person, and a key on their keyboard. A face is shown at one of a fixed
+set of sizes, and how large it is decides how large the letters standing in for
+it are, so a surface states one fact rather than two that can disagree; a face
+is round and a thing that is not a person is not, because a round frame around a
+mark that was drawn square is a crop. Whether the picture or the stand-in is on
+screen follows from whether the picture arrived, so a surface says what both are
+and never says which. A surface that gives the thing a colour of its own — a
+colour derived from its name, so the same thing is the same colour wherever it
+appears — supplies that colour, because which colour belongs to which name is
+the product's decision and not this package's. A face states how much room it
+takes and keeps exactly that much, neither growing to fit what is inside it nor
+giving room back to a row that ran out.
+
+A key is drawn as the key it is, and the keys of one chord are drawn together
+and announced as one gesture. What the key is called is the surface's word,
+because which key a person presses depends on their platform and their layout.
+It is never a control: nothing about it answers a pointer, takes focus or can be
+selected. Where such a key is drawn on a surface whose colours are reversed, it
+reverses with it, and the surface tells it so rather than the key guessing.
+Neither of these two carries a role in the interface, so neither takes a colour
+that names one.
+
 Product surfaces own workflows, placement, responsive layout, and accessibility
 requirements. They may add layout or interaction classes when a local constraint
 cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
@@ -329,3 +352,7 @@ the two Radix files they replace are recorded in the
 The card rung as a component, the badge that is on no rung, the one line the
 rules allow, and the Card callers still owed a flush surface are recorded in the
 [UI card, badge and separator note](../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md).
+The avatar whose rung picks its own letters, the key cap, and the component
+token group that carries a surface's inversion into what is standing on it are
+recorded in the
+[UI avatar and kbd note](../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).

@@ -79,11 +79,7 @@ export function WorkspaceMachineOwnerAvatar({ owner }: { owner: MachineTabOwner 
           className="inline-flex shrink-0 cursor-default rounded-full"
           aria-label={t('workspace.machines.ownerTooltip', { owner: owner.name })}
         >
-          <UserAvatar
-            user={owner}
-            className="h-5 w-5 text-[9px]"
-            fallbackClassName="bg-muted text-muted-foreground"
-          />
+          <UserAvatar user={owner} size="small" />
         </span>
       </TooltipTrigger>
       <TooltipContent>{t('workspace.machines.ownerTooltip', { owner: owner.name })}</TooltipContent>

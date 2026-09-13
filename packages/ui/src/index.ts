@@ -20,6 +20,14 @@ export type {
   AlertProps,
   AlertTitleProps,
 } from './feedback/alert';
+export { Avatar } from './avatar/avatar';
+export type {
+  AvatarFallbackProps,
+  AvatarImageProps,
+  AvatarRootProps,
+  AvatarShape,
+  AvatarSize,
+} from './avatar/avatar';
 export { AlertDialog } from './dialog/alert-dialog';
 export type {
   AlertDialogContentProps,
@@ -83,6 +91,8 @@ export type {
 } from './field/field';
 export { Input } from './field/input';
 export type { InputProps, InputSize } from './field/input';
+export { Kbd, KbdGroup } from './kbd/kbd';
+export type { KbdGroupProps, KbdProps } from './kbd/kbd';
 export { Menu } from './menu/menu';
 export type {
   MenuCheckboxItemProps,

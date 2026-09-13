@@ -41,7 +41,7 @@ One rung per component. The rung fixes background and shadow together.
   is the third: an action that destroys, and an outcome that failed.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
-  scrollbar, tracks, kbd, skeleton.
+  scrollbar, tracks, kbd, skeleton, an avatar's stand-in.
 
 ## Fields
 
@@ -571,6 +571,74 @@ surface's layout, so it carries no margin of its own — a popup's divider has o
 only because it bleeds through an inset the caller cannot see. A vertical line
 stretches to its row rather than taking a percentage of a height the row has
 not got.
+
+## Faces and keys
+
+Two parts that stand for something outside the interface — a person, and a key
+on the keyboard — and neither is a control. They take the gray ramp, which is
+what the rules reserve it for: a thing with no role.
+
+### Avatar
+
+The second part on no rung, and the one that is **not a film**. A badge can be a
+tint over whatever holds it because a word reads through one; what an avatar
+stands in for is a photograph, and a translucent face would show a row's hover
+through it. So the fallback is `avatar.fallbackBackground`, a gray, the same
+reading `Skeleton` already takes.
+
+| part    | what it is                                                             |
+| ------- | ---------------------------------------------------------------------- |
+| box     | one of five rungs — 16, 20, 24, 32, 64 — a width, a height, and a crop |
+| picture | fills the box and is cropped to it; mounted only once it has loaded    |
+| letters | the rung's own step, in `avatar.fallbackLabel`                         |
+| mark    | an `avatar.glyph*` box, for a name there are no letters to make        |
+| circle  | a person: `radius.full` on `corner.round`                              |
+| tile    | a thing: `avatar.tileRadius*`, the radius-by-size table read per rung  |
+
+**The rung picks the letters.** A box and a type step stated separately are two
+facts that can disagree, and they did: the deleted implementation had one size
+and twenty call sites restating both. Two initials want 20px or more; 16 is a
+face where an icon would otherwise be.
+
+A circle is a person and a tile is a thing. A circle around a logo is a crop,
+and the mark inside one was drawn square. The letters take `label` rather than
+`secondaryLabel` — unlike a badge's word, which is _about_ the thing beside it,
+initials **are** the person, and measured on this gray the secondary label is
+3.5:1 in the light palette, under the 4.5:1 letters this small need.
+
+An avatar is a ceiling as well as a floor. A flex item's automatic minimum size
+is its content's, so a 16px circle holding two initials lays out 20px wide and
+stops being a circle; the box and the fallback both give that up, and the
+letters are clipped to the width instead.
+
+An identity colour — a hue derived from a name, so one workspace is one colour
+on every screen — is the surface's and arrives as a `style`. Which hue belongs
+to which name is a product fact, not a token.
+
+### Kbd
+
+`kbd.background`, a gray, at a badge's height and corner: a cap stands for a
+piece of hardware, so `accent` would claim it is live, ink would claim it is
+stored and a tone would claim it reported something. It is never a control —
+no hover, no focus ring, no pressed state, and it takes neither the pointer nor
+a selection. A chord is a `<kbd>` around `<kbd>`s at `kbd.gap`, with nothing
+between them: a `+` is how a chord is written in prose, and this is not prose.
+One cap is at least as wide as it is tall, so `K` and `Shift` do not read as
+noise side by side. The face is the UI font, because `<kbd>` defaults to
+monospace and `⌘` there is a different glyph from the identical character in the
+label beside it.
+
+A menu row's shortcut is **not** this: the rules give that slot plain trailing
+metadata in `popup.hint`, because a column of chips down a menu's right edge
+turns a quiet list into a keyboard diagram. A cap is for where the keys are the
+subject.
+
+A cap on a tooltip inverts with it. `kbdOnInvertedTheme` re-declares the two
+things a cap is made of — the film and the letters — and `Tooltip.Content`
+declares it on its own popup, so every cap under it inherits. A component token
+group is how a surface tells what is inside it what it is standing on; StyleX
+has no descendant selector, and unlike one this also reaches a cap a caller
+wrapped in something of their own.
 
 ## Corners
 
