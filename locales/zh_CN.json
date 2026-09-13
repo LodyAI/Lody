@@ -3426,6 +3426,8 @@
   "settings.agent.setup.runtimeInstallFailed": "无法下载 Agent 运行时。",
   "settings.agent.setup.runtimeReady": "Agent 运行时已就绪，正在检查 Provider 访问权限…",
   "settings.agent.setup.runtimeUnavailable": "目标机器不支持此运行时。",
+  "settings.agent.setup.bubInstallRequired": "目标机器尚未安装 Bub 或其 ACP Server。",
+  "settings.agent.setup.bubInstallCommand": "使用以下命令一键安装：",
   "settings.agent.setup.verificationFailed": "Provider 验证失败，请重试。",
   "settings.agent.setup.verifying": "正在检查 Credential 和 Provider 访问权限…",
   "settings.agent.setup.verifyingRuntime": "正在校验 Agent 运行时…",

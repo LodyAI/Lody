@@ -205,7 +205,14 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
-  it('does not publish Bub when its live probe fails', async () => {
+  it.each([
+    ['spawn bub ENOENT', 'runtime-unavailable'],
+    [
+      "Failed to load plugin 'acp-server': No module named 'bub_acp_server'; No such command 'acp'",
+      'runtime-unavailable',
+    ],
+    ['ACP handshake timed out', 'verification-failed'],
+  ] as const)('classifies a failed Bub probe: %s', async (error, failureCode) => {
     const harness = createHarness({
       refreshMachineAcpCapabilities: vi.fn(async () => ({
         type: 'machine/acp-capabilities-refresh_response' as const,
@@ -214,7 +221,7 @@ describe('ProviderSetupManager', () => {
         cliType: 'builtin' as const,
         agentType: 'bub',
         success: false,
-        error: 'spawn bub ENOENT',
+        error,
       })),
     });
     seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType: 'bub' }));
@@ -224,7 +231,7 @@ describe('ProviderSetupManager', () => {
     expect(readState(harness.flock).config).toBeUndefined();
     expect(readState(harness.flock).setup).toMatchObject({
       status: 'failed',
-      failureCode: 'verification-failed',
+      failureCode,
     });
     harness.manager.stop();
   });

@@ -94,8 +94,7 @@ installed by you, so Lody ships the integration without provisioning the command
 its ACP server plugin into the environment that provides `bub`:
 
 ```bash
-bub install bub-acp-server@main
-bub acp --help
+curl -fsSL https://bub.build/install.sh | bash -- --preset acp
 ```
 
 Then create an Agent Config and choose **Bub**. Lody launches `bub acp` and talks to it over

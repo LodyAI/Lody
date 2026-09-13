@@ -51,6 +51,18 @@ const RESUMABLE_STATUSES = new Set<ProviderSetupStatus>([
   'verifying',
 ]);
 
+const isMissingBubRuntimeError = (error: string | undefined): boolean => {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes('spawn bub enoent') ||
+    normalized.includes('command not found') ||
+    normalized.includes("no such command 'acp'") ||
+    normalized.includes("failed to load plugin 'acp-server'") ||
+    normalized.includes("no module named 'bub_acp_server'")
+  );
+};
+
 /**
  * Owns the non-interactive half of built-in provider creation on the target
  * machine. Flock rows are the durable queue: syncing a row or restarting the
@@ -213,7 +225,13 @@ export class ProviderSetupManager {
         await this.updateStatus(verifying.id, attempt, 'awaiting-auth');
         return;
       }
-      await this.fail(verifying.id, attempt, 'verification-failed');
+      await this.fail(
+        verifying.id,
+        attempt,
+        verifying.config.agentType === 'bub' && isMissingBubRuntimeError(response.error)
+          ? 'runtime-unavailable'
+          : 'verification-failed'
+      );
     } catch (error) {
       this.logger.debug(`[provider-setup] Failed setup ${setup.id}: ${formatErrorMessage(error)}`);
       await this.fail(setup.id, attempt, unexpectedFailureCode).catch(() => undefined);

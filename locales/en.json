@@ -3426,6 +3426,8 @@
   "settings.agent.setup.runtimeInstallFailed": "The agent runtime could not be downloaded.",
   "settings.agent.setup.runtimeReady": "Agent runtime ready; checking provider access…",
   "settings.agent.setup.runtimeUnavailable": "This runtime is not available on the target machine.",
+  "settings.agent.setup.bubInstallRequired": "Bub or its ACP server is not installed on the target machine.",
+  "settings.agent.setup.bubInstallCommand": "Install it in one step:",
   "settings.agent.setup.verificationFailed": "Provider verification failed. Try again.",
   "settings.agent.setup.verifying": "Checking credentials and provider access…",
   "settings.agent.setup.verifyingRuntime": "Verifying the agent runtime…",

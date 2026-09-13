@@ -12,9 +12,11 @@ download, version, sign in to, or auto-register Bub; the command is spawned from
 the same augmented login-shell PATH as other local ACP agents. Explicit creation
 first writes a durable setup row, and only a successful live probe publishes the
 Agent Config. A failed probe stays retryable and links to Bub's ACP server tutorial,
-so a missing plugin never becomes a dead provider. The capability
-cache key is static because Lody cannot observe the user's Bub version; users
-re-probe after an upgrade.
+and recognized missing-runtime errors also show a copyable
+`curl -fsSL https://bub.build/install.sh | bash -- --preset acp` command, so a
+missing executable or plugin never becomes a dead provider. The capability cache
+key is static because Lody cannot observe the user's Bub version; users re-probe
+after an upgrade.
 
 ## Decision and ownership
 
@@ -41,7 +43,10 @@ even though Lody owns the integration, not the runtime.
 - Bub creation uses the durable `providerSetup` queue. Unlike managed builtins it
   skips binary preparation, probes the user-installed command directly, and
   publishes the config only on success. Failed setup rows retain an install-guide
-  action; machines predating the setup protocol cannot create Bub from the dialog.
+  action. `spawn bub ENOENT`, Bub's missing `acp` command, and ACP plugin import
+  failures are classified as `runtime-unavailable` and show the copyable preset
+  installer; unrelated verification failures do not. Machines predating the setup
+  protocol cannot create Bub from the dialog.
 - Startup auto-registration remains limited to `MANAGED_BUILTIN_RUNTIMES`, so Bub
   appears as an available choice but is never created until the user explicitly
   chooses it. CLI `agent-config create --agent-type bub` classifies that explicit

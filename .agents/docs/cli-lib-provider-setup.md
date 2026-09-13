@@ -17,6 +17,9 @@ with executable runtime overrides are invalid.
 Only managed builtins enter binary status/download handling. Bub is user-installed, so
 its queued setup advances directly to the live ACP probe. A missing or broken `bub`
 command leaves a failed, retryable setup row and never publishes an `agentConfig`.
+Missing-executable and missing-ACP-plugin signatures are classified as
+`runtime-unavailable`, allowing the UI to offer the copyable Bub ACP preset installer;
+other startup/protocol failures remain `verification-failed`.
 
 Cancellation is a separate row, `['providerSetupCancellation', configId]`. After a
 merge the owning CLI causally deletes any concurrently published setup or config, so a
