@@ -34,15 +34,9 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   render: function Story(args) {
     const [selected, setSelected] = useState(args.selected);
-    const [wide, setWide] = useState(false);
     return (
-      <SessionShareDialogFrame title="Designing static sharing" wide={wide}>
-        <SessionShareManager
-          {...args}
-          selected={selected}
-          onSelect={setSelected}
-          onPreviewOpenChange={setWide}
-        />
+      <SessionShareDialogFrame title="Designing static sharing">
+        <SessionShareManager {...args} selected={selected} onSelect={setSelected} />
       </SessionShareDialogFrame>
     );
   },
@@ -55,7 +49,7 @@ const meta = {
       { sessionId: 'child', title: 'Deployment design' },
       { sessionId: 'child-2', title: 'Reader layout notes' },
     ],
-    pending: null,
+    hasPending: false,
     phase: 'idle',
     progress: 0,
     result: null,
@@ -67,7 +61,6 @@ const meta = {
     error: null,
     notice: null,
     onSelect: () => {},
-    onPrepare: noop,
     onPublish: noop,
     onDiscard: () => {},
     onCopy: noop,
@@ -112,7 +105,7 @@ export const PublishFailed: Story = {
     hasSecret: true,
     shareLink: storyLink,
     error: 'Could not update sharing. Check the current settings and try again.',
-    pending: { manifest: { conversations: [], attachments: [] } } as never,
+    hasPending: true,
   },
 };
 
@@ -123,7 +116,7 @@ export const Conflict: Story = {
     hasSecret: true,
     shareLink: storyLink,
     conflict: true,
-    pending: { manifest: { conversations: [], attachments: [] } } as never,
+    hasPending: true,
   },
 };
 

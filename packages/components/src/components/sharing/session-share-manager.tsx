@@ -1,13 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronRight, Copy, Globe, Loader2 } from 'lucide-react';
+import { Check, Copy, Globe } from 'lucide-react';
 import { SHARE_LIMITS } from '@lody/shared/session-sharing';
 import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import { Progress } from '@/ui/progress';
-import { SessionSharePreview } from './session-share-preview';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -25,8 +24,6 @@ export type SessionShareManagerProps = ReturnType<typeof useSessionShareManageme
   candidates: ShareCandidate[];
   selectionLocked?: boolean;
   onClose?: () => void;
-  /** Lets the frame widen while the frozen-copy preview is expanded. */
-  onPreviewOpenChange?: (open: boolean) => void;
 };
 
 /** Which panel the dialog shows. One screen at a time, one primary action each. */
@@ -35,7 +32,7 @@ type ShareStep = 'loading' | 'setup' | 'publishing' | 'published' | 'stale-draft
 /**
  * Animates the dialog's height between steps so the panel grows into the next
  * screen instead of snapping. The measured child is the only source of height:
- * a step whose own content changes (a preview opening, an error appearing)
+ * a step whose own content changes (an error appearing)
  * resizes with the same transition.
  */
 function StepTransition({ step, children }: { step: ShareStep; children: ReactNode }) {
@@ -110,8 +107,7 @@ function Note({ tone = 'muted', children }: { tone?: 'muted' | 'alert'; children
 /** Pure controls: only a human's action uploads and publishes the frozen package. */
 export function SessionShareManager(props: SessionShareManagerProps) {
   const { t } = useTranslation();
-  const { entry, pending, busy, phase, result, conflict, selectionLocked } = props;
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const { entry, hasPending, busy, phase, result, conflict, selectionLocked } = props;
   const [confirming, setConfirming] = useState<{
     kind: 'reset' | 'revoke';
     revision: number;
@@ -132,7 +128,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const active = entry?.status === 'active';
   const canPublish = entry === null || !!entry?.canManage || entry?.status === 'revoked';
   const publishing = phase === 'capturing' || phase === 'uploading' || phase === 'publishing';
-  const staleDraft = entry?.status === 'draft' && !!entry.canManage && !pending;
+  const staleDraft = entry?.status === 'draft' && !!entry.canManage && !hasPending;
   const step: ShareStep =
     entry === undefined
       ? 'loading'
@@ -144,21 +140,6 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             ? 'stale-draft'
             : 'setup';
 
-  const { onPreviewOpenChange } = props;
-  useEffect(() => {
-    onPreviewOpenChange?.(previewOpen && step === 'setup');
-  }, [onPreviewOpenChange, previewOpen, step]);
-  // A confirmation opened from an agent request must show the frozen copy it is
-  // about to publish, so freeze it as soon as the locked editor is usable.
-  const requestedPreview = useRef(false);
-  useEffect(() => {
-    if (!selectionLocked || requestedPreview.current) return;
-    if (entry === undefined || pending || busy || !props.canCapture || !canPublish) return;
-    requestedPreview.current = true;
-    setPreviewOpen(true);
-    void props.onPrepare();
-  }, [selectionLocked, entry, pending, busy, props, canPublish]);
-
   const toggleChildren = (checked: boolean) =>
     props.onSelect(
       checked ? [props.sessionId, ...shareableChildren.map((c) => c.sessionId)] : [props.sessionId]
@@ -167,7 +148,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const publishLabel = active
     ? t('sharing.static.update', 'Update share')
     : t('sharing.static.share', 'Share conversation');
-  const retrying = !!props.error && !!pending;
+  const retrying = !!props.error && hasPending;
 
   const body = (() => {
     if (step === 'loading')
@@ -319,65 +300,12 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             })}
           </Note>
         )}
-        {canPublish && props.canCapture && (
-          <div>
-            <button
-              type="button"
-              aria-expanded={previewOpen}
-              disabled={busy}
-              onClick={() => {
-                const next = !previewOpen;
-                setPreviewOpen(next);
-                if (next && !pending) void props.onPrepare();
-              }}
-              className="-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-            >
-              {phase === 'previewing' ? (
-                <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />
-              ) : (
-                <ChevronRight
-                  aria-hidden
-                  className={cn(
-                    'size-3 transition-transform duration-200 motion-reduce:transition-none',
-                    previewOpen && 'rotate-90'
-                  )}
-                />
-              )}
-              {t('sharing.static.preview', 'Preview what will be published')}
-            </button>
-            {previewOpen && pending && (
-              <div className="mt-2 space-y-2">
-                <Note>
-                  {t(
-                    'sharing.static.summary',
-                    '{{conversations}} conversations · {{attachments}} copied attachments',
-                    {
-                      conversations: pending.manifest.conversations.length,
-                      attachments: pending.manifest.attachments.length,
-                    }
-                  )}
-                </Note>
-                <ul className="space-y-0.5 text-xs text-muted-foreground">
-                  {pending.manifest.conversations.map((conversation) => (
-                    <li key={conversation.id} className="truncate">
-                      {conversation.title || t('sessions.untitled', 'Untitled session')}
-                    </li>
-                  ))}
-                </ul>
-                {pending.uncopiedResourceCount > 0 && (
-                  <Note>
-                    {t(
-                      'sharing.static.uncopiedResources',
-                      '{{count}} file attachments or embedded resources are not included. File attachments are replaced with a notice; external links cannot load original workspace resources or remote images.',
-                      { count: pending.uncopiedResourceCount }
-                    )}
-                  </Note>
-                )}
-                <SessionSharePreview key={pending.manifestHash} prepared={pending} />
-              </div>
-            )}
-          </div>
-        )}
+        <Note>
+          {t(
+            'sharing.static.attachmentNotice',
+            'Images are included. File attachments and external resources are not included.'
+          )}
+        </Note>
         {!props.canCapture && canPublish && (
           <Note>
             {t(

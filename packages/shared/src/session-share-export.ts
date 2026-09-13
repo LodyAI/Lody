@@ -9,7 +9,6 @@ import {
   validateShareHistory,
   type ShareAttachment,
   type ShareConversation,
-  type ShareHistoryEntry,
   type ShareJson,
   type ShareObject,
   type SharePackageManifest,
@@ -31,8 +30,6 @@ export type PreparedSharePackage = {
   objects: ReadonlyMap<string, Uint8Array>;
   /** Private management hints; never include this mapping in uploaded JSON. */
   sourceIds: { sourceId: string; conversationId: string }[];
-  /** Preflight only, not persisted. Opaque history links are text, never fetch authority. */
-  uncopiedResourceCount: number;
 };
 
 export type ShareAttachmentSource = {
@@ -107,7 +104,6 @@ export async function prepareSharePackage(options: {
     { id: string; sizeBytes: number; mediaType: string; sha256: string }
   >();
   let totalBytes = 0;
-  let uncopiedResourceCount = 0;
   async function addObject(id: string, bytes: Uint8Array, mediaType: string) {
     options.signal?.throwIfAborted();
     if (bytes.length > SHARE_LIMITS.objectBytes) throw new Error('Share object exceeds size limit');
@@ -191,26 +187,7 @@ export async function prepareSharePackage(options: {
       value.type = 'text';
       value.text =
         options.fileAttachmentOmissionText ?? 'File attachment not included in this share';
-      uncopiedResourceCount++;
       return;
-    }
-    if (
-      (value.type === 'resource_link' && typeof value.uri === 'string') ||
-      (value.type === 'image' &&
-        typeof value.uri === 'string' &&
-        typeof value.imageId !== 'string' &&
-        typeof value.data !== 'string')
-    ) {
-      uncopiedResourceCount++;
-    }
-    if (value.type === 'text' && typeof value.text === 'string') {
-      // Do not parse/fetch arbitrary Markdown or tool output with workspace credentials.
-      // The reader intentionally renders these external media references inert.
-      uncopiedResourceCount += [
-        ...value.text.matchAll(
-          /!\[[^\]]*\]\((?!data:)[^)]+\)|(?:file:\/\/|lody-file:|\/api\/workspaces\/)/g
-        ),
-      ].length;
     }
     if (value.type === 'image' && typeof value.imageId === 'string') {
       await copyAttachment(value, 'image', sourceId);
@@ -285,16 +262,5 @@ export async function prepareSharePackage(options: {
     manifestHash: await shareObjectDigest(manifestBytes),
     objects,
     sourceIds: captured.map((source) => ({ sourceId: source.sourceId, conversationId: source.id })),
-    uncopiedResourceCount,
   };
-}
-
-export function readPreparedShareHistory(
-  prepared: PreparedSharePackage,
-  conversationId: string
-): ShareHistoryEntry[] {
-  const conversation = prepared.manifest.conversations.find((entry) => entry.id === conversationId);
-  const bytes = conversation && prepared.objects.get(conversation.historyObjectId);
-  if (!bytes) throw new Error('Share conversation unavailable');
-  return validateShareHistory(JSON.parse(new TextDecoder().decode(bytes)));
 }

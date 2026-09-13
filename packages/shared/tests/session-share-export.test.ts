@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   prepareSharePackage as captureSharePackage,
-  readPreparedShareHistory,
+  type PreparedSharePackage,
 } from '../src/session-share-export';
-import { validateShareHistory, verifyShareObject } from '../src/session-share-package';
+import {
+  type ShareHistoryEntry,
+  validateShareHistory,
+  verifyShareObject,
+} from '../src/session-share-package';
+
+function readPreparedShareHistory(
+  prepared: PreparedSharePackage,
+  conversationId: string
+): ShareHistoryEntry[] {
+  const conversation = prepared.manifest.conversations.find((entry) => entry.id === conversationId);
+  const bytes = conversation && prepared.objects.get(conversation.historyObjectId);
+  if (!bytes) throw new Error('Share conversation unavailable');
+  return validateShareHistory(JSON.parse(new TextDecoder().decode(bytes)));
+}
 
 const capturedAt = '2026-09-12T00:00:00.000Z';
 it('removes task proposals without changing source or agent history', async () => {
@@ -88,7 +102,6 @@ it('omits file blocks by default without reading them, while still copying image
   expect(reads).toEqual(['image']);
   expect(prepared.manifest.attachments.map((a) => a.kind)).toEqual(['image']);
   expect(prepared.objects.size).toBe(2);
-  expect(prepared.uncopiedResourceCount).toBe(3);
   const output = readPreparedShareHistory(prepared, 'c1');
   const notice = { type: 'text', text: '文件附件未包含在此次分享中' };
   expect(output[0]).toMatchObject({
@@ -318,7 +331,6 @@ describe('client static share export', () => {
         throw new Error('Arbitrary URI fetch');
       },
     });
-    expect(prepared.uncopiedResourceCount).toBe(2);
     expect(prepared.manifest.attachments).toEqual([]);
     expect(readPreparedShareHistory(prepared, 'c1')).toEqual(source);
   });

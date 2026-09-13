@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
@@ -24,13 +24,10 @@ import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scrol
 export function SessionShareDialogFrame({
   title,
   onClose,
-  wide,
   children,
 }: {
   title: string;
   onClose?: () => void;
-  /** Widen for the frozen-copy preview, which needs conversation-sized room. */
-  wide?: boolean;
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -55,8 +52,7 @@ export function SessionShareDialogFrame({
         }}
         className={cn(
           'flex w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:p-0',
-          'transition-[max-width] duration-300 ease-out motion-reduce:transition-none',
-          wide ? 'max-w-3xl' : 'max-w-md'
+          'max-w-md'
         )}
         style={{
           top: 'calc((100dvh - var(--native-keyboard-height, 0px) + var(--safe-area-top, 0px) - max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px))) / 2)',
@@ -100,7 +96,6 @@ function ShareEditor({
 }) {
   const { t } = useTranslation();
   const meta = useAtomValue(sessionMetaCacheAtom);
-  const [wide, setWide] = useState(false);
   // Discovery proposes the explicit set frozen by the publishing client.
   const candidates = useMemo(
     () =>
@@ -120,13 +115,12 @@ function ShareEditor({
     confirmation
   );
   return (
-    <SessionShareDialogFrame title={title} onClose={onClose} wide={wide}>
+    <SessionShareDialogFrame title={title} onClose={onClose}>
       <SessionShareManager
         sessionId={session.id}
         candidates={candidates}
         selectionLocked={!!confirmation}
         onClose={onClose}
-        onPreviewOpenChange={setWide}
         {...management}
       />
     </SessionShareDialogFrame>

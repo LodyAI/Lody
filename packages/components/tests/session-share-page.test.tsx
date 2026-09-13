@@ -11,7 +11,6 @@ import {
   SessionSharePage,
   SessionShareSurface,
 } from '../src/components/sharing/session-share-page';
-import { SessionSharePreview } from '../src/components/sharing/session-share-preview';
 
 const language = vi.hoisted(() => ({
   resolvedLanguage: 'en',
@@ -63,45 +62,6 @@ describe('static share presentation', () => {
   let root: Root, container: HTMLDivElement;
   let props: Parameters<typeof SessionShareSurface>[0];
   const writeText = vi.fn().mockResolvedValue(undefined);
-  it('previews and copies the frozen unpublished bytes, not later source edits', async () => {
-    const source = [
-      { id: 'turn', role: 'assistant', items: [{ type: 'text', text: 'Frozen preview' }] },
-    ];
-    const prepared = await prepareSharePackage({
-      rootSourceId: 'root',
-      capturedAt: '2026-09-12T00:00:00.000Z',
-      conversations: [{ sourceId: 'root', title: 'Preview', history: source }],
-      readAttachment: async () => {
-        throw new Error('Unexpected source read');
-      },
-    });
-    source[0]!.items[0]!.text = 'Changed source';
-    await act(async () => root.render(<SessionSharePreview prepared={prepared} />));
-    const button = byText('Copy as Markdown') as HTMLButtonElement | undefined;
-    expect(button).toBeTruthy();
-    await act(async () => button!.click());
-    expect(writeText.mock.calls[0]?.[0]).toContain('Frozen preview');
-    expect(writeText.mock.calls[0]?.[0]).not.toContain('Changed source');
-  });
-
-  it('keeps visitor chrome out of the publisher’s embedded preview', async () => {
-    const prepared = await prepareSharePackage({
-      rootSourceId: 'root',
-      capturedAt: '2026-09-12T00:00:00.000Z',
-      conversations: [{ sourceId: 'root', title: 'Preview', history: [] }],
-      readAttachment: async () => {
-        throw new Error('Unexpected source read');
-      },
-    });
-    await act(async () => root.render(<SessionSharePreview prepared={prepared} />));
-    // The app owns its own appearance: an embedded preview must not offer a
-    // theme control that would repaint the surrounding app, nor force one.
-    expect(byText('Sign in to Lody')).toBeUndefined();
-    expect(container.querySelector('[aria-label^="Appearance"]')).toBeNull();
-    expect(container.querySelector('[aria-label^="Switch language"]')).toBeNull();
-    expect(theme.setTheme).not.toHaveBeenCalled();
-  });
-
   beforeEach(async () => {
     container = document.createElement('div');
     document.body.append(container);

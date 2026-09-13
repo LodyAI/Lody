@@ -11,15 +11,14 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   A human action always starts publication, and the package is frozen in full
   before any byte is uploaded. Include all selected stored history, including
   thought/tool fields except task-proposal notices; disclose the sensitivity and public title on the first
-  screen, never behind a disclosure. `onPrepare` freezes for review only and must
-  never upload; `onPublish` freezes (or reuses the frozen retry keys) and then
-  uploads and commits.
+  screen, never behind a disclosure. `onPublish` freezes (or reuses the frozen
+  retry keys), uploads and commits. There is no publication preview or prepare-only action.
 - Progress must stay honest: only the object upload has a byte total, so only it
   may show a percentage. Capture and the publish commit use the indeterminate
   sweep. Auto-copy on success may claim "copied" only after the clipboard write
   resolves; a rejected write shows the manual-copy field instead.
-- A confirmation opened from an agent request freezes and shows the frozen copy
-  as soon as the locked editor is usable, so the human reviews the exact bytes.
+- MCP requests still require explicit human confirmation of the locked target set.
+  Opening the dialog does not capture or publish; confirmation starts freeze/upload.
 - `SessionShareDialogFrame` keeps its fixed header and one keyboard-aware scroll
   body; the manager's action row sticks to the bottom of that body. Opening must
   not autofocus a control — focus the panel, so the link field is not preselected
@@ -78,20 +77,18 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   unmount content and must not send history/error payloads to telemetry.
 - Copy Agent Prompt is an explicit short-lived capability export, not a fork.
   Localize the prompt with the reader's current i18n language and keep token URLs out of telemetry. Pass the
-  selected conversation and pinned deployment; hide issuance in embedded previews.
+  selected conversation and pinned deployment; issue access only for published deployments.
   Clipboard rejection must leave a manual-copy prompt, not claim success.
 - Reader chrome: the Lody mark leads the header — the packaged app icon's own
   black tile, which does not repaint with the reader's appearance — and links
   back to the product in a new tab; right to left the header ends with viewer
   identity, language toggle, then the theme control. Language toggles English/Chinese
   and saves the existing `lody-language` preference without app/OneSignal hooks;
-  embedded previews hide both controls. The conversation tree is a left sidebar on a
+  The conversation tree is a left sidebar on a
   wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
   per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
   any other stored value; the reader deliberately does not follow the app's
-  appearance setting. It still drives the app ThemeProvider, so `embedded`
-  (the publisher's frozen-copy preview) must suppress both it and the identity
-  slot rather than repaint the surrounding app.
+  appearance setting. It drives the reader's ThemeProvider; publication does not embed the reader.
 - `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
   authenticates and, on its own origin, cannot read the app's session cookie:
   showing a name or avatar requires the host to establish it. Signed-out offers

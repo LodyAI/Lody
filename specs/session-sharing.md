@@ -72,8 +72,8 @@ bytes already downloaded.
 ## Deployment consistency
 
 A client freezes the complete package before upload, and only a human action in
-the authenticated app starts that publication; the frozen copy is reviewable
-before the action. Upload authority is limited to one immutable inventory and
+the authenticated app starts that publication. There is no publication preview:
+confirmation approves the selected scope and disclosure, then freezes and uploads. Upload authority is limited to one immutable inventory and
 cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
@@ -134,8 +134,8 @@ lifetime or share revocation/reset. It cannot renew itself, publish, upload or r
 source resources. Files remain excluded from the agent resource API. Hosting must
 rate-limit issuance and reads by IP and share, omit capability URLs from logs, and
 keep responses private/no-store. This is burst protection, not a billing quota.
-Clipboard denial exposes the generated prompt for manual copying; embedded
-unpublished previews never issue access links.
+Clipboard denial exposes the generated prompt for manual copying; access links
+are issued only from published deployments.
 
 ## Implementation status and evidence
 

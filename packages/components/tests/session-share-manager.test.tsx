@@ -2,7 +2,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { prepareSharePackage } from '@lody/shared/session-sharing';
 import {
   SessionShareManager,
   type SessionShareManagerProps,
@@ -51,7 +50,7 @@ describe('static share dialog steps', () => {
       sessionId: 'root',
       entry,
       selected: ['root'],
-      pending: null,
+      hasPending: false,
       phase: 'idle',
       progress: 0,
       result: null,
@@ -67,7 +66,6 @@ describe('static share dialog steps', () => {
       error: null,
       notice: null,
       onSelect: vi.fn(),
-      onPrepare: vi.fn(),
       onPublish: vi.fn(),
       onDiscard: vi.fn(),
       onCopy: vi.fn(),
@@ -102,7 +100,6 @@ describe('static share dialog steps', () => {
     expect(props.onPublish).not.toHaveBeenCalled();
     await click('Share conversation');
     expect(props.onPublish).toHaveBeenCalledOnce();
-    expect(props.onPrepare).not.toHaveBeenCalled();
   });
 
   it('freezes only the explicit current sub-conversation selection', async () => {
@@ -187,14 +184,7 @@ describe('static share dialog steps', () => {
   });
 
   it('retries a failed publication with the frozen package instead of restarting', async () => {
-    props.pending = await prepareSharePackage({
-      rootSourceId: 'root',
-      conversations: [{ sourceId: 'root', title: 'Frozen Root', history: [] }],
-      capturedAt: '2026-09-12T00:00:00.000Z',
-      readAttachment: async () => {
-        throw new Error('Unexpected attachment');
-      },
-    });
+    props.hasPending = true;
     props.error = 'Could not update sharing.';
     await render();
     expect(button('Update share')).toBeUndefined();
@@ -202,47 +192,23 @@ describe('static share dialog steps', () => {
     expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
-  it('recovers a conflicting preview by starting over rather than publishing it', async () => {
+  it('recovers a conflicting frozen package by starting over rather than publishing it', async () => {
     props.conflict = true;
-    props.pending = await prepareSharePackage({
-      rootSourceId: 'root',
-      conversations: [{ sourceId: 'root', title: 'Frozen Root', history: [] }],
-      capturedAt: '2026-09-12T00:00:00.000Z',
-      readAttachment: async () => {
-        throw new Error('Unexpected attachment');
-      },
-    });
+    props.hasPending = true;
     await render();
     await click('Start over');
     expect(props.onDiscard).toHaveBeenCalledOnce();
     expect(props.onPublish).not.toHaveBeenCalled();
   });
 
-  it('shows the frozen copy on request without publishing it', async () => {
-    props.entry = null;
-    await render();
-    await click('Preview what will be published');
-    expect(props.onPrepare).toHaveBeenCalledOnce();
-    expect(props.onPublish).not.toHaveBeenCalled();
-    props.pending = await prepareSharePackage({
-      rootSourceId: 'root',
-      conversations: [{ sourceId: 'root', title: 'Frozen Root', history: [] }],
-      capturedAt: '2026-09-12T00:00:00.000Z',
-      readAttachment: async () => {
-        throw new Error('Unexpected attachment');
-      },
-    });
-    await render();
-    expect(container.textContent).toContain('Frozen Root');
-  });
-
-  it('freezes an agent-requested target set for review as soon as the editor opens', async () => {
+  it('waits for explicit approval of an agent-requested target set', async () => {
     props.entry = null;
     props.selectionLocked = true;
     await render();
-    expect(props.onPrepare).toHaveBeenCalledOnce();
     expect(props.onPublish).not.toHaveBeenCalled();
     expect(container.querySelector('[role="checkbox"]')).toBeNull();
+    await click('Share conversation');
+    expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
   it('routes an unfinished draft to discard instead of a dead publish button', async () => {

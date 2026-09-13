@@ -207,13 +207,7 @@ type PendingPublication = {
  * a percentage; capture and the publish commit report an indeterminate bar
  * rather than an invented number.
  */
-export type SharePublishPhase =
-  | 'idle'
-  /** Freezing bytes for an explicit preview request; nothing will be uploaded. */
-  | 'previewing'
-  | 'capturing'
-  | 'uploading'
-  | 'publishing';
+export type SharePublishPhase = 'idle' | 'capturing' | 'uploading' | 'publishing';
 
 /** What the just-finished publication produced, so success can be shown truthfully. */
 export type SharePublishResult = {
@@ -278,8 +272,8 @@ export function useSessionShareManagement(
     !(pending.deployment && entry?.currentDeploymentId === pending.deployment.deploymentId) &&
     (pending.expected?.shareId !== (entry?.status === 'active' ? entry.shareId : undefined) ||
       pending.expected?.revision !== (entry?.status === 'active' ? entry.revision : undefined));
-  /** Freeze the package without publishing it. Reused as the retry key holder. */
-  const capture = async (label: SharePublishPhase): Promise<PendingPublication> => {
+  /** Freeze once before upload; retain the package and keys for retries. */
+  const capture = async (): Promise<PendingPublication> => {
     const runtime = store.get(activeWorkspaceRuntimeAtom),
       token = store.get(authTokenAtom);
     if (!runtime || runtime.workspaceId !== workspaceId || !token || !lifetime.current)
@@ -289,7 +283,7 @@ export function useSessionShareManagement(
     if (sessions.length !== selected.length || !selected.includes(sessionId))
       throw new Error('Share source unavailable');
     const signal = AbortSignal.any([lifetime.current.signal, AbortSignal.timeout(120_000)]);
-    setPhase(label);
+    setPhase('capturing');
     const prepared = await captureSessionShare({
       runtime,
       token,
@@ -373,21 +367,13 @@ export function useSessionShareManagement(
     setSelected(null);
     setProgress(0);
   };
-  const prepare = () =>
-    actions.run(async () => {
-      try {
-        await capture('previewing');
-      } finally {
-        setPhase('idle');
-      }
-    });
   /** One human action: freeze if needed, then upload and commit. */
   const publishNow = () =>
     actions.run(async () => {
       try {
         const existing = pendingRef.current;
         if (existing && conflict) throw new Error('Share confirmation changed');
-        await publishPrepared(existing ?? (await capture('capturing')));
+        await publishPrepared(existing ?? (await capture()));
       } finally {
         setPhase('idle');
       }
@@ -396,7 +382,7 @@ export function useSessionShareManagement(
   return {
     entry,
     selected,
-    pending: pending?.prepared ?? null,
+    hasPending: pending !== null,
     conflict,
     progress,
     phase,
@@ -416,7 +402,6 @@ export function useSessionShareManagement(
         setPending(null);
       }
     },
-    onPrepare: prepare,
     onPublish: publishNow,
     onDiscard: () => setPending(null),
     onCopy: () =>

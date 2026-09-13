@@ -1,7 +1,5 @@
 {
   "sharing.toggleTree": "展开或收起对话树",
-  "sharing.static.preview": "预览将要发布的内容",
-  "sharing.static.uncopiedResources": "{{count}} 个文件附件或嵌入资源未包含在分享中。文件附件会替换为提示文字；外部链接不会加载原工作区资源或远程图片。",
   "sharing.fileAttachmentOmitted": "文件附件未包含在此次分享中",
   "sharing.request.incomplete": "此部署尚未发布，编辑器关闭后无法续传。请先放弃部署，再让 Agent 使用新的 requestId 重新发起分享请求。",
   "sharing.request.incompleteOpen": "此部署尚未发布，可在已打开的编辑器中重试。关闭编辑器会丢弃上传凭据；之后需要先放弃此部署，再重新发起分享。",
@@ -13,9 +11,9 @@
   "sharing.request.failed": "未能忽略此请求，请重试。",
   "sharing.static.draft": "上一次分享没有完成发布。",
   "sharing.static.includeChildren": "同时分享 {{count}} 个子对话",
+  "sharing.static.attachmentNotice": "包含图片，暂不包含文件附件和外部资源。",
   "sharing.static.includeChildrenPartial": "同时分享子对话（已选 {{selected}} / {{count}}）",
   "sharing.static.limit": "每份分享最多包含 {{count}} 个对话。",
-  "sharing.static.summary": "{{conversations}} 个对话 · {{attachments}} 个已复制附件",
   "sharing.static.sourceUnavailable": "所选源对话不可用，已发布的副本不受影响。",
   "sharing.static.conflict": "这个分享已在别处发生变化。请重新开始，以发布当前内容。",
   "sharing.static.update": "更新分享",

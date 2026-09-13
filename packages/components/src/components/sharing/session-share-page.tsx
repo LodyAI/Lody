@@ -265,13 +265,6 @@ export function SessionShareSurface(props: {
   attachmentAccess: ShareAttachmentAccess;
   /** Supplied by a host that can establish an identity; signed-out otherwise. */
   viewer?: ShareViewer;
-  /**
-   * Rendered inside the authenticated app (the publisher's frozen-copy
-   * preview). Visitor chrome is suppressed: the theme control here would drive
-   * the surrounding app's own appearance, and the sign-in slot describes a
-   * visitor, not the publisher looking at their own package.
-   */
-  embedded?: boolean;
   createAgentPrompt?: (conversationId: string) => Promise<string>;
 }) {
   const { t } = useTranslation();
@@ -387,13 +380,9 @@ export function SessionShareSurface(props: {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {!props.embedded && (
-            <>
-              <ShareThemeToggle />
-              <ShareLanguageToggle />
-              <ShareViewerIdentity viewer={viewer} appOrigin={appOrigin} />
-            </>
-          )}
+          <ShareThemeToggle />
+          <ShareLanguageToggle />
+          <ShareViewerIdentity viewer={viewer} appOrigin={appOrigin} />
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
@@ -415,9 +404,7 @@ export function SessionShareSurface(props: {
             snapshot={props.snapshot}
             attachmentAccess={props.attachmentAccess}
             createAgentPrompt={
-              !props.embedded && props.createAgentPrompt
-                ? () => props.createAgentPrompt!(panes.main.id)
-                : undefined
+              props.createAgentPrompt ? () => props.createAgentPrompt!(panes.main.id) : undefined
             }
           />
         </div>
