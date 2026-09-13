@@ -156,7 +156,6 @@ export function MessageQueueDisplay({
                     sessionId={sessionId}
                     item={item}
                     index={index}
-                    isFirst={index === 0}
                     showSteerAction={showSteerAction}
                     canReorder={canReorder}
                     isEditing={isEditing}

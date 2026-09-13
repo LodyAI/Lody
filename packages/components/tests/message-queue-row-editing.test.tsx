@@ -14,15 +14,15 @@ import { initI18n } from '../src/i18n';
 
 const ORIGINAL_TASK = 'Refactor the message queue';
 
-function makeItem(): MessageQueueItem {
+function makeItem(cid = 'cid-0', task = ORIGINAL_TASK): MessageQueueItem {
   return {
-    $cid: 'cid-0',
-    task: ORIGINAL_TASK,
+    $cid: cid,
+    task,
     userId: 'user-1',
-    userTurnId: 'turn-0',
+    userTurnId: `turn-${cid}`,
     timestamp: '2026-01-01T00:00:00.000Z',
     acpSessionConfig: {
-      prompt: ORIGINAL_TASK,
+      prompt: task,
       cliType: 'claude-code',
       agentType: 'claude-code',
     },
@@ -231,5 +231,45 @@ describe('queued message editing commits', () => {
 
     expect(saved).toEqual([]);
     expect(cancelled).toEqual(['cid-0']);
+  });
+
+  it('offers steer on every queued item and makes each message body draggable', async () => {
+    const items = [makeItem('cid-0', 'First queued task'), makeItem('cid-1', 'Later queued task')];
+    const steered: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onEditStart: () => undefined,
+          onEditCancel: () => undefined,
+          onEditSave: () => undefined,
+          onSteer: (item: MessageQueueItem) => {
+            steered.push(item.$cid);
+          },
+          showSteerAction: true,
+        })
+      );
+    });
+
+    const steerButtons = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Steer the active response with this message"]'
+      )
+    );
+    expect(steerButtons).toHaveLength(2);
+    await act(async () => {
+      steerButtons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(steered).toEqual(['cid-1']);
+
+    const dragTargets = Array.from(
+      container!.querySelectorAll<HTMLElement>('[aria-label="Drag to reorder"]')
+    );
+    expect(dragTargets).toHaveLength(2);
+    expect(dragTargets[1]?.textContent).toContain('Later queued task');
+    expect(dragTargets[1]?.contains(steerButtons[1] ?? null)).toBe(false);
   });
 });

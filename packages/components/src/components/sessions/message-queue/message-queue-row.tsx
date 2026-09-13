@@ -17,7 +17,6 @@ export type MessageQueueRowProps = {
   sessionId: SessionId;
   item: MessageQueueItem;
   index: number;
-  isFirst: boolean;
   showSteerAction: boolean;
   canReorder: boolean;
   isEditing: boolean;
@@ -37,8 +36,10 @@ type EditCommitProps = {
 };
 
 export function MessageQueueRow(props: MessageQueueRowProps) {
+  const { t } = useTranslation();
   const { item, canReorder, isEditing, isPending, editValue, onCancelEdit, onSaveEdit } = props;
   const sortable = useSortable({ id: item.$cid, disabled: !canReorder || isEditing });
+  const dragEnabled = canReorder && !isEditing;
   const constrainedTransform = sortable.transform
     ? { ...sortable.transform, x: 0, scaleX: 1, scaleY: 1 }
     : null;
@@ -95,22 +96,28 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         isEditing && 'bg-background/60'
       )}
     >
-      <LeadingHandle {...props} sortable={sortable} />
-      <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      <div
+        ref={sortable.setActivatorNodeRef}
+        className={cn(
+          'flex min-w-0 flex-1 items-start gap-2 rounded-sm',
+          dragEnabled &&
+            'cursor-grab touch-none active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+        )}
+        aria-label={
+          dragEnabled ? t('sessions.messageQueue.dragToReorder', 'Drag to reorder') : undefined
+        }
+        {...(dragEnabled ? sortable.attributes : {})}
+        {...(dragEnabled ? sortable.listeners : {})}
+      >
+        <LeadingHandle {...props} />
+        <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      </div>
       <RowActions {...props} />
     </div>
   );
 }
 
-function LeadingHandle({
-  index,
-  canReorder,
-  isEditing,
-  sortable,
-}: MessageQueueRowProps & { sortable: ReturnType<typeof useSortable> }) {
-  const { t } = useTranslation();
-  const label = t('sessions.messageQueue.dragToReorder', 'Drag to reorder');
-
+function LeadingHandle({ index, canReorder, isEditing }: MessageQueueRowProps) {
   if (!canReorder || isEditing) {
     return (
       <div
@@ -123,30 +130,19 @@ function LeadingHandle({
   }
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          ref={sortable.setActivatorNodeRef}
-          className={cn(
-            'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded',
-            'text-[10px] font-medium tabular-nums text-muted-foreground/60',
-            'cursor-grab transition-colors active:cursor-grabbing',
-            'hover:bg-muted hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
-          )}
-          aria-label={label}
-          {...sortable.attributes}
-          {...sortable.listeners}
-        >
-          <span className="block group-hover/row:hidden group-focus-within/row:hidden">
-            {index + 1}
-          </span>
-          <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+    <div
+      aria-hidden="true"
+      className={cn(
+        'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded',
+        'text-[10px] font-medium tabular-nums text-muted-foreground/60',
+        'transition-colors group-hover/row:text-foreground'
+      )}
+    >
+      <span className="block group-hover/row:hidden group-focus-within/row:hidden">
+        {index + 1}
+      </span>
+      <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
+    </div>
   );
 }
 
@@ -288,7 +284,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
-  const { item, isFirst, showSteerAction, isEditing, onStartEdit, onRemove, onSteer } = props;
+  const { item, showSteerAction, isEditing, onStartEdit, onRemove, onSteer } = props;
 
   // In edit mode the textarea owns the row: it carries its own confirm button, so we
   // render no row-level actions that would compete for the click mid-edit.
@@ -298,7 +294,7 @@ function RowActions(props: MessageQueueRowProps) {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      {isFirst && showSteerAction ? (
+      {showSteerAction ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
           ariaLabel={t(

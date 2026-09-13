@@ -3450,6 +3450,7 @@
   "commands.session.toggleCurrentPinned": "切换当前对话置顶",
   "commands.session.searchCurrent": "在当前对话中查找",
   "commands.session.focusInput": "聚焦当前输入框",
+  "commands.session.sendWithInverseQueueBehavior": "以相反的排队／引导方式发送",
   "commands.session.saveCurrentFile": "保存当前文件",
   "commands.session.toggleExplorerSidebar": "切换文件与更改侧边栏",
   "commands.session.copyCurrentBranch": "复制当前分支",

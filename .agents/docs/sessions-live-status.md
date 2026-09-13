@@ -43,8 +43,10 @@ this page is the full text of the rules summarised there.
   must queue in that state (even when the preference is guide; steering requires
   positive live prompt activity), because queue promotion is safe for both a live
   turn and a stale transcript while direct dispatch can create a second accepted
-  turn. This barrier affects routing only; it must not relight Working UI or enable
-  Stop. That pre-start label is additionally suppressed whenever the
+  turn. An explicit inverse submission swaps queue and guide for that submission
+  only, then applies the same activity and ordering gates; it never changes the
+  stored preference. This barrier affects routing only; it must not relight Working
+  UI or enable Stop. That pre-start label is additionally suppressed whenever the
   status chip has an active connection/machine problem (`statusStripState !=
 null`: browser offline, machine removed or offline) — the chip owns that story,
   and "Starting…" next to "machine offline" is a contradiction. `isSessionWorking`

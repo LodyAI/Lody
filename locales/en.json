@@ -3450,6 +3450,7 @@
   "commands.session.toggleCurrentPinned": "Toggle Current Chat Pinned",
   "commands.session.searchCurrent": "Find in Current Chat",
   "commands.session.focusInput": "Focus Current Input",
+  "commands.session.sendWithInverseQueueBehavior": "Send with Opposite Queue/Steer Behavior",
   "commands.session.saveCurrentFile": "Save Current File",
   "commands.session.toggleExplorerSidebar": "Toggle Files and Changes Sidebar",
   "commands.session.copyCurrentBranch": "Copy Current Branch",

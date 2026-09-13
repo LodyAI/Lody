@@ -93,6 +93,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Editor',
   },
   {
+    id: 'session.sendWithInverseQueueBehavior',
+    titleKey: 'commands.session.sendWithInverseQueueBehavior',
+    title: 'Send with Opposite Queue/Steer Behavior',
+    category: 'Session',
+  },
+  {
     id: 'session.toggleExplorerSidebar',
     titleKey: 'commands.session.toggleExplorerSidebar',
     title: 'Toggle Files and Changes Sidebar',

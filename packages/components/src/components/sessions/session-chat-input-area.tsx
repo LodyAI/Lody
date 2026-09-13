@@ -145,6 +145,7 @@ import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-ro
 import { splitImageAndFileAttachments } from '@/lib/file-drop';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 
 const sessionDraftsCache = new Map<SessionId, string>();
 
@@ -441,7 +442,8 @@ export interface SessionChatInputAreaProps {
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
   onSendMessage: (
     inputBlocks: SessionInputBlock[],
-    agentRole: SessionTurnAgentRoleSelection
+    agentRole: SessionTurnAgentRoleSelection,
+    options?: SessionChatInputSubmitOptions
   ) => Promise<boolean>;
   onStop: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
@@ -470,6 +472,10 @@ export interface SessionChatInputAreaProps {
 }
 
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
+
+export type SessionChatInputSubmitOptions = {
+  invertQueuedBehavior?: boolean;
+};
 
 export type SessionChatInputAreaHandle = {
   setInputText: (text: string) => void;
@@ -1756,7 +1762,10 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
+    const invertQueuedBehaviorForNextSubmitRef = useRef(false);
     const sendMessage = useCallback(async () => {
+      const invertQueuedBehavior = invertQueuedBehaviorForNextSubmitRef.current;
+      invertQueuedBehaviorForNextSubmitRef.current = false;
       if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
         capturePostHogEvent(postHog, 'session/input_blocked', {
           reason: 'free_session_turn_limit_reached',
@@ -1900,7 +1909,11 @@ export const SessionChatInputArea = memo(
       const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
       if (!submission) return;
       try {
-        const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
+        const accepted = await onSendMessage(
+          inputBlocks,
+          agentRoleTurnSelectionRef.current,
+          invertQueuedBehavior ? { invertQueuedBehavior: true } : undefined
+        );
         if (accepted) {
           if (submission.isCurrent()) {
             clearInput();
@@ -1999,6 +2012,24 @@ export const SessionChatInputArea = memo(
       isExternalHistoryRefreshing ||
       durableAgentRoleReady === false ||
       Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit);
+    useCommand(
+      {
+        id: 'session.sendWithInverseQueueBehavior',
+        title: t(
+          'commands.session.sendWithInverseQueueBehavior',
+          'Send with Opposite Queue/Steer Behavior'
+        ),
+        category: 'Session',
+        keybindings: getCommandKeybindings('session.sendWithInverseQueueBehavior'),
+        allowInTextInput: true,
+        when: () => hasSendableContent && !isSendActionDisabled,
+        run: () => {
+          invertQueuedBehaviorForNextSubmitRef.current = true;
+          void sendMessage();
+        },
+      },
+      commandsEnabled
+    );
     const attachmentAddEnabled = !isArchived;
     const sessionLocalFileSource = useMemo(
       () =>

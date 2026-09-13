@@ -63,8 +63,10 @@ import {
   SessionChatInputArea,
   setSessionChatInputTextDraft,
   type SessionChatInputAreaHandle,
+  type SessionChatInputAreaProps,
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
+import { commands } from '../src/lib/commands';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -342,7 +344,7 @@ describe('SessionChatInputArea submission feedback', () => {
     claimNavigationFocus,
   }: {
     sessionId?: string;
-    onSendMessage: (blocks: SessionInputBlock[]) => Promise<boolean>;
+    onSendMessage: SessionChatInputAreaProps['onSendMessage'];
     isArchived?: boolean;
     composerRef?: RefObject<SessionChatInputAreaHandle | null>;
     claimNavigationFocus?: () => boolean;
@@ -401,6 +403,19 @@ describe('SessionChatInputArea submission feedback', () => {
       }
     });
   }
+
+  it('submits the current draft with one-shot inverse queue behavior', async () => {
+    const onSendMessage = vi.fn<SessionChatInputAreaProps['onSendMessage']>(async () => true);
+    await renderComposer({ sessionId: 'inverse-queue-submit', onSendMessage });
+
+    await act(async () => {
+      expect(commands.execute('session.sendWithInverseQueueBehavior')).toBe(true);
+      await Promise.resolve();
+    });
+
+    expect(onSendMessage).toHaveBeenCalledOnce();
+    expect(onSendMessage.mock.calls[0]?.[2]).toEqual({ invertQueuedBehavior: true });
+  });
 
   it.each([
     ['keyboard', true],

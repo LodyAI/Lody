@@ -5,6 +5,7 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
   resolveSessionMessageSubmitRoute({
     forceDirect: false,
     forceQueue: false,
+    invertQueuedBehavior: false,
     isPromptBusy: false,
     hasUnfinishedAssistantTurn: false,
     queuedMessageBehavior: 'queue',
@@ -40,6 +41,25 @@ describe('resolveSessionMessageSubmitRoute', () => {
         queuedMessageBehavior: 'guide',
       })
     ).toEqual({ type: 'guide' });
+  });
+
+  it('inverts the configured queue behavior for an explicit submission', () => {
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'queue',
+        invertQueuedBehavior: true,
+      })
+    ).toEqual({ type: 'guide' });
+    expect(
+      resolve({
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+        invertQueuedBehavior: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
   });
 
   it('honors explicit route overrides with forceDirect taking precedence', () => {
