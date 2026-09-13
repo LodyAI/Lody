@@ -155,7 +155,7 @@ describe('resolveBuiltinACPSetting', () => {
       expect(patch).toContain("name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'");
       expect(patch).toContain('compression: zstd');
       expect(patch).toContain('defaultPreset: workspace-write');
-      expect(patch).toContain('reasoningEffort: max');
+      expect(patch).toContain('reasoningEffort: "max"');
       expect(patch).toContain('model: "deepseek-flash"');
     } finally {
       vi.unstubAllEnvs();
