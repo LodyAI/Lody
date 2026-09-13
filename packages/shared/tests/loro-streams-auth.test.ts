@@ -193,33 +193,20 @@ describe('loro streams auth helpers', () => {
     );
   });
 
-  it('does not fail a successful token fetch when persistent cache auth lookup fails', async () => {
-    let authTokenCalls = 0;
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ token: 'jwt-1', expiresIn: 900 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-    );
-
+  it('fails closed when the current login cannot be resolved', async () => {
+    let available = true;
     const provider = createLoroStreamsTokenProvider({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace-1',
-      authToken: async () => {
-        authTokenCalls++;
-        if (authTokenCalls <= 2) {
-          return 'raw-token';
-        }
-        throw new Error('session unavailable');
+      authToken: () => {
+        if (!available) throw new Error('session unavailable');
+        return 'auth';
       },
-      fetchImpl,
+      fetchImpl: async () => new Response(JSON.stringify({ token: 'jwt', expiresIn: 900 })),
     });
-
-    await expect(provider.getToken()).resolves.toBe('jwt-1');
-    await expect(provider.getToken()).resolves.toBe('jwt-1');
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(await provider.getToken()).toBe('jwt');
+    available = false;
+    await expect(provider.getToken()).rejects.toThrow('session unavailable');
   });
 
   it('invalidate() forces a fresh token fetch on the next getToken() call', async () => {
@@ -290,7 +277,7 @@ describe('loro streams auth helpers', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     );
-    await expect(tokenPromise1).resolves.toBe('stale-jwt');
+    await expect(tokenPromise1).rejects.toThrow('superseded');
 
     // Resolve the fresh fetch
     freshResolve(
@@ -480,7 +467,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('reads an encrypted cached token from localStorage on initialization and avoids fetching', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const firstFetchImpl = vi.fn(
       async () =>
         new Response(
@@ -554,7 +541,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('writes fetched tokens to localStorage without storing plaintext JWTs', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const fetchImpl = vi.fn(
       async () =>
         new Response(
@@ -592,7 +579,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('ignores an encrypted cache when the auth token changes and fetches a fresh JWT', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const firstProvider = createLoroStreamsTokenProvider({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace-1',
@@ -629,7 +616,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('replaces legacy plaintext localStorage cache entries with encrypted cache entries', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     localStorageMock.setItem(
       storageKey,
       JSON.stringify({
@@ -693,5 +680,131 @@ describe('loro streams auth helpers', () => {
 
     await expect(secondProvider.getToken()).resolves.toBe('jwt-fresh');
     expect(secondFetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it('coalesces staggered unauthorized calls and ignores late failures on a shared callback', async () => {
+    let finish!: (response: Response) => void;
+    let started!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let requests = 0;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'auth',
+      fetchImpl: async (_url, init) => {
+        requests++;
+        if (requests === 1) return new Response(JSON.stringify({ token: 'old', expiresIn: 900 }));
+        expect(JSON.parse(String(init?.body)).rejectedToken).toBe('old');
+        started();
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    const auth = provider.createAuthCallback();
+    expect(await auth()).toBe('old');
+    const first = auth({ reason: 'unauthorized', previousToken: 'old' });
+    await refreshStarted;
+    const rest = Array.from({ length: 19 }, () =>
+      auth({ reason: 'unauthorized', previousToken: 'old' })
+    );
+    finish(new Response(JSON.stringify({ token: 'new', expiresIn: 900 })));
+    expect(await Promise.all([first, ...rest])).toEqual(Array(20).fill('new'));
+    expect(await auth({ reason: 'unauthorized', previousToken: 'old' })).toBe('new');
+    expect(await provider.getToken()).toBe('new');
+    expect(requests).toBe(2);
+  });
+
+  it('does not return a cached token across login changes or logout', async () => {
+    let login: string | null = 'alice';
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => login,
+      fetchImpl: async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            token: String(init?.headers && (init.headers as Record<string, string>).Authorization),
+            expiresIn: 900,
+          })
+        ),
+    });
+    expect(await provider.getToken()).toBe('Bearer alice');
+    login = 'bob';
+    expect(await provider.getToken()).toBe('Bearer bob');
+    login = null;
+    expect(await provider.createAuthCallback()()).toBeUndefined();
+  });
+
+  it('rejects an old login response after a new login has populated the cache', async () => {
+    let login = 'alice';
+    let finish!: (response: Response) => void;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => login,
+      fetchImpl: async (_url, init) => {
+        if (new Headers(init?.headers).get('Authorization') === 'Bearer alice') {
+          started();
+          return new Promise<Response>((resolve) => {
+            finish = resolve;
+          });
+        }
+        return new Response(JSON.stringify({ token: 'bob-token', expiresIn: 900 }));
+      },
+    });
+    const old = provider.getToken();
+    await requestStarted;
+    login = 'bob';
+    expect(await provider.getToken()).toBe('bob-token');
+    finish(new Response(JSON.stringify({ token: 'alice-token', expiresIn: 900 })));
+    await expect(old).rejects.toThrow('superseded');
+    expect(await provider.getToken()).toBe('bob-token');
+  });
+
+  it('does not hydrate a token issued by another endpoint or workspace', async () => {
+    const make = (endpoint: string, workspaceId: string) =>
+      createLoroStreamsTokenProvider({
+        endpoint,
+        workspaceId,
+        authToken: 'same-auth',
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ token: endpoint + workspaceId, expiresIn: 900 })),
+      });
+    expect(await make('https://one.example', 'a').getToken()).toBe('https://one.examplea');
+    expect(await make('https://two.example', 'a').getToken()).toBe('https://two.examplea');
+    expect(await make('https://one.example', 'b').getToken()).toBe('https://one.exampleb');
+  });
+
+  it('fences publication when login changes between async validation and its continuation', async () => {
+    Object.defineProperty(globalThis, 'localStorage', { value: undefined, configurable: true });
+    let login = 'alice';
+    let resolutions = 0;
+    let newer: Promise<unknown> | undefined;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => {
+        const captured = login;
+        if (++resolutions === 5)
+          queueMicrotask(() => {
+            login = 'bob';
+            newer = provider.getToken().catch((error) => error);
+          });
+        return captured;
+      },
+      fetchImpl: async (_url, init) =>
+        new Headers(init?.headers).get('Authorization') === 'Bearer alice'
+          ? new Response(JSON.stringify({ token: 'alice-token', expiresIn: 900 }))
+          : new Response('', { status: 500 }),
+    });
+    await expect(provider.getToken()).rejects.toThrow('superseded');
+    await newer;
+    await expect(provider.getToken()).rejects.toThrow('status=500');
   });
 });
