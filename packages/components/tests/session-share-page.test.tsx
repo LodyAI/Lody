@@ -227,7 +227,7 @@ describe('static share presentation', () => {
   it('offers Fork as a disabled, explicitly unfinished action', async () => {
     await render();
     const fork = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
-      node.textContent?.includes('Fork to my Lody workspace')
+      node.textContent?.includes('Fork to my Lody')
     )!;
     expect(fork.disabled).toBe(true);
     expect(fork.getAttribute('aria-label')).toContain('coming soon');

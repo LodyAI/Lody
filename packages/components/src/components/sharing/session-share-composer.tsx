@@ -25,7 +25,7 @@ export function SessionShareComposer({
   showFork?: boolean;
 }) {
   const { t } = useTranslation();
-  const forkLabel = t('sharing.forkComingSoon', 'Fork to my Lody workspace (coming soon)');
+  const forkLabel = t('sharing.forkComingSoon', 'Fork to my Lody (coming soon)');
   return (
     <div className="shrink-0 bg-background pb-3 pt-1">
       <ConversationColumn>
@@ -52,7 +52,7 @@ export function SessionShareComposer({
                 aria-label={forkLabel}
               >
                 <GitFork className="size-3.5" aria-hidden />
-                <span className="truncate">{t('sharing.fork', 'Fork to my Lody workspace')}</span>
+                <span className="truncate">{t('sharing.fork', 'Fork to my Lody')}</span>
                 <span className="rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   {t('common.comingSoon', 'Soon')}
                 </span>
