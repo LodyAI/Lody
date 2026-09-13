@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 
 export function LoadingPlaceholder({
@@ -28,7 +28,7 @@ export function LoadingPlaceholder({
         role="status"
         aria-live="polite"
       >
-        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+        <Spinner className="h-5 w-5" aria-hidden />
         <div className="space-y-1">
           <div className="text-sm font-medium text-foreground">{title}</div>
           {description ? (

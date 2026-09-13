@@ -1906,6 +1906,14 @@ pre,
    sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
    13.55×15.43 in the reconnecting pill before this rule.
 
+   Spinning an `<svg>` directly is no longer done anywhere in this
+   package: Chromium refuses to composite a transform animation on an SVG
+   target whose effective zoom is not 1 (crbug.com/1186312), which is every
+   SVG on a Retina display, so the rotation re-ran style, pre-paint and
+   layerize on the main thread at the refresh rate. `ui/spinner.tsx` puts
+   the animation on an HTML wrapper instead. The `svg` rule below stays as
+   a safety net for any stray `<svg class="animate-spin">`.
+
    `@layer base` keeps this below utilities, so an explicit
    `origin-*` / `shrink` utility at a call site still wins. */
 @layer base {
@@ -1915,11 +1923,11 @@ pre,
     flex-shrink: 0;
   }
 
-  /* `SessionSyncingIndicator` animates an HTML wrapper instead of the
-     glyph. A wrapper is only equivalent while its box matches the
-     glyph's: the moment anything else lands inside it (a label, a gap)
-     its box grows, its center moves off the glyph, and the glyph
-     orbits. It must therefore stay icon-only and explicitly sized;
+  /* `ui/spinner.tsx` animates an HTML wrapper instead of the glyph so
+     the rotation composites. A wrapper is only equivalent while its box
+     matches the glyph's: the moment anything else lands inside it (a
+     label, a gap) its box grows, its center moves off the glyph, and the
+     glyph orbits. It must therefore stay icon-only and explicitly sized;
      centering the origin here makes that failure mode a wobble-free
      no-op rather than an orbit. */
   span.animate-spin {
@@ -1979,7 +1987,9 @@ pre,
 
 /* An agent runtime whose wait has no denominator (the ACP handshake) gets the
    same ring as a download, on an orbit instead of a fill. Transform-only and
-   CSS-driven, so React stays idle while it spins. */
+   CSS-driven, so React stays idle while it spins. The class sits on an HTML
+   wrapper around the arc's own `<svg>`, not on an SVG `<g>`: Chromium cannot
+   composite SVG transform animations at DPR≠1 (see the spinner rule above). */
 @keyframes agent-readiness-orbit {
   to {
     transform: rotate(360deg);

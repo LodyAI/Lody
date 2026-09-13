@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import { Textarea } from '@/ui/textarea';
@@ -120,7 +120,7 @@ export function UserMessageEditor({
             'active:translate-y-[1px]'
           )}
         >
-          {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
           {t('sessions.send', 'Send')}
         </Button>
       </div>

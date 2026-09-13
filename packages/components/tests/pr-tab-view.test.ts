@@ -108,7 +108,7 @@ describe('PrTabView refresh button', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });
 
     expect(button.disabled).toBe(false);
-    expect(button.querySelector('svg')?.classList.contains('animate-spin')).toBe(true);
+    expect(button.querySelector('.animate-spin')).not.toBeNull();
 
     flushSync(() => {
       button.click();
@@ -121,7 +121,7 @@ describe('PrTabView refresh button', () => {
     const { button, onRefresh } = renderView({ state: 'ready', isRefreshing: true });
 
     expect(button.disabled).toBe(false);
-    expect(button.querySelector('svg')?.classList.contains('animate-spin')).toBe(true);
+    expect(button.querySelector('.animate-spin')).not.toBeNull();
 
     flushSync(() => {
       button.click();

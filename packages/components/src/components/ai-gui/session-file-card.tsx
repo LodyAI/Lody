@@ -14,8 +14,8 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
-  Loader2,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import {
@@ -93,14 +93,14 @@ const buildActionIcon = ({
   isDownloading: boolean;
 }): ReactNode => {
   if (state === 'pending') {
-    return <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />;
+    return <Spinner className="h-4 w-4" aria-hidden="true" />;
   }
   if (state === 'expired') {
     return <Clock className="h-4 w-4" aria-hidden="true" />;
   }
   if (state === 'downloadable') {
     return isDownloading ? (
-      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      <Spinner className="h-4 w-4" aria-hidden="true" />
     ) : (
       <Download className="h-4 w-4" aria-hidden="true" />
     );
@@ -224,7 +224,7 @@ export function SessionFileCard({
           className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isDownloading ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            <Spinner className="h-4 w-4" aria-hidden="true" />
           ) : (
             <Download className="h-4 w-4" aria-hidden="true" />
           )}

@@ -52,7 +52,6 @@ import {
   Download,
   FlaskConical,
   KeyRound,
-  Loader2,
   Lock,
   RefreshCw,
   Search,
@@ -60,6 +59,7 @@ import {
   SquareTerminal,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
@@ -2127,7 +2127,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   onClick={() => void runCustomProbe()}
                 >
                   {probing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     <FlaskConical className="h-3.5 w-3.5" />
                   )}
@@ -2206,7 +2206,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   }}
                 >
                   {probing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     <FlaskConical className="h-3.5 w-3.5" />
                   )}
@@ -2288,7 +2288,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 </p>
               ) : binaryStatus === 'unknown' || binaryProgressActive ? (
                 <p className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                   {formatBinaryStatusText(
                     t,
                     binaryStatus,
@@ -2335,7 +2335,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     >
                       {installingBinary ? (
                         <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                           {t('settings.agent.dialog.binaryDownloading', 'Downloading…')}
                         </>
                       ) : (
@@ -2485,7 +2485,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   size="sm"
                 >
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-2 h-4 w-4" />
                   )}
                   {mode.kind === 'edit' ? t('common.save', 'Save') : t('common.create', 'Create')}
                 </Button>
@@ -2731,7 +2731,7 @@ function ProbeStatus({
   if (probing) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        <Spinner className="h-3 w-3" aria-hidden="true" />
         {t('settings.agent.dialog.probing', 'Probing…')}
       </span>
     );

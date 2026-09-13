@@ -125,6 +125,7 @@ import {
   PinOff,
   Wrench,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -2640,7 +2641,7 @@ const WorktreeScriptNoticeView = ({
             {title}
           </span>
           {isRunning ? (
-            <Loader2 className="h-3 w-3 flex-none shrink-0 animate-spin text-muted-foreground" />
+            <Spinner className="h-3 w-3 flex-none shrink-0 text-muted-foreground" />
           ) : null}
         </Fragment>
       }
@@ -2889,7 +2890,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Loader2 className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 animate-spin text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 text-muted-foreground" />
               )}
               <div
                 className={cn(
@@ -3141,7 +3142,7 @@ const ResendUndeliveredDialog = ({
             {t('common.cancel', 'Cancel')}
           </AlertDialogCancel>
           <AlertDialogAction disabled={isResending} onClick={onConfirm}>
-            {isResending ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : null}
+            {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -3632,11 +3633,7 @@ const AssistantForkButton = ({
       )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
-      {isForking ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <GitFork className="h-3.5 w-3.5" />
-      )}
+      {isForking ? <Spinner className="h-3.5 w-3.5" /> : <GitFork className="h-3.5 w-3.5" />}
     </Button>
   );
 
@@ -5783,7 +5780,7 @@ const ToolCallCard = memo(function ToolCallCard({
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
@@ -5793,10 +5790,7 @@ const ToolCallCard = memo(function ToolCallCard({
     const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <StatusIcon
-          className={cn('h-4 w-4 shrink-0', isCompacting && 'animate-spin')}
-          aria-hidden="true"
-        />
+        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -5896,9 +5890,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? (
-    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  ) : null;
+  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;

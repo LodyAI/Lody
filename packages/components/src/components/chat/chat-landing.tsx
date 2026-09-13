@@ -46,13 +46,13 @@ import {
   ArrowUp,
   FolderOpen,
   Github as GithubIcon,
-  Loader2,
   LockKeyhole,
   Monitor,
   PanelLeft,
   RefreshCw,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 
 import {
@@ -6127,11 +6127,7 @@ function WorkspaceChatLanding({
                   'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
                 )}
               >
-                {submitting ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-5 w-5" />
-                )}
+                {submitting ? <Spinner className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
               </Button>
             }
             autoResize

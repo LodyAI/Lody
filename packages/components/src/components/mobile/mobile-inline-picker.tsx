@@ -13,7 +13,8 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Check, Loader2, Search, X } from 'lucide-react';
+import { Check, Search, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { cn } from '@/lib/utils';
@@ -474,7 +475,7 @@ export function MobileInlinePicker<T extends string = string>({
       <span className="flex min-w-0 flex-1 items-center gap-2">
         {loading ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" aria-hidden="true" />
+            <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
             {loadingText ? <span className="truncate">{loadingText}</span> : triggerContent}
           </>
         ) : (

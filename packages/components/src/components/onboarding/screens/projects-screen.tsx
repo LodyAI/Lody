@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCloudAction, usePlatformCapability } from '@lody/platform/react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, ExternalLink, FolderPlus, Github, Loader2 } from 'lucide-react';
+import { Check, ExternalLink, FolderPlus, Github } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from 'sonner';
@@ -166,13 +167,7 @@ export function ProjectsScreenView({
 
         <div className="grid gap-3 sm:grid-cols-2">
           <ActionCard
-            icon={
-              importing ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <FolderPlus className="h-5 w-5" />
-              )
-            }
+            icon={importing ? <Spinner className="h-5 w-5" /> : <FolderPlus className="h-5 w-5" />}
             title={t('onboarding.projects.addLocalTitle', 'Add a local project')}
             description={t(
               'onboarding.projects.addLocalDescription',
@@ -192,11 +187,7 @@ export function ProjectsScreenView({
           />
           <ActionCard
             icon={
-              connectingGitHub ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Github className="h-5 w-5" />
-              )
+              connectingGitHub ? <Spinner className="h-5 w-5" /> : <Github className="h-5 w-5" />
             }
             title={t('onboarding.projects.connectGitHubTitle', 'Connect a GitHub repository')}
             description={t(

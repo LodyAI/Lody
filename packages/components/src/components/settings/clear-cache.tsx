@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,7 +82,7 @@ export function ClearCacheConfirmDialog({
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {isClearing ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              <Spinner className="mr-1.5 h-3.5 w-3.5" />
             ) : (
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
             )}

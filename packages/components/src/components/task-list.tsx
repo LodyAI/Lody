@@ -23,7 +23,6 @@ import {
   GitPullRequest,
   GripVertical,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
@@ -31,6 +30,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   memo,
   useCallback,
@@ -990,7 +990,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                         {shareMenuState === 'share' ? (
                           <Users />
                         ) : shareMenuState === 'loading' ? (
-                          <Loader2 className="animate-spin" />
+                          <Spinner />
                         ) : (
                           <LockKeyhole />
                         )}

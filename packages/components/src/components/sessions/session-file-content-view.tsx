@@ -5,7 +5,6 @@ import {
   Download,
   Eye,
   EyeClosed,
-  Loader2,
   MessageCircle,
   RefreshCw,
   Save,
@@ -13,6 +12,7 @@ import {
   ShieldAlert,
   WrapText,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
@@ -1153,7 +1153,7 @@ function SessionFileContentViewImpl({
   if (showProviderConnecting) {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         <span>
           {fileProviderMessage ??
             t('sessions.codeSession.connecting', 'Connecting to code session…')}
@@ -1163,7 +1163,7 @@ function SessionFileContentViewImpl({
   } else if (showLocalLoading || data.status === 'loading') {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         <span>
           {shouldUseLocalFileContent
             ? localFileLoadingLabel
@@ -1226,7 +1226,7 @@ function SessionFileContentViewImpl({
         />
         {htmlPreviewLoading ? (
           <div className="pointer-events-none absolute right-3 top-3 rounded bg-background/90 p-1.5 text-muted-foreground shadow-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
           </div>
         ) : null}
         {htmlRuntimeError ? (
@@ -1450,8 +1450,10 @@ function SessionFileContentViewImpl({
                 aria-busy={isRefreshing}
                 className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <RefreshCw
-                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  className="h-3.5 w-3.5"
                   aria-hidden="true"
                 />
               </button>
@@ -1516,7 +1518,7 @@ function SessionFileContentViewImpl({
                 )}
               >
                 {saveStatus.kind === 'saving' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
                   <Save className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
@@ -1539,8 +1541,10 @@ function SessionFileContentViewImpl({
                 aria-busy={isRefreshing}
                 className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <RefreshCw
-                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  className="h-3.5 w-3.5"
                   aria-hidden="true"
                 />
               </button>

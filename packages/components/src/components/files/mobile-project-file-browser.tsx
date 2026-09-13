@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, CloudOff, FileText, FolderOpen, Home, Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
 import { useAtomValue } from 'jotai';
@@ -822,7 +823,7 @@ function StatusPanel({
         tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
       )}
     >
-      <Icon className={cn('h-6 w-6', spin && 'animate-spin')} aria-hidden />
+      <Spinner icon={Icon} spinning={spin} className="h-6 w-6" aria-hidden />
       <span className="text-[0.95rem]">{title}</span>
       {description ? (
         <span className="text-[0.8125rem] text-muted-foreground">{description}</span>

@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CreditCard, Loader2, Shield, User } from 'lucide-react';
+import { CreditCard, Shield, User } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -205,7 +206,7 @@ export function InviteMemberDialog({
             )
           ) : (
             <Button size="sm" onClick={submit} disabled={!email.trim() || inviting}>
-              {inviting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {inviting && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
               {inviting ? t('common.inviting') : t('common.invite')}
             </Button>
           )}
@@ -228,7 +229,7 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
   if (preview === undefined) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <Spinner className="h-3.5 w-3.5" />
         {t('workspace.invite.seat.loading')}
       </div>
     );

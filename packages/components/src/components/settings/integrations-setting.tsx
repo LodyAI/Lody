@@ -1,15 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
-import {
-  AlertCircle,
-  Book,
-  CheckCircle2,
-  Github,
-  ArrowUpRight,
-  Loader2,
-  Lock,
-  Search,
-} from 'lucide-react';
+import { AlertCircle, Book, CheckCircle2, Github, ArrowUpRight, Lock, Search } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -150,11 +142,7 @@ export function GitHubPersonalIdentitySettingsCard({
             onClick={onAuthorize}
             disabled={!workspaceReady || authorizing}
           >
-            {authorizing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Github className="h-3.5 w-3.5" />
-            )}
+            {authorizing ? <Spinner className="h-3.5 w-3.5" /> : <Github className="h-3.5 w-3.5" />}
             {t('settings.integrations.github.personalIdentityAuthorize', 'Authorize')}
           </Button>
         )}
@@ -178,7 +166,7 @@ export function GitHubPersonalIdentitySettingsCard({
         </div>
         <div className="flex shrink-0 items-center">
           {updating ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Spinner className="h-4 w-4 text-muted-foreground" />
           ) : (
             <Switch
               checked={enabled}
@@ -247,7 +235,7 @@ export function GitHubPersonalIdentitySettingsCard({
               disabled={!workspaceReady || authorizing}
             >
               {authorizing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <Github className="h-3.5 w-3.5" />
               )}
@@ -309,7 +297,9 @@ function CloudIntegrationsSettings() {
   const setPersonalOperationPreference = useCloudMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(cloudOperations.github.refreshPersonalGitHubProfile);
+  const refreshPersonalGitHubProfile = useCloudAction(
+    cloudOperations.github.refreshPersonalGitHubProfile
+  );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -571,9 +561,7 @@ function CloudIntegrationsSettings() {
                   }}
                   disabled={showGitHubConnectSpinner || !workspaceAuthReady}
                 >
-                  {showGitHubConnectSpinner ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : null}
+                  {showGitHubConnectSpinner ? <Spinner className="h-3.5 w-3.5" /> : null}
                   {t('settings.integrations.github.connect')}
                   {!showGitHubConnectSpinner ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
                 </Button>
@@ -649,7 +637,7 @@ function CloudIntegrationsSettings() {
             >
               {workspaceReposLoading ? (
                 <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="h-4 w-4" />
                   {t('settings.integrations.github.loading')}
                 </div>
               ) : repos.length === 0 ? (

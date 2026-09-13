@@ -13,10 +13,10 @@ import {
   CornerLeftUp,
   Github,
   Hand,
-  Loader2,
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -149,12 +149,7 @@ function SessionRowStatusIndicator({
   if (isWaitingPermission) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
-    icon = (
-      <Loader2
-        data-session-working-spinner=""
-        className="h-3 w-3 shrink-0 animate-spin text-primary will-change-transform"
-      />
-    );
+    icon = <Spinner data-session-working-spinner="" className="h-3 w-3 shrink-0 text-primary" />;
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }

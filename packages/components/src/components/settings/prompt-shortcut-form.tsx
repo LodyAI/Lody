@@ -1,5 +1,5 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { parsePromptShortcut } from '@lody/shared/prompt-shortcuts/compiler';
 import {
@@ -382,7 +382,7 @@ export function PromptShortcutForm({
           {t('common.cancel', 'Cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={saving || blocked}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
+          {saving ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {isNew ? t('settings.promptShortcuts.create', 'Create') : t('common.save', 'Save')}
         </Button>
       </footer>

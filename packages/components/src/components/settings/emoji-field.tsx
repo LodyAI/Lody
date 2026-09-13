@@ -1,5 +1,5 @@
 import { lazy, Suspense, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
@@ -61,7 +61,7 @@ export function EmojiField({
         <Suspense
           fallback={
             <div className="flex h-[320px] w-72 items-center justify-center">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
+              <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             </div>
           }
         >

@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 export function SessionSyncingIndicator({ labelClassName }: { labelClassName?: string }) {
@@ -6,9 +6,7 @@ export function SessionSyncingIndicator({ labelClassName }: { labelClassName?: s
 
   return (
     <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-      <span className="inline-flex h-3 w-3 shrink-0 origin-center animate-spin items-center justify-center">
-        <Loader2 className="h-3 w-3" aria-hidden="true" />
-      </span>
+      <Spinner className="h-3 w-3" aria-hidden="true" />
       <span className={labelClassName}>{t('common.syncing', 'Syncing')}</span>
     </span>
   );

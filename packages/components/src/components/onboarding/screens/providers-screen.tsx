@@ -2,16 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  Loader2,
-  Plus,
-  Trash2,
-  XCircle,
-} from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, Plus, Trash2, XCircle } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -335,7 +327,7 @@ export function ProvidersScreenView({
       <div className="flex flex-col gap-3">
         {noLocalMachine ? (
           <div className="flex items-center gap-3 rounded-lg border border-dashed border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner className="h-4 w-4" />
             {t('onboarding.providers.waitingMachine', 'Waiting for the local agent to connect…')}
           </div>
         ) : null}
@@ -1328,7 +1320,7 @@ export function ProvidersScreen({
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
