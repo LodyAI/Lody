@@ -485,6 +485,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let metaSub: RepoRoomSubscription | null = null;
   let cloudMetaTracker: RoomSyncTracker | null = null;
   let streamsTokenProvider: LoroStreamsTokenProvider | null = null;
+  // One long-lived auth callback per provider. `createAuthCallback()` remembers
+  // the last token it handed out, which is the only fallback left when a
+  // transport reports `unauthorized` without a `previousToken`. A callback
+  // created per invocation always starts with an empty memory and would make
+  // the provider return the rejected token unchanged.
+  let eagerSyncAuthCallback: ReturnType<LoroStreamsTokenProvider['createAuthCallback']> | null =
+    null;
   let jsonStreamClient: LoroStreamsJsonStreamClient | null = null;
   let machineRpcStreamsClientReady: Promise<LoroStreamsJsonStreamClient> | null = null;
   let transportStreamsBaseUrl: string | null = null;
@@ -1537,6 +1544,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         authToken: () => authToken,
         onEvent: logTokenProviderEvent,
       });
+      eagerSyncAuthCallback = streamsTokenProvider.createAuthCallback();
     }
     return streamsTokenProvider;
   };
@@ -2634,6 +2642,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (invalidateTokenProvider) {
       streamsTokenProvider?.invalidate();
       streamsTokenProvider = null;
+      eagerSyncAuthCallback = null;
     }
     detachMetaRoomStatusListener?.();
     detachMetaRoomStatusListener = null;
@@ -2983,6 +2992,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     transportStreamsBaseUrl = null;
     streamsTokenProvider?.invalidate();
     streamsTokenProvider = null;
+    eagerSyncAuthCallback = null;
   };
 
   const joinAndWatchMetaRoom = async (syncPhase: 'initial' | 'recovery') => {
@@ -3709,9 +3719,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
       };
     },
-    auth: async (reason) => {
-      if (!cloudPlaneEnabled || !streamsTokenProvider) return undefined;
-      return streamsTokenProvider.createAuthCallback()(reason ? { reason } : undefined);
+    auth: async (context) => {
+      if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
+      return eagerSyncAuthCallback(context);
     },
   });
 

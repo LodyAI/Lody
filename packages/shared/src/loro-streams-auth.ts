@@ -435,6 +435,46 @@ export function createLoroStreamsTokenProvider(options: {
         throw new Error('Loro Streams token request superseded by an auth change');
       }
     };
+    // One HTTP round trip. `sentRejectedToken` is fixed when the body is built,
+    // so a rejection that arrives later cannot be carried by this request.
+    const requestToken = async (
+      sentRejectedToken: string | undefined
+    ): Promise<CachedLoroStreamsToken> => {
+      emit({ type: 'fetch-start', workspaceId: options.workspaceId, endpoint: options.endpoint });
+      const startedAt = getServerNow();
+      const response = await fetchImpl(options.endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: LoroStreamsTokenRequestSchema.shape.workspaceId.parse(options.workspaceId),
+          ...(sentRejectedToken ? { rejectedToken: sentRejectedToken } : {}),
+        } satisfies LoroStreamsTokenRequest),
+      });
+      await assertCurrent();
+      assertCurrentGeneration();
+      if (!response.ok) {
+        // Do not include a backend response body: it may contain credentials.
+        if (response.status === 401 || response.status === 403) {
+          const error = new LoroStreamsTokenAuthError(
+            `Loro Streams token authorization failed (status=${response.status})`,
+            response.status
+          );
+          terminalAuthFailure = error;
+          throw error;
+        }
+        throw new Error(`Failed to fetch Loro Streams token (status=${response.status})`);
+      }
+      const parsed = LoroStreamsTokenResponseSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error('Invalid Loro Streams token response');
+      await assertCurrent();
+      assertCurrentGeneration();
+      return {
+        token: parsed.data.token,
+        expiresAtMs: startedAt + parsed.data.expiresIn * 1000,
+        gatewayBaseUrl: parsed.data.gatewayBaseUrl,
+        shardHostSuffix: parsed.data.shardHostSuffix,
+      };
+    };
     const promise = (async (): Promise<CachedLoroStreamsToken> => {
       if (hydrate) {
         hydrate = false;
@@ -455,48 +495,40 @@ export function createLoroStreamsTokenProvider(options: {
         workspaceId: options.workspaceId,
         reason: cached ? 'expired-or-stale' : 'missing',
       });
-      emit({ type: 'fetch-start', workspaceId: options.workspaceId, endpoint: options.endpoint });
       try {
-        const startedAt = getServerNow();
-        const response = await fetchImpl(options.endpoint, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspaceId: LoroStreamsTokenRequestSchema.shape.workspaceId.parse(options.workspaceId),
-            ...(rejectedToken ? { rejectedToken } : {}),
-          } satisfies LoroStreamsTokenRequest),
-        });
-        await assertCurrent();
-        assertCurrentGeneration();
-        if (!response.ok) {
-          // Do not include a backend response body: it may contain credentials.
-          if (response.status === 401 || response.status === 403) {
-            const error = new LoroStreamsTokenAuthError(
-              `Loro Streams token authorization failed (status=${response.status})`,
-              response.status
-            );
-            terminalAuthFailure = error;
-            throw error;
+        const sent = rejectedToken;
+        let nextToken = await requestToken(sent);
+        if (rejectedToken !== undefined && rejectedToken !== sent) {
+          // An unauthorized callback joined this refresh after its body was
+          // already sent. If the issuer handed back the very token the gateway
+          // rejected, spend exactly one more request that does carry
+          // `rejectedToken`. Every caller awaiting this promise shares that
+          // retry, so a fan-out of callbacks still costs one extra round trip.
+          if (nextToken.token === rejectedToken) {
+            nextToken = await requestToken(rejectedToken);
           }
-          throw new Error(`Failed to fetch Loro Streams token (status=${response.status})`);
         }
-        const parsed = LoroStreamsTokenResponseSchema.safeParse(await response.json());
-        if (!parsed.success) throw new Error('Invalid Loro Streams token response');
-        await assertCurrent();
-        assertCurrentGeneration();
-        const nextToken: CachedLoroStreamsToken = {
-          token: parsed.data.token,
-          expiresAtMs: startedAt + parsed.data.expiresIn * 1000,
-          gatewayBaseUrl: parsed.data.gatewayBaseUrl,
-          shardHostSuffix: parsed.data.shardHostSuffix,
-        };
         // Encryption uses the credential that authorized this request, never a
         // later login. A stale encrypted write cannot be decrypted by that login.
-        await writeCachedTokenToStorage(storageNamespace, authToken, nextToken, isCurrent);
+        // The gate also re-reads the rejection marker, because it runs
+        // synchronously just before `setItem` while the encryption above it is
+        // several async WebCrypto calls long: an unauthorized callback landing
+        // inside that window clears storage first, and an unguarded write would
+        // put the rejected JWT back for the next process to hydrate.
+        // `reset('unauthorized')` deliberately keeps the generation, so
+        // `isCurrent()` alone cannot see it.
+        await writeCachedTokenToStorage(
+          storageNamespace,
+          authToken,
+          nextToken,
+          () => isCurrent() && nextToken.token !== rejectedToken
+        );
         await assertCurrent();
         assertCurrentGeneration();
         cached = nextToken;
-        rejectedToken = undefined;
+        // The marker only survives while the provider is still serving the
+        // rejected JWT, so a refresh that predates the rejection cannot clear it.
+        if (nextToken.token !== rejectedToken) rejectedToken = undefined;
         emit({
           type: 'fetch-success',
           workspaceId: options.workspaceId,

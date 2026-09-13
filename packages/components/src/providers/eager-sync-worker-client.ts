@@ -3,6 +3,7 @@ import type { LocalLoroDataPlaneConnection } from '@lody/shared/local-loro-trans
 import type { PrefetchOutcome } from './background-sync-coordinator';
 import { readEagerSyncSnapshot } from './eager-sync-snapshot-cache';
 import type {
+  EagerSyncAuthContext,
   EagerSyncTransport,
   EagerSyncWorkerInput,
   EagerSyncWorkerOutput,
@@ -16,7 +17,7 @@ export type EagerSyncWorkerClientDeps = {
   workspaceId: string;
   scope: string;
   resolveTransport(roomId: string): Promise<EagerSyncTransport>;
-  auth(reason?: string): Promise<string | undefined>;
+  auth(context?: EagerSyncAuthContext): Promise<string | undefined>;
   localConnection(): { connection: LocalLoroDataPlaneConnection; dispose(): void } | null;
   readSnapshot?: typeof readEagerSyncSnapshot;
   createWorker?: () => Worker;
@@ -102,7 +103,7 @@ export function createEagerSyncWorkerClient(deps: EagerSyncWorkerClientDeps) {
             finish('failed');
           }
         } else if (data.type === 'auth' && transport.plane === 'cloud') {
-          void deps.auth(data.reason).then(
+          void deps.auth(data.context).then(
             (token) => post({ type: 'auth-result', id: data.id, token }),
             () => finish('failed')
           );

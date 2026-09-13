@@ -7,13 +7,13 @@ import {
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import { readEagerSyncSnapshot, writeEagerSyncSnapshot } from './eager-sync-snapshot-cache';
-import type { EagerSyncWorkerInput } from './eager-sync-worker-protocol';
+import type { EagerSyncAuthContext, EagerSyncWorkerInput } from './eager-sync-worker-protocol';
 
 export async function runEagerSyncWorkerTask(
   request: Extract<EagerSyncWorkerInput, { type: 'start' }>,
   deps: {
     connection: LocalLoroDataPlaneConnection;
-    auth(context?: { reason: string }): Promise<string | undefined>;
+    auth(context?: EagerSyncAuthContext): Promise<string | undefined>;
     readSnapshot?: typeof readEagerSyncSnapshot;
     writeSnapshot?: typeof writeEagerSyncSnapshot;
     now?: () => number;
