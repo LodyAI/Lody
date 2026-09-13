@@ -862,11 +862,13 @@ export const buildChatVirtualRows = ({
 
   for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
     const item = items[messageIndex];
-    if (!item) continue;
-    if (item.type !== 'message' || item.message.role !== 'assistant') {
+    // Empty presentation must never seed Virtua's index-based size cache:
+    // its zero height would otherwise be inherited by the first user row.
+    if (!item || item.type === 'empty') continue;
+    if (item.message.role !== 'assistant') {
       rows.push({
         type: 'standard',
-        key: item.type === 'message' ? item.message.id : `empty-${messageIndex}`,
+        key: item.message.id,
         messageIndex,
         item,
       });
@@ -1653,7 +1655,9 @@ export const SessionChatStreamView = forwardRef<
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
-    if ((!items.length || (hasOnlyEmptyItem && emptyState)) && leadingContent == null) {
+    // A non-null leading Fragment may render no DOM. Keep the entire empty
+    // state outside Virtua even then, and mount it only with real messages.
+    if (!items.length || hasOnlyEmptyItem) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -1661,11 +1665,20 @@ export const SessionChatStreamView = forwardRef<
               ref={scrollRootRef}
               className={cn('relative bg-background', className)}
             >
-              {emptyState ?? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  No messages yet
+              <div className="flex h-full flex-col overflow-y-auto">
+                {leadingContent == null ? null : (
+                  <div className="shrink-0" data-conversation-leading-content="">
+                    {leadingContent}
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  {emptyState ?? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      {noMessagesLabel}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </ContainerQueryProvider>
           </SessionImagePreviewContext.Provider>
         </SessionChatActionContext.Provider>
