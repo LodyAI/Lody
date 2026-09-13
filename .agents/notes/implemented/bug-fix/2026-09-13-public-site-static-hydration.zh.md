@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/677
 
 [English](2026-09-13-public-site-static-hydration.md)
 
