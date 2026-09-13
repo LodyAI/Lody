@@ -284,7 +284,7 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
 });
 
 describe('getEffectiveProjectActivitySummary', () => {
-  test('counts unique live Sessions and child Tabs, preserving unread alongside active', () => {
+  test('assigns each live Session to one project activity state', () => {
     const parent = makeSession({
       id: 'parent',
       isPinned: true,
@@ -302,7 +302,7 @@ describe('getEffectiveProjectActivitySummary', () => {
     const children = buildChildSessionsByParent([parent, child, archived]);
     expect(
       getEffectiveProjectActivitySummary([parent, parent, child, stale, archived], children, live)
-    ).toMatchObject({ permission: 1, unread: 1, active: 1 });
+    ).toMatchObject({ permission: 1, unread: 0, active: 1 });
     expect(getEffectiveProjectActivitySummary([stale])).toMatchObject({
       permission: 0,
       unread: 0,

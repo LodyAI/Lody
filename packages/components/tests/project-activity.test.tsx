@@ -179,13 +179,13 @@ describe('collapsed project activity', () => {
   }
 
   it.each([
-    ['permission unread+active', 'permission:1 more:1'],
+    ['permission unread+active', 'permission:1 active:1'],
     ['permission+unread active', 'permission:1 active:1'],
-    ['permission+unread unread+active active', 'permission:1 more:2'],
+    ['permission+unread unread+active active', 'permission:1 active:2'],
     ['permission unread unread+active active', 'permission:1 more:3'],
-    ['unread+active active', 'unread:1 active:1'],
-    ['unread+active unread', 'unread:2'],
-    ['unread+active', 'unread:1'],
+    ['unread+active active', 'active:2'],
+    ['unread+active unread', 'unread:1 active:1'],
+    ['unread+active', 'active:1'],
     ['permission+unread', 'permission:1'],
   ])('deduplicates overlapping and nested sources: %s', (states, expected) => {
     const sessions = states.split(' ').map((state, index) => ({
@@ -264,11 +264,11 @@ describe('collapsed project activity', () => {
     });
 
     it.each([
-      [1, 1, 0, '1+1', ['permission', 'more']],
-      [1, 2, 0, '1+2', ['permission', 'more']],
-      [1, 1, 1, '1+2', ['permission', 'more']],
-      [0, 1, 0, '', ['unread']],
-      [0, 1, 1, '', ['unread', 'active']],
+      [1, 1, 0, '', ['permission', 'active']],
+      [1, 2, 0, '2', ['permission', 'active']],
+      [1, 1, 1, '2', ['permission', 'active']],
+      [0, 1, 0, '', ['active']],
+      [0, 1, 1, '2', ['active']],
     ] as const)(
       'counts overlapping Sessions once across project slots (%i / %i / %i)',
       (permission, unread, active, text, statuses) => {
@@ -279,8 +279,18 @@ describe('collapsed project activity', () => {
             { overlapUnreadActive: true, childTabs }
           );
           expect(indicator?.textContent).toBe(text);
+          const effectiveUnread = 0;
+          const effectiveActive = active + unread;
+          const expectedLabel = [
+            [permission, 'Request Permission'],
+            [effectiveUnread, 'Unread messages'],
+            [effectiveActive, 'Active'],
+          ]
+            .filter(([count]) => Number(count) > 0)
+            .map(([count, label]) => `${count} ${label}`)
+            .join(' · ');
           expect(indicator?.closest('[aria-label]')?.getAttribute('aria-label')).toContain(
-            `${unread} Unread messages · ${unread + active} Active`
+            expectedLabel
           );
           expect(
             [...indicator!.querySelectorAll('[data-project-activity-status]')].map((mark) =>

@@ -1,4 +1,5 @@
 const activityStatuses = ['permission', 'unread', 'active'] as const;
+const sessionStatusPriority = ['permission', 'active', 'unread'] as const;
 type ProjectActivityStatus = (typeof activityStatuses)[number];
 export type ProjectActivityCounts = Record<ProjectActivityStatus, number> & {
   sessionIds: Record<ProjectActivityStatus, string[]>;
@@ -26,6 +27,17 @@ export function getProjectActivityCounts(sessions: ProjectActivitySource[]): Pro
     if (session.isWaitingPermission) ids.permission.add(id);
     if (session.hasUnreadMessages) ids.unread.add(id);
     if (session.isWorking && !session.isWaitingPermission) ids.active.add(id);
+  }
+  // A single Session is represented by its highest-priority state. The
+  // project row still uses unread before active when choosing its first slot.
+  const ownerById = new Map<string, (typeof sessionStatusPriority)[number]>();
+  for (const status of sessionStatusPriority) {
+    for (const id of ids[status]) {
+      if (!ownerById.has(id)) ownerById.set(id, status);
+    }
+  }
+  for (const status of activityStatuses) {
+    ids[status] = new Set([...ids[status]].filter((id) => ownerById.get(id) === status));
   }
   return {
     permission: ids.permission.size,
