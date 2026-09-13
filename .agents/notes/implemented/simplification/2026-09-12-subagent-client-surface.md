@@ -1,7 +1,9 @@
 # Keep the host subagent client limited to current consumers
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-12-subagent-client-surface.zh.md)
 
 ## Abstract
 

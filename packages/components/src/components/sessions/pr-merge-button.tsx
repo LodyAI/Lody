@@ -40,7 +40,12 @@ const MERGE_METHODS: Array<{
   },
 ];
 
-function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
+/**
+ * The active merge method as a label. Exported because the info bar can demote
+ * Merge into the overflow menu (a dirty worktree outranks it), and that plain
+ * menu item has to name the same method the split button would have performed.
+ */
+export function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
   const { t } = useTranslation();
   if (method === 'squash') {
     return <>{t('sessions.prTab.mergeSquashAction', 'Squash and merge')}</>;

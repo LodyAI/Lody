@@ -21,6 +21,7 @@
 import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
 import { workspaceInfoCache } from './local-storage-cache';
 import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
+import { EAGER_SYNC_CACHE_DB } from '../providers/eager-sync-snapshot-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
@@ -44,6 +45,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
   EAGER_SYNC_HIGH_WATER_DB_NAME,
+  EAGER_SYNC_CACHE_DB,
   'lody:repo-file-paths',
   'lody:repo-issues-prs',
   'lody:github-pr-cache',

@@ -1,10 +1,12 @@
 # Build `acp-extension-core` on install, not in each consumer
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/596
 
 Upstream change: https://github.com/LodyAI/acp-extension-core/pull/8
+
+[中文](2026-09-11-acp-core-install-build.zh.md)
 
 ## Abstract
 

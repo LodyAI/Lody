@@ -88,7 +88,12 @@ status, existing translations, and inbound links together.
 
 ## History and language
 
-Translation follows the [shared language policy](../README.md#asynchronous-bilingual-documentation).
+Translation follows the [shared language policy](../README.md#asynchronous-bilingual-documentation),
+with one addition for agents. When the author is an Agent, land both `.md` and
+`.zh.md` in the same change: cross-link the two languages, keep their `Status:`
+equal, carry the same Abstract/摘要 meaning, and mark both `Translation: current`.
+`Translation: pending` remains available only to a human who cannot write the
+other language; an agent that can write both never merges a note as pending.
 
 Implemented notes preserve the decision in its historical context. Current
 behavior belongs in Specs; important later changes use a new linked note. Identify

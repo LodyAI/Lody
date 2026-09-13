@@ -1,7 +1,9 @@
 # Preserve every dropped directory mention
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-folder-drop-review.zh.md)
 
 ## Abstract
 

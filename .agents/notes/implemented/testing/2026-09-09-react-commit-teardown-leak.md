@@ -1,7 +1,9 @@
 # A React commit outside act can fail the run from the next test file
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-react-commit-teardown-leak.zh.md)
 
 ## Abstract
 

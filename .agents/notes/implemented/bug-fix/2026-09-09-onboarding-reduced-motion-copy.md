@@ -1,7 +1,9 @@
 # Hide departing intro copy without animation
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-onboarding-reduced-motion-copy.zh.md)
 
 ## Abstract
 

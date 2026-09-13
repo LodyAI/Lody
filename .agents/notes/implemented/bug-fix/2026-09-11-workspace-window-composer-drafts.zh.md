@@ -1,7 +1,9 @@
 # 工作区窗口 Composer 草稿隔离
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[English](2026-09-11-workspace-window-composer-drafts.md)
 
 ## 摘要
 

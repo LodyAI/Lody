@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
@@ -131,6 +131,44 @@ describe('queued message editing commits', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Rewrite the queue instead' }]);
+  });
+
+  it('focuses the editor when the editing flag arrives before the start write completes', async () => {
+    let finishStart!: () => void;
+    function QueueWithEarlyUpdate() {
+      const [items, setItems] = useState([makeItem()]);
+      return createElement(MessageQueueDisplay, {
+        sessionId: 'session-test' as SessionId,
+        items,
+        onRemove: () => undefined,
+        onReorder: () => undefined,
+        onSteer: () => undefined,
+        onEditCancel: () => undefined,
+        onEditSave: (item, task) => {
+          saved.push({ cid: item.$cid, task });
+          setItems((current) => current.map((entry) => ({ ...entry, isEditing: false, task })));
+        },
+        onEditStart: (item) => {
+          setItems([{ ...item, isEditing: true }]);
+          return new Promise<void>((resolve) => {
+            finishStart = resolve;
+          });
+        },
+      });
+    }
+    await act(async () => root?.render(createElement(QueueWithEarlyUpdate)));
+    const textarea = await startEditing(container!);
+    expect(textarea.disabled).toBe(true);
+    expect(document.activeElement).not.toBe(textarea);
+
+    await act(async () => finishStart());
+    expect(textarea.disabled).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(ORIGINAL_TASK.length);
+    expect(textarea.selectionEnd).toBe(ORIGINAL_TASK.length);
+    await act(async () => setTextareaValue(textarea, 'Clarified queued instruction'));
+    await pressEnter(textarea);
+    expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
   });
 
   it('leaves Shift+Enter to the textarea as a newline', async () => {

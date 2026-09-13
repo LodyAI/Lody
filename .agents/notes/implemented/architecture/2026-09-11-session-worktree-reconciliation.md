@@ -1,7 +1,9 @@
 # Reconcile session worktrees from archived state instead of machine commands
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-11-session-worktree-reconciliation.zh.md)
 
 ## Abstract
 
