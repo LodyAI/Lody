@@ -96,10 +96,12 @@ Loro watchdog then forces a reconnect.
 - `apps/cli/tests/session-dispatch-watcher.test.ts`: with fake timers and an
   injected doc/mirror stub, a turn that receives 300 mirror commits plus one
   post-turn enqueue costs exactly one follow-up history read; that read is parked
-  on a macrotask rather than run on microtasks; a timer armed before a queued
-  check fires before the check reads history; the promise returned to a
+  on a macrotask rather than run on microtasks; a timer armed during the turn
+  fires while a later queued check is still parked; the promise returned to a
   coalesced caller resolves only after the shared check finishes; and the chain
-  stays live afterwards.
+  stays live afterwards. Ablating either mechanism fails the test: without
+  coalescing the coalesced promise never resolves, without the yield the
+  follow-up read runs on microtasks.
 - `pnpm check` and `pnpm format` results are recorded in
   [PR #676](https://github.com/LodyAI/Lody/pull/676). The
   `worktree-gc` suite has a pre-existing failure on this machine caused by
