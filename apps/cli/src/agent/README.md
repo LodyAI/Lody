@@ -221,7 +221,7 @@ deriving one from prompt text publishes prompt text, and "rotate the password be
 is an ordinary request. Two filters were tried and both failed for the same reason — a secret
 has no reliable shape, since `hunter2` is a password and an ordinary word. Stripping
 credential-shaped tokens left everything that did not look like one; failing closed on
-credential *syntax* still let plain prose through, so it fails open on every miss and cannot
+credential _syntax_ still let plain prose through, so it fails open on every miss and cannot
 be a security boundary. Naming refs after user text needs a source provably isolated from the
 prompt, and no such source exists at session-ready: the ACP title has not arrived yet, and the
 isolated generator's own fallback is the raw prompt.
