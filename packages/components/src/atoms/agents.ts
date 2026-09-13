@@ -10,7 +10,7 @@ import {
   getServerNow,
   hasBuiltinRuntimeOverrideValues,
   isAgentBrandId,
-  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
   isBuiltinRuntimeOverrides,
   isCustomAcpLaunchSpec,
   isLoroRepoDocDeleted,
@@ -385,11 +385,11 @@ export const cmdCreateProviderSetupAtom = atom(
     const provider = getLodyCodexCustomProvider(config.env);
     if (
       config.cliType !== 'builtin' ||
-      !isManagedBuiltinAgentType(config.agentType) ||
+      !supportsBuiltinProviderSetup(config.agentType) ||
       (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
         !(config.agentType === 'codex' && provider && setupRevision))
     ) {
-      throw new Error('Provider setup is only supported for managed builtin agents');
+      throw new Error('Provider setup is not supported for this agent');
     }
     if (providerSetupContainsCodexCredential(config)) {
       throw new Error('Provider setup rows cannot contain credentials');

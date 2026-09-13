@@ -8,6 +8,10 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./streams-snapshot-codec": {
+      "types": "./src/streams-snapshot-codec.ts",
+      "import": "./src/streams-snapshot-codec.ts"
+    },
     "./prompt-shortcuts": {
       "types": "./src/prompt-shortcuts/index.ts",
       "import": "./src/prompt-shortcuts/index.ts"

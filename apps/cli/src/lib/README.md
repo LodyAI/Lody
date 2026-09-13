@@ -49,7 +49,7 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   builtin Codex local-project history import.
 - `local-project-removal.ts` — local project deletion, session archiving, and optional
   Lody-created worktree cleanup.
-- `provider-setup-manager.ts` — durable default managed-builtin agent config creation.
+- `provider-setup-manager.ts` — durable builtin provider setup; managed runtimes are installed before verification, while user-installed Bub is only published after a successful live probe.
 - `task-doc.ts` — every CLI-side read/write of a Task document, plus
   `listWorkspaceTaskIds` and the index-only listing (`listTasksFromIndex` / pure
   `selectTaskIndexRows`). Normative contract: specs/tasks.md.

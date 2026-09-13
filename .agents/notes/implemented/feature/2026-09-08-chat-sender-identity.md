@@ -1,7 +1,9 @@
 # Identify senders in shared conversations
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-08-chat-sender-identity.zh.md)
 
 ## Abstract
 

@@ -1,7 +1,9 @@
 # Let Codex and Grok own their session titles, and split the ACP title predicates
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-08-acp-owned-session-titles.zh.md)
 
 ## Abstract
 

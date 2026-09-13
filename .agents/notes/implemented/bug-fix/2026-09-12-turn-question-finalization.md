@@ -1,7 +1,9 @@
 # End pending questions with their owning turn
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-12-turn-question-finalization.zh.md)
 
 ## Abstract
 

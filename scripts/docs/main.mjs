@@ -328,6 +328,11 @@ export function documentStatus(root) {
     const missingTranslation = !existsSync(path.join(root, counterpart));
     if (translation === 'current' && missingTranslation)
       errors.push(`${file}: translation marked current but counterpart missing`);
+    else if (missingTranslation && file.startsWith('.agents/notes/'))
+      warnings.push(
+        `${file}: ${counterpart} is missing. Agent-authored notes ship both languages ` +
+          'in the same change; see .agents/notes/AGENTS.md#history-and-language'
+      );
     if (!missingTranslation) {
       const other = readFileSync(localPath(root, counterpart), 'utf8');
       const otherStatus = /^Status:[ \t]*(\S+)/m.exec(other)?.[1];

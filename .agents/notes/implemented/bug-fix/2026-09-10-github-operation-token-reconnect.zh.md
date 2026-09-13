@@ -1,8 +1,10 @@
 # 静默恢复 GitHub 操作令牌的 Convex 断线
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: not created
+
+[English](2026-09-10-github-operation-token-reconnect.md)
 
 ## 摘要
 

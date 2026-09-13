@@ -1,7 +1,9 @@
 # Codex Base URL and API Key setup
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-codex-custom-endpoint-authentication.zh.md)
 
 ## Abstract
 

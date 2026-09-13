@@ -1,7 +1,9 @@
 # Codex custom endpoint authentication
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](codex-custom-endpoint-authentication.zh.md)
 
 ## Scenario
 

@@ -1,7 +1,9 @@
 # Resolve terminal colors without transitions
 
 Status: proposed
-Translation: pending
+Translation: current
+
+[中文](2026-09-09-terminal-reduced-motion-colors.zh.md)
 
 ## Abstract
 

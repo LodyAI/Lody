@@ -18,6 +18,8 @@ also applies.
   existing Lody process.
 - Run scenarios serially until every remaining fixed OS endpoint has an
   explicit shared test binding. Do not raise Cucumber parallelism first.
+- Keep the unpackaged E2E BrowserWindow hidden by default and disable renderer
+  background throttling. `LODY_E2E_SHOW_WINDOW=1` opts into visible debugging.
 
 ## Scenario contract
 

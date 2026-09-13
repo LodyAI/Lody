@@ -1,4 +1,8 @@
 import { randomUUID } from 'crypto';
+import { stat } from 'fs/promises';
+import path from 'path';
+
+import type { ChildProcess } from 'child_process';
 
 import type { Logger } from '@/utils/logger';
 import { decodeBuffer } from '@/utils/encoding';
@@ -9,6 +13,32 @@ import type {
 } from './session-sandbox';
 
 export type TerminalExitStatus = { exitCode: number | null; signal?: string | null };
+
+/**
+ * The terminal command never started: its executable could not be resolved
+ * (`ENOENT`) or could not be executed (`EACCES`).
+ *
+ * `createTerminal` rejects with this instead of resolving a terminal id, so the
+ * ACP layer can answer with a typed JSON-RPC error. A bare errno (`-2`) leaves
+ * agents unable to tell a bad command from a broken connection, and several
+ * drop the whole ACP session over it.
+ */
+export class TerminalSpawnError extends Error {
+  readonly spawnCode: 'ENOENT' | 'EACCES';
+  readonly command: string;
+
+  constructor(spawnCode: 'ENOENT' | 'EACCES', command: string, cause: unknown) {
+    super(
+      spawnCode === 'ENOENT'
+        ? `Terminal command not found: ${command}`
+        : `Terminal command is not executable: ${command}`,
+      { cause }
+    );
+    this.name = 'TerminalSpawnError';
+    this.spawnCode = spawnCode;
+    this.command = command;
+  }
+}
 
 export interface TerminalManager {
   createTerminal(
@@ -98,6 +128,11 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       onExit: (exitCode, signal) => this.handleExit(state, exitCode, signal),
       onError: (error) => {
         this.logger.error(`[${this.sessionLabel}] Terminal ${terminalId} error: ${error.message}`);
+        // A process error is terminal for this handle: the child either never
+        // started or died outside the exit path. Without recording an exit
+        // status here `terminal/wait_for_exit` would never resolve and the
+        // agent's turn would hang forever.
+        this.handleExit(state, null, null);
       },
     };
 
@@ -224,7 +259,10 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     exitCode: number | null,
     signal: NodeJS.Signals | null
   ) {
-    if (!this.terminals.has(state.id)) {
+    // A released terminal keeps the status `releaseTerminal` already recorded.
+    // A terminal that fails between `startProcess` and registration has no map
+    // entry yet and still needs one, or a later wait would never resolve.
+    if (!this.terminals.has(state.id) && state.exitStatus) {
       return;
     }
     state.exitStatus = {
@@ -255,6 +293,8 @@ export interface ShellTerminalManagerOptions extends BaseTerminalManagerOptions 
   buildEnv: (overrides?: Record<string, string>) => NodeJS.ProcessEnv;
   sandbox: SessionSandbox;
   onResourceLimitExceeded?: (violation: SessionResourceLimitViolation) => Promise<void> | void;
+  /** Defaults to the host platform; injected so both shell branches are testable. */
+  platform?: NodeJS.Platform;
 }
 
 interface ShellTerminalHandle {
@@ -270,6 +310,7 @@ export class ShellTerminalManager
   private readonly buildEnv: ShellTerminalManagerOptions['buildEnv'];
   private readonly sandbox: ShellTerminalManagerOptions['sandbox'];
   private readonly onResourceLimitExceeded?: ShellTerminalManagerOptions['onResourceLimitExceeded'];
+  private readonly platform: NodeJS.Platform;
 
   constructor(options: ShellTerminalManagerOptions) {
     super(options);
@@ -277,6 +318,7 @@ export class ShellTerminalManager
     this.buildEnv = options.buildEnv;
     this.sandbox = options.sandbox;
     this.onResourceLimitExceeded = options.onResourceLimitExceeded;
+    this.platform = options.platform ?? process.platform;
   }
 
   protected async startProcess(
@@ -291,14 +333,25 @@ export class ShellTerminalManager
   ): Promise<ShellTerminalHandle> {
     const workdir = this.resolveWorkdir(params.cwd);
     const env = this.buildEnv(params.env);
-    const processHandle = await this.sandbox.spawn(params.command, params.args, {
-      cwd: workdir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // A fast terminal command can exit before spawn() returns; without
-      // capture its output would be dropped before the agent ever sees it.
-      captureOutput: true,
-    });
+    const target = await resolveTerminalSpawnTarget(
+      params.command,
+      params.args,
+      workdir,
+      this.platform
+    );
+    let processHandle: SessionProcessHandle;
+    try {
+      processHandle = await this.sandbox.spawn(target.command, target.args, {
+        cwd: workdir,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // A fast terminal command can exit before spawn() returns; without
+        // capture its output would be dropped before the agent ever sees it.
+        captureOutput: true,
+      });
+    } catch (error) {
+      throw toTerminalSpawnError(error, target.command);
+    }
 
     const stdoutListener = (chunk: Buffer) => hooks.onData(chunk);
     const stderrListener = (chunk: Buffer) => hooks.onData(chunk);
@@ -327,16 +380,24 @@ export class ShellTerminalManager
     const unsubscribeStderr = processHandle.onStderr(stderrListener);
     const unsubscribeClose = processHandle.onClose(closeListener);
     const unsubscribeError = processHandle.onError(errorListener);
-
-    return {
-      processHandle,
-      dispose: () => {
-        unsubscribeStdout();
-        unsubscribeStderr();
-        unsubscribeClose();
-        unsubscribeError();
-      },
+    const dispose = () => {
+      unsubscribeStdout();
+      unsubscribeStderr();
+      unsubscribeClose();
+      unsubscribeError();
     };
+
+    // Sandboxes that do not await the child's pid hand back a handle before the
+    // OS has reported the failure, so an unresolvable executable would become a
+    // live terminal id whose exit never arrives. Fail the request instead.
+    try {
+      await waitForSpawnConfirmation(processHandle);
+    } catch (error) {
+      dispose();
+      throw toTerminalSpawnError(error, target.command);
+    }
+
+    return { processHandle, dispose };
   }
 
   protected async killHandle(state: TerminalState<ShellTerminalHandle>): Promise<void> {
@@ -348,6 +409,77 @@ export class ShellTerminalManager
   protected async disposeHandle(state: TerminalState<ShellTerminalHandle>): Promise<void> {
     state.handle.dispose();
   }
+}
+
+/**
+ * ACP `terminal/create` carries the executable in `command` and its argv in
+ * `args`, and that pair is what gets spawned (see AGENTS.md). Some agents
+ * instead put the whole shell line in `command` and leave `args` empty; spawned
+ * literally, that fails with `ENOENT` and the agent loses its terminal.
+ *
+ * Only that exact shape falls back to a shell, and only when the line does not
+ * name an existing file, so an executable path that merely contains a space is
+ * still spawned directly. The shell is non-interactive and non-login (`sh -c`,
+ * not `bash -lc`): the agent asked for one command, not for the user's login
+ * profile to run.
+ */
+async function resolveTerminalSpawnTarget(
+  command: string,
+  args: string[],
+  workdir: string,
+  platform: NodeJS.Platform
+): Promise<{ command: string; args: string[] }> {
+  if (args.length > 0 || !/\s/.test(command)) {
+    return { command, args };
+  }
+  if (await isExistingFile(path.resolve(workdir, command))) {
+    return { command, args };
+  }
+  return platform === 'win32'
+    ? { command: 'cmd.exe', args: ['/c', command] }
+    : { command: '/bin/sh', args: ['-c', command] };
+}
+
+async function isExistingFile(candidate: string): Promise<boolean> {
+  try {
+    return (await stat(candidate)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve once the child has a pid, reject with its spawn error otherwise.
+ * Node sets `pid` synchronously on success, so a started process costs nothing
+ * here; only a failing spawn waits for the buffered `error` event.
+ */
+function waitForSpawnConfirmation(handle: SessionProcessHandle): Promise<void> {
+  const child: ChildProcess = handle.child;
+  if (typeof child.pid === 'number' && child.pid > 0) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const disposers: Array<() => void> = [];
+    const settle = (report: () => void) => {
+      if (settled) return;
+      settled = true;
+      for (const dispose of disposers) dispose();
+      report();
+    };
+    const handleSpawn = () => settle(resolve);
+    child.once('spawn', handleSpawn);
+    disposers.push(() => child.off('spawn', handleSpawn));
+    disposers.push(handle.onError((error) => settle(() => reject(error))));
+  });
+}
+
+function toTerminalSpawnError(error: unknown, command: string): unknown {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === 'ENOENT' || code === 'EACCES') {
+    return new TerminalSpawnError(code, command, error);
+  }
+  return error;
 }
 
 function truncateBuffer(buffer: Buffer, limit: number): Buffer {

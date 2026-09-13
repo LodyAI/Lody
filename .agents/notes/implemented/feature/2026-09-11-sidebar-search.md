@@ -1,8 +1,10 @@
 # Sidebar search entry
 
 Status: implemented
-Translation: pending
+Translation: current
 PR: https://github.com/LodyAI/Lody/pull/598
+
+[中文](2026-09-11-sidebar-search.zh.md)
 
 ## Abstract
 

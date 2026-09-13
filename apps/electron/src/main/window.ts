@@ -22,6 +22,7 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import {
   clearMountWatchdog,
@@ -333,6 +334,11 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
 
 export function createMainWindow(options: CreateMainWindowOptions): BrowserWindow {
   const shouldMaximizeOnLaunch = !options.auxiliary && shouldMaximizeMainWindowOnLaunch()
+  const runtimePolicy = resolveMainWindowRuntimePolicy({
+    isPackaged: app.isPackaged,
+    e2eFlag: process.env['LODY_E2E'],
+    showE2EWindowFlag: process.env['LODY_E2E_SHOW_WINDOW']
+  })
   if (options.icon) productWindowIcon = options.icon
   if (!options.auxiliary)
     nativeTheme.themeSource = getInitialMainWindowThemeSource(
@@ -360,6 +366,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      backgroundThrottling: runtimePolicy.backgroundThrottling,
       // Chromium's packaged locale resources are intentionally English-only.
       // Carry Electron's OS-level preference into preload so first-run product
       // language detection does not mistake the available .pak for user intent.
@@ -401,6 +408,9 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 
   window.on('ready-to-show', () => {
     if (options.hideWindowOnAutoLaunch) {
+      return
+    }
+    if (!runtimePolicy.showWhenReady) {
       return
     }
     if (shouldMaximizeOnLaunch) {

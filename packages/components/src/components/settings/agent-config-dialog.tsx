@@ -512,6 +512,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     experimental: true,
     searchKeys: 'deepseek harness dsh acp',
   },
+  {
+    kind: 'builtin',
+    value: 'builtin:bub',
+    label: 'Bub',
+    descriptionKey: 'settings.agent.dialog.option.bub.description',
+    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
+    cliType: 'builtin',
+    agentType: 'bub',
+    searchKeys: 'bub bubbuild acp',
+  },
 ];
 
 const PRESET_OPTIONS: AgentTypeOption[] = PRESETS.map((p) => ({
@@ -1100,12 +1110,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
   const isCodexBuiltin = isCodexBuiltinForm(formData);
   const codexAuthenticationMode = formData.codexAuthenticationMode ?? 'chatgpt';
+  // Bub is builtin but user-installed, so there is no managed runtime to
+  // prepare. It still must pass a live probe on create: that is how a missing
+  // `bub acp` becomes an actionable "install Bub" prompt instead of a
+  // provider that fails later on its first turn.
+  const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin);
+    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1231,68 +1246,65 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         env: codexSubmitEnv,
       })
     );
-  }, [
-    codexAuthenticationMode,
-    codexSubmitEnv,
-    formData,
-    isCodexBuiltin,
-    mode,
-    parsedCustomAcp,
-  ]);
-  const backgroundManagedBuiltinSetup =
-    machineSupportsProviderSetupProtocol(machine) &&
+  }, [codexAuthenticationMode, codexSubmitEnv, formData, isCodexBuiltin, mode, parsedCustomAcp]);
+  const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
+  const backgroundBuiltinSetup =
+    supportsProviderSetup &&
     ((isCodexBuiltin && codexCredentialProvisioningRequired) ||
-      (requiresBuiltinCreationVerification && usesDefaultManagedRuntime));
+      (requiresBuiltinCreationVerification && (usesDefaultManagedRuntime || isBubBuiltin)));
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
-  const buildSubmitPayload = useCallback((setupRevision?: string): AgentConfigSubmitPayload => {
-    let env = { ...formData.env };
-    if (activePreset) {
-      env = buildPresetEnv(activePreset, activeCredentialMode, formData);
-    } else if (isDeepSeekBuiltinForm(formData)) {
-      env = buildDeepSeekSubmitEnv(formData);
-    } else if (isCodexBuiltinForm(formData)) {
-      env = codexSubmitEnv ?? buildCodexSubmitEnv(formData);
-    }
-    const agentType = formData.agentType as AgentType;
-    const titleGeneration = acpProvidesSessionTitle
-      ? undefined
-      : isPreset
-        ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
-        : formData.titleGeneration;
-    return {
-      id: agentConfigId,
-      name: formData.name.trim(),
-      cliType: formData.cliType,
-      agentType,
-      customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
-      runtimeOverrides: formData.runtimeOverrides,
-      prompt: formData.prompt,
-      env,
-      titleGeneration,
-      description: undefined,
-      brandId: resolvedBrandId,
-      ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
-      ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
-        ? {
-            codexApiKey: formData.codexApiKey?.trim(),
-            setupRevision,
-          }
-        : {}),
-    };
-  }, [
-    activeCredentialMode,
-    activePreset,
-    acpProvidesSessionTitle,
-    agentConfigId,
-    backgroundManagedBuiltinSetup,
-    codexCredentialProvisioningRequired,
-    codexSubmitEnv,
-    formData,
-    isCustom,
-    isPreset,
-    parsedCustomAcp,
-    resolvedBrandId,
-  ]);
+  const buildSubmitPayload = useCallback(
+    (setupRevision?: string): AgentConfigSubmitPayload => {
+      let env = { ...formData.env };
+      if (activePreset) {
+        env = buildPresetEnv(activePreset, activeCredentialMode, formData);
+      } else if (isDeepSeekBuiltinForm(formData)) {
+        env = buildDeepSeekSubmitEnv(formData);
+      } else if (isCodexBuiltinForm(formData)) {
+        env = codexSubmitEnv ?? buildCodexSubmitEnv(formData);
+      }
+      const agentType = formData.agentType as AgentType;
+      const titleGeneration = acpProvidesSessionTitle
+        ? undefined
+        : isPreset
+          ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
+          : formData.titleGeneration;
+      return {
+        id: agentConfigId,
+        name: formData.name.trim(),
+        cliType: formData.cliType,
+        agentType,
+        customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
+        runtimeOverrides: formData.runtimeOverrides,
+        prompt: formData.prompt,
+        env,
+        titleGeneration,
+        description: undefined,
+        brandId: resolvedBrandId,
+        ...(backgroundBuiltinSetup ? { backgroundSetup: true } : {}),
+        ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
+          ? {
+              codexApiKey: formData.codexApiKey?.trim(),
+              setupRevision,
+            }
+          : {}),
+      };
+    },
+    [
+      activeCredentialMode,
+      activePreset,
+      acpProvidesSessionTitle,
+      agentConfigId,
+      backgroundBuiltinSetup,
+      codexCredentialProvisioningRequired,
+      codexSubmitEnv,
+      formData,
+      isCustom,
+      isPreset,
+      parsedCustomAcp,
+      resolvedBrandId,
+    ]
+  );
   const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
     const payload = buildSubmitPayload(
       codexCredentialProvisioningRequired ? crypto.randomUUID() : undefined
@@ -1823,6 +1835,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (!formData.agentType.trim())
       return t('agents.disableReason.missingAgentType', 'Please select an agent type');
     if (incompatibleHostMessage) return incompatibleHostMessage;
+    if (mode.kind === 'create' && isBubBuiltin && !supportsProviderSetup) {
+      return t(
+        'settings.agent.setup.unsupportedTarget',
+        'Update Lody on the target machine to finish this provider setup.'
+      );
+    }
     if (binaryRequired && !binaryReady) {
       if (binaryStatus === 'unsupported-platform') {
         return t(
@@ -1934,7 +1952,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (disableReason || submitting) return;
     if (
       requiresBuiltinCreationVerification &&
-      !backgroundManagedBuiltinSetup &&
+      !backgroundBuiltinSetup &&
       !builtinCreationVerified
     ) {
       setPendingCreateBuiltinContext(builtinVerificationContext);
@@ -1949,7 +1967,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   useEffect(() => {
-    if (!requiresBuiltinCreationVerification || backgroundManagedBuiltinSetup) return;
+    if (!requiresBuiltinCreationVerification || backgroundBuiltinSetup) return;
     if (pendingCreateBuiltinContext !== builtinVerificationContext) return;
     if (!builtinCreationVerified || probing || authRequired || submitting) return;
     if (disableReason) {
@@ -1960,7 +1978,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     void persistConfig();
   }, [
     authRequired,
-    backgroundManagedBuiltinSetup,
+    backgroundBuiltinSetup,
     builtinCreationVerified,
     builtinVerificationContext,
     disableReason,
@@ -2173,7 +2191,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           probing={probing}
           probeError={probeError}
           ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
-          showIdleAction={!isCustom}
+          showIdleAction={!isCustom && !(mode.kind === 'create' && isBubBuiltin)}
           onRetry={() => {
             setProbeError(null);
             if (isCustom) {
@@ -2464,7 +2482,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                           'The agent runtime download failed.'
                         )
                       : usesDefaultManagedRuntime
-                        ? backgroundManagedBuiltinSetup
+                        ? backgroundBuiltinSetup
                           ? t(
                               'settings.agent.dialog.managedRuntimeQueuedAfterCreate',
                               'The managed runtime is not downloaded or is out of date. Lody will download and verify it in the background after you add this provider.'

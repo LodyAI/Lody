@@ -265,5 +265,31 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     expect(rendererCommit).not.toHaveBeenCalled();
     expect(flush).not.toHaveBeenCalled();
     expect(syncOnce).not.toHaveBeenCalled();
+
+    const bubSetupId = 'bub-provider-setup-writer' as AgentConfigId;
+    const bubConfig: AgentConfigMeta = {
+      id: bubSetupId,
+      machineId,
+      name: 'Bub',
+      cliType: 'builtin',
+      agentType: 'bub',
+      env: {},
+      prompt: '',
+    };
+
+    await store.set(cmdCreateProviderSetupAtom, { config: bubConfig });
+
+    expect(replaceProviderSetup.mock.calls.at(-1)).toEqual([
+      flockDocId,
+      expect.objectContaining({
+        id: bubSetupId,
+        status: 'queued',
+        attempt: 1,
+        config: bubConfig,
+      }),
+    ]);
+    expect(store.get(getAllProviderSetupsAtom)).toEqual([
+      expect.objectContaining({ id: bubSetupId, status: 'queued' }),
+    ]);
   });
 });

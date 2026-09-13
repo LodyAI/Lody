@@ -1,7 +1,9 @@
 # Mount the DSH file settings provider
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-08-dsh-settings-provider.zh.md)
 
 ## Abstract
 
