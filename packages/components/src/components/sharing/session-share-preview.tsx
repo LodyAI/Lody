@@ -8,28 +8,13 @@ import { SessionShareErrorBoundary } from './session-share-error-boundary';
 /** Exactly the frozen, unpublished bytes. This preview has no network or source adapter. */
 export function SessionSharePreview({ prepared }: { prepared: PreparedSharePackage }) {
   const [selected, setSelected] = useState(prepared.manifest.rootConversationId);
-  const [sideId, setSideId] = useState<string>();
-  const panes = resolveSharePanes(prepared.manifest, selected, sideId);
-  const sideConversationId = panes.side?.id;
+  const panes = resolveSharePanes(prepared.manifest, selected);
   const snapshot = useMemo(
     () => ({
       status: 'ready' as const,
       history: readPreparedShareHistory(prepared, panes.main.id) as unknown as SessionHistory[],
     }),
     [prepared, panes.main.id]
-  );
-  const sideSnapshot = useMemo(
-    () =>
-      sideConversationId
-        ? {
-            status: 'ready' as const,
-            history: readPreparedShareHistory(
-              prepared,
-              sideConversationId
-            ) as unknown as SessionHistory[],
-          }
-        : undefined,
-    [prepared, sideConversationId]
   );
   const access = useMemo(
     () => ({
@@ -46,21 +31,16 @@ export function SessionSharePreview({ prepared }: { prepared: PreparedSharePacka
     [prepared]
   );
   return (
-    <div className="mt-3 overflow-hidden rounded-md border [&_main]:h-[60vh]">
+    <div className="overflow-hidden rounded-md border border-border/60 [&_main]:h-[50vh]">
       <SessionShareErrorBoundary>
         <SessionShareSurface
+          embedded
           manifest={prepared.manifest}
           sessionId={selected}
-          sideId={sideId}
           status="ready"
           snapshot={snapshot}
-          sideSnapshot={sideSnapshot}
           attachmentAccess={access}
-          onSelect={(id) => {
-            const conversation = prepared.manifest.conversations.find((entry) => entry.id === id);
-            if (conversation?.childSessionPlacement === 'side-panel') setSideId(id);
-            else setSelected(id);
-          }}
+          onSelect={setSelected}
         />
       </SessionShareErrorBoundary>
     </div>

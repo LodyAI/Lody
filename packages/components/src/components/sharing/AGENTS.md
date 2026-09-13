@@ -6,14 +6,29 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   deploy until the anonymous reader, MCP confirmation, GC and integration fixtures
   have switched together. [Intent](../../../../../specs/session-sharing.md).
 - `session-share-dialog.tsx` and controlled `session-share-manager.tsx` own
-  authenticated publication confirmation. Capture a detached package first;
-  only the final human action uploads/publishes it. Include all selected stored
-  history, including thought/tool fields; disclose the sensitivity and public title.
+  authenticated publication. The manager is one screen at a time — setup,
+  publishing, published, unfinished draft — with exactly one primary action each.
+  A human action always starts publication, and the package is frozen in full
+  before any byte is uploaded. Include all selected stored history, including
+  thought/tool fields; disclose the sensitivity and public title on the first
+  screen, never behind a disclosure. `onPrepare` freezes for review only and must
+  never upload; `onPublish` freezes (or reuses the frozen retry keys) and then
+  uploads and commits.
+- Progress must stay honest: only the object upload has a byte total, so only it
+  may show a percentage. Capture and the publish commit use the indeterminate
+  sweep. Auto-copy on success may claim "copied" only after the clipboard write
+  resolves; a rejected write shows the manual-copy field instead.
+- A confirmation opened from an agent request freezes and shows the frozen copy
+  as soon as the locked editor is usable, so the human reviews the exact bytes.
 - `SessionShareDialogFrame` keeps its fixed header and one keyboard-aware scroll
-  body. The portal must shrink/lift for the native keyboard. Closed editors must
-  not load source documents or run cloud queries.
-- The sub-conversation switch resolves to an explicit current set, capped at 32;
-  future children never join automatically. Client capture is not server
+  body; the manager's action row sticks to the bottom of that body. Opening must
+  not autofocus a control — focus the panel, so the link field is not preselected
+  and the sub-conversation checkbox is not armed. The portal must shrink/lift for
+  the native keyboard. Closed editors must not load source documents or run cloud
+  queries.
+- The sub-conversation checkbox resolves to an explicit current set, capped at 32;
+  future children never join automatically. A share that carries only some of the
+  current children renders indeterminate with the exact count, never a plain tick. Client capture is not server
   materialization and source metadata is not a publisher identity certificate.
 - `hooks/use-session-share-management.ts` owns prepare/confirm/upload/publish.
   Settings reuses `useSessionShareLinkActions` for copy/reset/revoke. Keep retry
@@ -33,9 +48,11 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   and never create a workspace runtime, Repo, Flock, machine connection, source
   attachment request or local durable history cache. Navigation is manifest-only.
   `session-share-reader.ts` reads a single immutable history; no polling, Loro
-  document or source fallback. Main and side-pane selection are independent.
-- Preserve app presentation: independent conversations in the left tree, child
-  Tabs in the main pane and side-panel children at right. Reuse controlled
+  document or source fallback. One conversation is selected at a time.
+- Preserve app presentation: independent conversations in the left tree and
+  child Tabs in the one main pane. The reader has NO right pane and no toggle
+  for one, so a side-panel child renders as an ordinary Tab — it is published
+  content and must stay reachable, never dropped with the pane. Reuse controlled
   presentation only, not workspace runtime hooks. The left tree uses the app's
   `session-row-leading-slot.tsx`, not a second connector/disclosure implementation.
 - Markdown is dynamic and uses the existing conversation-copy builder, range
@@ -52,5 +69,24 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - Keep the read-only context free of composer, edit, retry, fork, permission,
   agent-control and workspace-navigation callbacks. Malformed reader errors
   unmount content and must not send history/error payloads to telemetry.
-- Theme controls reuse the app ThemeProvider and key, not a share-specific setting.
-  The host owns origin/build/CSP and an isolated anonymous platform/store.
+- Reader chrome: the Lody mark leads the header — the packaged app icon's own
+  black tile, which does not repaint with the reader's appearance — and links
+  back to the product in a new tab; right to left the header ends with viewer
+  identity, then the theme control. The conversation tree is a left sidebar on a
+  wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
+  per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
+  any other stored value; the reader deliberately does not follow the app's
+  appearance setting. It still drives the app ThemeProvider, so `embedded`
+  (the publisher's frozen-copy preview) must suppress both it and the identity
+  slot rather than repaint the surrounding app.
+- `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
+  authenticates and, on its own origin, cannot read the app's session cookie:
+  showing a name or avatar requires the host to establish it. Signed-out offers
+  only a new-tab link to the app's `/login`, resolved from `VITE_SITE_URL` or by
+  dropping a leading `share.` label, and nothing when neither yields an origin.
+- Each pane is named by the app's tab pill (`shared/tab-pill-strip.tsx`), never a
+  second title bar, so one conversation and a set of child Tabs read alike. The
+  foot is `session-share-composer.tsx`: the product composer's exact resting
+  surface from `chat/composer-surface.ts`, inert and `aria-hidden`, with the
+  visitor's real actions floated over it. Keep Markdown copy there, per pane.
+- The host owns origin/build/CSP and an isolated anonymous platform/store.

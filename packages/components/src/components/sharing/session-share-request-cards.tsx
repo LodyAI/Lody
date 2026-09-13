@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAtomValue } from 'jotai';
+import { Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import type { SessionShareRequest } from '@lody/cloud-api';
@@ -61,18 +62,29 @@ function RequestCards({
         .map((request) => (
           <section
             key={request.requestId}
-            className="my-3 rounded-lg border border-border p-4"
-            aria-label={t('sharing.request.title', 'Share request')}
+            className="my-3 flex flex-col gap-2 rounded-md border border-border bg-card p-3"
+            aria-label={t('sharing.request.title', 'Share this conversation?')}
           >
-            <p className="text-sm font-medium">{t('sharing.request.title', 'Share request')}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Share2 className="h-3.5 w-3.5" aria-hidden />
+              <span>{t('sharing.request.title', 'Share this conversation?')}</span>
+            </div>
+            <p className="text-sm leading-6">
               {t(
                 'sharing.request.notice',
-                'The agent requested a static share. Nothing is published until you review and confirm.'
+                'The agent asked to publish a static copy. Nothing is published until you review and confirm.'
               )}
             </p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {request.sessionIds.map((id) => (
+                <li key={id} className="truncate">
+                  {Object.values(meta).find((value) => value.id === id)?.title ||
+                    t('sessions.untitled', 'Untitled session')}
+                </li>
+              ))}
+            </ul>
             {request.status === 'confirmed' && (
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="text-xs leading-5 text-muted-foreground">
                 {selected?.requestId === request.requestId
                   ? t(
                       'sharing.request.incompleteOpen',
@@ -84,20 +96,7 @@ function RequestCards({
                     )}
               </p>
             )}
-            <ul className="my-2 list-inside list-disc text-sm">
-              {request.sessionIds.map((id) => (
-                <li key={id}>
-                  {Object.values(meta).find((value) => value.id === id)?.title ||
-                    t('sessions.untitled', 'Untitled session')}
-                </li>
-              ))}
-            </ul>
-            <div className="flex gap-2">
-              {request.status === 'pending' && (
-                <Button size="sm" disabled={busy} onClick={() => setSelected(request)}>
-                  {t('sharing.request.review', 'Review share')}
-                </Button>
-              )}
+            <div className="flex items-center justify-end gap-2">
               <Button
                 size="sm"
                 variant="ghost"
@@ -108,6 +107,11 @@ function RequestCards({
                   ? t('sharing.request.abandon', 'Abandon deployment')
                   : t('common.dismiss', 'Dismiss')}
               </Button>
+              {request.status === 'pending' && (
+                <Button size="sm" disabled={busy} onClick={() => setSelected(request)}>
+                  {t('sharing.request.review', 'Review and share')}
+                </Button>
+              )}
             </div>
           </section>
         ))}

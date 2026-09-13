@@ -107,6 +107,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Published: Story = {};
+export const SignedInViewer: Story = {
+  args: { viewer: { status: 'signed-in', name: 'Ada Lovelace' } },
+};
+/** A side-panel child is an ordinary Tab here: the reader has no right pane. */
+export const SidePanelChildAsTab: Story = { args: { sessionId: 'side' } };
 export const Loading: Story = {
   args: {
     manifest: null,

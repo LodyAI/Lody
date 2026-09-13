@@ -106,7 +106,7 @@ describe('share management settings inventory', () => {
     expect(container.textContent).toContain('Archived copy');
     expect(container.textContent).toContain('Revoked');
     expect(container.textContent).not.toContain('Copy link');
-    expect(container.textContent).not.toContain('Update deployment');
+    expect(container.textContent).not.toContain('Update share');
   });
   it('does not query cloud sharing when the platform capability is absent', async () => {
     mocks.enabled = false;

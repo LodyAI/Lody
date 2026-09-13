@@ -65,8 +65,10 @@ bytes already downloaded.
 
 ## Deployment consistency
 
-A client confirms the frozen package before upload. Upload authority is limited
-to one immutable inventory and cannot publish. Only the authenticated app commits
+A client freezes the complete package before upload, and only a human action in
+the authenticated app starts that publication; the frozen copy is reviewable
+before the action. Upload authority is limited to one immutable inventory and
+cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
 request, rather than silently accepting changed parameters.
@@ -83,10 +85,12 @@ abandoned uploads require quota-accounted, fenced garbage collection.
 
 ## Reader and agent interactions
 
-The share page preserves the application's layout: independent child conversations
-appear in the left conversation tree, child Tabs in the main tab bar, and
-side-panel children in the right pane. Relationships come from the manifest,
-not hidden references in history. Navigation never expands the manifest.
+The share page preserves the application's layout for what a reader needs:
+independent child conversations appear in the left conversation tree and child
+Tabs in the main tab bar. It has no right pane, so a side-panel child appears in
+that same tab bar rather than being hidden; published content is never
+unreachable. Relationships come from the manifest, not hidden references in
+history. Navigation never expands the manifest.
 
 Markdown is generated only when requested, using the existing conversation-copy
 builder, range selection, budget rules and result notices. It is a readable

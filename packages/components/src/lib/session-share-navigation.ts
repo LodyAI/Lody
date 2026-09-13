@@ -1,33 +1,18 @@
 import type { SharePackageManifest } from '@lody/shared/session-sharing';
 
-export function resolveSharePanes(
-  manifest: SharePackageManifest,
-  selectedId: string,
-  sideId?: string | null
-) {
+export function resolveSharePanes(manifest: SharePackageManifest, selectedId: string) {
   const selected =
     manifest.conversations.find((entry) => entry.id === selectedId) ??
     manifest.conversations.find((entry) => entry.id === manifest.rootConversationId)!;
   const root =
     manifest.conversations.find((entry) => entry.id === selected.parentConversationId) ?? selected;
+  // The reader has no right pane, so a side-panel child is a Tab like any other
+  // child. It must stay reachable: the publisher chose to publish it, and a
+  // pane the reader dropped would silently remove it from the share.
   const tabs = manifest.conversations.filter(
-    (entry) =>
-      entry.id === root.id ||
-      (entry.parentConversationId === root.id && entry.childSessionPlacement !== 'side-panel')
+    (entry) => entry.id === root.id || entry.parentConversationId === root.id
   );
-  const sides = manifest.conversations.filter(
-    (entry) =>
-      entry.parentConversationId === root.id && entry.childSessionPlacement === 'side-panel'
-  );
-  return {
-    root,
-    tabs,
-    sides,
-    main: selected.childSessionPlacement === 'side-panel' ? root : selected,
-    side:
-      sides.find((entry) => entry.id === sideId) ??
-      (selected.childSessionPlacement === 'side-panel' ? selected : sides[0]),
-  };
+  return { root, tabs, main: selected };
 }
 
 /** The manifest, never a requested URL target, grants access. */
@@ -50,13 +35,12 @@ export function subscribeSessionShareNavigation(changed: () => void): () => void
 export const getSessionShareSearch = (): string => window.location.search;
 
 /** Keeps the access fragment intact; never transfers the secret into a query. */
-export function navigateSessionShareTab(
-  sessionId: string,
-  replace = false,
-  pane: 'main' | 'side' = 'main'
-): void {
+export function navigateSessionShareTab(sessionId: string, replace = false): void {
   const url = new URL(window.location.href);
-  url.searchParams.set(pane === 'side' ? 'side' : 'tab', sessionId);
+  url.searchParams.set('tab', sessionId);
+  // A link minted while the reader still had a right pane must not keep
+  // pinning one; there is nothing left to select.
+  url.searchParams.delete('side');
   if (url.href === window.location.href) return;
   if (replace) window.history.replaceState(null, '', url);
   else window.history.pushState(null, '', url);
