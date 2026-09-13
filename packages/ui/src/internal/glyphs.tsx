@@ -49,6 +49,26 @@ export function ChevronRightGlyph() {
   return <Glyph d="M6.5 4 10.5 8 6.5 12" />;
 }
 
+/** Its mirror: the way back through a pager. */
+export function ChevronLeftGlyph() {
+  return <Glyph d="M9.5 4 5.5 8 9.5 12" />;
+}
+
+/**
+ * The pages a pager is not listing. It is three dots rather than a character,
+ * so the gap between the first pages and the last is the same mark at the same
+ * weight as the glyphs beside it in every font a host may be set to.
+ */
+export function EllipsisGlyph() {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="3.5" cy="8" r="1.15" fill="currentColor" />
+      <circle cx="8" cy="8" r="1.15" fill="currentColor" />
+      <circle cx="12.5" cy="8" r="1.15" fill="currentColor" />
+    </svg>
+  );
+}
+
 /**
  * The dot on the chosen row of a radio group. It is filled rather than stroked,
  * because a radio mark is a disc: at 16px a stroked ring reads as a tick that
