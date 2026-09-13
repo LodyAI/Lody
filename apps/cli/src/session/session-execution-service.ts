@@ -1753,8 +1753,16 @@ export class SessionExecutionService {
    * cannot resurrect finished work. Same dispatch contract as
    * {@link requeueUndeliveredSteer}: ordinary dispatch skips `pending_apply`
    * but picks up `pending`, and the pointer write is what wakes the idle
-   * watcher. A steer whose history entry has not synced here keeps its
-   * terminal-without-entry record instead of being requeued blind.
+   * watcher. An entry that has not synced here is requeued through the pointer
+   * alone (the late-syncing entry dispatches via the `pending_apply` pointer
+   * match in `findNextDispatchableUserTurn`), and the race branch's stale
+   * terminal-without-entry record is dropped so it cannot repair the late
+   * entry back to terminal. The pointer write also never replaces a newer
+   * activation published while this steer request was held — execution writes
+   * its own slots only, per the rule documented on {@link setDispatchProcessing}
+   * — so with a live activation for another turn the pointer is left alone: a
+   * flipped entry is picked up by the dispatch scan that activation keeps
+   * running, and a not-yet-synced entry keeps steer intent.
    */
   private async requeueSteerAfterLateRefusal(
     sessionId: SessionId,
@@ -1768,13 +1776,28 @@ export class SessionExecutionService {
       if (meta?.lastHandledUserMsgId === userTurnId) {
         return;
       }
+      // A newer send that published its activation while this steer request was
+      // held owns the pointer; clobbering it would leave that turn unwatched.
+      // The suppression slots that retire an activation for dispatch
+      // (`lastMissingHistoryUserMsgId`, `settledActivationUserMsgId`) free the
+      // slot here too.
+      const pointer = meta?.latestUserMsgId;
+      const pointerHoldsNewerActivation =
+        typeof pointer === 'string' &&
+        pointer.length > 0 &&
+        pointer !== userTurnId &&
+        pointer !== meta?.lastHandledUserMsgId &&
+        pointer !== meta?.lastMissingHistoryUserMsgId &&
+        pointer !== meta?.settledActivationUserMsgId;
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      let entryPresent = false;
       let queueable = false;
       await sessionDoc.updateHistory((history) =>
         history.map((entry) => {
           if (entry.id !== userTurnId || entry.role !== 'user') {
             return entry;
           }
+          entryPresent = true;
           queueable =
             entry.status === 'pending_apply' ||
             entry.status === 'pending' ||
@@ -1792,10 +1815,19 @@ export class SessionExecutionService {
             : entry;
         })
       );
-      if (!queueable) {
+      if (entryPresent && !queueable) {
         return;
       }
+      // The refusal proves non-delivery: whatever terminal-without-entry record
+      // the race branch left behind must not repair the late-syncing entry back
+      // to terminal.
       this.clearTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId);
+      if (pointerHoldsNewerActivation) {
+        this.deps.logger.info(
+          `[${sessionId}] Steer ${userTurnId} refused after its turn ended; left for the dispatch scan while activation ${pointer} holds the pointer`
+        );
+        return;
+      }
       await this.upsertSessionMeta(sessionId, {
         latestUserMsgId: userTurnId,
         lastMissingHistoryUserMsgId: undefined,

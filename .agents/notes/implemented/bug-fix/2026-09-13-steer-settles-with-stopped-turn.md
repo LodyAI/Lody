@@ -46,7 +46,12 @@ untouched.
   `AgentSteerNotDeliveredError` — produced only by the agent's own invalid-request answer — requeues
   the guide via `requeueSteerAfterLateRefusal`, which flips back only the terminal status that same
   race branch wrote and re-walks the ordinary requeue guards; the existing post-application
-  cancellation guard is unchanged.
+  cancellation guard is unchanged. The requeue also covers the entry that has not synced to this
+  daemon (the supported RPC-before-history ordering): it requeues through the pointer alone and
+  drops the race branch's terminal-without-entry record so the late-syncing entry dispatches via
+  the `pending_apply` pointer match instead of being repaired back to terminal, and it never
+  replaces a newer activation that owns the dispatch pointer — execution writes its own slots only
+  — leaving the flipped entry to the dispatch scan that the newer activation keeps running.
 
 ## Trade-offs and compatibility
 
@@ -60,6 +65,12 @@ untouched.
   status reflects the unanswered verdict rather than asserting delivery.
 - The steer mutation queue is unblocked as soon as the response settles; queue ordering for later
   steers is unchanged.
+- The dispatch pointer is single-slot and producer-owned. When a newer send published its
+  activation while the steer request was held, the requeue must not reclaim the slot: it leaves
+  the pointer alone and relies on the chronological scan that the live activation keeps running (a
+  not-yet-synced entry then keeps steer intent, which dispatches only through an explicit pointer
+  match). Destroying the newer activation would strand that turn permanently once the watcher
+  unloads.
 
 ## Verification
 
@@ -70,3 +81,11 @@ cover the late verdict: a refused-after-settlement guide returns to `pending` wi
 pointer rewritten, and a late acceptance releases its lease. All four fail before the refinement and
 pass with it; the full `apps/cli` suite passes unchanged apart from two runtime mocks completed with
 the `promptOutcome` field the race now reads.
+
+Five further tests cover the requeue edges flagged in review: an entry absent at refusal time is
+requeued through the pointer and the stale terminal-without-entry record is cleared (previously the
+guide stranded); with a live newer activation owning the pointer, an absent entry gets no pointer
+write (the record is still cleared) and a present entry is flipped to `pending` without a pointer
+rewrite (previously the newer turn's activation was clobbered); a pointer naming an already-handled
+turn and a pointer retired by `settledActivationUserMsgId` are both treated as free slots, so the
+requeue still publishes. The first three fail on the previous head.

@@ -34,7 +34,11 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
   `waiter.released` 装为会话的应用屏障，在租约释放前阻塞该会话所有后续 `sessionUpdate`）；
   迟到的 `AgentSteerNotDeliveredError`——仅由 agent 亲口的 invalid-request 应答产生——经
   `requeueSteerAfterLateRefusal` 重排队，该方法只回翻同一 race 分支写下的终态并复走常规
-  重排队守卫；既有的应用后取消守卫不变。
+  重排队守卫；既有的应用后取消守卫不变。重排队同时覆盖条目尚未同步到本机的场景（受支持的
+  RPC 先于历史到达顺序）：仅通过指针重排队并清除 race 分支遗留的 terminal-without-entry
+  记录，让迟同步的条目经 `pending_apply` 指针匹配进入分发而不是被修复回终态；且绝不替换
+  持有分发指针的更新 activation——执行侧只写自己的槽位——把回翻后的条目交给该 activation
+  持续驱动的分发扫描。
 
 ## 权衡与兼容性
 
@@ -44,6 +48,10 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
 - 非取消结算标记为 `failed` 是唯一启发式：完成 turn 却不应答被扣 steer 请求的 agent 已偏离
   确认型 steer 契约，失败状态如实反映"无裁决"，而非断言已投递或未投递。
 - 响应结算后每会话 steer 变更队列立即解锁；后续 steer 的排队顺序不变。
+- 分发指针是单槽且 producer-owned。steer 请求被扣留期间更新的 send 已发布自己的 activation
+  时，重排队不能夺回该槽位：保持指针不动，依赖该活跃 activation 持续驱动的按时间序扫描来
+  派发回翻的条目（尚未同步的条目则保持 steer 意图，只能通过显式指针匹配进入分发）。销毁
+  更新的 activation 会在 watcher 卸载后让那个 turn 永久搁浅。
 
 ## 验证
 
@@ -52,3 +60,9 @@ prompt 传输的运行时，被停止的 prompt 会直接拒绝 `applied`，落�
 `error` 且不写历史）。两条在父提交上失败、修复后通过。另有两条覆盖迟到裁决：结算后被拒绝的指南回到 `pending`
 并重写分发指针，迟到的接受释放其租约。四条在细化前失败、细化后通过；`apps/cli` 全量套件
 除为 race 读取的 `promptOutcome` 字段补全两个运行时 mock 外全部通过。
+
+另有五条测试覆盖 review 指出的重排队边界：拒绝到达时条目缺失 → 经指针重排队并清除过期的
+terminal-without-entry 记录（修复前永久搁浅）；更新的活跃 activation 持有指针时，条目缺失
+→ 不写指针（记录仍清除）、条目在场 → 仅回翻 `pending` 不改写指针（修复前会覆盖新 turn 的
+activation）；指针指向已处理完成的 turn、以及指针已被 `settledActivationUserMsgId` 退役
+两种情况都视为空闲槽位，重排队照常发布指针。前三条在父提交上失败。

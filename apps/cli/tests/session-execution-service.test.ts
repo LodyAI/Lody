@@ -862,6 +862,218 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
+  // Shared harness for the late-refusal requeue edges: the steer's history
+  // entry may not have synced to this daemon when the refusal arrives, and a
+  // newer send may own the dispatch pointer while the request was held.
+  const setupLateRefusal = ({
+    history,
+    meta,
+  }: {
+    history: SessionHistoryInput[];
+    meta?: Partial<SessionMeta>;
+  }) => {
+    const verdict = createDeferred<{ release: () => void }>();
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: verdict.promise,
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      })),
+      cancel: vi.fn(async () => {}),
+      steerPrompt,
+      currentModel: undefined,
+    };
+    const updateHistory = vi.fn(
+      async (map: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history.splice(0, history.length, ...map(history));
+      }
+    );
+    const sessionDoc = { updateHistory };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => (meta ? { meta } : undefined)) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-late-refusal-edges' as SessionId;
+    const promptSettled = createDeferred<{ status: 'rejected'; error: unknown }>();
+    const promptRun = {
+      turnId: 'assistant:user-1',
+      promptOutcome: promptSettled.promise,
+      successorReady: Promise.resolve(),
+      signalSuccessor: vi.fn(),
+    };
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer' as ACPSessionId },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
+      activePromptRun: promptRun,
+      yieldedFinalization: Promise.resolve(),
+      settlement: { callback: vi.fn(async () => {}), completed: false },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const settleTurn = async () => {
+      const response = service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-09-14T00:00:00.000Z',
+        inputConfig: { prompt: 'change direction' },
+      });
+      await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+      runtime.cancelRequested = true;
+      promptSettled.resolve({ status: 'rejected', error: new Error('prompt canceled') });
+      await expect(response).resolves.toMatchObject({
+        applied: false,
+        disposition: 'stale-turn',
+      });
+    };
+    const refuseLate = () => {
+      verdict.reject(
+        new AgentSteerNotDeliveredError(
+          'Agent refused the acknowledged steer request',
+          new Error('invalid request')
+        )
+      );
+    };
+    return { service, sessionId, history, upsertDocMeta, settleTurn, refuseLate };
+  };
+
+  it('requeues a refused steer via the dispatch pointer even before its history entry syncs', async () => {
+    // RPC-before-history ordering: the race terminalizes the guide without an
+    // entry (terminal-without-entry record) and the refusal arrives while the
+    // entry is still absent. The refusal proves non-delivery, so the guide is
+    // requeued through the pointer — the same treatment the ordinary refusal
+    // path gives a missing entry — and the stale record is dropped so it cannot
+    // repair the late-syncing entry back to terminal.
+    const { service, sessionId, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+      history: [],
+    });
+    await settleTurn();
+    expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBe('canceled');
+
+    refuseLate();
+    await vi.waitFor(() =>
+      expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBeUndefined()
+    );
+    await vi.waitFor(() =>
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ latestUserMsgId: 'user-2' })
+      )
+    );
+  });
+
+  it('leaves the pointer alone when a newer activation owns it and the entry has not synced', async () => {
+    // With a live activation for a newer turn, publishing the refused steer's
+    // pointer would destroy that activation — a turn visible only through the
+    // pointer is never reconsidered after the watcher unloads. The stale
+    // record is still dropped; the late-syncing entry keeps steer intent
+    // (it dispatches only through an explicit pointer match).
+    const { service, sessionId, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+      history: [],
+      meta: { latestUserMsgId: 'user-3', lastHandledUserMsgId: 'user-1' },
+    });
+    await settleTurn();
+    expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBe('canceled');
+
+    refuseLate();
+    await vi.waitFor(() =>
+      expect(service.getTerminalUserTurnStatusWithoutEntry(sessionId, 'user-2')).toBeUndefined()
+    );
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2' })
+    );
+  });
+
+  it('requeues a refused steer behind a newer activation without replacing the pointer', async () => {
+    // A newer send published while the steer request was held owns
+    // latestUserMsgId. The refused guide is flipped back to `pending` — the
+    // chronological scan that the newer activation keeps running dispatches it
+    // first — but the pointer must not be rewritten to the older steer, or the
+    // newer turn loses its activation and never runs.
+    const { history, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+      history: [
+        { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+      ],
+      meta: { latestUserMsgId: 'user-3', lastHandledUserMsgId: 'user-1' },
+    });
+    await settleTurn();
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'canceled' }));
+
+    refuseLate();
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'pending' }));
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2' })
+    );
+  });
+
+  it('still rewrites the pointer when the activation slot is free', async () => {
+    // The pointer naming an already-handled turn is a consumed activation, not
+    // a newer one: the refused guide must take the slot or an idle watcher is
+    // never woken.
+    const { history, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+      history: [
+        { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+      ],
+      meta: { latestUserMsgId: 'user-1', lastHandledUserMsgId: 'user-1' },
+    });
+    await settleTurn();
+    refuseLate();
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'pending' }));
+    await vi.waitFor(() =>
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ latestUserMsgId: 'user-2' })
+      )
+    );
+  });
+
+  it('treats a pointer retired by the settled-activation slot as free', async () => {
+    // `settledActivationUserMsgId` retires an activation without rewriting the
+    // pointer, so the pointer value alone cannot tell whether the slot is
+    // occupied — a retired activation must not block the refused guide's
+    // requeue.
+    const { history, upsertDocMeta, settleTurn, refuseLate } = setupLateRefusal({
+      history: [
+        { id: 'user-2', role: 'user', status: 'pending_apply', read: false } as SessionHistoryInput,
+      ],
+      meta: { latestUserMsgId: 'user-3', settledActivationUserMsgId: 'user-3' },
+    });
+    await settleTurn();
+    refuseLate();
+    await vi.waitFor(() => expect(history[0]).toMatchObject({ status: 'pending' }));
+    await vi.waitFor(() =>
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ latestUserMsgId: 'user-2' })
+      )
+    );
+  });
+
   it('completes A to B to C when yielded prompts never settle', async () => {
     const sessionId = 'session-steer-lifecycle' as SessionId;
     const first = createDeferred<unknown>();
