@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/672
 
 [English](2026-09-13-spinner-off-svg-retina-composite.md)
 
