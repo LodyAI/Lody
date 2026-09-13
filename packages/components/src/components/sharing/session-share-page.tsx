@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Moon, Sun, PanelLeft, PanelRight } from 'lucide-react';
+import { Moon, Sun, PanelLeft } from 'lucide-react';
 import {
   SessionRowLeadingSlot,
   buildSessionRowOpenedByTreeSlot,
@@ -45,6 +45,7 @@ import { cn } from '@/lib/utils';
 import { useTheme } from '@/theme-provider';
 import { SessionShareComposer } from './session-share-composer';
 import {
+  ShareBrandLink,
   ShareViewerIdentity,
   resolveShareAppOrigin,
   type ShareViewer,
@@ -230,10 +231,8 @@ const loadingSnapshot: SessionShareReaderSnapshot = { status: 'loading', history
 export function SessionShareSurface(props: {
   manifest: SharePackageManifest | null;
   sessionId: string | null;
-  sideId?: string | null;
   status: 'loading' | 'unavailable' | 'ready';
   snapshot: SessionShareReaderSnapshot;
-  sideSnapshot?: SessionShareReaderSnapshot;
   onSelect: (conversationId: string) => void;
   attachmentAccess: ShareAttachmentAccess;
   /** Supplied by a host that can establish an identity; signed-out otherwise. */
@@ -251,7 +250,6 @@ export function SessionShareSurface(props: {
   const appOrigin = useMemo(() => resolveShareAppOrigin(), []);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [treeVisible, setTreeVisible] = useState(true);
-  const [sideVisible, setSideVisible] = useState(true);
   const { manifest, sessionId, status } = props;
   const tree = useMemo(() => {
     if (!manifest) return [];
@@ -292,13 +290,14 @@ export function SessionShareSurface(props: {
         {t('sharing.loading', 'Loading shared conversation…')}
       </main>
     );
-  const panes = resolveSharePanes(manifest, sessionId, props.sideId);
+  const panes = resolveSharePanes(manifest, sessionId);
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-1">
+          <ShareBrandLink appOrigin={appOrigin} />
           {hasTree && (
             <Button
               size="icon"
@@ -311,25 +310,8 @@ export function SessionShareSurface(props: {
               <PanelLeft className="h-4 w-4" />
             </Button>
           )}
-          {/* The tab pill already names the conversation; on a phone this
-              caption would only push the header controls into a second row. */}
-          <span className="hidden text-xs text-muted-foreground sm:inline">
-            {t('sharing.sharedConversation', 'Shared conversation')}
-          </span>
         </div>
         <div className="flex items-center gap-2">
-          {panes.sides.length > 0 && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              aria-expanded={sideVisible}
-              aria-label={t('sharing.toggleSide', 'Toggle side conversation')}
-              onClick={() => setSideVisible((value) => !value)}
-            >
-              <PanelRight className="h-4 w-4" />
-            </Button>
-          )}
           {!props.embedded && (
             <>
               <ShareThemeToggle />
@@ -383,20 +365,6 @@ export function SessionShareSurface(props: {
             attachmentAccess={props.attachmentAccess}
           />
         </div>
-        {panes.side && sideVisible && (
-          <aside className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border sm:max-w-[45%] sm:border-l sm:border-t-0">
-            <ShareConversationPane
-              key={panes.side.id}
-              conversationId={panes.side.id}
-              title={title(panes.side.title)}
-              tabs={panes.sides.map((tab) => ({ id: tab.id, title: title(tab.title) }))}
-              onSelect={props.onSelect}
-              showFork={false}
-              snapshot={props.sideSnapshot ?? loadingSnapshot}
-              attachmentAccess={props.attachmentAccess}
-            />
-          </aside>
-        )}
       </div>
     </main>
   );
@@ -461,10 +429,8 @@ function SessionShareReaderPage({ apiOrigin, shareId, secret }: SessionSharePage
     return () => lifetime.abort();
   }, [apiOrigin, shareId, secret]);
   const sessionId = resolveSessionShareTab(share?.manifest ?? null, search);
-  const sideId = new URLSearchParams(search).get('side');
-  const panes = share && sessionId ? resolveSharePanes(share.manifest, sessionId, sideId) : null;
+  const panes = share && sessionId ? resolveSharePanes(share.manifest, sessionId) : null;
   const snapshot = useShareConversation(share, panes?.main.id);
-  const sideSnapshot = useShareConversation(share, panes?.side?.id);
   const access = useMemo<ShareAttachmentAccess>(
     () => ({
       async read(id, signal) {
@@ -479,19 +445,12 @@ function SessionShareReaderPage({ apiOrigin, shareId, secret }: SessionSharePage
     <SessionShareSurface
       manifest={share?.manifest ?? null}
       sessionId={sessionId}
-      sideId={sideId}
       status={failed ? 'unavailable' : share ? 'ready' : 'loading'}
       snapshot={snapshot}
-      sideSnapshot={sideSnapshot}
       attachmentAccess={access}
       onSelect={(id) => {
-        const target = share?.manifest.conversations.find((entry) => entry.id === id);
-        if (target)
-          navigateSessionShareTab(
-            id,
-            false,
-            target.childSessionPlacement === 'side-panel' ? 'side' : 'main'
-          );
+        if (share?.manifest.conversations.some((entry) => entry.id === id))
+          navigateSessionShareTab(id);
       }}
     />
   );

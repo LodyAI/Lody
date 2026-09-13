@@ -1,6 +1,5 @@
 {
   "sharing.toggleTree": "展开或收起对话树",
-  "sharing.toggleSide": "展开或收起侧边对话",
   "sharing.static.preview": "预览将要发布的内容",
   "sharing.static.uncopiedResources": "发现 {{count}} 个未复制的嵌入资源链接。其文本会保留，但分享页不会加载原工作区资源或远程图片。",
   "sharing.request.incomplete": "此部署尚未发布，编辑器关闭后无法续传。请先放弃部署，再让 Agent 使用新的 requestId 重新发起分享请求。",
@@ -4047,7 +4046,6 @@
   "sharing.unavailableDetail": "链接可能不完整、已重置或已撤销。",
   "sharing.loading": "正在加载分享对话…",
   "sharing.defaultTitle": "分享对话",
-  "sharing.sharedConversation": "分享的对话",
   "sharing.conversationTree": "对话树",
   "sharing.appearance": "外观：{{mode}}",
   "sharing.conversations": "分享的对话",

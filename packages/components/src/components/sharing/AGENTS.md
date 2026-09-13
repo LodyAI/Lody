@@ -48,9 +48,11 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   and never create a workspace runtime, Repo, Flock, machine connection, source
   attachment request or local durable history cache. Navigation is manifest-only.
   `session-share-reader.ts` reads a single immutable history; no polling, Loro
-  document or source fallback. Main and side-pane selection are independent.
-- Preserve app presentation: independent conversations in the left tree, child
-  Tabs in the main pane and side-panel children at right. Reuse controlled
+  document or source fallback. One conversation is selected at a time.
+- Preserve app presentation: independent conversations in the left tree and
+  child Tabs in the one main pane. The reader has NO right pane and no toggle
+  for one, so a side-panel child renders as an ordinary Tab — it is published
+  content and must stay reachable, never dropped with the pane. Reuse controlled
   presentation only, not workspace runtime hooks. The left tree uses the app's
   `session-row-leading-slot.tsx`, not a second connector/disclosure implementation.
 - Markdown is dynamic and uses the existing conversation-copy builder, range
@@ -65,7 +67,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - Keep the read-only context free of composer, edit, retry, fork, permission,
   agent-control and workspace-navigation callbacks. Malformed reader errors
   unmount content and must not send history/error payloads to telemetry.
-- Reader chrome, right to left in the header: viewer identity, then the theme
+- Reader chrome: the Lody mark leads the header and links back to the product in
+  a new tab; right to left it ends with viewer identity, then the theme
   control. That control offers Light and Dark only and forces Light when it finds
   any other stored value; the reader deliberately does not follow the app's
   appearance setting. It still drives the app ThemeProvider, so `embedded`

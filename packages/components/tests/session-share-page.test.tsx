@@ -129,7 +129,6 @@ describe('static share presentation', () => {
           },
         ] satisfies SessionHistory[],
       },
-      sideSnapshot: { status: 'ready', history: [] },
     };
   });
   afterEach(async () => {
@@ -138,7 +137,7 @@ describe('static share presentation', () => {
   });
   const render = () => act(async () => root.render(<SessionShareSurface {...props} />));
 
-  it('places opened conversations in a collapsible tree, child Tabs centrally and side chats at right', async () => {
+  it('places opened conversations in a collapsible tree and every child in the one pane', async () => {
     await render();
     const tree = container.querySelector('nav[aria-label="Conversation tree"]')!;
     expect(tree.textContent).toContain('Main');
@@ -146,7 +145,9 @@ describe('static share presentation', () => {
     expect(tree.textContent).not.toContain('Notes');
     expect(tree.textContent).not.toContain('Discussion');
     expect(container.querySelector('[data-conversation="c2"]')).not.toBeNull();
-    expect(container.querySelector('aside [data-conversation="c4"]')).not.toBeNull();
+    // No right pane, and no toggle for one.
+    expect(container.querySelector('aside')).toBeNull();
+    expect(container.querySelector('[aria-label="Toggle side conversation"]')).toBeNull();
     await act(async () =>
       tree.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')!.click()
     );
@@ -165,17 +166,16 @@ describe('static share presentation', () => {
     await render();
     const tabs = container.querySelector('[role="tablist"]')!;
     const labels = [...tabs.querySelectorAll('[role="tab"]')].map((node) => node.textContent);
-    expect(labels).toEqual(['Main', 'Notes']);
+    // A side-panel child stays reachable as a Tab rather than disappearing.
+    expect(labels).toEqual(['Main', 'Notes', 'Discussion']);
     expect(tabs.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Notes');
     await act(async () =>
       [...tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-        .find((node) => node.textContent === 'Main')!
+        .find((node) => node.textContent === 'Discussion')!
         .click()
     );
-    expect(props.onSelect).toHaveBeenCalledWith('c1');
-    // The side pane holds one conversation, so it renders a solo tab, not a strip.
-    expect(container.querySelector('aside [role="tablist"]')).toBeNull();
-    expect(container.querySelector('aside h1')?.textContent).toBe('Discussion');
+    expect(props.onSelect).toHaveBeenCalledWith('c4');
+    expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(1);
   });
 
   it('generates Markdown only when copied, using the displayed transcript and no source namespace', async () => {
@@ -229,6 +229,17 @@ describe('static share presentation', () => {
       container.querySelector<HTMLButtonElement>('[aria-label^="Appearance"]')!.click()
     );
     expect(theme.setTheme).toHaveBeenCalledExactlyOnceWith('light');
+  });
+
+  it('leads the header with a Lody mark that goes back to the product', async () => {
+    await render();
+    const brand = [...container.querySelectorAll('header a')].find((node) =>
+      node.textContent?.includes('Lody')
+    ) as HTMLAnchorElement;
+    expect(brand.target).toBe('_blank');
+    expect(brand.rel).toContain('noopener');
+    expect(brand.getAttribute('href')).not.toContain('/login');
+    expect(brand.querySelector('img')).not.toBeNull();
   });
 
   it('sends an anonymous visitor to the app to sign in, in a new tab', async () => {

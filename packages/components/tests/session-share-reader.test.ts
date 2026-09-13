@@ -120,7 +120,7 @@ describe('anonymous static conversation reader', () => {
     ]);
   });
 
-  it('resolves only manifest identities and separates tree, Tab and side-chat ownership', async () => {
+  it('resolves only manifest identities and keeps every published child reachable', async () => {
     const { share } = await fixture();
     const manifest = share.manifest;
     expect(resolveSessionShareTab(manifest, '?tab=source')).toBe('c1');
@@ -128,19 +128,16 @@ describe('anonymous static conversation reader', () => {
     const tab = resolveSharePanes(manifest, 'c2');
     expect(tab.root.id).toBe('c1');
     expect(tab.main.id).toBe('c2');
-    expect(tab.tabs.map((entry) => entry.id)).toEqual(['c1', 'c2']);
-    expect(tab.sides.map((entry) => entry.id)).toEqual(['c4']);
+    // c4 is a side-panel child in the app. The reader has no right pane, so it
+    // is a Tab here rather than content the reader silently drops.
+    expect(tab.tabs.map((entry) => entry.id)).toEqual(['c1', 'c2', 'c4']);
     const side = resolveSharePanes(manifest, 'c4');
-    expect(side.main.id).toBe('c1');
-    expect(side.side?.id).toBe('c4');
-    const secondSide = { ...manifest.conversations[3]!, id: 'c5' };
-    const withSecondSide = { ...manifest, conversations: [...manifest.conversations, secondSide] };
-    expect(resolveSharePanes(withSecondSide, 'c4', 'c5').side?.id).toBe('c5');
-    expect(resolveSharePanes(withSecondSide, 'c2', 'c5').main.id).toBe('c2');
-    expect(resolveSharePanes(withSecondSide, 'c4', 'outside').side?.id).toBe('c4');
+    expect(side.root.id).toBe('c1');
+    expect(side.main.id).toBe('c4');
+    expect(side.tabs.map((entry) => entry.id)).toEqual(['c1', 'c2', 'c4']);
     const opened = resolveSharePanes(manifest, 'c3');
     expect(opened.root.id).toBe('c3');
     expect(opened.main.openedByConversationId).toBe('c2');
-    expect(opened.side).toBeUndefined();
+    expect(opened.tabs.map((entry) => entry.id)).toEqual(['c3']);
   });
 });

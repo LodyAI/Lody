@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { LogIn } from 'lucide-react';
+import lodyLogo from '@/assets/lody-icon.png';
+import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@/ui/button';
 
@@ -80,5 +82,32 @@ export function ShareViewerIdentity({
         <span className="hidden sm:inline">{t('sharing.signIn', 'Sign in to Lody')}</span>
       </a>
     </Button>
+  );
+}
+
+/** The product mark, leading the reader header and pointing back at Lody. */
+export function ShareBrandLink({ appOrigin }: { appOrigin: string | null }) {
+  const mark = (
+    <>
+      <img
+        src={lodyLogo}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className="size-5 rounded-md object-contain"
+      />
+      <span className="text-sm font-semibold tracking-tight">Lody</span>
+    </>
+  );
+  const className = cn(
+    'flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-foreground',
+    appOrigin && 'transition-colors hover:bg-hover'
+  );
+  if (!appOrigin) return <span className={className}>{mark}</span>;
+  // A new tab: a visitor reading a share must not lose it to the marketing site.
+  return (
+    <a href={appOrigin} target="_blank" rel="noopener noreferrer" className={className}>
+      {mark}
+    </a>
   );
 }

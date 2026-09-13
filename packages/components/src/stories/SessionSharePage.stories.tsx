@@ -102,19 +102,6 @@ const meta = {
         },
       ] satisfies SessionHistory[],
     },
-    sideSnapshot: {
-      status: 'ready',
-      history: [
-        {
-          id: 'side-note',
-          role: 'assistant',
-          timestamp: '2026-09-07T08:10:00Z',
-          finished: true,
-          fileDiff: [],
-          items: [{ type: 'text', text: 'Keep the reader free of workspace credentials.' }],
-        },
-      ] satisfies SessionHistory[],
-    },
   },
 } satisfies Meta<typeof SessionShareSurface>;
 export default meta;
@@ -123,7 +110,8 @@ export const Published: Story = {};
 export const SignedInViewer: Story = {
   args: { viewer: { status: 'signed-in', name: 'Ada Lovelace' } },
 };
-export const SideConversation: Story = { args: { sideId: 'side' } };
+/** A side-panel child is an ordinary Tab here: the reader has no right pane. */
+export const SidePanelChildAsTab: Story = { args: { sessionId: 'side' } };
 export const Loading: Story = {
   args: {
     manifest: null,

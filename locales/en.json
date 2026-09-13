@@ -1,6 +1,5 @@
 {
   "sharing.toggleTree": "Toggle conversation tree",
-  "sharing.toggleSide": "Toggle side conversation",
   "sharing.static.preview": "Preview what will be published",
   "sharing.static.uncopiedResources": "{{count}} embedded resource links are not copied. Their text is preserved, but the share cannot load resources from the original workspace or remote image URLs.",
   "sharing.request.incomplete": "This deployment is not published yet and cannot be resumed after the editor closes. Abandon it, then ask the agent for a new share request with a new requestId.",
@@ -4047,7 +4046,6 @@
   "sharing.unavailableDetail": "The link may be incomplete, reset, or revoked.",
   "sharing.loading": "Loading shared conversation…",
   "sharing.defaultTitle": "Shared conversation",
-  "sharing.sharedConversation": "Shared conversation",
   "sharing.conversationTree": "Conversation tree",
   "sharing.appearance": "Appearance: {{mode}}",
   "sharing.conversations": "Shared conversations",
