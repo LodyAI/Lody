@@ -134,7 +134,9 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     adapterPath: options.adapterPath,
     presetRoot,
     sessionCompression,
+    reasoningEffort: 'max',
   });
+  await mkdir(sessionsRoot, { recursive: true });
   // The adapter lives next to the installed CLI, so its absolute path can
   // change across app upgrades. Content-address the profile directory so
   // Windows never has to replace in-use files with a stale path.
