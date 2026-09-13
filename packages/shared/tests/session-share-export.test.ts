@@ -3,9 +3,57 @@ import {
   prepareSharePackage as captureSharePackage,
   readPreparedShareHistory,
 } from '../src/session-share-export';
-import { verifyShareObject } from '../src/session-share-package';
+import { validateShareHistory, verifyShareObject } from '../src/session-share-package';
 
 const capturedAt = '2026-09-12T00:00:00.000Z';
+it('removes task proposals without changing source or agent history', async () => {
+  const proposal = {
+    type: 'system_notice',
+    name: 'task_proposal',
+    meta: { taskId: 'private-task', title: 'Private proposal' },
+    content: [{ type: 'image', imageId: 'private-image' }],
+  };
+  const kept = [
+    { type: 'subagent_task', taskId: 'agent-work', status: 'completed' },
+    { type: 'tool_call', rawOutput: proposal },
+    { type: 'text', text: 'task_proposal is mentioned here' },
+  ];
+  const source = [
+    {
+      id: 'turn',
+      role: 'system',
+      items: [proposal, ...kept, { type: 'content', content: [proposal] }],
+      inputConfig: { inputBlocks: [proposal] },
+    },
+  ];
+  const before = JSON.stringify(source);
+  expect(() => validateShareHistory(source)).toThrow('Task proposals');
+  const prepared = await captureSharePackage({
+    rootSourceId: 'root',
+    capturedAt,
+    conversations: [{ sourceId: 'root', title: 'Root', history: source }],
+    readAttachment: async () => {
+      throw new Error('Excluded proposal must not read attachments');
+    },
+  });
+  expect(readPreparedShareHistory(prepared, 'c1')).toEqual([
+    {
+      id: 'turn',
+      role: 'system',
+      items: [...kept, { type: 'content', content: [] }],
+      inputConfig: { inputBlocks: [] },
+    },
+  ]);
+  expect(prepared.manifest.attachments).toEqual([]);
+  expect(JSON.stringify(source)).toBe(before);
+  for (const nested of [
+    { items: [{ type: 'content', content: [proposal] }] },
+    { items: [], inputConfig: { inputBlocks: [proposal] } },
+  ])
+    expect(() => validateShareHistory([{ id: 'turn', role: 'system', ...nested }])).toThrow(
+      'Task proposals'
+    );
+});
 // Retain coverage of the file-copy path for the future rollout.
 const prepareSharePackage = (options: Parameters<typeof captureSharePackage>[0]) =>
   captureSharePackage({ ...options, fileAttachmentsEnabled: true });

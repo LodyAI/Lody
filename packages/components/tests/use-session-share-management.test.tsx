@@ -131,7 +131,73 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
-  it('uploads only after the human action and saves the secret only after publication', async () => {
+  it('retains the reader credential when the dialog closes during publication', async () => {
+    let finish!: (value: typeof entry) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    cloud.mutation.mockImplementation(async (name: string) => {
+      if (name === 'sessionSharing:beginDeployment')
+        return { ...entry, status: 'draft', deploymentId: 'deployment' };
+      expect(readSessionShareSecret(localStorage, key, 1)).toBe('a'.repeat(64));
+      entered();
+      return new Promise<typeof entry>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await render();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = control.onPublish();
+      await started;
+    });
+    await act(async () => root.render(null));
+    await act(async () => {
+      finish(entry);
+      await pending;
+    });
+    cloud.state = entry;
+    await render();
+    expect(control.shareLink).toBe(`https://share.test/s/share#access=v1.${'a'.repeat(64)}`);
+  });
+
+  it('blocks upload and publication on storage failure and reuses the deployment on retry', async () => {
+    await render();
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('Storage disabled');
+    });
+    try {
+      await act(async () => control.onPublish());
+      expect(control.error).toContain('Could not save the share link');
+      expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+        'sessionSharing:beginDeployment',
+      ]);
+      expect(cloud.upload).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+    await act(async () => control.onPublish());
+    expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+      'sessionSharing:beginDeployment',
+      'sessionSharing:publishDeployment',
+    ]);
+    expect(control.shareLink).toBe(`https://share.test/s/share#access=v1.${'a'.repeat(64)}`);
+  });
+
+  it('does not overwrite a newer saved credential or publish with a stale one', async () => {
+    saveSessionShareSecret(localStorage, key, { credentialVersion: 2, secret: 'c'.repeat(64) });
+    await render();
+    await act(async () => control.onPublish());
+    expect(readSessionShareSecret(localStorage, key, 2)).toBe('c'.repeat(64));
+    expect(cloud.upload).not.toHaveBeenCalled();
+    expect(control.error).toContain('Could not save the share link');
+    expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+      'sessionSharing:beginDeployment',
+    ]);
+  });
+
+  it('uploads only after the human action and retains the published secret', async () => {
     await render();
     await act(async () => control.onPrepare());
     expect(cloud.capture).toHaveBeenCalledOnce();

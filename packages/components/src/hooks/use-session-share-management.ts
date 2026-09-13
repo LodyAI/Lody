@@ -25,6 +25,7 @@ import {
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 const operations = cloudOperations.sessionSharing;
+class ShareCredentialStorageError extends Error {}
 
 /** Shared by the conversation dialog and Settings. Authority is checked server-side. */
 export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
@@ -108,13 +109,18 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
     setNotice(null);
     try {
       await action();
-    } catch {
+    } catch (failure) {
       if (current())
         setError(
-          t(
-            'sharing.manager.failed',
-            'Could not update sharing. Check the current settings and try again.'
-          )
+          failure instanceof ShareCredentialStorageError
+            ? t(
+                'sharing.manager.credentialStorageFailed',
+                'Could not save the share link on this device. Allow browser storage and retry. This attempt did not publish.'
+              )
+            : t(
+                'sharing.manager.failed',
+                'Could not update sharing. Check the current settings and try again.'
+              )
         );
     } finally {
       busyRef.current = false;
@@ -127,6 +133,22 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
     notice,
     run,
     remember,
+    persistBeforePublish(entry: SessionShareView, secret: string) {
+      if (!current() || !userId) throw new Error('Share confirmation changed');
+      try {
+        const key = sessionShareSecretKey(userId, workspaceId, entry.shareId);
+        if (
+          saveSessionShareSecret(localStorage, key, {
+            secret,
+            credentialVersion: entry.credentialVersion,
+          }) !== 'stored' ||
+          readSessionShareSecret(localStorage, key, entry.credentialVersion) !== secret
+        )
+          throw new ShareCredentialStorageError();
+      } catch {
+        throw new ShareCredentialStorageError();
+      }
+    },
     secretFor,
     linkFor,
     copy(entry: SessionShareView) {
@@ -169,7 +191,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
 }
 
 type PendingPublication = {
-  deploymentId?: string;
+  deployment?: SessionShareView & { deploymentId: string };
   sealed?: boolean;
   prepared: PreparedSharePackage;
   requestId: string;
@@ -253,7 +275,7 @@ export function useSessionShareManagement(
     (entry?.status === 'active' ? entry.selectedSourceIds : [sessionId]);
   const conflict =
     !!pending &&
-    !(pending.deploymentId && entry?.currentDeploymentId === pending.deploymentId) &&
+    !(pending.deployment && entry?.currentDeploymentId === pending.deployment.deploymentId) &&
     (pending.expected?.shareId !== (entry?.status === 'active' ? entry.shareId : undefined) ||
       pending.expected?.revision !== (entry?.status === 'active' ? entry.revision : undefined));
   /** Freeze the package without publishing it. Reused as the retry key holder. */
@@ -294,8 +316,8 @@ export function useSessionShareManagement(
     const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
     setPhase('uploading');
     setProgress(0);
-    const deployment = value.deploymentId
-      ? { deploymentId: value.deploymentId }
+    const deployment = value.deployment
+      ? value.deployment
       : await begin({
           workspaceId,
           rootSessionId: sessionId,
@@ -308,13 +330,12 @@ export function useSessionShareManagement(
           manifest: prepared.manifest,
           sourceIds: prepared.sourceIds,
         });
-    value.deploymentId = deployment.deploymentId;
+    value.deployment = deployment;
     setPending((current) =>
-      current?.requestId === requestId
-        ? { ...current, deploymentId: deployment.deploymentId }
-        : current
+      current?.requestId === requestId ? { ...current, deployment } : current
     );
     lifetime.current.signal.throwIfAborted();
+    if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
     if (!value.sealed) {
       await uploadPreparedShare({
         origin: import.meta.env.VITE_SERVER_URL,
@@ -330,9 +351,10 @@ export function useSessionShareManagement(
         current?.requestId === requestId ? { ...current, sealed: true } : current
       );
     }
+    lifetime.current.signal.throwIfAborted();
+    if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
     setPhase('publishing');
     const updated = await publish({ deploymentId: deployment.deploymentId });
-    if (readerSecret) actions.remember(updated, readerSecret);
     if (lifetime.current.signal.aborted) return;
     // Auto-copy is a convenience, never a claim: only a resolved write counts.
     const url = actions.linkFor(updated);

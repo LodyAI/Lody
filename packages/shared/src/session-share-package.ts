@@ -173,7 +173,7 @@ function assertJson(
 }
 
 /** A storage contract, not the evolving live message parser. Unknown message types survive. */
-export function validateShareHistory(value: unknown): ShareHistoryEntry[] {
+function validateHistoryShape(value: unknown): ShareHistoryEntry[] {
   assertJson(value);
   if (!Array.isArray(value)) throw new Error('Invalid share history');
   const ids = new Set<string>();
@@ -200,6 +200,48 @@ export function validateShareHistory(value: unknown): ShareHistoryEntry[] {
     ids.add(entry.id);
   }
   return value as ShareHistoryEntry[];
+}
+
+/** Only display containers are traversed; opaque tool payloads are reference data. */
+function projectShareHistory(value: unknown, omitProposals: boolean): ShareHistoryEntry[] {
+  const history = validateHistoryShape(value);
+  const blocks = (items: ShareJson[]): ShareJson[] =>
+    items.flatMap<ShareJson>((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return [item];
+      if (item.type === 'system_notice' && item.name === 'task_proposal') {
+        if (!omitProposals) throw new Error('Task proposals are not allowed in share history');
+        return [];
+      }
+      const result = { ...item };
+      for (const key of ['items', 'content', 'inputBlocks']) {
+        if (Array.isArray(item[key])) result[key] = blocks(item[key]);
+      }
+      return [result];
+    });
+  return history.map((entry) => {
+    const result = { ...entry };
+    if (Array.isArray(entry.items)) result.items = blocks(entry.items) as typeof entry.items;
+    const config = entry.inputConfig;
+    if (
+      config &&
+      typeof config === 'object' &&
+      !Array.isArray(config) &&
+      Array.isArray(config.inputBlocks)
+    ) {
+      result.inputConfig = { ...config, inputBlocks: blocks(config.inputBlocks) };
+    }
+    return result;
+  });
+}
+
+/** Client capture removes task proposals before attachments or publication. */
+export function captureShareHistory(value: unknown): ShareHistoryEntry[] {
+  return projectShareHistory(value, true);
+}
+
+/** Readers reject task proposals rather than mounting workspace task actions. */
+export function validateShareHistory(value: unknown): ShareHistoryEntry[] {
+  return projectShareHistory(value, false);
 }
 
 export function encodeShareJson(value: unknown, limit: number): Uint8Array {

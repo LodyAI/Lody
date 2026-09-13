@@ -4,6 +4,7 @@ import {
   SharePackageManifestSchema,
   ShareResourceId,
   encodeShareJson,
+  captureShareHistory,
   shareObjectDigest,
   validateShareHistory,
   type ShareAttachment,
@@ -88,7 +89,7 @@ export async function prepareSharePackage(options: {
       ids.set(source.sourceId, id);
       reserved.add(id);
     }
-    const bytes = encodeShareJson(validateShareHistory(source.history), SHARE_LIMITS.historyBytes);
+    const bytes = encodeShareJson(captureShareHistory(source.history), SHARE_LIMITS.historyBytes);
     capturedBytes += bytes.length;
     if (capturedBytes > SHARE_LIMITS.deploymentBytes)
       throw new Error('Share package exceeds size limit');

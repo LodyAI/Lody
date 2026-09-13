@@ -21,6 +21,10 @@ runtime configuration, queued messages, agent sessions or workspace credentials.
 History itself can contain sensitive text: publication is disclosure, not
 automatic sanitization.
 
+Task-proposal notices are the exception: capture removes their complete display
+blocks and metadata before attachment reads, and readers reject unfiltered proposals.
+Subagent execution records and opaque tool/text content remain unchanged.
+
 A versioned manifest describes conversations, their relationships, immutable
 history objects and copied attachments. The rollout switch
 `SESSION_SHARE_FILE_ATTACHMENTS_ENABLED` defaults to false: typed `file` blocks
@@ -74,6 +78,12 @@ cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
 request, rather than silently accepting changed parameters.
+
+For a new link, the client durably saves and verifies the reader credential using
+the begin response's share ID/version before upload and again before committing.
+Storage failure stops publication and preserves the same deployment for retry.
+Closing during the final commit cannot discard the credential; reopening resolves
+server status and reconstructs the link. Upload secrets are not persisted.
 
 Readers resolve the current deployment once, then pin all history and attachments
 to that deployment. A retired deployment has a bounded grace interval; no read

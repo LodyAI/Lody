@@ -10,7 +10,7 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   publishing, published, unfinished draft — with exactly one primary action each.
   A human action always starts publication, and the package is frozen in full
   before any byte is uploaded. Include all selected stored history, including
-  thought/tool fields; disclose the sensitivity and public title on the first
+  thought/tool fields except task-proposal notices; disclose the sensitivity and public title on the first
   screen, never behind a disclosure. `onPrepare` freezes for review only and must
   never upload; `onPublish` freezes (or reuses the frozen retry keys) and then
   uploads and commits.
@@ -44,11 +44,18 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - `lib/session-share-secrets.ts` owns device-local credentials scoped by
   user/workspace/share and credential version. Ordinary cache clear preserves them.
   Missing credentials require reset, never recovery from cloud data or Flock.
+  New publication must durably save and read back the begin response's reader
+  credential before uploading or committing. Storage failure stops publication;
+  closing a dialog during the final commit cannot discard its only reader secret.
+  Upload secrets remain editor-local. Reset-link behavior is separate.
 - The anonymous reader must use the static package client, pin one deployment,
   and never create a workspace runtime, Repo, Flock, machine connection, source
   attachment request or local durable history cache. Navigation is manifest-only.
   `session-share-reader.ts` reads a single immutable history; no polling, Loro
   document or source fallback. One conversation is selected at a time.
+  Capture removes `system_notice/task_proposal` from display containers before
+  attachment I/O; reader validation rejects it. Preserve `subagent_task` and
+  opaque tool/text content. This is not keyword-based task redaction.
 - Preserve app presentation: independent conversations in the left tree and
   child Tabs in the one main pane. The reader has NO right pane and no toggle
   for one, so a side-panel child renders as an ordinary Tab — it is published
