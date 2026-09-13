@@ -1,3 +1,4 @@
+import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn, type SessionData } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
@@ -1756,7 +1757,7 @@ export function subscribeSessionChanges(
 }
 
 export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
-  mirror: SessionControlPlaneMirror | null = null;
+  private mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
   // Detached-aware 'streams' binding view of `docSub` (see streamsRoomBinding);
@@ -1828,8 +1829,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       // One writer instance owns local history writes; the control Mirror never
       // materializes history.
       writer,
-      // A real local durability barrier; `repo.flush()` persists the repo.
-      durable: () => this.repo.flush(),
       // The composed history import binds its cursor through the control plane:
       // the adapter reads/writes the cursor in the same synchronous block as
       // the history write, with no await gap.
@@ -1852,9 +1851,16 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * reader/writer without arming a write observer, so opening a doc cannot
    * change it. Normal `init`/`initOffline` arm it explicitly. Idempotent.
    */
+  get agentWrites(): SessionAgentWrites {
+    if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
+    return createSessionAgentWrites(this.sessionDataInstance.writer);
+  }
+
   attachAutoRead(): void {
     if (this.historyAutoReadHandle) return;
-    this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.sessionData);
+    this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.sessionData, (id) =>
+      this.agentWrites.markTurnSeen(id)
+    );
   }
 
   /**
@@ -2278,7 +2284,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       throw new Error('SessionDocument not initialized');
     }
     this.logger.debug(`Marking session ${this.sessionId} history as seen`);
-    const result = await this.sessionData.commands.markTurnSeen(turnId);
+    const result = await this.agentWrites.markTurnSeen(turnId);
     if (result.status === 'indeterminate') throw result.cause;
   }
 
@@ -2717,9 +2723,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }
     const id = this.shallowLatestTurnId('assistant');
     if (!id) return;
-    requireSessionAccepted(
-      await this.sessionData.commands.setTurnField(id, 'plan', setFieldTo(entries))
-    );
+    requireSessionAccepted(await this.agentWrites.setTurnField(id, 'plan', setFieldTo(entries)));
   }
 
   async getMessageQueue(): Promise<MessageQueueItem[]> {
@@ -2877,7 +2881,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     this.docRoomStatusListeners.clear();
     // Invalidate outstanding stored-history snapshot handles: their source is
     // this store, which is going away. Subsequent use reports `source_closed`.
-    this.sessionDataInstance?.snapshots.closeSource();
+    this.sessionDataInstance?.dispose();
     this.mirror?.dispose();
     this.mirror = null;
     this.handle = null;

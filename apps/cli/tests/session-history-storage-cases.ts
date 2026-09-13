@@ -1,26 +1,18 @@
+import type { SessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it } from 'vitest';
-import type { SessionId } from '../src/ids';
-import type { SessionTurn } from '../src/session-data';
+import type { SessionId } from '@lody/shared/ids';
+import type { SessionTurn } from '@lody/shared/session-data';
 import {
   pageVisibleTranscript,
   clearField,
   setFieldTo,
-  SessionSnapshotError,
   type SessionData,
   type SessionSnapshot,
-  type SessionWriteReceipt,
-} from '../src/session-data';
+} from '@lody/shared/session-data';
 
-/**
- * The consumer contract for `SessionData`. Every implementation must satisfy it;
- * the Loro adapter and the independent in-memory double both run it, which is
- * what proves session business code does not depend on Loro/CID/offset details.
- *
- * The harness exposes raw escape hatches so a test can model an older peer or a
- * concurrent writer without going through the command port.
- */
-export type SessionDataHarness = {
-  readonly data: SessionData;
+/** Real stored-history regressions, including old data and concurrent edits. */
+export type StoredHistoryFixture = {
+  readonly data: SessionData & { commands: SessionData['commands'] & SessionAgentWrites };
   /** Inject a raw field into a stored turn, as legacy/unknown stored data. */
   injectStoredField(turnId: string, key: string, value: unknown): void;
   /** Inject a raw item into a stored turn, as a newer peer's opaque content. */
@@ -58,18 +50,10 @@ const assistantTurn = (turnId: string): SessionTurn => ({
 const textOf = (turn: SessionTurn | undefined): unknown =>
   Array.isArray(turn?.items) ? (turn.items[0] as { text?: unknown } | undefined)?.text : undefined;
 
-const acceptedReceipt = (
-  result: Awaited<ReturnType<SessionData['commands']['appendTurn']>>
-): SessionWriteReceipt => {
-  if (result.status !== 'accepted') throw new Error(`expected accepted, got ${result.status}`);
-  return result.receipt;
-};
-
-export function runSessionDataContract(
-  name: string,
-  create: () => Promise<SessionDataHarness> | SessionDataHarness
+export function runStoredHistoryCases(
+  create: () => Promise<StoredHistoryFixture> | StoredHistoryFixture
 ): void {
-  describe(`${name}: session data contract`, () => {
+  describe('stored history operations', () => {
     it('captures only the linked turn output and preserves observation order', async () => {
       const { data } = await create();
       await data.commands.appendTurn(userTurn('before'));
@@ -268,7 +252,10 @@ export function runSessionDataContract(
       await data.commands.appendTurn(assistantTurn('assistant-1'));
       harness.injectStoredField('assistant-1', 'legacyFlag', 'kept');
 
-      const result = await data.commands.resumeAssistant('assistant-1');
+      const result = await data.commands.openAssistantTurn({
+        turnId: 'assistant-1',
+        timestamp: '2026-01-01T00:00:00Z',
+      });
       expect(result.status).toBe('accepted');
 
       const stored = harness.readStored().find((turn) => turn.id === 'assistant-1')!;
@@ -546,48 +533,14 @@ export function runSessionDataContract(
       expect(tailHidden.hasMore).toBe(false);
     });
 
-    it('keeps local acceptance separate from durability', async () => {
-      const harness = await create();
-      const { data } = harness;
-      const result = await data.commands.appendTurn(userTurn('a'));
-      const receipt = acceptedReceipt(result);
-      await expect(data.durability.waitDurable(receipt)).resolves.toBeUndefined();
-      expect((await data.history.readTurn('a')).state).toBe('ready');
-    });
-
-    it('rejects forged, foreign and released snapshot handles', async () => {
-      const harness = await create();
-      const { data } = harness;
-      const snapshots = data.snapshots;
-      if (!snapshots) throw new Error('the backend must expose its snapshot service');
-
-      // A JSON-shaped object is not a capability, even with the visible fields.
-      const forged = { sessionId, read: () => [] } as unknown as SessionSnapshot;
-      expect(() => snapshots.release(forged)).toThrowError(
-        expect.objectContaining({ code: 'invalid_snapshot' })
-      );
-      await expect(snapshots.copyFrom(forged, [])).rejects.toThrowError(
-        expect.objectContaining({ code: 'invalid_snapshot' })
-      );
-
-      // Only the issuing store can release a handle.
-      const other = await create();
-      const foreign = await other.data.snapshots!.capture();
-      expect(() => snapshots.release(foreign)).toThrowError(
-        expect.objectContaining({ code: 'cross_store' })
-      );
-
-      // Release is idempotent; a released handle is refused by read and copyFrom.
-      const own = await snapshots.capture();
-      expect(own.sessionId).toBe(sessionId);
-      await expect(own.read()).resolves.toEqual([]);
-      snapshots.release(own);
-      expect(() => snapshots.release(own)).not.toThrow();
-      await expect(own.read()).rejects.toThrowError(expect.objectContaining({ code: 'released' }));
-      await expect(snapshots.copyFrom(own, [])).rejects.toThrowError(
-        expect.objectContaining({ code: 'released' })
-      );
-      await expect(snapshots.copyFrom(own, [])).rejects.toThrowError(SessionSnapshotError);
+    it('refuses a forged stored-copy handle before writing', async () => {
+      const { data, readStored } = await create();
+      const forged = { history: [] } as unknown as SessionSnapshot;
+      expect(await data.snapshots.copyFrom(forged, [])).toMatchObject({
+        status: 'rejected',
+        reason: { code: 'invalid_input' },
+      });
+      expect(readStored()).toEqual([]);
     });
 
     it('copies a cross-store selection, retaining opaque stored items and rejecting colliding ids', async () => {
@@ -595,7 +548,6 @@ export function runSessionDataContract(
       const source = sourceHarness.data;
       const sourceSnapshots = source.snapshots;
       if (!sourceSnapshots) throw new Error('the backend must expose its snapshot service');
-      if (!sourceSnapshots.capabilities.copy) return; // no stored-copy support: nothing to copy
 
       await source.commands.appendTurn(userTurn('a'));
       await source.commands.appendTurn(userTurn('b'));
@@ -605,14 +557,14 @@ export function runSessionDataContract(
 
       // read() is the handle's own full, detached read of the captured source:
       // it sees the stored content, and mutating one copy cannot change it.
-      const captured = (await snapshot.read()) as SessionTurn[];
+      const captured = snapshot.history as SessionTurn[];
       expect(captured.map((turn) => turn.id)).toEqual(['a', 'b']);
       expect(captured[0]!.items).toEqual([
         { type: 'text', text: 'hello' },
         { type: 'text', text: 'legacy', legacyField: 7 },
       ]);
       captured.push(userTurn('mutated'));
-      expect((await snapshot.read()).map((turn) => turn.id)).toEqual(['a', 'b']);
+      expect(snapshot.history.map((turn) => turn.id)).toEqual(['a', 'b']);
 
       const targetHarness = await create();
       const target = targetHarness.data;
@@ -638,10 +590,7 @@ export function runSessionDataContract(
       // the target's initialization row is retained and the source is untouched.
       const copied = await target.snapshots!.copyFrom(snapshot, selection);
       expect(copied.status).toBe('accepted');
-      if (copied.status === 'accepted') {
-        expect(copied.receipt.kind).toBe('copy');
-        expect(copied.receipt.turnIds).toEqual(['a']);
-      }
+
       expect(targetHarness.readStored().map((turn) => turn.id)).toEqual(['a', 'c']);
       expect(targetHarness.readStored()[0]!.items).toEqual([
         { type: 'text', text: 'hello' },
@@ -656,52 +605,9 @@ export function runSessionDataContract(
       expect(targetHarness.readStored().map((turn) => turn.id)).toEqual(['a', 'c']);
     });
 
-    it('returns honest unsupported results for stored copy, tail replacement and import', async () => {
-      const harness = await create();
-      const { data } = harness;
-      const snapshots = data.snapshots;
-      if (!snapshots) throw new Error('the backend must expose its snapshot service');
-      if (snapshots.capabilities.copy) return; // this backend supports the writer-owned ops
-
-      await data.commands.appendTurn(userTurn('a'));
-      const snapshot = await snapshots.capture();
-      // A valid handle reaches the honest capability report...
-      const result = await snapshots.copyFrom(snapshot, [userTurn('a')]);
-      expect(result.status).toBe('rejected');
-      if (result.status === 'rejected') expect(result.reason.code).toBe('unsupported');
-      // ...while a handle from another store is still a foreign scope.
-      const other = await create();
-      const foreign = await other.data.snapshots!.capture();
-      await expect(snapshots.copyFrom(foreign, [])).rejects.toThrowError(
-        expect.objectContaining({ code: 'cross_store' })
-      );
-      // The double never fakes the writer-owned guarded operations either.
-      const replaced = await data.commands.replaceEditableTail({
-        expectedUserTurnId: 'a',
-        expectedForkTurnId: undefined,
-        replacement: userTurn('b'),
-      });
-      expect(replaced.status).toBe('rejected');
-      if (replaced.status === 'rejected') expect(replaced.reason.code).toBe('unsupported');
-      const imported = await data.commands.applyHistoryImport({
-        mode: 'initialize',
-        replay: {
-          history: [userTurn('b')],
-          turnHashes: ['hash-b'],
-          replayDigest: 'digest',
-          droppedNotifications: 0,
-        },
-      });
-      expect(imported.status).toBe('rejected');
-      if (imported.status === 'rejected') expect(imported.reason.code).toBe('unsupported');
-      // Neither rejection applied anything.
-      expect(harness.readStored().map((turn) => turn.id)).toEqual(['a']);
-    });
-
     it('replaces the editable tail, reports the previous user and compensates the range only', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return; // the guarded command ships with stored copy
 
       await data.commands.appendTurn(userTurn('u1'));
       await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
@@ -717,7 +623,6 @@ export function runSessionDataContract(
       });
       expect(applied.status).toBe('accepted');
       if (applied.status !== 'accepted') return;
-      expect(applied.receipt.kind).toBe('replace-editable-tail');
       expect(applied.previousUserTurnId).toBe('u1');
       expect(textOf(harness.readStored()[2])).toBe('edited');
       expect(harness.readStored().map((turn) => turn.id)).toEqual(['u1', 'a1', 'u2-new']);
@@ -744,7 +649,6 @@ export function runSessionDataContract(
     it('rejects the compensation when the replaced range was edited by a peer', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return;
 
       await data.commands.appendTurn(userTurn('u1'));
       await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
@@ -768,7 +672,6 @@ export function runSessionDataContract(
     it('refuses a tail replacement whose tail moved at commit time', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return;
 
       await data.commands.appendTurn(userTurn('u1'));
       await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
@@ -795,7 +698,6 @@ export function runSessionDataContract(
     it('refuses a tail replacement whose provider boundary no longer matches', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return;
 
       await data.commands.appendTurn(userTurn('u1'));
       await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
@@ -814,7 +716,6 @@ export function runSessionDataContract(
     it('refuses a tail replacement while a session goal is active in history', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return;
 
       await data.commands.appendTurn({
         ...userTurn('u1'),
@@ -839,7 +740,6 @@ export function runSessionDataContract(
     it('consults the meta goal fallback when the history carries no goal item', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return;
 
       await data.commands.appendTurn(userTurn('u1'));
       await data.commands.appendTurn({ ...assistantTurn('a1'), acpTurnId: 'provider-1' });
@@ -864,7 +764,6 @@ export function runSessionDataContract(
     it('imports history in one bound block: write, stored baseline and cursor', async () => {
       const harness = await create();
       const { data } = harness;
-      if (!data.snapshots?.capabilities.copy) return; // import ships with stored copy
 
       const imported = await data.commands.applyHistoryImport({
         mode: 'initialize',
@@ -882,4 +781,4 @@ export function runSessionDataContract(
   });
 }
 
-export { sessionId as contractSessionId };
+export { sessionId as storageSessionId };

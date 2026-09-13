@@ -22,7 +22,7 @@ it('inline legacy rows remain writable without changing their opaque data or sib
   list.insert(1, turn('other'));
   doc.commit();
   const writer = createHistoryWriter(doc),
-    data = createLoroSessionData({ doc, sessionId, writer, durability: 'unavailable' });
+    data = createLoroSessionData({ doc, sessionId, writer });
   const sibling = list.get(1);
   requireSessionAccepted(
     await data.commands.applyHistoryAction({
@@ -58,7 +58,7 @@ it('body reads reuse a shallow ID index and follow duplicate, renamed and shifte
   const doc = new LoroDoc(),
     writer = createHistoryWriter(doc);
   for (let n = 0; n < 128; n++) writer.append(turn(`t${n}`));
-  const data = createLoroSessionData({ doc, sessionId, writer, durability: 'unavailable' });
+  const data = createLoroSessionData({ doc, sessionId, writer });
   await data.history.readTurn('t0');
   const get = vi.spyOn(LoroList.prototype, 'get');
   try {
@@ -91,7 +91,7 @@ it('body reads reuse a shallow ID index and follow duplicate, renamed and shifte
     state: 'ready',
     turn: { items: [{ text: 'head' }] },
   });
-  data.snapshots.closeSource();
+  data.dispose();
 });
 it('unknown failure after tail replacement reaches the indeterminate phase', async () => {
   const doc = new LoroDoc(),
@@ -103,7 +103,7 @@ it('unknown failure after tail replacement reaches the indeterminate phase', asy
     real(update);
     throw error;
   };
-  const data = createLoroSessionData({ doc, sessionId, writer, durability: 'unavailable' });
+  const data = createLoroSessionData({ doc, sessionId, writer });
   expect(
     await data.commands.replaceEditableTail({
       expectedUserTurnId: 'u',

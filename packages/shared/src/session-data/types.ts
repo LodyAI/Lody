@@ -1,19 +1,10 @@
 import type { HistoryAction } from './history-actions';
-import type { MessageContent, ModelInfo } from '../ai';
-import type { AcpSessionNotification } from '../acp/schema';
 import type { SessionGoalMessage } from '../goal';
 import type { PermissionOutcome } from '../message';
 import type { SessionId } from '../ids';
 import type { HistoryImportInput } from './history-import';
 import type { SessionSnapshotService } from './snapshot';
-import type {
-  SessionEntry,
-  SessionDirectoryRow,
-  SessionTurn,
-  SessionTurnRead,
-  SessionTurnWritableValues,
-  SessionWritableField,
-} from './domain';
+import type { SessionEntry, SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
 
 // # Session data ports
 //
@@ -68,58 +59,10 @@ export type SessionCommandRejection = {
   readonly issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[];
 };
 
-declare const sessionWriteReceiptBrand: unique symbol;
-
-/**
- * An accepted change's receipt. It is a capability issued by the store that
- * applied the change: the brand is not exported, and each store keeps its own
- * issued set, so a caller cannot fabricate a receipt for a different store or a
- * change that was never applied.
- */
-export interface SessionWriteReceipt {
-  readonly [sessionWriteReceiptBrand]: true;
-  readonly sessionId: SessionId;
-  /** Business turn ids touched by the accepted change, in the order applied. */
-  readonly turnIds: readonly string[];
-  readonly kind:
-    | 'append'
-    | 'replace'
-    | 'set-field'
-    | 'resume-assistant'
-    | 'open-assistant-turn'
-    | 'resolve-task-proposal'
-    | 'mark-seen'
-    | 'respond-permission'
-    | 'copy'
-    | 'history-action'
-    | 'replace-editable-tail'
-    | 'import-history'
-    | 'apply-agent-batch';
-}
-
 /** A user's decision on a task proposal, resolved against the live notice. */
 export type TaskProposalResolution = {
   readonly taskId?: string;
   readonly outcome: 'created' | 'dismissed';
-};
-
-/**
- * One bound batch of agent output. The target assistant turn is part of the
- * input, never re-selected at flush time. `entryBound` means the caller has
- * already proved every message belongs to `targetAssistantEntryId` (text/thought
- * chunks); the adapter then rewrites only that located turn. Otherwise the
- * adapter routes through the whole history because a tool/subagent update can
- * belong to an older turn.
- */
-export type ApplyAgentBatchInput = {
-  readonly notifications?: readonly AcpSessionNotification[];
-  readonly contents?: readonly MessageContent[];
-  readonly targetAssistantEntryId?: string;
-  readonly entryBound?: boolean;
-  readonly model?: ModelInfo;
-  /** Deterministic identity for tests; production derives the target id. */
-  readonly createId?: () => string;
-  readonly now?: () => string;
 };
 
 /**
@@ -142,9 +85,6 @@ export type OpenAssistantTurnInput = {
 /**
  * Three phases, deliberately distinct:
  *  - `accepted`   — the store holds the change; retrying would duplicate it.
- *                   `postAcceptError` reports an accepted write whose *side
- *                   effect* (cache notification, evidence) then failed; the
- *                   change itself is applied and must not be re-issued.
  *  - `rejected`   — validated and refused before touching storage; the caller
  *                   may fix and retry.
  *  - `indeterminate` — the implementation cannot say whether the change
@@ -153,8 +93,6 @@ export type OpenAssistantTurnInput = {
 export type SessionCommandResult =
   | {
       readonly status: 'accepted';
-      readonly receipt: SessionWriteReceipt;
-      readonly postAcceptError?: unknown;
     }
   | { readonly status: 'rejected'; readonly reason: SessionCommandRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
@@ -209,7 +147,6 @@ export type ReplaceEditableTailInput = {
 export type SessionEditableTailResult =
   | {
       readonly status: 'accepted';
-      readonly receipt: SessionWriteReceipt;
       /** Last user turn before the replaced tail; the meta commit needs it. */
       readonly previousUserTurnId?: string;
       /**
@@ -219,7 +156,6 @@ export type SessionEditableTailResult =
        * persists its own follow-up state, or the two can interleave.
        */
       readonly rollback: () => Promise<void>;
-      readonly postAcceptError?: unknown;
     }
   | { readonly status: 'rejected'; readonly reason: SessionEditableTailRejection }
   | { readonly status: 'indeterminate'; readonly cause: unknown };
@@ -298,32 +234,6 @@ export interface SessionHistoryCommands {
   /** Replace an existing turn by business id. */
   replaceTurn(turnId: string, turn: SessionTurn): Promise<SessionCommandResult>;
   /**
-   * Set or clear exactly one field. The adapter re-reads the target and applies
-   * the change in one commit, so a peer edit between the caller's read and this
-   * call cannot be overwritten outside the named field.
-   */
-  setTurnField<K extends SessionWritableField>(
-    turnId: string,
-    key: K,
-    change: SessionFieldChange<SessionTurnWritableValues[K]>
-  ): Promise<SessionCommandResult>;
-  /**
-   * Reopen an assistant turn for a re-dispatched execution: clear the terminal
-   * footprint (`finished`, `endedAt`, `permissionWaitMs`) while preserving every
-   * unknown stored field.
-   */
-  resumeAssistant(turnId: string): Promise<SessionCommandResult>;
-  /**
-   * Mark a turn seen: `status = 'seen'` and the legacy `read = true`. Idempotent;
-   * the adapter re-locates the turn at commit time. Refuses to regress an
-   * advanced execution state (`processing`/`handled`/`failed`/`canceled`/
-   * `pending_apply`) that a concurrent writer committed: that is a
-   * `rejected('conflict')` precondition failure, never a silent overwrite.
-   */
-  markTurnSeen(turnId: string): Promise<SessionCommandResult>;
-  /** Reopen an existing assistant turn or create it, as one business operation. */
-  openAssistantTurn(input: OpenAssistantTurnInput): Promise<SessionCommandResult>;
-  /**
    * Resolve a task proposal against the live notice in one entry. The adapter
    * re-locates the proposal inside its commit; a rendered history snapshot is
    * never written back.
@@ -340,14 +250,6 @@ export interface SessionHistoryCommands {
     options?: { readonly turnId?: string }
   ): Promise<SessionCommandResult>;
   /**
-   * Apply one bound ACP agent-output batch. The batch's target, ordering and
-   * identity are inputs; the adapter never asks for "the current turn". A mixed
-   * batch (tool/subagent updates that may belong to an older turn) keeps the
-   * whole-history routing, while a caller that proved entry ownership uses the
-   * target-local write.
-   */
-  applyAgentBatch(input: ApplyAgentBatchInput): Promise<SessionCommandResult>;
-  /**
    * Replace the editable tail user turn. The eligibility rule (last editable
    * user turn, delivered non-steer, with its provider boundary) and the
    * active-goal guard are applied once in `planner.ts` and re-checked here
@@ -363,43 +265,11 @@ export interface SessionHistoryCommands {
   applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
 }
 
-/**
- * Local persistence, separate from local acceptance and from remote sync.
- * Resolving proves the accepted change is in local durable storage, not that a
- * peer has seen it. An implementation that cannot prove local durability MUST
- * reject with `SessionDurabilityError` instead of resolving: a public promise
- * must never silently stand in for a persistence barrier it did not perform.
- */
-export interface SessionDurability {
-  /** Await local durability of changes accepted at or before `receipt`. */
-  waitDurable(receipt?: SessionWriteReceipt): Promise<void>;
-}
-
-export type SessionDurabilityErrorCode = 'unavailable' | 'invalid_receipt';
-
-export class SessionDurabilityError extends Error {
-  constructor(
-    readonly code: SessionDurabilityErrorCode,
-    message: string
-  ) {
-    super(message);
-    this.name = 'SessionDurabilityError';
-  }
-}
-
 export interface SessionData {
   readonly sessionId: SessionId;
   readonly history: SessionHistoryReader;
   readonly commands: SessionHistoryCommands;
-  readonly durability: SessionDurability;
-  /**
-   * The storage-owned stored-history snapshot service. Absent only for a
-   * backend that supports no snapshot capture at all; a backend that captures
-   * but cannot copy declares `capabilities.copy = false` rather than omitting
-   * the service. Handles are opaque capabilities scoped to this store: they are
-   * released explicitly and become invalid when the source store closes.
-   */
-  readonly snapshots?: SessionSnapshotService;
+  readonly snapshots: SessionSnapshotService;
 }
 
 export type SessionImportResult =

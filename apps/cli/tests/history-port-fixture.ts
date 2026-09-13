@@ -8,7 +8,7 @@ import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/sess
 
 /** Service-test storage owner. Preserve each fixture's injected persistence
  * failures while exposing the same data-only history commands as production.
- * Backend correctness is covered separately over real Loro and memory stores. */
+ * Backend correctness is covered separately over real Loro storage. */
 export function withHistoryPort<T extends object>(fixture: T): T & { sessionData: SessionData } {
   const storage = fixture as T & {
     getHistory?: () => Promise<SessionEntry[]>;

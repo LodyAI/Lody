@@ -17,7 +17,6 @@ import {
   type LoroList,
   type LoroMap,
 } from 'loro-crdt';
-import type { z } from 'zod';
 import type { SessionId } from '../ids';
 import type { SessionHistory, SessionHistoryInput } from '../schema';
 import {
@@ -26,48 +25,28 @@ import {
   parseHistoryWrite,
 } from '../history-write-schema';
 import { PermissionOutcomeSchema } from '../message-schemas';
-import { applyMessageContentsBatch, applyNotificationOnHistory } from '../acp/history-apply';
 import { pickDirectoryInputConfig, pickDirectoryScalars } from './directory';
+import { createHistoryWriter, type HistoryWriter } from '../history-writer';
+import type { SessionSnapshotService } from './snapshot';
 import {
-  createHistoryWriter,
-  type HistoryWriter,
-  type StoredHistorySnapshot,
-} from '../history-writer';
-import {
-  mintSessionSnapshot,
-  sessionSnapshotContext,
-  SessionSnapshotError,
-  type SessionSnapshotService,
-} from './snapshot';
-import {
-  applyMarkTurnSeen,
-  applyOpenAssistantTurn,
-  applyResumeAssistant,
-  createAssistantTurn,
   EditableTailRefusedError,
   hasTaskProposal,
-  markTurnSeenBlocked,
   parseTaskProposalResolution,
   planEditableTailReplacement,
   resolveTaskProposalOnEntry,
   type EditableTailPlan,
 } from './planner';
 import {
-  SessionDurabilityError,
   type SessionCommandResult,
   type SessionData,
   type SessionDirectoryRow,
   type SessionEditableTailResult,
   type SessionImportResult,
-  type SessionFieldChange,
   type SessionHistoryCommands,
   type SessionHistoryReader,
   type SessionObservation,
   type SessionTurn,
   type SessionTurnRead,
-  type SessionTurnWritableValues,
-  type SessionWritableField,
-  type SessionWriteReceipt,
 } from './types';
 
 // # Loro-backed SessionData
@@ -80,28 +59,9 @@ import {
 // Phase discipline: input is validated and the target located *before* any
 // mutation, so a `rejected` result proves nothing was applied. Once the writer
 // is invoked, a throw is reported as `indeterminate` (a partial write cannot be
-// ruled out) rather than as a pre-write rejection. `postAcceptError` reports an
-// accepted write whose post-accept side effect failed.
+// ruled out) rather than as a pre-write rejection.
 
 const HISTORY_ROOT_KEY = 'history';
-
-/**
- * Durability is a construction-time decision, never a silent default: a caller
- * either supplies a real local persistence barrier or explicitly declares that
- * the store has none. In the latter case `waitDurable` rejects with
- * `SessionDurabilityError('unavailable')` instead of pretending an in-memory
- * accept is durable.
- */
-export type LoroSessionDurabilityOptions =
-  | {
-      /** Local persistence barrier, e.g. `repo.flush` or `repo.persistPendingChanges`. */
-      readonly durable: () => Promise<void>;
-      readonly durability?: undefined;
-    }
-  | {
-      readonly durable?: undefined;
-      readonly durability: 'unavailable';
-    };
 
 export type LoroSessionDataOptions = {
   sessionId: SessionId;
@@ -112,36 +72,23 @@ export type LoroSessionDataOptions = {
    * history writes; omit it only in tests that build a standalone adapter.
    */
   writer?: HistoryWriter;
-  /** Awaited after a change is accepted, before the command resolves. */
-  afterAccept?: (receipt: SessionWriteReceipt) => void | Promise<void>;
   /**
    * Control-plane cursor access for the composed history import: the adapter
    * reads the current cursor and writes the new one inside the same synchronous
    * block as the history write, so there is no await gap between them. The
    * session entrypoint supplies the Mirror-backed accessors; tests may omit it
-   * (reads as undefined, writes are dropped).
+   * (imports reject before writing without this accessor).
    */
   historyImportCursor?: {
     readonly read: () => unknown;
     readonly write: (cursor: unknown) => void;
   };
-} & LoroSessionDurabilityOptions;
+};
 
 export type LoroSessionData = SessionData & {
   /** The shared writer, for storage-owned capabilities (capture/copy/rollback). */
   readonly writer: HistoryWriter;
-  /**
-   * The storage-owned snapshot service, bound to this store's identity and
-   * session id. `closeSource` is the store's teardown hook (called by the
-   * owning `SessionDocument.destroy`): every outstanding handle then reports
-   * `source_closed`.
-   */
-  readonly snapshots: LoroSessionSnapshotService;
-};
-
-export type LoroSessionSnapshotService = SessionSnapshotService & {
-  /** Internal teardown hook; not part of the public snapshot service contract. */
-  closeSource(): void;
+  dispose(): void;
 };
 
 const asStoredTurn = (value: unknown): SessionTurn | undefined => {
@@ -180,18 +127,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   const writer = options.writer ?? createHistoryWriter(doc);
   const list = doc.getList(HISTORY_ROOT_KEY);
 
-  // Receipts are capabilities this store issued, not caller-shaped objects.
-  const issuedReceipts = new WeakSet<object>();
-
-  const issueReceipt = (
-    kind: SessionWriteReceipt['kind'],
-    turnIds: readonly string[]
-  ): SessionWriteReceipt => {
-    const receipt = { sessionId, kind, turnIds } as unknown as SessionWriteReceipt;
-    issuedReceipts.add(receipt);
-    return receipt;
-  };
-
   const rejected = (
     code: 'invalid_input' | 'not_found' | 'conflict' | 'unsupported',
     issues?: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[]
@@ -208,20 +143,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
   const issuesOf = (error: unknown) =>
     (error as HistoryWriteError).issues ?? [{ path: [], code: 'invalid_input' }];
 
-  const accepted = async (
-    kind: SessionWriteReceipt['kind'],
-    turnIds: readonly string[]
-  ): Promise<SessionCommandResult> => {
-    const receipt = issueReceipt(kind, turnIds);
-    try {
-      await options.afterAccept?.(receipt);
-    } catch (postAcceptError) {
-      // The change is applied; only its side effect failed. Never report this as
-      // a pre-write rejection, which would invite a duplicate append.
-      return { status: 'accepted', receipt, postAcceptError };
-    }
-    return { status: 'accepted', receipt };
-  };
+  const accepted = async (): Promise<SessionCommandResult> => ({ status: 'accepted' });
 
   /** Shallow send config for a user turn: small collections only, never the body. */
   const shallowInputConfig = (map: LoroMap): unknown => {
@@ -462,7 +384,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
           const preview = applyHistoryAction(current, action);
           if (!preview.matched)
             return {
-              ...(await accepted('history-action', [])),
+              ...(await accepted()),
               matched: false,
               proposal: preview.proposal,
             };
@@ -475,7 +397,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         if (error instanceof HistoryWriteError) return rejected('invalid_input', issuesOf(error));
         return indeterminate(error);
       }
-      return { ...(await accepted('history-action', [])), matched, proposal };
+      return { ...(await accepted()), matched, proposal };
     },
     async appendTurn(turn) {
       try {
@@ -488,7 +410,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       } catch (cause) {
         return indeterminate(cause);
       }
-      return accepted('append', [turn.id]);
+      return accepted();
     },
     async replaceTurn(turnId, turn) {
       if (turn.id !== turnId)
@@ -508,106 +430,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       } catch (cause) {
         return indeterminate(cause);
       }
-      return accepted('replace', [turnId]);
-    },
-    async setTurnField<K extends SessionWritableField>(
-      turnId: string,
-      key: K,
-      change: SessionFieldChange<SessionTurnWritableValues[K]>
-    ) {
-      if (change.kind === 'set') {
-        try {
-          parseHistoryWrite(HistoryEntryWriteSchema.shape[key] as z.ZodType, change.value);
-        } catch (error) {
-          return rejected('invalid_input', issuesOf(error));
-        }
-      }
-      let updated: boolean;
-      try {
-        updated = writer.setField(
-          turnId,
-          key,
-          (change.kind === 'set' ? change.value : undefined) as SessionHistoryInput[typeof key]
-        );
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      // `setField` locates by id and diffs only this field; `false` means the
-      // turn is absent, without materializing the turn body as a preflight.
-      if (!updated) return rejected('not_found');
-      return accepted('set-field', [turnId]);
-    },
-    async resumeAssistant(turnId) {
-      let roleMismatch = false;
-      let updated: boolean;
-      try {
-        updated = writer.updateEntry(turnId, (turn) => {
-          if (turn.role !== 'assistant') {
-            roleMismatch = true;
-            return turn;
-          }
-          applyResumeAssistant(turn as unknown as Record<string, unknown>);
-          return turn;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (!updated) return rejected('not_found');
-      if (roleMismatch) return rejected('invalid_input');
-      return accepted('resume-assistant', [turnId]);
-    },
-    async markTurnSeen(turnId) {
-      let updated: boolean;
-      let blocked = false;
-      try {
-        updated = writer.updateEntry(turnId, (turn) => {
-          // Re-check the business condition inside the commit: a status advanced
-          // by a concurrent writer since the caller's read is never regressed.
-          if (markTurnSeenBlocked(turn as unknown as Record<string, unknown>)) {
-            blocked = true;
-            return turn;
-          }
-          applyMarkTurnSeen(turn as unknown as Record<string, unknown>);
-          return turn;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (!updated) return rejected('not_found');
-      if (blocked) return rejected('conflict');
-      return accepted('mark-seen', [turnId]);
-    },
-    async openAssistantTurn(input) {
-      let roleMismatch = false;
-      let updated: boolean;
-      try {
-        updated = writer.updateEntry(input.turnId, (turn) => {
-          if (turn.role !== 'assistant') {
-            roleMismatch = true;
-            return turn;
-          }
-          applyOpenAssistantTurn(turn as unknown as Record<string, unknown>, input);
-          return turn;
-        });
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      if (updated) {
-        if (roleMismatch) return rejected('invalid_input');
-        return accepted('open-assistant-turn', [input.turnId]);
-      }
-      const entry = createAssistantTurn(input);
-      try {
-        parseHistoryWrite(HistoryEntryWriteSchema, entry);
-      } catch (error) {
-        return rejected('invalid_input', issuesOf(error));
-      }
-      try {
-        writer.append(entry as unknown as SessionHistory);
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted('open-assistant-turn', [input.turnId]);
+      return accepted();
     },
     async resolveTaskProposal(entryId, proposalId, resolution) {
       try {
@@ -629,7 +452,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
       if (!updated) return rejected('not_found');
       if (!found) return rejected('not_found');
-      return accepted('resolve-task-proposal', [entryId]);
+      return accepted();
     },
     async respondPermission(requestId, outcome, respondOptions) {
       try {
@@ -644,57 +467,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         return indeterminate(cause);
       }
       if (!answered) return rejected('not_found');
-      return accepted('respond-permission', respondOptions?.turnId ? [respondOptions.turnId] : []);
-    },
-    async applyAgentBatch(input) {
-      const notifications = input.notifications ?? [];
-      const contents = input.contents ?? [];
-      const targetId = input.targetAssistantEntryId;
-      const touched = targetId !== undefined ? [targetId] : [];
-      if (notifications.length === 0 && contents.length === 0) {
-        return accepted('apply-agent-batch', touched);
-      }
-      const applyTo = (turns: SessionHistoryInput[]): SessionHistoryInput[] => {
-        let next = turns;
-        if (notifications.length > 0) {
-          next = applyNotificationOnHistory(next, notifications as never, input.model, {
-            ...(input.createId ? { createId: input.createId } : {}),
-            ...(input.now ? { now: input.now } : {}),
-            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
-          });
-        }
-        if (contents.length > 0) {
-          next = applyMessageContentsBatch(next, contents as never, {
-            ...(input.createId ? { createId: input.createId } : {}),
-            ...(input.now ? { now: input.now } : {}),
-            ...(targetId ? { targetAssistantEntryId: targetId } : {}),
-            ...(input.model ? { model: input.model } : {}),
-          });
-        }
-        return next;
-      };
-      if (input.entryBound) {
-        if (targetId === undefined) return rejected('invalid_input');
-        // A bound batch whose target does not exist yet still creates it with the
-        // caller's id, matching the historical targeted-then-create fallthrough.
-        if (writer.read(targetId)) {
-          try {
-            writer.updateEntry(targetId, (entry) => {
-              const next = applyTo([entry as unknown as SessionHistoryInput]);
-              return (next[0] ?? entry) as unknown as SessionHistoryInput;
-            });
-          } catch (cause) {
-            return indeterminate(cause);
-          }
-          return accepted('apply-agent-batch', touched);
-        }
-      }
-      try {
-        writer.update((turns) => applyTo(turns));
-      } catch (cause) {
-        return indeterminate(cause);
-      }
-      return accepted('apply-agent-batch', touched);
+      return accepted();
     },
     async replaceEditableTail(input): Promise<SessionEditableTailResult> {
       let plan: EditableTailPlan | undefined;
@@ -724,7 +497,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       const previousUserTurnId = plan?.previousUserTurnId;
       return {
         status: 'accepted',
-        receipt: issueReceipt('replace-editable-tail', []),
         // The writer's rule is still one synchronous conditional restore. It is
         // exposed as awaitable so a caller cannot persist follow-up state before
         // the compensation finished; a synchronous throw rejects the promise.
@@ -770,7 +542,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
         historyWritten = true;
         const nextCursor = createImportCursor(input.replay.turnHashes, writer.readStored());
         options.historyImportCursor.write(nextCursor);
-        return { status: 'accepted', receipt: issueReceipt('import-history', []), appended };
+        return { status: 'accepted', appended };
       } catch (error) {
         if (historyWritten) return indeterminate(error);
         if (error instanceof HistoryImportRefused)
@@ -783,112 +555,14 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
     },
   };
 
-  const durability = {
-    async waitDurable(receipt?: SessionWriteReceipt) {
-      if (receipt !== undefined && !issuedReceipts.has(receipt)) {
-        throw new SessionDurabilityError(
-          'invalid_receipt',
-          'The receipt was not issued by this session store.'
-        );
-      }
-      if (!options.durable) {
-        throw new SessionDurabilityError(
-          'unavailable',
-          'This session store has no local durability barrier.'
-        );
-      }
-      await options.durable();
-    },
-  };
-
   // # Storage-owned snapshot service
-  //
-  // Capture and copy go through the shared writer (`capture`/`copyFrom`), so
-  // stored-copy provenance stays the module WeakMap in `history-writer.ts` and
-  // is never re-implemented here. The service adds scoping: each handle is
-  // minted against the issuing store's identity and session id, only the
-  // issuing store can `release` it, a handle from a different backend is
-  // `cross_store`, and after `closeSource` (the owning store's teardown hook)
-  // store-scoped handles report `source_closed`; operation captures remain
-  // usable until release. `copyFrom` admits same-backend
-  // cross-store handles: the fork flow copies a source snapshot into a target
-  // doc, and the writer's module-level provenance is what makes that safe.
-  const snapshotToken = {};
-  const issuedSnapshots = new WeakSet<object>();
-  const capturedWriters = new WeakMap<object, StoredHistorySnapshot>();
-  let snapshotSourceClosed = false;
-
-  const snapshotRead = async (snapshot: object): Promise<readonly SessionTurn[]> => {
-    if (sessionSnapshotContext(snapshot)?.isClosed())
-      throw new SessionSnapshotError('source_closed', 'The session store is closed.');
-    if (!issuedSnapshots.has(snapshot))
-      throw new SessionSnapshotError('released', 'The snapshot was released.');
-    // The writer's snapshot getter returns a detached structuredClone on each
-    // access; a caller can mutate its copy without touching the capture.
-    return capturedWriters.get(snapshot)!.history as unknown as readonly SessionTurn[];
-  };
-
-  const snapshots: LoroSessionSnapshotService = {
-    capabilities: { copy: true },
-    async capture(captureOptions) {
-      if (snapshotSourceClosed)
-        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
-      // One consistent capture of the stored document, never a stitched read.
-      const stored = writer.capture();
-      const operationOwned = captureOptions?.lifetime === 'operation';
-      const snapshot = mintSessionSnapshot(
-        {
-          token: snapshotToken,
-          backend: 'loro',
-          payload: stored,
-          issued: issuedSnapshots,
-          isClosed: () => snapshotSourceClosed && !operationOwned,
-        },
-        sessionId,
-        () => snapshotRead(snapshot)
-      );
-      capturedWriters.set(snapshot, stored);
-      issuedSnapshots.add(snapshot);
-      return snapshot;
-    },
-    release(snapshot) {
-      const issuer = sessionSnapshotContext(snapshot);
-      if (issuer === undefined)
-        throw new SessionSnapshotError(
-          'invalid_snapshot',
-          'Not a snapshot capability of any store.'
-        );
-      if (issuer.token !== snapshotToken)
-        throw new SessionSnapshotError(
-          'cross_store',
-          'The snapshot was issued by a different store.'
-        );
-      // Idempotent: releasing an already-released handle is a no-op.
-      issuedSnapshots.delete(snapshot);
+  const snapshots: SessionSnapshotService = {
+    async capture() {
+      return writer.capture();
     },
     async copyFrom(snapshot, selection) {
-      if (snapshotSourceClosed)
-        throw new SessionSnapshotError('source_closed', 'The session store is closed.');
-      const issuer = sessionSnapshotContext(snapshot);
-      if (issuer === undefined)
-        throw new SessionSnapshotError(
-          'invalid_snapshot',
-          'Not a snapshot capability of any store.'
-        );
-      // Same-backend cross-store handles are the fork flow; a memory handle has
-      // no writer provenance this store could honour.
-      if (issuer.backend !== 'loro')
-        throw new SessionSnapshotError(
-          'cross_store',
-          'The snapshot was issued by a different backend.'
-        );
-      if (issuer.isClosed())
-        throw new SessionSnapshotError('source_closed', 'The snapshot source store is closed.');
-      if (!issuer.issued.has(snapshot))
-        throw new SessionSnapshotError('released', 'The snapshot was released.');
-      const stored = issuer.payload as StoredHistorySnapshot;
       try {
-        writer.copyFrom(stored, selection as unknown as SessionHistoryInput[]);
+        writer.copyFrom(snapshot, selection as unknown as SessionHistoryInput[]);
       } catch (error) {
         // The writer validates colliding ids and prepares every authored change
         // before any mutation, so a HistoryWriteError here is a pre-write
@@ -902,19 +576,15 @@ export function createLoroSessionData(options: LoroSessionDataOptions): LoroSess
       }
       return {
         status: 'accepted',
-        receipt: issueReceipt(
-          'copy',
-          selection.map((turn) => turn.id)
-        ),
       };
-    },
-    closeSource() {
-      snapshotSourceClosed = true;
-      unsubscribeIdentity();
-      positions.clear();
-      identityDirty = true;
     },
   };
 
-  return { sessionId, history, commands, durability, writer, snapshots };
+  const dispose = () => {
+    unsubscribeIdentity();
+    positions.clear();
+    identityDirty = true;
+  };
+
+  return { sessionId, history, commands, writer, snapshots, dispose };
 }

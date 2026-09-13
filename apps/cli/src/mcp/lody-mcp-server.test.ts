@@ -1098,7 +1098,7 @@ describe('session MCP input schemas', () => {
         finished: i < 99,
       });
     const sessionId = 'status-session' as SessionId;
-    const data = createLoroSessionData({ sessionId, doc, writer, durability: 'unavailable' });
+    const data = createLoroSessionData({ sessionId, doc, writer });
     const manager = {
       getOrCreateSessionDoc: async () => ({ sessionData: data, getMessageQueue: async () => [{}] }),
     };
@@ -1114,7 +1114,7 @@ describe('session MCP input schemas', () => {
       expect(result).toMatchObject({ activeTurnId: 'a-99', queuedTurnCount: 1 });
     } finally {
       spy.mockRestore();
-      data.snapshots.closeSource();
+      data.dispose();
     }
   });
 

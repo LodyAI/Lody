@@ -14,7 +14,7 @@ import type {
 //
 // The business rules for the domain commands live here once. The Loro adapter
 // applies them inside the shared writer's conditional commit; the independent
-// in-memory double applies them to a detached turn. Neither adapter re-states
+// CLI and renderer reuse these operations. Neither consumer re-states
 // the rule, so a change here cannot drift between them.
 
 type Draft = Record<string, unknown>;

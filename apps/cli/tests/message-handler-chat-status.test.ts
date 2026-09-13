@@ -52,6 +52,7 @@ function createTestHarness(overrides: { sessionDoc?: Record<string, unknown> }) 
   (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
     sessionDoc.updateHistory as never
   );
+  Object.assign(sessionDoc, { agentWrites: (sessionDoc as any).sessionData.agentWrites });
 
   const workspaceDocument = {
     sessions: new Map<SessionId, unknown>(),

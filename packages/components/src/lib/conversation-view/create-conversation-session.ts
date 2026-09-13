@@ -19,17 +19,8 @@ export function createConversationSession(
   options: CreateConversationViewFromReaderOptions & {
     windowed: boolean;
     sessionId: SessionId;
-    /**
-     * Local persistence barrier for this doc (the renderer passes `repo.flush`).
-     * Omitting it declares the store has no local durability, so `waitDurable`
-     * rejects instead of treating local acceptance as persistence.
-     */
-    durable?: () => Promise<void>;
   }
 ) {
-  const durability = options.durable
-    ? ({ durable: options.durable } as const)
-    : ({ durability: 'unavailable' } as const);
   if (!options.windowed) {
     const mirror = createSessionMirror({
       doc,
@@ -44,7 +35,6 @@ export function createConversationSession(
       sessionId: options.sessionId,
       doc,
       writer: mirror.historyWriter,
-      ...durability,
     });
     return {
       mirror,
@@ -52,7 +42,7 @@ export function createConversationSession(
       historyWriter: mirror.historyWriter,
       sessionData,
       dispose: () => {
-        sessionData.snapshots.closeSource();
+        sessionData.dispose();
         history.dispose();
         mirror.dispose();
       },
@@ -71,11 +61,8 @@ export function createConversationSession(
     sessionId: options.sessionId,
     doc,
     writer: historyWriter,
-    ...durability,
   });
-  // The display cache reads through the CRDT-neutral session-data port, not
-  // the raw doc; the raw `createConversationViewFromDoc` remains only for the
-  // non-windowed/rollback path.
+  // One windowed implementation for production, stories and benchmarks.
   const history = createConversationViewFromReader(sessionData.history, options);
   return {
     mirror,
@@ -83,7 +70,7 @@ export function createConversationSession(
     historyWriter,
     sessionData,
     dispose: () => {
-      sessionData.snapshots.closeSource();
+      sessionData.dispose();
       history.dispose();
       mirror.dispose();
     },

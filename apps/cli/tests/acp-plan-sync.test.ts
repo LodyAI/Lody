@@ -35,8 +35,11 @@ describe('handleACPUpdateMessage plan sync', () => {
     expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([]);
     const cause = new Error('storage outcome unknown');
     const stub = vi
-      .spyOn(doc.sessionData.commands, 'setTurnField')
-      .mockResolvedValue({ status: 'indeterminate', cause });
+      .spyOn(doc, 'agentWrites', 'get')
+      .mockReturnValue({
+        ...doc.agentWrites,
+        setTurnField: async () => ({ status: 'indeterminate', cause }),
+      });
     await expect(doc.setPlan([])).rejects.toBe(cause);
     stub.mockRestore();
     await expect(
@@ -78,8 +81,9 @@ describe('handleACPUpdateMessage plan sync', () => {
     const doc = withHistoryPort({
       updateHistory,
       setPlan,
+      agentWrites: { applyAgentBatch },
       sessionData: {
-        commands: { applyAgentBatch },
+        commands: {},
         history: {
           count: async () => 0,
           readAt: async () => ({ state: 'missing' as const }),
@@ -88,7 +92,6 @@ describe('handleACPUpdateMessage plan sync', () => {
           readDirectory: async () => [],
           observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
         },
-        durability: { waitDurable: async () => {} },
       },
     }) as any;
 

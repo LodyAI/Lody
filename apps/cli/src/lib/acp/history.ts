@@ -193,7 +193,7 @@ export const handleACPUpdateMessage = async (
           )
         );
         const createId = targetTurnId ? () => targetTurnId : uuidV4;
-        const result = await doc.sessionData.commands.applyAgentBatch({
+        const result = await doc.agentWrites.applyAgentBatch({
           notifications: persistableBatch,
           ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
           ...(targetOnly ? { entryBound: true } : {}),
@@ -206,15 +206,6 @@ export const handleACPUpdateMessage = async (
           );
         }
         if (result.status === 'indeterminate') throw result.cause;
-        if (result.postAcceptError !== undefined) {
-          callbacks?.logger?.warn(
-            `[${doc.sessionId}] ACP history batch persisted, but a post-accept side effect failed: ${
-              result.postAcceptError instanceof Error
-                ? result.postAcceptError.message
-                : String(result.postAcceptError)
-            }`
-          );
-        }
       }
     }
     // Evidence is derived from the same enriched notification, but it is only
@@ -1243,18 +1234,6 @@ export const updatePermissionOutcomeInHistory = async (
     );
   }
   if (result.status === 'indeterminate') throw result.cause;
-  if (result.postAcceptError !== undefined) {
-    // The outcome is persisted. A post-accept side-effect failure must not be
-    // reported as "the write failed", or the caller would re-answer a request
-    // that already has an outcome.
-    logger.warn(
-      `Permission outcome for ${requestId} persisted, but its side effect failed: ${
-        result.postAcceptError instanceof Error
-          ? result.postAcceptError.message
-          : String(result.postAcceptError)
-      }`
-    );
-  }
 };
 
 /**

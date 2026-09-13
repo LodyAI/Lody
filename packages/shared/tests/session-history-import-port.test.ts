@@ -39,7 +39,6 @@ describe('history import domain boundary', () => {
     const data = createLoroSessionData({
       doc,
       sessionId: 'test' as SessionId,
-      durability: 'unavailable',
     });
     expect(await data.commands.applyHistoryImport(input)).toMatchObject({
       status: 'rejected',
@@ -52,7 +51,6 @@ describe('history import domain boundary', () => {
     const data = createLoroSessionData({
       doc,
       sessionId: 'test' as SessionId,
-      durability: 'unavailable',
       historyImportCursor: {
         read: () => undefined,
         write: () => {
@@ -71,7 +69,6 @@ describe('history import domain boundary', () => {
     const data = createLoroSessionData({
       doc,
       sessionId: 'test' as SessionId,
-      durability: 'unavailable',
       historyImportCursor: {
         read: () => cursor,
         write: (value) => {

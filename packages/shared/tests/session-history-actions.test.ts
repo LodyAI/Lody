@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { LoroDoc, LoroMap, LoroList } from 'loro-crdt';
 import {
   createLoroSessionData,
-  createMemorySessionData,
   readSessionHistory,
   requireSessionAccepted,
   type SessionData,
@@ -18,12 +17,9 @@ const row = (id: string, role: SessionTurn['role'] = 'assistant'): SessionEntry 
   items: [{ type: 'text', text: id }],
   fileDiff: [],
 });
-for (const backend of ['loro', 'memory'] as const)
+for (const backend of ['loro'] as const)
   describe(`history actions ${backend}`, () => {
-    const create = () =>
-      backend === 'loro'
-        ? createLoroSessionData({ sessionId: sid, doc: new LoroDoc(), durability: 'unavailable' })
-        : createMemorySessionData({ sessionId: sid });
+    const create = () => createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
     const seed = async (data: SessionData) => {
       for (const t of [row('u', 'user'), row('a'), row('other')])
         requireSessionAccepted(await data.commands.appendTurn(t));
@@ -159,7 +155,7 @@ for (const backend of ['loro', 'memory'] as const)
   });
 it('retains an opaque stored item during a named field action', async () => {
   const doc = new LoroDoc();
-  const data = createLoroSessionData({ sessionId: sid, doc, durability: 'unavailable' });
+  const data = createLoroSessionData({ sessionId: sid, doc });
   requireSessionAccepted(await data.commands.appendTurn(row('a')));
   const map = doc.getList('history').get(0) as LoroMap;
   const items = map.get('items') as LoroList;
@@ -174,12 +170,9 @@ it('retains an opaque stored item during a named field action', async () => {
   });
 });
 
-for (const backend of ['loro', 'memory'] as const)
+for (const backend of ['loro'] as const)
   it(`${backend}: an ended-steer fallback only changes pending_apply`, async () => {
-    const data =
-      backend === 'loro'
-        ? createLoroSessionData({ sessionId: sid, doc: new LoroDoc(), durability: 'unavailable' })
-        : createMemorySessionData({ sessionId: sid });
+    const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
     requireSessionAccepted(
       await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending_apply' })
     );
@@ -230,19 +223,6 @@ for (const backend of ['loro', 'memory'] as const)
     );
     expect((await data.history.readAll())[1]).not.toHaveProperty('fileDiff');
   });
-it('memory keeps accepted history when an observation throws', async () => {
-  const data = createMemorySessionData({ sessionId: sid });
-  const error = new Error('consumer failed');
-  const observation = data.history.observe(() => {
-    throw error;
-  });
-  await observation.initial;
-  const result = await data.commands.appendTurn(row('a'));
-  expect(result).toMatchObject({ status: 'accepted', postAcceptError: error });
-  expect((await data.history.readAll()).map((t) => t.id)).toEqual(['a']);
-  observation.unsubscribe();
-});
-
 it('business full reads preserve normalization without rewriting opaque stored history', async () => {
   const doc = new LoroDoc();
   const list = doc.getList('history');
@@ -252,7 +232,7 @@ it('business full reads preserve normalization without rewriting opaque stored h
     inputConfig: { prompt: '  hello  ', mcpServerIds: [], future: 'keep' },
   });
   doc.commit();
-  const data = createLoroSessionData({ sessionId: sid, doc, durability: 'unavailable' });
+  const data = createLoroSessionData({ sessionId: sid, doc });
   const before = doc.toJSON();
   const version = doc.version().toJSON();
   const projected = await readSessionHistory(data.history);
@@ -264,8 +244,8 @@ it('business full reads preserve normalization without rewriting opaque stored h
   expect(doc.version().toJSON()).toEqual(version);
 });
 
-it('memory structural actions report membership changes even without a target hint', async () => {
-  const data = createMemorySessionData({ sessionId: sid });
+it('Loro structural actions report membership changes even without a target hint', async () => {
+  const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
   const changes: unknown[] = [];
   const subscription = data.history.observe((change) => changes.push(change));
   await subscription.initial;

@@ -56,6 +56,7 @@ describe('MessageHandler chat resume', () => {
     (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
       sessionDoc.updateHistory as never
     );
+    Object.assign(sessionDoc, { agentWrites: (sessionDoc as any).sessionData.agentWrites });
     withHistoryPort(sessionDoc);
 
     const workspaceDocument = {

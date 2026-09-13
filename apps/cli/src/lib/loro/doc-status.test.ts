@@ -130,7 +130,7 @@ describe('SessionDocument status metadata', () => {
     const doc = createSessionDocument({}, undefined, loroDoc);
 
     expect(
-      (await doc.sessionData.commands.setTurnField('entry-1', 'fileDiff', { kind: 'clear' })).status
+      (await doc.agentWrites.setTurnField('entry-1', 'fileDiff', { kind: 'clear' })).status
     ).toBe('accepted');
 
     const readBack = loroDoc.getList('history').get(0) as LoroMap;

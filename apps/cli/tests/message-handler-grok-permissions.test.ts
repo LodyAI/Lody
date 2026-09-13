@@ -101,6 +101,7 @@ function fixture(initialMode = 'ask') {
     },
   });
   (doc as { sessionData?: unknown }).sessionData = fakeSessionData(doc.updateHistory as never);
+  Object.assign(doc, { agentWrites: (doc as any).sessionData.agentWrites });
   withHistoryPort(doc);
   const workspace = {
     sessions: new Map(),

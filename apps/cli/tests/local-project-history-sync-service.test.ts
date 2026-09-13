@@ -1,7 +1,7 @@
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { getExternalAcpHistoryImportKey, getSessionRoomId } from '@lody/shared';
-import { createMemorySessionData } from '@lody/shared/session-data';
+import type { HistoryImportInput } from '@lody/shared/session-data';
 import type {
   ACPSessionId,
   ExternalAcpHistorySyncMeta,
@@ -427,16 +427,15 @@ describe('history import persistence', () => {
     let storedHistory: SessionHistoryInput[] = [];
     let importedTurnHashes: string[] = [];
     const calls: string[] = [];
-    // The honest in-memory double: its composed import rejects `unsupported`
-    // instead of faking the no-gap binding; used by the rejection case below.
-    const memoryData = createMemorySessionData({ sessionId: 'imported-memory' as never });
     const sessionDoc = withHistoryPort({
       sessionData: {
         commands: {
-          applyHistoryImport: (
-            input: Parameters<typeof memoryData.commands.applyHistoryImport>[0]
-          ) => {
-            if (options.rejectImport) return memoryData.commands.applyHistoryImport(input);
+          applyHistoryImport: (input: HistoryImportInput) => {
+            if (options.rejectImport)
+              return Promise.resolve({
+                status: 'rejected' as const,
+                reason: { code: 'unsupported' },
+              });
             // Mirrors the port's one synchronous block: the write, the stored
             // baseline and the cursor creation with no await gap.
             calls.push('history');

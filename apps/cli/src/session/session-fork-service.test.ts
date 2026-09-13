@@ -111,7 +111,6 @@ function createForkHarness(
     sessionData: createLoroSessionData({
       sessionId: sourceSessionId,
       doc: sourceLoro,
-      durability: 'unavailable',
     }),
   });
   let forkOperation: unknown = options.forkOperation;
@@ -669,7 +668,7 @@ describe('SessionForkService durability boundary', () => {
   it('keeps the fork snapshot alive while the source unloads during worktree creation', async () => {
     const entered = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();
-    const released = Promise.withResolvers<void>();
+    const completed = Promise.withResolvers<void>();
     const harness = createForkHarness(undefined, {
       worktree: { dirty: false, headSha: 'a'.repeat(40) },
     });
@@ -677,17 +676,14 @@ describe('SessionForkService durability boundary', () => {
       entered.resolve();
       await gate.promise;
     });
-    const snapshots = harness.sourceDoc.sessionData.snapshots;
-    const release = snapshots.release.bind(snapshots);
-    vi.spyOn(snapshots, 'release').mockImplementation((snapshot) => {
-      release(snapshot);
-      released.resolve();
+    const finish = harness.targetDoc.setForkOperation;
+    finish.mockImplementation((value) => {
+      if (value === undefined) completed.resolve();
     });
     const copied: string[] = [];
     const target = createLoroSessionData({
       sessionId: targetSessionId,
       doc: new LoroDoc(),
-      durability: 'unavailable',
     });
     harness.targetDoc.sessionData.snapshots.copyFrom = async (snapshot, history) => {
       const result = await target.snapshots.copyFrom(snapshot, history);
@@ -700,9 +696,9 @@ describe('SessionForkService durability boundary', () => {
     });
     expect(result.success).toBe(true);
     await entered.promise;
-    snapshots.closeSource();
+    harness.sourceDoc.sessionData.dispose();
     gate.resolve();
-    await released.promise;
+    await completed.promise;
     expect(copied).toContain('assistant-1');
     expect(harness.targetDoc.setForkOperation).toHaveBeenLastCalledWith(undefined);
   });

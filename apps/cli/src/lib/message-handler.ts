@@ -988,7 +988,7 @@ export class MessageHandler {
       // turn (re)start via `openAssistantEntry`. See apps/cli/src/session/AGENTS.md
       // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
       // ("Worked for …").
-      const result = await sessionDoc.sessionData.commands.openAssistantTurn({
+      const result = await sessionDoc.agentWrites.openAssistantTurn({
         turnId,
         ...(userTurnId !== undefined ? { userTurnId } : {}),
         ...(modelInfo !== undefined ? { modelInfo } : {}),
@@ -4775,7 +4775,7 @@ export class MessageHandler {
       if (contents.length === 0) {
         return;
       }
-      const result = await args.sessionDoc.sessionData.commands.applyAgentBatch({
+      const result = await args.sessionDoc.agentWrites.applyAgentBatch({
         contents,
         targetAssistantEntryId: args.assistantEntryId,
         createId: () => args.assistantEntryId,

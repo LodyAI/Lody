@@ -1,22 +1,28 @@
+import { createSessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
-import type { SessionHistory } from '../src/schema';
-import type { SessionId } from '../src/ids';
-import { createHistoryWriter } from '../src/history-writer';
+import type { SessionHistory } from '@lody/shared';
+import type { SessionId } from '@lody/shared/ids';
+import { createHistoryWriter } from '@lody/shared';
 import {
-  createLoroSessionData,
+  createLoroSessionData as createStoredSession,
   pageVisibleTranscript,
   hashHistoryEntry,
   hashText,
   type SessionTurn,
-} from '../src/session-data';
+} from '@lody/shared/session-data';
 import {
-  contractSessionId,
-  runSessionDataContract,
-  type SessionDataHarness,
-} from './session-data-contract';
+  storageSessionId,
+  runStoredHistoryCases,
+  type StoredHistoryFixture,
+} from './session-history-storage-cases';
 
-const makeHarness = (doc = new Loro()): SessionDataHarness => {
+const createLoroSessionData = (options: Parameters<typeof createStoredSession>[0]) => {
+  const data = createStoredSession(options);
+  return { ...data, commands: { ...data.commands, ...createSessionAgentWrites(data.writer) } };
+};
+
+const makeHarness = (doc = new Loro()): StoredHistoryFixture => {
   let cursor: unknown;
   const data = createLoroSessionData({
     historyImportCursor: {
@@ -25,9 +31,8 @@ const makeHarness = (doc = new Loro()): SessionDataHarness => {
         cursor = value;
       },
     },
-    sessionId: contractSessionId,
+    sessionId: storageSessionId,
     doc,
-    durable: async () => {},
   });
   const writer = createHistoryWriter(doc);
   const findMap = (turnId: string): LoroMap | undefined => {
@@ -67,21 +72,19 @@ const makeHarness = (doc = new Loro()): SessionDataHarness => {
   };
 };
 
-runSessionDataContract('loro', () => makeHarness());
+runStoredHistoryCases(() => makeHarness());
 
 describe('loro session data adapter', () => {
   it('converges two replicas after UI- and agent-side domain writes', async () => {
     const left = new Loro();
     const right = new Loro();
     const leftData = createLoroSessionData({
-      sessionId: contractSessionId,
+      sessionId: storageSessionId,
       doc: left,
-      durability: 'unavailable',
     });
     const rightData = createLoroSessionData({
-      sessionId: contractSessionId,
+      sessionId: storageSessionId,
       doc: right,
-      durability: 'unavailable',
     });
 
     await leftData.commands.appendTurn({
@@ -173,73 +176,14 @@ describe('loro session data adapter', () => {
     expect(page.hasMore).toBe(false);
   });
 
-  it('refuses to claim durability when no barrier exists, and rejects a forged receipt', async () => {
-    const doc = new Loro();
-    const data = createLoroSessionData({
-      sessionId: contractSessionId,
-      doc,
-      durability: 'unavailable',
-    });
-    const result = await data.commands.appendTurn({
-      id: 'turn',
-      role: 'user',
-      timestamp: '2026-01-01T00:00:00.000Z',
-      items: [{ type: 'text', text: 'x' }],
-      fileDiff: [],
-    });
-    expect(result.status).toBe('accepted');
-    if (result.status !== 'accepted') return;
-    // No barrier was provided: the public promise must not silently succeed.
-    await expect(data.durability.waitDurable(result.receipt)).rejects.toMatchObject({
-      code: 'unavailable',
-    });
-    // A caller-shaped object is not a capability this store issued.
-    await expect(
-      data.durability.waitDurable({
-        sessionId: contractSessionId,
-        kind: 'append',
-        turnIds: ['turn'],
-      } as never)
-    ).rejects.toMatchObject({ code: 'invalid_receipt' });
-  });
-
-  it('invalidates every snapshot handle when the source store closes', async () => {
-    const doc = new Loro();
-    const data = createLoroSessionData({
-      sessionId: contractSessionId,
-      doc,
-      durability: 'unavailable',
-    });
-    const snapshots = data.snapshots;
-    expect(snapshots.capabilities.copy).toBe(true);
-    const snapshot = await snapshots.capture();
-    expect(snapshot.sessionId).toBe(contractSessionId);
-    await data.commands.appendTurn({
-      id: 'turn',
-      role: 'user',
-      timestamp: '2026-01-01T00:00:00.000Z',
-      items: [{ type: 'text', text: 'x' }],
-      fileDiff: [],
-    });
-    // The store's teardown hook invalidates the source of every handle.
-    snapshots.closeSource();
-    const closed = expect.objectContaining({ code: 'source_closed' });
-    await expect(snapshots.capture()).rejects.toThrowError(closed);
-    await expect(snapshot.read()).rejects.toThrowError(closed);
-    await expect(snapshots.copyFrom(snapshot, [])).rejects.toThrowError(closed);
-    expect(() => snapshots.release(snapshot)).not.toThrow();
-  });
-
-  it('keeps an operation capture usable after source teardown until release', async () => {
+  it('keeps a detached capture usable after source teardown', async () => {
     const source = createLoroSessionData({
-      sessionId: contractSessionId,
+      sessionId: storageSessionId,
       doc: new Loro(),
-      durability: 'unavailable',
     });
     const target = createLoroSessionData({
       sessionId: 'fork-target' as SessionId,
       doc: new Loro(),
-      durability: 'unavailable',
     });
     await source.commands.appendTurn({
       id: 'u',
@@ -248,53 +192,22 @@ describe('loro session data adapter', () => {
       items: [{ type: 'text', text: 'captured' }],
       fileDiff: [],
     });
-    const snapshot = await source.snapshots.capture({ lifetime: 'operation' });
-    source.snapshots.closeSource();
-    const selection = await snapshot.read();
+    const snapshot = await source.snapshots.capture();
+    source.dispose();
+    const selection = snapshot.history;
     expect((await target.snapshots.copyFrom(snapshot, selection)).status).toBe('accepted');
     expect(await target.history.readTurn('u')).toMatchObject({
       state: 'ready',
       turn: { items: [{ type: 'text', text: 'captured' }] },
     });
-    source.snapshots.release(snapshot);
-    source.snapshots.release(snapshot);
-    await expect(snapshot.read()).rejects.toMatchObject({ code: 'released' });
-    await expect(target.snapshots.copyFrom(snapshot, selection)).rejects.toMatchObject({
-      code: 'released',
-    });
-  });
-
-  it('reports source_closed on a cross-store copy after the source store closes', async () => {
-    const sourceDoc = new Loro();
-    const source = createLoroSessionData({
-      sessionId: contractSessionId,
-      doc: sourceDoc,
-      durability: 'unavailable',
-    });
-    const targetDoc = new Loro();
-    const target = createLoroSessionData({
-      sessionId: 'target-session' as SessionId,
-      doc: targetDoc,
-      durability: 'unavailable',
-    });
-    const snapshot = await source.snapshots.capture();
-    source.snapshots.closeSource();
-    // The target store stays open, but the handle's source is gone.
-    await expect(target.snapshots.copyFrom(snapshot, [])).rejects.toThrowError(
-      expect.objectContaining({ code: 'source_closed' })
-    );
-    await expect(snapshot.read()).rejects.toThrowError(
-      expect.objectContaining({ code: 'source_closed' })
-    );
   });
 
   it('binds an imported history write, its stored baseline and the cursor with no await gap', async () => {
     const doc = new Loro();
     let cursorState: unknown;
     const data = createLoroSessionData({
-      sessionId: contractSessionId,
+      sessionId: storageSessionId,
       doc,
-      durability: 'unavailable',
       historyImportCursor: {
         read: () => cursorState,
         write: (value) => {
@@ -321,30 +234,6 @@ describe('loro session data adapter', () => {
     expect(JSON.parse(cursor.storedHistoryBaseline).turnHashes).toEqual(
       createHistoryWriter(doc).readStored().map(hashHistoryEntry)
     );
-  });
-
-  it('reports an accepted write whose post-accept side effect failed', async () => {
-    const doc = new Loro();
-    const data = createLoroSessionData({
-      sessionId: contractSessionId,
-      doc,
-      durable: async () => {},
-      afterAccept: () => {
-        throw new Error('notification failed');
-      },
-    });
-    const result = await data.commands.appendTurn({
-      id: 'turn',
-      role: 'user',
-      timestamp: '2026-01-01T00:00:00.000Z',
-      items: [{ type: 'text', text: 'x' }],
-      fileDiff: [],
-    });
-    // Applied, but its side effect failed: never a pre-write rejection.
-    expect(result.status).toBe('accepted');
-    if (result.status !== 'accepted') return;
-    expect(result.postAcceptError).toBeInstanceOf(Error);
-    expect((await data.history.readTurn('turn')).state).toBe('ready');
   });
 
   it('reads one turn by shallow identity without materializing unrelated bodies', async () => {

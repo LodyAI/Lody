@@ -12,10 +12,6 @@ maintenance commands here.
 - Keep the allowlist small and limited to deliberate adapter/composition files.
   A new violation should normally be fixed at its dependency boundary, not
   appended to the allowlist.
-- `check-session-data-boundary.mjs` rejects removed history facades, direct session
-  Mirror access and writer construction outside composition roots. TaskDoc owns a
-  separate task-document Mirror; that single file is exempt from the Mirror-member rule.
-  Its AST tests cover imports, computed access and destructuring.
 - `check-code-collab-imports.mjs` protects Code Collab ownership boundaries.
 - `check-public-boundary.mjs` rejects closed product paths, private workspace
   dependencies/imports, unresolved `workspace:` dependencies, closed-path

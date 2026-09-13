@@ -196,7 +196,7 @@ export async function openReaderView(
   const dispose = view.dispose;
   view.dispose = () => {
     dispose();
-    data.snapshots.closeSource();
+    data.dispose();
   };
   return view;
 }

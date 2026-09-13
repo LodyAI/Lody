@@ -1,3 +1,4 @@
+import { createSessionAgentWrites } from '../lib/loro/session-agent-writes';
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
@@ -101,7 +102,6 @@ describe('session output helpers', () => {
       sessionId: 'session-1' as SessionId,
       doc,
       writer,
-      durability: 'unavailable',
     });
     const bodyReads: string[] = [];
     const toJSON = LoroMap.prototype.toJSON;
@@ -128,15 +128,21 @@ describe('session output helpers', () => {
     });
     try {
       await first.promise;
-      await data.commands.setTurnField('a', 'finished', { kind: 'set', value: true });
-      await data.commands.setTurnField('u', 'status', { kind: 'set', value: 'handled' });
+      await createSessionAgentWrites(data.writer).setTurnField('a', 'finished', {
+        kind: 'set',
+        value: true,
+      });
+      await createSessionAgentWrites(data.writer).setTurnField('u', 'status', {
+        kind: 'set',
+        value: 'handled',
+      });
       expect((await completion).turnId).toBe('a');
       expect(events.map((e) => e.type)).toEqual(['update', 'done']);
       expect(bodyReads.length).toBeGreaterThan(0);
       expect([...new Set(bodyReads)]).toEqual(['a']);
     } finally {
       spy.mockRestore();
-      data.snapshots.closeSource();
+      data.dispose();
     }
   });
 

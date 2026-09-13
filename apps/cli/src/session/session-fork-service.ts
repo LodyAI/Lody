@@ -1,5 +1,4 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { requireSessionSnapshots } from '@lody/shared/session-data';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -51,8 +50,6 @@ type WorktreeForkPreparedInput = {
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   sourceSnapshot: SessionSnapshot;
-  /** Releases the source snapshot once the async worktree fork settles. */
-  releaseSourceSnapshot: () => void;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -477,10 +474,10 @@ export class SessionForkService {
     // path; the rejection order below is unchanged.
     // This detached capture belongs to the fork operation, which may outlive
     // the cached source document while git creates the new worktree.
-    const sourceSnapshots = requireSessionSnapshots(sourceDoc.sessionData);
+    const sourceSnapshots = sourceDoc.sessionData.snapshots;
     const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
       this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      sourceSnapshots.capture({ lifetime: 'operation' }),
+      sourceSnapshots.capture(),
       this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
       reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
     ]);
@@ -556,7 +553,7 @@ export class SessionForkService {
     // repaired session can never drift from a normally-forked one's title.
     const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
-      (await sourceSnapshot.read()) as SessionHistoryInput[],
+      sourceSnapshot.history as SessionHistoryInput[],
       spec.sourceTurnId,
       sourceSessionId,
       sourceTitle,
@@ -771,7 +768,6 @@ export class SessionForkService {
         marker,
         historyResult,
         sourceSnapshot,
-        releaseSourceSnapshot: () => sourceSnapshots.release(sourceSnapshot),
         agentConfig,
         user,
         operation,
@@ -873,7 +869,7 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        const copyResult = await requireSessionSnapshots(targetDoc.sessionData).copyFrom(
+        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
@@ -884,7 +880,6 @@ export class SessionForkService {
             copyResult.status === 'rejected' ? copyResult.reason : copyResult.cause
           );
         }
-        sourceSnapshots.release(sourceSnapshot);
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -1023,7 +1018,7 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        const copyResult = await requireSessionSnapshots(targetDoc.sessionData).copyFrom(
+        const copyResult = await targetDoc.sessionData.snapshots.copyFrom(
           sourceSnapshot,
           historyResult.history as unknown as readonly SessionTurn[]
         );
@@ -1083,7 +1078,6 @@ export class SessionForkService {
       );
     } finally {
       this.activeOperations.delete(operation.id);
-      input.releaseSourceSnapshot();
     }
   }
 }

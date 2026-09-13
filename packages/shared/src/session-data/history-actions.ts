@@ -66,7 +66,7 @@ export function historyActionTarget(action: HistoryAction): string | undefined {
     : undefined;
 }
 
-/** Called on a private draft at commit time by either backend. */
+/** Called on a private writer draft at commit time. */
 export function applyHistoryAction(
   history: SessionEntry[],
   action: HistoryAction

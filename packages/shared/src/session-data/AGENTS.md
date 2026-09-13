@@ -1,102 +1,33 @@
-# `@lody/shared` session-data — domain ports
+# Session history
 
-`CLAUDE.md` is a symlink to this file. Parent `AGENTS.md` files apply.
+`CLAUDE.md` is a symlink to this file. Parent guidelines apply.
 
-The CRDT-neutral seam between session business code (React UI, CLI, MCP) and one
-storage implementation. Public DTOs live in `domain.ts` and MUST NOT import the
-storage schema; `types.ts` MUST NOT name Loro, Mirror, a CID, a container id or a
-storage offset.
-
-- **One shared writer.** `createLoroSessionData` consumes the entrypoint's
-  `HistoryWriter` (`mirror.historyWriter`); never construct a second writer, and never
-  re-implement parsing, container diffing, rollback or stored-copy rules. Domain
-  command rules live once in the shared planners (`planner.ts`, `history-actions.ts`,
-  `history-import.ts`) and are applied by both the Loro adapter and
-  the in-memory double.
-- **Explicit field changes.** `set(value)` or `clear`; never `undefined`-means-delete
-  across a JSON/worker boundary. `items`/`id` are edited whole-entry.
-- **Phased results.** `accepted` (retrying duplicates), `rejected` (validated and
-  refused before storage; safe to fix and retry) and `indeterminate` (never auto-retry).
-  An accepted write whose post-accept side effect failed reports `postAcceptError` and
-  MUST NOT be re-issued or reported as a pre-write rejection. Validate input and locate
-  the target before mutating; a throw after the writer is invoked is `indeterminate`,
-  not a rejection.
-- **Durability is separate** from acceptance and remote sync, and is a construction-time
-  choice: a caller passes a real local barrier (`repo.flush`) or explicitly declares
-  `durability: 'unavailable'`. `waitDurable` rejects with
-  `SessionDurabilityError('unavailable')` when there is no barrier, and with
-  `'invalid_receipt'` for a receipt it did not issue; a receipt is an opaque capability,
-  never a caller-shaped object. Never treat an in-memory accept as persisted.
-- **Async windowed reads.** `count`, `readAt`/`readTurn`/`readRange`, `readDirectory`
-  (identity/state only, never bodies), `readAll` (one consistent detached full read) and a
-  gap-free `observe` whose initial directory is captured at the same point the listener goes
-  live. `changed` carries a raw range plus `structural: true` only for a membership/order
-  change; a content-only change omits it so a consumer fences the affected turn without
-  cancelling unrelated in-flight reads. Read states distinguish
-  missing/invalid/unavailable (`incomplete`/`unsupported`/`failed`). Identity lookups
-  read `id` shallowly and materialize only the target body. The Loro reader keeps
-  an ID index, invalidated by structural/id changes; content tokens do not rescan it.
-  Store teardown closes snapshot handles and removes the identity subscription.
-- Status queries use directory scalars and the control queue, never full bodies.
-  `readTurnOutput(userTurnId)` captures one coherent output observation: user
-  scalars, its first linked assistant body, and later system notices only on
-  failure. Unrelated bodies are not materialized; streaming consumers do not
-  assemble this from async reads at different document versions.
-- **Display paging is business logic.** `pageVisibleTranscript` scans raw rows through the
-  reader, counts displayable turns, keeps the cursor a raw position and never reports an
-  empty tail as the end. A caller-supplied visibility predicate stays on this side of the
-  boundary, not in the port.
-- **Bound ACP batches are one domain command.** `applyAgentBatch` rewrites only the
-  located turn for an entry-bound text/thought batch, keeps whole-history routing for a
-  mixed tool/subagent batch that may belong to an older turn, and creates a missing bound
-  target under the caller's id. Both adapters apply the same shared notification/content
-  planners; the caller never passes a JSON op list.
-- **Storage-owned snapshot service.** `data.snapshots` is the port's opaque-handle
-  stored-copy service. `capture()` must be the shared writer's `capture()` (Loro) or an
-  honest store snapshot (memory) — never a stitched read of a changing page.
-  `snapshot.read()` is the handle's own full, detached stored read (export/replay/hash
-  use it instead of stitching paginated reads). `release` is idempotent and
-  issuing-store-only; forged/foreign/released handles throw `SessionSnapshotError` with
-  the matching code, and `source_closed` applies once the issuing store closes
-  (`LoroSessionData.snapshots.closeSource()`, called by `SessionDocument.destroy`).
-  A fork explicitly captures with `lifetime: 'operation'`: its detached stored
-  snapshot survives source teardown until the operation releases it. No new
-  capture or target write is allowed on a closed store. Release of an owned
-  handle remains idempotent after teardown. `copyFrom` admits same-backend cross-store handles (the
-  fork flow: capture on the source, copy into the target) and rejects a different
-  backend with `cross_store`. Provenance stays in `history-writer.ts`; adapters only
-  scope handles to the issuing store identity + `sessionId`. A backend without stored
-  copy declares `capabilities.copy = false` and returns `rejected('unsupported')` — never
-  a false capability.
-- **Writer-owned guarded operations.** `commands.replaceEditableTail` replaces the editable
-  tail user turn from explicit domain inputs (`expectedUserTurnId`, `expectedForkTurnId`,
-  `replacement`, `fallbackGoal`): the eligibility rule and the active-goal guard live once in
-  `planner.ts` (`resolveEditableTail` / `planEditableTailReplacement`) and are re-applied
-  against the history read inside the store's commit, so a tail that moved after the caller's
-  own check is `rejected('stale_boundary'|'active_goal')`, never overwritten. The accepted
-  result carries `previousUserTurnId` (the caller's meta commit needs it) and a range-scoped
-  `rollback` that is `() => Promise<void>` and retains rows appended after the replacement;
-  the caller MUST `await` it (and handle rejection) before persisting its own follow-up
-  state, because the compensation may reach durable storage. `commands.applyHistoryImport`
-  (imported history write + stored snapshot read + cursor creation in ONE synchronous block,
-  no await gap; the cursor setter arrives as a construction-time control-plane accessor) accepts only explicit initialize/refresh/resolve-conflict inputs; no business callbacks.
-  The shared import planner checks current history and cursor inside the write.
-  Missing cursor capability rejects before writing. A cursor failure after history
-  mutation is indeterminate, never a pre-write rejection. Both are port commands over the one shared
-  writer; a backend without the rules (memory) rejects `unsupported` instead of faking them.
-  Business code never passes a raw writer callback. The old SessionDocument history
-  facades are removed; read through `history`, write through `commands`.
-  `applyHistoryAction` accepts a discriminated domain action, never a draft callback
-  or arbitrary property patch. Targeted actions read only the located turn. Legacy inline JSON rows remain
-  writable in their existing representation; only the changed row is replaced,
-  and validation finishes before removing its old slot.
-  UI steer fallback rechecks `pending_apply` at commit time; it cannot requeue an
-  already executing turn. Field deletion is explicit `clear`.
-  `readSessionHistory` preserves legacy business input-config normalization and skips
-  invalid slots without writing; `history.readAll` and snapshot reads preserve the
-  authoritative stored values. The CLI and renderer do not expose a HistoryWriter;
-  `pnpm check:session-data-boundary` enforces these access rules.
-- **The in-memory double** exists to prove async reads/writes and real consumer contracts;
-  it is not a second copy of domain rules. Both backends run
-  `tests/session-data-contract.ts`, and a real consumer runs against the double in
-  `packages/components/tests/session-data-consumer.test.ts`.
+- `HistoryWriter` is the only history writer. Reuse its validation, changed-field
+  diff, legacy representation, stored-copy and conditional rollback rules.
+  Shared business rules live in the planners, not in UI or CLI copies.
+- Directory reads contain identities, scalars and input configuration, never
+  bodies. Targeted reads materialize only the selected turn. Status queries use
+  the directory; explicit export/replay uses one consistent `readAll` observation.
+  `readTurnOutput` reads the selected assistant and relevant failure notices in
+  one observation instead of serializing the transcript on every token.
+- Subscribe and capture the initial directory without a gap. Storage range
+  notifications distinguish membership changes from content changes. The display
+  cache translates them into turn identities and rejects stale async reads.
+- Validate and locate before writing. `rejected` means storage was untouched;
+  `indeterminate` must not be retried automatically. Acceptance does not promise
+  persistence or remote convergence; the repo owns those existing barriers.
+- A snapshot is the HistoryWriter's detached, unforgeable stored-copy handle.
+  Its existing provenance WeakMap is authoritative. Source disposal does not
+  invalidate a capture held by a fork. Do not add a second handle registry,
+  backend capabilities, store tokens or source-lifetime coupling.
+- Tail replacement rechecks the expected user/provider boundary and active goal
+  inside the write. Await conditional rollback before persisting follow-up meta;
+  rollback retains later appends and refuses to overwrite concurrent edits.
+- Import inputs are explicit data. Recheck current history/cursor and bind the
+  stored baseline and cursor in the same synchronous write, without an await gap.
+  A cursor failure after history mutation is indeterminate.
+- Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
+  history while opening or reading. Auto-seen is a separately attached CLI policy
+  with a commit-time guard against regressing an advanced execution status.
+- Test the real Loro reader and writer. Delayed reads use small injected Promise
+  gates; there is no test-only implementation of the complete command API.

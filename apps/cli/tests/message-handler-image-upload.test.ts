@@ -80,6 +80,7 @@ const createHarness = (): TestHarness => {
   (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
     sessionDoc.updateHistory as never
   );
+  Object.assign(sessionDoc, { agentWrites: (sessionDoc as any).sessionData.agentWrites });
 
   const workspaceDocument = {
     isTransportConnected: vi.fn(() => true),

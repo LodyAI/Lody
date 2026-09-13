@@ -4,15 +4,14 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Every `new Mirror(...)` over a doc that syncs between clients must pass
-`ignoreUnknownProperties: true`. Peers on a newer schema write root keys this
-build does not declare; without the flag loro-mirror rejects the entire state
-with `Unknown property: <key>`, so the older client can never write to that doc
-again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
+Every synced Mirror must use `ignoreUnknownProperties: true`: otherwise an
+unknown root from a newer peer blocks writes on this client. Regression:
+`packages/shared/tests/session-doc-forward-compat.test.ts`.
 
-Session docs use a control-plane Mirror (`getDocState` excludes history) and
-the shared HistoryWriter. Read contracts belong to SessionData.
-Replacement contract: [shared rules](../../../../../packages/shared/AGENTS.md#session-history).
+SessionDocument's private Mirror is control-only. HistoryWriter owns writes;
+SessionData owns reads. CLI execution methods in `session-agent-writes.ts` reuse
+shared planners over that writer, not UI port methods or a second writer.
+Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-history).
 
 ## Opening a doc pulls its stream
 

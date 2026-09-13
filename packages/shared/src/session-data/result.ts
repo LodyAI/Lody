@@ -1,8 +1,6 @@
 import type { SessionCommandResult } from './types';
 
-/** Bridge for business operations that expose exceptions rather than command receipts.
- * An accepted write stays accepted even if a post-accept side effect failed.
- */
+/** Translate a write result for callers whose public API throws on failure. */
 export function requireSessionAccepted<T extends SessionCommandResult>(
   result: T
 ): Extract<T, { status: 'accepted' }> {

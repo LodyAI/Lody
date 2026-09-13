@@ -4,7 +4,6 @@ export type {
   SessionData,
   SessionDataChange,
   SessionDataChangeListener,
-  SessionDurability,
   SessionEditableTailRejection,
   SessionEditableTailRejectionCode,
   SessionEditableTailResult,
@@ -13,19 +12,12 @@ export type {
   SessionHistoryReader,
   SessionObservation,
   SessionWritableField,
-  SessionWriteReceipt,
   OpenAssistantTurnInput,
   ReplaceEditableTailInput,
   TaskProposalResolution,
 } from './types';
 export { clearField, sessionTurnReadIsReady, setFieldTo } from './types';
-export { SessionDurabilityError, type SessionDurabilityErrorCode } from './types';
-export {
-  SessionSnapshotError,
-  type SessionSnapshot,
-  type SessionSnapshotErrorCode,
-  type SessionSnapshotService,
-} from './snapshot';
+export { type SessionSnapshot, type SessionSnapshotService } from './snapshot';
 export type {
   SessionEntry,
   SessionDirectoryRow,
@@ -57,18 +49,8 @@ export {
   type VisibleTranscriptPage,
   type VisibleTranscriptRequest,
 } from './visible-transcript';
-export {
-  createMemorySessionData,
-  type MemoryCommitPlan,
-  type MemorySessionData,
-  type MemorySessionDataOptions,
-} from './memory';
-export {
-  createLoroSessionData,
-  type LoroSessionData,
-  type LoroSessionDataOptions,
-  type LoroSessionSnapshotService,
-} from './loro';
+
+export { createLoroSessionData, type LoroSessionData, type LoroSessionDataOptions } from './loro';
 
 export * from './history-import';
 
@@ -84,7 +66,5 @@ export {
 } from './operation-progress';
 
 export { readLatestTurn, readSessionHistory } from './read';
-
-export { requireSessionSnapshots } from './snapshot';
 
 export { markAssistantTurnFinished } from './assistant-finalize';

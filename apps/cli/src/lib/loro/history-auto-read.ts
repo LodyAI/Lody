@@ -1,5 +1,5 @@
 import { resolveSessionHistoryStatus } from '@lody/shared';
-import type { SessionData, SessionTurn } from '@lody/shared/session-data';
+import type { SessionCommandResult, SessionData, SessionTurn } from '@lody/shared/session-data';
 
 export type AutoMarkLatestUserHistoryAsReadHandle = {
   dispose: () => void;
@@ -33,7 +33,8 @@ const findLatestPendingUserTurn = async (data: SessionData): Promise<SessionTurn
  * turn.
  */
 export const attachAutoMarkLatestUserHistoryAsRead = (
-  data: SessionData
+  data: SessionData,
+  markTurnSeen: (id: string) => Promise<SessionCommandResult>
 ): AutoMarkLatestUserHistoryAsReadHandle => {
   let disposed = false;
   let lastMarkedTurnId: string | null = null;
@@ -58,7 +59,7 @@ export const attachAutoMarkLatestUserHistoryAsRead = (
           // regress an execution state a concurrent writer advanced. Record the
           // id only on an accepted write: a rejected precondition stays
           // retryable, and an indeterminate result is not "done".
-          const result = await data.commands.markTurnSeen(turn.id);
+          const result = await markTurnSeen(turn.id);
           if (result.status === 'accepted') lastMarkedTurnId = turn.id;
         } while (rerunRequested);
       } finally {

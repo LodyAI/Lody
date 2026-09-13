@@ -6,7 +6,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
 } from '@lody/shared';
-import type { ApplyAgentBatchInput } from '@lody/shared/session-data';
+import type { ApplyAgentBatchInput } from '../loro/session-agent-writes';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import { applyMessageContentsBatch, applyNotificationOnHistory } from './history-apply';
@@ -64,8 +64,9 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
     ),
     setPlan: vi.fn(async () => {}),
     getHistory: vi.fn(async () => history),
+    agentWrites: { applyAgentBatch },
     sessionData: {
-      commands: { applyAgentBatch },
+      commands: {},
       history: {
         count: async () => 0,
         readAt: async () => ({ state: 'missing' as const }),
