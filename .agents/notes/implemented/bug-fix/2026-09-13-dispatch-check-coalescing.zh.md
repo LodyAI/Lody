@@ -73,7 +73,7 @@ Loro 看门狗随即强制 reconnect。
   一个 turn 期间收到 300 次 mirror commit 加一次 turn 后的 enqueue，只产生恰好一次后续历史读取；
   该读取停在宏任务上而不是在微任务上运行；在排队 check 之前设置的定时器先于该 check 读历史触发；
   被合并的调用方拿到的 promise 只在共享的 check 完成后才 resolve；之后链仍然存活。
-- `pnpm check` 和 `pnpm format` 的结果记录在 PR 中。`worktree-gc` 套件在这台机器上有一个与
+- `pnpm check` 和 `pnpm format` 的结果记录在 [PR #676](https://github.com/LodyAI/Lody/pull/676) 中。`worktree-gc` 套件在这台机器上有一个与
   `/private/var` 路径解析有关的预存失败，与本次改动无关。
 - 未测量：修复后的生产日志签名。机制已在单元测试中确定性复现；在 13 MB 会话文档上的现场确认仍待观察。
 

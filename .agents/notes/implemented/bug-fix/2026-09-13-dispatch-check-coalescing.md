@@ -100,7 +100,8 @@ Loro watchdog then forces a reconnect.
   check fires before the check reads history; the promise returned to a
   coalesced caller resolves only after the shared check finishes; and the chain
   stays live afterwards.
-- `pnpm check` and `pnpm format` results are recorded in the PR. The
+- `pnpm check` and `pnpm format` results are recorded in
+  [PR #676](https://github.com/LodyAI/Lody/pull/676). The
   `worktree-gc` suite has a pre-existing failure on this machine caused by
   `/private/var` path resolution that is unrelated to this change.
 - Not measured: the production log signature after the fix. The mechanism is
