@@ -5,8 +5,9 @@ import type { LoroRepo } from 'loro-repo';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
+import { markAssistantTurnFinished } from '../assistant-turn-finalize';
 import { SessionDocument } from '../loro/doc';
-import { ensurePermissionRequestOnToolCall } from './history';
+import { ensurePermissionRequestOnToolCall, findPermissionOutcomeInHistory } from './history';
 
 const mirrors: ReturnType<typeof createSessionMirror>[] = [];
 afterEach(() => {
@@ -82,6 +83,74 @@ const permissionRequest = (): RequestPermissionRequest => ({
     locations: [{ path: '/synthetic/task.ts', line: 7 }],
   },
   options: [{ optionId: 'allow', name: 'Allow once', kind: 'allow_once' }],
+});
+
+it("finalizes only the owning turn's unanswered requests through durable history", async () => {
+  const { doc, readStored } = createStoredTool('unknown');
+  const request = permissionRequest();
+  await ensurePermissionRequestOnToolCall(doc, 'request', request);
+  const before = readStored();
+  await doc.updateHistory((history) => {
+    history[0]?.items.push({ type: 'tool_call', toolCallId: 'late-call', status: 'pending' });
+    history[0]?.items.push({
+      type: 'tool_call',
+      toolCallId: 'answered',
+      status: 'completed',
+      permissionRequest: {
+        requestId: 'answered-request',
+        options: request.options,
+        outcome: { outcome: 'selected', optionId: 'allow' },
+      },
+    });
+    history.push({
+      id: 'next-turn',
+      role: 'assistant',
+      timestamp: '2026-09-12T00:00:00.000Z',
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'next-call',
+          status: 'pending',
+          permissionRequest: { requestId: 'next-request', options: request.options },
+        },
+      ],
+      fileDiff: [],
+    });
+    return history;
+  });
+  // The permission waiter uses this same history subscription to release the ACP request.
+  const observed: unknown[] = [];
+  const unsubscribe = doc.mirror?.subscribe(() => {
+    const history = doc.mirror?.getState().history ?? [];
+    observed.push(findPermissionOutcomeInHistory(history, 'request'));
+  });
+  try {
+    await doc.updateHistory((history) =>
+      markAssistantTurnFinished(history, { turnId: 'assistant-turn', endedAt: 1_000 })
+    );
+    const history = await doc.getHistory();
+    expect(findPermissionOutcomeInHistory(history, 'request')).toEqual({ outcome: 'cancelled' });
+    expect(observed).toContainEqual({ outcome: 'cancelled' });
+    expect(findPermissionOutcomeInHistory(history, 'answered-request')).toEqual({
+      outcome: 'selected',
+      optionId: 'allow',
+    });
+    expect(findPermissionOutcomeInHistory(history, 'next-request')).toBeUndefined();
+    expect(history[1]?.finished).toBeUndefined();
+    expect(readStored().content).toEqual(before.content);
+    expect(readStored().ids).toEqual(before.ids);
+    // Stop may win while a request is still loading its document. It must not
+    // attach to the finished tool or fall back to the newer active turn.
+    await expect(
+      ensurePermissionRequestOnToolCall(doc, 'late-request', {
+        ...request,
+        toolCall: { ...request.toolCall, toolCallId: 'late-call' },
+      })
+    ).resolves.toBe(false);
+    expect(await doc.getHistory()).toEqual(history);
+  } finally {
+    unsubscribe?.();
+  }
 });
 
 describe.each(['unknown', 'malformed'] as const)(

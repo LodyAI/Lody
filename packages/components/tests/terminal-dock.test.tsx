@@ -116,11 +116,16 @@ function getTerminalTabButton(container: HTMLElement, title: string): HTMLButton
 }
 
 function expectActiveTerminal(container: HTMLElement, title: string): void {
-  // Active tab = brighter foreground text (no chip background in the slim tab
-  // strip). Match the resting foreground token, not the hover variant that
-  // inactive tabs also carry.
-  const classes = getTerminalTabButton(container, title).className.split(/\s+/);
-  expect(classes).toContain('text-foreground');
+  // Active tab = a flat fill against the strip's own `bg-sidebar` canvas (no
+  // border/shadow — this strip already lives inside the floating card's own
+  // border+shadow, so stacking another pair on a 24px tab read as heavy
+  // chrome). See the comment on `TERMINAL_TAB_ACTIVE_CLASS`.
+  const tab = getTerminalTab(container, title);
+  expect(tab.getAttribute('aria-selected')).toBe('true');
+  const classes = tab.className.split(/\s+/);
+  expect(classes).toContain('bg-background');
+  expect(classes).toContain('text-tab-active-foreground');
+  expect(classes).not.toContain('shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]');
 }
 
 describe('TerminalDock', () => {
@@ -145,12 +150,7 @@ describe('TerminalDock', () => {
     root = createRoot(container);
 
     await act(async () => {
-      root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-1"
-          defaultView="terminal"        />
-      );
+      root?.render(<TerminalDock channel={channel} sessionId="session-1" defaultView="terminal" />);
     });
     await flushReact();
     await flushReact();
@@ -176,11 +176,7 @@ describe('TerminalDock', () => {
     root = createRoot(container);
 
     await act(async () => {
-      root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-memory-a"        />
-      );
+      root?.render(<TerminalDock channel={channel} sessionId="session-memory-a" />);
     });
     await flushReact();
     await flushReact();
@@ -192,22 +188,14 @@ describe('TerminalDock', () => {
     expectActiveTerminal(container, 'beta');
 
     await act(async () => {
-      root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-memory-b"        />
-      );
+      root?.render(<TerminalDock channel={channel} sessionId="session-memory-b" />);
     });
     await flushReact();
     await flushReact();
     expect(hasOpenPanel(container)).toBe(false);
 
     await act(async () => {
-      root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-memory-a"        />
-      );
+      root?.render(<TerminalDock channel={channel} sessionId="session-memory-a" />);
     });
     await flushReact();
     await flushReact();
@@ -220,11 +208,7 @@ describe('TerminalDock', () => {
     root = createRoot(container);
 
     await act(async () => {
-      root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-memory-a"        />
-      );
+      root?.render(<TerminalDock channel={channel} sessionId="session-memory-a" />);
     });
     await flushReact();
     await flushReact();
@@ -246,10 +230,7 @@ describe('TerminalDock', () => {
 
     await act(async () => {
       root?.render(
-        <TerminalDock
-          channel={channel}
-          sessionId="session-stable-reload"
-          defaultView="terminal"        />
+        <TerminalDock channel={channel} sessionId="session-stable-reload" defaultView="terminal" />
       );
     });
     await flushReact();
@@ -264,7 +245,8 @@ describe('TerminalDock', () => {
         <TerminalDock
           channel={reloadChannel}
           sessionId="session-stable-reload"
-          canCreateTerminal={false}        />
+          canCreateTerminal={false}
+        />
       );
     });
     await flushReact();

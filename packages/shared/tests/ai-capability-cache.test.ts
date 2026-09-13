@@ -57,8 +57,10 @@ describe('ACP capability cache compatibility', () => {
   });
 
   it('drops only the known-incompatible derived field from pre-v7 non-Codex entries', () => {
+    // Pinned to 6: the guard keys on "older than v7", not on the current
+    // version, so a later bump must not quietly stop exercising it.
     const capability: AcpCapabilityCacheEntry = {
-      ...entry(ACP_CAPABILITY_CACHE_VERSION - 1),
+      ...entry(6),
       agentType: 'claude',
       models: [{ modelId: 'opus[1m]', name: 'Opus 1M' }],
       modelReasoningEfforts: { opus: ['1m'] },

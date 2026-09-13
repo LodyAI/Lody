@@ -10,6 +10,13 @@ import {
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
+import {
+  AGENT_ROLE_VERSION,
+  workspaceFlockKeys,
+  type AgentRole,
+  type AcpCapabilityCacheEntry,
+} from '@lody/shared';
 
 const anchor: MinimalVisualAnnotationAnchor = {
   version: 1,
@@ -37,6 +44,77 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
+  it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
+    'reconciles the durable role without overwriting intervening changes: %s',
+    async (scenario) => {
+      const flock = new Flock('role-reconciliation');
+      const role: AgentRole = {
+        v: AGENT_ROLE_VERSION,
+        id: 'role' as never,
+        machineId: 'machine' as never,
+        agentConfigId: 'config' as never,
+        ownerUserId: 'owner',
+        visibility: 'private',
+        name: 'Reviewer',
+        runConfig: { configOptionValues: { retired: 'value' } },
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const key = workspaceFlockKeys.agentRole(role.id);
+      flock.set(key, role as never);
+      flock.commit();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const repo = {
+        openFlockDoc: async () => {
+          await gate;
+          if (scenario === 'write-failure') throw new Error('storage unavailable');
+          return { flock, syncOnce: async () => {} };
+        },
+      };
+      const writer = createDirectWorkspaceWriter({ repo } as never);
+      const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+      const capability: AcpCapabilityCacheEntry = {
+        cliType: 'builtin',
+        agentType: 'codex',
+        provenance: 'runtime',
+        fetchedAt: 2,
+        modes: [],
+        models: [],
+        configOptions: [],
+      };
+      const pending = persistReconciledAgentRole(
+        runtime,
+        role,
+        capability,
+        scenario === 'other-owner' ? 'someone-else' : 'owner',
+        3,
+        () => scenario !== 'cancelled'
+      );
+      if (scenario === 'edited')
+        flock.set(key, { ...role, name: 'New name', revision: 2 } as never);
+      if (scenario === 'deleted') flock.delete(key);
+      flock.commit();
+      const before = flock.get(key);
+      release();
+      if (scenario === 'write-failure')
+        await expect(pending).rejects.toThrow('storage unavailable');
+      else await pending;
+      if (scenario === 'unchanged') {
+        expect(flock.get(key)).toEqual({
+          ...role,
+          runConfig: { configOptionValues: {} },
+          revision: 2,
+          updatedAt: 3,
+        });
+        await persistReconciledAgentRole(runtime, role, capability, 'owner', 4, () => true);
+        expect(flock.get(key)).toMatchObject({ revision: 2, updatedAt: 3 });
+      } else expect(flock.get(key)).toEqual(before);
+    }
+  );
   it.each([
     ['before acquisition', 'created'],
     ['before acquisition', 'dismissed'],

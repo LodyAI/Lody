@@ -42,6 +42,15 @@ export interface WorkspaceWriter {
   /** Flock-doc row put (agent config, machine command queue, external history). */
   flockRowPut(flockDocId: string, key: readonly string[], value: unknown): Promise<void>;
 
+  /** Compute a replacement against the current row in one local transaction.
+   * Return undefined to leave the row untouched (including an absent row).
+   */
+  flockRowUpdate(
+    flockDocId: string,
+    key: readonly string[],
+    update: (current: unknown) => unknown | undefined
+  ): Promise<boolean>;
+
   /** Insert a Flock-doc row only when its key is absent in the same transaction. */
   flockRowPutIfAbsent(
     flockDocId: string,

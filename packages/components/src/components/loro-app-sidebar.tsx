@@ -1614,13 +1614,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
-      void archiveSession(sessionId as SessionId);
-      if (!workspaceSlug) return;
-      if (selectedSessionId !== sessionId) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-      });
+      void archiveSession(sessionId as SessionId)
+        .then(async () => {
+          if (!workspaceSlug || selectedSessionId !== sessionId) return;
+          await router.navigate({
+            to: '/$workspaceName/chat',
+            params: { workspaceName: workspaceSlug },
+          });
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]
   );
@@ -1916,16 +1920,16 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionIds: string[]) => {
       void (async () => {
         for (const sessionId of sessionIds) {
-          // Sequential: archiveSession read-modify-writes the machine doc's
-          // needToArchiveSessions map, so concurrent calls drop entries.
           await archiveSession(sessionId as SessionId);
         }
-      })();
-      if (!workspaceSlug) return;
-      if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
+        if (!workspaceSlug) return;
+        if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
+        await router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
+        });
+      })().catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : String(error));
       });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]

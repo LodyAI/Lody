@@ -26,3 +26,9 @@ An accepted Operation captures the resolved Role configuration rather than rerea
 a mutable catalog on retry. Otherwise editing or deleting a Role could change what
 an already accepted request executes. Session provenance describes creation; it is
 not another configuration authority.
+
+Workspace startup also reconciles owned Roles against fresh runtime schemas without
+opening Settings. A conditional writer transaction fences delayed probe results
+against edits and deletion, then uses the same durability/upload split. See the
+[schema reconciliation Spec](../../specs/agent-role-schema-reconciliation.md) for
+which options may be removed and which pins remain user decisions.

@@ -1145,7 +1145,7 @@ export const SessionChatInputArea = memo(
 
     const startFileUpload = useCallback(
       async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId || !authToken) {
+        if (!workspaceId) {
           updatePendingFile(targetSessionId, localId, (entry) => ({
             ...entry,
             status: 'failed',
@@ -1183,6 +1183,16 @@ export const SessionChatInputArea = memo(
           } catch {
             // Local handoff threw; fall back to the cloud upload path.
           }
+        }
+
+        if (!authToken) {
+          updatePendingFile(targetSessionId, localId, (entry) => ({
+            ...entry,
+            status: 'failed',
+            progress: 0,
+            error: fileUploadMissingAuthLabel,
+          }));
+          return;
         }
 
         const abort = new AbortController();
@@ -2515,9 +2525,12 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
-        className={getSessionChatInputAreaShellClassName({
-          protectFromEdgeBackZone: isMobile,
-        })}
+        className={cn(
+          getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile }),
+          // ChatComposer owns the desktop 8px gap; keep only the native safe-area inset here.
+          !isMobile &&
+            'pb-[max(0px,env(safe-area-inset-bottom,0px)-var(--native-keyboard-height,0px))]'
+        )}
       >
         {/* The Role editor is a Dialog, so it is hosted OUT here rather than
             inside the run-config menu or the mobile drawer, where it would

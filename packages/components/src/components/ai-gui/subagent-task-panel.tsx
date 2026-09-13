@@ -62,8 +62,16 @@ const StatusIcon = ({ task }: { task: SubagentTask }) => {
   return <Loader2 className="h-3.5 w-3.5 flex-none shrink-0 animate-spin text-muted-foreground" />;
 };
 
-const SubagentTaskRow = ({ task }: { task: SubagentTask }) => {
+const SubagentTaskRow = ({
+  task,
+  onCancel,
+}: {
+  task: SubagentTask;
+  onCancel?: (taskId: string) => Promise<void>;
+}) => {
   const { t } = useTranslation();
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string>();
 
   const actor =
     task.actor ||
@@ -129,7 +137,37 @@ const SubagentTaskRow = ({ task }: { task: SubagentTask }) => {
             {action}
           </span>
         ) : null}
+        {onCancel && isRunning(task) && task.taskKind === 'subagent' ? (
+          <button
+            type="button"
+            disabled={cancelling}
+            className="shrink-0 rounded px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+            aria-label={t('sessions.subagentTasks.cancelNamed', {
+              name: task.description || actor,
+            })}
+            onClick={() => {
+              void (async () => {
+                setCancelling(true);
+                setError(undefined);
+                try {
+                  await onCancel(task.taskId);
+                } catch (cause) {
+                  setError(cause instanceof Error ? cause.message : String(cause));
+                } finally {
+                  setCancelling(false);
+                }
+              })();
+            }}
+          >
+            {t(cancelling ? 'sessions.subagentTasks.cancelling' : 'common.cancel')}
+          </button>
+        ) : null}
       </div>
+      {error ? (
+        <span role="alert" className="text-xs text-status-danger">
+          {error}
+        </span>
+      ) : null}
       {usageLabel ? (
         <span className="pl-5 text-[11px] font-mono tabular-nums text-muted-foreground/70">
           {usageLabel}
@@ -139,7 +177,13 @@ const SubagentTaskRow = ({ task }: { task: SubagentTask }) => {
   );
 };
 
-export const SubagentTaskPanel = ({ tasks }: { tasks: readonly SubagentTask[] }) => {
+export const SubagentTaskPanel = ({
+  tasks,
+  onCancel,
+}: {
+  tasks: readonly SubagentTask[];
+  onCancel?: (taskId: string) => Promise<void>;
+}) => {
   const { t } = useTranslation();
   const runningCount = useMemo(() => tasks.filter(isRunning).length, [tasks]);
   const hasRunning = runningCount > 0;
@@ -182,7 +226,7 @@ export const SubagentTaskPanel = ({ tasks }: { tasks: readonly SubagentTask[] })
       {expanded ? (
         <div className="scrollbar-pro mt-0.5 max-h-[22rem] divide-y divide-border/40 overflow-y-auto pl-1 pr-1">
           {tasks.map((task) => (
-            <SubagentTaskRow key={task.taskId} task={task} />
+            <SubagentTaskRow key={task.taskId} task={task} onCancel={onCancel} />
           ))}
         </div>
       ) : null}

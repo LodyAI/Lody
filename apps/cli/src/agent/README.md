@@ -23,7 +23,9 @@ context/message-flow.md "Upstream".
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
 - `setting.ts` — launch resolution for every agent kind.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
-  and npx launch wrapper around the `packages/acp-extension-dsh` submodule.
+  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
+  the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
+  while preset and session directories remain filesystem paths.
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package
   `.tar.zst` artifacts, checksums, resumable downloads, the active installation profile's
   `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.
@@ -186,11 +188,42 @@ override entries still apply only when their source-version suffix matches the s
 
 ### Session titles
 
-Builtin Claude owns session title generation through ACP `session_info_update`. Builtin Codex
-still uses the isolated generator in `title-generator.ts`, but its adapter tags every pushed
-title with `_meta.lody.titleSource`. Other providers use `title-generator.ts` /
-`response-utils.ts`. The shared `usesAcpProvidedSessionTitle()` predicate hides obsolete
-provider title settings only for Claude.
+Builtin Claude, Codex and Grok own session title generation through ACP
+`session_info_update`; Kimi and the DeepSeek Harness still use `title-generator.ts` /
+`response-utils.ts` and the `titleGeneration` config. `BUILTIN_ACP_TITLE_OWNERSHIP` in
+`packages/shared/src/ai.ts` is the single table behind both facts, and its doc comment
+carries the per-adapter mechanism; the audit evidence and what each remaining gap would
+cost to close live in the [decision note](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
+
+Two predicates read that table, and the difference between them is the part worth knowing.
+`acpOwnsSessionTitleGeneration()` keeps the isolated session out of an agent's title path
+and hides its obsolete title settings. `trustsUntaggedAcpSessionTitle()` is narrower: it
+answers whether a pushed title may be stored without a `_meta.lody.titleSource` tag, which
+is true only for the adapters that send no tag at all. Codex owns its generation but tags
+every title and previews the raw first prompt as `fallback`, so trusting it untagged would
+make that preview the session title.
+
+A runtime override revokes ownership. `BuiltinRuntimeOverrides` can aim the same
+`agentType` at an executable predating the title behaviour, and that session would otherwise
+get no title at all — generator skipped, nothing pushed, and the setting that would fix it
+hidden — so an overridden runtime keeps the local generator.
+
+The daemon does not name branches. A worktree session stays on the `session/<id>` branch
+`worktree-manager.ts` created for it, and `syncSessionBranchName` records whatever branch the
+session is actually on after every turn, so an agent that renames the branch itself is picked
+up. For GitHub projects the agent is asked to do exactly that — see
+`GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
+
+This used to be an automatic prompt-to-branch rename, removed because it could not be made
+safe. A branch name is a ref: it reaches the remote as soon as the session opens a PR, so
+deriving one from prompt text publishes prompt text, and "rotate the password before Friday"
+is an ordinary request. Two filters were tried and both failed for the same reason — a secret
+has no reliable shape, since `hunter2` is a password and an ordinary word. Stripping
+credential-shaped tokens left everything that did not look like one; failing closed on
+credential *syntax* still let plain prose through, so it fails open on every miss and cannot
+be a security boundary. Naming refs after user text needs a source provably isolated from the
+prompt, and no such source exists at session-ready: the ACP title has not arrived yet, and the
+isolated generator's own fallback is the raw prompt.
 
 ### Local project identity
 

@@ -124,6 +124,8 @@ const buildBrokerAuthEnv = (auth: GitCredentialBrokerAuth | undefined): NodeJS.P
 
 export type RemoveWorktreeOptions = {
   baseBranchName?: string;
+  /** Keep the session branch; only the worktree directory goes away. */
+  preserveBranch?: boolean;
 };
 
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_NAME = 'Lody Archive';
@@ -1470,7 +1472,7 @@ export class WorktreeManager {
         deleteBranch: true,
         branchName,
       });
-      if (resolvedBranchName) {
+      if (resolvedBranchName && options?.preserveBranch !== true) {
         if (this.shouldDeleteRemovedBranch(resolvedBranchName, options)) {
           await this.cleanupBranch(resolvedBranchName);
         }

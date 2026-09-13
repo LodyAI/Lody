@@ -22,6 +22,8 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
   declarations and private workspace packages are forbidden. Prime the token provider
   before reading `getGatewayBaseUrl()`, and never let runtime transports or Machine RPC
   require `LODY_LORO_STREAMS_BASE_URL` as a parallel hidden composition path.
+- PR association uses the HTTP action proxy at `authSiteUrl`, not the public Convex
+  RPC endpoint at `authBaseUrl`; the association function is internal-only.
 - Local session control preserves every intermediate response: new clients negotiate
   NDJSON, legacy clients keep the buffered JSON envelope. `MachineRuntime` may collect
   responses for completion, but must also forward each to the streaming observer as it

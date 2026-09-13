@@ -5,6 +5,8 @@ import {
   type AgentConfigMeta,
   type ChatFailedCode,
   type ChatFailedReason,
+  type SessionGoalAction,
+  type SessionGoalResponse,
   type IssuePRMention,
   type LocalProjectId,
   type MachineAcpBinaryInstallRequestValidated,
@@ -58,6 +60,7 @@ import {
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { randomUUID } from 'node:crypto';
 import type { ModelInfo } from '@lody/shared';
 import { Cause, Data, Effect, Exit, Fiber, type Scope } from 'effect';
 import {
@@ -88,6 +91,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -102,7 +106,10 @@ import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
-import { resolveResumableAcpSessionId } from './session-dispatch-logic';
+import {
+  resolveDispatchAcpSessionId,
+  resolveResumableAcpSessionId,
+} from './session-dispatch-logic';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
 import type { MachineAccessVerification } from './session-access-retry';
 import {
@@ -130,12 +137,10 @@ type FinalizeTurnContext = {
   project?: ProjectRef;
   isTurnCancelled?: () => boolean;
   abortSignal?: AbortSignal;
-  onAutoPromptStart?: () => void | Promise<void>;
-  onAutoPromptEnd?: () => void | Promise<void>;
   /**
    * False when the prompt returned without the agent ever emitting output. The
-   * turn is still finalized (diff stats, PR detection, auto-commit all stay
-   * correct), but it must not be announced as a completed answer.
+   * turn is still finalized (diff stats, dirty-worktree probe, and PR detection
+   * all stay correct), but it must not be announced as a completed answer.
    */
   producedOutput?: boolean;
 };
@@ -204,18 +209,8 @@ type TurnFinalizationEffects = {
     project?: ProjectRef;
     branchName?: string | null;
   }) => Promise<{ readonly baseBranch: string } | null>;
-  autoCommitAndPushForPR: (ctx: {
-    sessionId: SessionId;
-    session: ISession;
-    sessionDoc: SessionDocument;
-    project?: ProjectRef;
-    preferredBaseBranch?: string;
-    userId: string;
-    isTurnCancelled?: () => boolean;
-    abortSignal?: AbortSignal;
-    onAutoPromptStart?: () => void | Promise<void>;
-    onAutoPromptEnd?: () => void | Promise<void>;
-  }) => Promise<void>;
+  /** Publish the workspace dirty/unpushed flags alone, for paths that skip diff stats. */
+  syncWorkspaceGitState: (sessionId: SessionId, session: ISession) => Promise<void>;
   refreshCodeCollabSharedState?: (sessionId: SessionId) => Promise<void>;
   notifySessionCompleted: (
     sessionId: SessionId,
@@ -236,6 +231,14 @@ type PromptHandoffRun = {
   signalSuccessor: () => void;
 };
 
+type SessionGoalTurnRequest = {
+  sessionId: SessionId;
+  control: GoalPromptControl;
+  userId: string;
+  userName: string;
+  userEmail: string;
+};
+
 type TurnInvocation = {
   /** Causal input Turn for authorization and durable provenance. */
   sourceTurnId: string;
@@ -249,19 +252,23 @@ type TurnRuntimeState = {
   turnId: string;
   userTurnId?: string;
   invocation?: TurnInvocation;
+  goalControl?: GoalPromptControl;
   session?: ISession;
   project?: ProjectRef;
   baseCommitHash?: string | null;
   turnStartWorkingTreeDiff?: GitWorkingTreeDiffBaseline | null;
   promptStarted: boolean;
   promptInFlight: boolean;
-  autoPromptInFlight: boolean;
   promptFailed: boolean;
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
+  /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
+  workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
   cancelRequested: boolean;
   cancelFinalized: boolean;
+  /** One drain deadline shared by Stop and the cancellation finalizer. */
+  cancellationDrain?: Promise<void>;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
   settlement?: {
@@ -292,8 +299,6 @@ export type SessionExecutionSnapshot = {
   hasReusableSession: boolean;
   /** True while edit-and-resend owns the durable history tail. */
   hasRewriteBarrier: boolean;
-  /** True while post-turn automation owns an ACP prompt. */
-  hasActiveAutomation: boolean;
 };
 
 type TurnCancellationFinalizerOptions = {
@@ -352,6 +357,8 @@ type VisibleSessionTurnOptions = {
    * mutate user dispatch status or pointers.
    */
   assistantEntryParentTurnId?: string;
+  /** Goal action this turn runs; the agent receives it as prompt metadata. */
+  goalControl?: GoalPromptControl;
   onTurnStarted?: () => Promise<boolean>;
   onTurnSettled?: (settlement: SessionTurnSettlement) => Promise<void>;
   /**
@@ -371,10 +378,12 @@ type VisibleSessionTurnPlan = {
 };
 
 /** How the turn payload reached this machine (RPC fast path vs CRDT history vs queue promotion). */
-export type SessionDispatchSource = 'rpc' | 'crdt' | 'queue' | 'delivery';
+export type SessionDispatchSource = 'rpc' | 'crdt' | 'queue' | 'delivery' | 'goal';
 
 type SessionDispatchOptions = {
   dispatchSource?: SessionDispatchSource;
+  /** Goal action this turn exists to run; travels to the agent as prompt metadata. */
+  goalControl?: GoalPromptControl;
   /**
    * Runs only after this process has synchronously claimed the per-Session
    * visible-turn owner. Delivery uses this to append its system cause without
@@ -549,14 +558,6 @@ export type SessionExecutionServiceDeps = {
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides
   ) => Promise<void>;
-  maybeRenameSessionBranchFromPrompt: (
-    sessionId: SessionId,
-    session: ISession,
-    cliType: AgentConfigCliType,
-    agentType: string,
-    prompt: string,
-    env?: Record<string, string>
-  ) => Promise<void>;
   processMessageQueue: (sessionId: SessionId) => Promise<void>;
   syncLiveActivitySummary?: (userId: string) => Promise<void>;
   collectMachineResources: () => Promise<MachineResourceInfo>;
@@ -587,6 +588,7 @@ export type SessionExecutionServiceDeps = {
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
+    goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }>;
@@ -727,6 +729,9 @@ export class SessionExecutionService {
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
+  /** At most one goal action waits per session; a newer action replaces it. */
+  private readonly pendingGoalTurnBySession = new Map<SessionId, SessionGoalTurnRequest>();
+  private readonly goalTurnWaiterSessions = new Set<SessionId>();
   // Serializes ownership mutations per session so prompt completion and steer
   // application never race the boundary. No global concurrency cap (Infinity):
   // this is pure per-session serialization, matching the old hand-rolled lock.
@@ -853,29 +858,6 @@ export class SessionExecutionService {
     // Prompt hot-path invariant: notification/Live Activity sync is best-effort
     // and must not delay calling the ACP agent prompt.
     void this.syncLiveActivitySummary(userId, fields);
-  }
-
-  private async markPromptWorkingStarted(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument,
-    userId: string,
-    triggerReason: string
-  ): Promise<void> {
-    try {
-      this.deps.setSessionActivePresencePhase(sessionId, 'thinking');
-      await sessionDoc.setStatus(SessionStatusFactory.running());
-      this.captureStatusChanged(sessionId, 'running', undefined, triggerReason);
-    } catch (error) {
-      this.deps.logger.warn(
-        `[${sessionId}] Failed to mark prompt working: ${formatErrorMessage(error)}`
-      );
-      return;
-    }
-    this.scheduleLiveActivitySummarySync(userId, {
-      sessionId,
-      triggerReason,
-      status: 'running',
-    });
   }
 
   private async markPromptWorkingEnded(
@@ -1112,7 +1094,6 @@ export class SessionExecutionService {
       hasBlockingPendingCreate: Boolean(runtime?.pendingSession || (runtime && pendingSession)),
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),
       hasRewriteBarrier: this.rewriteBarrierSessions.has(sessionId),
-      hasActiveAutomation: Boolean(runtime?.autoPromptInFlight),
     };
   }
 
@@ -1185,6 +1166,191 @@ export class SessionExecutionService {
       bySession.set(sessionId, runtime.turnId);
     }
     return Array.from(bySession, ([sessionId, turnId]) => ({ sessionId, turnId }));
+  }
+
+  /**
+   * Run a goal action against a session.
+   *
+   * Status-only actions go out-of-band when the agent advertises that: an
+   * active goal holds this session's only prompt slot open across the agent's
+   * own continuations, so a pause that waited for a free slot would wait for
+   * the thing it is trying to stop. Everything else runs inside a Lody-owned
+   * turn, and if a turn is already running the action waits for that turn
+   * instead of being dropped — the caller gets `queued`, not a dead button.
+   */
+  async controlSessionGoal(options: {
+    sessionId: SessionId;
+    action: SessionGoalAction;
+    objective?: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+  }): Promise<SessionGoalResponse> {
+    const { sessionId, action } = options;
+    const respond = (
+      disposition: SessionGoalResponse['disposition'],
+      error?: string
+    ): SessionGoalResponse => ({
+      type: 'session/goal_response',
+      sessionId,
+      action,
+      accepted: disposition === 'applied' || disposition === 'queued',
+      disposition,
+      ...(error ? { error } : {}),
+    });
+
+    const agentClient = this.deps.sessionManager.getSession(sessionId)?.agentClient;
+    if (agentClient) {
+      const transport = agentClient.resolveGoalActionTransport(action);
+      if (transport === null) {
+        return respond('unsupported', `Agent does not support goal ${action}`);
+      }
+      if (transport === 'request') {
+        // A later Pause/Clear supersedes work that has not reached the provider.
+        this.pendingGoalTurnBySession.delete(sessionId);
+        try {
+          await agentClient.controlGoal(action);
+          return respond('applied');
+        } catch (error) {
+          this.deps.logger.warn(
+            `[${sessionId}] Goal ${action} control request failed: ${formatErrorMessage(error)}`
+          );
+          return respond('error', formatErrorMessage(error));
+        }
+      }
+    }
+
+    // No live agent, or an action that needs a turn: the turn boots the session
+    // when necessary and lets the agent client pick its transport at prompt time.
+    const control: GoalPromptControl = {
+      action,
+      ...(options.objective ? { objective: options.objective } : {}),
+    };
+    const request: SessionGoalTurnRequest = {
+      sessionId,
+      control,
+      userId: options.userId,
+      userName: options.userName,
+      userEmail: options.userEmail,
+    };
+    // Acceptance is not prompt completion (or even a claim of turn ownership).
+    // The worker reports startup failures through the session's existing history.
+    this.queueGoalTurn(request);
+    return respond('queued');
+  }
+
+  /**
+   * Hold one goal action per session until the running turn releases the prompt.
+   *
+   * A newer action replaces an older one: the user's latest intent is the only
+   * one worth running, and running a stale pause after a resume would undo it.
+   */
+  private queueGoalTurn(request: SessionGoalTurnRequest): void {
+    const { sessionId } = request;
+    this.pendingGoalTurnBySession.set(sessionId, request);
+    if (this.goalTurnWaiterSessions.has(sessionId)) {
+      return;
+    }
+    this.goalTurnWaiterSessions.add(sessionId);
+    void (async () => {
+      for (;;) {
+        const pending = this.pendingGoalTurnBySession.get(sessionId);
+        if (!pending) return;
+        const snapshot = this.getExecutionSnapshot(sessionId);
+        if (snapshot.hasActiveTurn && snapshot.activeTurnId) {
+          await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
+          continue;
+        }
+        try {
+          const claimed = await this.startGoalTurn(pending);
+          if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
+          // Another dispatch may win while metadata is loading. Retain the
+          // accepted request and wait for its owner instead of reporting success.
+          if (!claimed && this.getExecutionSnapshot(sessionId).hasActiveTurn) continue;
+          if (!claimed) throw new Error('Goal turn could not acquire session ownership');
+          this.pendingGoalTurnBySession.delete(sessionId);
+          // A claimed turn that never submitted its prompt already records its
+          // startup/cancellation outcome through the ordinary turn lifecycle.
+        } catch (error) {
+          if (this.pendingGoalTurnBySession.get(sessionId) !== pending) continue;
+          this.pendingGoalTurnBySession.delete(sessionId);
+          const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          await this.deps.recordChatFailure(
+            sessionDoc,
+            'turn_pre_prompt_failed',
+            `Goal ${pending.control.action} failed: ${formatErrorMessage(error)}`
+          );
+        }
+      }
+    })()
+      .catch((error: unknown) => {
+        this.deps.logger.error(
+          `[${sessionId}] Failed to report queued goal failure: ${formatErrorMessage(error)}`
+        );
+      })
+      .finally(() => {
+        this.goalTurnWaiterSessions.delete(sessionId);
+        const pending = this.pendingGoalTurnBySession.get(sessionId);
+        if (pending) this.queueGoalTurn(pending);
+      });
+  }
+
+  private async startGoalTurn(request: SessionGoalTurnRequest): Promise<boolean> {
+    const { sessionId, control } = request;
+    const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const meta = await sessionDoc.getMetaState();
+    if (!meta) {
+      throw new Error(`Session ${sessionId} has no metadata`);
+    }
+    if (meta.isArchived) {
+      throw new Error(`Session ${sessionId} is archived`);
+    }
+    if (!meta.cliType || !meta.agentType) {
+      throw new Error(`Session ${sessionId} has no agent configuration`);
+    }
+    const resumeAcpSessionId = resolveDispatchAcpSessionId(meta);
+    let claimed = false;
+    await this.continueSession(
+      {
+        type: 'session/chat',
+        sessionId,
+        machineId: this.deps.machineId,
+        workspaceId: this.deps.workspaceId,
+        ...(meta.project ? { project: meta.project } : {}),
+        acpSessionConfig: {
+          // Fallback blocks only: the agent replaces them when the action
+          // schedules its own continuation. The run configuration is
+          // deliberately absent so a goal turn cannot change model or mode.
+          prompt: 'Continue working toward the active goal.',
+          cliType: meta.cliType,
+          agentType: meta.agentType,
+          ...(resumeAcpSessionId ? { resume: resumeAcpSessionId } : {}),
+        },
+        // A goal turn owns an assistant entry but no user message, so this id
+        // is provenance only and never becomes a dispatch pointer.
+        userTurnId: `goal:${control.action}:${randomUUID()}`,
+        userId: request.userId,
+        userName: request.userName,
+        userEmail: request.userEmail,
+      },
+      {
+        dispatchSource: 'goal',
+        goalControl: control,
+        onTurnClaimed: async () => {
+          claimed = this.pendingGoalTurnBySession.get(sessionId) === request;
+          return claimed;
+        },
+        onTurnStarted: async () => {
+          if (this.pendingGoalTurnBySession.get(sessionId) !== request) {
+            await this.handleTurnError(sessionId, sessionDoc);
+            return false;
+          }
+          this.pendingGoalTurnBySession.delete(sessionId);
+          return true;
+        },
+      }
+    );
+    return claimed;
   }
 
   async steerSession(options: {
@@ -1262,7 +1428,7 @@ export class SessionExecutionService {
     if (runtime.turnId !== options.expectedTurnId) {
       return await rejectUndelivered('stale-turn');
     }
-    if (!runtime.promptInFlight) {
+    if (!runtime.promptInFlight || runtime.cancelRequested) {
       return await rejectUndelivered('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
@@ -1297,7 +1463,7 @@ export class SessionExecutionService {
       }
       // No provider request has been submitted yet, so this guide is still
       // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight) {
+      if (!runtime.promptInFlight || runtime.cancelRequested) {
         return await rejectUndelivered('no-active-turn');
       }
       return null;
@@ -1334,10 +1500,10 @@ export class SessionExecutionService {
         return preSubmitRejection;
       }
       const ownedPromptRun = runtime.activePromptRun;
-      if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
+      if (runtime.cancelRequested || !ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
         return await rejectUndelivered(
           'busy',
-          'Prompt owner was transitioning between logical turns'
+          'Prompt owner is cancelling or transitioning between logical turns'
         );
       }
 
@@ -1348,12 +1514,25 @@ export class SessionExecutionService {
       const application = await steerRun.applied;
       try {
         if (
+          runtime.cancelRequested ||
           this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
           !runtime.promptInFlight ||
           runtime.turnId !== previousTurnId ||
           runtime.activePromptRun !== ownedPromptRun
         ) {
-          return reject('stale-turn', 'Steer application arrived after ownership changed');
+          // Provider acceptance forbids replay; Stop keeps the source cancellation owner.
+          if (runtime.cancelRequested) {
+            await this.setTerminalUserTurnStatus(
+              options.sessionId,
+              sessionDoc,
+              options.userTurnId,
+              'canceled'
+            );
+          }
+          return reject(
+            'stale-turn',
+            'Steer application arrived after cancellation or ownership changed'
+          );
         }
 
         // The provider has accepted this steer and may execute tools before
@@ -1625,7 +1804,7 @@ export class SessionExecutionService {
   private createTurnRuntime(
     options: Pick<
       VisibleSessionTurnOptions,
-      'sessionId' | 'session' | 'userTurnId' | 'invocation' | 'onTurnSettled'
+      'sessionId' | 'session' | 'userTurnId' | 'invocation' | 'onTurnSettled' | 'goalControl'
     > & { turnId: string }
   ): TurnRuntimeState {
     return {
@@ -1633,13 +1812,14 @@ export class SessionExecutionService {
       turnId: options.turnId,
       userTurnId: options.userTurnId,
       invocation: options.invocation,
+      goalControl: options.goalControl,
       session: options.session,
       promptStarted: false,
       promptInFlight: false,
-      autoPromptInFlight: false,
       promptFailed: false,
       finalizeStarted: false,
       finalizeCompleted: false,
+      workspaceGitStateSynced: false,
       prePromptFailureRecorded: false,
       cancelRequested: false,
       cancelFinalized: false,
@@ -1826,6 +2006,34 @@ export class SessionExecutionService {
       });
   }
 
+  private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
+    if (runtime?.cancellationDrain) return runtime.cancellationDrain;
+    const pendingPrompt = session.agentClient?.pendingPromptCompletion;
+    if (!pendingPrompt) return Promise.resolve();
+
+    const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
+      async () => {
+        // A terminal response may have won just after the timeout fired.
+        if (!session.agentClient?.pendingPromptCompletion) return;
+        if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
+        this.deps.logger.warn(
+          `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
+        );
+        try {
+          await session.terminate(true);
+        } catch (error) {
+          this.deps.logger.warn(
+            `[${session.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+          );
+          // Failed termination is not permission to reuse a busy agent.
+          await pendingPrompt;
+        }
+      }
+    );
+    if (runtime) runtime.cancellationDrain = drain;
+    return drain;
+  }
+
   private createAcpReplaySuppressionResource(sessionId: SessionId): {
     acquire: Effect.Effect<void, never, Scope.Scope>;
     release: Effect.Effect<void, never, never>;
@@ -1941,6 +2149,19 @@ export class SessionExecutionService {
         );
       }
 
+      // A stopped turn leaves the agent's edits on disk and nothing commits them
+      // or pushes on the session's behalf, so the dirty/unpushed flags that
+      // raise the Info Bar's Commit & Push have to be refreshed here too. This is the
+      // route a Stop during the PROMPT takes; the one in `finalizeTurn` only
+      // covers a Stop that raced finalization. Publish before idle so the flag
+      // has landed by the time the UI stops showing Working.
+      const cancelledSession = options.session;
+      if (cancelledSession) {
+        yield* self.tryPromise(() =>
+          self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, cancelledSession)
+        );
+      }
+
       yield* self.ignoreWithWarning(
         options.sessionId,
         'Failed to set cancelled turn status to idle',
@@ -1953,30 +2174,10 @@ export class SessionExecutionService {
       );
 
       const sessionToDrain = options.session;
-      const pendingPrompt = sessionToDrain?.agentClient?.pendingPromptCompletion;
-      if (pendingPrompt && sessionToDrain && !options.terminateSession) {
+      if (sessionToDrain && !options.terminateSession) {
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
-        yield* self
-          .tryPromise(() => withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out'))
-          .pipe(
-            Effect.catchAll(() =>
-              self.tryPromise(async () => {
-                self.deps.logger.warn(
-                  `[${options.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
-                );
-                try {
-                  await sessionToDrain.terminate(true);
-                } catch (error) {
-                  self.deps.logger.warn(
-                    `[${options.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
-                  );
-                  // Failed termination is not permission to reuse a busy agent.
-                  await pendingPrompt;
-                }
-              })
-            )
-          );
+        yield* self.tryPromise(() => self.drainCancelledPrompt(sessionToDrain, runtime));
       }
 
       if (runtime?.promptStarted) {
@@ -2441,6 +2642,39 @@ export class SessionExecutionService {
     }
   }
 
+  /**
+   * Publish `workspaceDirty` / `workspaceUnpushed` at most once per turn.
+   *
+   * A cancelled turn reaches this from `finalizeTurn`'s bail-out AND from
+   * `finalizeCancelledTurnEffect` (the `acquireRelease` handler runs for every
+   * cancelled turn), so without the shared latch a single Stop spawns both git
+   * probes twice and rewrites the same values. `syncWorkspaceGitState` swallows
+   * its own failures, so no caller needs to guard this.
+   */
+  private markWorkspaceGitStateSynced(sessionId: SessionId, turnId: string): void {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+  }
+
+  private async syncWorkspaceGitStateOnce(
+    sessionId: SessionId,
+    turnId: string,
+    session: ISession
+  ): Promise<void> {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime?.workspaceGitStateSynced) {
+      return;
+    }
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+    await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
+    });
+  }
+
   private async runTurnFinalizationStage<T>(
     sessionId: SessionId,
     turnId: string,
@@ -2524,6 +2758,7 @@ export class SessionExecutionService {
       project,
     } = ctx;
     const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
+    const githubProject = resolveProjectGitHubRepo(project);
     const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
       if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
         return false;
@@ -2531,6 +2766,12 @@ export class SessionExecutionService {
       this.deps.logger.debug(
         `[${sessionId}] Turn ${turnId} was cancelled during ${stage}; skipping remaining completion post-processing`
       );
+      // The rest of finalization is skipped, but the agent's edits are still on
+      // disk. The dirty/unpushed flags are what raise the Info Bar's Commit &
+      // Push, and nothing commits or pushes on the session's behalf, so an
+      // interrupted turn that left stale `false`s here would hide real
+      // unpublished work behind a PR that looks current.
+      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session);
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.deps.touchSession(sessionId);
       return true;
@@ -2542,7 +2783,6 @@ export class SessionExecutionService {
       return;
     }
 
-    const githubProject = resolveProjectGitHubRepo(project);
     let branchName: string | null = null;
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
@@ -2598,41 +2838,10 @@ export class SessionExecutionService {
           preferredBaseBranch: preferredStatsBaseBranch,
           skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
         });
+        this.markWorkspaceGitStateSynced(sessionId, turnId);
       });
 
       if (await stopIfTurnCancelled('diff recording')) {
-        return;
-      }
-    }
-
-    if (githubProject) {
-      try {
-        await this.runTurnFinalizationStage(
-          sessionId,
-          turnId,
-          'autoCommitAndPushForPR',
-          async () => {
-            await this.deps.turnFinalization.autoCommitAndPushForPR({
-              sessionId,
-              session,
-              sessionDoc,
-              project,
-              preferredBaseBranch: preferredStatsBaseBranch,
-              userId,
-              isTurnCancelled,
-              abortSignal: ctx.abortSignal,
-              onAutoPromptStart: ctx.onAutoPromptStart,
-              onAutoPromptEnd: ctx.onAutoPromptEnd,
-            });
-          }
-        );
-      } catch (error) {
-        this.deps.logger.error(
-          `[${sessionId}] auto-commit-push failed: ${formatErrorMessage(error)}`
-        );
-      }
-
-      if (await stopIfTurnCancelled('auto-commit/push')) {
         return;
       }
     }
@@ -2974,6 +3183,9 @@ export class SessionExecutionService {
                               turnId: runtime.turnId,
                               promptPromise: agentClient.prompt(acpSessionId, promptBlocks, {
                                 signal,
+                                ...(runtime.goalControl
+                                  ? { goalControl: runtime.goalControl }
+                                  : {}),
                               }),
                             });
                             await self.awaitPromptHandoffTail(runtime, initialRun);
@@ -3655,8 +3867,11 @@ export class SessionExecutionService {
     prepareOptions?: { sessionDoc?: SessionDocument }
   ): Promise<VisibleSessionTurnPlan> {
     const { sessionId, acpSessionConfig, userId, userName, userEmail, userTurnId } = message;
+    // System-caused turns own an assistant entry, not a user dispatch pointer.
     const executionUserTurnId =
-      dispatchOptions?.dispatchSource === 'delivery' ? undefined : userTurnId;
+      dispatchOptions?.dispatchSource === 'delivery' || dispatchOptions?.dispatchSource === 'goal'
+        ? undefined
+        : userTurnId;
     const sessionDoc =
       prepareOptions?.sessionDoc ??
       (await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId));
@@ -4322,24 +4537,6 @@ export class SessionExecutionService {
                 producedOutput,
                 isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),
                 abortSignal: signal,
-                onAutoPromptStart: async () => {
-                  runtime.autoPromptInFlight = true;
-                  await self.markPromptWorkingStarted(
-                    sessionId,
-                    sessionDoc,
-                    completedRequesterUserId,
-                    'auto_prompt_started'
-                  );
-                },
-                onAutoPromptEnd: async () => {
-                  runtime.autoPromptInFlight = false;
-                  await self.markPromptWorkingEnded(
-                    sessionId,
-                    sessionDoc,
-                    completedRequesterUserId,
-                    'auto_prompt_completed'
-                  );
-                },
               })
           )
         );
@@ -4419,6 +4616,7 @@ export class SessionExecutionService {
         ...(dispatchOptions?.dispatchSource === 'delivery'
           ? { assistantEntryParentTurnId: userTurnId }
           : {}),
+        ...(dispatchOptions?.goalControl ? { goalControl: dispatchOptions.goalControl } : {}),
         ...(dispatchOptions?.onTurnStarted ? { onTurnStarted: dispatchOptions.onTurnStarted } : {}),
         ...(dispatchOptions?.onTurnSettled ? { onTurnSettled: dispatchOptions.onTurnSettled } : {}),
         ...(dispatchOptions?.dispatchSource
@@ -4905,17 +5103,6 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          if (shouldPrepareWorktree) {
-            void self.deps.maybeRenameSessionBranchFromPrompt(
-              sessionId,
-              session,
-              sessionConfig.agentCliType,
-              sessionConfig.agentType,
-              agentConfig.prompt ?? '',
-              env
-            );
-          }
-
           yield* self.tryPromise(() =>
             traceAsync(
               self.deps.logger,
@@ -5013,24 +5200,6 @@ export class SessionExecutionService {
                   producedOutput,
                   isTurnCancelled: () => self.isTurnCancelled(sessionId, completedTurnId),
                   abortSignal: signal,
-                  onAutoPromptStart: async () => {
-                    runtime.autoPromptInFlight = true;
-                    await self.markPromptWorkingStarted(
-                      sessionId,
-                      sessionDoc,
-                      completedRequesterUserId,
-                      'auto_prompt_started'
-                    );
-                  },
-                  onAutoPromptEnd: async () => {
-                    runtime.autoPromptInFlight = false;
-                    await self.markPromptWorkingEnded(
-                      sessionId,
-                      sessionDoc,
-                      completedRequesterUserId,
-                      'auto_prompt_completed'
-                    );
-                  },
                 })
             )
           );
@@ -5095,16 +5264,100 @@ export class SessionExecutionService {
     error?: string;
   }> {
     const { sessionId, turnId } = message;
+    if (message.subagentTaskId) {
+      // This control never writes lastCanceledTurn or interrupts the parent runtime.
+      if (
+        this.deps.getActiveTurnId(sessionId) !== turnId &&
+        this.currentTurnBySession.get(sessionId) !== turnId
+      )
+        return { success: false, error: 'The parent turn is no longer active.' };
+      const client = this.deps.sessionManager.getSession(sessionId)?.agentClient;
+      if (!client?.isCreated())
+        return { success: false, error: 'The agent is no longer connected.' };
+      try {
+        await client.cancelSubagent(message.subagentTaskId);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);
     const executionTurnId = this.currentTurnBySession.get(sessionId);
+    const runtimeTurnId = this.turnRuntimeBySession.get(sessionId)?.turnId;
     const isPrompting = activeTurnId === turnId;
-    const isCurrentExecutionTurn = executionTurnId === turnId;
-    const currentTurnId = activeTurnId ?? this.currentTurnBySession.get(sessionId);
+    const isCurrentExecutionTurn = executionTurnId === turnId || runtimeTurnId === turnId;
+    const currentTurnId = activeTurnId ?? executionTurnId ?? runtimeTurnId;
     // Cancel is exact-match only: a stale stop request must not interrupt a newer assistant turn.
     if (!isPrompting && !isCurrentExecutionTurn) {
+      // Stale repair mutates session-wide presence and history, so it must not
+      // overlap a newer turn or another durable rewrite. Hold the conflict lease
+      // across the awaited history read and recheck live ownership before
+      // cleaning up: a turn that starts while getHistory() is awaited must keep
+      // its presence and dispatch metadata.
+      if (currentTurnId == null) {
+        const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
+        if (releaseConflict) {
+          try {
+            const liveTurnId =
+              this.deps.getActiveTurnId(sessionId) ??
+              this.currentTurnBySession.get(sessionId) ??
+              this.turnRuntimeBySession.get(sessionId)?.turnId;
+            if (liveTurnId == null) {
+              const history = await sessionDoc.getHistory();
+              const hasUnfinishedRequestedTurn = history.some(
+                (entry) =>
+                  entry.id === turnId &&
+                  entry.role === 'assistant' &&
+                  entry.finished !== true &&
+                  typeof entry.endedAt !== 'number' &&
+                  entry.items?.some(
+                    (item) =>
+                      item.type === 'tool_call' &&
+                      item.activityKind === 'context_compaction' &&
+                      (item.status === 'pending' || item.status === 'in_progress')
+                  ) === true
+              );
+              if (hasUnfinishedRequestedTurn) {
+                this.deps.logger.debug(
+                  `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
+                );
+                this.deps.clearSessionActivePresence(sessionId);
+                await sessionDoc.updateHistory((nextHistory) => {
+                  for (const entry of nextHistory) {
+                    if (entry.id !== turnId) continue;
+                    entry.finished = true;
+                    entry.endedAt = getServerNow();
+                    if (!entry.items) continue;
+                    for (const item of entry.items) {
+                      if (
+                        item.type === 'tool_call' &&
+                        item.activityKind === 'context_compaction' &&
+                        (item.status === 'pending' || item.status === 'in_progress')
+                      ) {
+                        item.status = 'failed';
+                      }
+                    }
+                  }
+                  return nextHistory;
+                });
+
+                await this.finalizeCancelledTurn({
+                  sessionId,
+                  sessionDoc,
+                  turnId,
+                  reportTurnError: false,
+                });
+                return { success: true };
+              }
+            }
+          } finally {
+            releaseConflict();
+          }
+        }
+      }
       this.deps.logger.debug(
         `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
       );
@@ -5113,6 +5366,7 @@ export class SessionExecutionService {
       return { success: true };
     }
 
+    this.pendingGoalTurnBySession.delete(sessionId);
     this.markTurnCancelled(sessionId, turnId);
     const runtime = this.getTurnRuntime(sessionId, turnId);
     if (runtime) {
@@ -5122,9 +5376,6 @@ export class SessionExecutionService {
           `[${sessionId}] Stop request received while turn ${turnId} is finalizing; interrupting owner turn`
         );
         this.requestTurnInterrupt(runtime);
-        if (runtime.autoPromptInFlight) {
-          this.requestAgentCancelInBackground(runtime, 'finalizing');
-        }
         return { success: true };
       }
       const runtimeSession = runtime.session ?? this.deps.sessionManager.getSession(sessionId);
@@ -5136,8 +5387,13 @@ export class SessionExecutionService {
           this.requestTurnInterrupt(runtime);
           return { success: true };
         }
-        this.requestTurnInterrupt(runtime);
+        // Keep the owner alive until ACP returns; cancel acknowledgement is not prompt completion.
         this.requestAgentCancelInBackground(runtime, 'active');
+        void this.drainCancelledPrompt(runtimeSession, runtime).catch((error: unknown) => {
+          this.deps.logger.warn(
+            `[${sessionId}] Failed to drain cancelled prompt: ${formatErrorMessage(error)}`
+          );
+        });
         return { success: true };
       }
 
@@ -5292,7 +5548,8 @@ export class SessionExecutionService {
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
-        capabilities.acknowledgedSteer
+        capabilities.acknowledgedSteer,
+        capabilities.goalActions
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -5601,6 +5858,7 @@ export class SessionExecutionService {
         availableCommands,
         sessionFork,
         acknowledgedSteer,
+        goalActions,
         modelReasoningEfforts,
         capabilitySourceVersion,
       } = await this.deps.fetchAcpCapabilities(
@@ -5641,6 +5899,7 @@ export class SessionExecutionService {
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
+        goalActions,
         { signal: options.signal }
       );
 

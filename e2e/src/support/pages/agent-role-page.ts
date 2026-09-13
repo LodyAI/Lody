@@ -80,13 +80,15 @@ export class AgentRolePage {
     await expect(this.page.locator('#chat-prompt')).toBeEditable({ timeout: 30_000 });
 
     await this.page.getByRole('button', { name: /^(Run configuration|运行设置)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^(Role|角色)(?:\s|$)/u }).hover();
+    const roleMenu = this.page.getByRole('menuitem', { name: /^(Role|角色)(?:\s|$)/u });
+    await roleMenu.focus();
+    await roleMenu.press('ArrowRight');
     const roleOption = this.page.getByRole('menuitemradio', {
       name: this.fixture.roleName,
       exact: true,
     });
     await expect(roleOption).toBeEnabled();
-    await roleOption.click();
+    await roleOption.press('Enter');
     await expect(
       this.page.getByRole('button', { name: /^(Run configuration|运行设置)$/u })
     ).toContainText(this.fixture.roleName);

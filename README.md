@@ -145,6 +145,16 @@ We want the entire workspace—not only conversations—to become local-first. L
 
 Lody is still moving toward full local-first support.
 
+## Releases
+
+Pushing a stable `vX.Y.Z` tag creates a draft PR synchronizing every
+`apps/*/package.json` version on the default branch, followed by a GitHub Release
+with generated changelog notes. No installers or auto-update files are built or
+uploaded. The original tag is not moved; version synchronization takes effect
+on the default branch after the PR is merged. GitHub Actions must be allowed to
+create pull requests in repository settings. Bot-created PRs may require a maintainer
+action to trigger CI. Existing releases and their assets are preserved on reruns.
+
 ## Repository
 
 - `apps/cli` — Connect machines and run coding agents

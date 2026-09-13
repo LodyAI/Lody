@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { FileIcon } from '@/components/icons/file-icons';
+import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { ScrollArea } from '@/ui/scroll-area';
 import {
   DropdownMenu,
@@ -218,6 +219,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
 }: SessionSidePanelTabBarProps) {
   const windowDragClass = useWindowDragRegionClass();
   const activeTabRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useHorizontalWheelScroll();
 
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -228,6 +230,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
       <ScrollArea
         scrollableX
         horizontalOnly
+        viewportRef={viewportRef}
         className="min-w-0 flex-1"
         // Compact overlay bar: default horizontal track is too tall in this h-11 strip.
         horizontalScrollbarClassName="h-1 border-0 p-0"

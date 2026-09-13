@@ -12,7 +12,6 @@ import {
   type LocalProjectWorktreeCleanupResult,
   type MachineDeleteLocalProjectCommand,
   type MachineFlockScanRow,
-  type NeedToDeleteSessionQueueItem,
   type AcpSessionNotification,
   type SessionId,
   type SessionMeta,
@@ -25,7 +24,7 @@ import type { SessionManager } from '../src/session/session-manager';
 import { getWorktreeManager } from '../src/session/worktree/worktree-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
-import { createLocalRepo } from './worktree-manager-test-helpers';
+import { createLocalRepo, runGit } from './worktree-manager-test-helpers';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -39,26 +38,19 @@ const createSilentLogger = (): Logger => ({
 });
 
 type MessageHandlerInternals = {
-  archiveSessionResources: (
-    sessionId: SessionId,
-    options?: { preserveWorktree?: boolean }
-  ) => Promise<void>;
+  handleSessionArchived: (sessionId: SessionId) => Promise<void>;
+  handleSessionDeleted: (sessionId: SessionId) => Promise<void>;
+  discardLegacySessionCommands: () => Promise<void>;
+  worktreeGc: { schedule: () => Promise<{ removed: SessionId[] }> };
   deleteLocalProjectResources: (
     localProjectId: LocalProjectId,
     command: MachineDeleteLocalProjectCommand
   ) => Promise<LocalProjectWorktreeCleanupResult | undefined>;
-  deleteSessionResources: (sessionId: SessionId) => Promise<{ keptWorktreePath?: string }>;
-  writeKeptWorktreePath: (
-    sessionId: SessionId,
-    request: NeedToDeleteSessionQueueItem | undefined,
-    keptWorktreePath: string
-  ) => Promise<void>;
   enqueueACPUpdate: (sessionId: SessionId, update: AcpSessionNotification) => void;
   quiesceACPFlushForDeletion: (sessionId: SessionId) => Promise<void>;
   codeCollabV2PendingEvidenceWrites: Map<SessionId, Set<Promise<void>>>;
   codeCollabV2TurnDiffs: Map<string, unknown[]>;
   deletedSessionIds: Set<SessionId>;
-  deleteInFlight: Set<SessionId>;
   store: {
     has: (sessionId: SessionId) => boolean;
     get: (sessionId: SessionId) => { acpFlushInFlight: Promise<void> | null };
@@ -76,6 +68,8 @@ function createHarness(options?: {
   sessionMetas?: SessionMeta[];
   activeSessionIds?: SessionId[];
   includeLegacySessionDeleteRequest?: boolean;
+  includeLegacySessionArchiveRequest?: boolean;
+  deletedSessionIds?: SessionId[];
   localProjectRootPaths?: Record<LocalProjectId, string>;
 }) {
   const sessionId = options?.sessionId ?? ('session-1' as SessionId);
@@ -120,15 +114,19 @@ function createHarness(options?: {
     getDocMeta: vi.fn(async (roomId: string) => {
       const localSessionMeta = sessionMetas.get(roomId);
       if (localSessionMeta) {
-        return { meta: localSessionMeta };
+        const deleted = (options?.deletedSessionIds ?? []).some(
+          (id) => getSessionRoomId(id) === roomId
+        );
+        return { meta: localSessionMeta, deleted };
       }
       if (roomId === sessionRoomId) {
-        return { meta: { isArchived: true } };
+        return { meta: { isArchived: true, machineId } };
       }
       if (roomId === machineRoomId) {
         return {
           meta: {
-            needToArchiveSessions: {},
+            needToArchiveSessions:
+              options?.includeLegacySessionArchiveRequest === true ? { [sessionId]: true } : {},
             needToDeleteSessions:
               options?.includeLegacySessionDeleteRequest === false ? {} : { [sessionId]: true },
             localProjects: Object.fromEntries(
@@ -151,7 +149,10 @@ function createHarness(options?: {
     })),
     openFlockDoc: vi.fn(async () => ({
       flock: {
-        scan: () => machineFlockRows,
+        scan: (query?: { prefix?: readonly unknown[] }) =>
+          machineFlockRows.filter((row) =>
+            (query?.prefix ?? []).every((part, index) => row.key[index] === part)
+          ),
         set: flockSet,
         delete: flockDelete,
         commit: flockCommit,
@@ -224,33 +225,144 @@ function createHarness(options?: {
 }
 
 describe('MessageHandler terminal cleanup', () => {
-  it('closes session terminals when archiving resources even without an active session', async () => {
+  it('releases the runtime when a session becomes archived, even without an active session', async () => {
     const { handler, sessionId, closeSessionTerminals, sessionManager } = createHarness();
 
-    await handler.archiveSessionResources(sessionId);
+    await handler.handleSessionArchived(sessionId);
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
   });
 
-  it('closes parent and active child terminals before permanent deletion cleanup', async () => {
+  it('terminates an active session and its children when it becomes archived', async () => {
+    const childSessionId = 'child-1' as SessionId;
+    const { handler, sessionId, closeSessionTerminals, isSessionActive, getSessionMeta } =
+      createHarness({
+        childSessionIds: [childSessionId],
+        activeSessionIds: ['session-1' as SessionId, childSessionId],
+        sessionMetas: [
+          {
+            id: 'session-1' as SessionId,
+            machineId: 'machine-1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            userId: 'user-1',
+            cliType: 'codex',
+            agentType: 'codex',
+            status: SessionStatusFactory.running(),
+            isArchived: true,
+          } as SessionMeta,
+        ],
+      });
+
+    await handler.handleSessionArchived(sessionId);
+
+    expect(closeSessionTerminals).toHaveBeenCalledWith(childSessionId);
+    expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
+    expect(isSessionActive(sessionId)).toBe(false);
+    expect(isSessionActive(childSessionId)).toBe(false);
+    expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
+  });
+
+  it('removes the worktree of an archived local-project session and keeps its branch', async () => {
+    const localProjectId = 'local-project-archive' as LocalProjectId;
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-archive-project-'));
+    const originalDataDir = process.env.LODY_DATA_DIR;
+    const originalLocksDir = process.env.LODY_LOCKS_DIR;
+    process.env.LODY_DATA_DIR = path.join(testDir, 'data');
+    process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
+    const rootPath = createLocalRepo(testDir);
+    const sessionId = 'session-archive-worktree' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      userId: 'user-1',
+      cliType: 'codex',
+      agentType: 'codex',
+      status: SessionStatusFactory.idle(),
+      project: { kind: 'local', localProjectId },
+      isWorktree: true,
+      isArchived: true,
+    } as SessionMeta;
+    try {
+      const manager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(rootPath),
+        source: { kind: 'local-shared', originalRootPath: rootPath },
+        logger: createSilentLogger(),
+      });
+      const worktree = await manager.createWorktree(sessionId);
+      // Project metadata is deliberately absent everywhere: reconciliation must
+      // not depend on the local-project catalog (the gap behind #377).
+      const { handler, repo } = createHarness({ sessionId, sessionMetas: [sessionMeta] });
+
+      // A branch renamed in a terminal is known only to git until archive
+      // reports it; restore reattaches by `branchName`.
+      const renamed = `${worktree.branch}-renamed`;
+      runGit(worktree.hostPath, ['branch', '-m', renamed]);
+
+      await handler.handleSessionArchived(sessionId);
+      await handler.worktreeGc.schedule();
+
+      expect(fs.existsSync(worktree.hostPath)).toBe(false);
+      expect(runGit(rootPath, ['branch', '--list', renamed])).toContain(renamed);
+      expect(repo.upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(sessionId),
+        expect.objectContaining({ branchName: renamed })
+      );
+    } finally {
+      if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = originalDataDir;
+      if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = originalLocksDir;
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores archived sessions that belong to another machine', async () => {
+    const sessionId = 'session-elsewhere' as SessionId;
+    const { handler, closeSessionTerminals, sessionManager } = createHarness({
+      sessionId,
+      sessionMetas: [
+        {
+          id: sessionId,
+          machineId: 'machine-2',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          status: SessionStatusFactory.idle(),
+          isArchived: true,
+        } as SessionMeta,
+      ],
+    });
+
+    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionDeleted(sessionId);
+
+    expect(closeSessionTerminals).not.toHaveBeenCalled();
+    expect(sessionManager.archiveSession).not.toHaveBeenCalled();
+    expect(handler.deletedSessionIds.has(sessionId)).toBe(false);
+  });
+
+  it('closes parent and active child terminals when the session doc is deleted', async () => {
     const childSessionId = 'child-1' as SessionId;
     const { handler, sessionId, closeSessionTerminals } = createHarness({
       childSessionIds: [childSessionId],
     });
 
-    await handler.deleteSessionResources(sessionId);
+    await handler.handleSessionDeleted(sessionId);
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(childSessionId);
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
   });
 
-  it('drops transient ACP retry state before deletion and rejects late output', async () => {
-    const { handler, sessionId, repo } = createHarness();
+  it('drops transient ACP retry state after deletion and rejects late output', async () => {
+    const { handler, sessionId } = createHarness();
 
-    await handler.deleteSessionResources(sessionId);
+    await handler.handleSessionDeleted(sessionId);
 
-    expect(repo.deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
+    expect(handler.deletedSessionIds.has(sessionId)).toBe(true);
     expect(handler.store.has(sessionId)).toBe(false);
 
     handler.enqueueACPUpdate(sessionId, {
@@ -264,22 +376,26 @@ describe('MessageHandler terminal cleanup', () => {
     expect(handler.store.has(sessionId)).toBe(false);
   });
 
-  it('keeps a failed session-doc deletion retryable', async () => {
-    const { handler, sessionId, repo } = createHarness();
-    await vi.waitFor(() => expect(handler.deleteInFlight.size).toBe(0));
-    handler.deletedSessionIds.clear();
-    repo.deleteDoc.mockClear();
-    repo.deleteDoc.mockRejectedValueOnce(new Error('temporary delete failure'));
+  it('discards legacy archive and delete request records without acting on them', async () => {
+    const sessionId = 'session-legacy-queued' as SessionId;
+    const { handler, machineFlockRows, repo, sessionManager } = createHarness({
+      sessionId,
+      includeLegacySessionArchiveRequest: true,
+      machineFlockRows: [
+        { key: machineFlockKeys.archiveSessionCommand(sessionId), value: { v: 1, requestedAt: 1 } },
+        { key: machineFlockKeys.deleteSessionCommand(sessionId), value: { v: 1, requestedAt: 1 } },
+      ],
+    });
 
-    await expect(handler.deleteSessionResources(sessionId)).rejects.toThrow(
-      'temporary delete failure'
+    await handler.discardLegacySessionCommands();
+
+    expect(machineFlockRows).toEqual([]);
+    expect(repo.upsertDocMeta).toHaveBeenCalledWith(
+      getMachineRoomId('machine-1'),
+      expect.objectContaining({ needToArchiveSessions: {}, needToDeleteSessions: {} })
     );
-    expect(handler.deletedSessionIds.has(sessionId)).toBe(false);
-    const callsAfterFailure = repo.deleteDoc.mock.calls.length;
-
-    await expect(handler.deleteSessionResources(sessionId)).resolves.toEqual({});
-    expect(repo.deleteDoc.mock.calls.length).toBeGreaterThan(callsAfterFailure);
-    expect(handler.deletedSessionIds.has(sessionId)).toBe(true);
+    expect(sessionManager.archiveSession).not.toHaveBeenCalled();
+    expect(repo.deleteDoc).not.toHaveBeenCalled();
   });
 
   it('waits for an in-flight ACP write before dropping deletion state', async () => {
@@ -644,37 +760,5 @@ describe('MessageHandler terminal cleanup', () => {
     await handler.deleteLocalProjectResources(localProjectId, deleteCommand);
 
     expect(machineFlockRows).not.toContainEqual(expect.objectContaining({ key: localProjectKey }));
-  });
-
-  it('preserves kept worktree path by creating a Flock command for legacy-only delete requests', async () => {
-    const sessionId = 'session-legacy-delete' as SessionId;
-    const { handler, flockSet, flockCommit, repo } = createHarness({ sessionId });
-    const request = {
-      branchName: 'lody/session-legacy-delete',
-      baseBranchName: 'main',
-      isWorktree: true,
-      localProjectId: 'local-1',
-      originalRootPath: '/repo/app',
-      requestedAt: 123,
-    } satisfies NeedToDeleteSessionQueueItem;
-
-    await handler.writeKeptWorktreePath(sessionId, request, '/repo/app/.lody/worktrees/session');
-
-    expect(flockSet).toHaveBeenCalledWith(
-      machineFlockKeys.deleteSessionCommand(sessionId),
-      {
-        v: 1,
-        branchName: 'lody/session-legacy-delete',
-        baseBranchName: 'main',
-        localProjectId: 'local-1',
-        originalRootPath: '/repo/app',
-        requestedAt: 123,
-        keptWorktreePath: '/repo/app/.lody/worktrees/session',
-        isWorktree: true,
-      },
-      expect.any(Number)
-    );
-    expect(flockCommit).toHaveBeenCalled();
-    expect(repo.flush).toHaveBeenCalled();
   });
 });

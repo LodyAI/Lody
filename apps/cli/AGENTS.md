@@ -17,7 +17,8 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `name` stays `lody` in every composition.
 - Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
   adapter capabilities from a stale `dist/`.
-- `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
+- `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
+  `NAPI_VERSION=10`, and
   `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
   segfaults on the SQLite binding instead of throwing.
 - Read [apps/electron/AGENTS.md](../electron/AGENTS.md) — embedded packaging, native deps/ABI,
@@ -56,6 +57,11 @@ execution/consent rules. These rules also bind CLI callers outside that director
   runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
   never become visible `agent_warning` notices, while other rejections still do. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
+- INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
+  received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
+  a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a
+  recovery such as the resume-to-replay fallback loses every update of the replacement agent
+  ([note](../../.agents/notes/implemented/bug-fix/2026-09-11-failed-session-create-lifecycle-events.md)).
 - `lody feedback` and MCP `lody_feedback` submit only caller-provided suggestion text plus CLI
   version, platform, and architecture — never cwd, paths, hostname, environment, logs, prompts,
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.

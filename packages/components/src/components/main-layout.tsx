@@ -1,4 +1,5 @@
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
+import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
 import { type ReactNode } from 'react';
@@ -14,6 +15,7 @@ import { StuckConnectionBannerContainer } from './stuck-connection-banner';
 import { DesktopSettingsModal } from './settings/desktop-settings-modal';
 import { TaskQuickAddDialogContainer } from './tasks/task-quick-add-dialog-container';
 import { TaskStatusWatcher } from './tasks/task-status-watcher';
+import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
 export {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
@@ -38,6 +40,11 @@ export function WorkspaceRuntimeShell({
 
 function WorkspaceBadge() {
   useWorkspaceBadge();
+  return null;
+}
+
+function AgentRoleSchemaReconciliation() {
+  useAgentRoleSchemaReconciliation();
   return null;
 }
 
@@ -66,21 +73,24 @@ export function MainLayout({
 
   return (
     <WorkspaceWindowOwnerContext value={owner}>
-      <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
-        {children}
-        {owner && workspaceReady ? <WorkspaceBadge /> : null}
-        {tasksEnabled && workspaceReady ? (
-          <>
-            <TaskIndexSync />
-            {owner ? <TaskStatusWatcher /> : null}
-            <TaskQuickAddDialogContainer />
-          </>
-        ) : null}
-        {workspaceReady ? <BugReportDialogContainer /> : null}
-        <JoinCommunityDialogContainer />
-        <StuckConnectionBannerContainer />
-        {workspaceReady ? <DesktopSettingsModal /> : null}
-      </WorkspaceRuntimeShell>
+      <PromptShortcutProvider enabled={workspaceReady}>
+        <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
+          {children}
+          {owner && workspaceReady ? <WorkspaceBadge /> : null}
+          {owner && workspaceReady ? <AgentRoleSchemaReconciliation /> : null}
+          {tasksEnabled && workspaceReady ? (
+            <>
+              <TaskIndexSync />
+              {owner ? <TaskStatusWatcher /> : null}
+              <TaskQuickAddDialogContainer />
+            </>
+          ) : null}
+          {workspaceReady ? <BugReportDialogContainer /> : null}
+          <JoinCommunityDialogContainer />
+          <StuckConnectionBannerContainer />
+          {workspaceReady ? <DesktopSettingsModal /> : null}
+        </WorkspaceRuntimeShell>
+      </PromptShortcutProvider>
     </WorkspaceWindowOwnerContext>
   );
 }

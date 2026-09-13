@@ -36,6 +36,18 @@ type RememberedTerminalSessionState = {
   activeTerminalId: string | null;
 };
 
+// The terminal tab strip's own canvas is already `bg-sidebar` (the floating
+// card's fill), unlike `SessionTabBar`/`TAB_PILL_*`, whose pill sits on the
+// app's plain `--background` canvas — reusing that treatment here stacked a
+// border + shadow on a fill that matched its parent 1:1, so the pill read as
+// heavy chrome instead of a lightweight selected state. Flat fill only, no
+// border/shadow, and a step down from the card's own tone in dark mode where
+// `--background`/`--sidebar` collapse together.
+const TERMINAL_TAB_ACTIVE_CLASS =
+  'bg-background text-tab-active-foreground dark:bg-muted-foreground/[0.16]';
+const TERMINAL_TAB_INACTIVE_CLASS =
+  'text-tab-inactive-foreground hover:bg-muted-foreground/[0.08] hover:text-tab-hover-foreground';
+
 // Chrome above the resizable body: the drag zone (h-1.5 = 6px) + the top tab
 // strip (h-8 = 32px). Added to `bodyHeight` for the floating card's height.
 const RESIZE_HANDLE_HEIGHT = 6;
@@ -497,15 +509,17 @@ export function TerminalDock({
                     return (
                       <div
                         key={term.terminalId}
-                        className="group flex h-full max-w-44 min-w-0 shrink-0 items-center gap-1"
+                        role="tab"
+                        aria-selected={isActive}
+                        className={cn(
+                          'group flex h-6 max-w-44 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 transition-colors',
+                          isActive ? TERMINAL_TAB_ACTIVE_CLASS : TERMINAL_TAB_INACTIVE_CLASS
+                        )}
                       >
                         <button
                           type="button"
                           onClick={() => selectTerminal(term.terminalId)}
-                          className={cn(
-                            'flex min-w-0 items-center gap-1 hover:text-foreground',
-                            isActive ? 'text-foreground' : ''
-                          )}
+                          className="flex min-w-0 items-center gap-1"
                         >
                           <TerminalSquare className="h-3 w-3 shrink-0 opacity-70" />
                           <span className="min-w-0 truncate">{term.title || 'shell'}</span>
@@ -514,7 +528,12 @@ export function TerminalDock({
                           type="button"
                           aria-label="Close terminal"
                           onClick={() => handleCloseTerminal(term.terminalId)}
-                          className="shrink-0 rounded-sm opacity-0 hover:text-foreground group-hover:opacity-100"
+                          className={cn(
+                            'shrink-0 rounded-sm p-0.5 transition-opacity',
+                            isActive
+                              ? 'opacity-70 hover:opacity-100'
+                              : 'opacity-0 group-hover:opacity-100'
+                          )}
                         >
                           <X className="h-2.5 w-2.5" />
                         </button>

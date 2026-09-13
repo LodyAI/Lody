@@ -12,8 +12,16 @@ export type SessionForkResources = {
   sourceSessionId: string;
   targetSessionId: string;
   sourceAcpSessionId: string;
+  sourceTurnId: string;
   targetAcpSessionId: string;
   sourceAgentPid: number;
+  targetAgentPid: number;
+  targetWorktreePath: string;
+};
+
+export type AdditionalWorktreeFork = {
+  targetSessionId: string;
+  targetAcpSessionId: string;
   targetAgentPid: number;
   targetWorktreePath: string;
 };
@@ -62,12 +70,21 @@ export class SessionForkPage {
     await dialog.getByRole('button', { name: /^(Add|添加)$/u }).click();
     await expect(dialog).toBeHidden();
 
-    await this.page.getByRole('button', { name: /^(Run configuration|运行设置)$/u }).click();
-    await this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u }).hover();
+    const runConfiguration = this.page.getByRole('button', {
+      name: /^(Run configuration|运行设置)$/u,
+    });
+    await runConfiguration.click();
+    const agentMenu = this.page.getByRole('menuitem', { name: /^Agent(?:\s|$)/u });
+    if ((await agentMenu.textContent())?.includes(AGENT_NAME)) {
+      await this.page.keyboard.press('Escape');
+      return;
+    }
+    await agentMenu.focus();
+    await agentMenu.press('ArrowRight');
     const agent = this.page.getByRole('menuitemradio', { name: AGENT_NAME, exact: true });
-    await agent.click();
-    await expect(agent).toHaveAttribute('aria-checked', 'true');
-    await this.page.keyboard.press('Escape');
+    await expect(agent).toBeEnabled();
+    await agent.press('Enter');
+    await expect(runConfiguration).toContainText(AGENT_NAME);
   }
 
   async createCompletedSourceAndForkToWorktree(): Promise<SessionForkResources> {
@@ -81,53 +98,46 @@ export class SessionForkPage {
     const sourcePrompt = await this.fixture.waitForSourcePrompt();
     expect(sourcePrompt.sessionId).toEqual(expect.any(String));
     expect(sourcePrompt.turnId).toEqual(expect.any(String));
-
-    const forkButton = this.page.getByRole('button', { name: /^(Fork session|分叉会话)$/u });
-    await expect(forkButton.last()).toBeVisible({ timeout: 30_000 });
-    await forkButton.last().click();
-    const newWorktree = this.page.getByRole('menuitem', { name: /^(New worktree|新 worktree)/u });
-    await expect(newWorktree).toBeEnabled({ timeout: 30_000 });
-    await newWorktree.click();
-
-    await expect
-      .poll(() => this.currentSessionId(), {
-        timeout: 60_000,
-        intervals: [50, 100, 250, 500, 1_000],
-      })
-      .not.toBe(sourceSessionId);
-    const targetSessionId = this.currentSessionId();
-    const forkEvent = (await this.fixture.waitForEvent('session-fork')).at(-1)!;
-    expect(forkEvent.sourceSessionId).toBe(sourcePrompt.sessionId);
-    expect(forkEvent.sourceTurnId).toBe(sourcePrompt.turnId);
-    expect(forkEvent.sessionId).toEqual(expect.any(String));
-    expect(forkEvent.sessionId).not.toBe(sourcePrompt.sessionId);
-    expect(forkEvent.pid).not.toBe(sourcePrompt.pid);
-
-    await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
-    await expect(this.assistantResponse()).toBeVisible();
-    await expect(
-      this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u)
-    ).toBeVisible();
+    const target = await this.forkSourceToWorktree(sourceSessionId, {
+      acpSessionId: sourcePrompt.sessionId!,
+      turnId: sourcePrompt.turnId!,
+      agentPid: sourcePrompt.pid,
+    });
 
     await this.page.getByRole('button', { name: /^(Show terminal panel|显示终端面板)$/u }).click();
     await expect(this.page.locator('.lody-terminal-panel')).toBeVisible({ timeout: 30_000 });
-    await expect.poll(() => this.listTerminals(targetSessionId)).not.toEqual([]);
-    const targetWorktreePath = (await this.listTerminals(targetSessionId)).find(
+    await expect.poll(() => this.listTerminals(target.targetSessionId)).not.toEqual([]);
+    const targetWorktreePath = (await this.listTerminals(target.targetSessionId)).find(
       (terminal) => terminal.cwd
     )?.cwd;
     expect(targetWorktreePath).toEqual(expect.any(String));
-    expect(targetWorktreePath).toBe(forkEvent.cwd);
+    expect(targetWorktreePath).toBe(target.targetWorktreePath);
     await expect.poll(() => existsSync(targetWorktreePath!)).toBe(true);
 
     return {
       sourceSessionId,
-      targetSessionId,
+      targetSessionId: target.targetSessionId,
       sourceAcpSessionId: sourcePrompt.sessionId!,
-      targetAcpSessionId: forkEvent.sessionId!,
+      sourceTurnId: sourcePrompt.turnId!,
+      targetAcpSessionId: target.targetAcpSessionId,
       sourceAgentPid: sourcePrompt.pid,
-      targetAgentPid: forkEvent.pid,
+      targetAgentPid: target.targetAgentPid,
       targetWorktreePath: targetWorktreePath!,
     };
+  }
+
+  async createAdditionalWorktreeFork(
+    source: Pick<
+      SessionForkResources,
+      'sourceSessionId' | 'sourceAcpSessionId' | 'sourceTurnId' | 'sourceAgentPid'
+    >
+  ): Promise<AdditionalWorktreeFork> {
+    await this.navigateToSession(source.sourceSessionId);
+    return await this.forkSourceToWorktree(source.sourceSessionId, {
+      acpSessionId: source.sourceAcpSessionId,
+      turnId: source.sourceTurnId,
+      agentPid: source.sourceAgentPid,
+    });
   }
 
   async verifyOriginAndCleanup(resources: SessionForkResources): Promise<void> {
@@ -181,6 +191,59 @@ export class SessionForkPage {
     });
     await dialog.getByRole('button', { name: /^(Delete|删除)$/u }).click();
     await expect(archivedRow).toHaveCount(0);
+  }
+
+  private async forkSourceToWorktree(
+    sourceSessionId: string,
+    source: { acpSessionId: string; turnId: string; agentPid: number }
+  ): Promise<AdditionalWorktreeFork> {
+    const previousForkCount = this.fixture
+      .readEvents()
+      .filter((entry) => entry.event === 'session-fork').length;
+    const forkButton = this.page.getByRole('button', { name: /^(Fork session|分叉会话)$/u });
+    await expect(forkButton.last()).toBeVisible({ timeout: 30_000 });
+    await forkButton.last().focus();
+    await forkButton.last().press('Enter');
+    const newWorktree = this.page.getByRole('menuitem', { name: /^(New worktree|新 worktree)/u });
+    await expect(newWorktree).toBeEnabled({ timeout: 30_000 });
+    await newWorktree.click();
+
+    await expect
+      .poll(() => this.currentSessionId(), {
+        timeout: 60_000,
+        intervals: [50, 100, 250, 500, 1_000],
+      })
+      .not.toBe(sourceSessionId);
+    const targetSessionId = this.currentSessionId();
+    await expect
+      .poll(
+        () => this.fixture.readEvents().filter((entry) => entry.event === 'session-fork').length,
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBe(previousForkCount + 1);
+    const forkEvent = this.fixture.readEvents().filter((entry) => entry.event === 'session-fork')[
+      previousForkCount
+    ]!;
+    expect(forkEvent.sourceSessionId).toBe(source.acpSessionId);
+    expect(forkEvent.sourceTurnId).toBe(source.turnId);
+    expect(forkEvent.sessionId).toEqual(expect.any(String));
+    expect(forkEvent.sessionId).not.toBe(source.acpSessionId);
+    expect(forkEvent.pid).not.toBe(source.agentPid);
+    expect(forkEvent.cwd).toEqual(expect.any(String));
+
+    await expect(this.page.getByText(SOURCE_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.assistantResponse()).toBeVisible();
+    await expect(
+      this.page.getByText(/^(This conversation was forked from|此对话分叉自)$/u)
+    ).toBeVisible();
+    await expect.poll(() => existsSync(forkEvent.cwd!)).toBe(true);
+
+    return {
+      targetSessionId,
+      targetAcpSessionId: forkEvent.sessionId!,
+      targetAgentPid: forkEvent.pid,
+      targetWorktreePath: forkEvent.cwd!,
+    };
   }
 
   private async navigateToSession(sessionId: string): Promise<void> {

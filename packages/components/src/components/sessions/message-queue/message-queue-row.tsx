@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Check, GripVertical, Pencil, X, type LucideIcon } from 'lucide-react';
@@ -166,6 +166,13 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   const inlineImages = imageBlocks.slice(0, MAX_INLINE_IMAGES);
   const overflowImageCount = Math.max(0, imageBlocks.length - inlineImages.length);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusEditorAtEnd = useCallback((textarea: HTMLTextAreaElement | null) => {
+    textareaRef.current = textarea;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.scrollTop = textarea.scrollHeight;
+  }, []);
 
   if (isEditing) {
     // Enter, the confirm button, and clicking away all commit; Shift+Enter inserts a
@@ -180,7 +187,8 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
           )}
         >
           <textarea
-            ref={textareaRef}
+            // The synced editing flag can arrive before startEdit resolves; attach when enabled.
+            ref={isPending ? null : focusEditorAtEnd}
             value={editValue}
             rows={3}
             className={cn(
@@ -192,7 +200,6 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
               // inside the box. The composer suppresses it the same way.
               'outline-none focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0'
             )}
-            autoFocus
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
             onChange={(event) => onEditValueChange(event.currentTarget.value)}
@@ -210,16 +217,19 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
               onCommitEdit();
             }}
           />
-          {/* A footer strip rather than an overlay: the button keeps the bottom-right
-              corner without long text ever scrolling underneath it. Suppressing
-              mousedown keeps focus in the textarea, so the click commits through
-              onCommitEdit instead of racing the blur handler for the same write. */}
-          <div className="flex justify-end px-1 pb-1">
+          {/* Keep footer presses from blur-saving before focus or confirmation. */}
+          <div
+            className="flex justify-end px-1 pb-1"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              if (event.button === 0 && event.target === event.currentTarget)
+                focusEditorAtEnd(textareaRef.current);
+            }}
+          >
             <IconAction
               icon={Check}
               label={t('sessions.messageQueue.saveEdit', 'Save changes (Enter)')}
               disabled={isPending}
-              onMouseDown={(event) => event.preventDefault()}
               onClick={onCommitEdit}
             />
           </div>
@@ -349,14 +359,12 @@ function IconAction({
   destructive,
   disabled,
   onClick,
-  onMouseDown,
 }: {
   icon: LucideIcon;
   label: string;
   destructive?: boolean;
   disabled?: boolean;
   onClick: () => void;
-  onMouseDown?: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <Tooltip delayDuration={300}>
@@ -374,7 +382,6 @@ function IconAction({
             destructive && 'hover:text-destructive'
           )}
           onClick={onClick}
-          onMouseDown={onMouseDown}
         >
           <Icon className="h-3 w-3" />
         </button>

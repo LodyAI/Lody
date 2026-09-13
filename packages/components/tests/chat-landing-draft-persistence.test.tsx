@@ -2,10 +2,12 @@
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore } from 'jotai';
+import { Provider, createStore, useAtom } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, WorkspaceId } from '@lody/shared';
 
+import { buildChatLandingDraftKey } from '../src/atoms/chat-landing-draft';
+import { chatLandingSessionStateAtomFamily } from '../src/atoms/local-storage-cache';
 import { useChatLandingDraftSession } from '../src/hooks/use-chat-landing-draft-session';
 import {
   useChatLandingImageDraft,
@@ -76,13 +78,15 @@ vi.mock('../src/lib/electron-session-file-sender', () => ({
   sendSessionFileToLocalRuntime: async () => null,
 }));
 
-const WORKSPACE_A_KEY = 'user-1:workspace-a';
-const WORKSPACE_B_KEY = 'user-1:workspace-b';
+const WORKSPACE_A_KEY = buildChatLandingDraftKey('user-1', 'workspace-a');
+const WORKSPACE_B_KEY = buildChatLandingDraftKey('user-1', 'workspace-b');
 
 type Harness = {
   imageItems: ChatLandingImageDraftItem[];
   fileItems: ChatLandingFileDraftItem[];
   sessionId: SessionId | null;
+  prompt: string;
+  setPrompt: (prompt: string) => void;
   addImages: (files: File[]) => void;
   addFiles: (files: File[]) => void;
   removeImage: (localId: string) => void;
@@ -92,6 +96,7 @@ type Harness = {
 let harness: Harness | null = null;
 
 function DraftHarness({ draftKey }: { draftKey: string }) {
+  const [sessionState, setSessionState] = useAtom(chatLandingSessionStateAtomFamily(draftKey));
   const { sessionId, ensureSessionId } = useChatLandingDraftSession(draftKey);
   const imageDraft = useChatLandingImageDraft({
     draftKey,
@@ -114,6 +119,10 @@ function DraftHarness({ draftKey }: { draftKey: string }) {
     imageItems: imageDraft.imageItems,
     fileItems: fileDraft.fileItems,
     sessionId,
+    prompt: sessionState.prompt,
+    setPrompt: (prompt) => {
+      void setSessionState({ ...sessionState, prompt });
+    },
     addImages: imageDraft.addFiles,
     addFiles: fileDraft.addFiles,
     removeImage: imageDraft.handleRemoveImage,
@@ -164,6 +173,13 @@ function textFile(name: string): File {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  Object.defineProperty(window, '__LODY_ELECTRON__', {
+    value: false,
+    configurable: true,
+    writable: true,
+  });
   store = createStore();
   harness = null;
   objectUrlSeq = 0;
@@ -182,7 +198,55 @@ afterEach(() => {
   if (root) unmountLanding();
 });
 
-describe('chat landing draft attachments across a route unmount', () => {
+describe('chat landing draft persistence', () => {
+  it('persists prompt text separately for each workspace', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().setPrompt('draft from workspace A');
+    });
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_B_KEY);
+    expect(readHarness().prompt).toBe('');
+    act(() => {
+      readHarness().setPrompt('draft from workspace B');
+    });
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('draft from workspace A');
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_B_KEY);
+    expect(readHarness().prompt).toBe('draft from workspace B');
+  });
+
+  it('uses the same durable workspace draft from every peer window', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().setPrompt('workspace draft');
+    });
+    unmountLanding();
+
+    window.__LODY_ELECTRON__ = true;
+    sessionStorage.setItem('lody:auxiliaryWindow', '1');
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('workspace draft');
+    act(() => {
+      readHarness().setPrompt('updated workspace draft');
+    });
+    unmountLanding();
+
+    window.__LODY_ELECTRON__ = false;
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('updated workspace draft');
+  });
+
   it('restores images, their preview URLs, and the reserved session id', () => {
     mountLanding(WORKSPACE_A_KEY);
     act(() => {

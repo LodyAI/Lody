@@ -1,7 +1,9 @@
 # Align Plan consumers with ACP Core
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-10-core-plan-mode-consumers.zh.md)
 
 ## Abstract
 

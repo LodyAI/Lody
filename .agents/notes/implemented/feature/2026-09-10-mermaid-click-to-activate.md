@@ -1,7 +1,9 @@
 # Click to turn a Mermaid diagram into a canvas
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-10-mermaid-click-to-activate.zh.md)
 
 ## Abstract
 

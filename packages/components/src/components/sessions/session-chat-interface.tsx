@@ -1,4 +1,6 @@
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
+import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
 import { SessionWindowMenuItem } from '../session-window-menu-item';
 import {
   MessageSelectionContext,
@@ -45,6 +47,7 @@ import {
   Play,
   Plus,
   Search,
+  Share2,
   Trash2,
   UserRoundCog,
   Users,
@@ -54,7 +57,7 @@ import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
-import { isSessionContextCompacting } from '@/lib/session-context-compaction';
+import { isSessionContextCompacting, canStopAgentEnabled } from '@/lib/session-context-compaction';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
@@ -85,7 +88,6 @@ import type {
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
-  ConversationMarkdownStats,
   GitHubCheckRun,
   GitHubMergeMethod,
   VisualAnnotationReferencePayload,
@@ -125,6 +127,8 @@ import {
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useAppCapability } from '@/lib/app-platform';
+import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
@@ -211,9 +215,8 @@ import {
   shouldDisableSessionInfoBarGitHubActionForHydration,
 } from './session-info-action-state';
 import {
-  canPauseGoalThroughPromptBridge,
-  getPromptBridgeGoalCommands,
-  GOAL_PROMPT_DISPATCH_OPTIONS,
+  getSessionGoalCommands,
+  GOAL_COMMAND_PENDING_TIMEOUT_MS,
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
@@ -227,8 +230,10 @@ import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge
 import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
-  CREATE_DRAFT_PR_PROMPT,
-  CREATE_PR_PROMPT,
+  CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
 } from './create-pr-prompt';
 import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -321,54 +326,6 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);
-}
-
-/**
- * Copy-as-Markdown never trims message text and never drops thinking, so it can
- * still trim tool output, cap thinking, or nothing at all — and it can land over
- * budget. Silent truncation reads as "I copied everything", so the toast always
- * names what happened.
- */
-function describeCopiedConversation(
-  stats: ConversationMarkdownStats,
-  t: (key: string, fallback: string, options?: Record<string, unknown>) => string
-): string {
-  if (stats.overBudget) {
-    return t(
-      'sessions.copyConversationHistoryCopiedOverBudget',
-      'Conversation copied as Markdown (~{{tokens}}k tokens — message text alone exceeds the target)',
-      { tokens: Math.round(stats.estimatedTokens / 1000) }
-    );
-  }
-
-  const trimmed: string[] = [];
-  if (stats.toolCallsCollapsed) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimToolCalls', 'tool call details'));
-  }
-  if (stats.thinkingTruncated) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimThinking', 'thinking'));
-  }
-  if (stats.terminalOutputOmitted || stats.terminalOutputTruncated) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimTerminal', 'terminal output'));
-  }
-  if (stats.toolResultsTruncated > 0) {
-    trimmed.push(
-      // `value`, not `count`: `count` would send i18next down its plural-key
-      // lookup (`..._one` / `..._other`), which these strings do not define.
-      t('sessions.copyConversationHistoryTrimToolResults', '{{value}} tool results', {
-        value: stats.toolResultsTruncated,
-      })
-    );
-  }
-
-  if (trimmed.length === 0) {
-    return t('sessions.copyConversationHistoryCopied', 'Conversation copied as Markdown');
-  }
-  return t(
-    'sessions.copyConversationHistoryCopiedTrimmed',
-    'Conversation copied as Markdown (trimmed: {{omitted}})',
-    { omitted: trimmed.join(', ') }
-  );
 }
 
 function mapGitHubCheckRunToInfoBar(run: GitHubCheckRun): PrCiRun {
@@ -1019,6 +976,7 @@ export function SessionHeaderMenu({
   machineName,
   onCopyConversationHistory,
   onCopyUrl,
+  publicShareWorkspaceId,
   sharing,
   onShareWithTeam,
   onShareAsImage,
@@ -1045,6 +1003,7 @@ export function SessionHeaderMenu({
   machineName?: string | null;
   onCopyConversationHistory?: () => void | Promise<void>;
   onCopyUrl: () => void | Promise<void>;
+  publicShareWorkspaceId?: import('@lody/shared').WorkspaceId;
   sharing?: SessionSharingState;
   onShareWithTeam?: () => void | Promise<void>;
   /** Opens the share-as-image preview dialog. Pure local feature; no gating. */
@@ -1094,6 +1053,7 @@ export function SessionHeaderMenu({
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
+  const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1300,6 +1260,13 @@ export function SessionHeaderMenu({
           ) : null}
 
           {openedByRelationRows}
+
+          {publicShareWorkspaceId && (
+            <DropdownMenuItem onClick={() => setPublicShareSessionId(session.id)}>
+              <Share2 className="h-3.5 w-3.5 shrink-0" />
+              {t('sharing.manager.title', 'Share conversation')}
+            </DropdownMenuItem>
+          )}
 
           {onOpenSearch && (
             <DropdownMenuItem
@@ -1574,6 +1541,13 @@ export function SessionHeaderMenu({
               )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {publicShareWorkspaceId && publicShareSessionId === session.id && (
+        <SessionShareDialog
+          workspaceId={publicShareWorkspaceId}
+          session={session}
+          onClose={() => setPublicShareSessionId(null)}
+        />
+      )}
       <ReviewAgentSetupDialog
         open={reviewSetupOpen}
         onOpenChange={setReviewSetupOpen}
@@ -2011,6 +1985,7 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+    const publicSharingAvailable = useAppCapability('teamSharing');
     const currentUser = useAtomValue(userAtom);
     const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
@@ -2295,6 +2270,7 @@ export const SessionChatInterface = memo(
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     } = useMemo(
       () => getSessionGitHubState(session, workspaceSession),
@@ -2381,6 +2357,7 @@ export const SessionChatInterface = memo(
       markSessionRead,
       requestSessionCancel,
       requestSessionDispatch,
+      requestSessionGoal,
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
@@ -2705,11 +2682,14 @@ export const SessionChatInterface = memo(
       [legacySession.latestGoal, session.dismissedGoalThreadId, sessionHistory]
     );
     const isGoalActive = isSessionGoalActive(latestGoal);
-    // The existing prompt bridge is Codex-specific. Other providers may publish
-    // neutral goal snapshots, but their advertised `_session/goal` extension is
-    // not yet routed through Lody's session control plane, so keep them read-only.
-    const goalCommands = getPromptBridgeGoalCommands(session.agentType);
-    const canPauseGoal = canPauseGoalThroughPromptBridge(session.agentType);
+    // Goal control is an ACP extension, so the runtime's advertised actions
+    // decide which buttons exist. A runtime with no goal extension stays
+    // read-only rather than being guessed at from the agent's name.
+    const goalCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const goalCommands = useMemo(() => getSessionGoalCommands(goalCapability), [goalCapability]);
+    const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
       if (!pendingGoalCommand) {
@@ -2740,6 +2720,19 @@ export const SessionChatInterface = memo(
         setPendingGoalCommand(null);
       }
     }, [latestGoal, pendingGoalCommand]);
+
+    useEffect(() => {
+      if (!pendingGoalCommand) {
+        return undefined;
+      }
+      // The agent's own goal snapshot is the completion signal, and a queued
+      // action waits for a running turn to drain. Stop waiting eventually so a
+      // command that never lands cannot leave every goal button disabled.
+      const timer = setTimeout(() => {
+        setPendingGoalCommand((current) => (current === pendingGoalCommand ? null : current));
+      }, GOAL_COMMAND_PENDING_TIMEOUT_MS);
+      return () => clearTimeout(timer);
+    }, [pendingGoalCommand]);
 
     const isSessionActive = liveSessionStatus != null;
     // CLI-reported presence is the fact source for "working now". The only
@@ -3456,8 +3449,13 @@ export const SessionChatInterface = memo(
       isSessionWorking,
       isGoalActive,
     });
-    const canStopAgent =
-      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
+    const canStopAgent = canStopAgentEnabled({
+      isContextCompacting,
+      isSessionActive,
+      activeAssistantTurnId: activeAssistantTurnId ?? null,
+      isGoalActive,
+      canPauseGoal,
+    });
     const latestCompletedProposedPlan = useMemo(
       () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
       [sessionDoc?.history]
@@ -4184,20 +4182,24 @@ export const SessionChatInterface = memo(
           return false;
         }
 
-        directDispatchInFlightRef.current = false;
-        setInputActionState('ready');
         if (options?.showPending !== false) {
           setPendingGoalCommand({ threadId: goal.threadId, command });
         }
 
         try {
-          const accepted = await dispatchPrompt(`/goal ${command}`, GOAL_PROMPT_DISPATCH_OPTIONS);
-          if (!accepted) {
-            throw new Error('Goal command was not accepted for dispatch');
+          const response = await requestSessionGoal(session.id, command, {
+            userId: currentUser?.id ?? session.userId,
+            machineId: session.machineId,
+          });
+          if (!response?.accepted) {
+            throw new Error(
+              response?.error ?? `Goal command was ${response?.disposition ?? 'not delivered'}`
+            );
           }
           captureSessionEvent('session/goal_command_dispatched', {
             command,
             goal_thread_id: goal.threadId,
+            disposition: response.disposition,
           });
           return true;
         } catch (error) {
@@ -4218,7 +4220,17 @@ export const SessionChatInterface = memo(
           return false;
         }
       },
-      [captureSessionEvent, dispatchPrompt, goalCommands, latestGoal, t]
+      [
+        captureSessionEvent,
+        currentUser?.id,
+        goalCommands,
+        latestGoal,
+        requestSessionGoal,
+        session.id,
+        session.machineId,
+        session.userId,
+        t,
+      ]
     );
 
     const handleGoalCardCommand = useCallback(
@@ -4346,8 +4358,17 @@ export const SessionChatInterface = memo(
       [sessionDoc?.history]
     );
 
-    const createPrPrompt = t('sessions.prompts.createPr', CREATE_PR_PROMPT);
-    const createDraftPrPrompt = t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_PROMPT);
+    // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
+    // one key per language instead of being repeated inside both prompts.
+    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
+    const createPrPrompt = withPrBranchUpkeep(
+      t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT),
+      prBranchUpkeep
+    );
+    const createDraftPrPrompt = withPrBranchUpkeep(
+      t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+      prBranchUpkeep
+    );
     const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
 
     const handleCreatePr = useCallback(() => {
@@ -4607,18 +4628,17 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      const openedBy =
-        openerSessionId
-          ? {
-              sessionId: openerSessionId,
-              title:
-                (openerSessionMeta?.title ?? '').trim() ||
-                (docMetaCacheReady
-                  ? t('sessions.openedBy.deletedSession', 'Deleted session')
-                  : t('sessions.untitled', 'Untitled session')),
-              target: openerNavigationTarget,
-            }
-          : null;
+      const openedBy = openerSessionId
+        ? {
+            sessionId: openerSessionId,
+            title:
+              (openerSessionMeta?.title ?? '').trim() ||
+              (docMetaCacheReady
+                ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                : t('sessions.untitled', 'Untitled session')),
+            target: openerNavigationTarget,
+          }
+        : null;
       if (!openedBy && opened.length === 0) return undefined;
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
@@ -4661,6 +4681,7 @@ export const SessionChatInterface = memo(
         canShowGitHubActions,
         hasExistingPr,
         workspaceDirty,
+        workspaceUnpushed,
         hasChanges,
         isAgentBusy,
         prCiState: liveCiFailed ? 'f' : latestPrState?.s,
@@ -4756,6 +4777,7 @@ export const SessionChatInterface = memo(
       sessionDocReady,
       t,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     ]);
 
@@ -5061,6 +5083,8 @@ export const SessionChatInterface = memo(
         return;
       }
 
+      // Cancel first so Stop stays immediate; the pause that follows is an
+      // out-of-band control request and no longer waits for a free prompt slot.
       if (goalToPause) {
         await handleGoalCommand('pause', goalToPause, { showPending: false });
       }
@@ -5788,6 +5812,8 @@ export const SessionChatInterface = memo(
     );
     const headerMenuNode = (
       <SessionHeaderMenu
+        key={`${workspaceId}:${session.id}`}
+        publicShareWorkspaceId={publicSharingAvailable && workspaceId ? workspaceId : undefined}
         session={session}
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
@@ -5966,7 +5992,18 @@ export const SessionChatInterface = memo(
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}
                             className="h-full"
-                            leadingContent={openedByConversationStart}
+                            leadingContent={
+                              <>
+                                {openedByConversationStart}
+                                {workspaceId && (
+                                  <SessionShareRequestCards
+                                    workspaceId={workspaceId}
+                                    session={session}
+                                    isVisible={isVisible}
+                                  />
+                                )}
+                              </>
+                            }
                             emptyState={chatStreamEmptyState}
                             agentActivityLabel={agentActivityLabel}
                             agentActivityTone={agentActivityTone}

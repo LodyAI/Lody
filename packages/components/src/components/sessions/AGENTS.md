@@ -99,9 +99,10 @@ changing those files.
 - Canonical cluster in CONSTANT order + exactly one staged item; no items hides
   the bar (unless syncing) and the stage never empties or relayouts on click.
 - The stage icon is inert, colour is reserved for genuine status, and nothing
-  in the bar pulses or relayouts.
-- The Open preview chip stays gated on a real reported preview target, and
-  repository actions are priority-ordered and never duplicated below the reply.
+  in the bar pulses.
+- Open preview stays gated on a real reported target; repository actions are
+  priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
+  below the reply.
 
 ## [Auto review, status slot](../../../../../.agents/docs/sessions-auto-review.md)
 

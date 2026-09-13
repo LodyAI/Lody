@@ -43,6 +43,7 @@ export function getBuiltinToolPermissionOutcome(args: {
 }
 
 const VersionOneSchema = z.object({ version: z.literal(1) });
+const GoalActionSchema = z.enum(['set', 'pause', 'resume', 'clear']);
 const LodyCapabilitiesSchema = z
   .object({
     usage: VersionOneSchema.optional(),
@@ -64,7 +65,12 @@ const LodyCapabilitiesSchema = z
       output: z.literal(true).optional(),
     }).optional(),
     goal: VersionOneSchema.extend({
-      actions: z.array(z.enum(['set', 'pause', 'resume', 'clear'])),
+      actions: z.array(GoalActionSchema),
+      // Which transport carries which action. `actions` alone cannot say, and
+      // sending a work-starting action out-of-band would produce turns Lody has
+      // nowhere to attribute.
+      controlActions: z.array(GoalActionSchema).optional(),
+      promptActions: z.array(GoalActionSchema).optional(),
     }).optional(),
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),

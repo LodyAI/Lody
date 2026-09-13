@@ -85,7 +85,10 @@ changing either. Do not automatically turn current code into the specification.
 
 Specs and notes eventually have adjacent English `.md` and Chinese `.zh.md` files.
 Either language may come first. Translation does not block merging, and community
-contributors need not know both languages. Use `Translation: pending | current | stale`;
+contributors need not know both languages. Agents are the exception: an
+agent-authored Spec or note ships both languages in the same change, per the
+[note language rule](notes/AGENTS.md#history-and-language).
+Use `Translation: pending | current | stale`;
 link counterparts once available, keep their `Status:` values equal, and mark an older translation stale when meaning
 changes. Keep actual code identical; explanatory labels in diagrams may be translated.
 Translation cannot approve a Spec, and the tool does not assess translation accuracy.
@@ -115,9 +118,12 @@ Translation cannot approve a Spec, and the tool does not assess translation accu
    Humans confirm important intent. Do not add a parallel risk inventory.
 4. Run `pnpm run docs check` and follow [content review](content-review.md) for protected
    topics. Never refresh hashes merely to pass a check.
-5. Give humans a concise review summary with evidence, completed checks, and gaps.
-   Add the PR link after creation. Use status output to surface translation debt;
-   never invent approval or a PR that does not exist.
+5. An Agent that writes or updates a Spec or Agent Note adds or refreshes its
+   counterpart language in the same change. Do not merge an agent-authored note
+   as `Translation: pending` when the agent can write both languages; see the
+   [note language rule](notes/AGENTS.md#history-and-language).
+6. Give humans a concise review summary with evidence, completed checks, and gaps.
+   Add the PR link after creation; never invent approval or a PR that does not exist.
 
 ## Scoped audits
 

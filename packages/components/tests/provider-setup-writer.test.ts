@@ -83,10 +83,10 @@ describe('ProviderSetup WorkspaceWriter integration', () => {
     const config: AgentConfigMeta = {
       id: setupId,
       machineId,
-      name: 'Managed Codex',
+      name: 'Bub',
       description: undefined,
       cliType: 'builtin',
-      agentType: 'codex',
+      agentType: 'bub',
       env: {},
       prompt: '',
     };

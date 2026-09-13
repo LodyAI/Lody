@@ -2,6 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
+Archive uses `collectSessionArchiveTargets` for contained/opened descendants;
+restore/delete retain containment-only targets. See [relations](../../specs/session-relations.md).
+
 ## Session history
 
 - Session history storage tolerates unknown string item types from newer peers without
@@ -52,6 +55,7 @@
   Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
   paths retain the general reader. Future Mirror patches must compose with this patch,
   never silently replace it. No storage schema or write validation depends on this optimization.
+
 These contracts bind producers and consumers, including UI and CLI callers outside
 this package. Read them when changing daemon protocol negotiation, MCP/Role catalogs,
 per-turn MCP selection, or Role-based session creation and dispatch.
@@ -72,6 +76,18 @@ per-turn MCP selection, or Role-based session creation and dispatch.
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
   matching remains a separate applicability gate.
+
+## Session goal control
+
+- A goal action's transport follows what it does, not what the agent is. Status-only
+  actions (`pause`, `clear`) use the `_lody/session/goal` request and must reach a
+  goal whose prompt is still open; actions that start work (`set`, `resume`) run
+  inside a Lody-owned prompt carrying `_meta.lody.goalControl`, because every unit of
+  agent work needs a conversation entry to be attributed to. Never start goal work
+  from the request path.
+- Offer only the actions the runtime advertised in its ACP capability, never a
+  provider name check. A goal turn carries no run configuration, so resuming cannot
+  change model or mode. Behavior: [goal control Spec](../../specs/session-goal-control.md).
 
 ## Workspace MCP and Agent Roles
 

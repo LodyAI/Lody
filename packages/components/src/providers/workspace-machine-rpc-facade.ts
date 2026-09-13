@@ -6,6 +6,7 @@ import type {
 import {
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsSubagentCancellation,
   type MachineProtocolCapabilities,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
@@ -51,6 +52,8 @@ import {
   type PreviewTarget,
   type PreviewTargetApproval,
   type SessionSteerResponse,
+  type SessionGoalAction,
+  type SessionGoalResponse,
   type SessionTerminateResponse,
   type SessionForkResponse,
   type SessionForkSpec,
@@ -496,15 +499,22 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; subagentTaskId?: string }
   ): Promise<SessionCancelResponse | null> => {
     try {
+      if (
+        options?.subagentTaskId &&
+        !machineSupportsSubagentCancellation({
+          protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+        })
+      )
+        throw new Error('This machine does not support individual subagent cancellation.');
       if (await canUseLocalMachineRpc(machineId)) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
           method: 'session/cancel',
-          params: { sessionId, turnId },
+          params: { sessionId, turnId, subagentTaskId: options?.subagentTaskId },
           timeoutMs: options?.timeoutMs ?? 2_000,
         });
         if (response && !response.ok) {
@@ -516,12 +526,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionCancelResponse;
+        if (options?.subagentTaskId) throw new Error('Local machine RPC is unavailable.');
       }
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionCancel({
         sessionId,
         turnId,
+        subagentTaskId: options?.subagentTaskId,
         timeoutMs: options?.timeoutMs ?? 2_000,
       });
     } catch (error) {
@@ -751,6 +763,49 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         disposition: 'error',
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  };
+
+  const requestSessionGoal = async (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    options?: { timeoutMs?: number }
+  ): Promise<SessionGoalResponse | null> => {
+    const failure = (error: string): SessionGoalResponse => ({
+      type: 'session/goal_response',
+      sessionId: args.sessionId,
+      action: args.action,
+      accepted: false,
+      disposition: 'error',
+      error,
+    });
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/goal',
+          params: args,
+          timeoutMs: options?.timeoutMs ?? 10_000,
+        });
+        if (response && !response.ok) {
+          return failure(response.error);
+        }
+        if (response?.ok) return response.result as SessionGoalResponse;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionGoal({
+        ...args,
+        timeoutMs: options?.timeoutMs ?? 10_000,
+      });
+    } catch (error) {
+      return failure(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -1119,6 +1174,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   return {
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     requestSessionTerminate,
     requestSessionFork,
     requestSessionEditAndResend,

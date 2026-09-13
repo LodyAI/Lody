@@ -1,7 +1,9 @@
 # Shrink the component test module graph
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-10-components-test-module-graph.zh.md)
 
 ## Abstract
 

@@ -62,9 +62,10 @@ contracts, and window/renderer integration rules live in
   them into `app.asar.unpacked`, assert the DeepSeek adapter plus all four pinned
   presets, then probe CLI `--help`, node-pty loading, and a real in-memory SQLite
   database before signing.
-- Keep `better-sqlite3 >= 13.0.2`, CLI `engines.node >= 22.14.0`, the first-import
-  guard in `sqlite-runtime-support.ts`, and its tests aligned. Older Node versions can
-  segfault while loading the N-API 10 binding. Linux armv7 is unsupported.
+- Keep `better-sqlite3 >= 13.0.2`, the Node-API 10 engine range
+  (`>=22.14.0 <23 || >=23.6.0`), the first-import guard in
+  `sqlite-runtime-support.ts`, and its tests aligned. Older runtimes can segfault
+  while loading the binding. Linux armv7 is unsupported.
 - When upgrading `@lydell/node-pty`, audit package layout and Windows ConPTY binding
   names. Apply the staged asar-path repair after downloading target artifacts; a pnpm
   patch cannot cover cross-architecture packages fetched during packaging.
@@ -83,13 +84,8 @@ contracts, and window/renderer integration rules live in
   `latest*.yml`. Tag contract is `v${version}`.
 - macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
   Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
-  `SPARKLE_ED_PUBLIC_KEY` before signing. The release workflow then runs
-  `Innei/electron-sparkle-updater/action` pinned to a reviewed full commit SHA against
-  this release's zips only
-  (`publish: false`); the Action fetches the two previous `v*` zip releases as
-  delta bases. Keep Apple signing credentials scoped to the packaging step and the
-  Sparkle private key scoped to validation plus the pinned signing Action; never expose
-  them as job-level environment variables. Previous zips stay out of the published asset list. Sparkle load
+  `SPARKLE_ED_PUBLIC_KEY` before signing. Tag releases contain changelogs only;
+  they do not build installers or generate Sparkle feeds/deltas. Sparkle load
   failure falls back to electron-updater. Sparkle UI stays silent; progress and
   ready-to-install go through `ElectronUpdaterState` for the renderer banner.
 - Linux `.deb` installs go through `app-updater-linux-install.ts`, never
@@ -108,8 +104,7 @@ contracts, and window/renderer integration rules live in
 - macOS releases must be signed and notarized. `generate_appcast` refuses archives
   that fail `codesign --verify --deep --strict`, and Gatekeeper needs a notarized
   first-install DMG. Windows and Linux do not have this constraint.
-- CI packages Linux as `AppImage deb` only; `snap` stays in the target list for local
-  builds because it needs snapcraft on the machine.
+- `snap` stays in the target list for local builds and needs snapcraft on the machine.
 
 ## Verification
 

@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -64,6 +66,40 @@ describe('resolveDeepSeekHarnessHome', () => {
 });
 
 describe('resolveDeepSeekHarnessProcessLaunch', () => {
+  it('publishes an importable adapter URL while preserving the preset filesystem path', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
+    temporaryRoots.push(rootDir);
+    const adapterDir = join(rootDir, '应用 #100%');
+    await mkdir(adapterDir);
+    const adapterPath = join(adapterDir, 'deepseek-acp.mjs');
+    await writeFile(adapterPath, 'export const marker = "synthetic-acp-loaded";');
+
+    const launch = await resolveDeepSeekHarnessProcessLaunch({ adapterPath, rootDir });
+    const { config } = await readGeneratedConfig(launch);
+    // Read the generated YAML's JSON-quoted scalar without evaluating its !!js tags.
+    const entry = config.split('\n- id: acp-agent\n')[1];
+    const name = entry?.split('\n').find((line) => line.startsWith('  name: '));
+    if (!name) throw new Error('Generated config has no ACP adapter entry');
+    const specifier: unknown = JSON.parse(name.slice('  name: '.length));
+    if (typeof specifier !== 'string') throw new Error('ACP adapter entry is not a string');
+    expect(new URL(specifier).protocol).toBe('file:');
+
+    // A separate Node process exercises its native ESM loader, not Vite's import transform.
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      '--input-type=module',
+      '-e',
+      'const adapter = await import(process.argv[1]); console.log(adapter.marker);',
+      specifier,
+    ]);
+    expect(stdout.trim()).toBe('synthetic-acp-loaded');
+    expect(config).toContain(`path: ${JSON.stringify(join(adapterDir, 'deepseek-agent-presets'))}`);
+
+    const repeated = await readGeneratedConfig(
+      await resolveDeepSeekHarnessProcessLaunch({ adapterPath, rootDir })
+    );
+    expect(repeated).toEqual(await readGeneratedConfig(launch));
+  });
+
   it('publishes and loads the generated ACP config from the resolved Harness home', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
     temporaryRoots.push(rootDir);

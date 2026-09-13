@@ -1,5 +1,4 @@
-import { BrowserWindow } from 'electron'
-import { dialog } from 'electron'
+import { app, BrowserWindow, dialog, type OpenDialogOptions } from 'electron'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -137,10 +136,14 @@ export class LocalProjectsIpc extends IpcService {
   @IpcMethod()
   async selectDirectory() {
     const mainWindow = BrowserWindow.fromWebContents(getIpcContext().event.sender)
+    const options: OpenDialogOptions = {
+      defaultPath: app.getPath('home'),
+      properties: ['openDirectory']
+    }
     const result =
       mainWindow && !mainWindow.isDestroyed()
-        ? await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
-        : await dialog.showOpenDialog({ properties: ['openDirectory'] })
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options)
     if (result.canceled) return null
     const selectedPath = result.filePaths[0]
     if (!selectedPath) return null

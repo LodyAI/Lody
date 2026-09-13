@@ -6,27 +6,19 @@ reasoning behind those rules.
 
 ## Ownership
 
-- `chat-composer.tsx` — the reusable composer shell: prompt textarea, attachment
-  chips, status text, top/footer/bottom selector slots, image add, and
-  primary/secondary action placement.
-- `chat-landing.tsx` — new-chat orchestration: selector state, mobile sheet
-  wiring, submit behavior, and the nodes passed into `ChatComposer`.
-- `chat-landing-view.tsx` — the render-only landing layout around `ChatComposer`.
-- `chat-landing-derived.ts` — derived landing selection state.
-- `chat-landing-selectors.tsx`, `unified-project-selector.tsx` — wrappers over the
-  shared selector primitives for the project and branch controls.
-- `attachment-add-menu.tsx` — the composer's single "+" menu, including the
-  per-turn MCP selection.
-- `comment-reference-*` and `visual-annotation-reference-*` — attachment chip
-  state and rendering for references attached to outgoing messages.
-- `context-switch.tsx`, `machine-pairing-dialog.tsx`, `web-chat-landing-screen.tsx`
-  — landing chrome and host-specific entry points.
-- [`submission/`](submission/AGENTS.md) — the composer submission lifecycle
-  (its own scope, with its own rules).
-- Landing attachment uploads live in two sibling hooks under `src/hooks/`:
-  `use-chat-landing-image-draft.ts` (images) and `use-chat-landing-file-draft.ts`
-  (non-image files; cloud upload plus the Electron local-transport fast path,
-  mirroring `sessions/session-chat-input-area.tsx`).
+| Area                   | Owner                                                                                                                                                                                    | Responsibility                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Composer shell         | [`chat-composer.tsx`](chat-composer.tsx)                                                                                                                                                 | Prompt, attachment chips, status, selector slots, and actions.                  |
+| New-chat orchestration | [`chat-landing.tsx`](chat-landing.tsx)                                                                                                                                                   | Selector and draft state, mobile sheets, submission, and `ChatComposer` inputs. |
+| Landing layout         | [`chat-landing-view.tsx`](chat-landing-view.tsx)                                                                                                                                         | Render-only layout around `ChatComposer`.                                       |
+| Derived selection      | [`chat-landing-derived.ts`](chat-landing-derived.ts)                                                                                                                                     | Pure landing selection state.                                                   |
+| Selector controls      | [`chat-landing-selectors.tsx`](chat-landing-selectors.tsx), [`unified-project-selector.tsx`](unified-project-selector.tsx)                                                               | Project and branch wrappers over shared selectors.                              |
+| Attachment menu        | [`attachment-add-menu.tsx`](attachment-add-menu.tsx)                                                                                                                                     | The single "+" menu and per-turn MCP selection.                                 |
+| Reference chips        | `comment-reference-*`, `visual-annotation-reference-*`                                                                                                                                   | State and rendering for outgoing references.                                    |
+| Host chrome            | [`context-switch.tsx`](context-switch.tsx), [`machine-pairing-dialog.tsx`](machine-pairing-dialog.tsx), [`web-chat-landing-screen.tsx`](web-chat-landing-screen.tsx)                     | Context controls and host-specific entry points.                                |
+| Submission             | [`submission/`](submission/AGENTS.md)                                                                                                                                                    | Composer submission lifecycle and local rules.                                  |
+| Draft persistence      | [`../../atoms/local-storage-cache.ts`](../../atoms/local-storage-cache.ts), [`../../atoms/chat-landing-draft.ts`](../../atoms/chat-landing-draft.ts)                                     | Durable text and in-memory attachment state, scoped by workspace.               |
+| Attachment uploads     | [`../../hooks/use-chat-landing-image-draft.ts`](../../hooks/use-chat-landing-image-draft.ts), [`../../hooks/use-chat-landing-file-draft.ts`](../../hooks/use-chat-landing-file-draft.ts) | Image and file upload state, including Electron's local transport.              |
 
 ## Why the rules read the way they do
 
@@ -47,6 +39,10 @@ reasoning behind those rules.
   names the new agent lets those defaults overwrite the row that was just applied.
 - **Direct-authoring the accepted history entry.** The new conversation then
   renders the first message immediately, without waiting for room sync.
+- **Workspace-scoped drafts.** The workspace slug scopes every part of a new-chat
+  draft before the workspace id resolves. Every peer workspace window uses the
+  same durable localStorage contract; its launch relationship does not change
+  draft ownership or lifetime.
 - **Menu focus returning to the prompt.** Leaving focus on the model/agent trigger
   after Esc or an outside dismiss makes Enter re-open that menu.
 - **The drop target living in `chat-landing-view.tsx`.** A session dragged from the

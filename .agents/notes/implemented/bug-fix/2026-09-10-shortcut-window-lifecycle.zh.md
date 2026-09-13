@@ -1,7 +1,9 @@
 # 统一应用内快捷键的窗口生命周期
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[English](2026-09-10-shortcut-window-lifecycle.md)
 
 ## 摘要
 

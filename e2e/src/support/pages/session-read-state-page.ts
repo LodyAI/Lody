@@ -52,8 +52,14 @@ export class SessionReadStatePage {
   async markFirstSessionUnread(): Promise<void> {
     const { firstSessionId, secondSessionId } = this.fixture.requireSessionIds();
     await expect(this.page).toHaveURL(this.sessionRoutePattern(secondSessionId));
-    await this.openRowMenu(this.row(firstSessionId));
-    await this.page.getByRole('menuitem', { name: /^(Mark as unread|标记为未读)$/u }).click();
+    const row = this.row(firstSessionId);
+    const indicator = row.locator('[data-session-row-indicator]');
+    if (await indicator.isVisible()) return;
+    await this.openRowMenu(row);
+    await this.page
+      .getByRole('menuitem', { name: /^(Mark as unread|标记为未读)$/u })
+      .dispatchEvent('click');
+    await expect(indicator).toBeVisible();
   }
 
   async expectUnreadIndicator(): Promise<void> {

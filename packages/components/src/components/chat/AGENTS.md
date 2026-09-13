@@ -55,11 +55,12 @@ Index and rationale: [README.md](README.md).
   MUST consume that same identity. Attachment hooks never reset it independently;
   reset only after a full draft clear. Submit blocks while `hasBlockingImages` or
   `hasBlockingFiles`.
-- Store reserved session id and attachments in module-level atoms
-  (`atoms/chat-landing-draft.ts`, `buildChatLandingDraftKey`) keyed by workspace SLUG,
-  not initially unresolved id. Route unmount neither revokes previews nor aborts
-  uploads; uploads settle into the atom. Revoke/abort only on removal/full draft
-  clear. No localStorage persistence; app restart may lose attachments.
+- Key the whole landing draft with `buildChatLandingDraftKey` using the workspace SLUG,
+  not its initially unresolved id. Persist prompt/pasted text/mentions through
+  localStorage; workspace windows are peers and MUST NOT select draft persistence by
+  window launch relationship. Keep the reserved session id and attachments
+  in module-level atoms. Route unmount neither revokes previews nor aborts uploads;
+  revoke/abort only on removal/full draft clear. App restart may lose attachments.
 - Submit immediately hides and disables the visible landing draft but preserves
   its controlled text, attachment resources, and reserved session id until
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance

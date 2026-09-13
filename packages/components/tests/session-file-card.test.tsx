@@ -98,6 +98,20 @@ describe('SessionFileCard download action', () => {
     expect(onPreview).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a published attachment available independently of source retention', async () => {
+    const published = file({ uploadedAt: 0 });
+    const view = await render({ file: published, retention: 'publication' });
+    const preview = view.querySelector<HTMLButtonElement>(
+      'button[aria-label="lody-one-flyer.html"]'
+    );
+    expect(preview?.disabled).toBe(false);
+    await act(async () => {
+      preview?.click();
+    });
+    expect(onPreview).toHaveBeenCalledWith(published);
+    expect(view.textContent).not.toContain('expired');
+  });
+
   it('recognizes an HTML attachment by extension when the MIME type is generic', async () => {
     const view = await render({
       file: file({ fileName: 'report.htm', mimeType: 'application/octet-stream' }),
