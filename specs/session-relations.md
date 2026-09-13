@@ -1,7 +1,9 @@
 # Session relations and operation targets
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](session-relations.zh.md)
 
 A root Session may contain child Tabs and may also open independent Sessions. These
 relationships carry different guarantees. For example:
@@ -46,15 +48,62 @@ Every side effect follows the same target set as the state or document operation
 Terminal closure, machine commands and queues, launch-config removal, and worktree
 cleanup must not affect a Session excluded from the operation targets.
 
-Archive metadata writes have no cross-document transaction. Direct children must be
-written before the root, making the root the final commit point. A failed write must
-attempt to compensate every attempted target to its pre-action lifecycle state. Root
-compensation precedes child compensation; if it fails, children remain archived and the
-write and rollback errors are surfaced together, preserving the root-archived
-implication. Terminal closure starts only after all metadata writes succeed; a metadata
-failure therefore closes no target terminal. Once the first write starts, the action
-remains pinned to the captured workspace runtime until the write set commits or
-compensation finishes.
+### Archive and restore commit
+
+One archive or restore operation freezes its selected Session and discovered direct
+children before submission. The repository publishes that operation's effective
+lifecycle changes as one revision. An observer may see the preceding revision or the
+following revision, but never a subset caused by applying that operation incrementally.
+Replicas may receive a revision at different times; this is not a promise of simultaneous
+visibility across disconnected clients.
+
+A failure before acceptance leaves no change from that operation. Once an operation
+has been accepted, a persistence or acknowledgement failure must retain its identity
+and distinguish an unconfirmed outcome from rejection. Neither case authorizes writing
+old `isArchived` or execution `status` values back over current metadata. Success means
+the operation is locally durable; remote synchronization and resource cleanup have
+separate completion boundaries. Cross-restart recovery requires a persisted operation,
+not an in-memory error or retry flag.
+
+Recovery may deliver the same operation or revision more than once. Readers and resource
+owners must handle this idempotently; replay neither creates a new logical operation nor
+raises its precedence. Cross-crash notification delivery is not exactly once.
+
+Concurrent root lifecycle operations with identical frozen target sets choose one
+winner for that set. When sets differ, shared targets use the same operation ordering;
+a target absent from the newer operation retains its last applicable result. A later
+independent Tab operation may affect only that Tab, and a later root operation may
+supersede that Tab operation when the Tab is included. Therefore
+`root active / child archived` can be intentional; a failed root operation may not
+produce that combination by changing only some of its targets. Lifecycle writes do not
+own execution status: the runtime publishes its actual state, and restore never revives
+a captured `running` or `requestPermission` value.
+
+Terminal closure begins after the lifecycle commit. Cleanup observes current effective
+state and coordinates with start/resume across asynchronous resource work; an old
+archive task must not destroy a new runtime generation after restore. Cleanup failure is
+reported and retried by its resource owner without reversing the lifecycle operation.
+These resource effects may finish at different times; atomic lifecycle publication does
+not promise atomic termination of multiple processes.
+
+An operation remains bound to its captured workspace. A workspace switch before
+submission aborts without mutation; after acceptance the originating runtime owns
+confirmation and recovery. A rendered root is presentation evidence, not an authoritative
+source for membership, prior state, or a lifecycle commit.
+
+### Compatibility
+
+Every participating writer and lifecycle reader must share the operation and projection
+contract before the new representation is enabled. A Machine capability describes that
+daemon; it cannot establish compatibility of other independently authoring renderers.
+Legacy rows need an explicit migration baseline, and later legacy writes need a tested
+admission or compatibility policy. This policy and the activation mechanism must be
+proven before replacing the production path, not deferred until after its removal.
+Best-effort dual writes to independent archive flags
+do not establish this contract. Unsupported clients and retained offline writers remain
+a rollout prerequisite, not evidence that the weaker invariant is acceptable.
+
+### Exact deletion
 
 Exact deletion exists for compensation and explicit cleanup where the caller already
 knows the complete set, including a partially created child, an empty child Tab, or a
@@ -86,13 +135,25 @@ This Spec does not define worker supervision, status or result aggregation, unre
 permission routing, worker panels, settle, or handoff behavior. Those product choices
 remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
 
-Archive reads the repository metadata index for every action, so an interactive root
-does not depend on the client projection having discovered its direct children. The
+The current archive implementation reads the repository metadata index for every
+action, so an interactive root does not depend on the client projection having
+discovered its direct children. The
 query must complete before the first archive write, and query failure aborts the action
 without mutation. Its result is complete for the repository snapshot observed by that
 query; it is not a transaction boundary and does not include children created after the
 snapshot. Restore still discovers direct children from the client metadata cache and
-therefore retains the cold-start implementation gap.
+therefore retains the cold-start implementation gap. Archive still uses independent
+writes and snapshot compensation; this does not implement the atomic lifecycle and
+concurrent-write guarantees above. Existing resource reconciliation does not repair a
+partially applied metadata transition.
+
+The replacement direction is a durable operation record with a shared, atomically
+published projection. Its conflict ordering, persistence boundary, and mixed-client
+rollout must pass the [implementation plan](../plans/001-session-lifecycle-commit.md)
+before this draft can be treated as implemented. The
+[decision proposal](../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)
+records the dependency evidence and alternatives. Children created after the discovery
+snapshot, recursive containment, and atomic permanent deletion are outside this change.
 
 ## Evidence
 
@@ -108,6 +169,7 @@ CLI direct-child selection and the nested-child rejection are in
 and
 [`session-navigation.test.ts`](../packages/components/tests/session-navigation.test.ts).
 
-This draft records the relation and operation guarantees implemented by
-[#569](https://github.com/LodyAI/Lody/pull/569). Human approval of the complete
-contract remains pending.
+The containment target rules were implemented by
+[#569](https://github.com/LodyAI/Lody/pull/569). The archive acceptance criteria remain
+tracked by [#574](https://github.com/LodyAI/Lody/issues/574); discovery alone does not
+establish the full operation contract. Human approval of this draft remains pending.
