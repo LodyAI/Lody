@@ -4,6 +4,8 @@ import type {
   ACPSessionId,
   ExternalAcpHistorySyncMeta,
   LocalProjectHistoryCatalogItem,
+  LocalProjectHistoryCatalogResult,
+  LocalProjectHistoryImportResult,
   LocalProjectId,
   MachineId,
   SessionHistoryInput,
@@ -24,6 +26,54 @@ import {
 const machineId = 'machine-1' as MachineId;
 const localProjectId = 'project-1' as LocalProjectId;
 const provider = { cliType: 'builtin', agentType: 'codex' } as const;
+
+function deferred<T>() {
+  let settle: { resolve: (value: T) => void; reject: (reason: unknown) => void } | undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    settle = { resolve: promiseResolve, reject: promiseReject };
+  });
+  if (!settle) {
+    throw new Error('Promise executor did not initialize synchronously');
+  }
+  return { promise, ...settle };
+}
+
+function catalogResult(marker: number): LocalProjectHistoryCatalogResult {
+  return { listed: marker, lastListedAt: marker, sessions: [] };
+}
+
+function importResult(marker: number): LocalProjectHistoryImportResult {
+  return {
+    summary: {
+      listed: marker,
+      imported: marker,
+      refreshed: 0,
+      skipped: 0,
+      conflicted: 0,
+      failed: 0,
+      failures: [],
+    },
+    catalog: catalogResult(marker),
+  };
+}
+
+function historySyncService() {
+  return new LocalProjectHistorySyncService(
+    {} as never,
+    {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as never,
+    {
+      workspaceId: 'workspace-1' as never,
+      machineId,
+      userId: 'user-1',
+    },
+    provider
+  );
+}
 
 function externalHistory(overrides: Partial<ExternalAcpHistorySyncMeta> = {}) {
   return {
@@ -90,6 +140,101 @@ function materializedReplay(
     ...overrides,
   };
 }
+
+describe('local project history request coordination', () => {
+  const importArgs = (acpSessionIds: string[]) => ({
+    localProjectId,
+    rootPath: '/tmp/project-1',
+    acpSessionIds,
+  });
+
+  it('coalesces overlapping imports for the same session set', async () => {
+    const service = historySyncService();
+    const gate = deferred<LocalProjectHistoryImportResult>();
+    const starts: string[][] = [];
+    (
+      service as unknown as {
+        importLocalProjectSessionsInner: typeof service.importLocalProjectSessions;
+      }
+    ).importLocalProjectSessionsInner = async (args) => {
+      starts.push(args.acpSessionIds);
+      return gate.promise;
+    };
+
+    const first = service.importLocalProjectSessions(importArgs(['acp-2', 'acp-1']));
+    const second = service.importLocalProjectSessions(importArgs(['acp-1', 'acp-2', 'acp-1']));
+    await Promise.resolve();
+
+    expect(starts).toEqual([['acp-2', 'acp-1']]);
+    const expected = importResult(2);
+    gate.resolve(expected);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toBe(expected);
+    expect(secondResult).toBe(expected);
+  });
+
+  it('serializes different requests for the same local project', async () => {
+    const service = historySyncService();
+    const firstGate = deferred<LocalProjectHistoryImportResult>();
+    const secondGate = deferred<LocalProjectHistoryImportResult>();
+    const events: string[] = [];
+    (
+      service as unknown as {
+        importLocalProjectSessionsInner: typeof service.importLocalProjectSessions;
+      }
+    ).importLocalProjectSessionsInner = async (args) => {
+      const sessionId = args.acpSessionIds[0] ?? 'missing';
+      events.push(`start:${sessionId}`);
+      const result = sessionId === 'acp-1' ? await firstGate.promise : await secondGate.promise;
+      events.push(`finish:${sessionId}`);
+      return result;
+    };
+
+    const first = service.importLocalProjectSessions(importArgs(['acp-1']));
+    const second = service.importLocalProjectSessions(importArgs(['acp-2']));
+    await Promise.resolve();
+    expect(events).toEqual(['start:acp-1']);
+
+    firstGate.resolve(importResult(1));
+    await first;
+    await Promise.resolve();
+    expect(events).toEqual(['start:acp-1', 'finish:acp-1', 'start:acp-2']);
+
+    secondGate.resolve(importResult(2));
+    await second;
+    expect(events).toEqual(['start:acp-1', 'finish:acp-1', 'start:acp-2', 'finish:acp-2']);
+  });
+
+  it('allows a fresh request after completion or failure', async () => {
+    const service = historySyncService();
+    const outcomes: Array<Error | LocalProjectHistoryCatalogResult> = [
+      new Error('catalog unavailable'),
+      catalogResult(2),
+      catalogResult(3),
+    ];
+    (
+      service as unknown as {
+        syncLocalProjectInner: typeof service.syncLocalProject;
+      }
+    ).syncLocalProjectInner = async () => {
+      const outcome = outcomes.shift();
+      if (outcome instanceof Error) throw outcome;
+      if (!outcome) throw new Error('unexpected extra refresh');
+      return outcome;
+    };
+
+    await expect(
+      service.syncLocalProject({ localProjectId, rootPath: '/tmp/project-1' })
+    ).rejects.toThrow('catalog unavailable');
+    await expect(
+      service.syncLocalProject({ localProjectId, rootPath: '/tmp/project-1' })
+    ).resolves.toEqual(catalogResult(2));
+    await expect(
+      service.syncLocalProject({ localProjectId, rootPath: '/tmp/project-1' })
+    ).resolves.toEqual(catalogResult(3));
+    expect(outcomes).toEqual([]);
+  });
+});
 
 describe('decideHistoryRefresh', () => {
   it('skips when replay digest is unchanged', () => {

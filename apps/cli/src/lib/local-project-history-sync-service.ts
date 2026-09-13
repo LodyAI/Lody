@@ -46,7 +46,54 @@ import {
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
-const syncLeases = new Set<string>();
+type HistorySyncCoordinator = {
+  tail: Promise<void>;
+  requests: Map<string, Promise<unknown>>;
+};
+
+// History refreshes are initiated from more than one renderer surface. Keep one
+// coordinator per local project so equivalent requests can share their result,
+// while distinct operations still preserve the service's single-writer order.
+const historySyncCoordinators = new Map<string, HistorySyncCoordinator>();
+
+function withHistorySyncCoordination<T>(
+  coordinatorKey: string,
+  requestKey: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  let coordinator = historySyncCoordinators.get(coordinatorKey);
+  if (!coordinator) {
+    coordinator = { tail: Promise.resolve(), requests: new Map() };
+    historySyncCoordinators.set(coordinatorKey, coordinator);
+  }
+
+  const existing = coordinator.requests.get(requestKey);
+  if (existing) {
+    // A request key includes every operation input, so this promise has the
+    // same result type as the caller that originally registered it.
+    return existing as Promise<T>;
+  }
+
+  const current = coordinator.tail.then(operation);
+  const settled = current.then(
+    () => undefined,
+    () => undefined
+  );
+  coordinator.requests.set(requestKey, current);
+  coordinator.tail = settled;
+
+  const cleanup = () => {
+    if (coordinator.requests.get(requestKey) === current) {
+      coordinator.requests.delete(requestKey);
+    }
+    if (coordinator.requests.size === 0 && coordinator.tail === settled) {
+      historySyncCoordinators.delete(coordinatorKey);
+    }
+  };
+  void current.then(cleanup, cleanup);
+
+  return current;
+}
 
 // In-process serializer for machineRoomId-scoped catalog writes. History rows
 // are stored in machine Flock localProject entries, but each provider still does
@@ -625,20 +672,13 @@ export class LocalProjectHistorySyncService {
     localProjectId: LocalProjectId;
     rootPath: string;
   }): Promise<LocalProjectHistoryCatalogResult> {
-    const leaseKey =
+    const coordinatorKey =
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
-    if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
-    }
-    syncLeases.add(leaseKey);
-    try {
-      return await this.syncLocalProjectInner(args);
-    } finally {
-      syncLeases.delete(leaseKey);
-    }
+    const requestKey = stableJson(['sync', args.rootPath]);
+    return withHistorySyncCoordination(coordinatorKey, requestKey, () =>
+      this.syncLocalProjectInner(args)
+    );
   }
 
   private async syncLocalProjectInner(args: {
@@ -658,20 +698,17 @@ export class LocalProjectHistorySyncService {
     rootPath: string;
     acpSessionIds: string[];
   }): Promise<LocalProjectHistoryImportResult> {
-    const leaseKey =
+    const coordinatorKey =
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
-    if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
-    }
-    syncLeases.add(leaseKey);
-    try {
-      return await this.importLocalProjectSessionsInner(args);
-    } finally {
-      syncLeases.delete(leaseKey);
-    }
+    const requestKey = stableJson([
+      'import',
+      args.rootPath,
+      [...new Set(args.acpSessionIds)].sort(),
+    ]);
+    return withHistorySyncCoordination(coordinatorKey, requestKey, () =>
+      this.importLocalProjectSessionsInner(args)
+    );
   }
 
   async resolveHistoryConflict(args: {
@@ -680,20 +717,13 @@ export class LocalProjectHistorySyncService {
     sessionId: SessionId;
     acpSessionId: string;
   }): Promise<LocalProjectHistoryConflictResolveResult> {
-    const leaseKey =
+    const coordinatorKey =
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
-    if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
-    }
-    syncLeases.add(leaseKey);
-    try {
-      return await this.resolveHistoryConflictInner(args);
-    } finally {
-      syncLeases.delete(leaseKey);
-    }
+    const requestKey = stableJson(['resolve', args.rootPath, args.sessionId, args.acpSessionId]);
+    return withHistorySyncCoordination(coordinatorKey, requestKey, () =>
+      this.resolveHistoryConflictInner(args)
+    );
   }
 
   private async importLocalProjectSessionsInner(args: {
