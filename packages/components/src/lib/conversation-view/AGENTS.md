@@ -5,6 +5,9 @@
 - The shipped implementation is `createConversationViewFromReader`. Its index
   comes from shallow directory reads; bodies are acquired by window. Opening
   still imports the document and reads an O(total) directory before the window.
+- Outline summaries are lazy: opening builds the directory and retained tail only.
+  Hover reads the selected question and replies; released/evicted previews refresh
+  on demand after content edits. Business fact derivation is a separate consumer.
 - Cache identities and leases use turn ids, not positions. Release the ids
   captured at acquisition. Async reads are accepted only while membership and
   that turn's content epochs match. Retry invalidated reads while their lease

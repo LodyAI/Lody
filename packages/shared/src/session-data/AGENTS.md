@@ -10,6 +10,8 @@
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
+- Repeated identity lookups reuse an unchanged pending transaction. Reads must not
+  commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
 - Subscribe and capture the initial directory without a gap. Notifications carry structural ranges or changed turn ids. The display
   cache rejects stale async reads. CLI reads in-process synchronously; auto-seen
   scans directory scalars only and permission checks have no await gap.

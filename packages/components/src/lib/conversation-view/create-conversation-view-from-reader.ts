@@ -61,8 +61,7 @@ export type CreateConversationViewFromReaderOptions = {
   hydrateItemBudget?: number;
 };
 
-/** Turns summarized per background chunk, and the item budget that caps it. */
-const IDLE_CHUNK_TURNS = 80;
+/** Item budget for deferred tail hydration. */
 const IDLE_CHUNK_ITEMS = 1_200;
 
 /** Sentinel: the change carried no `to`, so the whole directory is re-read. */
@@ -134,7 +133,6 @@ export function createConversationViewFromReader(
   const acceptsToken = (id: string, token: { structure: number; turn: number }) =>
     !disposed && structureEpoch === token.structure && (turnEpoch.get(id) ?? 0) === token.turn;
   let idleCancel: (() => void) | null = null;
-  let idleCursor = -1;
   let resolveReady: () => void = () => {};
   let readyResolved = false;
   const ready = new Promise<void>((resolve) => {
@@ -336,86 +334,21 @@ export function createConversationViewFromReader(
     return deferred;
   };
 
-  // ---- background index pass -------------------------------------------------
-
-  const runIdleChunk = async (deadline: IdleDeadline) => {
+  // Idle work only fills the retained tail. Offscreen summaries are produced
+  // by explicit window/outline leases, never by scanning the entire history.
+  const runIdleChunk = async () => {
     if (disposed) return;
-    let processed = 0;
-    let items = 0;
-    let changed = false;
-    let complete = true;
-    if (await ensureTailHydrated(IDLE_CHUNK_ITEMS, false)) complete = false;
+    const deferred = await ensureTailHydrated(IDLE_CHUNK_ITEMS, true);
     if (disposed) return;
-    for (let i = idleCursor; i >= 0 && complete; i -= 1) {
-      idleCursor = i - 1;
-      const row = rows[i];
-      const id = row ? ids[i] : undefined;
-      if (!row || !id) continue;
-      const needsSummary = row.summary === undefined;
-      const needsCounts = row.itemCount === undefined;
-      if (!needsSummary && !needsCounts) continue;
-      if (
-        processed >= IDLE_CHUNK_TURNS ||
-        items >= IDLE_CHUNK_ITEMS ||
-        deadline.timeRemaining() <= 1
-      ) {
-        idleCursor = i;
-        complete = false;
-        break;
-      }
-      const body = hydrated.get(id);
-      if (body) {
-        rows[i] = withBodyFacts(row, body);
-        processed += 1;
-        items += Math.max(1, rows[i]!.itemCount ?? 0);
-        changed = true;
-        continue;
-      }
-      let read: SessionTurnRead;
-      const token = turnToken(id);
-      try {
-        read = await reader.readTurn(id);
-      } catch {
-        continue;
-      }
-      // The same acceptance rule as every other async read: a discarded summary
-      // is picked up by the next idle pass, and the row-identity check protects
-      // against a positional shift even if the turn's own token survived.
-      if (disposed) return;
-      if (!acceptsToken(id, token) || rows[i] !== row || ids[i] !== id) continue;
-      if (read.state !== 'ready') continue;
-      const turn = read.turn as unknown as SessionHistory;
-      const next: TurnIndexRow = {
-        ...(needsCounts
-          ? {
-              ...row,
-              itemCount: Array.isArray(turn.items) ? turn.items.length : 0,
-              planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
-            }
-          : row),
-      };
-      if (needsSummary) next.summary = summarizeTurn(turn);
-      rows[i] = next;
-      processed += 1;
-      items += Math.max(1, next.itemCount ?? 0);
-      changed = true;
-    }
-    if (disposed) return;
-    if (changed) {
-      bump();
-      emit({ kind: 'changed', ids: ids.slice(tailStart()) });
-    }
-    if (complete) resolveReady();
-    else scheduleIdlePass(false);
+    if (deferred) scheduleIdlePass();
+    else resolveReady();
   };
 
-  const scheduleIdlePass = (restart = true) => {
-    if (disposed) return;
-    if (restart) idleCursor = ids.length - 1;
-    if (idleCancel) return;
-    idleCancel = scheduleIdle((deadline) => {
+  const scheduleIdlePass = () => {
+    if (disposed || idleCancel) return;
+    idleCancel = scheduleIdle(() => {
       idleCancel = null;
-      void runIdleChunk(deadline);
+      void runIdleChunk();
     });
   };
 
@@ -509,17 +442,14 @@ export function createConversationViewFromReader(
       const evictedChanges: number[] = [];
       let lo = Infinity;
       let hi = -1;
-      let invalidatedSummary = false;
       for (const entry of entries) {
         const pos = entry.position;
         const row = rowFromDirectory(entry);
         const old = rows[pos];
         if (old && !hydrated.has(old.id)) {
-          // The change may have moved content under a summarized turn: let the
-          // idle pass recompute instead of trusting a possibly stale summary.
+          // Drop stale previews; the next explicit read will recompute them.
           if (old.summary !== undefined) {
             row.summary = undefined;
-            invalidatedSummary = true;
           }
         }
         // Invalidate only the turn(s) whose facts actually changed, so an
@@ -541,9 +471,6 @@ export function createConversationViewFromReader(
       if (evictedChanges.length > 0)
         emit({ kind: 'changed', ids: evictedChanges.map((pos) => ids[pos]!) });
       if (toReRead.length > 0) await applyHydratedReplacement(toReRead);
-      // A summary that was invalidated needs the background pass again; restart
-      // from the end so a cursor that already moved past this row revisits it.
-      if (invalidatedSummary) scheduleIdlePass(true);
       return;
     }
 

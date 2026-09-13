@@ -423,7 +423,6 @@ export function ConversationOutlineRail({
       // Magnify immediately — this is direct manipulation and must not wait on
       // the card's warmup, or the rail would feel unresponsive to the cursor.
       setPointerIndex(index);
-      onPreviewRoundRef.current?.(index);
       clearOpenTimer();
       const now = performance.now();
       const isWarm =
@@ -449,6 +448,7 @@ export function ConversationOutlineRail({
       });
       if (isWarm || bypassWarmup) {
         if (bypassWarmup) warmBrowsingRef.current = false;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({ type: 'card-open', at: now, index, source });
@@ -459,6 +459,7 @@ export function ConversationOutlineRail({
         // Deliberately waiting out the fixed delay is what earns the old
         // rapid-browsing window. A predictor bypass never arms it.
         warmBrowsingRef.current = true;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({

@@ -274,10 +274,14 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
       expect(view.index(0)?.inputConfig).toMatchObject({ modelId: 'sonnet' });
       await settle(idle, view);
       expect(ready).toBe(true);
-      // The idle pass filled summaries/counts without hydrating the turn body.
+      // Idle work does not read offscreen bodies for outline previews.
+      expect(view.index(at)?.summary).toBeUndefined();
+      expect(view.isHydrated(at)).toBe(false);
+      const preview = view.acquireRange(at, at + 1);
+      await preview.ready;
       expect(view.index(at)?.summary?.headText).toContain('empty selection');
       expect(view.index(at)?.itemCount).toBe(1);
-      expect(view.isHydrated(at)).toBe(false);
+      preview.release();
       view.dispose();
     } finally {
       harness.teardown();
@@ -794,7 +798,7 @@ describe('createConversationViewFromReader audit regressions', () => {
     }
   });
 
-  it('an idle summary read cannot overwrite a row after a head insertion', async () => {
+  it('an on-demand preview read cannot overwrite a row after a head insertion', async () => {
     const history = buildFixtureHistory(3);
     const doc = buildSessionDoc(history);
     const data = createLoroSessionData({
@@ -829,7 +833,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     });
     try {
       await checkpoint();
-      tasks.shift()!({ timeRemaining: () => 100 });
+      const preview = view.acquireRange(5, 6);
+      void preview.ready.catch(() => {});
       await entered;
       doc.getList('history').insert(0, { ...history[0], id: 'new' } as never);
       doc.commit();
@@ -887,7 +892,7 @@ describe('createConversationViewFromReader audit regressions', () => {
     }
   });
 
-  it('a gated same-turn content update is not overwritten by the stale summary write', async () => {
+  it('a gated on-demand preview cannot overwrite a same-turn content update', async () => {
     const history = buildFixtureHistory(3);
     const doc = buildSessionDoc(history);
     const data = createLoroSessionData({
@@ -922,7 +927,8 @@ describe('createConversationViewFromReader audit regressions', () => {
     });
     try {
       await checkpoint();
-      tasks.shift()!({ timeRemaining: () => 100 });
+      const preview = view.acquireRange(5, 6);
+      void preview.ready.catch(() => {});
       await entered;
       // Same turn, no positional shift: the row object is replaced, so the
       // delayed summary must not write its stale capture back.

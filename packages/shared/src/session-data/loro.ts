@@ -234,6 +234,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   const positions = new Map<string, number>();
   let identityDirty = true;
   let indexedLength = -1;
+  let indexedOpCount = -1;
   const unsubscribeIdentity = doc.subscribe((batch) => {
     if (
       batch.events.some(
@@ -248,13 +249,19 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       identityDirty = true;
   });
   const ensureIdentityIndex = () => {
-    if (!identityDirty && indexedLength === list.length && doc.getPendingTxnLength() === 0) return;
+    // Pending writes are readable before subscription delivery. Reuse the scan
+    // until another op arrives; merely having a pending transaction is not a change.
+    // opCount includes pending ops and does not restart at commit, unlike pending length.
+    if (!identityDirty && indexedLength === list.length) {
+      if (doc.getPendingTxnLength() === 0 || indexedOpCount === doc.opCount()) return;
+    }
     positions.clear();
     for (let i = 0; i < list.length; i++) {
       const id = readIdentity(list.get(i))?.turnId;
       if (id !== undefined) positions.set(id, i); // newest duplicate wins, like writer.locate
     }
     indexedLength = list.length;
+    indexedOpCount = doc.opCount();
     identityDirty = false;
   };
 

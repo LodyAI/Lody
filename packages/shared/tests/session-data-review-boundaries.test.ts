@@ -111,3 +111,64 @@ it('unknown failure after tail replacement reaches the indeterminate phase', asy
   ).toEqual({ status: 'indeterminate', cause: error });
   expect(writer.read('replacement')).toBeDefined();
 });
+
+it('reuses pending reads while observing uncommitted replacement, duplicates and renames', () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  for (let i = 0; i < 100; i++) writer.append(turn(`t${i}`));
+  const data = createLoroSessionData({ doc, sessionId, writer });
+  const list = doc.getList('history');
+  const read = (id: string) => data.history.readTurn(id);
+  const originalFrontiers = doc.frontiers();
+  try {
+    doc.getMap('session').set('id', 'pending');
+    const pending = doc.getPendingTxnLength();
+    expect(pending).toBeGreaterThan(0);
+    expect(read('t99')).toMatchObject({ state: 'ready', turn: { id: 't99' } });
+    const get = vi.spyOn(LoroList.prototype, 'get');
+    try {
+      for (let i = 0; i < 10; i++)
+        expect(read(`t${i}`)).toMatchObject({ state: 'ready', turn: { id: `t${i}` } });
+      expect(get.mock.calls.length).toBeLessThan(100);
+      expect(doc.getPendingTxnLength()).toBe(pending);
+    } finally {
+      get.mockRestore();
+    }
+    list.delete(99, 1);
+    list.insert(99, { ...turn('t0'), items: [{ type: 'text', text: 'newest' }] });
+    expect(read('t99')).toEqual({ state: 'missing' });
+    expect(read('t0')).toMatchObject({ turn: { items: [{ text: 'newest' }] } });
+    list.delete(99, 1);
+    expect(read('t0')).toMatchObject({ turn: { items: [{ text: 't0' }] } });
+    const first = list.get(0) as LoroMap;
+    first.set('id', 'renamed');
+    expect(read('t0')).toEqual({ state: 'missing' });
+    expect(read('renamed')).toMatchObject({ state: 'ready' });
+    doc.commit();
+    first.set('id', 'next');
+    expect(read('next')).toMatchObject({ state: 'ready' });
+    doc.commit();
+    first.set('id', 'last');
+    expect(read('next')).toEqual({ state: 'missing' });
+    expect(read('last')).toMatchObject({ state: 'ready' });
+    doc.commit();
+    // Checkout changes state without reducing oplog opCount.
+    doc.checkout(originalFrontiers);
+    expect(read('last')).toEqual({ state: 'missing' });
+    expect(read('t99')).toMatchObject({ state: 'ready' });
+    doc.attach();
+    expect(read('last')).toMatchObject({ state: 'ready' });
+    const peer = doc.fork();
+    try {
+      (peer.getList('history').get(0) as LoroMap).set('id', 'remote');
+      doc.import(peer.export({ mode: 'update' }));
+      expect(read('last')).toEqual({ state: 'missing' });
+      expect(read('remote')).toMatchObject({ state: 'ready' });
+    } finally {
+      peer.free();
+    }
+  } finally {
+    data.dispose();
+    doc.free();
+  }
+});

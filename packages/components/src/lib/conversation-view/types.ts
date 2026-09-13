@@ -2,8 +2,8 @@ import type { SessionHistory, SessionId, SessionTurnInputConfig } from '@lody/sh
 
 /**
  * Cheap per-turn facts the outline rail, placeholder rows, and height estimates
- * read without hydrating the turn. Derived once per turn from shallow Loro reads
- * (or from the hydrated object when one exists) and kept on the index row after
+ * read without keeping the turn hydrated. Derived when the turn is requested
+ * and kept on the index row after
  * the turn itself is evicted.
  */
 export type TurnSummary = {
@@ -44,8 +44,7 @@ export type TurnIndexInputConfig = Pick<
 
 /**
  * What every turn exposes at all times, hydrated or not. Scalars come straight
- * from the turn map's shallow value; the optional fields fill in as the
- * background pass reaches the turn.
+ * from the turn map's shallow value; optional summaries fill in when a window or hover requests the turn.
  */
 /**
  * Turn-map scalars mirrored into the index row. ONE list: `TurnIndexRow` is
@@ -111,7 +110,7 @@ export interface ConversationView {
   readonly turnCount: number;
   /** Bumps on any structural, index, or hydrated-content change. */
   readonly version: number;
-  /** Resolves once background summaries/counts finish; user Role config is eager. */
+  /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */

@@ -83,12 +83,29 @@ export function useConversationStreamItems(
     extendToPrecedingUserTurn: true,
   });
 
+  const previewRangeRef = useRef<ReturnType<ConversationView['acquireRange']> | null>(null);
+  useEffect(
+    () => () => {
+      previewRangeRef.current?.release();
+      previewRangeRef.current = null;
+    },
+    [view]
+  );
   const onOutlinePreviewRound = useCallback(
     (turnIndex: number) => {
-      if (!view) return;
-      // Hydrating fills the row's summary; the turn may then be evicted again.
-      const range = view.acquireRange(turnIndex, turnIndex + 1);
-      void range.ready.finally(() => range.release());
+      if (!view || !view.index(turnIndex)) return;
+      previewRangeRef.current?.release();
+      // A round includes its user question and replies up to the next user.
+      let end = turnIndex + 1;
+      while (end < view.turnCount && view.index(end)?.role !== 'user') end++;
+      const range = view.acquireRange(turnIndex, end);
+      previewRangeRef.current = range;
+      const release = () => {
+        range.release();
+        if (previewRangeRef.current === range) previewRangeRef.current = null;
+      };
+      // A failed preview must not become an unhandled rejected promise.
+      void range.ready.then(release, release);
     },
     [view]
   );
