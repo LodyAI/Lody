@@ -2,29 +2,24 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import {
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION,
-  ACP_EXTENSION_DSH_PROFILE_REVISION,
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
-  ACP_EXTENSION_DSH_VERSION,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
   DEEPSEEK_HARNESS_NPX_PACKAGES,
+  DEEPSEEK_HARNESS_PROFILE_FILENAMES,
+  DEEPSEEK_HARNESS_PROFILE_NAME,
   DEEPSEEK_HARNESS_VERSION,
-  createDeepSeekHarnessCordisConfig,
+  createDeepSeekHarnessProfileFiles,
   type DeepSeekHarnessSessionCompression,
 } from 'acp-extension-dsh/profile';
 
-export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessCordisConfig };
+export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessProfileFiles };
 export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION =
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
-
-const DEEPSEEK_HARNESS_CONFIG_FILE_PREFIX =
-  `cordis-${DEEPSEEK_HARNESS_VERSION.replaceAll('.', '-')}` +
-  `-acp-extension-dsh-${ACP_EXTENSION_DSH_VERSION}-${ACP_EXTENSION_DSH_PROFILE_REVISION}`;
 
 const RAW_SESSION_ARTIFACT = 'session.jsonl';
 const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
@@ -112,14 +107,15 @@ export async function resolveDeepSeekHarnessSessionCompression(
   return rawArtifact ? 'none' : DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION;
 }
 
-async function publishConfigAtomically(configPath: string, config: string): Promise<void> {
-  const temporaryPath = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, config, { mode: 0o600 });
+async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, contents, { mode: 0o600 });
   try {
-    await rename(temporaryPath, configPath);
+    await rename(temporaryPath, filePath);
   } catch (error) {
-    // On Windows rename cannot replace an existing destination. Another Lody
-    // process can only have published the same versioned, immutable content.
+    // On Windows rename cannot replace an existing destination. The profile
+    // directory is content-addressed, so a racing writer can only have
+    // published the same immutable files.
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     await rm(temporaryPath, { force: true });
   }
@@ -134,19 +130,44 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   const sessionsRoot = join(rootDir, 'sessions');
   const presetRoot = join(dirname(options.adapterPath), 'deepseek-agent-presets');
   const sessionCompression = await resolveDeepSeekHarnessSessionCompression(sessionsRoot);
-  const config = createDeepSeekHarnessCordisConfig(
-    // Cordis imports this entry as ESM; Windows drive paths are not module URLs.
-    pathToFileURL(options.adapterPath).href,
+  const profileFiles = createDeepSeekHarnessProfileFiles({
+    adapterPath: options.adapterPath,
     presetRoot,
-    sessionCompression
-  );
-  // The adapter lives next to the installed CLI, so its absolute path can
-  // change across app upgrades. Content-address the otherwise immutable file
-  // so Windows never has to replace an in-use config with a stale path.
-  const configHash = createHash('sha256').update(config).digest('hex').slice(0, 12);
-  const configPath = join(rootDir, `${DEEPSEEK_HARNESS_CONFIG_FILE_PREFIX}-${configHash}.yml`);
+    sessionCompression,
+    reasoningEffort: 'max',
+  });
   await mkdir(sessionsRoot, { recursive: true });
-  await publishConfigAtomically(configPath, config);
+  // The adapter lives next to the installed CLI, so its absolute path can
+  // change across app upgrades. Content-address the profile directory so
+  // Windows never has to replace in-use files with a stale path.
+  const fingerprint = createHash('sha256')
+    .update(profileFiles.packageJson)
+    .update(profileFiles.cordisYml)
+    .update(profileFiles.cordisPatchYml)
+    .update(profileFiles.pnpmWorkspaceYaml)
+    .digest('hex')
+    .slice(0, 12);
+  const profileName = `${DEEPSEEK_HARNESS_PROFILE_NAME}-${fingerprint}`;
+  const profileDir = join(rootDir, 'profiles', profileName);
+  await mkdir(profileDir, { recursive: true });
+  await Promise.all([
+    publishFileAtomically(
+      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.packageJson),
+      profileFiles.packageJson
+    ),
+    publishFileAtomically(
+      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisYml),
+      profileFiles.cordisYml
+    ),
+    publishFileAtomically(
+      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisPatchYml),
+      profileFiles.cordisPatchYml
+    ),
+    publishFileAtomically(
+      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.pnpmWorkspaceYaml),
+      profileFiles.pnpmWorkspaceYaml
+    ),
+  ]);
 
   return {
     command: 'npx',
@@ -157,9 +178,9 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
         '--package',
         `${packageName}@${DEEPSEEK_HARNESS_VERSION}`,
       ]),
-      'dsh-acp-demo',
-      '--config',
-      configPath,
+      'dsh',
+      '--profile',
+      profileName,
       ...(options.extraArgs ?? []),
     ],
     env: {

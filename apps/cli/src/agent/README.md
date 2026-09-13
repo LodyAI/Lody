@@ -101,10 +101,11 @@ inside the live turn, and the caller re-sends an undelivered steer — so wideni
 
 ### DeepSeek Harness is not a managed runtime
 
-`deepseek-harness-runtime.ts` publishes Lody's versioned ACP composition beside (without
-replacing) user Harness config and launches the pinned explicit package closure through
-`dsh-acp-demo`. The all-in-one `@deepseek-ai/dsh` product CLI is deliberately not used
-because this ACP host excludes product UI and telemetry packages. CLI production and dev
+`deepseek-harness-runtime.ts` publishes Lody's content-addressed ACP profile beside (without
+replacing) user Harness config and launches the pinned package closure through
+`dsh --profile`. The generated profile composes `@deepseek-ai/dsh-base` with a Lody overlay
+that disables the product telemetry, request-inventory, and LLM-title rows, so the host keeps
+the upstream base composition without inheriting the web product surface. CLI production and dev
 builds copy the extension's pinned official presets beside `deepseek-acp.js`; the generated
 roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
 provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
@@ -220,7 +221,7 @@ deriving one from prompt text publishes prompt text, and "rotate the password be
 is an ordinary request. Two filters were tried and both failed for the same reason — a secret
 has no reliable shape, since `hunter2` is a password and an ordinary word. Stripping
 credential-shaped tokens left everything that did not look like one; failing closed on
-credential *syntax* still let plain prose through, so it fails open on every miss and cannot
+credential _syntax_ still let plain prose through, so it fails open on every miss and cannot
 be a security boundary. Naming refs after user text needs a source provably isolated from the
 prompt, and no such source exists at session-ready: the ACP title has not arrived yet, and the
 isolated generator's own fallback is the raw prompt.

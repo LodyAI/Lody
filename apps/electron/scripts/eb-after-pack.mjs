@@ -19,7 +19,7 @@ const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal
 const SMOKE_TIMEOUT_MS = 120_000
 const DEEPSEEK_PACKAGED_ASSETS = [
   'deepseek-acp.js',
-  ...['standard', 'code', 'minimal', 'cordis'].map((preset) =>
+  ...['standard', 'ptc', 'minimal', 'cordis'].map((preset) =>
     path.join('deepseek-agent-presets', preset, 'agent.cordis.yml')
   )
 ]

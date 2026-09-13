@@ -50,6 +50,7 @@ const deepseekAgentConfig: AgentConfigMeta = {
   agentType: 'deepseek',
 };
 const deepseekModels = [
+  { value: 'deepseek-flash', label: 'DeepSeek-V41-Flash' },
   { value: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
   { value: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
 ];
@@ -220,7 +221,7 @@ describe('composer model picker search', () => {
     expect(rows()).toHaveLength(fewModels.length);
   });
 
-  it('links the upstream delegation warning for a builtin DeepSeek non-Pro model', async () => {
+  it('links the upstream delegation warning for a builtin DeepSeek non-default model', async () => {
     await act(async () => {
       root?.render(
         createElement(DesktopRunConfigMenu, {
@@ -245,7 +246,7 @@ describe('composer model picker search', () => {
     expect(warning?.textContent).toContain('Upstream discussion');
   });
 
-  it('does not warn when the builtin DeepSeek session already uses Pro', async () => {
+  it('does not warn when the builtin DeepSeek session already uses the default model', async () => {
     await act(async () => {
       root?.render(
         createElement(DesktopRunConfigMenu, {
@@ -253,7 +254,7 @@ describe('composer model picker search', () => {
           agentSelection: { agentId: deepseekAgentConfig.id, machineId },
           availableAgentConfigs: [deepseekAgentConfig],
           modelOptions: deepseekModels,
-          selectedModelId: 'deepseek-v4-pro',
+          selectedModelId: 'deepseek-flash',
         })
       );
     });
