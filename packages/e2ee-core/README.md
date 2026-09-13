@@ -1,5 +1,20 @@
 # @lody/e2ee-core
 
+**Design update (2026-09-13; not implemented):** normal first join will verify an
+authenticated device's signed authorization-state snapshot, then every increment.
+Full replay remains an optional audit. The 10k/100ms gate is withdrawn, not passed;
+SIMD/Wasm/multithreading optimization for that target is no longer required.
+See [snapshot trust and acceptance](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现).
+Existing examples/tests below exercise the full-replay API, not the pending
+snapshot API. Independent comparison binds actual state as well as chain head;
+endorsement is not independent verification of all history. Product integration remains paused.
+
+**Publication scope (2026-09-14):** this update commits documentation only. The
+recovery-device, Lean correspondence and backend-probe revisions described below
+include local uncommitted work; verify actual exports/files before using those
+paths. They are not delivered by this documentation commit. Historical “not
+pushed” statements are not current remote-status evidence.
+
 **P1 surface (D1–D5 semantics frozen; V4 SHA not frozen):** [ledger spec §§8–11](../../specs/e2ee-ledger.zh.md)
 defines the DAG-CBOR single-signer chain. Import `Ledger` from `@lody/e2ee-core` and
 builders from `@lody/e2ee-core/ledger`. Owner transfer (D1 A) is unilateral:
@@ -54,12 +69,15 @@ C1 real Loro/Flock + streams-crdt over a local Durable Streams peer:
 Lean model correspondence: `test/ledger-model-correspondence.test.ts`.
 Desktop 10k from-zero bench (not in default vitest):
 `pnpm --filter @lody/e2ee-core bench:ledger-10k`. Desktop Chromium harness:
-`pnpm --filter @lody/e2ee-core bench:ledger-10k-browser`. `Ledger.verify` still
+`pnpm --filter @lody/e2ee-core bench:ledger-10k-browser`.
+Ed25519 backend probe (noble vs OpenSSL vs optional Wasm SIMD; does not
+change `Ledger.verify`):
+`pnpm --filter @lody/e2ee-core bench:ed25519-backends`. `Ledger.verify` still
 parses, hashes, checks every signature (including nested proofs) and replays
 policy from zero; it caches parsed prime-subgroup public keys and uses
 `@noble/hashes` SHA-512/SHA-256 so the hot path is synchronous. Measured 10k from-zero (16,250 signatures) on Node with parallel Ed25519
-workers is ~2.9s hot vs ~11.5s single-thread; still far above 100ms. The bar
-is not lowered. Set `LODY_E2EE_VERIFY_WORKERS=0` to force sequential verify.
+workers was ~2.9s hot vs ~11.5s single-thread under the historical benchmark.
+These measurements did not meet 100ms; that gate is now withdrawn. Set `LODY_E2EE_VERIFY_WORKERS=0` to force sequential verify.
 README-only consumer (import the public package twice, real
 `verify`/`extend` plus D1 transfer): `pnpm --filter @lody/e2ee-core exec tsx bench/readme-consumer.ts`.
 V3 maintainer trial (someone who did **not** implement this package, clean
@@ -75,15 +93,27 @@ Paste env with the stdout (`uname -a`, `node -v`, `pwd`). Expect
 `fromZeroMatchesExtend: true`, and consumer 1 passed. Trust input is an
 out-of-band genesis hash; do not pass `verified=true`. Conflicts never
 re-sign; retry the exact pending bytes.
-Lean lives in the private `proofs/e2ee` model (finite; not a protocol proof).
+Lean correspondence is optional for a public checkout. The in-repo test always
+checks public `Ledger` against `test/ledger-model.ts`. To also run
+`lake exe correspond` (Lean 4.33.1 finite model in a sibling or private
+`proofs/e2ee` tree):
+
+```sh
+export LODY_E2EE_LEAN=/path/to/proofs/e2ee
+pnpm --filter @lody/e2ee-core exec vitest run test/ledger-model-correspondence.test.ts
+```
+
+If `LODY_E2EE_LEAN` is unset, a sibling `lody-e2ee-design/proofs/e2ee` next to
+this repository is used when present; otherwise the `lake` step is skipped.
+The finite model is not a protocol proof.
 
 **P4 freeze (V4口径 1).** Git `feat-e2ee-core`
 `147e8224c83c3753a7c81e59377ecbf50a47fdad` (not pushed). Ledger concat SHA-256
 `c5f51a0bd4323ff53e86d1ec0cea6d2912e62aa7f383197d933f992a01a6dd56`.
 Integrator summary: [HANDOFF.zh.md](HANDOFF.zh.md). Host must supply atomic
 Streams CAS, 15-minute JWT freshness, and an out-of-band genesis hash. Tag 6 is
-D1 A unilateral Owner transfer. 10k from-zero is still far above 100ms (recorded
-miss, bar not lowered). Passkey PRF and real phones are host/device
+D1 A unilateral Owner transfer. This historical freeze does not cover the new
+snapshot API. The 10k/100ms gate is withdrawn, not passed. Passkey PRF and real phones are host/device
 preconditions. Do not enable product E2EE.
 
 Experimental control-log and signed content-encryption primitives. **Electron main imports the device store only;

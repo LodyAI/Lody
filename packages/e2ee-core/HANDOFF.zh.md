@@ -6,22 +6,28 @@
 
 ## 状态
 
-独立 DAG-CBOR 账本已实现并 git freeze，**未 push、未开 PR、未启用产品 E2EE**。
+发布范围说明（2026-09-14）：本次提交只更新设计文档。下文两进程 R 恢复、Lean 对照及部分探针的修复报告涉及尚未提交的本地代码，不随本次文档提交交付；接手者必须先以实际 checkout 的 exports/测试核对，不能假设这些修复已在远端。旧“未 push”描述保留为历史时间点，不作为当前远端状态。
 
-- 分支：`feat-e2ee-core`
-- 实现：`147e8224c83c3753a7c81e59377ecbf50a47fdad`
-- tip（README 绑定）：`4074069c3be3ebc6f1c3711ec0d1691db4df94ec`
-- ledger concat SHA-256：`c5f51a0bd4323ff53e86d1ec0cea6d2912e62aa7f383197d933f992a01a6dd56`
-- `pnpm --filter @lody/e2ee-core check`：typecheck + 328 tests
+独立 DAG-CBOR 账本已实现。**代码 freeze 不是验收完成，也不是人类同意交接。** 未 push、未开 PR、未启用产品 E2EE。
 
-可以独立创建/验证/对账/提交账本、发钥换代、用恢复文件解锁并授权新设备。  
+- 分支：`feat-e2ee-core`（相对 review 基线 `795ee4a` 有本轮修复）
+- **P3/P4 总项未通过**
+
+可以独立创建/验证/对账/提交账本、发钥换代。恢复设备 R 的 **文件备份双进程** 路径已测（`createRecoveryDeviceSecret` / `importRecoveryDevice`）。
 **不是** Lody 产品已支持 E2EE。
 
-未勾、不放宽：
+**后续设计决定（尚未实现）：** 正常首次加入验证认证设备签署的权限快照，之后逐条验增量；全量历史保留供审计。具体签署资格、格式与 API 待定稿，旧 freeze 不覆盖此入口。核对必须绑定实际权限状态及链头，邀请者背书不等于独立核验全部历史。见[规范 §6.1](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现)。
 
-- **B**：10k 条从零 parse+hash+全部验签+权限重放，目标热 p95 ≤100ms。实测 Node ~2.7s（~27×）、Chromium 99 ~95s（~952×）。
-- **R2 / C3**：Passkey PRF 与真机浏览器。文件恢复路径已测；本环境无成功 PRF、无 USB 真机。
-- 生产 Loro Streams `/append-cas` 仍为 **501**（本地官方 sqlite-riverrun 已测 CAS）。
+仍待验收或已撤销：
+
+- **B 已撤销，不是通过**：原 10k 从零全签重放热 p95 ≤100ms。Node ~2.7s（~27×）、Chromium ~95s。OpenSSL 原生验签在 800 次合法签名上约 20× 快于 noble，外推仍高于 100ms；未替换 Ledger.verify（语义需单独审查）。
+- **S**：快照资格与格式、纯验证 API、两端独立核对、持久化/历史密钥/R 恢复及独立消费者验收均未完成；停止为旧 B 门槛安排 SIMD/Wasm/多线程优化。
+- **R2 / C3**：Passkey PRF 与真机。无 mock。
+- **R3**：文件双进程已测（含撤 R、成员失效、缺包、坏备份）；PRF 未过。krc-loop 内存 R 与擦公钥不算「仅凭备份恢复 R」。
+- **C2**：公开包部分串联，不是完整备份恢复。
+- **M2 / M3**：有限模型 + `lake exe correspond` 投影对照 `Ledger.state`（`replay`/`unauthorized` 已断言），不是协议证明。公开仓默认不读作者家目录；设 `LODY_E2EE_LEAN` 或使用兄弟目录 `lody-e2ee-design/proofs/e2ee`，否则跳过 `lake` 步。
+- **V4 / P4**：代码 freeze 不是验收完成，也不是人类同意交接。
+- 生产 Loro Streams `/append-cas` 仍为 **501**。
 
 ## 接入者用这些入口
 
@@ -36,14 +42,15 @@ import {
 } from '@lody/e2ee-core/ledger';
 ```
 
-| 入口 | 用途 |
-| --- | --- |
-| `@lody/e2ee-core` `Ledger` | 外带 genesis hash 做 `verify` / `extend`。禁止 `verified=true` |
-| `@lody/e2ee-core/ledger` | 编解码、历史包、HPKE、`LedgerClient`、`LedgerKeyDelivery` |
-| `@lody/e2ee-core/streams` | Durable Streams 适配；CAS 用 `appendCas`，不要普通 append |
-| `@lody/e2ee-core/streams-content` | streams-crdt；无 snapshot provenance 则 fail-closed |
-| `createRecoveryFile` / `sealRecoveryBackup` | 文件包装不透明字节（不是可导出 R 私钥） |
-| `@lody/e2ee-core/ledger-node` | 实验 sqlite journal/outbox，不是冻结格式 |
+| 入口                                                  | 用途                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| `@lody/e2ee-core` `Ledger`                            | 外带 genesis hash 做 `verify` / `extend`。禁止 `verified=true` |
+| `@lody/e2ee-core/ledger`                              | 编解码、历史包、HPKE、`LedgerClient`、`LedgerKeyDelivery`      |
+| `@lody/e2ee-core/streams`                             | Durable Streams 适配；CAS 用 `appendCas`，不要普通 append      |
+| `@lody/e2ee-core/streams-content`                     | streams-crdt；无 snapshot provenance 则 fail-closed            |
+| `createRecoveryFile` / `sealRecoveryBackup`           | 包装不透明字节                                                 |
+| `createRecoveryDeviceSecret` / `importRecoveryDevice` | 生成可导出 PKCS8，日常导入为非导出句柄                         |
+| `@lody/e2ee-core/ledger-node`                         | 实验 sqlite journal/outbox，不是冻结格式                       |
 
 JSON/hex 原型不在公开入口（`src/legacy.ts` 仅包内测试）。
 
@@ -62,10 +69,10 @@ pnpm --filter @lody/e2ee-core exec vitest run test/ledger-consumer.test.ts
 
 ## 宿主必须自备
 
-1. 外带确认的 genesis hash  
-2. 原子 Streams CAS（生产网关目前 501）  
-3. JWT/网关 15 分钟新鲜度；不要把 JWT 过期说成旧钥失效  
-4. 读回磁盘后再次 `Ledger.verify`  
+1. 外带确认的 genesis hash
+2. 原子 Streams CAS（生产网关目前 501）
+3. JWT/网关 15 分钟新鲜度；不要把 JWT 过期说成旧钥失效
+4. 当前入口读回磁盘后再次 `Ledger.verify`；未来快照恢复须验证认证材料与后缀，不能直接信任磁盘状态或 `verified=true`
 5. 真机 Passkey PRF（若产品要这条恢复路径）
 
 下一步产品接线、Convex、启用开关需要 **另行授权**。

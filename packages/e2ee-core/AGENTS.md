@@ -1,21 +1,30 @@
 # E2EE core
 
 Experimental primitives, not enabled product E2EE.
-Binding surface: [ledger spec §§8–11](../../specs/e2ee-ledger.zh.md) and
+Binding surface: [ledger spec](../../specs/e2ee-ledger.zh.md) and
 [README.md](README.md). JSON/hex control-log lives in `src/legacy.ts` for
 in-package tests only; do not re-export it.
 
 - Public exports: root `Ledger`/`LedgerError`/`ContentCipher`/recovery-file/
   `createUserIdentity`/`restoreUserIdentity`/`ControlFreshnessLease`; subpaths
   `./ledger`, `./ledger-node`, `./streams`, `./streams-content`. Never pass
-  `verified=true`; the trust input is an out-of-band genesis hash.
+  `verified=true`; existing verify uses an out-of-band genesis hash. The new
+  signed-snapshot bootstrap API is pending, not provided by these exports.
 - Org identity is the genesis record hash. `protocolVersion=1` only in genesis.
   Ordinary records omit Org ID, sequence, and generic operation IDs. Wire is
   `@ipld/dag-cbor` fixed arrays; keys, signatures, and hashes are raw bytes.
 - `Ledger.verify`/`extend` are pure and immutable. Parse, hash, verify every
   signature including nested proofs, then replay policy. Never skip an invalid
-  record or grant unverified authority. Do not lower the 10k/100ms from-zero bar
-  in-package (no snapshots, verify caches, or omitted signatures).
+  record or grant unverified authority. The 10k/100ms gate is withdrawn, not
+  passed; no required SIMD/Wasm/multithreading work for that target.
+- Approved direction (§6.1): authenticated signed authorization-state snapshot
+  for first join, then fully verified increments; full replay remains optional
+  audit. Snapshot signer trust must be established outside that snapshot.
+  Bind actual complete state, replay facts, Org/genesis, position and head;
+  comparing only the head does not authenticate the imported state. Independent
+  comparison detects divergent views, not globally latest or honest history.
+  Freeze the new API/format before implementing; no arbitrary trusted-state input.
+  Preserve rollback/CAS/freshness, historical-key and recovery guarantees.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `openEpochEnvelope` returns plaintext only when epoch matches and
   `commitEpochKey` equals the ledger commitment.
