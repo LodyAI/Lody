@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
-  getBuiltinAgentInstallDocsUrl,
   machineSupportsProviderSetupProtocol,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
@@ -20,6 +19,8 @@ import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
+
+const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/';
 
 export type ProviderSetupRowProps = {
   setup: ProviderSetupTask;
@@ -41,7 +42,9 @@ export function ProviderSetupRow({
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
   const config = setup.config;
   const installDocsUrl =
-    config.cliType === 'builtin' ? getBuiltinAgentInstallDocsUrl(config.agentType) : undefined;
+    config.cliType === 'builtin' && config.agentType === 'bub'
+      ? BUB_ACP_INSTALL_DOCS_URL
+      : undefined;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeProgress = useMachineAcpBinaryProgress(runtime, setup.machineId, config.agentType);
   const machineOnline = useMachineOnlineStatus(setup.machineId) === 'online';

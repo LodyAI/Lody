@@ -11,12 +11,9 @@ import {
   getAcpCapabilityCacheKey,
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
-  getBuiltinAgentInstallDocsUrl,
   getRegistryAcpLaunchKind,
-  hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
   isManagedBuiltinAgentType,
-  supportsBuiltinProviderSetup,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
   serializeCustomAcpLaunchSpec,
@@ -64,7 +61,6 @@ import {
   X,
 } from 'lucide-react';
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
@@ -1050,9 +1046,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // `bub acp` becomes an actionable "install Bub" prompt instead of a
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
-  const bubInstallDocsUrl = isBubBuiltin
-    ? getBuiltinAgentInstallDocsUrl(formData.agentType)
-    : undefined;
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
@@ -1155,12 +1148,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
   const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
-  const usesDeferredBuiltinSetup =
-    formData.cliType === 'builtin' &&
-    supportsBuiltinProviderSetup(formData.agentType) &&
-    !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
   const backgroundBuiltinSetup =
-    supportsProviderSetup && requiresBuiltinCreationVerification && usesDeferredBuiltinSetup;
+    supportsProviderSetup &&
+    requiresBuiltinCreationVerification &&
+    (usesDefaultManagedRuntime || isBubBuiltin);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
@@ -2235,28 +2226,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
           {probeError && !isPreset && (
             <div className="rounded-lg border border-status-warning/30 bg-status-warning/[0.08] px-3 py-2 text-xs text-status-warning">
-              <div>{probeError}</div>
-              {bubInstallDocsUrl && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span>
-                    {t(
-                      'settings.agent.dialog.bubInstallHint',
-                      'Bub is not installed on this machine, or `bub acp` failed to start. Install the Bub ACP server plugin, then retry.'
-                    )}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 px-2 text-xs"
-                    onClick={() => {
-                      void openExternalUrl(bubInstallDocsUrl);
-                    }}
-                  >
-                    {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
-                  </Button>
-                </div>
-              )}
+              {probeError}
             </div>
           )}
 

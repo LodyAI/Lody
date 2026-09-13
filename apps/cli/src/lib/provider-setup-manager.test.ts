@@ -179,6 +179,12 @@ describe('ProviderSetupManager', () => {
 
   it('verifies user-installed Bub without treating it as a downloadable runtime', async () => {
     const harness = createHarness({
+      getMachineAcpBinaryStatus: async () => {
+        throw new Error('Bub must not enter managed runtime preparation');
+      },
+      installMachineAcpBinary: async () => {
+        throw new Error('Bub must not enter managed runtime installation');
+      },
       refreshMachineAcpCapabilities: vi.fn(async () => ({
         type: 'machine/acp-capabilities-refresh_response' as const,
         machineId,
@@ -196,8 +202,6 @@ describe('ProviderSetupManager', () => {
 
     expect(readState(harness.flock).config?.agentType).toBe('bub');
     expect(readState(harness.flock).setup).toBeUndefined();
-    expect(harness.execution.getMachineAcpBinaryStatus).not.toHaveBeenCalled();
-    expect(harness.execution.installMachineAcpBinary).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 
@@ -222,8 +226,6 @@ describe('ProviderSetupManager', () => {
       status: 'failed',
       failureCode: 'verification-failed',
     });
-    expect(harness.execution.getMachineAcpBinaryStatus).not.toHaveBeenCalled();
-    expect(harness.execution.installMachineAcpBinary).not.toHaveBeenCalled();
     harness.manager.stop();
   });
 

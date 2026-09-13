@@ -32,18 +32,16 @@ even though Lody owns the integration, not the runtime.
   `builtin-bub:acp` key. A runtime version probe was rejected for now: the
   request explicitly deferred install-state handling, and a probe would add a
   spawn on every capability lookup.
-- `STATIC_BUILTIN_ACP_CAPABILITIES.bub` is deliberately empty. Bub publishes its
-  own modes, models, and config options over ACP, so the dialog must run a real
-  probe instead of offering invented options. `BUILTIN_DEFAULT_MODE_IDS.bub` is
-  only a harmless pre-probe fallback; selectors ignore it when the adapter does
-  not offer `default`.
+- Bub has no entry in `STATIC_BUILTIN_ACP_CAPABILITIES` or
+  `BUILTIN_DEFAULT_MODE_IDS`. It publishes modes, models, and config options over
+  ACP, so the dialog waits for the live probe instead of offering invented
+  defaults.
 - `BUILTIN_ACP_TITLE_OWNERSHIP.bub` is `none`: Bub pushes no authoritative
   session title, so Lody keeps its isolated title agent.
 - Bub creation uses the durable `providerSetup` queue. Unlike managed builtins it
   skips binary preparation, probes the user-installed command directly, and
   publishes the config only on success. Failed setup rows retain an install-guide
-  action backed by `getBuiltinAgentInstallDocsUrl`; machines predating the setup
-  protocol cannot create Bub from the dialog.
+  action; machines predating the setup protocol cannot create Bub from the dialog.
 - Startup auto-registration remains limited to `MANAGED_BUILTIN_RUNTIMES`, so Bub
   appears as an available choice but is never created until the user explicitly
   chooses it. CLI `agent-config create --agent-type bub` classifies that explicit
@@ -53,10 +51,16 @@ even though Lody owns the integration, not the runtime.
   `AgentIcon`. The upstream repository ships only raster wordmarks, so the icon
   is a faithful trace rather than an official vector.
 
-The hand-maintained builtin literal in `local-session-control.ts` / `.cjs` now
-also lists `bub`. The same literal was missing `grok`, so accepting every
-`BUILTIN_AGENTS` entry required adding both; previously a builtin Grok session
-config was rejected by the local control validator.
+The hand-maintained builtin literal in `local-session-control.ts` / `.cjs` also
+lists `bub`, with a parity test covering both implementations.
+
+An ablation pass removed behavior that was not necessary to make Bub usable:
+the empty static-capability object and speculative default mode, a duplicate
+dialog/onboarding install action already owned by the failed setup row, a
+single-consumer shared install-guide abstraction, repeated shared assertions,
+and an unrelated Grok validator correction. The remaining branches each protect
+an observable contract: explicit selection, deferred verification, success-only
+publication, launch, session validation, or recovery guidance.
 
 ## Verification
 

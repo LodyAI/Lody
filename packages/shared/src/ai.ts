@@ -44,18 +44,6 @@ export type AgentConfigCliType = 'builtin' | 'registry' | 'custom';
 export type AgentType = string;
 
 /**
- * Install guide for a builtin agent whose executable Lody does not manage. Bub
- * is user-installed (`bub install bub-acp-server`), so a failed launch is the
- * user's cue to install it instead of a runtime download. The setup UI links
- * here rather than pretending to provision it.
- */
-export const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/';
-
-const BUILTIN_AGENT_INSTALL_DOCS_URLS: Partial<Record<BuiltinAgentType, string>> = {
-  bub: BUB_ACP_INSTALL_DOCS_URL,
-};
-
-/**
  * How each builtin agent's ACP adapter handles the session title.
  *
  * - `none` — no usable title over ACP, so Lody runs its isolated title agent and
@@ -499,18 +487,6 @@ export const getAcpCapabilityCacheStaleReason = (
 export const isBuiltinAgentType = (agentType: string): agentType is BuiltinAgentType =>
   BUILTIN_AGENTS.some((agent) => agent.agentType === agentType);
 
-/**
- * Install/launch documentation to surface when a builtin provider's command
- * fails because the user has not installed it. Returns `undefined` for managed
- * builtins, whose runtimes Lody downloads itself.
- */
-export const getBuiltinAgentInstallDocsUrl = (
-  agentType: AgentType | null | undefined
-): string | undefined =>
-  agentType && isBuiltinAgentType(agentType)
-    ? BUILTIN_AGENT_INSTALL_DOCS_URLS[agentType]
-    : undefined;
-
 export const getBuiltinAgentByAgentType = (agentType: string): BuiltinAgent | undefined =>
   BUILTIN_AGENTS.find((agent) => agent.agentType === agentType);
 
@@ -548,17 +524,13 @@ export type StaticBuiltinAcpCapabilities = {
 /** Codex mode that routes approval requests to a model reviewer subagent. */
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
-const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
+const BUILTIN_DEFAULT_MODE_IDS = {
   kimi: 'auto',
   grok: 'agent',
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
-  // Bub advertises its own modes over ACP; this is only a fallback label for
-  // the first render before a probe. Unknown adapters fall back to the
-  // capability's currentValue, so a mismatch here is harmless.
-  bub: 'default',
-};
+} as const satisfies Partial<Record<BuiltinAgentType, string>>;
 
 /**
  * Lody-owned mode default for builtin agents when a turn has no
@@ -570,7 +542,7 @@ export const getBuiltinDefaultModeId = (
   agentType: AgentType | null | undefined
 ): string | undefined =>
   cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
-    ? BUILTIN_DEFAULT_MODE_IDS[agentType]
+    ? BUILTIN_DEFAULT_MODE_IDS[agentType as keyof typeof BUILTIN_DEFAULT_MODE_IDS]
     : undefined;
 
 const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
@@ -1014,7 +986,9 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
   },
 ];
 
-const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcpCapabilities> = {
+const STATIC_BUILTIN_ACP_CAPABILITIES: Partial<
+  Record<BuiltinAgentType, StaticBuiltinAcpCapabilities>
+> = {
   claude: {
     modes: CLAUDE_STATIC_MODES,
     models: CLAUDE_STATIC_MODELS,
@@ -1043,14 +1017,6 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
     models: [],
     configOptions: DEEPSEEK_HARNESS_CONFIG_OPTIONS,
-  },
-  // Bub publishes modes/models through its own ACP config options, so Lody has
-  // nothing authoritative to show before the live probe. Deliberately empty:
-  // the dialog then requires a real probe instead of offering invented options.
-  bub: {
-    modes: [],
-    models: [],
-    configOptions: [],
   },
 };
 
@@ -1095,7 +1061,8 @@ export const getStaticBuiltinAcpCapabilities = (
   if (hasBuiltinRuntimeOverrideValues(runtimeOverrides)) {
     return undefined;
   }
-  return cloneStaticCapabilities(STATIC_BUILTIN_ACP_CAPABILITIES[agentType]);
+  const capabilities = STATIC_BUILTIN_ACP_CAPABILITIES[agentType];
+  return capabilities ? cloneStaticCapabilities(capabilities) : undefined;
 };
 
 /**

@@ -152,7 +152,7 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
  * (`bub acp`) that Lody does not manage or version; the static key keeps
  * a capability probe valid until the next explicit refresh.
  */
-export const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
+const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are

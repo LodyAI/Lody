@@ -389,13 +389,12 @@ function isACPSessionConfig(value) {
   }
   const { cliType, agentType } = normalizedTarget;
   // This dependency-free validator cannot import the ESM runtime table. Keep
-  // this literal aligned with BUILTIN_AGENTS in ai.ts, the TS source, and their
-  // parity test.
+  // this literal aligned with the TS source and its Bub parity test when
+  // changing this feature.
   const isBuiltinAgentType =
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
-    agentType === 'grok' ||
     agentType === 'deepseek' ||
     agentType === 'bub';
   if (

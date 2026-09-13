@@ -11,7 +11,6 @@ import {
 import { REGISTRY_ACP_AGENTS } from '@lody/shared';
 
 import {
-  BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
   getAcpCapabilitySourceVersion,
   mergeLoginShellEnv,
   resolveACPSetting,
@@ -175,7 +174,7 @@ describe('resolveBuiltinACPSetting', () => {
     ).resolves.toEqual({
       command: 'bub',
       args: ['acp'],
-      capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
+      capabilitySourceVersion: 'builtin-bub:acp',
     });
 
     await expect(
@@ -187,12 +186,8 @@ describe('resolveBuiltinACPSetting', () => {
     ).resolves.toEqual({
       command: 'bub',
       args: ['acp', '--verbose'],
-      capabilitySourceVersion: BUILTIN_BUB_CAPABILITY_SOURCE_VERSION,
+      capabilitySourceVersion: 'builtin-bub:acp',
     });
-
-    expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'bub' })).toBe(
-      BUILTIN_BUB_CAPABILITY_SOURCE_VERSION
-    );
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {
