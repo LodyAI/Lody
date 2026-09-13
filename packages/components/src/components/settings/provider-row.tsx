@@ -11,7 +11,7 @@ import {
   parseRateLimitEntryKey,
 } from '@lody/shared';
 import { toast } from 'sonner';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import {
   AlertDialog,
@@ -167,7 +167,7 @@ export function ProviderRow({
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="min-w-0 truncate text-sm font-medium">{config.name}</span>
               {typeBadge ? (
-                <Badge variant="secondary" className="text-[10px] capitalize">
+                <Badge className="capitalize">
                   {typeBadge}
                 </Badge>
               ) : null}

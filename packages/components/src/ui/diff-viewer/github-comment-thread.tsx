@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { cn } from '@/lib/utils';
 import type { GitHubReviewThread, GitHubReviewComment } from './session-comment-types';
 import { SessionCommentMarkdown } from './session-comment-markdown';
@@ -197,9 +197,7 @@ export function GitHubCommentThread({
           {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
         </span>
         {thread.outdated && (
-          <Badge variant="outline" className="ml-1 h-4 text-[9px] px-1">
-            {t('comments.outdated', 'Outdated')}
-          </Badge>
+          <Badge className="ml-1">{t('comments.outdated', 'Outdated')}</Badge>
         )}
         {isCollapsed && (
           <span className="truncate text-xs text-muted-foreground ml-1">

@@ -4,7 +4,7 @@ import { formatDistance, type Locale } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
 import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
 
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -183,10 +183,7 @@ function ActiveForecast({
             </p>
           )}
           {watch.level ? (
-            <Badge
-              variant={watch.level === 'strong' ? 'warning' : 'secondary'}
-              className="shrink-0 font-normal"
-            >
+            <Badge tone={watch.level === 'strong' ? 'warning' : 'neutral'}>
               {watch.level === 'strong'
                 ? t('codexReset.levelStrong', 'Strong signal')
                 : t('codexReset.levelElevated', 'Elevated signal')}

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
 import { Bot, ChevronDown, Folder, Laptop, LockKeyhole } from 'lucide-react';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
@@ -38,23 +38,17 @@ export function WorkspaceMachineAccordionSummary({
       )}
     >
       {isLocal ? (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          {t('workspace.machines.thisDevice', 'This device')}
-        </Badge>
+        <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge>
       ) : null}
       {isPrivate ? (
-        <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
-          <LockKeyhole className="h-2.5 w-2.5" aria-hidden />
+        <Badge icon={<LockKeyhole className="h-3 w-3" aria-hidden />}>
           {t('workspace.machines.private', 'Private')}
         </Badge>
       ) : null}
-      <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
-        <Laptop className="h-2.5 w-2.5" aria-hidden />
-        <span className="max-w-24 truncate">{machine.os || '-'}</span>
+      <Badge icon={<Laptop className="h-3 w-3" aria-hidden />} className="max-w-32">
+        {machine.os || '-'}
       </Badge>
-      <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
-        {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
-      </Badge>
+      <Badge>{machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}</Badge>
       <span className="inline-flex shrink-0 items-center gap-1 px-1">
         <Folder className="h-3 w-3" aria-hidden />
         {t('settings.machines.directoryCountSummary', {

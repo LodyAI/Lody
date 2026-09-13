@@ -176,7 +176,7 @@ import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { normalizeWorktreePath, normalizeWorktreeTitle } from '@/lib/worktree-path';
-import { Badge } from '@/ui/badge';
+import { Badge, type BadgeTone } from '@lody/ui/badge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -5637,19 +5637,14 @@ const PLAN_STATUS_META: Record<
   },
 };
 
-const PRIORITY_META: Record<PlanEntryItem['priority'], { label: string; className: string }> = {
-  high: {
-    label: 'High',
-    className: 'border-status-danger/20 bg-status-danger/[0.15] text-status-danger',
-  },
-  medium: {
-    label: 'Medium',
-    className: 'border-status-warning/20 bg-status-warning/[0.15] text-status-warning',
-  },
-  low: {
-    label: 'Low',
-    className: 'border-status-success/20 bg-status-success/[0.15] text-status-success',
-  },
+/**
+ * How urgent a plan entry is, as one of the tones the Badge already has: the
+ * three colours this table used to name by hand are those three outcomes.
+ */
+const PRIORITY_META: Record<PlanEntryItem['priority'], { label: string; tone: BadgeTone }> = {
+  high: { label: 'High', tone: 'danger' },
+  medium: { label: 'Medium', tone: 'warning' },
+  low: { label: 'Low', tone: 'success' },
 };
 
 const PlanEntryRow = ({
@@ -5676,10 +5671,7 @@ const PlanEntryRow = ({
           <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
           <span className="break-words">{entry.content}</span>
         </div>
-        <Badge
-          variant="outline"
-          className={cn('text-[10px] font-semibold uppercase', priorityMeta.className)}
-        >
+        <Badge tone={priorityMeta.tone} className="uppercase">
           {priorityMeta.label}
         </Badge>
       </div>
