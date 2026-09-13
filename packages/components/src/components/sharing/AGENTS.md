@@ -76,7 +76,9 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - Reader chrome: the Lody mark leads the header — the packaged app icon's own
   black tile, which does not repaint with the reader's appearance — and links
   back to the product in a new tab; right to left the header ends with viewer
-  identity, then the theme control. The conversation tree is a left sidebar on a
+  identity, language toggle, then the theme control. Language toggles English/Chinese
+  and saves the existing `lody-language` preference without app/OneSignal hooks;
+  embedded previews hide both controls. The conversation tree is a left sidebar on a
   wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
   per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
   any other stored value; the reader deliberately does not follow the app's

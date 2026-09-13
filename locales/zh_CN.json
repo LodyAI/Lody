@@ -4058,6 +4058,7 @@
   "sharing.signIn": "登录 Lody",
   "sharing.agentComposerPlaceholder": "交给你自己的 Agent 继续…",
   "sharing.copyAgentPrompt": "复制 Agent Prompt",
+  "sharing.switchLanguage": "切换语言：{{language}}",
   "sharing.agentAccessNotice": "收到此 Prompt 的人或 Agent 可以读取分享中的对话和图片。",
   "sharing.agentPromptCopied": "Prompt 已复制，粘贴给你的 Agent 即可。",
   "sharing.agentPromptFailed": "暂时无法生成 Agent 读取链接，请稍后重试。",

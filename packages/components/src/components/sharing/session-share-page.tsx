@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Moon, Sun, PanelLeft } from 'lucide-react';
+import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import {
   SessionRowLeadingSlot,
   buildSessionRowOpenedByTreeSlot,
@@ -51,6 +51,34 @@ import {
   resolveShareAppOrigin,
   type ShareViewer,
 } from './session-share-identity';
+
+function ShareLanguageToggle() {
+  const { t, i18n } = useTranslation();
+  const nextLanguage = (i18n.resolvedLanguage ?? i18n.language) === 'zh_CN' ? 'en' : 'zh_CN';
+  const label = t('sharing.switchLanguage', 'Switch language: {{language}}', {
+    language: nextLanguage === 'en' ? 'English' : '中文',
+  });
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0 text-muted-foreground"
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        void i18n.changeLanguage(nextLanguage);
+        try {
+          window.localStorage.setItem('lody-language', JSON.stringify(nextLanguage));
+        } catch {
+          // Restricted storage must not prevent changing this page's language.
+        }
+      }}
+    >
+      <Languages className="h-4 w-4" aria-hidden="true" />
+    </Button>
+  );
+}
 
 function ShareThemeToggle() {
   const { t } = useTranslation();
@@ -362,6 +390,7 @@ export function SessionShareSurface(props: {
           {!props.embedded && (
             <>
               <ShareThemeToggle />
+              <ShareLanguageToggle />
               <ShareViewerIdentity viewer={viewer} appOrigin={appOrigin} />
             </>
           )}

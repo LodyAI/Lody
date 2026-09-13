@@ -4058,6 +4058,7 @@
   "sharing.signIn": "Sign in to Lody",
   "sharing.agentComposerPlaceholder": "Continue with your own agent…",
   "sharing.copyAgentPrompt": "Copy Agent Prompt",
+  "sharing.switchLanguage": "Switch language: {{language}}",
   "sharing.agentAccessNotice": "Anyone receiving this prompt can read the shared conversations and images.",
   "sharing.agentPromptCopied": "Prompt copied. Paste it into your agent.",
   "sharing.agentPromptFailed": "Could not create agent access. Please try again later.",

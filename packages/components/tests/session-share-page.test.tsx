@@ -7,8 +7,15 @@ import type { SessionHistory } from '@lody/shared';
 import { SessionShareSurface } from '../src/components/sharing/session-share-page';
 import { SessionSharePreview } from '../src/components/sharing/session-share-preview';
 
+const language = vi.hoisted(() => ({
+  resolvedLanguage: 'en',
+  changeLanguage: vi.fn(async (next: string) => {
+    language.resolvedLanguage = next;
+  }),
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: language,
     t: (_key: string, fallback: string, values?: Record<string, unknown>) =>
       values
         ? fallback.replace(/{{(\w+)}}/g, (_m, name: string) => String(values[name] ?? ''))
@@ -80,6 +87,7 @@ describe('static share presentation', () => {
     // theme control that would repaint the surrounding app, nor force one.
     expect(byText('Sign in to Lody')).toBeUndefined();
     expect(container.querySelector('[aria-label^="Appearance"]')).toBeNull();
+    expect(container.querySelector('[aria-label^="Switch language"]')).toBeNull();
     expect(theme.setTheme).not.toHaveBeenCalled();
   });
 
@@ -91,6 +99,8 @@ describe('static share presentation', () => {
     writeText.mockClear();
     theme.value = 'system';
     theme.setTheme.mockClear();
+    language.resolvedLanguage = 'en';
+    localStorage.clear();
     const { manifest } = await prepareSharePackage({
       rootSourceId: 'root',
       capturedAt: '2026-09-12T00:00:00.000Z',
@@ -136,6 +146,41 @@ describe('static share presentation', () => {
     container.remove();
   });
   const render = () => act(async () => root.render(<SessionShareSurface {...props} />));
+
+  it('switches both ways beside appearance and persists the visitor preference', async () => {
+    await render();
+    const button = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Switch language: 中文"]'
+    )!;
+    expect(button.previousElementSibling?.getAttribute('aria-label')).toMatch(/^Appearance/);
+    await act(async () => button.click());
+    await render();
+    expect(localStorage.getItem('lody-language')).toBe('"zh_CN"');
+    const english = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Switch language: English"]'
+    )!;
+    expect(english).not.toBeNull();
+    await act(async () => english.click());
+    await render();
+    expect(localStorage.getItem('lody-language')).toBe('"en"');
+    expect(container.querySelector('[aria-label="Switch language: 中文"]')).not.toBeNull();
+  });
+
+  it('still switches the page when browser storage is unavailable', async () => {
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage disabled', 'SecurityError');
+    });
+    try {
+      await render();
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('[aria-label="Switch language: 中文"]')!.click()
+      );
+      await render();
+      expect(container.querySelector('[aria-label="Switch language: English"]')).not.toBeNull();
+    } finally {
+      storage.mockRestore();
+    }
+  });
 
   it('places opened conversations in a collapsible tree and every child in the one pane', async () => {
     await render();
