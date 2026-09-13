@@ -9,6 +9,7 @@ import { ErrorBoundaryFallback } from '@/components/error-boundary-fallback';
 export type ErrorBoundaryFallbackProps = {
   error: Error;
   resetErrorBoundary: () => void;
+  componentStack?: string | null;
 };
 
 type ErrorBoundaryVariant = 'page' | 'section' | 'inline';
@@ -233,6 +234,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     const fallbackProps: ErrorBoundaryFallbackProps = {
       error,
       resetErrorBoundary: this.reset,
+      componentStack: this.state.componentStack,
     };
 
     if (this.props.fallbackRender) {

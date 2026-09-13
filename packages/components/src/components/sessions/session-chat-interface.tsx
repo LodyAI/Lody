@@ -274,6 +274,7 @@ import {
   useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { MessageListErrorFallback } from './message-list-error-fallback';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import { NotificationPermissionPrompt } from './notification-permission-prompt';
 import { useAppStoreReviewPrompt } from '@/hooks/use-app-store-review-prompt';
@@ -5923,30 +5924,7 @@ export const SessionChatInterface = memo(
                       name="SessionChatStream"
                       variant="section"
                       resetKeys={[session.id]}
-                      fallbackRender={({ resetErrorBoundary }) => (
-                        <div className="flex h-full w-full items-center justify-center p-4 text-center">
-                          <div className="max-w-md">
-                            <div className="text-sm font-semibold text-foreground">
-                              {t('common.somethingWentWrong', 'Something went wrong')}
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {t(
-                                'sessions.messageListCrashed',
-                                'The message list failed to render. Your draft message below is safe.'
-                              )}
-                            </div>
-                            <div className="mt-3 flex justify-center gap-2">
-                              <button
-                                type="button"
-                                className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                                onClick={resetErrorBoundary}
-                              >
-                                {t('common.tryAgain', 'Try again')}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      fallbackRender={(props) => <MessageListErrorFallback {...props} />}
                     >
                       {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                       <MessageSendStatusContext.Provider value={sendingMessageIds}>
