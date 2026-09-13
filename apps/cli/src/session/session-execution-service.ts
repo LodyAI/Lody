@@ -1091,7 +1091,12 @@ export class SessionExecutionService {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const currentTurnId = this.currentTurnBySession.get(sessionId);
     const activeTurnId = runtime?.turnId ?? currentTurnId;
-    const hasActiveTurn = typeof activeTurnId === 'string' && activeTurnId.length > 0;
+    // An engine-opened turn registers no client-turn ownership, but it is live
+    // work on the same agent: dispatch admission (and every other
+    // hasActiveTurn consumer) must hold queued work until it ends.
+    const engineTurnActive = this.deps.isEngineTurnActive(sessionId);
+    const hasActiveTurn =
+      (typeof activeTurnId === 'string' && activeTurnId.length > 0) || engineTurnActive;
     const pendingSession = this.deps.sessionManager.getPendingSession(sessionId);
 
     return {

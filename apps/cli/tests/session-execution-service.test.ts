@@ -415,6 +415,26 @@ describe('SessionExecutionService', () => {
     expect(result).toEqual({ success: true });
     expect(cancel).not.toHaveBeenCalled();
   });
+
+  it('reports engine-turn activity as active work in the execution snapshot', () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => true),
+    });
+    const service = new SessionExecutionService(deps);
+    const snapshot = service.getExecutionSnapshot('session-1' as SessionId);
+    // Dispatch admission reads hasActiveTurn to hold queued work — an engine
+    // turn must set it even though it owns no client-turn runtime.
+    expect(snapshot.hasActiveTurn).toBe(true);
+    expect(snapshot.activeTurnId).toBeUndefined();
+  });
+
+  it('reports no active work in the execution snapshot when the engine turn is done', () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => false),
+    });
+    const service = new SessionExecutionService(deps);
+    expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
+  });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
