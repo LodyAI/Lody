@@ -40,7 +40,7 @@ the runtime built a fresh `createAuthCallback()` per invocation. With no
 `previousToken` and no last-token memory the provider could not match the rejection
 against its cache, so it returned the rejected JWT unchanged and the Worker's rooms
 could only recover once the foreground transport happened to refresh, or the token
-aged out. The context now crosses the Worker protocol whole and the runtime holds one
+aged out. The reason and rejected-token fields now cross the Worker protocol and the runtime holds one
 callback per provider, dropped wherever the provider is dropped.
 
 Coalescing had the same effect in time rather than in space: a refresh already in

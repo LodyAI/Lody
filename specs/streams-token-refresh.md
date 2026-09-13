@@ -10,7 +10,7 @@ JWT, they should reuse one refresh in their token provider. A response for an ol
 JWT must not invalidate its replacement. The transport supplies `previousToken`;
 legacy callbacks without it use their last returned token as a best-effort fallback.
 Every hop between a transport and the provider, including a Worker message boundary,
-carries that context intact, and each transport holds one callback for the provider's
+carries its reason and rejected-token fields, and each transport holds one callback for the provider's
 lifetime: a callback rebuilt per invocation has no last token to fall back on and
 would return the rejected JWT unchanged.
 
@@ -24,8 +24,10 @@ A refresh may include optional `rejectedToken` in the existing token request.
 Older servers may ignore it; supporting servers should only invalidate a matching
 cached version and enforce their own authorization and refresh rate bounds. A refresh
 whose body was already sent cannot carry a later rejection, so it may neither clear the
-rejection nor persist a JWT still marked as rejected; if it returns that JWT, one further
-request carries the rejection and every joined caller shares it. The persistence
+rejection nor persist a JWT still marked as rejected. If the rejection is known before
+persistence starts and the response contains that JWT, one further request carries
+the rejection and every joined caller shares it. A rejection arriving during encryption
+prevents persistence but can require another transport retry. The persistence
 gate re-reads the marker synchronously before writing, because encryption is async
 and an unauthorized invalidation does not change the credential generation. Only
 the most recently rejected token is tracked.

@@ -32,7 +32,7 @@ Provider 现在共享刷新，并使用 SDK 提供的实际被拒绝 token，避
 eager-sync Worker 桥接把传输层的授权上下文压缩成只剩 `reason`，运行时又在每次调用时
 新建 `createAuthCallback()`。既没有 `previousToken`，也没有最后 token 记忆，provider
 无法把这次拒绝与缓存匹配，于是原样返回被拒绝的 JWT；Worker 的房间只能等前台传输恰好
-刷新，或等 token 自然过期才能恢复。现在上下文完整跨越 Worker 协议，运行时按 provider
+刷新，或等 token 自然过期才能恢复。现在拒绝原因与被拒 token 跨越 Worker 协议，运行时按 provider
 持有一个回调，并在丢弃 provider 的每个位置一并丢弃。
 
 合并刷新在时间维度上造成同样的后果：拒绝到达时已在飞行的刷新，其请求体不含

@@ -355,9 +355,6 @@ describe('eager-sync cloud auth bridge', () => {
   // between it and the token provider has to keep that value, otherwise the
   // provider cannot tell a real rejection from a stale one and hands the
   // rejected token straight back.
-  const flush = async () => {
-    for (let tick = 0; tick < 4; tick++) await Promise.resolve();
-  };
 
   it('forwards the whole auth context from the worker module onto the wire', async () => {
     vi.resetModules();
@@ -393,11 +390,9 @@ describe('eager-sync cloud auth bridge', () => {
           transport: await cloudTransport(),
         },
       } as MessageEvent<EagerSyncWorkerInput>);
-      await flush();
       expect(capturedAuth).toBeDefined();
 
       const pending = capturedAuth?.({ reason: 'unauthorized', previousToken: 'jwt-1' });
-      await flush();
       expect(posted.find((message) => message.type === 'auth')).toEqual({
         type: 'auth',
         id: 1,
@@ -445,8 +440,8 @@ describe('eager-sync cloud auth bridge', () => {
     const result = h.client.prefetch('room', 1, new AbortController().signal);
     const worker = await h.starts[0].promise;
     const settle = async (index: number) => {
+      // The client registers its reply handler before this await.
       await settled[index];
-      await flush();
     };
 
     worker.emit({ type: 'auth', id: 1, context: { reason: 'request' } });
