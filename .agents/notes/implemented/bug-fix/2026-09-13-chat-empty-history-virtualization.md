@@ -43,6 +43,11 @@ otherwise the early return would hide starting/thinking and permission warnings.
 Activity alone never mounts Virtua. Once history loads, the virtual list owns
 the activity row again.
 
+The empty scroller applies the same header inset and top gutter as populated
+history. The inset belongs to the whole presentation, so leading provenance/share
+content clears the mobile floating header too. Activity uses only local spacing;
+it must not add the header inset a second time.
+
 Removing sharing or forcing top scrolling would not repair the underlying cache
 lifecycle. A virtualizer remount keyed to message count would reset scroll and
 measurements on every append; the empty-history boundary is the narrower fix.
@@ -60,3 +65,5 @@ Fixtures contain only synthetic messages; this is a component/browser
 regression rather than a full workspace/transport E2E reproduction.
 Activity coverage exercises both an empty array and an empty sentinel, including
 warning tone, label removal/restoration, and exactly one activity row after hydration.
+Mobile coverage checks that leading content clears a simulated header inset,
+retains its position across hydration, and does not duplicate the inset on activity.

@@ -1665,17 +1665,17 @@ export const SessionChatStreamView = forwardRef<
               ref={scrollRootRef}
               className={cn('relative bg-background', className)}
             >
-              <div className="flex h-full flex-col overflow-y-auto">
+              <div
+                className="flex h-full flex-col overflow-y-auto"
+                style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
+              >
                 {leadingContent == null ? null : (
                   <div className="shrink-0" data-conversation-leading-content="">
                     {leadingContent}
                   </div>
                 )}
                 {agentActivityLabel && (
-                  <div
-                    className="shrink-0"
-                    style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
-                  >
+                  <div className="shrink-0 pt-2">
                     <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                   </div>
                 )}

@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -44,11 +44,13 @@ function HydrationStory({
   emptyHistory = emptyItems,
   agentActivityLabel,
   agentActivityTone,
+  topInset = 0,
 }: {
   visibleLeadingContent?: boolean;
   emptyHistory?: ChatStreamItem[];
   agentActivityLabel?: string;
   agentActivityTone?: ComponentProps<typeof SessionChatStreamView>['agentActivityTone'];
+  topInset?: number;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [active, setActive] = useState(true);
@@ -63,7 +65,11 @@ function HydrationStory({
             <Button onClick={() => setActive((value) => !value)}>Toggle activity</Button>
           )}
         </div>
-        <div className="min-h-0 flex-1">
+        <div
+          className="min-h-0 flex-1"
+          data-testid="chat-hydration-viewport"
+          style={{ '--conversation-top-inset': `${topInset}px` } as CSSProperties}
+        >
           <SessionChatStreamView
             sessionId={sessionId}
             className="h-full"
@@ -105,4 +111,7 @@ export const PermissionActivity: Story = {
     agentActivityLabel: 'Waiting for permission',
     agentActivityTone: 'warning',
   },
+};
+export const MobileLeadingContent: Story = {
+  args: { ...PermissionActivity.args, topInset: 64 },
 };

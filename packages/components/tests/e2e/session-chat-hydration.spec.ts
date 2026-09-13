@@ -1,5 +1,35 @@
 import { expect, test } from '@playwright/test';
 
+test('mobile leading content clears the header before and after history hydration', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=sessions-sessionchathydration--mobile-leading-content&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
+  const loadHistory = page.getByRole('button', { name: 'Load history', exact: true });
+  await loadHistory.waitFor({ state: 'visible' });
+  const viewport = page.getByTestId('chat-hydration-viewport');
+  const leading = page.getByText('Conversation provenance', { exact: true });
+  const activity = page.getByText('Waiting for permission', { exact: true });
+  await expect(leading).toBeVisible();
+  const viewportBox = (await viewport.boundingBox())!;
+  const leadingBox = (await leading.boundingBox())!;
+  // The 64px floating header plus the same 24px gutter as populated history.
+  expect(leadingBox.y).toBeCloseTo(viewportBox.y + 64 + 24, 0);
+  const activityBox = (await activity.boundingBox())!;
+  expect(activityBox.y).toBeGreaterThanOrEqual(leadingBox.y + leadingBox.height);
+  // Activity follows the leading row; it must not apply the header inset again.
+  expect(activityBox.y - leadingBox.y - leadingBox.height).toBeLessThan(24);
+  await loadHistory.click();
+  await expect(leading).toBeInViewport();
+  await expect(
+    page.getByText('The first user message must remain visible.', { exact: true })
+  ).toBeInViewport();
+  expect((await leading.boundingBox())!.y).toBeCloseTo(leadingBox.y, 0);
+});
+
 for (const leading of ['empty', 'visible']) {
   test(`first user message survives history hydration with ${leading} leading content`, async ({
     page,
