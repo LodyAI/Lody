@@ -1671,6 +1671,14 @@ export const SessionChatStreamView = forwardRef<
                     {leadingContent}
                   </div>
                 )}
+                {agentActivityLabel && (
+                  <div
+                    className="shrink-0"
+                    style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
+                  >
+                    <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                  </div>
+                )}
                 <div className="min-h-0 flex-1">
                   {emptyState ?? (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

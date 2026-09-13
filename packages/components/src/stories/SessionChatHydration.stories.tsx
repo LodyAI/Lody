@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -39,8 +39,19 @@ const loadedItems: ChatStreamItem[] = history.map((message) => ({
   message,
 }));
 
-function HydrationStory({ visibleLeadingContent = false }: { visibleLeadingContent?: boolean }) {
+function HydrationStory({
+  visibleLeadingContent = false,
+  emptyHistory = emptyItems,
+  agentActivityLabel,
+  agentActivityTone,
+}: {
+  visibleLeadingContent?: boolean;
+  emptyHistory?: ChatStreamItem[];
+  agentActivityLabel?: string;
+  agentActivityTone?: ComponentProps<typeof SessionChatStreamView>['agentActivityTone'];
+}) {
   const [loaded, setLoaded] = useState(false);
+  const [active, setActive] = useState(true);
   return (
     <PlatformContext.Provider value={platform}>
       <div className="flex h-screen flex-col" data-testid="chat-hydration-story">
@@ -48,12 +59,17 @@ function HydrationStory({ visibleLeadingContent = false }: { visibleLeadingConte
           <Button onClick={() => setLoaded(true)} disabled={loaded}>
             Load history
           </Button>
+          {agentActivityLabel && (
+            <Button onClick={() => setActive((value) => !value)}>Toggle activity</Button>
+          )}
         </div>
         <div className="min-h-0 flex-1">
           <SessionChatStreamView
             sessionId={sessionId}
             className="h-full"
-            items={loaded ? loadedItems : emptyItems}
+            items={loaded ? loadedItems : emptyHistory}
+            agentActivityLabel={active ? agentActivityLabel : null}
+            agentActivityTone={agentActivityTone}
             // A non-null Fragment with no visible children is what the sharing
             // request container supplies to ordinary conversations.
             leadingContent={
@@ -80,3 +96,13 @@ type Story = StoryObj<typeof meta>;
 
 export const EmptyLeadingContent: Story = {};
 export const VisibleLeadingContent: Story = { args: { visibleLeadingContent: true } };
+export const StartingActivity: Story = {
+  args: { emptyHistory: [], agentActivityLabel: 'Starting…' },
+};
+export const PermissionActivity: Story = {
+  args: {
+    visibleLeadingContent: true,
+    agentActivityLabel: 'Waiting for permission',
+    agentActivityTone: 'warning',
+  },
+};

@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-13-chat-empty-history-virtualization.zh.md)
 
+PR: [#674](https://github.com/LodyAI/Lody/pull/674)
+
 ## Abstract
 
 A conversation could lose its first visible user message after loading history,
@@ -35,6 +37,12 @@ virtualizer starts with real messages. `buildChatVirtualRows` omits the empty
 sentinel, also keeping sticky-scroll counts aligned with real rows. No persisted
 history, dispatch behavior, or sharing authority changes.
 
+Live presence may supply an activity label before history arrives. The empty
+presentation also renders `AgentActivityRow`, preserving its label and tone;
+otherwise the early return would hide starting/thinking and permission warnings.
+Activity alone never mounts Virtua. Once history loads, the virtual list owns
+the activity row again.
+
 Removing sharing or forcing top scrolling would not repair the underlying cache
 lifecycle. A virtualizer remount keyed to message count would reset scroll and
 measurements on every append; the empty-history boundary is the narrower fix.
@@ -50,3 +58,5 @@ hydration. The unmodified renderer fails specifically at the missing first-user
 visibility assertion; the fixed renderer passes both leading-content variants.
 Fixtures contain only synthetic messages; this is a component/browser
 regression rather than a full workspace/transport E2E reproduction.
+Activity coverage exercises both an empty array and an empty sentinel, including
+warning tone, label removal/restoration, and exactly one activity row after hydration.

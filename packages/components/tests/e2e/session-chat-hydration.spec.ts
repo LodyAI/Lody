@@ -63,3 +63,49 @@ for (const leading of ['empty', 'visible']) {
     }
   });
 }
+
+for (const { story, label, colorVariable } of [
+  { story: 'starting-activity', label: 'Starting…', colorVariable: '--primary' },
+  {
+    story: 'permission-activity',
+    label: 'Waiting for permission',
+    colorVariable: '--status-warning',
+  },
+]) {
+  test(`agent activity stays visible across empty history hydration: ${story}`, async ({
+    page,
+  }) => {
+    await page.goto(`/iframe.html?id=sessions-sessionchathydration--${story}&viewMode=story`, {
+      waitUntil: 'domcontentloaded',
+    });
+    const loadHistory = page.getByRole('button', { name: 'Load history', exact: true });
+    await loadHistory.waitFor({ state: 'visible' });
+    const activity = page.getByText(label, { exact: true });
+    await expect(activity).toBeVisible();
+    await expect(activity).toBeInViewport();
+    await expect(page.locator('[data-message-selection-scroll]')).toHaveCount(0);
+    const activityColor = () =>
+      page
+        .locator('.agent-activity-dot')
+        .evaluate((element) =>
+          (element as HTMLElement).style.getPropertyValue('--agent-activity-color')
+        );
+    expect(await activityColor()).toBe(`hsl(var(${colorVariable}, 199 89% 72%))`);
+
+    const toggleActivity = page.getByRole('button', { name: 'Toggle activity', exact: true });
+    await toggleActivity.click();
+    await expect(activity).toHaveCount(0);
+    await toggleActivity.click();
+    await expect(activity).toBeVisible();
+    await loadHistory.click();
+
+    await expect(
+      page.getByText('The first user message must remain visible.', { exact: true })
+    ).toBeInViewport();
+    await expect(activity).toHaveCount(1);
+    await expect(activity).toBeInViewport();
+    expect(await activityColor()).toBe(`hsl(var(${colorVariable}, 199 89% 72%))`);
+    await toggleActivity.click();
+    await expect(activity).toHaveCount(0);
+  });
+}
