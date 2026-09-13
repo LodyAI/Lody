@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/681
+
 [中文](2026-09-13-share-compression-and-concurrency.zh.md)
 
 ## Abstract
