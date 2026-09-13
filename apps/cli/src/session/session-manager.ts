@@ -41,6 +41,7 @@ import {
   type McpServerId,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
+import type { WorkspaceMcpAuthService } from '@/mcp/workspace-mcp-auth-service';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
 import { LoroDocumentManager } from '../lib/loro/doc';
 import {
@@ -466,6 +467,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly preparationUserResolver: SessionUserResolver;
   private readonly preparationService: SessionPreparationService<PreparedSessionRuntime>;
   private readonly cloudPort: CloudPort;
+  private readonly workspaceMcpAuthService?: WorkspaceMcpAuthService;
   private detachPreparationRecovery: (() => void) | null = null;
   private preparationRecoveryChain: Promise<void> = Promise.resolve();
   /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
@@ -491,6 +493,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     options: {
       sessionSandboxFactory?: SessionSandboxFactory;
       cloudPort: CloudPort;
+      workspaceMcpAuthService?: WorkspaceMcpAuthService;
     }
   ) {
     super();
@@ -502,6 +505,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.workspaceMcpAuthService = options.workspaceMcpAuthService;
     this.sessionSandboxFactory =
       options.sessionSandboxFactory ?? createSessionSandboxFactory({ logger: this.logger });
     this.preparationUserResolver = new SessionUserResolver(
@@ -1312,6 +1316,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               reason: 'session-mcp-catalog-start',
             }),
           workspaceId: this.workspaceId,
+          authService: this.workspaceMcpAuthService,
           sessionId,
           selectedIds: config.mcpServerIds,
           logger: this.logger,

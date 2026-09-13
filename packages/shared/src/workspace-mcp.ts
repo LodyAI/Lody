@@ -1,4 +1,11 @@
 import type { McpServerId } from './ids';
+import {
+  getBuiltinMcpProvider,
+  isBuiltinMcpAccessProfile,
+  isBuiltinMcpProviderId,
+  type BuiltinMcpAccessProfile,
+  type BuiltinMcpProviderId,
+} from './builtin-mcp-providers';
 
 /**
  * Lody supports stdio and Streamable HTTP MCP servers. SSE is intentionally
@@ -28,6 +35,16 @@ export type McpHttpConnection = {
 
 export type McpConnectionSpec = McpStdioConnection | McpHttpConnection;
 
+export type WorkspaceMcpBuiltinPresetSource = {
+  kind: 'builtin';
+  providerId: BuiltinMcpProviderId;
+  presetVersion: number;
+  accessProfile: BuiltinMcpAccessProfile;
+  publicOptions?: Record<string, string | boolean>;
+};
+
+export type WorkspaceMcpServerSource = WorkspaceMcpBuiltinPresetSource;
+
 export type WorkspaceMcpServerMeta = {
   id: McpServerId;
   /** Unique workspace display name and the name sent to the ACP agent. */
@@ -35,11 +52,19 @@ export type WorkspaceMcpServerMeta = {
   transport: McpTransport;
   description?: string;
   connection?: McpConnectionSpec;
+  /** Public preset identity only. Provider credentials remain machine-local. */
+  source?: WorkspaceMcpServerSource;
   enabledByDefault?: boolean;
   createdAt: number;
   updatedAt: number;
   createdBy?: string;
 };
+
+export const canonicalizeWorkspaceMcpName = (name: string): string =>
+  name.normalize('NFKC').toLocaleLowerCase('en-US');
+
+export const areWorkspaceMcpNamesEqual = (left: string, right: string): boolean =>
+  canonicalizeWorkspaceMcpName(left) === canonicalizeWorkspaceMcpName(right);
 
 export type ResolvedStdioMcpServer = {
   name: string;
@@ -61,6 +86,12 @@ export type McpResolutionProblem =
   | { kind: 'catalog_unavailable'; reason: string }
   | { kind: 'unknown_server'; mcpServerId: McpServerId }
   | { kind: 'missing_connection'; mcpServerId: McpServerId; name: string }
+  | {
+      kind: 'auth_required';
+      mcpServerId: McpServerId;
+      name: string;
+      providerId: BuiltinMcpProviderId;
+    }
   | {
       kind: 'unsupported_transport';
       mcpServerId: McpServerId;
@@ -112,6 +143,38 @@ const isStringArray = (value: unknown): value is string[] =>
 const isOptionalString = (value: unknown): value is string | undefined =>
   value === undefined || typeof value === 'string';
 
+const isBuiltinPublicOptions = (
+  providerId: BuiltinMcpProviderId,
+  value: unknown
+): value is Record<string, string | boolean> | undefined => {
+  if (value === undefined) return true;
+  if (!isRecord(value) || providerId !== 'posthog') return false;
+  const keys = Object.keys(value);
+  return (
+    keys.every((key) => key === 'mode') &&
+    (value.mode === undefined || value.mode === 'cli' || value.mode === 'tools')
+  );
+};
+
+export const isWorkspaceMcpServerSource = (value: unknown): value is WorkspaceMcpServerSource => {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'builtin' ||
+    !isBuiltinMcpProviderId(value.providerId) ||
+    !Number.isSafeInteger(value.presetVersion) ||
+    (value.presetVersion as number) < 1 ||
+    !isBuiltinMcpAccessProfile(value.accessProfile) ||
+    !isBuiltinPublicOptions(value.providerId, value.publicOptions)
+  ) {
+    return false;
+  }
+  const provider = getBuiltinMcpProvider(value.providerId);
+  const presetVersion = value.presetVersion as number;
+  return (
+    presetVersion <= provider.presetVersion && provider.accessProfiles.includes(value.accessProfile)
+  );
+};
+
 export const isMcpConnectionSpec = (value: unknown): value is McpConnectionSpec => {
   if (!isRecord(value) || !isMcpTransport(value.transport)) {
     return false;
@@ -149,9 +212,14 @@ export const isWorkspaceMcpServerMeta = (value: unknown): value is WorkspaceMcpS
     !Number.isFinite(value.updatedAt) ||
     (value.description !== undefined && typeof value.description !== 'string') ||
     (value.enabledByDefault !== undefined && typeof value.enabledByDefault !== 'boolean') ||
-    (value.createdBy !== undefined && typeof value.createdBy !== 'string')
+    (value.createdBy !== undefined && typeof value.createdBy !== 'string') ||
+    (value.source !== undefined && !isWorkspaceMcpServerSource(value.source))
   ) {
     return false;
+  }
+
+  if (value.source?.kind === 'builtin') {
+    return value.transport === 'http' && value.connection === undefined;
   }
 
   return (
@@ -232,6 +300,16 @@ export const resolveSessionMcpServers = (
     const entry = input.catalog[mcpServerId];
     if (!entry) {
       problems.push({ kind: 'unknown_server', mcpServerId });
+      continue;
+    }
+
+    if (entry.source?.kind === 'builtin') {
+      problems.push({
+        kind: 'auth_required',
+        mcpServerId,
+        name: entry.name,
+        providerId: entry.source.providerId,
+      });
       continue;
     }
 
@@ -360,6 +438,8 @@ export const formatMcpResolutionProblem = (problem: McpResolutionProblem): strin
       return `MCP server ${problem.mcpServerId} is no longer in the workspace catalog. Update this session's MCP selection.`;
     case 'missing_connection':
       return `MCP server “${problem.name}” has no connection. Set its command or URL in Settings → MCP, or run \`lody mcp set ${problem.mcpServerId}\`.`;
+    case 'auth_required':
+      return `MCP connector “${problem.name}” needs authorization on this machine. Connect ${problem.providerId} in Settings → MCP, then retry.`;
     case 'unsupported_transport':
       return `MCP server “${problem.name}” uses ${problem.transport}, which this agent does not support. Choose an agent with Streamable HTTP MCP support or change the server in Settings → MCP.`;
     case 'unresolved_env_var':

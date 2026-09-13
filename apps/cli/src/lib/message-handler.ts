@@ -169,6 +169,11 @@ import {
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   hasPendingUserTurnActivation,
+  getWorkspaceFlockDocId,
+  getWorkspaceMcpCatalog,
+  readWorkspaceFlockRowsFromFlock,
+  type WorkspaceMcpConnectionAction,
+  type WorkspaceMcpConnectionResult,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -234,6 +239,7 @@ import { deriveRepoIdFromGitHubRepo } from '@/utils/github';
 import { getLocalProjectGitStateAtRootPath } from '@lody/shared/node/local-project';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { WorkspaceMcpAuthService } from '@/mcp/workspace-mcp-auth-service';
 import {
   type LiveActivitySummarySyncResult,
   type PermissionRequestNotificationInput,
@@ -575,6 +581,7 @@ export interface MessageHandlerConfig {
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   cloudPort: CloudPort;
+  workspaceMcpAuthService?: WorkspaceMcpAuthService;
 }
 
 export type MessageDispatchSource = 'runtime' | 'local';
@@ -819,6 +826,8 @@ export class MessageHandler {
   private turnPostProcessingService: TurnPostProcessingService;
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
+  private readonly workspaceMcpAuthService: WorkspaceMcpAuthService;
+  private readonly ownsWorkspaceMcpAuthService: boolean;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
   private machineRpcTokenProvider: LoroStreamsTokenProvider | null = null;
   private machineRpcGatewayBaseUrl: string | null = null;
@@ -2903,6 +2912,10 @@ export class MessageHandler {
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
+    this.workspaceMcpAuthService =
+      config.workspaceMcpAuthService ??
+      new WorkspaceMcpAuthService(this.workspaceId, this.userId, this.logger);
+    this.ownsWorkspaceMcpAuthService = !config.workspaceMcpAuthService;
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
     this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
       launchMode: 'foreground',
@@ -6245,6 +6258,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'workspace-mcp/connection':
+        return await this.handleWorkspaceMcpConnection(request.params);
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);
@@ -6398,6 +6413,60 @@ export class MessageHandler {
       default: {
         const exhaustive: never = request;
         throw new Error(`Unsupported local Machine RPC method: ${String(exhaustive)}`);
+      }
+    }
+  }
+
+  private async handleWorkspaceMcpConnection(
+    action: WorkspaceMcpConnectionAction
+  ): Promise<WorkspaceMcpConnectionResult> {
+    if (action.requestedByUserId !== this.userId) {
+      return {
+        type: 'workspace-mcp/connection-error',
+        mcpServerId: action.mcpServerId,
+        code: 'permission_denied',
+        message: 'Built-in MCP credentials can only be managed by the signed-in Machine owner.',
+        retryable: false,
+      };
+    }
+    const handle = await this.workspaceDocument.repo.openFlockDoc(
+      getWorkspaceFlockDocId(this.workspaceId)
+    );
+    const entry = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock))[
+      action.mcpServerId
+    ];
+    if (!entry) {
+      return {
+        type: 'workspace-mcp/connection-error',
+        mcpServerId: action.mcpServerId,
+        code: 'entry_not_found',
+        message: 'The workspace MCP connector no longer exists.',
+        retryable: false,
+      };
+    }
+    if (entry.source?.kind !== 'builtin') {
+      return {
+        type: 'workspace-mcp/connection-error',
+        mcpServerId: action.mcpServerId,
+        code: 'not_builtin',
+        message: 'Only built-in MCP connectors use this authorization flow.',
+        retryable: false,
+      };
+    }
+    switch (action.action) {
+      case 'status':
+        return await this.workspaceMcpAuthService.status(entry);
+      case 'start-oauth':
+        return await this.workspaceMcpAuthService.startOAuth(entry);
+      case 'set-secret-url':
+        return await this.workspaceMcpAuthService.setSecretUrl(entry, action.secretUrl);
+      case 'disconnect':
+        return await this.workspaceMcpAuthService.disconnect(entry);
+      case 'test':
+        return await this.workspaceMcpAuthService.test(entry);
+      default: {
+        const exhaustive: never = action;
+        throw new Error(`Unsupported workspace MCP action: ${String(exhaustive)}`);
       }
     }
   }
@@ -9362,6 +9431,7 @@ export class MessageHandler {
     await this.codeCollabV2DiffStore.close();
     await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup');
     await this.sessionManager.cleanUp();
+    if (this.ownsWorkspaceMcpAuthService) await this.workspaceMcpAuthService.dispose();
   }
 
   private async notifySessionCompleted(

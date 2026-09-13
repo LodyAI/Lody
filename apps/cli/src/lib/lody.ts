@@ -24,6 +24,7 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import { WorkspaceMcpAuthService } from '@/mcp/workspace-mcp-auth-service';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
@@ -59,6 +60,7 @@ export class Lody {
   private machineId: MachineId;
   private machineName: string;
   private runtime: MachineRuntime;
+  private readonly workspaceMcpAuthService: WorkspaceMcpAuthService;
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -93,6 +95,11 @@ export class Lody {
     this.machineId = options.machineId;
     this.machineName = options.machineName;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
+    this.workspaceMcpAuthService = new WorkspaceMcpAuthService(
+      this.workspaceId,
+      this.userId,
+      this.logger
+    );
     this.runtime = new MachineRuntime({
       sessionManagerFactory: () =>
         new SessionManager(
@@ -101,7 +108,10 @@ export class Lody {
           this.machineId,
           this.workspaceId,
           documentManager,
-          { cloudPort: options.cloudPort }
+          {
+            cloudPort: options.cloudPort,
+            workspaceMcpAuthService: this.workspaceMcpAuthService,
+          }
         ),
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
@@ -125,6 +135,7 @@ export class Lody {
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         cloudPort: options.cloudPort,
+        workspaceMcpAuthService: this.workspaceMcpAuthService,
       },
       logger: this.logger,
     });
@@ -302,7 +313,11 @@ export class Lody {
     }
     this.pendingBuiltinAgentConfigRetryCliTypes.clear();
     this.builtinAgentConfigRetryAttempt = 0;
-    return await this.runtime.cleanup();
+    try {
+      return await this.runtime.cleanup();
+    } finally {
+      await this.workspaceMcpAuthService.dispose();
+    }
   };
 
   async dispatchLocalControl(

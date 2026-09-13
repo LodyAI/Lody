@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   ENV_VAR_NAME_PATTERN,
+  areWorkspaceMcpNamesEqual,
   getServerNow,
   type McpServerId,
   type WorkspaceId,
@@ -26,12 +27,6 @@ const MAX_MCP_STRING_LENGTH = 4_096;
 const MAX_MCP_COLLECTION_ENTRIES = 64;
 const SECRET_REFERENCE_PATTERN = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
 const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-
-const canonicalizeName = (name: string): string =>
-  name.normalize('NFKC').toLocaleLowerCase('en-US');
-
-const namesEqual = (left: string, right: string): boolean =>
-  canonicalizeName(left) === canonicalizeName(right);
 
 const boundedRecord = (valueSchema: z.ZodType<string>) =>
   z
@@ -150,7 +145,7 @@ export const WorkspaceMcpConfigureToolInputSchema = z
       .trim()
       .min(1)
       .max(MAX_MCP_NAME_LENGTH)
-      .refine((name) => !namesEqual(name, 'lody'), {
+      .refine((name) => !areWorkspaceMcpNamesEqual(name, 'lody'), {
         message: 'The name "lody" is reserved for the built-in Lody MCP server.',
       })
       .describe('Unique workspace display name. Existing names must be updated in trusted UI/CLI.'),
@@ -255,7 +250,7 @@ export async function configureWorkspaceMcpServer(
     }
 
     const servers = await deps.listCatalog(manager.repo, workspaceId);
-    const matches = servers.filter((server) => namesEqual(server.name, input.name));
+    const matches = servers.filter((server) => areWorkspaceMcpNamesEqual(server.name, input.name));
     if (matches.length > 0) {
       throw new Error(
         `A workspace MCP server named ${input.name} already exists. Review and update it in Settings → MCP or with lody mcp set.`

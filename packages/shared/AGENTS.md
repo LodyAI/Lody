@@ -91,6 +91,10 @@ per-turn MCP selection, or Role-based session creation and dispatch.
   document and selected ids in each user turn input config. Do not add machine bindings.
   Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
   driving turn's selection into ACP startup rather than rereading session history.
+- Built-in Workspace MCP catalog rows contain only public preset identity and policy; they
+  never contain a provider connection or credential. OAuth tokens and provider-secret URLs
+  are encrypted target-machine execution state, managed only over same-machine RPC. An
+  unauthenticated built-in preset resolves as `auth_required`, never as a public endpoint.
 - MCP/Role catalog writes resolve on local Flock durability, followed by explicit
   upload. Settings neither await nor report upload; upload failure must not fail or
   roll back a durable write. CLI reports its sync result. See

@@ -11,6 +11,21 @@ Parent instructions apply.
 - Dedicated credential fields accept `${VAR}` references or daemon environment passthrough,
   not literal secrets. Tool responses must never echo connection values.
 - Configurations affect only later turns or sessions; the running Agent does not hot-load them.
+- Built-in provider credentials belong to the target Machine, never workspace Flocks or cloud
+  state. Store OAuth client data/tokens and provider-secret URLs only through
+  `WorkspaceMcpCredentialStore`; keep callback state and PKCE verifiers process-local. A session
+  may receive a short-lived access token in its in-memory MCP config, but never a refresh token.
+- Fail closed unless a stored credential's authorization fingerprint still matches its provider,
+  preset/profile, pinned endpoint, OAuth resource, and issuer. OAuth metadata/fetch destinations
+  stay on the provider registry allowlist. Protected-resource metadata is mandatory: validation
+  failure is fatal for that fetch chain and must not fall back to MCP-origin AS discovery. PostHog
+  intentionally uses a query-free OAuth resource
+  while its actual MCP endpoint keeps Lody's pinned mode/readonly query. For PostHog readonly,
+  expose only identity and `*:read` metadata scopes to the OAuth SDK; the upstream metadata also
+  advertises write scopes even when the MCP endpoint itself is query-pinned readonly.
+- Credential saves use a unique credential id for compare-and-delete. Re-check an OAuth generation
+  after every awaited store write so disconnect/reconnect cannot be undone by a stale callback or
+  refresh completion.
 - The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
   never-completing response as a transport failure, not an MCP error. Every request must
   reach a terminated response: `GET /mcp` is answered with 405 rather than handed to the
