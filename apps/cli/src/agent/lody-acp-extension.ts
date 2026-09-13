@@ -93,6 +93,12 @@ const SessionUsageUpdateSchema = z.object({
   sessionId: z.string().min(1),
   usage: ModelUsageSchema,
   modelUsage: z.record(z.string(), ModelUsageSchema).optional(),
+  delta: z
+    .object({
+      usage: ModelUsageSchema,
+      modelUsage: z.record(z.string(), ModelUsageSchema),
+    })
+    .optional(),
 });
 
 const RateLimitWindowSchema = z.object({

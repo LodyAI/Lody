@@ -1,9 +1,9 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@lody/cloud-api';
-import { Logger } from '@/utils/logger';
-import type { CliType } from '@lody/shared';
+import type { Logger } from '@/utils/logger';
+import type { BuiltinAgentType } from '@lody/shared';
 import { PRICE_DATA } from './price';
-import { SessionUsageUpdate } from 'acp-extension-core';
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { formatErrorMessage } from '@/utils/format-error';
 
 export type UsageTrackingServiceConfig = {
@@ -18,7 +18,7 @@ export type RecordSessionUsageInput = {
   acpSessionId: string;
   userId: string;
   machineId: string;
-  cliType: CliType;
+  cliType: BuiltinAgentType;
   update: SessionUsageUpdate;
 };
 
@@ -28,6 +28,8 @@ type PendingState = {
   latestMeta: Omit<RecordSessionUsageInput, 'update'>;
   staged: SessionUsageUpdate | null;
   compacted: SessionUsageUpdate | null;
+  // A failed cumulative snapshot stays queued until acknowledged.
+  queued: RecordSessionUsageInput[];
   inFlight: Promise<void> | null;
 };
 
@@ -140,6 +142,7 @@ export class UsageTrackingService {
       latestMeta,
       staged: null,
       compacted: null,
+      queued: [],
       inFlight: null,
     };
     this.applyUpdateToState(state, input.cliType, update);
@@ -158,62 +161,58 @@ export class UsageTrackingService {
 
     if (state.inFlight) {
       await state.inFlight;
-      const latest = this.pending.get(key);
-      if (!latest) return;
-      if (latest.staged || latest.compacted) {
-        await this.flushKey(key);
-      }
       return;
     }
 
-    const snapshotMeta = { ...state.latestMeta };
-    const snapshotUpdate = this.buildFinalUpdate(state);
-    state.staged = null;
-    state.compacted = null;
-
-    if (!snapshotUpdate?.modelUsage) {
-      this.logger.debug(
-        `[usage] Skipping persist for session=${snapshotMeta.sessionId} acpSessionId=${snapshotMeta.acpSessionId}: missing modelUsage`
-      );
+    state.inFlight = this.drainPending(state).finally(() => {
+      state.inFlight = null;
       this.maybeCleanupPendingState(key);
-      return;
-    }
-
-    const params = {
-      cliToken: this.cliToken,
-      workspaceId: snapshotMeta.workspaceId,
-      sessionId: snapshotMeta.sessionId,
-      acpSessionId: snapshotMeta.acpSessionId,
-      userId: snapshotMeta.userId,
-      machineId: snapshotMeta.machineId,
-      cliType: snapshotMeta.cliType,
-      usage: snapshotUpdate.usage,
-      modelUsage: snapshotUpdate.modelUsage,
-    };
-
-    state.inFlight = this.client
-      .mutation(api.usage.upsertSessionUsageFromCli, params)
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        this.logger.debug(
-          `[usage] Failed to persist usage for session=${snapshotMeta.sessionId} acpSessionId=${snapshotMeta.acpSessionId}: ${formatErrorMessage(
-            error
-          )}`
-        );
-      })
-      .finally(() => {
-        const current = this.pending.get(key);
-        if (!current) return;
-        current.inFlight = null;
-        this.maybeCleanupPendingState(key);
-      });
-
+    });
     await state.inFlight;
+  }
+
+  private async drainPending(state: PendingState): Promise<void> {
+    for (;;) {
+      if (state.queued.length === 0) {
+        const update = this.buildFinalUpdate(state);
+        if (!update) return;
+        state.queued.push({ ...state.latestMeta, update });
+        state.staged = null;
+        state.compacted = null;
+      }
+      const snapshot = state.queued[0];
+      if (!snapshot) return;
+      const { update, ...meta } = snapshot;
+      if (!update.modelUsage || Object.keys(update.modelUsage).length === 0) {
+        this.logger.debug(
+          `[usage] Skipping persist for session=${meta.sessionId} acpSessionId=${meta.acpSessionId}: missing modelUsage`
+        );
+        state.queued.shift();
+        continue;
+      }
+      try {
+        const result = await this.client.mutation(api.usage.upsertSessionUsageFromCli, {
+          cliToken: this.cliToken,
+          ...meta,
+          usage: update.usage,
+          modelUsage: update.modelUsage,
+        });
+        if (!result.success) throw new Error('Usage persistence was not acknowledged');
+        state.queued.shift();
+      } catch (error: unknown) {
+        this.logger.debug(
+          `[usage] Failed to persist usage for session=${meta.sessionId} acpSessionId=${meta.acpSessionId}: ${formatErrorMessage(error)}`
+        );
+        // Leave the exact payload at the head, ahead of newer updates. A later
+        // explicit flush retries it; concurrent flush callers share this attempt.
+        return;
+      }
+    }
   }
 
   private applyUpdateToState(
     state: PendingState,
-    cliType: CliType,
+    cliType: BuiltinAgentType,
     update: SessionUsageUpdate
   ): void {
     if (cliType === 'codex' && this.isCodexCompaction(update)) {
@@ -268,13 +267,16 @@ export class UsageTrackingService {
     const state = this.pending.get(key);
     if (!state) return;
     if (state.inFlight) return;
-    if (state.staged || state.compacted) return;
+    if (state.staged || state.compacted || state.queued.length > 0) return;
 
     this.pending.delete(key);
     this.removePendingKeyFromSession(state.latestMeta.sessionId, key);
   }
 
-  private calculatePrice(update: SessionUsageUpdate, cliType: CliType): SessionUsageUpdate {
+  private calculatePrice(
+    update: SessionUsageUpdate,
+    cliType: BuiltinAgentType
+  ): SessionUsageUpdate {
     switch (cliType) {
       case 'claude':
         return update;
