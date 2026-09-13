@@ -317,6 +317,47 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.isSticky).toBe(true);
   });
 
+  it('anchors each measured height before paint without waiting for an animation frame', async () => {
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId: 'session-measured-tail' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+    for (const height of [1640, 2640, 1840]) {
+      fixture.setScrollHeight(height);
+      fixture.setContentHeight(height - 24);
+      act(() => {
+        emitResize(fixture.contentElement);
+      });
+      // ResizeObserver runs before paint. No RAF or React rerender here:
+      // Virtua can remeasure the same four rows multiple times during opening.
+      expect(Math.abs(fixture.getScrollTop() - (height - 400))).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('preserves a cached reading position during content measurements', async () => {
+    const sessionId = 'session-measured-reading' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    fixture.setScrollHeight(2640);
+    fixture.setContentHeight(2616);
+    act(() => {
+      emitResize(fixture.contentElement);
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+  });
+
   it('does not follow expanded rows after the reader scrolls up', async () => {
     const sessionId = 'session-reading-old-turn' as SessionId;
     const fixture = createScrollFixture();
@@ -439,7 +480,7 @@ describe('useStickyScroll Virtua adapter', () => {
     });
 
     expect(vlist.scrollToIndex).not.toHaveBeenCalled();
-    expect(fixture.getScrollTop()).toBeCloseTo(319, 5);
+    expect(Math.abs(fixture.getScrollTop() - 320)).toBeLessThanOrEqual(1);
     expect(latestResult?.isSticky).toBe(true);
   });
 
@@ -579,7 +620,7 @@ describe('useStickyScroll Virtua adapter', () => {
       await advanceAnimationFrames();
     });
 
-    expect(fixture.getScrollTop()).toBeCloseTo(319, 5);
+    expect(Math.abs(fixture.getScrollTop() - 320)).toBeLessThanOrEqual(1);
     expect(latestResult?.isSticky).toBe(true);
   });
 });

@@ -6,6 +6,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 - Restore before paint; hydration re-anchors only while following. Bottom
   following uses DOM extent, never a row index that eviction can invalidate.
+  Correct content measurement changes in ResizeObserver delivery before paint,
+  including unchanged row counts; do not defer this correction to RAF. Respect
+  the live follow lock and explicit jump suppression.
 - Keep virtualization and bottom-following separate: `virtua` owns mounted rows,
   measurement, and index navigation; `use-sticky-scroll.ts` adapts `use-stick-to-bottom`
   to Virtua's viewport and content elements. Never restore a content-token effect or a

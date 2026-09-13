@@ -202,6 +202,23 @@ export function useStickyScroll({
     });
   }, [itemCountRef]);
 
+  // Virtua measurements can change the content extent without changing the
+  // row count or rerendering this hook. The follow library schedules even an
+  // "instant" resize scroll on RAF, exposing the previous bottom for a paint.
+  // Correct that geometry in the observer delivery itself; the library still
+  // owns user intent and the follow lock.
+  useLayoutEffect(() => {
+    const content = scrollElement?.firstElementChild;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (initialScrollRestoredRef.current && state.isAtBottom && !suppressAutoScrollRef?.current) {
+        scrollToRealBottom();
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollElement, scrollToRealBottom, state, suppressAutoScrollRef]);
+
   // Restore before paint, and keep the same follow intent when a placeholder
   // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
   // would expose the old bottom for a frame (or several hydration commits).
