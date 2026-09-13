@@ -7,6 +7,8 @@ Translation: current
 
 Previous PR (closed, superseded): https://github.com/LodyAI/Lody/pull/661
 
+Current PR: https://github.com/LodyAI/Lody/pull/662
+
 ## Abstract
 
 Grok supplied per-prompt model totals where consumers require cumulative model
@@ -81,6 +83,7 @@ an isolated dependency harness. Root check stops in Claude's missing dependencie
 root format stops at a package without Prettier. No complete root check is claimed.
 Core 0.1.5 must publish before Grok/DSH consuming its helper; then release/rebuild
 adapters and update consumer artifacts/gitlinks. No new PR or release is created
-by this local implementation.
+by the implementation itself. The follow-up PR is linked above; submodule PR
+creation is awaiting GitHub integration permissions. No packages are published.
 
 [Current delivery Spec](../../../../specs/usage-delivery.md)

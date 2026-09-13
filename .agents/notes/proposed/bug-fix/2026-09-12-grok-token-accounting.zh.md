@@ -7,6 +7,8 @@ Translation: current
 
 旧 PR（已关闭，被本方案替代）：https://github.com/LodyAI/Lody/pull/661
 
+当前 PR：https://github.com/LodyAI/Lody/pull/662
+
 ## 摘要
 
 Grok 提供每个 prompt 的分模型用量，而消费端要求累计模型快照。逐条排队投递
@@ -68,6 +70,7 @@ Core 计量测试、Grok 真实 proxy 测试、DSH ACP 边界/计量测试和 CL
 文档及公共/平台边界检查通过。CLI 测试在隔离依赖目录中打包真实共享函数运行。
 根 check 停在 Claude 缺失依赖，根 format 停在缺少 Prettier 的包，未声称全仓检查通过。
 先发布 Core 0.1.5，再发布/重建依赖其 helper 的 Grok/DSH，最后更新消费端
-产物/gitlink。本地实现不创建新 PR 或发布。
+产物/gitlink。本地实现本身不发布；后续 PR 已链接于上方，子模块 PR 创建仍等待
+GitHub 集成权限，尚未发布任何包。
 
 [当前投递 Spec](../../../../specs/usage-delivery.zh.md)
