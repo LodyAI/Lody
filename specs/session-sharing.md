@@ -109,6 +109,22 @@ Fork is out of scope for version one. A future fork may import displayable histo
 and attachments into the visitor's workspace; a new agent receives Markdown in a
 new context, never a restored source agent thread or runtime session.
 
+The reader instead offers **Copy Agent Prompt** beside Markdown copy. A deliberate
+click obtains a short-lived read-only link pinned to the displayed deployment and
+selected conversation; the prompt is English regardless of UI language. Its index
+lists the existing conversation relations, history URLs and image URLs. Recipients
+need HTTP access, not a Lody account or MCP. No workspace import or agent dispatch
+occurs. Recipients can save downloaded content; the visible disclosure must say
+that the prompt grants access to the shared conversations and images.
+
+Agent access expires within 24 hours and cannot outlive the version's readable
+lifetime or share revocation/reset. It cannot renew itself, publish, upload or read
+source resources. Files remain excluded from the agent resource API. Hosting must
+rate-limit issuance and reads by IP and share, omit capability URLs from logs, and
+keep responses private/no-store. This is burst protection, not a billing quota.
+Clipboard denial exposes the generated prompt for manual copying; embedded
+unpublished previews never issue access links.
+
 ## Implementation status and evidence
 
 This is an in-progress breaking cutover, not a released or fully verified feature.

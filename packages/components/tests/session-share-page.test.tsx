@@ -224,13 +224,19 @@ describe('static share presentation', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('offers Fork as a disabled, explicitly unfinished action', async () => {
+  it('copies an agent prompt for the selected conversation and exposes manual copy on clipboard failure', async () => {
+    props.createAgentPrompt = vi.fn(
+      async () => 'Read this shared conversation: https://api.test/agent'
+    );
     await render();
-    const fork = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
-      node.textContent?.includes('Fork to my Lody')
-    )!;
-    expect(fork.disabled).toBe(true);
-    expect(fork.getAttribute('aria-label')).toContain('coming soon');
+    await act(async () => byText('Copy Agent Prompt')!.click());
+    expect(props.createAgentPrompt).toHaveBeenCalledWith('c2');
+    expect(writeText).toHaveBeenCalledWith('Read this shared conversation: https://api.test/agent');
+    writeText.mockRejectedValueOnce(new Error('Clipboard denied'));
+    await act(async () => byText('Copy Agent Prompt')!.click());
+    expect(container.querySelector('textarea')?.value).toBe(
+      'Read this shared conversation: https://api.test/agent'
+    );
   });
 
   it('starts Light and switches only between Light and Dark', async () => {

@@ -92,7 +92,7 @@ function ShareConversationPane({
   onSelect,
   snapshot,
   attachmentAccess,
-  showFork,
+  createAgentPrompt,
 }: {
   conversationId: string;
   title: string;
@@ -101,8 +101,7 @@ function ShareConversationPane({
   onSelect: (conversationId: string) => void;
   snapshot: SessionShareReaderSnapshot;
   attachmentAccess: ShareAttachmentAccess;
-  /** Fork covers the whole share, so the side pane leaves it to the main one. */
-  showFork?: boolean;
+  createAgentPrompt?: () => Promise<string>;
 }) {
   const { t } = useTranslation();
   const [copying, setCopying] = useState(false);
@@ -217,7 +216,7 @@ function ShareConversationPane({
             />
           </SessionReadonlyContext.Provider>
           <SessionShareComposer
-            showFork={showFork}
+            createAgentPrompt={createAgentPrompt}
             onCopyMarkdown={() => void copy()}
             copyDisabled={copying || snapshot.status !== 'ready'}
           />
@@ -245,6 +244,7 @@ export function SessionShareSurface(props: {
    * visitor, not the publisher looking at their own package.
    */
   embedded?: boolean;
+  createAgentPrompt?: (conversationId: string) => Promise<string>;
 }) {
   const { t } = useTranslation();
   const viewer = props.viewer ?? { status: 'signed-out' as const };
@@ -385,6 +385,11 @@ export function SessionShareSurface(props: {
             onSelect={props.onSelect}
             snapshot={props.snapshot}
             attachmentAccess={props.attachmentAccess}
+            createAgentPrompt={
+              !props.embedded && props.createAgentPrompt
+                ? () => props.createAgentPrompt!(panes.main.id)
+                : undefined
+            }
           />
         </div>
       </div>
@@ -484,6 +489,7 @@ function SessionShareReaderPage({ apiOrigin, shareId, secret }: SessionSharePage
       status={failed ? 'unavailable' : share ? 'ready' : 'loading'}
       snapshot={snapshot}
       attachmentAccess={access}
+      createAgentPrompt={share ? (id) => share.createAgentPrompt(id) : undefined}
       onSelect={(id) => {
         if (share?.manifest.conversations.some((entry) => entry.id === id))
           navigateSessionShareTab(id);

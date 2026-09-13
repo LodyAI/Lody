@@ -8,6 +8,37 @@ import { prepareSharePackage } from '../src/session-share-export';
 
 const origin = 'https://api.example.test';
 const secret = 'a'.repeat(64);
+it('creates a pinned English prompt through bearer authorization and rejects foreign access URLs', async () => {
+  const prepared = await fixture();
+  let foreign = false;
+  const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${secret}`);
+    expect(init?.redirect).toBe('error');
+    if (String(url).endsWith('/agent/c1')) {
+      expect(init?.method).toBe('POST');
+      expect(String(url)).toBe(`${origin}/api/shares/share/deployments/deployment/agent/c1`);
+      return Response.json({
+        url: `${foreign ? 'https://foreign.test' : origin}/api/share-agent/signed-token`,
+        expiresAt: '2026-09-14T00:00:00.000Z',
+      });
+    }
+    return Response.json({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: prepared.manifest,
+    });
+  });
+  const share = await openStaticShare({ origin, shareId: 'share', secret, fetch: fetcher });
+  const prompt = await share.createAgentPrompt('c1');
+  expect(prompt).toContain('Read this shared conversation:');
+  expect(prompt).toContain(`${origin}/api/share-agent/signed-token`);
+  expect(prompt).not.toContain(secret);
+  foreign = true;
+  await expect(share.createAgentPrompt('c1')).rejects.toThrow('Invalid share agent URL');
+  await expect(share.createAgentPrompt('unknown')).rejects.toThrow(
+    'Share conversation unavailable'
+  );
+});
 it('rejects file uploads before making any network request', async () => {
   const prepared = await prepareSharePackage({
     rootSourceId: 'root',

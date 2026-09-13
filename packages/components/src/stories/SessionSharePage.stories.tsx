@@ -33,6 +33,8 @@ const meta = {
     },
   ],
   args: {
+    createAgentPrompt: async () =>
+      'Read this shared conversation:\nhttps://api.example.test/api/share-agent/synthetic-preview-only',
     manifest: {
       formatVersion: 1,
       historyFormatVersion: 1,

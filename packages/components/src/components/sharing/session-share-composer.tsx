@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { Copy, GitFork } from 'lucide-react';
+import { useState } from 'react';
+import { Copy, MessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
 import { COMPOSER_SESSION_SURFACE_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
@@ -17,15 +19,35 @@ import { Button } from '@/ui/button';
 export function SessionShareComposer({
   onCopyMarkdown,
   copyDisabled,
-  showFork = true,
+  createAgentPrompt,
 }: {
   onCopyMarkdown: () => void;
   copyDisabled: boolean;
-  /** Fork takes the whole share, so only the main pane offers it. */
-  showFork?: boolean;
+  createAgentPrompt?: () => Promise<string>;
 }) {
   const { t } = useTranslation();
-  const forkLabel = t('sharing.forkComingSoon', 'Fork to my Lody (coming soon)');
+  const [busy, setBusy] = useState(false);
+  const [manualPrompt, setManualPrompt] = useState<string | null>(null);
+  async function copyAgentPrompt() {
+    if (!createAgentPrompt || busy) return;
+    setBusy(true);
+    setManualPrompt(null);
+    try {
+      const prompt = await createAgentPrompt();
+      try {
+        await navigator.clipboard.writeText(prompt);
+        toast.success(t('sharing.agentPromptCopied', 'Prompt copied. Paste it into your agent.'));
+      } catch {
+        setManualPrompt(prompt);
+      }
+    } catch {
+      toast.error(
+        t('sharing.agentPromptFailed', 'Could not create agent access. Please try again later.')
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="shrink-0 bg-background pb-3 pt-1">
       <ConversationColumn>
@@ -33,7 +55,7 @@ export function SessionShareComposer({
           <div aria-hidden className="pointer-events-none select-none">
             <div className={cn(COMPOSER_SESSION_SURFACE_CLASS, 'min-h-[112px] opacity-70')}>
               <div className="px-2 pt-1.5 text-sm text-input-placeholder">
-                {t('sharing.composerPlaceholder', 'Ask a follow-up in your own workspace…')}
+                {t('sharing.agentComposerPlaceholder', 'Continue with your own agent…')}
               </div>
               <div className="mt-auto flex items-center justify-end gap-1.5 pb-0.5 pr-0.5">
                 <span className="h-7 w-7 rounded-md bg-muted-foreground/10" />
@@ -42,19 +64,21 @@ export function SessionShareComposer({
             </div>
           </div>
           <div className="absolute inset-0 flex flex-wrap content-center items-center justify-center gap-2 rounded-xl bg-background/72 px-3 py-3 backdrop-blur-[2px] dark:bg-background/65">
-            {showFork && (
+            {createAgentPrompt && (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled
-                title={forkLabel}
-                aria-label={forkLabel}
+                disabled={busy || copyDisabled}
+                onClick={() => void copyAgentPrompt()}
+                title={t(
+                  'sharing.agentAccessNotice',
+                  'Anyone receiving this prompt can read the shared conversations and images.'
+                )}
               >
-                <GitFork className="size-3.5" aria-hidden />
-                <span className="truncate">{t('sharing.fork', 'Fork to my Lody')}</span>
-                <span className="rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {t('common.comingSoon', 'Soon')}
+                <MessageSquare className="size-3.5" aria-hidden />
+                <span className="truncate">
+                  {t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}
                 </span>
               </Button>
             )}
@@ -64,6 +88,24 @@ export function SessionShareComposer({
             </Button>
           </div>
         </div>
+        {createAgentPrompt && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            {t(
+              'sharing.agentAccessNotice',
+              'Anyone receiving this prompt can read the shared conversations and images.'
+            )}
+          </p>
+        )}
+        {manualPrompt && (
+          <textarea
+            readOnly
+            value={manualPrompt}
+            aria-label={t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}
+            className="mt-2 w-full rounded-md border bg-background p-2 text-xs"
+            rows={6}
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        )}
       </ConversationColumn>
     </div>
   );

@@ -61,6 +61,13 @@ rather than promising resumable uploads or persisting another secret.
 
 ## Outcome and verification limits
 
+The disabled Fork placeholder is replaced with an English Copy Agent Prompt action.
+The existing static client requests a deployment-pinned, short-lived capability;
+the host supplies an index of history/image URLs without another stored export.
+UI copy stays localized, and failed clipboard writes expose manual copy. This is
+reference transfer to an arbitrary HTTP-capable agent, not a workspace fork or
+restored runtime. Hosting gates and rate limits remain independent of the UI.
+
 The reader resolves one deployment and independently cancels main/side history
 loads; late results cannot replace another conversation. The original tree leading
 slot and Markdown omission notice are pure shared presentation components. Ordinary
