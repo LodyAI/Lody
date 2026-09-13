@@ -41,6 +41,8 @@ export const resolveHydrationWindow = (
 };
 
 export type ConversationStreamItems = BuildChatStreamItemsResult & {
+  /** Initial window has settled; later window changes do not hide the stream. */
+  initialWindowReady: boolean;
   /** Feed to `SessionChatStreamView.onVisibleTurnRangeChange`. */
   onVisibleTurnRangeChange: (range: VisibleTurnRange) => void;
   /** Feed to `SessionChatStreamView.onOutlinePreviewRound`. */
@@ -62,26 +64,38 @@ export function useConversationStreamItems(
   const version = useConversationVersion(view);
   const turnCount = view?.turnCount ?? 0;
 
-  const [visibleRange, setVisibleRange] = useState<VisibleTurnRange | null>(null);
-  const onVisibleTurnRangeChange = useCallback((next: VisibleTurnRange) => {
-    setVisibleRange((current) => {
-      if (
-        current &&
-        Math.abs(current.from - next.from) < VISIBLE_RANGE_HYSTERESIS_TURNS &&
-        Math.abs(current.to - next.to) < VISIBLE_RANGE_HYSTERESIS_TURNS
-      ) {
-        return current;
-      }
-      return next;
-    });
-  }, []);
+  const initialRef = useRef({ view, ready: false });
+  if (initialRef.current.view !== view) initialRef.current = { view, ready: false };
+  const [visible, setVisibleRange] = useState<{
+    view: ConversationView;
+    range: VisibleTurnRange;
+  } | null>(null);
+  const visibleRange = visible?.view === view ? visible.range : null;
+  const onVisibleTurnRangeChange = useCallback(
+    (next: VisibleTurnRange) => {
+      if (!view || !initialRef.current.ready) return;
+      setVisibleRange((current) => {
+        if (
+          current?.view === view &&
+          Math.abs(current.range.from - next.from) < VISIBLE_RANGE_HYSTERESIS_TURNS &&
+          Math.abs(current.range.to - next.to) < VISIBLE_RANGE_HYSTERESIS_TURNS
+        ) {
+          return current;
+        }
+        return { view, range: next };
+      });
+    },
+    [view]
+  );
   const hydrationWindow = useMemo(
     () => resolveHydrationWindow(turnCount, visibleRange),
     [turnCount, visibleRange]
   );
-  useTurnRange(view, hydrationWindow.from, hydrationWindow.to, {
+  const rangeReady = useTurnRange(view, hydrationWindow.from, hydrationWindow.to, {
     extendToPrecedingUserTurn: true,
   });
+  if (rangeReady) initialRef.current.ready = true;
+  const initialWindowReady = !!view && initialRef.current.ready;
 
   const previewRangeRef = useRef<ReturnType<ConversationView['acquireRange']> | null>(null);
   useEffect(
@@ -126,7 +140,7 @@ export function useConversationStreamItems(
   }, [result.cache, sessionId]);
 
   return useMemo(
-    () => ({ ...result, onVisibleTurnRangeChange, onOutlinePreviewRound }),
-    [result, onVisibleTurnRangeChange, onOutlinePreviewRound]
+    () => ({ ...result, initialWindowReady, onVisibleTurnRangeChange, onOutlinePreviewRound }),
+    [result, initialWindowReady, onVisibleTurnRangeChange, onOutlinePreviewRound]
   );
 }

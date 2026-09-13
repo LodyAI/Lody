@@ -72,6 +72,7 @@ type HarnessProps = {
   vlist: MockVirtualizerHandle | null;
   scrollElement: HTMLDivElement | null;
   itemCount: number;
+  initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
 };
@@ -220,6 +221,7 @@ function HookHarness({
   vlist,
   scrollElement,
   itemCount,
+  initialContentReady,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
 }: HarnessProps) {
@@ -230,6 +232,7 @@ function HookHarness({
     sessionId,
     vlistRef,
     itemCount,
+    initialContentReady,
     onAtBottomChange,
     skipNextViewportResizeAutoScrollRef,
   });
@@ -302,6 +305,47 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
+  it.each(['end', 'offset'] as const)(
+    'restores %s only after the first window settles',
+    async (type) => {
+      const sessionId = 'session-ready-window' as SessionId;
+      const fixture = createScrollFixture();
+      const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+      saveScrollPosition(sessionId, type === 'end' ? { type } : { type, scrollOffset: 96 });
+      const props = { sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 };
+      await renderHarness({ ...props, initialContentReady: false });
+      expect(latestResult?.initialScrollRestored).toBe(false);
+      fixture.setScrollHeight(1640);
+      await renderHarness({ ...props, initialContentReady: true });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+      expect(fixture.getScrollTop()).toBe(type === 'end' ? 1240 : 96);
+    }
+  );
+
+  it('follows mounted row overflow before Virtua commits the new spacer height', async () => {
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId: 'session-row-overflow' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    fixture.setScrollHeight(1640);
+    await act(async () => {
+      fixture.contentElement.append(document.createElement('div'));
+      await Promise.resolve();
+    });
+    expect(fixture.getScrollTop()).toBe(1240);
+    act(() => fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -10 })));
+    fixture.setScrollTop(96);
+    fixture.setScrollHeight(2640);
+    await act(async () => {
+      fixture.contentElement.replaceChildren(document.createElement('div'));
+      await Promise.resolve();
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+  });
+
   it('keeps a followed session at the end when placeholders expand into more rows', async () => {
     const sessionId = 'session-hydrated-tail' as SessionId;
     const fixture = createScrollFixture();
@@ -338,6 +382,39 @@ describe('useStickyScroll Virtua adapter', () => {
       // Virtua can remeasure the same four rows multiple times during opening.
       expect(Math.abs(fixture.getScrollTop() - (height - 400))).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('follows a committed Virtua height before a deferred content resize notification', async () => {
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId: 'session-spacer-commit' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+    for (const height of [1640, 2640, 1840]) {
+      await act(async () => {
+        fixture.setScrollHeight(height);
+        fixture.contentElement.style.height = `${height - 24}px`;
+        // Virtua's own correction lands short in this commit. Its spacer
+        // resize notification is deferred; no RAF/ResizeObserver is flushed.
+        fixture.setScrollTop(height - 800);
+        await Promise.resolve();
+      });
+      expect(fixture.getScrollTop()).toBe(height - 400);
+    }
+    await act(async () => {
+      fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
+      fixture.setScrollTop(96);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      fixture.setScrollHeight(3000);
+      fixture.contentElement.style.height = '2976px';
+      await Promise.resolve();
+    });
+    expect(fixture.getScrollTop()).toBe(96);
   });
 
   it('preserves a cached reading position during content measurements', async () => {

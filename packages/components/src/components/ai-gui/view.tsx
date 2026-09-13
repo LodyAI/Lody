@@ -448,6 +448,7 @@ export type GoalCommand = SessionGoalCommand;
 export type VisibleTurnRange = { from: number; to: number };
 
 export interface SessionChatStreamViewProps {
+  initialWindowReady?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
   /**
@@ -1227,6 +1228,7 @@ export const SessionChatStreamView = forwardRef<
     {
       items,
       sessionId,
+      initialWindowReady = true,
       className,
       leadingContent,
       emptyState,
@@ -1423,6 +1425,7 @@ export const SessionChatStreamView = forwardRef<
       handleScroll,
     } = useStickyScroll({
       sessionId,
+      initialContentReady: initialWindowReady,
       vlistRef,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
@@ -1785,6 +1788,7 @@ export const SessionChatStreamView = forwardRef<
               // header at rest while later content scrolls under it and blurs.
               // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
               style={{
+                visibility: initialWindowReady && initialScrollRestored ? 'visible' : 'hidden',
                 display: 'block',
                 overflowY: 'auto',
                 contain: 'strict',

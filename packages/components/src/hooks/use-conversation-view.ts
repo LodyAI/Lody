@@ -45,11 +45,18 @@ export function useTurnRange(
   from: number,
   to: number,
   options: { extendToPrecedingUserTurn?: boolean } = {}
-): void {
+): boolean {
   const extend = options.extendToPrecedingUserTurn === true;
+  const [settled, setSettled] = useState<{
+    view: ConversationView;
+    from: number;
+    to: number;
+    extend: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!view || to <= from) return undefined;
     let range: ReturnType<ConversationView['acquireRange']> | undefined;
+    let disposed = false;
     const acquire = () => {
       let start = Math.max(0, from);
       if (extend && start > 0) {
@@ -60,17 +67,40 @@ export function useTurnRange(
       const next = view.acquireRange(start, Math.min(view.turnCount, to));
       range?.release();
       range = next;
-      void next.ready.catch((error) => console.error('Failed to load conversation range', error));
+      const settle = () => {
+        if (!disposed && range === next) {
+          setSettled((previous) =>
+            previous?.view === view &&
+            previous.from === from &&
+            previous.to === to &&
+            previous.extend === extend
+              ? previous
+              : { view, from, to, extend }
+          );
+        }
+      };
+      void next.ready.then(settle, (error) => {
+        console.error('Failed to load conversation range', error);
+        settle();
+      });
     };
     const unsubscribe = view.subscribe((change) => {
       if (change.kind === 'structure') acquire();
     });
     acquire();
     return () => {
+      disposed = true;
       unsubscribe();
       range?.release();
     };
   }, [view, from, to, extend]);
+  return (
+    !!settled &&
+    settled.view === view &&
+    settled.from === from &&
+    settled.to === to &&
+    settled.extend === extend
+  );
 }
 
 /** One turn by id, hydrated while mounted. */

@@ -404,6 +404,7 @@ function ExtremeConversationViewFrame() {
     };
   }, [sessionId]);
   const {
+    initialWindowReady,
     items,
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
@@ -418,6 +419,7 @@ function ExtremeConversationViewFrame() {
       </div>
       <div className="min-h-0 flex-1">
         <SessionChatStreamView
+          initialWindowReady={initialWindowReady}
           items={items}
           sessionId={sessionId}
           className="h-full"

@@ -19,6 +19,7 @@ export interface UseStickyScrollOptions {
   vlistRef: RefObject<VirtualizerHandle | null>;
   /** Total number of items in the list. Used as the scroll-to target index. */
   itemCount: number;
+  initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   /**
    * Set by the session composer immediately before it changes its own height.
@@ -128,6 +129,7 @@ export function useStickyScroll({
   sessionId,
   vlistRef,
   itemCount,
+  initialContentReady = true,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
   suppressAutoScrollRef,
@@ -202,28 +204,45 @@ export function useStickyScroll({
     });
   }, [itemCountRef]);
 
-  // Virtua measurements can change the content extent without changing the
-  // row count or rerendering this hook. The follow library schedules even an
-  // "instant" resize scroll on RAF, exposing the previous bottom for a paint.
-  // Correct that geometry in the observer delivery itself; the library still
-  // owns user intent and the follow lock.
+  // Virtua can commit a new spacer height from inside its row ResizeObserver.
+  // Another ResizeObserver on that spacer may not run until the next frame:
+  // by then Virtua has painted its intermediate scroll correction. Observe
+  // the committed height as well, so following catches up in that commit's
+  // microtask checkpoint. Direct row mounts can overflow the old spacer too.
+  // Never observe row subtrees or streamed text.
   useLayoutEffect(() => {
     const content = scrollElement?.firstElementChild;
-    if (!content || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
+    if (!(content instanceof HTMLElement)) return;
+    const follow = () => {
       if (initialScrollRestoredRef.current && state.isAtBottom && !suppressAutoScrollRef?.current) {
         scrollToRealBottom();
       }
+    };
+    const resizeObserver = new ResizeObserver(follow);
+    resizeObserver.observe(content);
+    let height = content.style.height;
+    const mutationObserver = new MutationObserver((records) => {
+      const nextHeight = content.style.height;
+      if (height === nextHeight && !records.some((record) => record.type === 'childList')) return;
+      height = nextHeight;
+      follow();
     });
-    observer.observe(content);
-    return () => observer.disconnect();
+    mutationObserver.observe(content, {
+      attributes: true,
+      attributeFilter: ['style'],
+      childList: true,
+    });
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
   }, [scrollElement, scrollToRealBottom, state, suppressAutoScrollRef]);
 
   // Restore before paint, and keep the same follow intent when a placeholder
   // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
   // would expose the old bottom for a frame (or several hydration commits).
   useLayoutEffect(() => {
-    if (!scrollElement || itemCount === 0) return;
+    if (!scrollElement || itemCount === 0 || !initialContentReady) return;
     const currentVlist = vlistRef.current;
     if (!currentVlist) return;
 
@@ -244,6 +263,7 @@ export function useStickyScroll({
     setInitialScrollRestored(true);
   }, [
     itemCount,
+    initialContentReady,
     scrollElement,
     scrollToBottomWithLock,
     scrollToRealBottom,

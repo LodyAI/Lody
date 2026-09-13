@@ -138,6 +138,7 @@ function WindowedStream({ rounds }: { rounds: number }) {
     return () => next.dispose();
   }, [rounds]);
   const {
+    initialWindowReady,
     items,
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
@@ -147,6 +148,7 @@ function WindowedStream({ rounds }: { rounds: number }) {
   return (
     <div className="h-[720px] w-full bg-background">
       <SessionChatStreamView
+        initialWindowReady={initialWindowReady}
         items={items}
         sessionId={sessionId}
         className="h-full"

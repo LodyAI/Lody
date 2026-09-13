@@ -183,6 +183,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
   ) => {
     const version = useConversationVersion(view);
     const {
+      initialWindowReady,
       items,
       lastAssistantMessageId,
       lastCompletedAssistantMessageId,
@@ -258,6 +259,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
 
     return (
       <SessionChatStreamView
+        initialWindowReady={initialWindowReady}
         ref={ref}
         items={items}
         sessionId={sessionId}

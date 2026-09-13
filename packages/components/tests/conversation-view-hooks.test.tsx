@@ -65,6 +65,68 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it('holds the initial tail window until ready and never hides later window loads', async () => {
+    const { view } = await openView(150);
+    const acquire = view.acquireRange.bind(view);
+    let releaseReady!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+      const lease = acquire(...args);
+      return { ...lease, ready: lease.ready.then(() => gate) };
+    });
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return <span>{String(stream.initialWindowReady)}</span>;
+    }
+    await act(async () => root.render(<Probe />));
+    expect(container.textContent).toBe('false');
+    act(() => stream.onVisibleTurnRangeChange({ from: 0, to: 8 }));
+    await flush();
+    expect(view.isHydrated(0)).toBe(false);
+    expect(container.textContent).toBe('false');
+    await act(async () => {
+      releaseReady();
+    });
+    expect(container.textContent).toBe('true');
+    act(() => stream.onVisibleTurnRangeChange({ from: 0, to: 8 }));
+    await flush();
+    expect(view.isHydrated(0)).toBe(true);
+    expect(container.textContent).toBe('true');
+  });
+
+  it("does not accept a previous view's pending initial window after switching sessions", async () => {
+    const { view: first } = await openView(30);
+    const { view: second } = await openView(31);
+    const releases: (() => void)[] = [];
+    for (const view of [first, second]) {
+      const acquire = view.acquireRange.bind(view);
+      const gate = new Promise<void>((resolve) => {
+        releases.push(resolve);
+      });
+      vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+        const lease = acquire(...args);
+        return { ...lease, ready: lease.ready.then(() => gate) };
+      });
+    }
+    function Probe({ view }: { view: ConversationView }) {
+      const stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return <span>{String(stream.initialWindowReady)}</span>;
+    }
+    await act(async () => root.render(<Probe view={first} />));
+    await act(async () => root.render(<Probe view={second} />));
+    await act(async () => {
+      releases[0]!();
+    });
+    expect(container.textContent).toBe('false');
+    await act(async () => {
+      releases[1]!();
+    });
+    expect(container.textContent).toBe('true');
+  });
+
   it('rehydrates a mounted viewport after same-length replacement and releases it on unmount', async () => {
     const { doc, view, idle } = await openView(150);
     function Probe() {
