@@ -64,6 +64,53 @@ and the UTC weekday schedule, then accumulates USD; unknown/custom routes stay u
 This differs from repricing a whole session at flush time and avoids changing
 historical request estimates when a later turn crosses a pricing boundary.
 
+## Builtin audit correction (2026-09-13)
+
+Adapter tests alone did not establish end-to-end delivery. The CLI accepted only
+managed runtimes, excluding builtin `deepseek`. The receiver now uses the builtin
+catalog and the service accepts `BuiltinAgentType`, without adding DSH to managed
+downloads or enabling cloud services in local composition.
+
+| Provider | Inspected scope / delta                                                                     | Remaining mismatch                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Grok     | Current branch accumulates prompt/model contributions and emits delta                       | Fresh processes lose the baseline; same-ID resume needs continuity. Exact locked-runtime source mapping remains unproven.        |
+| DeepSeek | Current branch accumulates committed requests and emits delta; new sessions get fresh IDs   | Receiver exclusion fixed here; unreported internal requests remain outside coverage.                                             |
+| Claude   | Query-wide model totals include subagents; no delta emitted                                 | Resume creates a new query with the same session ID; clear/reset also resets SDK counters.                                       |
+| Kimi     | Locked f255222661c9 accumulates per-model/subagent usage since activation; no delta emitted | Resume keeps the session ID but establishes a new usage baseline. A submodule edit does not update the managed artifact.         |
+| Codex    | Locked 0.153.4 thread totals; no modelUsage or delta emitted                                | Inclusive buckets violate Core; current-model fallback misattributes old usage; reset offsets do not survive successful flushes. |
+
+The pinned [Codex decoder](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/codex-api/src/sse/responses.rs)
+keeps cached/cache-write tokens inside input and reasoning inside output. Its synthetic
+100 input / 10 output example includes 40 cached, 60 cache-write and 5 reasoning.
+Executing the current adapter mapping yields an independent-bucket sum of 155, not
+110, and omits cache creation. Correct disjoint buckets are 0 input + 40 read + 60
+write + 5 output + 5 reasoning. The [native protocol](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/protocol/src/protocol.rs)
+also resets counters on context-window fill; `last` is not an exactly-once delta.
+Claude's [SDK contract](https://code.claude.com/docs/en/agent-sdk/cost-tracking)
+distinguishes latest-turn main-agent usage from query-wide model totals and resets.
+
+Synthetic execution of actual extracted receiver/adapter methods and the locally
+inspected consumer reducer (no private source published) establishes: DeepSeek was
+dropped, while the repaired receiver accepts all five and excludes custom/unknown
+providers; model A=100 followed by model B=thread-total 200 produces 300; same-key
+1000 then a fresh lifetime's 200 produces no increment. The actual Codex delivery
+service also loses its offset across acknowledged 1000 / 0 / 200 flushes. These are
+code-level reproductions, not customer observations or authenticated runtime runs;
+the reset fixture establishes consumer behavior, not reset frequency.
+
+The parser preserves optional delta for all five providers; legacy persistence
+still receives only snapshots. This follow-up does not add Claude/Kimi/Codex delta
+producers: Kimi already has native differences; Claude needs a known query baseline;
+Codex needs normalization and reliable model/lifetime attribution. Never invent
+delta costs or treat top-level usage as a complete delta by default.
+
+Next decision: explicit accounting-lifetime identity through Core and the consumer,
+or durable cumulative baseline restoration. Random per-notification identities and
+blindly adding replayable deltas are not substitutes. No lifecycle repair or complete
+provider conformance is claimed. The receiver repair passes 13 delivery and 16 parser
+tests in the isolated harness. The required `context/message-flow.md` instruction
+target is absent here; the receiver edit is limited to provider eligibility.
+
 ## Alternatives and limits
 
 - Rejected: queue per-prompt deltas into a cumulative consumer; still undercounts.

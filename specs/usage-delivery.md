@@ -33,6 +33,12 @@ their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
 Codex's legacy compaction handling stays separate.
 
+Eligibility follows the builtin agent catalog, including DeepSeek Harness, not
+the managed-download catalog. Receiving a provider's delta does not prove its
+cumulative counters satisfy the lifetime contract; the
+[builtin audit](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md#builtin-audit-correction-2026-09-13)
+records unresolved adapter normalization and resume/reset gaps.
+
 DSH estimates official DeepSeek USD per request at the event's completion time,
 using the published UTC weekday peak/off-peak schedule, then accumulates costs.
 Unknown routes, custom endpoints or missing timestamps do not receive invented

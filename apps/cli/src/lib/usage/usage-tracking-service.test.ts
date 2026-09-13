@@ -64,6 +64,28 @@ describe('usage delivery', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  it.each(['claude', 'codex', 'kimi', 'grok', 'deepseek'] as const)(
+    'delivers %s cumulative snapshots without adding optional delta',
+    async (provider) => {
+      const first = input(100, provider);
+      const next = input(150, provider);
+      next.update.modelUsage = { synthetic: { ...next.update.usage, costUSD: 0.125 } };
+      next.update.delta = {
+        usage: { inputTokens: 50, outputTokens: 0, cacheReadInputTokens: 0 },
+        modelUsage: { synthetic: { inputTokens: 50, outputTokens: 0, cacheReadInputTokens: 0 } },
+      };
+      service.recordSessionUsageUpdate(first);
+      await service.flushSessionUsage('s');
+      service.recordSessionUsageUpdate(next);
+      await service.flushSessionUsage('s');
+      expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([100, 150]);
+      expect(persisted[1]?.cliType).toBe(provider);
+      expect(persisted[1]?.modelUsage?.synthetic.costUSD).toBe(0.125);
+      // Legacy persistence receives snapshots only; delta is retained at the ACP boundary.
+      expect(persisted[1]).not.toHaveProperty('delta');
+    }
+  );
+
   it('coalesces Grok cumulative snapshots without adding their delta again', async () => {
     const first = input(100);
     service.recordSessionUsageUpdate(first);

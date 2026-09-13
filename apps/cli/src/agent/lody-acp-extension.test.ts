@@ -8,28 +8,31 @@ import {
 } from './lody-acp-extension';
 
 describe('Core usage accounting boundary', () => {
-  it('preserves optional delta separately from cumulative totals and rejects invalid buckets', () => {
-    const usage = { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30 };
-    const params = {
-      sessionId: 's',
-      usage,
-      modelUsage: { model: { ...usage, inputTokens: 300 } },
-      delta: { usage, modelUsage: { model: usage } },
-    };
-    const parse = (value: Record<string, unknown>) =>
-      parseLodyExtensionMessage({
-        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
-        params: value,
+  it.each(['codex', 'claude', 'kimi', 'grok', 'deepseek'] as const)(
+    'preserves %s optional delta separately from cumulative totals and rejects invalid buckets',
+    (provider) => {
+      const usage = { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30 };
+      const params = {
         sessionId: 's',
-        provider: 'grok',
-      });
-    expect(parse(params)).toEqual({ type: 'usage', update: params });
-    const { delta, ...legacy } = params;
-    expect(parse(legacy)).toEqual({ type: 'usage', update: legacy });
-    expect(() =>
-      parse({ ...params, delta: { ...delta, usage: { ...usage, inputTokens: -1 } } })
-    ).toThrow();
-  });
+        usage,
+        modelUsage: { model: { ...usage, inputTokens: 300 } },
+        delta: { usage, modelUsage: { model: usage } },
+      };
+      const parse = (value: Record<string, unknown>) =>
+        parseLodyExtensionMessage({
+          method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+          params: value,
+          sessionId: 's',
+          provider,
+        });
+      expect(parse(params)).toEqual({ type: 'usage', update: params });
+      const { delta, ...legacy } = params;
+      expect(parse(legacy)).toEqual({ type: 'usage', update: legacy });
+      expect(() =>
+        parse({ ...params, delta: { ...delta, usage: { ...usage, inputTokens: -1 } } })
+      ).toThrow();
+    }
+  );
 });
 
 describe('Grok TUI permission compatibility', () => {

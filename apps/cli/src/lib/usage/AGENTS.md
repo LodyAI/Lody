@@ -4,6 +4,8 @@
 
 - Accounting uses Core cumulative `modelUsage`; optional `delta` is already included.
   Coalesce pending snapshots, including Grok; never add delta to cumulative totals.
+- Usage eligibility follows the builtin catalog, including `deepseek`, not the
+  managed-runtime download catalog. Local composition still has no cloud service.
 - Failed delivery retains the exact payload ahead of newer updates. Concurrent flushes
   share one drain; rejection waits for a later flush instead of spinning.
 - Keep legacy Codex compaction separate. Never turn unknown costs into zero

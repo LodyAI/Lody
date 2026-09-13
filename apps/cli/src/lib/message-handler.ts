@@ -38,7 +38,7 @@ import {
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
   type TitleGenerationConfig,
-  isManagedBuiltinAgentType,
+  isBuiltinAgentType,
   sanitizeLodyInternalInstructions,
   acpOwnsSessionTitleGeneration,
   SessionCreateResponse,
@@ -1103,7 +1103,7 @@ export class MessageHandler {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
       if (!meta) return;
-      if (meta.cliType !== 'builtin' || !isManagedBuiltinAgentType(meta.agentType)) {
+      if (meta.cliType !== 'builtin' || !isBuiltinAgentType(meta.agentType)) {
         return;
       }
       const cliType = meta.agentType;

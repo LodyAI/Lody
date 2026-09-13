@@ -1,7 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@lody/cloud-api';
 import type { Logger } from '@/utils/logger';
-import type { CliType } from '@lody/shared';
+import type { BuiltinAgentType } from '@lody/shared';
 import { PRICE_DATA } from './price';
 import type { SessionUsageUpdate } from 'acp-extension-core';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -18,7 +18,7 @@ export type RecordSessionUsageInput = {
   acpSessionId: string;
   userId: string;
   machineId: string;
-  cliType: CliType;
+  cliType: BuiltinAgentType;
   update: SessionUsageUpdate;
 };
 
@@ -212,7 +212,7 @@ export class UsageTrackingService {
 
   private applyUpdateToState(
     state: PendingState,
-    cliType: CliType,
+    cliType: BuiltinAgentType,
     update: SessionUsageUpdate
   ): void {
     if (cliType === 'codex' && this.isCodexCompaction(update)) {
@@ -273,7 +273,10 @@ export class UsageTrackingService {
     this.removePendingKeyFromSession(state.latestMeta.sessionId, key);
   }
 
-  private calculatePrice(update: SessionUsageUpdate, cliType: CliType): SessionUsageUpdate {
+  private calculatePrice(
+    update: SessionUsageUpdate,
+    cliType: BuiltinAgentType
+  ): SessionUsageUpdate {
     switch (cliType) {
       case 'claude':
         return update;

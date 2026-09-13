@@ -27,6 +27,11 @@ CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直�
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
 Codex 原有压缩兼容处理保持独立。
 
+是否接收用量取决于 builtin agent catalog（包含 DeepSeek Harness），而非 managed
+下载列表。收到 provider 的 delta 不证明其累计值已符合生命周期契约；
+[builtin 审计](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.zh.md#builtin-审计更正2026-09-13)
+记录了尚未解决的 adapter 归一化和 resume/reset 问题。
+
 DSH 按请求完成事件时间，使用官方 UTC 工作日高峰/非高峰价逐请求估算美元，
 再累加费用。未知路由、自定义端点或缺失时间戳不虚构价格。价格表有日期，
 不是账单；跨价格边界的请求可能与账单不同。Runtime 未报告的活动无法计入。
