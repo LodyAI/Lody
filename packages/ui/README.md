@@ -376,6 +376,105 @@ mark and not the state, and where it goes is the surface's decision.
 </Button>
 ```
 
+`Table` and `Pagination` are one family too, and what they share is a list that
+did not fit: the rows, and the way to the rows that are not on screen.
+
+A table is **the one part of this package with no surface of its own** — no
+background, no shadow, no radius. It is rows on whatever the surface around it
+already was, so a card holding one keeps owning its edges, and the one thing it
+draws is the edge the rules give a list: `separator`, between one row and the
+next. The head takes that line too, because the row after it is the first
+record; the last record draws none.
+
+**A column is stated once.** That is the whole design:
+
+```tsx
+const columns: TableColumn<Session>[] = [
+  { key: 'name', header: t('sessions.name'), cell: (s) => s.name, width: 220 },
+  { key: 'agent', header: t('sessions.agent'), cell: (s) => s.agent },
+  { key: 'turns', header: t('sessions.turns'), cell: (s) => s.turns, numeric: true, sortable: true },
+];
+
+<Table
+  columns={columns}
+  rows={sessions}
+  rowKey={(session) => session.id}
+  sort={sort}
+  onSortChange={setSort}
+  selected={selected}
+  onSelectedChange={setSelected}
+  onRowPress={(session) => open(session.id)}
+  maxHeight={320}
+  empty={t('sessions.none')}
+/>
+```
+
+How wide a column is, which way it aligns, whether it holds figures, whether the
+table can be ordered by it, what a totals row holds under it — all facts about a
+*column*, and a column written twice (a name in the head, a cell in every row) is
+a fact that can drift. Both surfaces in this repository that drew a table before
+this wrote their column template as a literal `grid-cols-[…]` string in the
+header and again in the row, by hand.
+
+Everything else follows from having them in one place:
+
+- **Ordering** is one column at a time, on the root rather than per column, so
+  two columns wearing the arrow is a state that cannot be expressed. The arrow
+  and `aria-sort` are the part's; the **rows are never reordered** — a server
+  sorts, a comparator breaks ties, a page is one slice of many.
+- **Selection** is a tick first. `aria-selected` belongs to a row in a grid, so
+  the table puts a `Checkbox` in the row — what a person presses and what a
+  screen reader is told — and derives the box over that column: none, some
+  (`mixed`), or all. A selection reaching past the rows on screen survives a
+  select-all.
+- **`maxHeight` and a head that stays are one decision**, because a head that
+  scrolls out of its own box is not something a surface would ask for. A head
+  that stays is no longer a row but a band over them, so it takes the region
+  rung; a transparent one has the records painted through the column names.
+- **The pointer is answered only where `onRowPress` says something happens.**
+  The Radix table this replaces lit every row, and its one caller had to turn
+  that off with a class. A pressable row takes the keyboard with it: Enter and
+  Space press it, and it rings where the keyboard is.
+- **`empty` crosses every column**, including the one the boxes are in — a count
+  only the table knows.
+
+**A table too narrow for its columns becomes a list of records**, each a stack of
+label-and-value lines, with the label being the head's own words. It asks about
+*its own* width rather than the window's — a table in a 360px side panel on a
+27-inch screen is narrow — so it is a container query, and a table whose columns
+must stay a grid says `stack={false}`.
+
+The parts are exported for a table that is **not** a list of records — a
+two-column list of facts, or markup produced from a Markdown document:
+
+```tsx
+<Table.Root size="large">
+  <Table.Body>
+    <Table.Row>
+      <Table.ColumnHeader scope="row">{t('summary.agent')}</Table.ColumnHeader>
+      <Table.Cell>{agentName}</Table.Cell>
+    </Table.Row>
+  </Table.Body>
+</Table.Root>
+```
+
+`Pagination` is one control rather than a kit of parts, because the part a caller
+would otherwise assemble is the one that is easy to get wrong — which pages to
+list out of nine thousand, and where to admit the rest are missing:
+
+```tsx
+<Pagination page={page} pages={pages} onPageChange={setPage} />
+<Pagination layout="compact" jump page={page} pages={9214} onPageChange={setPage} />
+```
+
+The window is one width from the first page to the last, so the buttons do not
+move out from under the pointer, and a gap is drawn only where it stands for more
+than one page. Where the pages are too many to list, `compact` says where you are
+instead — and `jump` lets a person type it, committing on Enter or on leaving the
+field rather than on every keystroke, since typing 4-5 through a pager that
+navigates as you type visits page 4 on the way to page 45. Every word it says is
+one `labels` prop, so a surface translates all of them or none.
+
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in
 [token rules](src/tokens/RULES.md#fields).
@@ -389,7 +488,10 @@ the menu family and the migration still owed to it are recorded in the
 [UI menu primitives note](../../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md);
 the popover, the modal rung, the tooltip and the migration still owed to them are
 recorded in the
-[UI overlay primitives note](../../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
+[UI overlay primitives note](../../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md);
+the table with no surface, the pager that shares its group, and the two Radix
+files they replace are recorded in the
+[UI table and pagination note](../../.agents/notes/implemented/feature/2026-09-12-ui-table-pagination.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

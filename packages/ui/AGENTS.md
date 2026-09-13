@@ -21,8 +21,8 @@ into one component at a time. Source-consumed; consumers compile it through
   `!important`, which no layer order overrides. A control that changes its edge
   with its state restates the ring with it; CSS cannot append to a box-shadow.
 - Checkbox, Radio and Switch render a real `<button>` through Base UI's
-  `nativeButton`, so `:disabled` and `:focus-visible` reach them the way they
-  reach an `<input>` and a `<label>` can point at them.
+  `nativeButton`, so `:disabled` and `:focus-visible` reach them and a `<label>`
+  can point at them.
 - Controls in the field family read validity and disabled from `Field.Root`
   through Base UI's state callback on `className`, never from a prop of their
   own. The invalid ring follows `aria-invalid`, so the ring and what a screen
@@ -30,32 +30,29 @@ into one component at a time. Source-consumed; consumers compile it through
   because StyleX cannot express an attribute selector.
 - A trigger reads `field` and the list it opens reads `popup`: different rungs,
   and the list shares its vocabulary with a menu rather than an input.
-  `src/popup/surface.ts` holds the appearance the floating parts share, the way
-  `src/field/well.ts` holds the controls' and `src/dialog/surface.ts` the modals'.
-- `Select.Value` resolves its text from `Select.Root items`, never from the rows.
-  A caller whose row text differs from its value states the list on the root as
-  well, or the trigger names the raw value; `test/select.test.tsx` pins both.
+  `src/popup/surface.ts` holds what the floating parts share, as
+  `src/field/well.ts` does for controls and `src/dialog/surface.ts` for modals.
+- `Select.Value` resolves its text from `Select.Root items`, never the rows: a
+  caller whose row text differs from its value states the list on the root too,
+  or the trigger names the raw value (`test/select.test.tsx` pins both).
 - Every floating part's `Content` assembles Base UI's portal, positioner and
-  popup so a caller writes contents rather than plumbing, and takes the
-  positioning props outside. They mount into the nearest
+  popup, and takes the positioning props outside. They mount into the nearest
   `PopupContainerProvider`, switching to the absolute strategy when they do: a
   container centred with `translate` is the containing block for `fixed`
-  descendants, so a viewport-anchored popup inside one lands at its own offset.
-- `Menu` is the dropdown menu; `ContextMenu` and `Menubar` restate only the way
-  in and re-export its rows. A menu reads `popup` and replaces exactly one of a
-  list's declarations, `--anchor-width`; the surface and every row are shared
-  through `src/popup/surface.ts`.
+  descendants.
+- `Menu` is the dropdown; `ContextMenu` and `Menubar` restate only the way in
+  and re-export its rows. A menu reads `popup` and replaces one declaration,
+  `--anchor-width`; the surface and rows come from `src/popup/surface.ts`.
 - Whatever holds a glyph gives it a box, because this package's glyphs state
   100% and StyleX has no descendant selector: a menu row's leading box, a
-  Select's chevron, a message's mark, and an icon-only `Button`, which draws a
-  `button.iconSize` box around its children. A caller's icon states 100% rather
-  than its library's default. A checkbox or radio row's box holds its mark only.
-- Every trigger here is Base UI's, unstyled: a surface opens a menu, a popover or
-  a modal with whatever it already had there, through `render={<Button …/>}`.
-  Post-close focus is the product's policy, passed as `finalFocus`.
-- `Popover` reads `popup` too and replaces five of a list's declarations: the
-  anchor width, the row inset, and the three that make type prose.
-  `test/popover.test.tsx` pins that as a count.
+  message's mark, an icon-only `Button`'s `button.iconSize` box. A caller's icon
+  states 100% too; a checkbox or radio row's box holds its mark only.
+- Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
+  modal with what it already had there, `render={<Button …/>}`. Post-close focus
+  is the product's policy, passed as `finalFocus`.
+- `Popover` reads `popup` too and replaces five of a list's declarations (the
+  anchor width, the row inset, the three that make type prose);
+  `test/popover.test.tsx` pins the count.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts`; only the way in and what may dismiss them differ. An
   outside press does not answer an alert dialog, but Escape does. `Content`
@@ -64,8 +61,7 @@ into one component at a time. Source-consumed; consumers compile it through
   in the same commit would read null and land on the body.
 - There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`,
   whose viewport lays it out so the panel's `transform` carries the drag. `side`
-  is the writing direction's edge, from which `Root` derives the physical swipe;
-  `inset` is the second axis.
+  is the writing direction's edge; `inset` is the second axis.
 - `Tooltip` is the one floating part that does not read `popup`: the ladder
   inverts it, `label` under `shadow.medium`. Base UI makes it visual-only — no
   role, no `aria-describedby` — so every trigger states its own `aria-label`.
@@ -77,8 +73,16 @@ into one component at a time. Source-consumed; consumers compile it through
 - Alert, Toast, Progress, Skeleton and Spinner are one `feedback` family: what
   the system says back. A tone is a tint and a mark, never a fill; the mark is
   the part's, and `feedback/tone.ts` maps the four. The tint is mixed in
-  `feedback/surface.ts` from each rung's own background, because an Alert is a
-  card and a Toast floats. `disabled` from Base UI state, not `:disabled`.
+  `feedback/surface.ts` from each rung's own background. `disabled` from Base UI
+  state, not `:disabled`.
+- `Table` and `Pagination` are one `table` family: the rows, and the way to the
+  rows that did not fit. Base UI ships neither. **A column is stated once** —
+  `Table` takes `columns` and owns the width, the ordering (one column, on the
+  root), the selection (a `Checkbox`, never `aria-selected`), the empty row's
+  span, the head that stays, and the stack it becomes when its own container is
+  too narrow. `table/parts.tsx` is the element layer, for a table that is not a
+  list of records. A table draws no surface; `border-collapse: separate` is what
+  lets its one line, a sticky head and a row's ring all be box-shadows.
 - A forced palette travels to a portalled popup. `ThemeRoot` publishes its mode
   and `Content` re-declares the palette on the positioner, because a popup is
   mounted outside the subtree that declares it and would otherwise inherit the
@@ -98,16 +102,14 @@ into one component at a time. Source-consumed; consumers compile it through
   `src/theme/theme.tsx` so `ThemeRoot` applies it with every forced palette; a
   custom property declared only at the document root keeps the root palette
   inside a themed subtree. A family shares one group (`field` covers the label,
-  Input, Textarea, Checkbox, Radio, Switch, the Select and Combobox triggers,
-  help and error; `popup` covers the lists they open) rather than one group per
-  component.
+  every control and their messages; `popup` covers the lists those controls
+  open) rather than one group per component.
 - `src/gallery` is the visual reference for the package. A new token, variant,
   size, tone or shape lands with its board entry in the same change, and the
   board reads sample values back off the rendered node instead of repeating a
   literal. `test/gallery.test.tsx` fails when a token has no entry.
-- `corner.shape` is applied wherever a radius is applied, except on
-  `radius.full`: a pill or a circle takes `corner.round`, because a squircle at
-  that radius is a superellipse rather than a stadium. Round corners outside
-  Chromium are the accepted fallback.
+- `corner.shape` goes wherever a radius goes, except `radius.full`: a pill or a
+  circle takes `corner.round`, because a squircle there is a superellipse rather
+  than a stadium. Round corners outside Chromium are the accepted fallback.
 - A Radix file in `packages/components/src/ui` is deleted when its in-repo
   callers reach zero; private consumers sync on typecheck.
