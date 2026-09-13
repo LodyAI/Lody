@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-13-terminal-pr-status-verification.zh.md)
 
+Pull request: [#670](https://github.com/LodyAI/Lody/pull/670)
+
 ## Abstract
 
 The session sidebar could retain a red `closed` icon after GitHub had merged the same pull request,

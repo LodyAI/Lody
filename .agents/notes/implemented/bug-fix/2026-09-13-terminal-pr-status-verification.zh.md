@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-13-terminal-pr-status-verification.md)
 
+Pull request: [#670](https://github.com/LodyAI/Lody/pull/670)
+
 ## 摘要
 
 GitHub 已合并同一个 Pull Request 后，会话侧栏仍可能保留红色 `closed` 图标，而当前会话
