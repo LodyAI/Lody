@@ -52,6 +52,9 @@ export const ACP_SKILL_DIRS_BY_AGENT_TYPE: Record<string, SkillDirsByAgentType> 
     ['~/.autohand/skills']
   ),
   bob: skillDirs(['.bob/skills'], ['~/.bob/skills']),
+  // Bub discovers skills in the shared `.agents/skills` roots (project then
+  // user), exactly like the Agent Skills default.
+  bub: skillDirs([DEFAULT_PROJECT_SKILL_DIR], [DEFAULT_AGENTS_GLOBAL_SKILL_DIR]),
   claude: skillDirs([CLAUDE_PROJECT_SKILL_DIR], [CLAUDE_GLOBAL_SKILL_DIR]),
   'claude-acp': skillDirs([CLAUDE_PROJECT_SKILL_DIR], [CLAUDE_GLOBAL_SKILL_DIR]),
   'claude-code': skillDirs([CLAUDE_PROJECT_SKILL_DIR], [CLAUDE_GLOBAL_SKILL_DIR]),

@@ -35,6 +35,7 @@ export type CliType = BuiltinCliType;
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
+  { agentType: 'bub', displayName: 'Bub' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -66,6 +67,9 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
   grok: 'untagged',
   kimi: 'none',
   deepseek: 'none',
+  // Bub's ACP server does not push an authoritative session title, so Lody
+  // keeps running its isolated title agent.
+  bub: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -491,6 +495,14 @@ export const isManagedBuiltinAgentType = (
 ): agentType is ManagedBuiltinAgentType =>
   MANAGED_BUILTIN_RUNTIMES.some((runtime) => runtime.agentType === agentType);
 
+/**
+ * Builtins that may be created through the durable provider-setup queue.
+ * Managed runtimes use it for download + verification; Bub uses the same queue
+ * only to keep its user-installed command unpublished until a live probe passes.
+ */
+export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
 ): ManagedBuiltinRuntime | undefined =>
@@ -512,7 +524,7 @@ export type StaticBuiltinAcpCapabilities = {
 /** Codex mode that routes approval requests to a model reviewer subagent. */
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
-const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
+const BUILTIN_DEFAULT_MODE_IDS = {
   kimi: 'auto',
   // Grok advertises `default` / `plan`, not Codex `agent`. Injecting `agent`
   // makes Role/MCP session create fail with "Unsupported ACP mode".
@@ -520,7 +532,7 @@ const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
-};
+} as const satisfies Partial<Record<BuiltinAgentType, string>>;
 
 /**
  * Lody-owned mode default for builtin agents when a turn has no
@@ -532,7 +544,7 @@ export const getBuiltinDefaultModeId = (
   agentType: AgentType | null | undefined
 ): string | undefined =>
   cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
-    ? BUILTIN_DEFAULT_MODE_IDS[agentType]
+    ? BUILTIN_DEFAULT_MODE_IDS[agentType as keyof typeof BUILTIN_DEFAULT_MODE_IDS]
     : undefined;
 
 const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
@@ -976,7 +988,9 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
   },
 ];
 
-const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcpCapabilities> = {
+const STATIC_BUILTIN_ACP_CAPABILITIES: Partial<
+  Record<BuiltinAgentType, StaticBuiltinAcpCapabilities>
+> = {
   claude: {
     modes: CLAUDE_STATIC_MODES,
     models: CLAUDE_STATIC_MODELS,
@@ -1049,7 +1063,8 @@ export const getStaticBuiltinAcpCapabilities = (
   if (hasBuiltinRuntimeOverrideValues(runtimeOverrides)) {
     return undefined;
   }
-  return cloneStaticCapabilities(STATIC_BUILTIN_ACP_CAPABILITIES[agentType]);
+  const capabilities = STATIC_BUILTIN_ACP_CAPABILITIES[agentType];
+  return capabilities ? cloneStaticCapabilities(capabilities) : undefined;
 };
 
 /**

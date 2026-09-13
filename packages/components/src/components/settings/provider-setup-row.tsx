@@ -7,17 +7,22 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { Check, Copy, Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@/ui/button';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import { openExternalUrl } from '@/lib/native-browser';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
+
+const BUB_ACP_INSTALL_DOCS_URL = 'https://bub.build/docs/tutorials/acp-server/?utm_source=lody';
+const BUB_ACP_INSTALL_COMMAND = 'curl -fsSL https://bub.build/install.sh | bash -- --preset acp';
 
 export type ProviderSetupRowProps = {
   setup: ProviderSetupTask;
@@ -37,7 +42,12 @@ export function ProviderSetupRow({
 }: ProviderSetupRowProps) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
+  const [installCommandCopied, setInstallCommandCopied] = useState(false);
   const config = setup.config;
+  const isBubSetup = config.cliType === 'builtin' && config.agentType === 'bub';
+  const installDocsUrl = isBubSetup ? BUB_ACP_INSTALL_DOCS_URL : undefined;
+  const showBubInstallCommand =
+    isBubSetup && setup.status === 'failed' && setup.failureCode === 'runtime-unavailable';
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeProgress = useMachineAcpBinaryProgress(runtime, setup.machineId, config.agentType);
   const machineOnline = useMachineOnlineStatus(setup.machineId) === 'online';
@@ -80,6 +90,12 @@ export function ProviderSetupRow({
         return t('settings.agent.setup.awaitingAuth', 'Sign in to finish this provider setup.');
       case 'failed':
         if (setup.failureCode === 'runtime-unavailable') {
+          if (isBubSetup) {
+            return t(
+              'settings.agent.setup.bubInstallRequired',
+              'Bub or its ACP server is not installed on the target machine.'
+            );
+          }
           return t(
             'settings.agent.setup.runtimeUnavailable',
             'This runtime is not available on the target machine.'
@@ -216,6 +232,64 @@ export function ProviderSetupRow({
       {/* Aligned to the name above it, not to the card edge: the sentence is
           about this agent, so it starts where the agent's text column starts. */}
       <p className="ml-[3.25rem] pb-3 pr-3 text-xs text-muted-foreground">{statusText}</p>
+      {showBubInstallCommand ? (
+        <div className="ml-[3.25rem] space-y-2 pb-3 pr-3">
+          <p className="text-xs text-muted-foreground">
+            {t('settings.agent.setup.bubInstallCommand', 'Install it in one step:')}
+          </p>
+          <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/60 px-2 py-1.5">
+            <code className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap text-xs">
+              {BUB_ACP_INSTALL_COMMAND}
+            </code>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2 text-xs"
+              aria-label={
+                installCommandCopied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')
+              }
+              onClick={() => {
+                void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((copied) => {
+                  if (copied) setInstallCommandCopied(true);
+                });
+              }}
+            >
+              {installCommandCopied ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {installCommandCopied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
+            </Button>
+          </div>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);
+            }}
+          >
+            {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+          </Button>
+        </div>
+      ) : setup.status === 'failed' && installDocsUrl ? (
+        <div className="ml-[3.25rem] pb-3 pr-3">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              void openExternalUrl(installDocsUrl);
+            }}
+          >
+            {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+          </Button>
+        </div>
+      ) : null}
       {setup.status === 'awaiting-auth' ? (
         <div className="ml-[3.25rem] pb-3 pr-3">
           <AcpAuthenticationPanel

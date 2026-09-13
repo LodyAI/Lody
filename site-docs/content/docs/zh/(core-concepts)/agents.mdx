@@ -74,6 +74,18 @@ ANTHROPIC_API_KEY=sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxx  # 生成的 API Key
 
 [参考文档](https://www.kimi.com/code/docs/more/third-party-agents.html)
 
+## Bub
+
+Lody 内置 **Bub** ACP Provider。与上面的托管 Runtime 不同，Bub 需要你自行安装，Lody 只提供集成、不负责下载命令。请先在提供 `bub` 的环境中安装 Bub 及其 ACP Server 插件：
+
+```bash
+curl -fsSL https://bub.build/install.sh | bash -- --preset acp
+```
+
+然后在新建 Agent Config 时选择 **Bub**。Lody 会启动 `bub acp` 并通过 ACP 与其通信。如果命令不存在或启动失败，Provider 验证界面会给出安装提示并链接到下述教程。
+
+[安装指南](https://bub.build/docs/tutorials/acp-server/?utm_source=lody)
+
 ## GLM
 
 最快的方式是在 **设置**-**Agent 配置** 中选择 **GLM over Claude Code** 预设，先选择与 API Key 匹配的
