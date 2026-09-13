@@ -18,7 +18,7 @@ export function shouldShowDeepSeekDelegationWarning({
     cliType === 'builtin' &&
     agentType === 'deepseek' &&
     modelId != null &&
-    modelId !== 'deepseek-v4-pro'
+    modelId !== 'deepseek-flash'
   );
 }
 
@@ -32,7 +32,7 @@ export function DeepSeekDelegationWarningContent() {
       <span className="min-w-0 text-xs leading-snug text-foreground/90">
         {t(
           'chat.runConfig.deepseek.delegationWarning',
-          "Due to a current DSH limitation, delegated subagents may use the session's creation-time model (DeepSeek-V4-Pro) instead of this model, which can cost more."
+          "Due to a current DSH limitation, delegated subagents may use the session's creation-time model (DeepSeek-V41-Flash) instead of this model, which can cost more."
         )}{' '}
         <span className="inline-flex items-center gap-1 font-medium text-status-warning underline underline-offset-2">
           {t('chat.runConfig.deepseek.delegationDiscussion', 'Upstream discussion')}

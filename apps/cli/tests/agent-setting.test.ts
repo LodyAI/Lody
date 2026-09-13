@@ -103,7 +103,7 @@ describe('resolveBuiltinACPSetting', () => {
     );
   });
 
-  it('launches DeepSeek Harness through the pinned ACP npm composition', async () => {
+  it('launches DeepSeek Harness through the pinned profile launcher', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'lody-deepseek-harness-test-'));
     vi.stubEnv(DEEPSEEK_HARNESS_HOME_ENV, dshHome);
     try {
@@ -120,44 +120,43 @@ describe('resolveBuiltinACPSetting', () => {
           '--prefer-offline',
           '-y',
           '--package',
-          `@deepseek-ai/dsh-acp-demo@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-agent-spine-demo@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-base@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-session-persistence-jsonl@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-llm-deepseek@${DEEPSEEK_HARNESS_VERSION}`,
-          '--package',
-          `@deepseek-ai/dsh-permission-presets@${DEEPSEEK_HARNESS_VERSION}`,
-          'dsh-acp-demo',
-          '--config',
+          `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
+          'dsh',
+          '--profile',
         ])
       );
       expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
-        name: '@deepseek-ai/dsh-acp-demo',
+        name: '@deepseek-ai/dsh',
         version: DEEPSEEK_HARNESS_VERSION,
       });
-      expect(launch.args).not.toContain(`@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`);
+      expect(launch.args).toContain(`@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`);
       expect(launch.env?.[ACP_EXTENSION_DSH_SESSION_ROOT_ENV]).toBe(join(dshHome, 'sessions'));
       expect(launch.env?.[ACP_EXTENSION_DSH_QUERY_PATH_ENV]).toBe(
         join(dshHome, 'sessions', 'session-query.db')
       );
       expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
 
-      const configFlag = launch.args.indexOf('--config');
-      const configPath = launch.args[configFlag + 1];
-      expect(configPath).toBeTruthy();
-      const config = await readFile(configPath!, 'utf8');
-      expect(config).toContain('deepseek-acp.js');
-      expect(config).not.toContain("name: '@deepseek-ai/dsh-acp-demo'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-persistence-jsonl'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-checkpoint-policy'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-query-sqlite'");
-      expect(config).toContain('compression: zstd');
-      expect(config).toContain('mode: workspace-write');
-      expect(config).toContain("name: '@deepseek-ai/dsh-permission-presets'");
-      expect(config).toContain('reasoningEffort: max');
+      const profileFlag = launch.args.indexOf('--profile');
+      const profileName = launch.args[profileFlag + 1];
+      expect(profileName).toBeTruthy();
+      const profileDir = join(dshHome, 'profiles', profileName!);
+      const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
+      const patch = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8');
+      expect(packageJson).toContain('@deepseek-ai/dsh-base');
+      expect(patch).toContain('deepseek-acp.js');
+      expect(patch).not.toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
+      expect(patch).toContain("name: '@deepseek-ai/dsh-agent-presets'");
+      expect(patch).toContain("name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'");
+      expect(patch).toContain('compression: zstd');
+      expect(patch).toContain('defaultPreset: workspace-write');
+      expect(patch).toContain('reasoningEffort: max');
+      expect(patch).toContain('model: "deepseek-flash"');
     } finally {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
