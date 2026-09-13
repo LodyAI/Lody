@@ -5,12 +5,12 @@ Translation: pending
 
 ## 摘要
 
-独立 DAG-CBOR 账本（`Ledger.verify`/`extend`，公开 spec §8–11）已实现；D1–D5
-书面确认后 P1 A1–A5 冻结。P2 L1–L7 与 P3 除 B/R2/C3 外均有执行证据。JSON/hex
-原型内部化为 `src/legacy.ts`，不作为公开入口。V1 对抗 landed=0、V2 清理已勾。
-剩余未勾：10k/100ms 未达标（不放宽、不勾 B）、Passkey/真机为宿主前提（不勾
-R2/C3）、第二人 README 试接（不勾 V3）、无 git freeze（不勾 V4）。生产 Streams
-CAS 仍 501。旧 `ControlFreshnessLease` 仍只是本地守卫，不是 JWT。
+独立 DAG-CBOR 账本（`Ledger.verify`/`extend`，公开 spec §8–11）已实现并 freeze。
+交接报告：公开 `packages/e2ee-core/HANDOFF.zh.md`，完整证据在私有
+`plans/20260913-e2ee-independent-package-handoff.zh.md`。P1/P2 已勾；P3 除 B/R2/C3
+外已勾。JSON/hex 原型内部化为 `src/legacy.ts`。V1 landed=0。B 保持 100ms 未达标
+（不勾）；R2/C3 为宿主/设备前提（不勾）。生产 Streams CAS 仍 501。未 push、未启用
+产品 E2EE。人类交接原句仍待确认。
 
 2026-09-13 C3 改在 `http://localhost` 探测（有效 WebAuthn RP ID，不再用 127.0.0.1
 的 invalid domain）。Chrome 152 headless：`isUVPAA=true`，`credentials.create({prf})`

@@ -80,13 +80,11 @@ Lean lives in the private `proofs/e2ee` model (finite; not a protocol proof).
 **P4 freeze (V4口径 1).** Git `feat-e2ee-core`
 `147e8224c83c3753a7c81e59377ecbf50a47fdad` (not pushed). Ledger concat SHA-256
 `c5f51a0bd4323ff53e86d1ec0cea6d2912e62aa7f383197d933f992a01a6dd56`.
-Integrators should use `Ledger` / `@lody/e2ee-core/ledger` / `./streams` /
-`./streams-content` / recovery-file helpers. Host must supply atomic Streams CAS,
-15-minute JWT freshness, and an out-of-band genesis hash; this package does not
-verify those. Tag 6 is D1 A unilateral Owner transfer (predecessor becomes Admin).
-10k from-zero is still far above 100ms (recorded miss, bar not lowered). Passkey
-PRF and real phones are host/device preconditions. Full host/limit/gap list:
-private `plans/e2ee-next.md` “P4 交付草稿”. Do not enable product E2EE.
+Integrator summary: [HANDOFF.zh.md](HANDOFF.zh.md). Host must supply atomic
+Streams CAS, 15-minute JWT freshness, and an out-of-band genesis hash. Tag 6 is
+D1 A unilateral Owner transfer. 10k from-zero is still far above 100ms (recorded
+miss, bar not lowered). Passkey PRF and real phones are host/device
+preconditions. Do not enable product E2EE.
 
 Experimental control-log and signed content-encryption primitives. **Electron main imports the device store only;
 it is not end-to-end encryption for Lody.** [Protocol draft](../../specs/e2ee-control-log.zh.md).
