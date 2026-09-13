@@ -472,6 +472,191 @@ describe('SessionExecutionService', () => {
     expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
+  it('settles a held steer when the target turn is stopped instead of stranding it in pending_apply', async () => {
+    // The report's scenario: the adapter holds the steer request unanswered
+    // past the UI's RPC timeout, and `applied` only settles when the
+    // connection closes. Stopping the target turn must end the wait, return
+    // a bounded disposition, and give the guide a terminal history status
+    // instead of leaving it in `pending_apply` forever.
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: new Promise(() => {}),
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      })),
+      cancel: vi.fn(async () => {}),
+      steerPrompt,
+      currentModel: undefined,
+    };
+    const updateHistory = vi.fn(async (map: (history: unknown[]) => unknown[]) => {
+      await map([{ id: 'user-2', role: 'user', status: 'pending_apply' }]);
+    });
+    const sessionDoc = { updateHistory };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta: vi.fn(async () => {}) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-orphan' as SessionId;
+    const promptSettled = createDeferred<{ status: 'rejected'; error: unknown }>();
+    const promptOutcome = promptSettled.promise;
+    const promptRun = {
+      turnId: 'assistant:user-1',
+      promptOutcome,
+      successorReady: Promise.resolve(),
+      signalSuccessor: vi.fn(),
+    };
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer' as ACPSessionId },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
+      activePromptRun: promptRun,
+      yieldedFinalization: Promise.resolve(),
+      settlement: { callback: vi.fn(async () => {}), completed: false },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    const response = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      inputConfig: { prompt: 'change direction' },
+    });
+    await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+
+    // Stop the target turn: cancellation is requested and the prompt run settles.
+    runtime.cancelRequested = true;
+    promptSettled.resolve({ status: 'rejected', error: new Error('prompt canceled') });
+
+    // The response must be bounded by the stop, not by the adapter's verdict.
+    await expect(response).resolves.toMatchObject({
+      applied: false,
+      disposition: 'stale-turn',
+    });
+    // The guide is settled to a terminal status (canceled), not left pending_apply.
+    await vi.waitFor(() => expect(updateHistory).toHaveBeenCalled());
+    const mapFn = updateHistory.mock.calls.at(-1)![0] as (history: unknown[]) => unknown[];
+    const mapped = mapFn([{ id: 'user-2', role: 'user', status: 'pending_apply' }]) as Array<{
+      status: string;
+    }>;
+    expect(mapped[0]!.status).toBe('canceled');
+  });
+
+  it('gives a stopped turn whose steer verdict rejects the same terminal settlement', async () => {
+    // Prompt-transport runtimes reject `applied` with the stopped prompt's own
+    // error; that must converge to the same explicit terminal state instead of
+    // the generic `error` disposition that leaves the guide in `pending_apply`.
+    const stopped = createDeferred<never>();
+    const steerPrompt = vi.fn(() => ({
+      completion: stopped.promise,
+      applied: stopped.promise.then(
+        () => undefined,
+        (error: unknown) => {
+          throw error;
+        }
+      ),
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'claudeCode',
+        appliedNotificationMethod: 'claude/steerApplied',
+        upstreamTurn: 'handoff',
+        configPolicy: 'apply',
+      })),
+      cancel: vi.fn(async () => {}),
+      steerPrompt,
+      currentModel: undefined,
+    };
+    const updateHistory = vi.fn(async (map: (history: unknown[]) => unknown[]) => {
+      await map([{ id: 'user-2', role: 'user', status: 'pending_apply' }]);
+    });
+    const sessionDoc = { updateHistory };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta: vi.fn(async () => {}) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-orphan-reject' as SessionId;
+    const promptSettled = createDeferred<{ status: 'rejected'; error: unknown }>();
+    const promptRun = {
+      turnId: 'assistant:user-1',
+      promptOutcome: promptSettled.promise,
+      successorReady: Promise.resolve(),
+      signalSuccessor: vi.fn(),
+    };
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer' as ACPSessionId },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user-1',
+        requesterUserId: 'user-1',
+        inputConfig: { prompt: 'initial prompt' },
+      },
+      activePromptRun: promptRun,
+      yieldedFinalization: Promise.resolve(),
+      settlement: { callback: vi.fn(async () => {}), completed: false },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    const response = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      inputConfig: { prompt: 'change direction' },
+    });
+    await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+
+    runtime.cancelRequested = true;
+    promptSettled.reject(new Error('prompt canceled'));
+    stopped.reject(new Error('prompt canceled'));
+
+    await expect(response).resolves.toMatchObject({
+      applied: false,
+      disposition: 'stale-turn',
+    });
+    await vi.waitFor(() => expect(updateHistory).toHaveBeenCalled());
+    const mapFn = updateHistory.mock.calls.at(-1)![0] as (history: unknown[]) => unknown[];
+    const mapped = mapFn([{ id: 'user-2', role: 'user', status: 'pending_apply' }]) as Array<{
+      status: string;
+    }>;
+    expect(mapped[0]!.status).toBe('canceled');
+  });
+
   it('completes A to B to C when yielded prompts never settle', async () => {
     const sessionId = 'session-steer-lifecycle' as SessionId;
     const first = createDeferred<unknown>();
@@ -908,7 +1093,7 @@ describe('SessionExecutionService', () => {
           acpSessionId: 'acp-steer-refused' as ACPSessionId,
         },
         promptInFlight: true,
-        activePromptRun: { turnId: 'assistant:user-1' },
+        activePromptRun: { turnId: 'assistant:user-1', promptOutcome: new Promise(() => {}) },
         cancelRequested: cancelStage === 'before',
       };
       vi.mocked(deps.buildAcpPromptBlocks).mockImplementation(async () => {
@@ -1097,7 +1282,7 @@ describe('SessionExecutionService', () => {
         acpSessionId: 'acp-steer-ambiguous' as ACPSessionId,
       },
       promptInFlight: true,
-      activePromptRun: { turnId: 'assistant:user-1' },
+      activePromptRun: { turnId: 'assistant:user-1', promptOutcome: new Promise(() => {}) },
     };
     (
       service as unknown as {

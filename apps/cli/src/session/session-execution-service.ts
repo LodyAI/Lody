@@ -1472,8 +1472,9 @@ export class SessionExecutionService {
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
     let submittedToAgent = false;
+    let sessionDoc: SessionDocument | undefined;
     try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
+      sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
         options.inputConfig.inputBlocks,
         options.inputConfig.prompt ?? ''
@@ -1511,7 +1512,38 @@ export class SessionExecutionService {
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       submittedToAgent = true;
-      const application = await steerRun.applied;
+      // The verdict must not outlive the turn it was aimed at: a runtime that
+      // holds the steer request unanswered keeps `applied` pending until the
+      // connection closes, so a stopped turn would strand this guide in
+      // `pending_apply` while the per-session steer mutation queue stays
+      // blocked behind this await. Settle with the prompt run's outcome
+      // instead; the application waiter itself stays registered until the
+      // agent answers or the connection closes, so a late verdict cannot
+      // resurrect the stopped turn.
+      const application = await Promise.race([
+        steerRun.applied,
+        ownedPromptRun.promptOutcome.then(
+          () => 'prompt-run-settled' as const,
+          () => 'prompt-run-settled' as const
+        ),
+      ]);
+      if (application === 'prompt-run-settled') {
+        // Unknown delivery result: the provider may still take the held
+        // request, so the guide gets a terminal status rather than being
+        // replayed into ordinary dispatch.
+        await this.setTerminalUserTurnStatus(
+          options.sessionId,
+          sessionDoc,
+          options.userTurnId,
+          runtime.cancelRequested ? 'canceled' : 'failed'
+        );
+        return reject(
+          'stale-turn',
+          runtime.cancelRequested
+            ? 'The target turn was stopped before the agent answered the steer'
+            : 'The target turn ended before the agent answered the steer'
+        );
+      }
       try {
         if (
           runtime.cancelRequested ||
@@ -1612,6 +1644,22 @@ export class SessionExecutionService {
       }
     } catch (error) {
       const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
+      if (!notDelivered && sessionDoc && runtime.cancelRequested) {
+        // A stopped turn can reject `applied` directly (prompt-transport
+        // runtimes race this handler ahead of the settlement branch above);
+        // the guide still converges to a terminal state instead of the
+        // generic `error` disposition that leaves it in `pending_apply`.
+        await this.setTerminalUserTurnStatus(
+          options.sessionId,
+          sessionDoc,
+          options.userTurnId,
+          'canceled'
+        );
+        return reject(
+          'stale-turn',
+          'The target turn was stopped before the agent answered the steer'
+        );
+      }
       if (!notDelivered) {
         return reject('error', formatErrorMessage(error));
       }
