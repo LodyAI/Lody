@@ -43,7 +43,7 @@ function StepTransition({ step, children }: { step: ShareStep; children: ReactNo
   const [height, setHeight] = useState<number>();
   useLayoutEffect(() => {
     const node = inner.current;
-    if (!node) return;
+    if (!node) return undefined;
     const observer = new ResizeObserver(() => setHeight(node.offsetHeight));
     observer.observe(node);
     setHeight(node.offsetHeight);
