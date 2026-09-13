@@ -50,3 +50,14 @@ CI's Static checks failed on `typescript-eslint(consistent-return)` in the sideb
 the success callback mixed an empty return with a returned navigation Promise. Making
 the callback async and awaiting navigation retains error propagation and passes the
 same type-aware lint locally. Non-type-aware lint had missed this error previously.
+
+## CLI synchronization correction
+
+Manager creation can continue after an incomplete initial metadata sync. The archive
+command now explicitly synchronizes both workspace resolution and the execution
+manager before reading the root or discovering descendants. Sync failure aborts before
+any archive write; post-write confirmation alone cannot repair an omitted descendant.
+The command suite uses a deferred sync to introduce a previously unknown opened child,
+asserts both resulting archive states, and verifies a rejected sync leaves the root active.
+This guarantees discovery from the synchronized snapshot, not atomic inclusion of Sessions
+created concurrently after that snapshot.

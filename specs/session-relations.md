@@ -82,7 +82,11 @@ This Spec does not define worker supervision, status or result aggregation, unre
 permission routing, worker panels, settle, or handoff behavior. Those product choices
 remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
 
-Archive requires a complete client metadata cache before any write. Repeating archive
+Archive requires a complete client metadata cache before any write. CLI archive
+additionally requires successful metadata synchronization before root
+validation and target discovery, including when initialization continued in degraded mode.
+This is a synchronized snapshot guarantee, not an atomic barrier against later creation.
+Repeating archive
 on an already archived root still discovers and archives descendants. Writes are
 idempotent but not transactional; a failed write surfaces an error and can be retried.
 Each archived Session retains the existing runtime shutdown and worktree cleanup behavior.

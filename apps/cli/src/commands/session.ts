@@ -968,6 +968,21 @@ export async function listArchiveDescendantSessionIds(
   );
 }
 
+export async function archiveSessionWithSyncedMetadata(
+  manager: LoroDocumentManager,
+  sessionId: SessionId
+): Promise<SessionId[]> {
+  await syncWorkspaceMetaForRead(manager, `session.archive:${sessionId}:prewrite`);
+  await resolveSessionMetaOrThrow(manager, sessionId);
+  const childSessionIds = await listArchiveDescendantSessionIds(manager, sessionId);
+  // Each owning machine observes archived state and reconciles its resources.
+  await applySessionAndChildren(sessionId, childSessionIds, (id) =>
+    manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
+  );
+  await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
+  return childSessionIds;
+}
+
 async function applySessionAndChildren(
   sessionId: SessionId,
   childSessionIds: SessionId[],
@@ -4354,16 +4369,12 @@ const sessionArchiveCommand = new Command('archive')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.archive:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        await resolveSessionMetaOrThrow(manager, sessionId);
-        const childSessionIds = await listArchiveDescendantSessionIds(manager, sessionId);
-        // The archived state is the whole request: the owning machine observes
-        // it, releases the runtime, and reconciles the worktree directory.
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
-        );
-        await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
+        const childSessionIds = await archiveSessionWithSyncedMetadata(manager, sessionId);
 
         if (options.json) {
           printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
