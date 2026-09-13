@@ -19,9 +19,13 @@ import type { ReviewFinding } from './review';
  * turn, which surprised users who had not asked for a commit. The enforcement
  * now lives here instead — an instruction the agent follows and the user can
  * override in conversation — with the Info Bar's `Commit & Push` action as the
- * visible fallback when a turn still ends on a dirty tree.
+ * visible fallback when a turn still ends with unpublished work.
+ *
+ * Exported separately from the two prompts so the UI can compose it from its own
+ * i18n key. Inlining it into each localized prompt would put the same paragraph
+ * in five places with nothing to catch a wording change that misses one.
  */
-const PR_BRANCH_UPKEEP_INSTRUCTION = [
+export const PR_BRANCH_UPKEEP_PROMPT = [
   'After the PR exists, keep it current: at the end of every turn in this conversation,',
   'commit any outstanding changes and push them to the PR branch before you finish, so',
   'the PR head always matches your latest work. Treat this as the default rather than',
@@ -29,13 +33,23 @@ const PR_BRANCH_UPKEEP_INSTRUCTION = [
   'for something that overrides it — in that case say so instead of pushing silently.',
 ].join(' ');
 
-export const CREATE_PR_PROMPT = `Create a PR for the current worktree (a regular PR, not a draft). Use \`gh\` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.
+export const CREATE_PR_BASE_PROMPT =
+  'Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
 
-${PR_BRANCH_UPKEEP_INSTRUCTION}`;
+export const CREATE_DRAFT_PR_BASE_PROMPT =
+  'Create a draft PR for the current worktree. Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
 
-export const CREATE_DRAFT_PR_PROMPT = `Create a draft PR for the current worktree. Use \`gh\` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.
+/** Joins a PR-creation prompt to the standing upkeep instruction. */
+export const withPrBranchUpkeep = (basePrompt: string, upkeep: string): string =>
+  `${basePrompt}\n\n${upkeep}`;
 
-${PR_BRANCH_UPKEEP_INSTRUCTION}`;
+/** Composed form for headless callers (the auto-review engine) that have no i18n. */
+export const CREATE_PR_PROMPT = withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT);
+
+export const CREATE_DRAFT_PR_PROMPT = withPrBranchUpkeep(
+  CREATE_DRAFT_PR_BASE_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT
+);
 
 export const COMMIT_AND_PUSH_PROMPT = [
   'Publish the current branch: commit anything uncommitted, then push to the remote branch.',

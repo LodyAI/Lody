@@ -136,29 +136,28 @@ function StoryHarness({
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
-  // Priority order, highest first. `mergeAction` appends the merge control after
-  // any labelled actions so a story can show it BOTH as the leading split button
+  // Priority order, highest first: `mergeAction` appends the merge control after
+  // any labelled actions, so a story can show it BOTH as the leading split button
   // and demoted into the chevron behind a higher-priority Commit & Push.
-  const labelledActions: ContextChipAction[] =
-    actionLabels?.map((label) => ({
+  const actions: ContextChipAction[] = [
+    ...(actionLabels ?? []).map((label) => ({
       id: label.toLowerCase().replaceAll(' ', '-'),
       label,
       onClick: fn(),
-    })) ?? [];
-  const contextActions: ContextChipAction[] | undefined = mergeAction
-    ? [
-        ...labelledActions,
-        {
-          kind: 'merge',
-          id: 'merge',
-          method: mergeMethod,
-          onMerge: fn(),
-          onSelectMethod: setMergeMethod,
-        },
-      ]
-    : actionLabels
-      ? labelledActions
-      : undefined;
+    })),
+    ...(mergeAction
+      ? [
+          {
+            kind: 'merge' as const,
+            id: 'merge' as const,
+            method: mergeMethod,
+            onMerge: fn(),
+            onSelectMethod: setMergeMethod,
+          },
+        ]
+      : []),
+  ];
+  const contextActions = actions.length > 0 ? actions : undefined;
   return (
     <div className="flex max-w-full flex-col" style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}

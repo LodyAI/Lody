@@ -8,7 +8,7 @@ const BASE_INPUT = {
   canShowGitHubActions: true,
   hasExistingPr: false,
   workspaceDirty: false,
-  hasUnpublishedWork: false,
+  workspaceUnpushed: false,
   hasChanges: false,
   isAgentBusy: false,
 };
@@ -19,7 +19,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
         hasChanges: true,
       })
     ).toEqual(['create-pr', 'create-draft-pr', 'commit-and-push']);
@@ -48,7 +47,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
       })
     ).toEqual(['commit-and-push']);
   });
@@ -68,7 +66,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
         prStatus: 'draft',
         prMergeState: 'd',
         prCiState: 'f',
@@ -132,7 +129,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       ...BASE_INPUT,
       hasExistingPr: true,
       workspaceDirty: true,
-      hasUnpublishedWork: true,
       prStatus: 'open' as const,
     };
 
@@ -165,7 +161,7 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: false,
-        hasUnpublishedWork: true,
+        workspaceUnpushed: true,
         prStatus: 'open',
         prMergeState: 'c',
         prCiState: 's',
@@ -180,7 +176,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
         ...BASE_INPUT,
         hasExistingPr: true,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
         prStatus: 'merged',
         prReadiness: 'y',
       })
@@ -192,7 +187,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
         isAgentBusy: true,
       })
     ).toEqual([]);
@@ -200,7 +194,6 @@ describe('resolveSessionInfoBarGitHubActionIds', () => {
       resolveSessionInfoBarGitHubActionIds({
         ...BASE_INPUT,
         workspaceDirty: true,
-        hasUnpublishedWork: true,
         canShowGitHubActions: false,
       })
     ).toEqual([]);

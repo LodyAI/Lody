@@ -88,9 +88,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   `apps/cli/src/session/turn-post-processing-service.ts`), so unpublished work means
   the PR head is NOT the author's latest work, and this action item is the only signal
   that stops a user from merging or reviewing a stale PR.
-  "Unpublished" is `SessionMeta.workspaceDirty` OR `workspaceUnpushed`, combined by
-  `getSessionGitHubState` into `hasUnpublishedWork`. BOTH are required and neither is
-  redundant: `workspaceDirty` comes from `git status --porcelain`, so it goes false the
+  "Unpublished" is `SessionMeta.workspaceDirty` OR `workspaceUnpushed`, both surfaced
+  raw by `getSessionGitHubState` and OR-ed at the one point of use. BOTH are required
+  and neither is redundant: `workspaceDirty` comes from `git status --porcelain`, so it goes false the
   instant the agent commits, while a commit whose push failed leaves the PR head a
   commit behind. Gating this action on `workspaceDirty` alone drops it exactly there
   and promotes Merge against a stale remote head. `workspaceDirty` alone still gates

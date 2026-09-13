@@ -34,7 +34,7 @@ export function resolveSessionInfoBarGitHubActionIds({
   canShowGitHubActions,
   hasExistingPr,
   workspaceDirty,
-  hasUnpublishedWork,
+  workspaceUnpushed,
   hasChanges,
   isAgentBusy,
   prCiState,
@@ -44,14 +44,10 @@ export function resolveSessionInfoBarGitHubActionIds({
 }: {
   canShowGitHubActions: boolean;
   hasExistingPr: boolean;
-  /** Uncommitted-only. Gates "Commit & Push" on a session with no PR yet. */
+  /** Uncommitted changes in the working tree. */
   workspaceDirty: boolean;
-  /**
-   * Uncommitted OR committed-but-unpushed. Gates "Commit & Push" on a session
-   * that already has a PR, because that is the state in which the PR head is
-   * behind the author's latest work; see `getSessionGitHubState`.
-   */
-  hasUnpublishedWork: boolean;
+  /** Local commits the remote does not have. */
+  workspaceUnpushed: boolean;
   /**
    * Whether there is anything to base a PR on — committed OR uncommitted. Gates
    * "Create PR"; see `getSessionGitHubState`.
@@ -79,12 +75,12 @@ export function resolveSessionInfoBarGitHubActionIds({
     // the author's latest work. Offering "Merge" first on that state invites
     // landing a PR that is missing it.
     //
-    // This reads `hasUnpublishedWork`, NOT `workspaceDirty`: `git status` goes
-    // clean the moment the agent commits, so a commit whose push failed would
-    // otherwise drop the action and leave Merge as the top offer against a stale
-    // remote head — the precise failure this ranking exists to prevent.
+    // Both flags, NOT `workspaceDirty` alone: `git status` goes clean the moment
+    // the agent commits, so a commit whose push failed would otherwise drop the
+    // action and leave Merge as the top offer against a stale remote head — the
+    // precise failure this ranking exists to prevent.
     const actions: SessionInfoBarGitHubActionId[] = [];
-    if (hasUnpublishedWork) {
+    if (workspaceDirty || workspaceUnpushed) {
       actions.push('commit-and-push');
     }
     if (prStatus === 'draft') {

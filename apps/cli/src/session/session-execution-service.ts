@@ -262,6 +262,8 @@ type TurnRuntimeState = {
   promptFailed: boolean;
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
+  /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
+  workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
   cancelRequested: boolean;
   cancelFinalized: boolean;
@@ -1802,6 +1804,7 @@ export class SessionExecutionService {
       promptFailed: false,
       finalizeStarted: false,
       finalizeCompleted: false,
+      workspaceGitStateSynced: false,
       prePromptFailureRecorded: false,
       cancelRequested: false,
       cancelFinalized: false,
@@ -2111,12 +2114,8 @@ export class SessionExecutionService {
       // has landed by the time the UI stops showing Working.
       const cancelledSession = options.session;
       if (cancelledSession) {
-        yield* self.ignoreWithWarning(
-          options.sessionId,
-          'Failed to sync workspace git state for cancelled turn',
-          self.tryPromise(() =>
-            self.deps.turnFinalization.syncWorkspaceGitState(options.sessionId, cancelledSession)
-          )
+        yield* self.tryPromise(() =>
+          self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, cancelledSession)
         );
       }
 
@@ -2620,6 +2619,39 @@ export class SessionExecutionService {
     }
   }
 
+  /**
+   * Publish `workspaceDirty` / `workspaceUnpushed` at most once per turn.
+   *
+   * A cancelled turn reaches this from `finalizeTurn`'s bail-out AND from
+   * `finalizeCancelledTurnEffect` (the `acquireRelease` handler runs for every
+   * cancelled turn), so without the shared latch a single Stop spawns both git
+   * probes twice and rewrites the same values. `syncWorkspaceGitState` swallows
+   * its own failures, so no caller needs to guard this.
+   */
+  private markWorkspaceGitStateSynced(sessionId: SessionId, turnId: string): void {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+  }
+
+  private async syncWorkspaceGitStateOnce(
+    sessionId: SessionId,
+    turnId: string,
+    session: ISession
+  ): Promise<void> {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime?.workspaceGitStateSynced) {
+      return;
+    }
+    if (runtime) {
+      runtime.workspaceGitStateSynced = true;
+    }
+    await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
+    });
+  }
+
   private async runTurnFinalizationStage<T>(
     sessionId: SessionId,
     turnId: string,
@@ -2704,9 +2736,6 @@ export class SessionExecutionService {
     } = ctx;
     const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
     const githubProject = resolveProjectGitHubRepo(project);
-    // Set once `updateSessionDiffStats` has published fresh values, so a later
-    // cancellation check does not re-run the same probes for the same answer.
-    let workspaceGitStatePublished = false;
     const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
       if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
         return false;
@@ -2718,24 +2747,8 @@ export class SessionExecutionService {
       // disk. The dirty/unpushed flags are what raise the Info Bar's Commit &
       // Push, and nothing commits or pushes on the session's behalf, so an
       // interrupted turn that left stale `false`s here would hide real
-      // unpublished work behind a PR that looks current. Keep it best-effort:
-      // cancellation must still settle.
-      if (!workspaceGitStatePublished) {
-        try {
-          await this.runTurnFinalizationStage(
-            sessionId,
-            turnId,
-            'syncWorkspaceGitState',
-            async () => {
-              await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
-            }
-          );
-        } catch (error) {
-          this.deps.logger.debug(
-            `[${sessionId}] Failed to sync workspace git state after cancellation: ${formatErrorMessage(error)}`
-          );
-        }
-      }
+      // unpublished work behind a PR that looks current.
+      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session);
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.deps.touchSession(sessionId);
       return true;
@@ -2802,7 +2815,7 @@ export class SessionExecutionService {
           preferredBaseBranch: preferredStatsBaseBranch,
           skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
         });
-        workspaceGitStatePublished = true;
+        this.markWorkspaceGitStateSynced(sessionId, turnId);
       });
 
       if (await stopIfTurnCancelled('diff recording')) {

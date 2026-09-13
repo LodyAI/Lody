@@ -17,20 +17,18 @@ export type SessionGitHubState = {
   hasExistingPr: boolean;
   workspaceDirty: boolean;
   /**
-   * Whether the branch holds work the remote does not have yet — uncommitted
-   * (`workspaceDirty`) OR committed but unpushed. This, not `workspaceDirty`
-   * alone, answers "is the PR head the author's latest work?": committing
-   * clears the dirty flag while the PR head stays behind, and offering Merge on
-   * that state lands a PR missing the local commits.
+   * Committed but not on the remote. Independent of `workspaceDirty`, which
+   * goes false the moment the agent commits while the PR head stays behind —
+   * together they answer "is the PR head the author's latest work?".
    */
-  hasUnpublishedWork: boolean;
+  workspaceUnpushed: boolean;
   /**
    * Whether the session has any changes to base a PR on — uncommitted
    * (`workspaceDirty`) OR already committed (`diffStats.allChange > 0`). These
    * two signals come from independent writers (post-turn `git status` vs the
    * Code Collab file-index scanner), so together they survive one being stale
    * and, unlike `workspaceDirty` alone, keep "Create PR" available after the
-   * agent auto-commits (clean tree, real commits, still no PR).
+   * agent commits (clean tree, real commits, still no PR).
    */
   hasChanges: boolean;
 };
@@ -105,7 +103,7 @@ export const getSessionGitHubState = (
     canShowGitHubActions: !!repoFullName,
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
-    hasUnpublishedWork: workspaceDirty || workspaceUnpushed,
+    workspaceUnpushed,
     hasChanges: workspaceDirty || hasCommittedDiff,
   };
 };

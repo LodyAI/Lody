@@ -39,6 +39,8 @@ type WorkspaceSessionContext = {
   ownerSessionId: SessionId;
   ownerDoc: SessionDocument;
   ownerMeta: SessionMeta | undefined;
+  /** The active session's own meta, already read to find the owner. */
+  activeMeta: SessionMeta | undefined;
   ownerRoomId: ReturnType<typeof getSessionRoomId>;
   pullRequests: readonly SessionPullRequestMeta[];
 };
@@ -68,6 +70,7 @@ export class TurnPostProcessingService {
         ownerSessionId,
         ownerDoc: activeDoc,
         ownerMeta: activeMeta,
+        activeMeta,
         ownerRoomId: getSessionRoomId(ownerSessionId),
         pullRequests: this.resolvePullRequests(activeMeta, activeMeta),
       };
@@ -79,6 +82,7 @@ export class TurnPostProcessingService {
       ownerSessionId,
       ownerDoc,
       ownerMeta,
+      activeMeta,
       ownerRoomId: getSessionRoomId(ownerSessionId),
       pullRequests: this.resolvePullRequests(ownerMeta, activeMeta),
     };
@@ -135,14 +139,13 @@ export class TurnPostProcessingService {
   async syncWorkspaceGitState(sessionId: SessionId, session: ISession): Promise<void> {
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const activeMeta = await sessionDoc.getMetaState();
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      // Gate on GitHub-capability HERE rather than at each caller. Cancellation
-      // reaches this from several sites that carry no `ProjectRef`, and a second
-      // copy of the rule is how the two cancel routes drift apart. A child Tab's
-      // own meta may omit `project`; it shares the owner's checkout, so the
-      // owner's binding is the correct fallback.
-      const project = activeMeta?.project ?? workspace.ownerMeta?.project;
+      // Gate here rather than at the cancellation callers: they reach this from
+      // several sites that carry no `ProjectRef`, and a second copy of the rule
+      // is how those routes drift apart. A child Tab's own meta may omit
+      // `project`; it shares the owner's checkout, so the owner's binding is the
+      // correct fallback.
+      const project = workspace.activeMeta?.project ?? workspace.ownerMeta?.project;
       if (!resolveProjectGitHubRepo(project)) {
         return;
       }
@@ -200,6 +203,10 @@ export class TurnPostProcessingService {
     let fileDiff: SessionHistoryInput['fileDiff'] = [];
     let diffStats: SessionMeta['diffStats'] = { allChange: { add: 0, del: 0 } };
 
+    // Runs alongside the diff-stats pipeline rather than after it; the two share
+    // nothing but `runGit`, and this one swallows its own failures.
+    const workspaceGitState = this.probeWorkspaceGitState(sessionId, runGit);
+
     try {
       const preferredBaseBranch = resolveBaseBranchPreference({
         preferredBranch: options.preferredBaseBranch,
@@ -219,16 +226,14 @@ export class TurnPostProcessingService {
       this.deps.logger.debug(`[${sessionId}] Failed to compute git diff stats:`, error);
     }
 
-    // Only conclusive probes contribute a key. `undefined` means git could not be
-    // queried (transient spawn failure); overwriting the durable value with a
-    // stale `false` would hide Create PR / Commit & Push on a session that really
-    // does have unpublished work, until a later turn recomputes it.
-    const workspaceGitState = await this.probeWorkspaceGitState(sessionId, runGit);
-
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      const metaPatch: Partial<SessionMeta> = { diffStats, ...workspaceGitState };
+      // Only conclusive probes contribute a key. `undefined` means git could not
+      // be queried (transient spawn failure); overwriting the durable value with
+      // a stale `false` would hide Create PR / Commit & Push on a session that
+      // really does have unpublished work, until a later turn recomputes it.
+      const metaPatch: Partial<SessionMeta> = { diffStats, ...(await workspaceGitState) };
       await this.deps.workspaceDocument.repo.upsertDocMeta(workspace.ownerRoomId, metaPatch);
     } catch (error) {
       this.deps.logger.debug(

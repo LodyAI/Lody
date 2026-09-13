@@ -426,13 +426,6 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
     );
   }
 
-  // Merge can be demoted out of the primary slot (a dirty worktree outranks it),
-  // and a demoted action must stay reachable rather than silently vanish. In the
-  // menu it collapses to one item that performs the already-selected method;
-  // picking a different method remains the split button's job, which is back as
-  // soon as merge is the top-priority action again.
-  const hasOverflow = overflowActions.length > 0;
-
   return (
     <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
       <button
@@ -444,7 +437,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
-      {hasOverflow ? (
+      {overflowActions.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -458,6 +451,11 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" sideOffset={6}>
             {overflowActions.map((action) =>
+              // Merge can be demoted out of the primary slot (unpublished work
+              // outranks it) and must stay reachable rather than silently vanish.
+              // Here it collapses to one item performing the already-selected
+              // method; picking a different method remains the split button's
+              // job, which is back as soon as merge leads again.
               action.kind === 'merge' ? (
                 <DropdownMenuItem
                   key={action.id}
