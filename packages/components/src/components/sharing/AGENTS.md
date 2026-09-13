@@ -67,9 +67,12 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - Keep the read-only context free of composer, edit, retry, fork, permission,
   agent-control and workspace-navigation callbacks. Malformed reader errors
   unmount content and must not send history/error payloads to telemetry.
-- Reader chrome: the Lody mark leads the header and links back to the product in
-  a new tab; right to left it ends with viewer identity, then the theme
-  control. That control offers Light and Dark only and forces Light when it finds
+- Reader chrome: the Lody mark leads the header — the packaged app icon's own
+  black tile, which does not repaint with the reader's appearance — and links
+  back to the product in a new tab; right to left the header ends with viewer
+  identity, then the theme control. The conversation tree is a left sidebar on a
+  wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
+  per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
   any other stored value; the reader deliberately does not follow the app's
   appearance setting. It still drives the app ThemeProvider, so `embedded`
   (the publisher's frozen-copy preview) must suppress both it and the identity

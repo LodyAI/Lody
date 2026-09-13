@@ -162,6 +162,27 @@ describe('static share presentation', () => {
     expect(props.onSelect).toHaveBeenCalledWith('c3');
   });
 
+  it('reaches the conversation tree as a drawer where a sidebar does not fit', async () => {
+    await render();
+    // Wide and narrow each own a toggle so CSS, not a viewport hook, decides
+    // which is live; the narrow one opens the tree over the conversation.
+    const toggles = [
+      ...container.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle conversation tree"]'),
+    ];
+    expect(toggles).toHaveLength(2);
+    const drawerToggle = toggles[1]!;
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => drawerToggle.click());
+    const drawer = document.querySelector('[role="dialog"]')!;
+    expect(drawer.textContent).toContain('Review');
+    const review = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent === 'Review'
+    )!;
+    await act(async () => review.click());
+    expect(props.onSelect).toHaveBeenCalledWith('c3');
+    expect(drawerToggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('names each pane with the app’s tab, so child Tabs and a solo conversation match', async () => {
     await render();
     const tabs = container.querySelector('[role="tablist"]')!;

@@ -85,18 +85,26 @@ export function ShareViewerIdentity({
   );
 }
 
-/** The product mark, leading the reader header and pointing back at Lody. */
+/**
+ * The product mark, leading the reader header and pointing back at Lody.
+ *
+ * The tile is the packaged app icon's own black square rather than a theme
+ * surface: a brand mark should not repaint with the reader's appearance. Dark
+ * mode only adds a hairline so the tile still has an edge against the canvas.
+ */
 export function ShareBrandLink({ appOrigin }: { appOrigin: string | null }) {
   const mark = (
     <>
-      <img
-        src={lodyLogo}
-        alt=""
-        aria-hidden
-        draggable={false}
-        className="size-5 rounded-md object-contain"
-      />
-      <span className="text-sm font-semibold tracking-tight">Lody</span>
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-[6px] bg-[#0d0d0f] dark:ring-1 dark:ring-white/10">
+        <img
+          src={lodyLogo}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="size-[18px] object-contain"
+        />
+      </span>
+      <span className="text-sm tracking-tight">Lody</span>
     </>
   );
   const className = cn(

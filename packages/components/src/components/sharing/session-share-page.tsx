@@ -41,6 +41,7 @@ import {
 import { SessionShareErrorBoundary } from './session-share-error-boundary';
 import { Button } from '@/ui/button';
 import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
+import { Sheet, SheetContent, SheetTitle } from '@/ui/sheet';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/theme-provider';
 import { SessionShareComposer } from './session-share-composer';
@@ -250,6 +251,7 @@ export function SessionShareSurface(props: {
   const appOrigin = useMemo(() => resolveShareAppOrigin(), []);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [treeVisible, setTreeVisible] = useState(true);
+  const [treeSheetOpen, setTreeSheetOpen] = useState(false);
   const { manifest, sessionId, status } = props;
   const tree = useMemo(() => {
     if (!manifest) return [];
@@ -293,22 +295,67 @@ export function SessionShareSurface(props: {
   const panes = resolveSharePanes(manifest, sessionId);
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
+  const treeRows = () =>
+    tree.map((node) => (
+      <div
+        key={node.id}
+        className={`flex items-center rounded-md ${node.id === panes.root.id ? 'bg-accent' : 'hover:bg-accent/50'}`}
+      >
+        <SessionRowLeadingSlot
+          menuLabel=""
+          openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
+            setCollapsed((previous) => {
+              const next = new Set(previous);
+              if (next.has(node.id)) next.delete(node.id);
+              else next.add(node.id);
+              return next;
+            })
+          )}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            props.onSelect(node.id);
+            setTreeSheetOpen(false);
+          }}
+          aria-current={node.id === panes.root.id ? 'page' : undefined}
+          className="min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]"
+        >
+          {title(node.item.title)}
+        </button>
+      </div>
+    ));
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-1">
           <ShareBrandLink appOrigin={appOrigin} />
           {hasTree && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              aria-expanded={treeVisible}
-              aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
-              onClick={() => setTreeVisible((value) => !value)}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
+            <>
+              {/* Two buttons rather than a viewport hook: the wide layout keeps
+                  the tree in place, the narrow one has no room and opens it as
+                  a drawer. CSS decides, so neither can flash the wrong one. */}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="hidden h-8 w-8 sm:inline-flex"
+                aria-expanded={treeVisible}
+                aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                onClick={() => setTreeVisible((value) => !value)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 sm:hidden"
+                aria-expanded={treeSheetOpen}
+                aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                onClick={() => setTreeSheetOpen(true)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -324,34 +371,9 @@ export function SessionShareSurface(props: {
         {hasTree && treeVisible && (
           <nav
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
-            className="max-h-40 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 sm:max-h-none sm:w-56 sm:border-b-0 sm:border-r"
+            className="hidden shrink-0 overflow-auto border-border bg-muted/20 p-2 sm:block sm:w-56 sm:border-r"
           >
-            {tree.map((node) => (
-              <div
-                key={node.id}
-                className={`flex items-center rounded-md ${node.id === panes.root.id ? 'bg-accent' : 'hover:bg-accent/50'}`}
-              >
-                <SessionRowLeadingSlot
-                  menuLabel=""
-                  openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
-                    setCollapsed((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(node.id)) next.delete(node.id);
-                      else next.add(node.id);
-                      return next;
-                    })
-                  )}
-                />
-                <button
-                  type="button"
-                  onClick={() => props.onSelect(node.id)}
-                  aria-current={node.id === panes.root.id ? 'page' : undefined}
-                  className="min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]"
-                >
-                  {title(node.item.title)}
-                </button>
-              </div>
-            ))}
+            {treeRows()}
           </nav>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -366,6 +388,20 @@ export function SessionShareSurface(props: {
           />
         </div>
       </div>
+      {hasTree && (
+        <Sheet open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
+          <SheetContent
+            side="left"
+            aria-label={t('sharing.conversationTree', 'Conversation tree')}
+            className="w-72 overflow-y-auto p-2 pt-12 sm:max-w-xs"
+          >
+            <SheetTitle className="sr-only">
+              {t('sharing.conversationTree', 'Conversation tree')}
+            </SheetTitle>
+            {treeRows()}
+          </SheetContent>
+        </Sheet>
+      )}
     </main>
   );
 }
