@@ -34,16 +34,39 @@ const meta = {
   ],
   args: {
     manifest: {
-      shareId: 'story',
-      rootSessionId: 'main',
-      workspaceName: 'Lody · Product',
-      scopeVersion: 1,
-      credentialVersion: 1,
-      validUntil: 2_000_000_000_000,
-      targets: [
-        { sessionId: 'main', title: 'Designing a shared conversation' },
-        { sessionId: 'notes', title: 'Implementation notes' },
+      formatVersion: 1,
+      historyFormatVersion: 1,
+      capturedAt: '2026-09-12T00:00:00.000Z',
+      rootConversationId: 'main',
+      conversations: [
+        { id: 'main', title: 'Designing a shared conversation', historyObjectId: 'h1' },
+        {
+          id: 'notes',
+          title: 'Implementation notes',
+          historyObjectId: 'h2',
+          parentConversationId: 'main',
+        },
+        {
+          id: 'review',
+          title: 'Independent review',
+          historyObjectId: 'h3',
+          openedByConversationId: 'notes',
+        },
+        {
+          id: 'side',
+          title: 'Side discussion',
+          historyObjectId: 'h4',
+          parentConversationId: 'main',
+          childSessionPlacement: 'side-panel',
+        },
       ],
+      attachments: [],
+      objects: ['h1', 'h2', 'h3', 'h4'].map((id) => ({
+        id,
+        mediaType: 'application/json',
+        sizeBytes: 2,
+        sha256: '0'.repeat(64),
+      })),
     },
     sessionId: 'main',
     status: 'ready',
@@ -54,7 +77,7 @@ const meta = {
       },
     },
     snapshot: {
-      status: 'live',
+      status: 'ready',
       history: [
         {
           id: 'question',
@@ -73,7 +96,7 @@ const meta = {
           items: [
             {
               type: 'text',
-              text: 'Choose the conversations you want to include. Anyone with the complete link can read their history and follow new messages.\n\nThe author can update the selection or revoke the link from the conversation menu.\n\n```ts\nconst selected = [mainConversation, implementationNotes];\n```',
+              text: 'Choose the conversations you want to include. Anyone with the complete link can read this published copy. New source messages stay private until you publish an update.\n\nThe author can update the deployment or revoke the link from sharing management.\n\n```ts\nconst selected = [mainConversation, implementationNotes];\n```',
             },
           ],
         },
@@ -83,7 +106,7 @@ const meta = {
 } satisfies Meta<typeof SessionShareSurface>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const Live: Story = {};
+export const Published: Story = {};
 export const Loading: Story = {
   args: {
     manifest: null,
@@ -92,14 +115,13 @@ export const Loading: Story = {
     snapshot: { status: 'loading', history: [] },
   },
 };
-export const Paused: Story = { args: { status: 'paused' } };
 export const Unavailable: Story = { args: { manifest: null, status: 'unavailable' } };
-export const Empty: Story = { args: { snapshot: { status: 'live', history: [] } } };
+export const Empty: Story = { args: { snapshot: { status: 'ready', history: [] } } };
 export const UnsupportedContent: Story = { render: () => <SessionShareReadError /> };
 export const AttachmentStates: Story = {
   args: {
     snapshot: {
-      status: 'live',
+      status: 'ready',
       history: [
         {
           id: 'attachments',

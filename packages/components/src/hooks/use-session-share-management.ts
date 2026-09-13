@@ -2,15 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
-import type { SessionShareManagementEntry, SessionShareView } from '@lody/cloud-api';
-import type { WorkspaceId } from '@lody/shared';
+import type { SessionShareView } from '@lody/cloud-api';
+import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import {
   createSessionShareSecret,
   createSessionShareUrl,
   hashSessionShareSecret,
+  uploadPreparedShare,
+  type PreparedSharePackage,
 } from '@lody/shared/session-sharing';
 import { userAtom } from '@/atoms';
+import { activeWorkspaceRuntimeAtom, authTokenAtom } from '@/atoms/runtime';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { captureSessionShare } from '@/lib/session-share-publisher';
 import {
   readSessionShareSecret,
   removeSessionShareSecret,
@@ -20,129 +25,69 @@ import {
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 const operations = cloudOperations.sessionSharing;
-const versionKey = (entry: SessionShareView | null | undefined) =>
-  entry ? `${entry.shareId}:${entry.scopeVersion}:${entry.credentialVersion}` : 'new';
-const expected = (entry: SessionShareView) => ({
-  scopeVersion: entry.scopeVersion,
-  credentialVersion: entry.credentialVersion,
-});
 
-/** Mount keyed by user/workspace/session so in-flight actions cannot cross editors. */
-export function useSessionShareManagement(
-  workspaceId: WorkspaceId,
-  sessionId: string,
-  candidateIds: string[]
-) {
+/** Shared by the conversation dialog and Settings. Authority is checked server-side. */
+export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
   const { t } = useTranslation();
   const userId = useAtomValue(userAtom)?.id ?? null;
   const store = useStore();
   const scope = useResolvedWorkspaceScope({ workspaceId });
-  const [draft, setDraft] = useState<{ baseline: string; ids: string[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const mounted = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [ephemeral, setEphemeral] = useState<{
     shareId: string;
     credentialVersion: number;
     secret: string;
   } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  const alive = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now);
-  const [, refreshSecrets] = useState(0);
-  const state = useCloudQuery(
-    operations.getManagement,
-    scope.enabled && userId !== null
-      ? {
-          workspaceId,
-          sessionId,
-          candidateSessionIds: [...new Set([...(draft?.ids ?? []), ...candidateIds])].slice(0, 128),
-        }
-      : 'skip'
-  );
-  const requestVerification = useCloudMutation(operations.requestVerification);
-  const verificationRef = useRef(requestVerification);
-  verificationRef.current = requestVerification;
-  const create = useCloudMutation(operations.create);
-  const reset = useCloudMutation(operations.reset);
-  const updateTargets = useCloudMutation(operations.updateTargets);
+  const [, refresh] = useState(0);
+  const reset = useCloudMutation(operations.resetCredential);
   const revoke = useCloudMutation(operations.revoke);
-  const selected = draft?.ids ?? state?.root?.sessionIds ?? [sessionId];
-  const conflict = draft !== null && draft.baseline !== versionKey(state?.root);
-
-  const verificationIds = JSON.stringify(
-    [...new Set([sessionId, ...selected, ...candidateIds])].slice(0, 128)
-  );
   useEffect(() => {
-    if (!scope.enabled || userId === null) return undefined;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const verify = async () => {
-      if (stopped || store.get(userAtom)?.id !== userId) return;
-      try {
-        await verificationRef.current({
-          workspaceId,
-          sessionIds: JSON.parse(verificationIds) as string[],
-        });
-      } catch {
-        // The reactive management query retains its unavailable/expired state.
-        // This retry is discovery only and must never claim that a source synced.
-      } finally {
-        if (!stopped)
-          timer = setTimeout(() => {
-            void verify();
-          }, 60_000);
-      }
-    };
-    void verify();
-    return () => {
-      stopped = true;
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [scope.enabled, userId, workspaceId, verificationIds, store]);
-
-  useEffect(() => {
-    alive.current = true;
-    const changed = () => refreshSecrets((value) => value + 1);
+    mounted.current = true;
+    const changed = () => refresh((value) => value + 1);
     window.addEventListener('storage', changed);
     return () => {
-      alive.current = false;
+      mounted.current = false;
       window.removeEventListener('storage', changed);
     };
   }, []);
-  useEffect(() => {
-    // Reactive queries do not rerun just because a lease expires.
-    const deadlines = [...(state?.sources ?? []), ...(state?.candidates ?? [])].flatMap((entry) =>
-      entry.validUntil !== null && entry.validUntil > now ? [entry.validUntil] : []
-    );
-    if (!deadlines.length) return undefined;
-    const timer = setTimeout(
-      () => setNow(Date.now()),
-      Math.max(0, Math.min(...deadlines) - Date.now() + 1)
-    );
-    return () => clearTimeout(timer);
-  }, [state, now]);
-
-  const secretFor = (entry: SessionShareView): string | null => {
-    if (userId === null || entry.authorUserId !== userId || entry.status !== 'active') return null;
+  const current = () =>
+    mounted.current && scope.enabled && userId !== null && store.get(userAtom)?.id === userId;
+  const remember = (entry: SessionShareView, secret: string) => {
+    if (!current() || !userId) return;
+    setEphemeral({ shareId: entry.shareId, credentialVersion: entry.credentialVersion, secret });
     try {
-      const stored = readSessionShareSecret(
+      saveSessionShareSecret(
+        localStorage,
+        sessionShareSecretKey(userId, workspaceId, entry.shareId),
+        { secret, credentialVersion: entry.credentialVersion }
+      );
+    } catch {
+      /* Keep the successful result in memory if storage is unavailable. */
+    }
+  };
+  function secretFor(entry: SessionShareView): string | null {
+    if (!userId || entry.publisherUserId !== userId || entry.status !== 'active') return null;
+    try {
+      const secret = readSessionShareSecret(
         localStorage,
         sessionShareSecretKey(userId, workspaceId, entry.shareId),
         entry.credentialVersion
       );
-      if (stored !== null) return stored;
+      if (secret) return secret;
     } catch {
-      /* Storage itself may be unavailable. Keep the just-created secret in memory. */
+      /* Storage may be unavailable. */
     }
     return ephemeral?.shareId === entry.shareId &&
       ephemeral.credentialVersion === entry.credentialVersion
       ? ephemeral.secret
       : null;
-  };
-
-  const run = async (action: () => Promise<void>) => {
-    if (busyRef.current || !scope.enabled || userId === null) return;
+  }
+  async function run(action: () => Promise<void>) {
+    if (!current() || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -150,8 +95,7 @@ export function useSessionShareManagement(
     try {
       await action();
     } catch {
-      // Never log mutation inputs, link secrets, or raw provider errors.
-      if (alive.current)
+      if (current())
         setError(
           t(
             'sharing.manager.failed',
@@ -160,115 +104,41 @@ export function useSessionShareManagement(
         );
     } finally {
       busyRef.current = false;
-      if (alive.current) setBusy(false);
+      if (current()) setBusy(false);
     }
-  };
-
-  const issueLink = () =>
-    run(async () => {
-      if (!state || userId === null || conflict) return;
-      const secret = createSessionShareSecret();
-      const credentialHash = await hashSessionShareSecret(secret);
-      const entry = state.root
-        ? await reset({
-            shareId: state.root.shareId,
-            expected: expected(state.root),
-            sessionIds: selected,
-            credentialHash,
-          })
-        : await create({
-            workspaceId,
-            rootSessionId: sessionId,
-            sessionIds: selected,
-            credentialHash,
-          });
-      // Closing an editor still saves its successful result. Signing out or
-      // switching accounts must not reintroduce secrets after a local wipe.
-      if (store.get(userAtom)?.id !== userId) return;
-      let persistence: 'stored' | 'superseded' | 'unavailable' = 'unavailable';
-      try {
-        persistence = saveSessionShareSecret(
-          localStorage,
-          sessionShareSecretKey(userId, workspaceId, entry.shareId),
-          { credentialVersion: entry.credentialVersion, secret }
-        );
-      } catch {
-        /* Reading localStorage may itself throw. */
-      }
-      if (!alive.current) return;
-      if (persistence === 'superseded') {
-        setError(
-          t(
-            'sharing.manager.conflict',
-            'Sharing changed on another device. Reload the selection before making changes.'
-          )
-        );
-        return;
-      }
-      setEphemeral({ shareId: entry.shareId, credentialVersion: entry.credentialVersion, secret });
-      setDraft(null);
-      setNotice(
-        persistence === 'stored'
-          ? t('sharing.manager.created', 'Link ready. Copy it to share.')
-          : t(
-              'sharing.manager.storageUnavailable',
-              'Link ready, but this device could not save its secret. Copy it now; after closing this page you may need to reset the link.'
-            )
-      );
-    });
-
+  }
   return {
-    state,
-    selected,
     busy,
     error,
     notice,
-    now,
-    conflict,
-    copyableShareIds:
-      state?.sources.filter((entry) => secretFor(entry) !== null).map((entry) => entry.shareId) ??
-      [],
-    onSelect: (ids: string[]) =>
-      setDraft({ baseline: draft?.baseline ?? versionKey(state?.root), ids }),
-    onReload: () => {
-      setDraft(null);
-      setError(null);
-    },
-    onCreate: () => {
-      void issueLink();
-    },
-    onReset: () => {
-      void issueLink();
-    },
-    onSave: () => {
-      void run(async () => {
-        if (!state?.root || conflict) return;
-        await updateTargets({
-          shareId: state.root.shareId,
-          expected: expected(state.root),
-          sessionIds: selected,
-        });
-        if (alive.current) {
-          setDraft(null);
-          setNotice(t('sharing.manager.saved', 'Selection saved.'));
-        }
-      });
-    },
-    onCopy: (entry: SessionShareManagementEntry) => {
-      void run(async () => {
+    run,
+    remember,
+    secretFor,
+    copy(entry: SessionShareView) {
+      return run(async () => {
         const secret = secretFor(entry);
-        if (secret === null || (entry.validUntil ?? 0) <= Date.now())
-          throw new Error('Share unavailable');
+        if (!secret) throw new Error('Share credential unavailable');
         await navigator.clipboard.writeText(
           createSessionShareUrl(entry.shareId, secret, import.meta.env.VITE_SESSION_SHARE_ORIGIN)
         );
-        if (alive.current) setNotice(t('sharing.manager.copied', 'Share link copied.'));
+        if (current()) setNotice(t('settings.shares.copied', 'Share link copied'));
       });
     },
-    onRevoke: (entry: SessionShareManagementEntry) => {
-      void run(async () => {
-        await revoke({ shareId: entry.shareId, expected: expected(entry) });
-        if (userId !== null) {
+    reset(entry: SessionShareView) {
+      return run(async () => {
+        const secret = createSessionShareSecret();
+        const updated = await reset({
+          shareId: entry.shareId,
+          expectedRevision: entry.revision,
+          credentialHash: await hashSessionShareSecret(secret),
+        });
+        remember(updated, secret);
+      });
+    },
+    revoke(entry: SessionShareView) {
+      return run(async () => {
+        await revoke({ shareId: entry.shareId, expectedRevision: entry.revision });
+        if (current() && userId) {
           try {
             removeSessionShareSecret(
               localStorage,
@@ -276,20 +146,161 @@ export function useSessionShareManagement(
               entry.credentialVersion
             );
           } catch {
-            /* Best effort. */
+            /* Revocation remains effective. */
           }
-        }
-        if (alive.current) {
-          setEphemeral((value) => (value?.shareId === entry.shareId ? null : value));
-          if (entry.shareId === state?.root?.shareId) setDraft(null);
-          setNotice(
-            t(
-              'sharing.manager.revokedNotice',
-              'Link revoked. In-progress reads may take a short time to stop.'
-            )
-          );
+          setEphemeral(null);
         }
       });
     },
+  };
+}
+
+type PendingPublication = {
+  deploymentId?: string;
+  sealed?: boolean;
+  prepared: PreparedSharePackage;
+  requestId: string;
+  uploadSecret: string;
+  readerSecret: string | null;
+  expected: SessionShareView | null;
+};
+
+/** Key the owner by account/workspace/root so an async publication cannot cross scopes. */
+export function useSessionShareManagement(
+  workspaceId: WorkspaceId,
+  sessionId: string,
+  candidateIds: string[],
+  shareId?: string,
+  confirmation?: { requestId: string; sessionIds: string[] }
+) {
+  const scope = useResolvedWorkspaceScope({ workspaceId });
+  const userId = useAtomValue(userAtom)?.id;
+  const store = useStore();
+  const meta = useAtomValue(sessionMetaCacheAtom);
+  const actions = useSessionShareLinkActions(workspaceId);
+  const entry = useCloudQuery(
+    operations.getManagement,
+    scope.enabled && userId ? { workspaceId, rootSessionId: sessionId, shareId } : 'skip'
+  );
+  const begin = useCloudMutation(operations.beginDeployment);
+  const publish = useCloudMutation(operations.publishDeployment);
+  const [selectedDraft, setSelected] = useState<string[] | null>(null);
+  const [pending, setPending] = useState<PendingPublication | null>(null);
+  const [progress, setProgress] = useState(0);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => {
+      controller.abort();
+    };
+  }, []);
+  const selected =
+    confirmation?.sessionIds ??
+    selectedDraft ??
+    (entry?.status === 'active' ? entry.selectedSourceIds : [sessionId]);
+  const conflict =
+    !!pending &&
+    !(pending.deploymentId && entry?.currentDeploymentId === pending.deploymentId) &&
+    (pending.expected?.shareId !== (entry?.status === 'active' ? entry.shareId : undefined) ||
+      pending.expected?.revision !== (entry?.status === 'active' ? entry.revision : undefined));
+  const prepare = () =>
+    actions.run(async () => {
+      const runtime = store.get(activeWorkspaceRuntimeAtom),
+        token = store.get(authTokenAtom);
+      if (!runtime || runtime.workspaceId !== workspaceId || !token || !lifetime.current)
+        throw new Error('Share source unavailable');
+      const byId = new Map(Object.values(meta).map((session) => [session.id as string, session]));
+      const sessions = selected.map((id) => byId.get(id)).filter((s): s is SessionMeta => !!s);
+      if (sessions.length !== selected.length || !selected.includes(sessionId))
+        throw new Error('Share source unavailable');
+      const signal = AbortSignal.any([lifetime.current.signal, AbortSignal.timeout(120_000)]);
+      const prepared = await captureSessionShare({
+        runtime,
+        token,
+        sessions,
+        rootSessionId: sessionId,
+        previousSourceIds: entry?.sourceIds,
+        signal,
+      });
+      signal.throwIfAborted();
+      const expected = entry?.status === 'active' ? entry : null;
+      setPending({
+        prepared,
+        expected,
+        requestId: crypto.randomUUID(),
+        uploadSecret: createSessionShareSecret(),
+        readerSecret: expected ? null : createSessionShareSecret(),
+      });
+    });
+  const confirm = () =>
+    actions.run(async () => {
+      if (!pending || conflict || !lifetime.current) throw new Error('Share confirmation changed');
+      const { expected, prepared, uploadSecret, readerSecret, requestId } = pending;
+      const result = pending.deploymentId
+        ? { deploymentId: pending.deploymentId }
+        : await begin({
+            workspaceId,
+            rootSessionId: sessionId,
+            shareId: expected?.shareId,
+            expectedRevision: expected?.revision,
+            credentialHash: readerSecret ? await hashSessionShareSecret(readerSecret) : undefined,
+            uploadCredentialHash: await hashSessionShareSecret(uploadSecret),
+            requestId,
+            confirmationRequestId: confirmation?.requestId,
+            manifest: prepared.manifest,
+            sourceIds: prepared.sourceIds,
+          });
+      setPending((value) =>
+        value?.requestId === requestId ? { ...value, deploymentId: result.deploymentId } : value
+      );
+      lifetime.current.signal.throwIfAborted();
+      if (!pending.sealed) {
+        await uploadPreparedShare({
+          origin: import.meta.env.VITE_SERVER_URL,
+          deploymentId: result.deploymentId,
+          secret: uploadSecret,
+          prepared,
+          signal: lifetime.current.signal,
+          onProgress: (uploaded, total) =>
+            setProgress(total ? Math.round((uploaded / total) * 100) : 100),
+        });
+        setPending((value) =>
+          value?.requestId === requestId ? { ...value, sealed: true } : value
+        );
+      }
+      const updated = await publish({ deploymentId: result.deploymentId });
+      if (readerSecret) actions.remember(updated, readerSecret);
+      if (!lifetime.current.signal.aborted) {
+        setPending(null);
+        setSelected(null);
+        setProgress(0);
+      }
+    });
+  return {
+    entry,
+    selected,
+    pending: pending?.prepared ?? null,
+    conflict,
+    progress,
+    canCapture: selected.every(
+      (id) => candidateIds.includes(id) && Object.values(meta).some((session) => session.id === id)
+    ),
+    busy: actions.busy,
+    error: actions.error,
+    notice: actions.notice,
+    hasSecret: !!entry && !!actions.secretFor(entry),
+    onSelect(ids: string[]) {
+      if (!actions.busy && !confirmation) {
+        setSelected(ids);
+        setPending(null);
+      }
+    },
+    onPrepare: prepare,
+    onConfirm: confirm,
+    onDiscard: () => setPending(null),
+    onCopy: () => entry && actions.copy(entry),
+    onReset: () => entry && actions.reset(entry),
+    onRevoke: () => entry && actions.revoke(entry),
   };
 }

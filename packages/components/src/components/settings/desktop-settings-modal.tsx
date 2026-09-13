@@ -37,6 +37,7 @@ import { AboutSettingsComponent } from './about-setting';
 import { AgentRolesSetting } from './agent-roles-setting';
 import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
+import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 /**
@@ -289,6 +290,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       return <PromptShortcutsSetting />;
     case 'mcp':
       return <McpSetting />;
+    case 'shares':
+      return <ShareManagementSetting />;
     case 'machines':
       return (
         <MachineAgentSettings

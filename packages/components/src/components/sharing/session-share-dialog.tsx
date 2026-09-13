@@ -66,11 +66,20 @@ export function SessionShareDialogFrame({
   );
 }
 
-function ShareEditor({ workspaceId, session }: { workspaceId: WorkspaceId; session: SessionMeta }) {
+function ShareEditor({
+  workspaceId,
+  session,
+  shareId,
+  confirmation,
+}: {
+  workspaceId: WorkspaceId;
+  session: SessionMeta;
+  shareId?: string;
+  confirmation?: { requestId: string; sessionIds: string[] };
+}) {
   const { t } = useTranslation();
   const meta = useAtomValue(sessionMetaCacheAtom);
-  // Discovery only proposes; the switch still resolves to an explicit id set that
-  // the server verifies target by target.
+  // Discovery proposes the explicit set frozen by the publishing client.
   const candidates = useMemo(
     () =>
       [session, ...getSessionShareCandidates(session.id, Object.values(meta)).slice(0, 96)].map(
@@ -84,9 +93,18 @@ function ShareEditor({ workspaceId, session }: { workspaceId: WorkspaceId; sessi
   const management = useSessionShareManagement(
     workspaceId,
     session.id,
-    candidates.map((entry) => entry.sessionId)
+    candidates.map((entry) => entry.sessionId),
+    shareId,
+    confirmation
   );
-  return <SessionShareManager sessionId={session.id} candidates={candidates} {...management} />;
+  return (
+    <SessionShareManager
+      sessionId={session.id}
+      candidates={candidates}
+      selectionLocked={!!confirmation}
+      {...management}
+    />
+  );
 }
 
 /** Mounted only while open: closed headers do not query or traverse session metadata. */
@@ -94,10 +112,14 @@ export function SessionShareDialog({
   workspaceId,
   session,
   onClose,
+  shareId,
+  confirmation,
 }: {
   workspaceId: WorkspaceId;
   session: SessionMeta;
   onClose: () => void;
+  shareId?: string;
+  confirmation?: { requestId: string; sessionIds: string[] };
 }) {
   const { t } = useTranslation();
   const userId = useAtomValue(userAtom)?.id;
@@ -108,9 +130,11 @@ export function SessionShareDialog({
     >
       {userId !== undefined && (
         <ShareEditor
-          key={`${userId}:${workspaceId}:${session.id}`}
+          key={`${userId}:${workspaceId}:${session.id}:${shareId ?? ''}:${confirmation?.requestId ?? ''}`}
           workspaceId={workspaceId}
           session={session}
+          shareId={shareId}
+          confirmation={confirmation}
         />
       )}
     </SessionShareDialogFrame>

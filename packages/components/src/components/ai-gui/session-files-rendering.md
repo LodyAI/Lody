@@ -7,6 +7,8 @@ File attachments use `file` blocks; the product contract is in
   previewable/downloadable derived from transport + `getServerNow()` expiry) and
   `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`,
   test: `tests/session-file-card.test.tsx`.
+- Static shares pass `retention='publication'`: the copied object has no dependency
+  on the source upload's expiry. Its manifest-gated reader decides availability.
 - One card, one primary action — EXCEPT an HTML attachment, which also gets a separate
   download button for the source bytes. Its click opens the RENDERED page (browser
   surface or live file preview), a surface with no control of its own for the file that
