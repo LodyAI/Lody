@@ -9,15 +9,11 @@ queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 `../session-message-submit-route.ts` and is described in
 [.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
 
-A queued item's Steer action uses native acknowledged steering only when the
-authoritative ACP capability cache advertises it. Never infer steering support
-from built-in/custom config type or agent identity; unsupported and stale cache
-entries retain the interrupt-and-send fallback.
-
-Every queued row offers Steer while an active turn can accept it. The compatibility
-fallback must move a selected later row to the queue head before interrupting, and
-must not interrupt if that reorder fails. A row's number and message body are one
-drag activator; its Steer, edit, and remove controls stay outside that activator.
+Every queued row offers Steer while an active turn can accept it. Steer sends the
+selected `$cid` and expected active turn to the owning daemon; it never reorders,
+removes, or materializes a queue row in the renderer. A rejected or missing identity
+must leave the active turn running. A row's number and message body are one drag
+activator; its Steer, edit, and remove controls stay outside that activator.
 
 The queue intentionally stays OUT of the composer info bar
 ([.agents/docs/sessions-info-bar.md](../../../../../../.agents/docs/sessions-info-bar.md)).

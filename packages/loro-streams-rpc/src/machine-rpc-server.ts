@@ -34,6 +34,7 @@ import type {
   PreviewTarget,
   PreviewTargetApproval,
   SessionCancelResponse,
+  SessionQueueSteerResponse,
   SessionPreparationCancelSpec,
   SessionPreparationSpec,
   SessionPrepareCancelResponse,
@@ -118,6 +119,7 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/acp-capabilities-refresh-cancel',
   'session/cancel',
   'session/live-status',
+  'session/queue-steer',
   'session/steer',
   'session/goal',
   'session/terminate',
@@ -350,6 +352,12 @@ type RpcServerDeps = {
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
   }) => Promise<LoroSessionLiveStatusRpcResponse>;
+  steerQueuedMessage?: (args: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    queueItemId: string;
+    requestedByUserId: string;
+  }) => Promise<SessionQueueSteerResponse>;
   steerSession?: (args: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -1107,6 +1115,23 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'session/queue-steer': {
+          if (!this.deps.steerQueuedMessage) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Queued message steer is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.steerQueuedMessage({
+            sessionId: request.params.sessionId as SessionId,
+            expectedTurnId: request.params.expectedTurnId,
+            queueItemId: request.params.queueItemId,
+            requestedByUserId: request.params.requestedByUserId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'session/goal': {
           if (!this.deps.controlSessionGoal) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1615,6 +1640,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineBugReportResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
+      | SessionQueueSteerResponse
       | SessionSteerResponse
       | SessionGoalResponse
       | SessionTerminateResponse

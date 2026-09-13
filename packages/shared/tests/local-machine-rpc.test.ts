@@ -42,6 +42,15 @@ describe('local Machine RPC', () => {
       },
     },
     {
+      method: 'session/queue-steer',
+      params: {
+        sessionId: 'session-1',
+        expectedTurnId: 'assistant:turn-0',
+        queueItemId: 'queue-C',
+        requestedByUserId: 'user-1',
+      },
+    },
+    {
       method: 'session/prepare',
       params: {
         preparationId: 'prepare-1',

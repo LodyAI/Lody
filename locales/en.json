@@ -1981,6 +1981,7 @@
   "sessions.proposedPlanDecision.executing": "Implementing plan...",
   "sessions.queueEditError": "Failed to edit message",
   "sessions.queueError": "Failed to queue message",
+  "sessions.queueItemMissing": "This queued message is no longer available",
   "sessions.queueRemoveError": "Failed to remove message from queue",
   "sessions.queueReorderError": "Failed to reorder messages",
   "sessions.removeImage": "Remove image",

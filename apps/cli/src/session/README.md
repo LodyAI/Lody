@@ -19,10 +19,14 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   authorized or executed. Its extensive header comment
   is the authoritative doc for edge cases (stale pointers, history/meta sync races).
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
+- `queued-message-turn.ts` — the shared queue-item-to-User-turn conversion used by
+  both ordinary queue dispatch and exact-item Steer consumption.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
-- `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
+- `session-execution-service.ts` — runs one turn end-to-end and owns exact-item queue
+  Steer serialization: validate the active turn and queued item, consume that item,
+  then cancel only the expected turn. It also owns ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —

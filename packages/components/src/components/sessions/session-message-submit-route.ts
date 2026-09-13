@@ -6,7 +6,7 @@ export type SessionMessageSubmitRoute =
 export type SessionMessageSubmitRouteInput = {
   forceDirect: boolean;
   forceQueue: boolean;
-  invertQueuedBehavior: boolean;
+  queueBehavior?: 'inverse';
   isPromptBusy: boolean;
   hasUnfinishedAssistantTurn: boolean;
   queuedMessageBehavior: 'queue' | 'guide';
@@ -24,7 +24,7 @@ export type SessionMessageSubmitRouteInput = {
 export function resolveSessionMessageSubmitRoute({
   forceDirect,
   forceQueue,
-  invertQueuedBehavior,
+  queueBehavior,
   isPromptBusy,
   hasUnfinishedAssistantTurn,
   queuedMessageBehavior,
@@ -32,7 +32,7 @@ export function resolveSessionMessageSubmitRoute({
   if (forceDirect) {
     return { type: 'direct_dispatch' };
   }
-  const effectiveQueuedMessageBehavior = invertQueuedBehavior
+  const effectiveQueuedMessageBehavior = queueBehavior === 'inverse'
     ? queuedMessageBehavior === 'queue'
       ? 'guide'
       : 'queue'

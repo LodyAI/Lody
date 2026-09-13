@@ -45,6 +45,7 @@ import type {
   MachineStatusResponse,
   MachineUpgradeResponse,
   SessionCancelResponse,
+  SessionQueueSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
   SessionPreparationCancelSpec,
@@ -94,6 +95,7 @@ import {
   MachineStatusResponseSchema,
   MachineUpgradeResponseSchema,
   SessionCancelResponseSchema,
+  SessionQueueSteerResponseSchema,
   SessionPreparationCancelSpecSchema,
   SessionPreparationSpecSchema,
   SessionPrepareCancelResponseSchema,
@@ -192,6 +194,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'file/preview',
   'session/cancel',
   'session/live-status',
+  'session/queue-steer',
   'session/steer',
   'session/goal',
   'session/terminate',
@@ -472,6 +475,18 @@ export const LoroSessionSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
     .strict(),
 }).strict();
 
+export const LoroSessionQueueSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/queue-steer'),
+  params: z
+    .object({
+      sessionId: SessionIdSchema,
+      expectedTurnId: z.string().trim().min(1),
+      queueItemId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const LoroSessionTerminateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/terminate'),
   params: z
@@ -599,6 +614,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroFilePreviewRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
+  LoroSessionQueueSteerRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
   LoroSessionGoalRpcRequestSchema,
   LoroSessionTerminateRpcRequestSchema,
@@ -1442,6 +1458,7 @@ export type LoroMachineRpcResult =
   | MachineBugReportResponse
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
+  | SessionQueueSteerResponse
   | SessionSteerResponse
   | SessionGoalResponse
   | SessionTerminateResponse
@@ -1470,6 +1487,7 @@ const toLegacyRpcErrorResponse = (
   cancelContext?: { sessionId: string },
   forkContext?: { sourceSessionId: string; targetSessionId: string },
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string },
+  queueSteerContext?: { sessionId: string; queueItemId: string },
   steerContext?: { sessionId: string; userTurnId: string },
   goalContext?: { sessionId: string; action: SessionGoalAction },
   previewContext?: { sessionId: string },
@@ -1641,6 +1659,17 @@ const toLegacyRpcErrorResponse = (
       sessionId: (steerContext?.sessionId ?? '') as SessionSteerResponse['sessionId'],
       userTurnId: steerContext?.userTurnId ?? '',
       applied: false,
+      disposition: 'error',
+      error: `${error.code}: ${error.message}`,
+    };
+  }
+
+  if (method === 'session/queue-steer') {
+    return {
+      type: 'session/queue-steer_response',
+      sessionId: (queueSteerContext?.sessionId ?? '') as SessionQueueSteerResponse['sessionId'],
+      queueItemId: queueSteerContext?.queueItemId ?? '',
+      accepted: false,
       disposition: 'error',
       error: `${error.code}: ${error.message}`,
     };
@@ -1820,6 +1849,10 @@ const parseRpcSuccessResult = async (
     const parsed = SessionSteerResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionSteerResponse) : null;
   }
+  if (response.method === 'session/queue-steer') {
+    const parsed = SessionQueueSteerResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as SessionQueueSteerResponse) : null;
+  }
   if (response.method === 'session/goal') {
     const parsed = SessionGoalResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionGoalResponse) : null;
@@ -1896,6 +1929,7 @@ export type LoroStreamsRpcPendingRegistration = {
   cancelContext?: { sessionId: string };
   forkContext?: { sourceSessionId: string; targetSessionId: string };
   editAndResendContext?: { sessionId: string; replacementUserTurnId: string };
+  queueSteerContext?: { sessionId: string; queueItemId: string };
   steerContext?: { sessionId: string; userTurnId: string };
   goalContext?: { sessionId: string; action: SessionGoalAction };
   previewContext?: { sessionId: string };
@@ -2280,6 +2314,7 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.cancelContext,
           finalPending.forkContext,
           finalPending.editAndResendContext,
+          finalPending.queueSteerContext,
           finalPending.steerContext,
           finalPending.goalContext,
           finalPending.previewContext,
@@ -2313,6 +2348,7 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.cancelContext,
           finalPending.forkContext,
           finalPending.editAndResendContext,
+          finalPending.queueSteerContext,
           finalPending.steerContext,
           finalPending.goalContext,
           finalPending.previewContext,
@@ -2690,6 +2726,25 @@ export class LoroStreamsMachineRpcClient {
         inputConfig: options.inputConfig,
       },
     })) as SessionSteerResponse | null;
+  }
+
+  async requestSessionQueueSteer(options: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    queueItemId: string;
+    requestedByUserId: string;
+    timeoutMs?: number;
+  }): Promise<SessionQueueSteerResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/queue-steer',
+      timeoutMs: options.timeoutMs ?? 5_000,
+      params: {
+        sessionId: options.sessionId,
+        expectedTurnId: options.expectedTurnId,
+        queueItemId: options.queueItemId,
+        requestedByUserId: options.requestedByUserId,
+      },
+    })) as SessionQueueSteerResponse | null;
   }
 
   async requestSessionGoal(options: {
@@ -3170,6 +3225,16 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'session/queue-steer';
+          timeoutMs: number;
+          params: {
+            sessionId: SessionId;
+            expectedTurnId: string;
+            queueItemId: string;
+            requestedByUserId: string;
+          };
+        }
+      | {
           method: 'session/steer';
           timeoutMs: number;
           params: {
@@ -3403,6 +3468,10 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/steer'
           ? { sessionId: args.params.sessionId, userTurnId: args.params.userTurnId }
           : undefined,
+      queueSteerContext:
+        args.method === 'session/queue-steer'
+          ? { sessionId: args.params.sessionId, queueItemId: args.params.queueItemId }
+          : undefined,
       goalContext:
         args.method === 'session/goal'
           ? { sessionId: args.params.sessionId, action: args.params.action }
@@ -3510,6 +3579,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/live-status':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/queue-steer':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/steer':
@@ -3705,6 +3777,7 @@ export class LoroStreamsMachineRpcClient {
         pending.cancelContext,
         pending.forkContext,
         pending.editAndResendContext,
+        pending.queueSteerContext,
         pending.steerContext,
         pending.goalContext,
         pending.previewContext,

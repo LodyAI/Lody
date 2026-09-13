@@ -5,7 +5,7 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
   resolveSessionMessageSubmitRoute({
     forceDirect: false,
     forceQueue: false,
-    invertQueuedBehavior: false,
+    queueBehavior: undefined,
     isPromptBusy: false,
     hasUnfinishedAssistantTurn: false,
     queuedMessageBehavior: 'queue',
@@ -49,7 +49,7 @@ describe('resolveSessionMessageSubmitRoute', () => {
         isPromptBusy: true,
         hasUnfinishedAssistantTurn: true,
         queuedMessageBehavior: 'queue',
-        invertQueuedBehavior: true,
+        queueBehavior: 'inverse',
       })
     ).toEqual({ type: 'guide' });
     expect(
@@ -57,7 +57,7 @@ describe('resolveSessionMessageSubmitRoute', () => {
         isPromptBusy: true,
         hasUnfinishedAssistantTurn: true,
         queuedMessageBehavior: 'guide',
-        invertQueuedBehavior: true,
+        queueBehavior: 'inverse',
       })
     ).toEqual({ type: 'queue', reason: 'prompt_busy' });
   });

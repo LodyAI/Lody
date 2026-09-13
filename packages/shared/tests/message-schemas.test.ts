@@ -23,6 +23,7 @@ import {
   SessionCreateRequestSchema,
   SessionSteerRequestSchema,
   SessionSteerResponseSchema,
+  SessionQueueSteerResponseSchema,
   SessionImageUploadResponseSchema,
   SessionIdSchema,
   SessionImagePayloadSchema,
@@ -208,6 +209,21 @@ describe('message-schemas session steer', () => {
         inputConfig: { prompt: 'change direction' },
       }).success
     ).toBe(false);
+  });
+});
+
+describe('message-schemas queued message steer', () => {
+  it('accepts an exact queue identity acknowledgement', () => {
+    expect(
+      SessionQueueSteerResponseSchema.safeParse({
+        type: 'session/queue-steer_response',
+        sessionId: 'session-1',
+        queueItemId: 'queue-C',
+        userTurnId: 'user-C',
+        accepted: true,
+        disposition: 'accepted',
+      }).success
+    ).toBe(true);
   });
 });
 

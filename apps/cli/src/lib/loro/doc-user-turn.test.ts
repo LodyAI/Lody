@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSessionMirror, type SessionHistoryInput, type SessionId } from '@lody/shared';
+import {
+  createSessionMirror,
+  type MessageQueueItem,
+  type SessionHistoryInput,
+  type SessionId,
+} from '@lody/shared';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 
@@ -19,7 +24,10 @@ const createLogger = (): Logger =>
  * runs; `history` mirrors what the CRDT would hold.
  */
 const createSessionDocument = (repo: Partial<LoroRepo>) => {
-  const state: { history: SessionHistoryInput[] } = { history: [] };
+  const state: { history: SessionHistoryInput[]; mq: MessageQueueItem[] } = {
+    history: [],
+    mq: [],
+  };
   const doc = new SessionDocument(
     repo as LoroRepo,
     'session-append-1' as SessionId,
@@ -42,6 +50,42 @@ const createUserTurn = (id: string): SessionHistoryInput => ({
   status: 'pending',
   read: false,
   userId: 'user-1',
+});
+
+describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
+  it('atomically consumes the named later row without reordering the survivors', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    state.mq = ['A', 'B', 'C'].map(
+      (cid): MessageQueueItem => ({
+        $cid: cid,
+        task: `task ${cid}`,
+        timestamp: '2026-09-13T00:00:00.000Z',
+      })
+    );
+
+    const result = await doc.consumeMessageQueueItemAsUserTurn('C', () =>
+      createUserTurn('user:C')
+    );
+
+    expect(result).toMatchObject({ type: 'consumed', entry: { id: 'user:C' } });
+    expect(state.history.map((entry) => entry.id)).toEqual(['user:C']);
+    expect(state.mq.map((item) => item.$cid)).toEqual(['A', 'B']);
+    expect(upsertDocMeta).toHaveBeenCalledWith(doc.roomId, { latestUserMsgId: 'user:C' });
+  });
+
+  it('does not write history or a dispatch pointer when the identity is absent', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    state.mq = [{ $cid: 'A', task: 'task A', timestamp: '2026-09-13T00:00:00.000Z' }];
+
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn('C', () => createUserTurn('user:C'))
+    ).resolves.toEqual({ type: 'missing' });
+    expect(state.history).toEqual([]);
+    expect(state.mq.map((item) => item.$cid)).toEqual(['A']);
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
 });
 
 describe('SessionDocument.appendUserTurn', () => {

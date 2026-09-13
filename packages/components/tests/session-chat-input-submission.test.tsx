@@ -406,7 +406,12 @@ describe('SessionChatInputArea submission feedback', () => {
 
   it('submits the current draft with one-shot inverse queue behavior', async () => {
     const onSendMessage = vi.fn<SessionChatInputAreaProps['onSendMessage']>(async () => true);
-    await renderComposer({ sessionId: 'inverse-queue-submit', onSendMessage });
+    const textarea = await renderComposer({ sessionId: 'inverse-queue-submit', onSendMessage });
+
+    document.body.tabIndex = -1;
+    document.body.focus();
+    expect(commands.execute('session.sendWithInverseQueueBehavior')).toBe(false);
+    textarea.focus();
 
     await act(async () => {
       expect(commands.execute('session.sendWithInverseQueueBehavior')).toBe(true);
@@ -414,7 +419,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
 
     expect(onSendMessage).toHaveBeenCalledOnce();
-    expect(onSendMessage.mock.calls[0]?.[2]).toEqual({ invertQueuedBehavior: true });
+    expect(onSendMessage.mock.calls[0]?.[2]).toEqual({ queueBehavior: 'inverse' });
   });
 
   it.each([

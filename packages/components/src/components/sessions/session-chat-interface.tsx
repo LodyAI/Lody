@@ -66,11 +66,7 @@ import {
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import {
-  MessageQueueDisplay,
-  shouldRequestNativeQueueSteer,
-  steerQueuedMessageWithFallback,
-} from './message-queue';
+import { MessageQueueDisplay } from './message-queue';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
@@ -1911,7 +1907,7 @@ export type SessionChatInterfaceHandle = {
 export type DispatchInputBlocksOptions = {
   forceQueue?: boolean;
   forceDirect?: boolean;
-  invertQueuedBehavior?: boolean;
+  queueBehavior?: 'inverse';
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -2410,6 +2406,7 @@ export const SessionChatInterface = memo(
       requestSessionCancel,
       requestSessionDispatch,
       requestSessionGoal,
+      requestSessionQueueSteer,
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
@@ -3956,7 +3953,7 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
-          invertQueuedBehavior: options?.invertQueuedBehavior === true,
+          queueBehavior: options?.queueBehavior,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
@@ -3983,7 +3980,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
-          invert_queued_behavior: Boolean(options?.invertQueuedBehavior),
+          queue_behavior_override: options?.queueBehavior ?? 'default',
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
@@ -4108,7 +4105,7 @@ export const SessionChatInterface = memo(
       async (
         inputBlocks: SessionInputBlock[],
         agentRole?: SessionTurnAgentRoleSelection,
-        options?: Pick<DispatchInputBlocksOptions, 'invertQueuedBehavior'>
+        options?: Pick<DispatchInputBlocksOptions, 'queueBehavior'>
       ): Promise<boolean> => {
         return await dispatchInputBlocks(inputBlocks, { agentRole, ...options });
       },
@@ -5157,136 +5154,6 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
 
-    const handleInterruptAndSend = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: 'external_history_syncing',
-            queue_item_id: item.$cid,
-          });
-          return;
-        }
-        if (!workspaceId || !activeAssistantTurnId) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: !workspaceId ? 'missing_workspace' : 'missing_active_turn',
-            queue_item_id: item.$cid,
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'));
-          return;
-        }
-        setInputActionState('ready');
-        pendingUserInterruptRef.current = true;
-        try {
-          await requestSessionCancel(session.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_interrupt_succeeded', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-          });
-        } catch (error) {
-          console.error('Failed to interrupt for queued message', error);
-          pendingUserInterruptRef.current = false;
-          captureSessionEvent('session/queue_interrupt_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-            description: getErrorMessage(error),
-          });
-        }
-      },
-      [
-        activeAssistantTurnId,
-        captureSessionEvent,
-        isExternalHistoryRefreshing,
-        requestSessionCancel,
-        session.id,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const handleNativeSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
-          return;
-        }
-        if (steeringQueueItemIdsRef.current.has(item.$cid)) {
-          return;
-        }
-        steeringQueueItemIdsRef.current.add(item.$cid);
-        try {
-          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
-          if (!inputConfig) {
-            throw new Error('Queued message input config is invalid');
-          }
-          const inputBlocks = normalizeSessionInputBlocks(
-            inputConfig.inputBlocks,
-            inputConfig.prompt ?? item.task
-          );
-          const pendingHistoryEntry = buildPendingUserHistoryEntry({
-            userId: item.userId,
-            inputBlocks,
-            timestamp: item.timestamp,
-            inputConfig,
-            status: 'pending_apply',
-          });
-          if (!pendingHistoryEntry) {
-            throw new Error('Queued message is empty');
-          }
-          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          const { entry: historyEntry } = await addSessionHistory({
-            ...pendingHistoryEntry,
-            id: queuedUserTurnId,
-          });
-          await removeMessageQueueItem(item.$cid);
-          trackMessageSend(historyEntry.id);
-          touchSessionActivity(session.id).catch((error: unknown) => {
-            console.warn('Failed to update session activity for steer', error);
-          });
-          const applied = await guideHistoryEntry(historyEntry.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_guide_result', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            applied,
-          });
-        } catch (error) {
-          console.error('Failed to guide with queued message', error);
-          captureSessionEvent('session/queue_guide_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.sendError'), {
-            description: getErrorMessage(error),
-          });
-        } finally {
-          steeringQueueItemIdsRef.current.delete(item.$cid);
-        }
-      },
-      [
-        activeAssistantTurnId,
-        addSessionHistory,
-        captureSessionEvent,
-        guideHistoryEntry,
-        isExternalHistoryRefreshing,
-        removeMessageQueueItem,
-        session.id,
-        t,
-        touchSessionActivity,
-        trackMessageSend,
-      ]
-    );
-
-    const queueSteerCapability = session.agentConfigId
-      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
-      : undefined;
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      queueSteerCapability
-    );
     const handleReorderQueueItem = useCallback(
       async (activeCid: string, overCid: string) => {
         try {
@@ -5310,7 +5177,6 @@ export const SessionChatInterface = memo(
           toast.error(t('sessions.queueReorderError', 'Failed to reorder messages'), {
             description: getErrorMessage(error),
           });
-          throw error;
         }
       },
       [captureSessionEvent, reorderMessageQueueItem, t]
@@ -5318,27 +5184,56 @@ export const SessionChatInterface = memo(
 
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
-        if (shouldUseNativeQueueSteer) {
-          await handleNativeSteerQueuedMessage(item);
+        if (isExternalHistoryRefreshing || !activeAssistantTurnId || !currentUser?.id) {
           return;
         }
-
-        // The compatibility path cancels the active turn and lets the daemon promote
-        // the queue head. Move an explicitly selected later item to that position first,
-        // preserving the user's choice without creating a second dispatch path.
-        await steerQueuedMessageWithFallback({
-          queueItemCids: messageQueue.map((queuedItem) => queuedItem.$cid),
-          selectedCid: item.$cid,
-          reorder: handleReorderQueueItem,
-          interrupt: () => handleInterruptAndSend(item),
-        });
+        if (steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        steeringQueueItemIdsRef.current.add(item.$cid);
+        try {
+          const response = await requestSessionQueueSteer(
+            session.id,
+            activeAssistantTurnId,
+            item.$cid,
+            { machineId: session.machineId, requestedByUserId: currentUser.id }
+          );
+          captureSessionEvent('session/queue_steer_result', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+            accepted: response?.accepted === true,
+            disposition: response?.disposition ?? 'no_response',
+          });
+          if (!response?.accepted) {
+            toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+              description:
+                response?.disposition === 'queue-item-missing'
+                  ? t('sessions.queueItemMissing', 'That queued message is no longer available')
+                  : response?.error,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to steer queued message', error);
+          captureSessionEvent('session/queue_steer_failed', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+            error_name: error instanceof Error ? error.name : typeof error,
+            error_message: getErrorMessage(error),
+          });
+          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+            description: getErrorMessage(error),
+          });
+        } finally {
+          steeringQueueItemIdsRef.current.delete(item.$cid);
+        }
       },
       [
-        handleInterruptAndSend,
-        handleNativeSteerQueuedMessage,
-        handleReorderQueueItem,
-        messageQueue,
-        shouldUseNativeQueueSteer,
+        activeAssistantTurnId,
+        captureSessionEvent,
+        currentUser?.id,
+        isExternalHistoryRefreshing,
+        requestSessionQueueSteer,
+        session.id,
+        session.machineId,
+        t,
       ]
     );
 

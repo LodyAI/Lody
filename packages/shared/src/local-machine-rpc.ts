@@ -37,6 +37,7 @@ import {
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   PreviewTargetSchema,
+  SessionQueueSteerResponseSchema,
   SessionSteerResponseSchema,
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
@@ -194,6 +195,17 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: SessionPreparationCancelSpecSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/queue-steer'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        expectedTurnId: z.string().trim().min(1),
+        queueItemId: z.string().trim().min(1),
+        requestedByUserId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/steer'),
     params: z
       .object({
@@ -271,6 +283,7 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPrepareCancelResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
+  SessionQueueSteerResponseSchema,
   SessionSteerResponseSchema,
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,

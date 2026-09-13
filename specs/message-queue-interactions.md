@@ -15,13 +15,20 @@ the queue by hand.
 ## Contract
 
 - `Mod+Shift+Enter` sends the current composer draft with the opposite of the stored
-  Queue/Steer preference. This is a one-shot submission intent: it does not mutate the
-  preference, and it still obeys the ordinary availability, live-activity, and unfinished-
-  transcript safeguards.
+  Queue/Steer preference. The command passes `queueBehavior: "inverse"` directly to that
+  submission; ordinary Enter passes no override. This one-shot intent does not mutate the
+  preference and still obeys the ordinary availability, live-activity, and unfinished-
+  transcript safeguards. Composer focus, content, and send readiness are command-level
+  availability rules so user-rebound shortcuts retain them.
 - While steering is available for the active turn, every queued message exposes Steer.
-  Selecting a later item targets that exact item. Native acknowledged steering removes
-  and applies the selected item directly; the compatibility path first moves it to the
-  queue head and interrupts only after the reorder succeeds.
+  Selecting an item sends its durable queue identity and the expected active turn to the
+  owning daemon. The daemon revalidates both identities, atomically consumes only that row
+  into the next durable user turn, and then stops the expected turn. Queue order is never
+  rewritten as part of Steer: selecting C from `[A, B, C]` produces the active turn C and
+  leaves `[A, B]`.
+- A stale Steer selection is a failed no-op. If the selected queue identity is missing, or
+  the expected turn no longer owns execution, the daemon must not stop any turn. The
+  renderer waits for this acknowledgement and never removes or materializes the row itself.
 - The number and non-editing message body form the drag target for queue reordering.
   Steer, edit, and remove remain separate controls and must not begin a drag.
 - Editing keeps its existing keyboard and focus behavior and disables reordering for
@@ -40,7 +47,8 @@ physical-device coverage remains separate from component tests.
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/`
-- `packages/components/tests/{session-message-submit-route,queued-message-steer,message-queue-row-editing}.test.*`
+- `packages/components/tests/{session-message-submit-route,session-chat-input-submission,message-queue-row-editing}.test.*`
+- `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts}`
 - [Decision record](../.agents/notes/implemented/feature/2026-09-13-queue-steer-controls.md)
 
 This is a draft for human review. Implementation and passing tests do not approve it.

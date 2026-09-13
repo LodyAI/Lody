@@ -1679,6 +1679,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const {
     requestSessionCancel,
+    requestSessionQueueSteer,
     requestSessionSteer,
     requestSessionGoal,
     requestSessionTerminate,
@@ -4676,6 +4677,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     subscribeMachineAcpBinaryProgress,
     getMachineAcpBinaryProgress,
     requestSessionCancel,
+    requestSessionQueueSteer,
     requestSessionSteer,
     requestSessionGoal,
     requestSessionTerminate,

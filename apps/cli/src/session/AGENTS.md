@@ -25,7 +25,7 @@ Contract: specs/session-orchestration.md.
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; Queue Steer consumes exact `$cid`; missing never stops.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC

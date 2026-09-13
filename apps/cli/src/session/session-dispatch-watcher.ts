@@ -3,13 +3,11 @@ import { Effect, Fiber } from 'effect';
 import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
-  buildSessionTurnInputConfig,
   getSessionRoomId,
   getLegacyReadForSessionHistoryStatus,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
   isSessionDocRoomId,
-  type AcpConfigOptionValue,
   type MessageQueueItem,
   type MachineId,
   SESSION_DOC_PREFIX,
@@ -23,7 +21,6 @@ import {
   SessionStatusFactory,
   type SessionTurnInputConfig,
   type WorkspaceId,
-  normalizeMcpServerIdSelection,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
 } from '@lody/shared';
@@ -32,17 +29,13 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { SessionExecutionService, type SessionDispatchSource } from './session-execution-service';
-import {
-  extractPromptPreviewFromInputBlocks,
-  normalizeSessionInputBlocks,
-} from './session-execution-helpers';
+import { normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { SessionUserResolver, SessionUserProfile } from './session-user-resolver';
 import {
   findNextDispatchableUserTurn,
   isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
-  resolveResumableAcpSessionId,
   resolveSessionCancelAction,
   resolveSessionDispatchAction,
   shouldWatchSession,
@@ -57,6 +50,7 @@ import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
 import type { SessionAccessPolicyService } from './session-access-policy';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { listAliveRoomIds } from '@/lib/loro/repo-existence';
+import { buildQueuedMessageUserTurn } from './queued-message-turn';
 
 const SESSION_RECONCILE_CONCURRENCY = 4;
 
@@ -196,17 +190,6 @@ type SessionReconcilePhase =
   | 'enqueue-session-checks';
 
 type SessionDocumentHandle = Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>;
-
-const isConfigOptionValueRecord = (
-  value: unknown
-): value is Record<string, AcpConfigOptionValue> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  return Object.values(value as Record<string, unknown>).every(
-    (item) => typeof item === 'string' || typeof item === 'boolean'
-  );
-};
 
 /**
  * ## Session Dispatch Watcher — Behavioral Design
@@ -2126,47 +2109,11 @@ export class SessionDispatchWatcher {
         return null;
       }
 
-      const inputBlocks = normalizeSessionInputBlocks(
-        queuedItem.acpSessionConfig?.inputBlocks,
-        queuedItem.acpSessionConfig?.prompt ?? queuedItem.task
-      );
-      const inputConfig = buildSessionTurnInputConfig({
-        inputBlocks,
-        prompt:
-          queuedItem.acpSessionConfig?.prompt ?? extractPromptPreviewFromInputBlocks(inputBlocks),
-        cliType: queuedItem.acpSessionConfig?.cliType ?? meta.cliType,
-        agentType: queuedItem.acpSessionConfig?.agentType ?? meta.agentType,
-        modeId: queuedItem.acpSessionConfig?.modeId,
-        modelId: queuedItem.acpSessionConfig?.modelId,
-        configOptionValues: isConfigOptionValueRecord(
-          queuedItem.acpSessionConfig?.configOptionValues
-        )
-          ? queuedItem.acpSessionConfig.configOptionValues
-          : undefined,
-        mcpServerIds:
-          normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
-        taskToolsEnabled: queuedItem.acpSessionConfig?.taskToolsEnabled === true,
-        agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
-        agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
-        issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
-        resume: resolveResumableAcpSessionId(meta),
-      });
-      const pendingEntry = buildPendingUserHistoryEntry({
-        userId: queuedItem.userId ?? meta.userId,
-        inputBlocks,
-        timestamp: queuedItem.timestamp,
-        inputConfig,
-      });
-
-      if (!pendingEntry) {
+      const entry = buildQueuedMessageUserTurn(queuedItem, meta);
+      if (!entry) {
         this.deps.logger.debug(`[${meta.id}] Retaining invalid queued message ${queuedItem.$cid}`);
         return null;
       }
-
-      const entry: SessionHistoryInput = {
-        ...pendingEntry,
-        id: queuedTurnId,
-      };
 
       // Promotion is a dispatch producer; `appendUserTurn` publishes the pointer.
       await sessionDoc.appendUserTurn(entry);

@@ -13,9 +13,15 @@ Translation: current
 ## 契约
 
 - `Mod+Shift+Enter` 以已保存“排队／引导”偏好的相反行为发送当前草稿。这是一次性的提交
-  意图，不修改设置，并继续遵守普通的可用性、实时活动和未完成消息记录保护。
+  意图：命令直接为本次提交传入 `queueBehavior: "inverse"`，普通 Enter 不传覆盖项。它不
+  修改设置，并继续遵守普通的可用性、实时活动和未完成消息记录保护。输入框聚焦、有内容且
+  可以发送属于命令本身的可用条件，因此用户重绑快捷键后仍受同一限制。
 - 当前 turn 可接受引导时，每条排队消息都提供“引导”操作。选择后续项必须以该项为目标。
-  原生带确认的 steer 直接移除并应用所选项；兼容路径先把它移到队首，只有重排成功后才中断。
+  客户端把该项的持久 ID 和预期活动 turn 一并发给所属 daemon；daemon 重新确认两者，在一次
+  Session Doc 更新中只消费该项为下一个用户 turn，再停止预期 turn。“引导”绝不修改队列顺序：
+  从 `[A, B, C]` 选择 C 后，正在执行的是 C，队列剩下 `[A, B]`。
+- 过期的“引导”选择必须是失败且无副作用的操作。所选 ID 已不存在，或预期 turn 已不再拥有
+  执行权时，daemon 不得停止任何 turn。Renderer 等待 daemon 确认，不自行移除队列项或写历史。
 - 序号和非编辑状态的消息正文共同组成队列重排拖动区域。“引导”、“编辑”和“移除”是独立
   控件，不能触发拖动。
 - 编辑状态保留已有键盘与焦点行为，并在编辑结束前禁用该行重排。
@@ -31,7 +37,8 @@ Translation: current
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/`
-- `packages/components/tests/{session-message-submit-route,queued-message-steer,message-queue-row-editing}.test.*`
+- `packages/components/tests/{session-message-submit-route,session-chat-input-submission,message-queue-row-editing}.test.*`
+- `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts}`
 - [决策记录](../.agents/notes/implemented/feature/2026-09-13-queue-steer-controls.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

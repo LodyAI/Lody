@@ -1981,6 +1981,7 @@
   "sessions.proposedPlanDecision.executing": "正在实施计划...",
   "sessions.queueEditError": "编辑消息失败",
   "sessions.queueError": "消息入队失败",
+  "sessions.queueItemMissing": "这条排队消息已不存在",
   "sessions.queueRemoveError": "移除消息失败",
   "sessions.queueReorderError": "调整消息顺序失败",
   "sessions.removeImage": "移除图片",

@@ -17,6 +17,58 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('sends queued Steer as one exact local daemon operation', async () => {
+    const invoke = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        type: 'session/queue-steer_response' as const,
+        sessionId,
+        queueItemId: 'queue-C',
+        userTurnId: 'user-C',
+        accepted: true,
+        disposition: 'accepted' as const,
+      },
+    }));
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: { invoke },
+    });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local'),
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSessionQueueSteer(localMachineId, {
+        sessionId,
+        expectedTurnId: 'assistant-active',
+        queueItemId: 'queue-C',
+        requestedByUserId: 'user-1',
+      })
+    ).resolves.toMatchObject({ accepted: true, queueItemId: 'queue-C' });
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
+      expect.objectContaining({
+        machineId: localMachineId,
+        workspaceId,
+        method: 'session/queue-steer',
+        params: {
+          sessionId,
+          expectedTurnId: 'assistant-active',
+          queueItemId: 'queue-C',
+          requestedByUserId: 'user-1',
+        },
+      })
+    );
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

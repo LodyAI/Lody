@@ -17,6 +17,7 @@ import type {
   MachineFlockKey,
   SessionGoalAction,
   SessionGoalResponse,
+  SessionQueueSteerResponse,
 } from '@lody/shared';
 import {
   getMachineRoomId,
@@ -301,6 +302,12 @@ export type SessionActions = {
     userTurnId: string,
     options?: { machineId?: MachineId | null }
   ) => Promise<boolean>;
+  requestSessionQueueSteer: (
+    sessionId: SessionId,
+    expectedTurnId: string,
+    queueItemId: string,
+    options: { requestedByUserId: string; machineId?: MachineId | null }
+  ) => Promise<SessionQueueSteerResponse | null>;
   /**
    * Run a goal action through the agent's control extension.
    *
@@ -957,6 +964,39 @@ export function useSessionActions(): SessionActions {
     [requestSessionDispatch, runtime, store]
   );
 
+  const requestSessionQueueSteer = useCallback(
+    async (
+      sessionId: SessionId,
+      expectedTurnId: string,
+      queueItemId: string,
+      options: { requestedByUserId: string; machineId?: MachineId | null }
+    ): Promise<SessionQueueSteerResponse | null> => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      let machineId = options.machineId ?? null;
+      if (!machineId) {
+        const existing = await runtime.repo.getDocMeta(roomId);
+        const meta = isLoroRepoDocDeleted(existing)
+          ? undefined
+          : (existing?.meta as SessionMeta | undefined);
+        machineId = meta?.machineId ?? null;
+      }
+      const requestedByUserId = options.requestedByUserId.trim();
+      if (!machineId || !requestedByUserId) {
+        return null;
+      }
+      return await runtime.requestSessionQueueSteer(machineId, {
+        sessionId,
+        expectedTurnId,
+        queueItemId,
+        requestedByUserId,
+      });
+    },
+    [runtime]
+  );
+
   const touchSessionActivity = useCallback(
     async (sessionId: SessionId) => {
       if (!runtime) {
@@ -1291,6 +1331,7 @@ export function useSessionActions(): SessionActions {
     addSessionHistory,
     requestSessionDispatch,
     requestSessionCancel,
+    requestSessionQueueSteer,
     requestSessionSteer,
     requestSessionGoal,
     touchSessionActivity,

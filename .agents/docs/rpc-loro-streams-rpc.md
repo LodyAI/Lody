@@ -20,6 +20,11 @@ been removed.
   handlers.
 - `README.md` — package smoke-test notes.
 
+`session/queue-steer` is an identity-based control operation, not queue reordering.
+Its request names both the expected active turn and the exact queued item. The CLI
+consumes that item before cancelling the expected turn; a missing item or stale turn
+is rejected without stopping the current agent.
+
 ## Remote lifecycle acknowledgements
 
 For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts

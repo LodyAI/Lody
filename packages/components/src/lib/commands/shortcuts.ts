@@ -68,7 +68,7 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // Desktop ⌘L focuses the composer. On web the browser owns ⌘L (Open Location),
   // so leave it unbound — the hint chip follows the resolved binding.
   'session.focusInput': [electron('Mod+l')],
-  'session.sendWithInverseQueueBehavior': [whileComposerFocused('Mod+Shift+Enter')],
+  'session.sendWithInverseQueueBehavior': ['Mod+Shift+Enter'],
   'session.toggleExplorerSidebar': ['Mod+Alt+b'],
   'session.copyCurrentBranch': ['Alt+Shift+b'],
   'session.copyUrl': ['Alt+Shift+c'],

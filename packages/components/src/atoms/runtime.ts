@@ -16,6 +16,7 @@ import type {
   SessionPreparationSpec,
   SessionPrepareCancelResponse,
   SessionPrepareResponse,
+  SessionQueueSteerResponse,
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
@@ -302,6 +303,16 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionSteerResponse | null>;
+  requestSessionQueueSteer: (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      expectedTurnId: string;
+      queueItemId: string;
+      requestedByUserId: string;
+    },
+    options?: { timeoutMs?: number }
+  ) => Promise<SessionQueueSteerResponse | null>;
   requestSessionGoal: (
     machineId: MachineId,
     args: {

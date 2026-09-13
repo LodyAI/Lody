@@ -44,6 +44,7 @@ import {
   SessionChatRequestValidated,
   SessionCancelRequestValidated,
   type SessionSteerResponse,
+  type SessionQueueSteerResponse,
   type WorkspaceId,
   hasRecentResumeNotice,
   buildReplayPromptFromHistory,
@@ -111,6 +112,7 @@ import {
   resolveResumableAcpSessionId,
 } from './session-dispatch-logic';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
+import { buildQueuedMessageUserTurn } from './queued-message-turn';
 import type { MachineAccessVerification } from './session-access-retry';
 import {
   GIT_EXECUTABLE_NOT_FOUND_CODE,
@@ -1381,6 +1383,92 @@ export class SessionExecutionService {
       }
       try {
         return await this.steerSessionLocked(options);
+      } finally {
+        releaseConflict();
+      }
+    });
+  }
+
+  async steerQueuedMessage(options: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    queueItemId: string;
+    requestedByUserId: string;
+  }): Promise<SessionQueueSteerResponse> {
+    const respond = (
+      disposition: SessionQueueSteerResponse['disposition'],
+      details?: { userTurnId?: string; error?: string }
+    ): SessionQueueSteerResponse => ({
+      type: 'session/queue-steer_response',
+      sessionId: options.sessionId,
+      queueItemId: options.queueItemId,
+      accepted: disposition === 'accepted',
+      disposition,
+      ...(details?.userTurnId ? { userTurnId: details.userTurnId } : {}),
+      ...(details?.error ? { error: details.error } : {}),
+    });
+
+    return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
+      const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
+      if (!releaseConflict) {
+        return respond('busy', { error: 'The session history is being replaced.' });
+      }
+      try {
+        const runtime = this.turnRuntimeBySession.get(options.sessionId);
+        if (!runtime || !runtime.session || !runtime.promptInFlight || runtime.cancelRequested) {
+          return respond('no-active-turn');
+        }
+        if (runtime.turnId !== options.expectedTurnId) {
+          return respond('stale-turn');
+        }
+
+        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(
+          options.sessionId
+        );
+        const meta = await sessionDoc.getMetaState();
+        if (!meta) {
+          return respond('error', { error: 'Session metadata is unavailable.' });
+        }
+
+        const currentRuntime = this.turnRuntimeBySession.get(options.sessionId);
+        if (
+          currentRuntime !== runtime ||
+          runtime.turnId !== options.expectedTurnId ||
+          !runtime.promptInFlight ||
+          runtime.cancelRequested
+        ) {
+          return respond('stale-turn');
+        }
+
+        // Queue order and immediate steering are separate mutations. Consume the
+        // selected identity directly; A/B keep their relative order when C wins.
+        const consumed = await sessionDoc.consumeMessageQueueItemAsUserTurn(
+          options.queueItemId,
+          (item) => buildQueuedMessageUserTurn(item, meta)
+        );
+        if (consumed.type === 'missing') {
+          return respond('queue-item-missing');
+        }
+        if (consumed.type === 'invalid') {
+          return respond('invalid-queue-item');
+        }
+        const entry = consumed.entry;
+        const cancellation = await this.cancelSession({
+          type: 'session/cancel',
+          sessionId: options.sessionId,
+          machineId: this.deps.machineId,
+          workspaceId: this.deps.workspaceId,
+          turnId: options.expectedTurnId,
+        });
+        if (!cancellation.success) {
+          return respond('error', {
+            userTurnId: entry.id,
+            error: cancellation.error ?? 'The active turn could not be stopped.',
+          });
+        }
+        return respond('accepted', { userTurnId: entry.id });
+      } catch (error) {
+        return respond('error', { error: formatErrorMessage(error) });
       } finally {
         releaseConflict();
       }

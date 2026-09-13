@@ -474,7 +474,7 @@ export interface SessionChatInputAreaProps {
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
 
 export type SessionChatInputSubmitOptions = {
-  invertQueuedBehavior?: boolean;
+  queueBehavior?: 'inverse';
 };
 
 export type SessionChatInputAreaHandle = {
@@ -1762,10 +1762,7 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
-    const invertQueuedBehaviorForNextSubmitRef = useRef(false);
-    const sendMessage = useCallback(async () => {
-      const invertQueuedBehavior = invertQueuedBehaviorForNextSubmitRef.current;
-      invertQueuedBehaviorForNextSubmitRef.current = false;
+    const sendMessage = useCallback(async (options?: SessionChatInputSubmitOptions) => {
       if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
         capturePostHogEvent(postHog, 'session/input_blocked', {
           reason: 'free_session_turn_limit_reached',
@@ -1912,7 +1909,7 @@ export const SessionChatInputArea = memo(
         const accepted = await onSendMessage(
           inputBlocks,
           agentRoleTurnSelectionRef.current,
-          invertQueuedBehavior ? { invertQueuedBehavior: true } : undefined
+          options
         );
         if (accepted) {
           if (submission.isCurrent()) {
@@ -2022,10 +2019,17 @@ export const SessionChatInputArea = memo(
         category: 'Session',
         keybindings: getCommandKeybindings('session.sendWithInverseQueueBehavior'),
         allowInTextInput: true,
-        when: () => hasSendableContent && !isSendActionDisabled,
+        when: () => {
+          const activeElement = document.activeElement;
+          return (
+            activeElement instanceof Element &&
+            activeElement.closest('[data-lody-composer-input]') !== null &&
+            hasSendableContent &&
+            !isSendActionDisabled
+          );
+        },
         run: () => {
-          invertQueuedBehaviorForNextSubmitRef.current = true;
-          void sendMessage();
+          void sendMessage({ queueBehavior: 'inverse' });
         },
       },
       commandsEnabled

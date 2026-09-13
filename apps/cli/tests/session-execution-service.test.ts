@@ -25,6 +25,7 @@ import {
   type ChatFailedReason,
   type LocalProjectId,
   type MachineId,
+  type MessageQueueItem,
   type SessionGoalMessage,
   type SessionHistoryInput,
   type SessionId,
@@ -273,6 +274,145 @@ describe('SessionExecutionService', () => {
     expect(await service.cancelSession(request)).toEqual({ success: true });
     expect([...runningChildren]).toEqual(['child-2']);
     expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
+  });
+
+  it('steers an exact later queue item without reordering the remaining queue', async () => {
+    const sessionId = 'session-queue-steer' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const queue = ['A', 'B', 'C'].map(
+      (id): MessageQueueItem => ({
+        $cid: id,
+        task: `task ${id}`,
+        userId: 'owner-user',
+        userTurnId: `user:${id}`,
+        timestamp: '2026-09-13T00:00:00.000Z',
+        acpSessionConfig: {
+          prompt: `task ${id}`,
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+      })
+    );
+    const history: SessionHistoryInput[] = [];
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        id: sessionId,
+        userId: 'owner-user',
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      })),
+      consumeMessageQueueItemAsUserTurn: vi.fn(
+        async (
+          cid: string,
+          buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null
+        ) => {
+          const index = queue.findIndex((item) => item.$cid === cid);
+          if (index < 0) return { type: 'missing' as const };
+          const entry = buildEntry(queue[index]!);
+          if (!entry) return { type: 'invalid' as const };
+          history.push(entry);
+          queue.splice(index, 1);
+          return { type: 'consumed' as const, entry };
+        }
+      ),
+    };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {},
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi.spyOn(service, 'cancelSession').mockResolvedValue({ success: true });
+
+    await expect(
+      service.steerQueuedMessage({
+        sessionId,
+        expectedTurnId: activeTurnId,
+        queueItemId: 'C',
+        requestedByUserId: 'owner-user',
+      })
+    ).resolves.toMatchObject({
+      accepted: true,
+      disposition: 'accepted',
+      queueItemId: 'C',
+      userTurnId: 'user:C',
+    });
+
+    expect(queue.map((item) => item.$cid)).toEqual(['A', 'B']);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ id: 'user:C', role: 'user' });
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ turnId: activeTurnId }));
+    expect(sessionDoc.consumeMessageQueueItemAsUserTurn.mock.invocationCallOrder[0]).toBeLessThan(
+      cancel.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('keeps the active turn running when the selected queue identity is gone', async () => {
+    const sessionId = 'session-queue-steer-missing' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        id: sessionId,
+        userId: 'owner-user',
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      })),
+      consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({ type: 'missing' as const })),
+    };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {},
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi.spyOn(service, 'cancelSession').mockResolvedValue({ success: true });
+
+    await expect(
+      service.steerQueuedMessage({
+        sessionId,
+        expectedTurnId: activeTurnId,
+        queueItemId: 'C',
+        requestedByUserId: 'owner-user',
+      })
+    ).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'queue-item-missing',
+      queueItemId: 'C',
+    });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(
+      (service as unknown as { turnRuntimeBySession: Map<SessionId, unknown> }).turnRuntimeBySession.get(
+        sessionId
+      )
+    ).toBe(runtime);
   });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({

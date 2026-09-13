@@ -52,6 +52,7 @@ import {
   type PreviewTarget,
   type PreviewTargetApproval,
   type SessionSteerResponse,
+  type SessionQueueSteerResponse,
   type SessionGoalAction,
   type SessionGoalResponse,
   type SessionTerminateResponse,
@@ -766,6 +767,55 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestSessionQueueSteer = async (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      expectedTurnId: string;
+      queueItemId: string;
+      requestedByUserId: string;
+    },
+    options?: { timeoutMs?: number }
+  ): Promise<SessionQueueSteerResponse | null> => {
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/queue-steer',
+          params: args,
+          timeoutMs: options?.timeoutMs ?? 5_000,
+        });
+        if (response && !response.ok) {
+          return {
+            type: 'session/queue-steer_response',
+            sessionId: args.sessionId,
+            queueItemId: args.queueItemId,
+            accepted: false,
+            disposition: 'error',
+            error: response.error,
+          };
+        }
+        if (response?.ok) return response.result as SessionQueueSteerResponse;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionQueueSteer({
+        ...args,
+        timeoutMs: options?.timeoutMs ?? 5_000,
+      });
+    } catch (error) {
+      return {
+        type: 'session/queue-steer_response',
+        sessionId: args.sessionId,
+        queueItemId: args.queueItemId,
+        accepted: false,
+        disposition: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   const requestSessionGoal = async (
     machineId: MachineId,
     args: {
@@ -1173,6 +1223,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   return {
     requestSessionCancel,
+    requestSessionQueueSteer,
     requestSessionSteer,
     requestSessionGoal,
     requestSessionTerminate,

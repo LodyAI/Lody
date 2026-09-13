@@ -2682,6 +2682,23 @@ export class MessageHandler {
     return await this.executionService.steerSession(args);
   }
 
+  private async steerQueuedMessageWithAccessCheck(
+    args: Parameters<SessionExecutionService['steerQueuedMessage']>[0]
+  ): ReturnType<SessionExecutionService['steerQueuedMessage']> {
+    const access = await this.verifySessionMachineAccess(args.sessionId, args.requestedByUserId);
+    if (access.outcome !== 'allowed') {
+      return {
+        type: 'session/queue-steer_response',
+        sessionId: args.sessionId,
+        queueItemId: args.queueItemId,
+        accepted: false,
+        disposition: 'error',
+        error: `Queue steer access verification ${access.outcome}`,
+      };
+    }
+    return await this.executionService.steerQueuedMessage(args);
+  }
+
   private async controlSessionGoalWithAccessCheck(args: {
     sessionId: SessionId;
     action: SessionGoalAction;
@@ -3327,6 +3344,7 @@ export class MessageHandler {
           };
         },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
+        steerQueuedMessage: async (args) => await this.steerQueuedMessageWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
         forkSession: async (args) => await this.forkSessionWithAccessCheck(args),
@@ -6353,6 +6371,12 @@ export class MessageHandler {
         });
       case 'session/steer': {
         return await this.steerSessionWithAccessCheck({
+          ...request.params,
+          sessionId: request.params.sessionId as SessionId,
+        });
+      }
+      case 'session/queue-steer': {
+        return await this.steerQueuedMessageWithAccessCheck({
           ...request.params,
           sessionId: request.params.sessionId as SessionId,
         });

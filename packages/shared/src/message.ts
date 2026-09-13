@@ -166,6 +166,23 @@ export interface SessionSteerResponse {
   error?: string;
 }
 
+export interface SessionQueueSteerResponse {
+  type: 'session/queue-steer_response';
+  sessionId: SessionId;
+  queueItemId: string;
+  userTurnId?: string;
+  accepted: boolean;
+  disposition:
+    | 'accepted'
+    | 'queue-item-missing'
+    | 'invalid-queue-item'
+    | 'no-active-turn'
+    | 'stale-turn'
+    | 'busy'
+    | 'error';
+  error?: string;
+}
+
 /**
  * Answer to a goal control request.
  *

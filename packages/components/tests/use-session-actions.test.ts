@@ -351,6 +351,37 @@ describe('useSessionActions', () => {
     return actions;
   };
 
+  it('forwards both queue and active-turn identities for queued Steer', async () => {
+    const sessionId = 'session-queue-steer' as SessionId;
+    const machineId = 'machine-1' as MachineId;
+    const requestSessionQueueSteer = vi.fn(async () => ({
+      type: 'session/queue-steer_response' as const,
+      sessionId,
+      queueItemId: 'queue-C',
+      userTurnId: 'user-C',
+      accepted: true,
+      disposition: 'accepted' as const,
+    }));
+    const runtime = createRuntime({}) as WorkspaceRuntime & {
+      requestSessionQueueSteer: WorkspaceRuntime['requestSessionQueueSteer'];
+    };
+    runtime.requestSessionQueueSteer = requestSessionQueueSteer;
+    const actions = await renderActions(runtime);
+
+    await expect(
+      actions.requestSessionQueueSteer(sessionId, 'assistant-active', 'queue-C', {
+        machineId,
+        requestedByUserId: 'user-1',
+      })
+    ).resolves.toMatchObject({ accepted: true, queueItemId: 'queue-C' });
+    expect(requestSessionQueueSteer).toHaveBeenCalledWith(machineId, {
+      sessionId,
+      expectedTurnId: 'assistant-active',
+      queueItemId: 'queue-C',
+      requestedByUserId: 'user-1',
+    });
+  });
+
   it('does not block session creation on remote stream pre-creation', async () => {
     const sessionId = 'session-create-stream-pending' as SessionId;
     const streamCreate = createDeferred();

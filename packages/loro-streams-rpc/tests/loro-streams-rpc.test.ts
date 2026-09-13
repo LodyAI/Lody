@@ -99,6 +99,30 @@ describe('session steer RPC schema', () => {
   });
 });
 
+describe('queued message steer RPC schema', () => {
+  it('carries the exact queue and active-turn identities', () => {
+    const result = LoroStreamsRpcRequestSchema.safeParse({
+      jsonrpc: '2.0',
+      id: 'request-queue-steer-1',
+      method: 'session/queue-steer',
+      rpcVersion: '1',
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      replyTo: 'workspace-1:rpc:res',
+      sentAt: 1,
+      expiresAt: 2,
+      params: {
+        sessionId: 'session-1',
+        expectedTurnId: 'assistant:user-1',
+        queueItemId: 'queue-C',
+        requestedByUserId: 'user-1',
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+});
+
 describe('session preparation RPC schema', () => {
   const baseRequest = {
     jsonrpc: '2.0',

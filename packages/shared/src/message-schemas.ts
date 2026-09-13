@@ -681,6 +681,26 @@ export const SessionSteerResponseSchema = z
   })
   .strict();
 
+export const SessionQueueSteerResponseSchema = z
+  .object({
+    type: z.literal('session/queue-steer_response'),
+    sessionId: SessionIdSchema,
+    queueItemId: z.string().trim().min(1),
+    userTurnId: z.string().trim().min(1).optional(),
+    accepted: z.boolean(),
+    disposition: z.enum([
+      'accepted',
+      'queue-item-missing',
+      'invalid-queue-item',
+      'no-active-turn',
+      'stale-turn',
+      'busy',
+      'error',
+    ]),
+    error: z.string().optional(),
+  })
+  .strict();
+
 export const SessionGoalResponseSchema = z
   .object({
     type: z.literal('session/goal_response'),
@@ -3398,6 +3418,7 @@ import type {
   ServerToMachine,
   SessionCancelRequest,
   SessionCancelResponse,
+  SessionQueueSteerResponse,
   SessionSteerRequest,
   SessionSteerResponse,
   SessionChatAck,
@@ -3466,6 +3487,7 @@ export type {
   SessionChatAck as SessionChatAckValidated,
   SessionCancelRequest as SessionCancelRequestValidated,
   SessionCancelResponse as SessionCancelResponseValidated,
+  SessionQueueSteerResponse as SessionQueueSteerResponseValidated,
   SessionSteerRequest as SessionSteerRequestValidated,
   SessionSteerResponse as SessionSteerResponseValidated,
   PermissionRequestMessage as PermissionRequestMessageValidated,

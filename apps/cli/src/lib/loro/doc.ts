@@ -2912,6 +2912,63 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   }
 
   /**
+   * Consume one exact queue identity into history as a single Session Doc mutation.
+   *
+   * The callback runs against the current queue row, so a peer deletion cannot
+   * degrade into a successful no-op followed by an unrelated turn cancellation.
+   * The dispatch pointer is published only after the history/queue mutation exists.
+   */
+  async consumeMessageQueueItemAsUserTurn(
+    cid: string,
+    buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null
+  ): Promise<
+    | { type: 'consumed'; entry: SessionHistoryInput }
+    | { type: 'missing' }
+    | { type: 'invalid' }
+  > {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
+
+    const outcome: {
+      value:
+        | { type: 'consumed'; entry: SessionHistoryInput }
+        | { type: 'missing' }
+        | { type: 'invalid' };
+    } = { value: { type: 'missing' } };
+    this.mirror.setState((prev) => {
+      const queue = (prev.mq ?? []) as MessageQueueItem[];
+      const item = queue.find((candidate) => candidate.$cid === cid);
+      if (!item) return prev;
+
+      const entry = buildEntry(item);
+      if (!entry) {
+        outcome.value = { type: 'invalid' };
+        return prev;
+      }
+      if (entry.role !== 'user') {
+        throw new Error(
+          `consumeMessageQueueItemAsUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
+        );
+      }
+      const history = (prev.history as SessionHistoryInput[]) || [];
+      // @ts-ignore - mirror state is writable inside setState.
+      prev.history = [...history, entry];
+      // @ts-ignore - mirror state is writable inside setState.
+      prev.mq = queue.filter((candidate) => candidate.$cid !== cid);
+      outcome.value = { type: 'consumed', entry };
+      return prev;
+    });
+
+    if (outcome.value.type === 'consumed') {
+      await this.repo.upsertDocMeta(this.roomId, {
+        latestUserMsgId: outcome.value.entry.id,
+      } satisfies Partial<SessionMeta>);
+    }
+    return outcome.value;
+  }
+
+  /**
    * Replace the fields of the message-queue item identified by `$cid`. The
    * caller supplies the fully-resolved next field set (the renderer resolves its
    * updater function to a concrete value before sending the intent), so this is a

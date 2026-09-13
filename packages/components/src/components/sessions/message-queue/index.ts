@@ -2,11 +2,6 @@ export { MessageQueueDisplay } from './message-queue-display';
 export type { MessageQueueDisplayProps } from './message-queue-display';
 export { MessageQueueRow } from './message-queue-row';
 export type { MessageQueueRowProps } from './message-queue-row';
-export {
-  resolveFallbackQueueSteerPreparation,
-  steerQueuedMessageWithFallback,
-  shouldRequestNativeQueueSteer,
-} from './queued-message-steer';
 export { QueuedImagePreview } from './queued-image-preview';
 export type { QueuedImageBlock } from './queued-image-preview';
 export {
