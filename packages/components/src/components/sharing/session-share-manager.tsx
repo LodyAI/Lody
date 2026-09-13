@@ -306,6 +306,12 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             'Images are included. File attachments and external resources are not included.'
           )}
         </Note>
+        <Note>
+          {t(
+            'sharing.static.historyOmissions',
+            'Runtime settings and terminal output are omitted. Terminal commands are retained.'
+          )}
+        </Note>
         {!props.canCapture && canPublish && (
           <Note>
             {t(

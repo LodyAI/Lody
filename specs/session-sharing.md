@@ -16,7 +16,15 @@ deployment must leave the current copy intact.
 The readable client hydrates all selected conversations, then synchronously
 detaches their stored history before attachment I/O. It preserves the existing
 history JSON, including thinking, tool inputs/outputs, system entries and unknown
-fields. It does not export Loro operation history or the surrounding document's
+content fields. Capture omits live terminal handles, tool permission requests,
+read/user/runtime-turn identifiers, file-diff bookkeeping, and send/resume/Role
+configuration. `inputConfig.inputBlocks` remains for historical attachments;
+the message's `role` and visible actor attribution remain. Terminal commands remain,
+but typed terminal output blocks are omitted completely, including exit status.
+A tool title identical to its first terminal command is omitted on the wire;
+readers restore the missing title from that command. Other titles remain unchanged.
+The confirmation screen discloses these omissions. Opaque tool payloads are not
+heuristically rewritten. It does not export Loro operation history or the surrounding document's
 runtime configuration, queued messages, agent sessions or workspace credentials.
 History itself can contain sensitive text: publication is disclosure, not
 automatic sanitization.
@@ -44,6 +52,13 @@ Workspace Stream encryption is a separate future feature. The publishing client
 will decrypt before preparing the same plaintext sharing package. The share
 bearer is an access credential, not a decryption key. No sharing E2EE format,
 encryption envelope, or key escrow is part of this version.
+
+Version 2 may store each history object as Zstd when it reduces size. The manifest
+binds the encoded byte length/checksum, explicit `contentEncoding: zstd`, and
+`decodedSizeBytes`. Version 1 and uncompressed objects remain readable. A decoder
+must bound the frame window and decoded size before allocation, reject extra
+frames, and enforce the decoded byte limit. Images are not recompressed. Browser
+reads verify encoded bytes before decoding; Agent history URLs still return JSON.
 
 ## Permissions and management
 
@@ -78,6 +93,14 @@ cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
 request, rather than silently accepting changed parameters.
+
+Document acquisition, attachment copying, history encoding and object uploads use
+bounded concurrency. Completion order cannot change conversation/attachment IDs.
+Failure stops new work, cancels sibling I/O and drains started work before source
+leases are released. Sealing waits for every object; no partial package is published.
+Export and upload remain separate because upload admission binds the complete
+immutable inventory. Per-conversation streaming admission and multipart uploads
+are outside this version.
 
 For a new link, the client durably saves and verifies the reader credential using
 the begin response's share ID/version before upload and again before committing.
