@@ -1337,34 +1337,6 @@ importers:
         specifier: '>=4'
         version: 4.3.0
 
-  packages/history-import:
-    dependencies:
-      '@lody/shared':
-        specifier: workspace:*
-        version: link:../shared
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.10.12
-      loro-crdt:
-        specifier: 'catalog:'
-        version: 1.15.1
-      loro-mirror:
-        specifier: 'catalog:'
-        version: 2.3.2(loro-crdt@1.15.1)
-      tinybench:
-        specifier: ^2.9.0
-        version: 2.9.0
-      tsx:
-        specifier: ^4.23.5
-        version: 4.23.13
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
-
   packages/ignore:
     dependencies:
       effect:
