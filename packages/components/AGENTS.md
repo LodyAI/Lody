@@ -18,9 +18,10 @@ mobile surfaces. Background for the rules below:
   controls fill with `bg-input-field`, never `bg-input`; gray means disabled
   (`disabled:bg-muted`). Primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
 - Collapsed local-project and GitHub-repository rows count fresh Session/child-Tab
-  activity (including pinned Sessions) at the row end, before actions. Show at most
-  two items: permission > unread > active; combine mixed remaining states as `+N`
-  unique Sessions after excluding Sessions represented by the first item.
+  activity (including pinned Sessions) at the row end, before actions. Preserve overlapping
+  states and choose the primary by permission > unread > active. Exclude its Session ids
+  before choosing the secondary: one remaining type uses its icon; multiple types use
+  `+N` with their unique Session count (`+1` is valid). Require ids for nested/duplicate inputs.
   Omit single counts unless the second item is mixed `+N`; initializing uses running. Expanded/removing groups hide the
   aggregate. Preserve disclosure and Session end-slot status. See the
   [draft contract](../../specs/collapsed-project-activity.zh.md).

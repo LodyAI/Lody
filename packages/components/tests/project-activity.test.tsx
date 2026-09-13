@@ -14,6 +14,7 @@ import type {
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { SessionList } from '../src/components/session-list';
 import {
+  getProjectActivityCounts,
   getProjectActivityItems,
   type ProjectActivityCounts,
 } from '../src/components/project-activity';
@@ -44,9 +45,6 @@ const cases: [string, [number, number, number], string][] = [
   ['three single states', [1, 1, 1], 'permission:1 more:2'],
   ['merged remainder', [2, 3, 2], 'permission:2 more:5'],
 ];
-function countsFrom([permission, unread, active]: [number, number, number]): ProjectActivityCounts {
-  return { permission, unread, active };
-}
 function expectedItems(value: string): [string, number][] {
   return value
     ? value.split(' ').map((item) => {
@@ -78,12 +76,13 @@ describe('collapsed project activity', () => {
 
   function renderProject(
     kind: 'project' | 'repo',
-    counts: ProjectActivityCounts,
+    counts: Omit<ProjectActivityCounts, 'sessionIds'>,
     options: {
       collapsed?: boolean;
       childTabs?: boolean;
       pinned?: boolean;
       overlapUnreadActive?: boolean;
+      initializing?: boolean;
       removalState?: 'removing' | 'waiting_for_device';
     } = {}
   ) {
@@ -113,7 +112,11 @@ describe('collapsed project activity', () => {
         if (status !== 'unread' || options.overlapUnreadActive)
           liveSessionStatuses.set(id, {
             type:
-              status === 'permission' ? 'requestPermission' : i % 2 ? 'initializing' : 'running',
+              status === 'permission'
+                ? 'requestPermission'
+                : options.initializing || i % 2
+                  ? 'initializing'
+                  : 'running',
           });
       }
     }
@@ -175,11 +178,30 @@ describe('collapsed project activity', () => {
     return container.querySelector(`[data-sidebar-${kind}-activity]`);
   }
 
-  it.each(cases)('selects at most two items: %s', (_name, counts, expected) => {
-    const items = expectedItems(expected);
-    expect(getProjectActivityItems(countsFrom(counts))).toEqual(
-      items.map(([status, count]) => ({ status, count }))
-    );
+  it.each([
+    ['permission unread+active', 'permission:1 more:1'],
+    ['permission+unread active', 'permission:1 active:1'],
+    ['permission+unread unread+active active', 'permission:1 more:2'],
+    ['permission unread unread+active active', 'permission:1 more:3'],
+    ['unread+active active', 'unread:1 active:1'],
+    ['unread+active unread', 'unread:2'],
+    ['unread+active', 'unread:1'],
+    ['permission+unread', 'permission:1'],
+  ])('deduplicates overlapping and nested sources: %s', (states, expected) => {
+    const sessions = states.split(' ').map((state, index) => ({
+      sessionId: String(index),
+      isWaitingPermission: state.includes('permission'),
+      hasUnreadMessages: state.includes('unread'),
+      isWorking: state.includes('active') || state.includes('permission'),
+    }));
+    const projectActivityCounts = getProjectActivityCounts(sessions);
+    const nested = { sessionId: 'group', projectActivityCounts };
+    for (const source of [sessions, [...sessions, ...sessions], [nested], [nested, ...sessions]]) {
+      const counts = getProjectActivityCounts(source);
+      const items = getProjectActivityItems(counts);
+      expect(items.reduce((total, item) => total + item.count, 0)).toBe(sessions.length);
+      expect(items).toEqual(expectedItems(expected).map(([status, count]) => ({ status, count })));
+    }
   });
 
   describe.each(['project', 'repo'] as const)('%s row', (kind) => {
@@ -191,7 +213,8 @@ describe('collapsed project activity', () => {
         )
         .filter(Boolean)
         .join(' · ');
-      const indicator = renderProject(kind, countsFrom(counts));
+      const [permission, unread, active] = counts;
+      const indicator = renderProject(kind, { permission, unread, active });
       if (!items.length) {
         expect(indicator).toBeNull();
         return;
@@ -240,14 +263,42 @@ describe('collapsed project activity', () => {
       expect(indicator?.textContent).toBe('2+5');
     });
 
-    it('counts a Session with unread and active states once in the mixed remainder', () => {
+    it.each([
+      [1, 1, 0, '1+1', ['permission', 'more']],
+      [1, 2, 0, '1+2', ['permission', 'more']],
+      [1, 1, 1, '1+2', ['permission', 'more']],
+      [0, 1, 0, '', ['unread']],
+      [0, 1, 1, '', ['unread', 'active']],
+    ] as const)(
+      'counts overlapping Sessions once across project slots (%i / %i / %i)',
+      (permission, unread, active, text, statuses) => {
+        for (const childTabs of [false, true]) {
+          const indicator = renderProject(
+            kind,
+            { permission, unread, active },
+            { overlapUnreadActive: true, childTabs }
+          );
+          expect(indicator?.textContent).toBe(text);
+          expect(indicator?.closest('[aria-label]')?.getAttribute('aria-label')).toContain(
+            `${unread} Unread messages · ${unread + active} Active`
+          );
+          expect(
+            [...indicator!.querySelectorAll('[data-project-activity-status]')].map((mark) =>
+              mark.getAttribute('data-project-activity-status')
+            )
+          ).toEqual(statuses);
+        }
+      }
+    );
+
+    it('labels an initializing-only project as Active', () => {
       const indicator = renderProject(
         kind,
-        { permission: 1, unread: 1, active: 0 },
-        { overlapUnreadActive: true }
+        { permission: 0, unread: 0, active: 1 },
+        { initializing: true }
       );
-      expect(indicator?.textContent).toBe('1+1');
       expect(indicator?.closest('[aria-label]')?.getAttribute('aria-label')).toContain('1 Active');
+      expect(indicator?.querySelector('[data-session-working-spinner]')).not.toBeNull();
     });
 
     it('includes pinned activity without adding pinned Sessions to the expanded group', () => {

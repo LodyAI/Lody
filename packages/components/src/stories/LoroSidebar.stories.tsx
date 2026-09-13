@@ -1424,7 +1424,7 @@ export const CollapsedProjectPermissionWithUnreadCounts = localActivity([2, 3, 0
 export const CollapsedProjectPermissionPrecedence = localActivity([1, 0, 1]);
 export const CollapsedProjectPermissionWithActiveCounts = localActivity([2, 0, 2]);
 export const CollapsedProjectOverlappingUnreadActive = localActivity([1, 1, 0], true, false, true);
-export const CollapsedProjectMergedRemainder = localActivity([2, 3, 2]);
+export const CollapsedProjectMergedRemainder = localActivity([1, 3, 2]);
 export const CollapsedProjectInitializing = localActivity([0, 0, 1], true, true);
 export const ExpandedProjectActivity = localActivity([2, 3, 2], false);
 export const CollapsedGitHubRepositoryRunning = repoActivity([0, 0, 1]);
@@ -1445,7 +1445,7 @@ export const CollapsedGitHubRepositoryOverlappingUnreadActive = repoActivity(
   false,
   true
 );
-export const CollapsedGitHubRepositoryMergedRemainder = repoActivity([2, 3, 2]);
+export const CollapsedGitHubRepositoryMergedRemainder = repoActivity([1, 3, 2]);
 export const CollapsedGitHubRepositoryInitializing = repoActivity([0, 0, 1], true, true);
 export const ExpandedGitHubRepositoryActivity = repoActivity([2, 3, 2], false);
 
