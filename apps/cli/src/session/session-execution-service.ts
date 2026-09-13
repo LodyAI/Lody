@@ -901,6 +901,7 @@ export class SessionExecutionService {
     triggerReason: string
   ): Promise<void> {
     try {
+      this.deps.setSessionActivePresencePhase(sessionId, 'finalizing');
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.captureStatusChanged(sessionId, 'idle', undefined, triggerReason);
     } catch (error) {

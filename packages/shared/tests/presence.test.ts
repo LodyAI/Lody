@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   LODY_PRESENCE_TTL_MS,
   collectOnlineMachineIdsFromPresence,
@@ -13,11 +14,47 @@ import {
   type SessionId,
 } from '../src';
 
+// Shape of ActiveSessionStatusSchema's running object before optional `phase`.
+// z.object strips unknown keys, so old clients keep `{ type: 'running' }`.
+const legacyRunningStatus = z.object({
+  type: z.literal('running'),
+  activity: z.enum(['image_generation']).optional(),
+});
+
 const machineId = 'machine-1' as MachineId;
 const sessionId = 'session-1' as SessionId;
 const instanceId = 'instance-1' as LodyPresenceInstanceId;
 
 describe('presence helpers', () => {
+  it('keeps an optional running phase on session presence', () => {
+    const sessionKey = getLodySessionPresenceKey(sessionId, instanceId);
+    const parsed = parseLodyPresenceStates({
+      [sessionKey]: {
+        kind: 'session',
+        sessionId,
+        machineId,
+        instanceId,
+        status: { type: 'running', phase: 'finalizing' },
+        updatedAt: 120,
+      },
+    });
+    expect(parsed[sessionKey]).toMatchObject({
+      status: { type: 'running', phase: 'finalizing' },
+    });
+  });
+
+  it('lets an older running parser keep the session when phase is unknown', () => {
+    expect(legacyRunningStatus.parse({ type: 'running', phase: 'finalizing' })).toEqual({
+      type: 'running',
+    });
+  });
+
+  it('rejects a new activity enum value that older parsers cannot keep', () => {
+    expect(legacyRunningStatus.safeParse({ type: 'running', activity: 'finalizing' }).success).toBe(
+      false
+    );
+  });
+
   it('uses a 90 second presence TTL', () => {
     expect(LODY_PRESENCE_TTL_MS).toBe(90_000);
   });

@@ -28,16 +28,23 @@ const createSilentLogger = (): Logger => ({
 });
 
 /**
- * Mark a session as having active presence so async status callbacks are allowed
- * to write working statuses (see session-activity-status.ts).
+ * Mark a session as having active presence so image activity can retarget
+ * thinking ↔ image_generation (see session-activity-status.ts).
  */
 const injectActivePresence = (handler: MessageHandler, sessionId: SessionId): void => {
-  (
-    handler as unknown as {
-      startSessionActivePresence: (id: SessionId) => void;
-    }
-  ).startSessionActivePresence(sessionId);
+  internals(handler).startSessionActivePresence(sessionId);
 };
+
+const internals = (handler: MessageHandler) =>
+  handler as unknown as {
+    startSessionActivePresence: (id: SessionId) => void;
+    setSessionActivePresencePhase: (
+      id: SessionId,
+      phase: 'thinking' | 'image_generation' | 'finalizing'
+    ) => void;
+    sessionActivePresence: { getStatus: (id: SessionId) => SessionStatus | null };
+    store: { get: (id: SessionId) => { imageGenerationActivityStatusChain: Promise<void> } };
+  };
 
 type TestHarness = {
   handler: MessageHandler;
@@ -141,16 +148,13 @@ describe('MessageHandler image upload flow', () => {
     }
   });
 
-  it('publishes and clears Codex image generation activity status', async () => {
+  it('publishes and clears Codex image generation activity on presence only', async () => {
     const harness = createHarness();
     handlers.push(harness.handler);
 
     const sessionId = 'session-1' as SessionId;
     await harness.sessionDoc.setStatus({ type: 'running' } as SessionStatus);
     harness.sessionDoc.setStatus.mockClear();
-
-    // Image-generation status is only sustainable while active presence is live;
-    // simulate the in-flight turn that owns this activity.
     injectActivePresence(harness.handler, sessionId);
 
     (harness.host.handleImageGenerationBegin as (sessionId: SessionId, event: unknown) => void)(
@@ -160,13 +164,12 @@ describe('MessageHandler image upload flow', () => {
         callId: 'ig-1',
       }
     );
-
-    await vi.waitFor(() => {
-      expect(harness.sessionDoc.setStatus).toHaveBeenCalledWith({
-        type: 'running',
-        activity: 'image_generation',
-      });
+    await internals(harness.handler).store.get(sessionId).imageGenerationActivityStatusChain;
+    expect(internals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
+      activity: 'image_generation',
     });
+    expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
 
     (harness.host.handleImageGenerationEnd as (sessionId: SessionId, event: unknown) => void)(
       sessionId,
@@ -176,18 +179,22 @@ describe('MessageHandler image upload flow', () => {
         status: 'completed',
       }
     );
-
-    await vi.waitFor(() => {
-      expect(harness.sessionDoc.setStatus).toHaveBeenLastCalledWith({ type: 'running' });
+    await internals(harness.handler).store.get(sessionId).imageGenerationActivityStatusChain;
+    expect(internals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
     });
+    expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
   });
 
-  it('does not resurrect image generation activity after durable status is idle', async () => {
+  it('does not retarget image activity after the turn has started finalizing', async () => {
     const harness = createHarness();
     handlers.push(harness.handler);
 
     const sessionId = 'session-idle-image-generation' as SessionId;
     injectActivePresence(harness.handler, sessionId);
+    internals(harness.handler).setSessionActivePresencePhase(sessionId, 'finalizing');
+    await harness.sessionDoc.setStatus({ type: 'idle' });
+    harness.sessionDoc.setStatus.mockClear();
 
     (harness.host.handleImageGenerationBegin as (sessionId: SessionId, event: unknown) => void)(
       sessionId,
@@ -196,11 +203,46 @@ describe('MessageHandler image upload flow', () => {
         callId: 'ig-idle',
       }
     );
-
-    await vi.waitFor(() => {
-      expect(harness.sessionDoc.getMetaState).toHaveBeenCalled();
+    await internals(harness.handler).store.get(sessionId).imageGenerationActivityStatusChain;
+    expect(internals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
+      phase: 'finalizing',
     });
     expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not let a queued image end undo finalizing or idle', async () => {
+    const harness = createHarness();
+    handlers.push(harness.handler);
+    const sessionId = 'session-image-finalization-race' as SessionId;
+    const host = internals(harness.handler);
+    await harness.sessionDoc.setStatus({ type: 'running' });
+    harness.sessionDoc.setStatus.mockClear();
+    injectActivePresence(harness.handler, sessionId);
+    harness.host.handleImageGenerationBegin(sessionId, {
+      acpSessionId: 'acp-1',
+      callId: 'ig-race',
+    });
+    await host.store.get(sessionId).imageGenerationActivityStatusChain;
+    expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
+      activity: 'image_generation',
+    });
+    expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
+
+    host.setSessionActivePresencePhase(sessionId, 'finalizing');
+    await harness.sessionDoc.setStatus({ type: 'idle' });
+    harness.host.handleImageGenerationEnd(sessionId, {
+      acpSessionId: 'acp-1',
+      callId: 'ig-race',
+      status: 'completed',
+    });
+    await host.store.get(sessionId).imageGenerationActivityStatusChain;
+    expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
+      phase: 'finalizing',
+    });
+    expect((await harness.sessionDoc.getMetaState()).status).toEqual({ type: 'idle' });
   });
 
   it('attaches uploaded images as partial success when a later upload fails', async () => {

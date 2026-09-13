@@ -37,6 +37,7 @@ import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
 import { shouldWatchSession } from '../src/session/session-dispatch-logic';
+import { SessionActivePresenceController } from '../src/lib/loro/session-active-presence';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
 
@@ -2094,6 +2095,12 @@ describe('SessionExecutionService', () => {
       startSessionActivePresence: vi.fn(() => {
         events.push('active-start');
       }),
+      setSessionActivePresencePhase: vi.fn((_sessionId, phase) => {
+        events.push(`phase:${phase}`);
+      }),
+      createAssistantEntryForTurn: vi.fn(async () => {
+        events.push('assistant-entry');
+      }),
       clearSessionActivePresence: vi.fn(() => {
         events.push('active-clear');
       }),
@@ -2137,6 +2144,9 @@ describe('SessionExecutionService', () => {
     expect(idleAfterPromptAt).toBeGreaterThan(promptResolvedAt);
     expect(finalizeStartedAt).toBeGreaterThan(idleAfterPromptAt);
     expect(activeClearedAt).toBeGreaterThan(finalizeStartedAt);
+    const finalizingAt = events.indexOf('phase:finalizing');
+    expect(finalizingAt).toBeGreaterThan(promptResolvedAt);
+    expect(idleAfterPromptAt).toBeGreaterThan(finalizingAt);
   });
 
   it.each([undefined, 'delivery'] as const)(
@@ -7243,6 +7253,114 @@ describe('SessionExecutionService goal control', () => {
     completion.resolve();
     await released;
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);
+  });
+
+  it('reports resumed goal activity while viewer history still shows the previous finished turn', async () => {
+    const { service, deps, sessionDoc, submitted, completion, failed, failures } =
+      createGoalService({
+        transport: 'promptMeta',
+      });
+    const history: SessionHistoryInput[] = [
+      {
+        id: 'earlier-user',
+        role: 'user',
+        status: 'handled',
+        items: [{ type: 'text', text: 'Work toward the goal.' }],
+      },
+      {
+        id: 'earlier-assistant',
+        role: 'assistant',
+        finished: true,
+        items: [{ type: 'text', text: 'The previous turn is complete.' }],
+      },
+    ];
+    const visibleHistory = history.slice();
+    const originalGetMetaState = sessionDoc.getMetaState;
+    Object.assign(sessionDoc, {
+      getHistory: async () => history,
+      getMetaState: async () => ({
+        ...(await originalGetMetaState()),
+        project: { kind: 'github', repoFullName: 'example/project' },
+      }),
+    });
+    Object.assign(deps.sessionManager, { refreshGhTokenForSession: async () => {} });
+    const presence = new SessionActivePresenceController(
+      {
+        publishSessionPresence: () => {},
+        clearSessionPresence: () => {},
+      } as unknown as LoroDocumentManager,
+      'machine-1' as MachineId,
+      createSilentLogger()
+    );
+    deps.startSessionActivePresence = (id, phase) => {
+      presence.start(id, phase);
+    };
+    deps.setSessionActivePresencePhase = (id, phase, detail) => {
+      presence.setPhase(id, phase, detail);
+    };
+    deps.clearSessionActivePresence = (id) => presence.clear(id);
+    deps.createAssistantEntryForTurn = async () => {
+      if (!history.some((entry) => entry.id === 'turn-1')) {
+        history.push({ id: 'turn-1', role: 'assistant', finished: false, items: [] });
+      }
+    };
+    const flushing = createDeferred<void>();
+    const releaseFlush = createDeferred<void>();
+    deps.turnFinalization.finalizeACPState = async () => {
+      const entry = history.find((candidate) => candidate.id === 'turn-1');
+      if (entry) entry.finished = true;
+    };
+    deps.turnFinalization.flushSessionUsage = async () => {
+      flushing.resolve();
+      await releaseFlush.promise;
+    };
+    const autoPromptStatuses: unknown[] = [];
+    deps.turnFinalization.autoCommitAndPushForPR = async (ctx) => {
+      autoPromptStatuses.push(presence.getStatus(goalSessionId));
+      await ctx.onAutoPromptStart?.();
+      autoPromptStatuses.push(presence.getStatus(goalSessionId));
+      await ctx.onAutoPromptEnd?.();
+      autoPromptStatuses.push(presence.getStatus(goalSessionId));
+    };
+
+    try {
+      expect(await service.controlSessionGoal({ ...goalArgs, action: 'resume' })).toMatchObject({
+        accepted: true,
+        disposition: 'queued',
+      });
+      await Promise.race([
+        submitted.promise,
+        failed.promise.then(() => {
+          throw new Error(failures.join('; '));
+        }),
+      ]);
+      expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(true);
+      expect(presence.getStatus(goalSessionId)).toEqual({ type: 'running' });
+      expect(history.map((entry) => entry.id)).toEqual([
+        'earlier-user',
+        'earlier-assistant',
+        'turn-1',
+      ]);
+      expect(visibleHistory.map((entry) => entry.id)).toEqual([
+        'earlier-user',
+        'earlier-assistant',
+      ]);
+      completion.resolve();
+      await flushing.promise;
+      expect(history.at(-1)?.finished).toBe(true);
+      expect(presence.getStatus(goalSessionId)).toEqual({ type: 'running', phase: 'finalizing' });
+    } finally {
+      const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
+      completion.resolve();
+      releaseFlush.resolve();
+      await released;
+      presence.clearAll();
+    }
+    expect(autoPromptStatuses).toEqual([
+      { type: 'running', phase: 'finalizing' },
+      { type: 'running' },
+      { type: 'running', phase: 'finalizing' },
+    ]);
   });
 
   it('retains an accepted goal across more than three competing turns', async () => {
