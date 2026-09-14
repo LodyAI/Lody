@@ -336,7 +336,7 @@ function RootLocationEffects() {
     setAuthToken(null);
     setWorkspaceContext({ slug: null, workspaceId: null });
 
-    void signOutWithoutRedirect(authClient);
+    void signOutWithoutRedirect(authClient, { sessionExpired: true });
     toast.error(i18next.t('login.sessionExpired'));
     void navigate({
       to: '/login',

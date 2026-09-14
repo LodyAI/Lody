@@ -54,6 +54,7 @@ export function createSessionSendResources(stores: {
     )
   );
   let closing: Promise<void> | undefined;
+  let activeOperations = 0;
 
   const run = async <A>(
     work: (signal: AbortSignal) => Promise<A>,
@@ -86,14 +87,21 @@ export function createSessionSendResources(stores: {
     }
   };
 
+  const runTracked = async <A>(work: (signal: AbortSignal) => Promise<A>, signal?: AbortSignal): Promise<A> => {
+    activeOperations += 1;
+    try { return await run(work, signal); }
+    finally { activeOperations -= 1; }
+  };
+
   return {
-    run,
+    run: runTracked,
+    getActiveCount: () => activeOperations,
     withSessionStore: <A>(
       sessionId: SessionId,
       use: (store: SessionDocStore, signal: AbortSignal) => Promise<A> | A,
       signal?: AbortSignal
     ): Promise<A> =>
-      run(async (ownedSignal) => {
+      runTracked(async (ownedSignal) => {
         const store = await stores.acquire(sessionId);
         try {
           throwIfSendAborted(ownedSignal);

@@ -274,3 +274,7 @@ export function setMenuLanguage(locale: string): void {
   }
   buildAndSetMenu()
 }
+
+export function translateAppText(key: string): string {
+  return t(currentLocale, key)
+}
