@@ -22,6 +22,21 @@ export interface ChatShareCardMessage {
  */
 export type ChatShareCardFormat = 'phone' | 'desktop';
 
+/**
+ * How much ground the card is matted on — named for where the image is going,
+ * not for how much padding it has, because the person exporting knows the
+ * destination and has no way to judge a measurement. `chat` is a thin bleed for
+ * an image that lands inside a message thread, where the mat is mostly wasted
+ * height and the reader is already looking at the card. `post` is a real mat for
+ * an image that stands alone in a feed, a README or a slide, where the ground is
+ * what keeps the card off the page behind it.
+ *
+ * It is the same fraction of the card's width in both forms — roughly a
+ * twentieth and a tenth — so the two destinations look like the same decision on
+ * a handset and on a desktop.
+ */
+export type ChatShareCardDestination = 'chat' | 'post';
+
 export interface ChatShareCardMeta {
   /** Runtime/agent display name — the caption's subject. */
   name?: string;
@@ -47,14 +62,16 @@ export interface ChatShareCardProps {
   theme: 'light' | 'dark';
   /** Canvas printed behind the card; `none` exports the card on its own corners. */
   backdrop: ChatShareCardBackdrop;
+  /** Where the image is going, which is how much ground it is matted on. */
+  destination: ChatShareCardDestination;
   meta?: ChatShareCardMeta;
   className?: string;
 }
 
 interface CardLayout {
-  /** Card width in CSS pixels; the backdrop adds `frame` on every side. */
+  /** Card width in CSS pixels; a ground adds its destination's `frame` on every side. */
   width: number;
-  frame: string;
+  frame: Record<ChatShareCardDestination, string>;
   radius: string;
   /**
    * The one horizontal inset every band uses — title, conversation and caption
@@ -89,7 +106,7 @@ interface CardLayout {
 const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
   phone: {
     width: 360,
-    frame: 'p-4',
+    frame: { chat: 'p-4', post: 'p-9' },
     radius: 'rounded-[22px]',
     gutter: 'px-5',
     top: 'pt-6',
@@ -105,7 +122,7 @@ const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
   },
   desktop: {
     width: 560,
-    frame: 'p-8',
+    frame: { chat: 'p-8', post: 'p-14' },
     radius: 'rounded-[26px]',
     gutter: 'px-7',
     top: 'pt-7',
@@ -241,6 +258,7 @@ export function ChatShareCard({
   format,
   theme,
   backdrop,
+  destination,
   meta,
   className,
 }: ChatShareCardProps) {
@@ -365,15 +383,15 @@ export function ChatShareCard({
     </>
   );
 
-  // Without a ground there is nothing to print the sign-off on, and nothing to
-  // inset the card from: the card itself is the whole exported image.
+  // Without a ground there is nothing to print the sign-off on, and nothing for
+  // the destination to size: the card itself is the whole exported image.
   if (backdrop === 'none') {
     return <div className={cn('w-fit', themeScopeClass, className)}>{card}</div>;
   }
 
   return (
     <div
-      className={cn('w-fit', layout.frame, themeScopeClass, className)}
+      className={cn('w-fit', layout.frame[destination], themeScopeClass, className)}
       style={CHAT_SHARE_BACKDROP_STYLES[backdrop]}
     >
       {card}

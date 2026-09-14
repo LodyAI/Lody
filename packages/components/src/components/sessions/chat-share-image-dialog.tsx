@@ -17,12 +17,16 @@ import {
   CHAT_SHARE_BACKDROPS,
   CHAT_SHARE_BACKDROP_STYLES,
   type ChatShareCardBackdrop,
+  type ChatShareCardDestination,
   type ChatShareCardFormat,
 } from '@/components/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
 /** Opening ground: the brand's own, so an untouched export is the signature card. */
 const DEFAULT_BACKDROP: ChatShareCardBackdrop = 'lody';
+
+/** A share card is a poster until its author says otherwise. */
+const DEFAULT_DESTINATION: ChatShareCardDestination = 'post';
 
 /** Capture date on the card: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
 function formatShareImageDate(timestamp: string | undefined): string | undefined {
@@ -143,6 +147,71 @@ function PaletteToggle({
 }
 
 /**
+ * Where the image is going. Named for the destination rather than for the
+ * padding it sets: the person exporting knows whether this is going into a
+ * thread or onto a feed, and has no way to judge "24pt" against "56pt". It is
+ * inert without a ground, because then there is no mat to size.
+ */
+function DestinationToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ChatShareCardDestination;
+  onChange: (destination: ChatShareCardDestination) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const label = t('sessions.shareImage.destination', 'Sharing to');
+  const options = [
+    { value: 'chat' as const, label: t('sessions.shareImage.destinationChat', 'Chat') },
+    { value: 'post' as const, label: t('sessions.shareImage.destinationPost', 'Post') },
+  ];
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        id="chat-share-destination-label"
+        className={cn(
+          'shrink-0 text-xs text-muted-foreground transition-opacity',
+          disabled && 'opacity-60'
+        )}
+      >
+        {label}
+      </span>
+      <div
+        role="radiogroup"
+        aria-labelledby="chat-share-destination-label"
+        className="inline-grid h-9 grid-cols-2 rounded-full border border-border/70 bg-muted/60 p-0.5"
+      >
+        {options.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                'flex min-w-14 items-center justify-center rounded-full px-3 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                'disabled:pointer-events-none disabled:opacity-60',
+                selected
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Backdrop swatches. Each option paints the gradient it stands for, because a
  * word cannot describe a ground and this is the one choice left in the preview;
  * `none` is drawn as an absent ground rather than named, so the row reads as one
@@ -229,8 +298,9 @@ export interface ChatShareImageDialogProps {
 
 /**
  * Preview and export for "Share as image". The card is a fixed template, so this
- * surface is a preview with two controls and two actions rather than an editor:
- * the palette the card is printed in, and the ground it is printed on. The phone
+ * surface is a preview with three controls and two actions rather than an editor:
+ * the palette the card is printed in, the ground it is printed on, and where the
+ * image is going, which is the only thing that sizes that ground. The phone
  * and desktop forms are chosen by the device being shared from, and everything
  * else about the image — its bands, their order, their margins, their type — is
  * already decided.
@@ -262,6 +332,7 @@ export function ChatShareImageDialog({
   );
   const [theme, setTheme] = useState<'light' | 'dark'>(appTheme);
   const [backdrop, setBackdrop] = useState<ChatShareCardBackdrop>(DEFAULT_BACKDROP);
+  const [destination, setDestination] = useState<ChatShareCardDestination>(DEFAULT_DESTINATION);
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -278,6 +349,7 @@ export function ChatShareImageDialog({
     if (open) {
       setTheme(appTheme);
       setBackdrop(DEFAULT_BACKDROP);
+      setDestination(DEFAULT_DESTINATION);
       setExportError(false);
       setCopied(false);
     }
@@ -353,6 +425,7 @@ export function ChatShareImageDialog({
           format={format}
           theme={theme}
           backdrop={backdrop}
+          destination={destination}
           meta={meta}
         />
       </div>
@@ -404,6 +477,20 @@ export function ChatShareImageDialog({
     </Button>
   );
 
+  // `none` has no mat, so the destination has nothing to size; it stays visible
+  // and inert rather than disappearing, so the row does not relayout on a swatch.
+  const controls = (
+    <>
+      <DestinationToggle
+        value={destination}
+        onChange={setDestination}
+        disabled={exporting || backdrop === 'none'}
+      />
+      <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
+      <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
+    </>
+  );
+
   const requestOpenChange = (next: boolean) => {
     if (!exportingRef.current) onOpenChange(next);
   };
@@ -434,8 +521,7 @@ export function ChatShareImageDialog({
             <div className="shrink-0 space-y-3 border-t border-border/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
               {status}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-                <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
-                <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
+                {controls}
               </div>
               <div className="grid grid-cols-2 gap-2 [&>button]:w-full">
                 {copyButton}
@@ -460,14 +546,15 @@ export function ChatShareImageDialog({
 
         <div className="flex min-h-0 flex-1 flex-col bg-muted/40 p-6">{preview}</div>
 
-        {/* Two thin rows rather than one: the controls hold a fixed width, and a
-            status line sharing that row would have to squeeze them to fit. */}
+        {/* Controls above actions rather than one row: three fixed-width controls
+            and two buttons do not share a line, and a status message sharing one
+            would have to squeeze whatever is beside it. */}
         <div className="flex shrink-0 flex-col border-t border-border/70">
-          {status ? <div className="px-5 pt-2.5">{status}</div> : null}
-          <div className="flex items-center gap-4 px-5 py-3">
-            <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
-            <span className="h-6 w-px shrink-0 bg-border/70" aria-hidden="true" />
-            <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pb-2.5 pt-3">
+            {controls}
+          </div>
+          <div className="flex items-center gap-3 px-5 pb-3">
+            {status}
             <div className="ml-auto flex shrink-0 items-center gap-3">
               {copyButton}
               {exportButton}

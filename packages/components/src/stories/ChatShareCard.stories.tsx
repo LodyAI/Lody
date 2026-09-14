@@ -25,6 +25,12 @@ const meta = {
       description:
         'The ground the card is printed on; part of the exported image. `none` drops the mat, and the sign-off falls back into the caption.',
     },
+    destination: {
+      control: 'inline-radio',
+      options: ['chat', 'post'],
+      description:
+        'Where the image is going, which is the only thing that sizes the mat. Inert without a ground.',
+    },
   },
   tags: ['autodocs'],
 } satisfies Meta<typeof ChatShareCard>;
@@ -97,6 +103,7 @@ export const DesktopLight: Story = {
     format: 'desktop',
     theme: 'light',
     backdrop: 'lody',
+    destination: 'post',
     meta: demoMeta,
   },
 };
@@ -135,6 +142,15 @@ export const NoBackdropDarkCard: Story = {
   args: { ...DesktopLight.args, backdrop: 'none', theme: 'dark' },
 };
 
+/** The two destinations side by side: a thin bleed for a thread, a mat for a feed. */
+export const ChatDestination: Story = {
+  args: { ...DesktopLight.args, destination: 'chat' },
+};
+
+export const ChatDestinationPhone: Story = {
+  args: { ...DesktopLight.args, format: 'phone', destination: 'chat' },
+};
+
 export const Untitled: Story = {
   args: {
     messages: [
@@ -152,6 +168,7 @@ export const Untitled: Story = {
     format: 'phone',
     theme: 'light',
     backdrop: 'welcome',
+    destination: 'post',
     meta: demoMeta,
   },
 };
@@ -196,6 +213,7 @@ export const LongCodeLines: Story = {
     format: 'desktop',
     theme: 'dark',
     backdrop: 'lody',
+    destination: 'post',
     meta: demoMeta,
   },
 };

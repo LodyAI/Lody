@@ -23,15 +23,26 @@ Custom runtimes use the current session configuration's display name. The date
 remains the session creation date; elapsed runtime is not displayed.
 
 The card is a fixed template. Its bands, their order, their type scale and their
-margins are the same on every card, and the preview offers exactly two choices,
-neither of which can change that: the palette the card is printed in, and the
-ground it is printed on. The palette opens on whichever appearance the app is
+margins are the same on every card, and the preview offers exactly three choices,
+none of which can change that: the palette the card is printed in, the ground it
+is printed on, and where the image is going. The palette opens on whichever appearance the app is
 currently wearing. The template exists in two forms, and the device being shared
 from picks one: a phone form sized to a handset's own content width, and a
 desktop form wide enough for a line of prose and a line of code. They differ in
 measure and margin only — type sizes are shared, and are independent of the
 reader's conversation font setting — so two cards taken from two devices set the
 same words at the same size. Nothing in the product selects the form.
+
+Where the image is going is the only thing that sizes the ground, and it is asked
+as a destination rather than as an amount. A card sent into a message thread is
+read inside a conversation the reader is already looking at, so its ground is a
+thin bleed; a card posted to a feed, a README or a slide has to hold itself off
+whatever is behind it, so its ground is a real mat. The person exporting knows
+which of those they are doing and cannot judge one measurement against another,
+so the card asks the question they can answer. Both destinations take the same
+fraction of the card's width in both forms, so the choice means the same thing on
+a handset as on a desktop, and it is inert without a ground because then there is
+no mat to size.
 
 A chosen ground is part of the exported image rather than a border added around
 it, the same as on the usage card. The set is the product's own — its signature
@@ -83,7 +94,7 @@ copy leaves the preview open for retry. Copying does not publish the conversatio
 or change the saved image behavior.
 
 The preview is a preview and not an editor: the palette switch, the ground
-swatches and the two actions are all it carries. It is a dialog on a desktop and a bottom drawer on a
+swatches, the destination switch and the two actions are all it carries. It is a dialog on a desktop and a bottom drawer on a
 handset, with the same preview, the same control and the same actions in both.
 
 Evidence: [selection tests](../packages/components/tests/message-selection.test.tsx),

@@ -13,10 +13,10 @@ numeric code-collapse field, roughly a thousand reachable combinations of which
 only a few produced an image worth sending. The controls also hid two defects —
 the default footer printed the agent's name with no Lody mark anywhere on the
 image, and the default QR code always encoded the product home page rather than
-the conversation. The card is now one template with two choices — the palette it
-is printed in and the ground it is printed on, neither of which can change its
-layout — issued in a phone form and a desktop form that the sharing device
-selects; every
+the conversation. The card is now one template with three choices — the palette it
+is printed in, the ground it is printed on, and where the image is going, none of
+which can change its layout — issued in a phone form and a desktop form that the
+sharing device selects; every
 band shares one horizontal inset, turns are left-aligned with an unequal vertical
 rhythm instead of right-hung bubbles, and the preview is a preview with two
 actions rather than a control panel. The card still grows without a height limit,
@@ -74,6 +74,19 @@ user. `none` keeps its place in that set and takes the sign-off into the caption
 left column, the same fallback the usage card already documents, rather than
 earning a band of its own.
 
+The mat's size came back as a third choice, and it is asked as a destination
+rather than as an amount. The original control offered "Compact", "Regular" and
+"Spacious", which are three words for a number the person exporting has no way to
+judge: nobody knows whether they want 32pt or 56pt of gradient, and nobody has to,
+because they do know whether this image is going into a message thread or onto a
+feed. A card read inside a thread is already the thing the reader is looking at,
+so its ground is a thin bleed; a card posted alone has to hold itself off whatever
+is behind it, so its ground is a real mat. Both take the same fraction of the
+card's width in both forms — about a twentieth and a tenth — so the choice means
+the same thing on a handset as on a desktop, and the two values per format live in
+the same `LAYOUT` table as everything else. `none` leaves nothing to size, so the
+control goes inert rather than disappearing and relaying out the row.
+
 Code soft-wrapping became unconditional. An image has no horizontal scrollbar, so
 an unwrapped line is a line the reader cannot see; that is a property of the
 medium, not a preference. The paired `collapseAfter` control went with it, and
@@ -128,10 +141,10 @@ unrecoverable, to save a control that costs one row of swatches.
 intended behavior and was updated in the same change, including the stale
 sentence in [the usage card spec](../../../../specs/usage-share-image.md) that
 described this card as justifying a large set of appearance controls. Stories
-cover both forms in both palettes, every ground that needs its own judgement — the
-pale one against both card palettes, a saturated one, and no ground at all in both
-palettes — an untitled card, and a code block whose signature line is far wider
-than either card.
+cover both forms in both palettes, both destinations, every ground that needs its
+own judgement — the pale one against both card palettes, a saturated one, and no
+ground at all in both palettes — an untitled card, and a code block whose signature
+line is far wider than either card.
 
 Workspace typechecks, lint, the i18n key check, and the Code Collab, platform and
 public-boundary guards pass. The `@lody/components` suite is 474 of 476 files
