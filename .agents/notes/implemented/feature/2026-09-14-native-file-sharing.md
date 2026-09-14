@@ -37,3 +37,10 @@ Stories cover native ready and pending states. Complete checks could not pass:
 the worktree lacks installed dependencies/submodules, and the borrowed installation
 has incompatible workspace types. Document checks report existing missing submodule
 links. iOS/Android share-sheet appearance and receiving-app handoff remain untested.
+
+CI run 34802071337 subsequently exposed a test assertion cost: generic deep equality
+over the 3 MiB Buffer exceeded the 5-second timeout (the only failure among 3,624
+component tests). Use Buffer.equals for exact length-and-byte comparison instead;
+the fixture, chunk boundary, and timeout stay unchanged. Locally the native suite
+dropped from 4,482 ms to 163 ms; all 36 related tests passed with two workers, as did
+targeted formatting and lint. These timings are observations, not test assertions.

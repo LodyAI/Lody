@@ -57,7 +57,8 @@ it.each([0, 7, 3 * 1024 * 1024 + 5])(
   async (size) => {
     const bytes = Uint8Array.from({ length: size }, (_, i) => i % 256);
     await shareFileBytesNatively('../package.deb', bytes);
-    expect(state.received[0].bytes).toEqual(Buffer.from(bytes));
+    // Compare every byte without generic deep equality enumerating millions of keys.
+    expect(state.received[0].bytes.equals(Buffer.from(bytes))).toBe(true);
     expect(state.received[0].name.split('/')).toHaveLength(3);
     expect(state.received[0].name).toMatch(/package\.deb$/);
     expect(state.files.size).toBe(0);
