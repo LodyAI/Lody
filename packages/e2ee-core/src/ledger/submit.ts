@@ -142,10 +142,14 @@ export class LedgerClient {
               ? fail('genesis-mismatch')
               : await Ledger.verify({ anchor: loaded.genesis, records: loaded.records });
         if (incoming.length < existing.length) fail('replay');
-        if (incoming.length === existing.length && !bytesEqual(incoming.head, existing.head)) {
-          fail('replay');
+        if (incoming.length === existing.length) {
+          if (!bytesEqual(incoming.head, existing.head)) fail('replay');
+          const incomingDigest = incoming.comparisonNote(trust.endorser).stateDigest;
+          const existingDigest = existing.comparisonNote(trust.endorser).stateDigest;
+          if (!bytesEqual(incomingDigest, existingDigest)) fail('replay');
+          if (loaded.snapshot && !bytesEqual(loaded.snapshot, snapshot)) fail('replay');
+          return;
         }
-        if (incoming.length === existing.length) return;
         fail('replay');
       }
       await tx.save({

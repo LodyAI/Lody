@@ -248,4 +248,47 @@ describe('S3 snapshot LedgerClient', () => {
     const view = await restarted.read();
     expect(view.length).toBeGreaterThan(ledger.length);
   });
+
+  it('refuses a second snapshot with the same head but different authorized state', async () => {
+    const { owner, ledger, stream } = await seeded();
+    const honest = await signSnapshot(ledger, owner);
+    const root = decodeSnapshotCbor(honest.snapshot) as unknown[];
+    const body = [...(root[0] as unknown[])];
+    const auth = [...(body[5] as unknown[])];
+    auth[5] = !auth[5];
+    body[5] = auth;
+    const bodyBytes = encodeSnapshotCbor(body as never);
+    const falseSnap = encodeSignedSnapshot(
+      bodyBytes,
+      await owner.sign(snapshotSigningBytes(bodyBytes))
+    );
+    const store = new MemoryLedgerStore();
+    await LedgerClient.openFromSnapshot({
+      trust: honest.trust,
+      snapshot: falseSnap,
+      store,
+      stream,
+    });
+    const same = await LedgerClient.openFromSnapshot({
+      trust: honest.trust,
+      snapshot: falseSnap,
+      store,
+      stream,
+    });
+    const keptFalse = await same.read();
+    expect(keptFalse.head).toEqual(ledger.head);
+    expect(keptFalse.state.epoch.rotationRequired).not.toBe(ledger.state.epoch.rotationRequired);
+    await expect(
+      LedgerClient.openFromSnapshot({
+        trust: honest.trust,
+        snapshot: honest.snapshot,
+        store,
+        stream,
+      })
+    ).rejects.toMatchObject({ code: 'replay' });
+    const still = await LedgerClient.openJournal(honest.trust.genesis, store, stream);
+    const view = await still.read();
+    expect(view.state.epoch.rotationRequired).toBe(keptFalse.state.epoch.rotationRequired);
+    expect(view.head).toEqual(keptFalse.head);
+  });
 });
