@@ -115,5 +115,3 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 - Text above the editor budget uses fixed bounded Range requests. Binary uses raw
   streams with backpressure/cancellation; raster header dimensions bound decode cost.
   The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.
-
-- Product-window close/reload and app quit must check pending sends before draining renderer owners; stop the CLI only after every renderer drain settles. Keep cache/reset protection for recoverable messages.
