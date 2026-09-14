@@ -18,8 +18,9 @@ clicks now focus the prompt directly so the editing-focus behavior remains avail
 - Keep the shared shell's `pb-[calc(...)]` for both landing and in-session composers.
 - Keep the session card at its original `py-1.5`; do not duplicate the desktop bottom space inside
   the card.
-- Focus the prompt only when a primary mouse press lands on the shell itself, so selectors,
-  attachments, and prompt interactions retain their existing targets.
+- Focus the prompt only when a primary mouse press lands on the shell itself, canceling the
+  browser's default mousedown focus handling first so selectors, attachments, and prompt
+  interactions retain their existing targets.
 
 ## Evidence
 

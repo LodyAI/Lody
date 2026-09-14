@@ -2531,6 +2531,7 @@ export const SessionChatInputArea = memo(
           // Keep the restored shell-owned bottom spacing focusable without
           // stealing focus from selectors, attachments, or the prompt itself.
           if (event.button === 0 && event.target === event.currentTarget) {
+            event.preventDefault();
             textareaRef.current?.focus({ preventScroll: true });
           }
         }}

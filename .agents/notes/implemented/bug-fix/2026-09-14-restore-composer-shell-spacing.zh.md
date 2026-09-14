@@ -13,7 +13,7 @@ PR #655 为了让底部空白区域可以聚焦输入框，把 desktop session c
 
 - landing 与具体会话统一保留共享 shell 的 `pb-[calc(...)]`。
 - session card 恢复原来的 `py-1.5`，不在 card 内重复增加 desktop 底部间距。
-- 只有鼠标左键点击 shell 自身空白区域时才聚焦输入框，不影响 selector、附件和输入框本身的交互。
+- 只有鼠标左键点击 shell 自身空白区域时才会先阻止浏览器默认的 mousedown 焦点处理，再聚焦输入框，不影响 selector、附件和输入框本身的交互。
 
 ## 证据
 
