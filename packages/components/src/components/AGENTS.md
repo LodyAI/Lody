@@ -99,3 +99,13 @@ Ownership and explanations: [README.md](README.md).
   worktree. Always state that the original project directory is never deleted; list
   dirty worktrees and keep them by default. A completed cleanup result is not pending
   removal and must be acknowledged visibly even when some worktrees were kept or failed.
+
+## Share cards
+
+- `chat-share-card.tsx` is ONE fixed template, not an appearance editor: two forms
+  (`phone`/`desktop`) derived from the device, light/dark as the only switch, one
+  gutter for every band, left-aligned turns, unconditional code wrap, no height cap
+  and no QR. Padding lives in its `LAYOUT` table, never in the markup.
+  `sessions/chat-share-image-dialog.tsx` is a preview with that one switch and two
+  actions — a drawer on a handset, a dialog otherwise — and never offers the form.
+  Intent: [chat image export](../../../../specs/chat-share-image.md).

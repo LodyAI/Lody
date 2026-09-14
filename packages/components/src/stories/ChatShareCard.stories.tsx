@@ -1,12 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ComponentProps } from 'react';
 import { ChatShareCard, type ChatShareCardMessage } from '@/components/chat-share-card';
 import { AgentIcon } from '@/components/icons/agent-icon';
-
-type ShareArgs = ComponentProps<typeof ChatShareCard> & {
-  codeWrap?: boolean;
-  codeCollapseLines?: number;
-};
 
 const meta = {
   title: 'Sessions/ChatShareCard',
@@ -15,34 +9,29 @@ const meta = {
     layout: 'centered',
   },
   argTypes: {
-    backdrop: {
-      control: 'select',
-      options: ['none', 'lody', 'aurora', 'ocean', 'sunset', 'welcome'],
-      description: 'Gradient canvas framing the card (part of the exported image).',
+    format: {
+      control: 'inline-radio',
+      options: ['phone', 'desktop'],
+      description: 'Chosen by the device sharing; the product never offers it as a control.',
     },
-    footerVariant: {
-      control: 'select',
-      options: ['stacked', 'row', 'minimal', 'canvas', 'exif'],
-    },
-    codeWrap: {
-      control: 'boolean',
-      description: 'Soft-wrap long code lines (maps to `code.wrap`).',
-    },
-    codeCollapseLines: {
-      control: { type: 'number', min: 0, max: 40, step: 1 },
-      description:
-        'Collapse code blocks beyond this many rendered lines (maps to `code.collapseAfter`; 0 = off).',
+    theme: {
+      control: 'inline-radio',
+      options: ['light', 'dark'],
+      description: 'The only switch the fixed card template keeps.',
     },
   },
   tags: ['autodocs'],
-} satisfies Meta<ShareArgs>;
+} satisfies Meta<typeof ChatShareCard>;
 
 export default meta;
-type Story = StoryObj<ShareArgs>;
+type Story = StoryObj<typeof meta>;
 
-const renderShareCard = ({ codeWrap, codeCollapseLines, ...args }: ShareArgs) => (
-  <ChatShareCard {...args} code={{ wrap: codeWrap, collapseAfter: codeCollapseLines }} />
-);
+const demoMeta = {
+  name: 'Claude Code',
+  params: ['Sonnet 4.5', '~12.4K tokens'],
+  date: '2026-09-07 21:38',
+  icon: <AgentIcon cliType="builtin" agentType="claude" className="size-5" />,
+};
 
 // Synthetic fixtures only — never real transcripts.
 const multiTurnMessages: ChatShareCardMessage[] = [
@@ -95,38 +84,29 @@ const multiTurnMessages: ChatShareCardMessage[] = [
   },
 ];
 
-export const Light: Story = {
+export const DesktopLight: Story = {
   args: {
     title: '渲染性能排查',
     messages: multiTurnMessages,
-    backdrop: 'lody',
-    footerVariant: 'exif',
-    meta: {
-      title: 'Claude Code',
-      params: ['Sonnet 4.5', '12.4k tokens'],
-      sub: '2026-09-07 21:38',
-      icon: <AgentIcon cliType="builtin" agentType="claude" className="size-5" />,
-    },
-    codeWrap: false,
-    codeCollapseLines: 0,
+    format: 'desktop',
+    theme: 'light',
+    meta: demoMeta,
   },
-  render: renderShareCard,
 };
 
-export const Dark: Story = {
-  args: {
-    title: '渲染性能排查',
-    messages: multiTurnMessages,
-    backdrop: 'lody',
-    footerVariant: 'canvas',
-    codeWrap: false,
-    codeCollapseLines: 0,
-  },
-  globals: { theme: 'dark' },
-  render: renderShareCard,
+export const DesktopDark: Story = {
+  args: { ...DesktopLight.args, theme: 'dark' },
 };
 
-export const SingleTurn: Story = {
+export const PhoneLight: Story = {
+  args: { ...DesktopLight.args, format: 'phone' },
+};
+
+export const PhoneDark: Story = {
+  args: { ...DesktopLight.args, format: 'phone', theme: 'dark' },
+};
+
+export const Untitled: Story = {
   args: {
     messages: [
       {
@@ -140,35 +120,14 @@ export const SingleTurn: Story = {
         text: '闭包是函数连同它定义时所在作用域的变量一起被打包保存的机制，因此函数即使离开了定义它的作用域，仍然能访问当时的变量。',
       },
     ],
-    backdrop: 'lody',
-    footerVariant: 'canvas',
+    format: 'phone',
+    theme: 'light',
+    meta: demoMeta,
   },
-  render: renderShareCard,
 };
 
-export const NoBackdropDark: Story = {
-  args: {
-    title: 'Memoizing a filtered list',
-    messages: multiTurnMessages,
-    backdrop: 'none',
-    theme: 'dark',
-    footerVariant: 'exif',
-    codeWrap: true,
-  },
-  render: renderShareCard,
-};
-
-export const NoBackdropLight: Story = {
-  ...NoBackdropDark,
-  args: { ...NoBackdropDark.args, theme: 'light' },
-};
-
-export const WelcomeBackdrop: Story = {
-  ...Light,
-  args: { ...Light.args, backdrop: 'welcome' },
-};
-
-// Long code block with one very long line, to exercise wrap and collapse.
+// One very long signature line: an image has no horizontal scrollbar, so the
+// card must wrap it rather than clip it.
 const codeHeavyMessages: ChatShareCardMessage[] = [
   {
     id: 'share-code-user',
@@ -195,28 +154,17 @@ const codeHeavyMessages: ChatShareCardMessage[] = [
       '  await Promise.all(workers);',
       '  return results;',
       '}',
-      '',
-      'function withTimeout<R>(promise: Promise<R>, timeoutMs: number): Promise<R> {',
-      '  return Promise.race([',
-      '    promise,',
-      '    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),',
-      '  ]);',
-      '}',
       '```',
-      '',
-      '首行那一长串签名在截图里默认会横向溢出——用右侧控制面板的 `codeWrap` / `codeCollapseLines` 试试两种处理。',
     ].join('\n'),
   },
 ];
 
-export const CodeOptions: Story = {
+export const LongCodeLines: Story = {
   args: {
     title: '并发 helper review',
     messages: codeHeavyMessages,
-    backdrop: 'ocean',
-    footerVariant: 'canvas',
-    codeWrap: false,
-    codeCollapseLines: 8,
+    format: 'desktop',
+    theme: 'dark',
+    meta: demoMeta,
   },
-  render: renderShareCard,
 };

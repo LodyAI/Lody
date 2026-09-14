@@ -107,3 +107,9 @@ export const CustomRuntime: Story = {
     agentName: 'Local Coding Agent',
   },
 };
+
+/** The phone card inside the desktop shell; the real handset surface is a drawer. */
+export const PhoneCardFormat: Story = {
+  ...Default,
+  args: { ...Default.args, formatOverride: 'phone' },
+};

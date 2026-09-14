@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
-import QRCode from 'qrcode';
+import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
@@ -12,417 +10,304 @@ export interface ChatShareCardMessage {
   text: string;
 }
 
-export interface ChatShareCardCodeOptions {
-  /** Soft-wrap long code lines instead of letting them overflow horizontally. */
-  wrap?: boolean;
-  /** Collapse code blocks taller than this many rendered lines; 0/undefined keeps full height. */
-  collapseAfter?: number;
+/**
+ * The card has exactly two forms and the device being shared from picks one;
+ * there is no format control and no other appearance switch but light/dark.
+ * `phone` is sized to a handset's own content width, so an image opened in a
+ * chat thread sets its text at the size the reader's own apps do. `desktop` is
+ * wide enough for a ~70-character line of prose and a real line of code, which
+ * is what a post or a README needs. They differ in measure and margin only:
+ * type sizes are shared, so two cards taken from two devices set the same words
+ * at the same size.
+ */
+export type ChatShareCardFormat = 'phone' | 'desktop';
+
+export interface ChatShareCardMeta {
+  /** Runtime/agent display name — the caption's subject. */
+  name?: string;
+  /** Agent mark for the caption; the Lody mark stands in when absent. */
+  icon?: ReactNode;
+  /** Model, token estimate, … — the caption's parameter line. */
+  params?: string[];
+  /** Absolute capture date, printed under the parameters. */
+  date?: string;
 }
-
-/** Gradient canvas presets behind the card. `none` removes only the canvas. */
-export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset' | 'welcome';
-
-/** Footer layout: centered stack, single row with QR at the end, or minimal line with the QR floating in the card corner. */
-export type ChatShareCardFooterVariant = 'stacked' | 'row' | 'minimal' | 'canvas' | 'exif';
 
 export interface ChatShareCardProps {
   messages: ChatShareCardMessage[];
   title?: string;
-  /** URL encoded into the footer QR code. */
-  shareUrl?: string;
-  code?: ChatShareCardCodeOptions;
-  /** Gradient frame around the card; becomes part of the exported image. */
-  backdrop?: ChatShareCardBackdrop;
-  /** Breathing room between card and frame edge; `regular` when unset. */
-  framePadding?: 'compact' | 'regular' | 'spacious';
-  footerVariant?: ChatShareCardFooterVariant;
-  /** Renders the footer QR code where the variant has one (`stacked`/`row`/`canvas`). */
-  showQr?: boolean;
+  format: ChatShareCardFormat;
   /**
-   * Pins the card to one of the bundled Lody palettes (lody-light / vesper)
-   * instead of following the app theme — the exported image should look the
-   * way the user picked, not the way the app happens to be themed right now.
-   * Scoped variables come from `ensureShareThemeScopes`; `.light-scope`
-   * also opts out of any ancestor `.dark`.
+   * Pins the exported palette to a bundled Lody theme rather than following the
+   * app: the image must look the way the preview did, whatever the app is
+   * themed as by the time the capture runs. Scoped variables come from
+   * `ensureShareThemeScopes`; `.light-scope` also opts out of an ancestor
+   * `.dark`.
    */
-  theme?: 'light' | 'dark';
-  /** EXIF-style caption for the `exif` footer: a bold device/model line and a
-      mono parameter line (turns, tokens, date, …), camera-frame style. `icon`
-      replaces the Lody mark — e.g. pass an `AgentIcon` for the driving agent. */
-  meta?: { title?: string; params?: string[]; sub?: string; icon?: ReactNode };
+  theme: 'light' | 'dark';
+  meta?: ChatShareCardMeta;
   className?: string;
-  onAssetsReadyChange?: (ready: boolean) => void;
 }
 
-const DEFAULT_SHARE_URL = 'https://lody.ai';
-/** Matches the markdown code block metrics in src/tailwind/index.css (0.75rem × 1.4). */
-const CODE_LINE_HEIGHT_PX = 16.8;
+interface CardLayout {
+  /** Card width in CSS pixels; the backdrop adds `frame` on every side. */
+  width: number;
+  frame: string;
+  radius: string;
+  /**
+   * The one horizontal inset every band uses — title, conversation and caption
+   * share a left edge, and nothing in the card is allowed a private gutter.
+   */
+  gutter: string;
+  /** First band's top inset, whichever band that is. */
+  top: string;
+  titleSize: string;
+  /** Title band to conversation. */
+  afterTitle: string;
+  /** Conversation to the caption rule. */
+  bottom: string;
+  /** Between one exchange and the next: the card's largest interior gap. */
+  exchangeGap: number;
+  /** Between a prompt and the reply it belongs to; half the exchange gap. */
+  replyGap: number;
+  promptRadius: string;
+  promptPad: string;
+  captionPad: string;
+  /** Card to the sign-off printed on the backdrop below it. */
+  signature: string;
+}
 
-const FRAME_PADDING_CLASSES: Record<NonNullable<ChatShareCardProps['framePadding']>, string> = {
-  compact: 'p-8',
-  regular: 'p-14 sm:p-16',
-  spacious: 'p-20 sm:p-24',
-};
-
-const BACKDROP_STYLES: Record<Exclude<ChatShareCardBackdrop, 'none'>, CSSProperties> = {
-  // Signature: deep-sea night base with teal/blue aurora blooms from the brand
-  // mark's palette (#35c8b0 teal, #2f77bf blue, #1f4f7f navy), a soft horizon
-  // glow at the bottom, and a vignette to keep the edges quiet.
-  lody: {
-    background:
-      'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%),' +
-      'radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%),' +
-      'radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%),' +
-      'radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%),' +
-      'linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+/**
+ * The whole padding system, as two rows rather than values sprinkled through
+ * the markup, so "the desktop card breathes more" stays one decision. Every
+ * value sits on a 4px grid, and the vertical rhythm is deliberately unequal:
+ * the gap that separates two exchanges is twice the gap that binds a prompt to
+ * its reply, which is what makes a tall card scannable without speaker labels.
+ */
+const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
+  phone: {
+    width: 360,
+    frame: 'p-4',
+    radius: 'rounded-[22px]',
+    gutter: 'px-5',
+    top: 'pt-6',
+    titleSize: 'text-[17px]',
+    afterTitle: 'pt-4',
+    bottom: 'pb-5',
+    exchangeGap: 24,
+    replyGap: 12,
+    promptRadius: 'rounded-[14px]',
+    promptPad: 'px-3.5 py-2.5',
+    captionPad: 'py-3.5',
+    signature: 'mt-4',
   },
-  aurora: {
-    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)',
-  },
-  ocean: {
-    background: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)',
-  },
-  sunset: {
-    background: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
-  },
-  // Export-safe still of the opening ceremony's shallow-water field. The live
-  // onboarding scene uses a WebGL shader, which a DOM PNG capture cannot
-  // faithfully serialize.
-  welcome: {
-    background:
-      'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px),' +
-      'radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%),' +
-      'radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%),' +
-      'linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)),' +
-      '#dce5e7',
-    backgroundSize: '88px 100%, auto, auto, auto, auto',
+  desktop: {
+    width: 560,
+    frame: 'p-8',
+    radius: 'rounded-[26px]',
+    gutter: 'px-7',
+    top: 'pt-7',
+    titleSize: 'text-[20px]',
+    afterTitle: 'pt-5',
+    bottom: 'pb-6',
+    exchangeGap: 28,
+    replyGap: 14,
+    promptRadius: 'rounded-[16px]',
+    promptPad: 'px-4 py-3',
+    captionPad: 'py-4',
+    signature: 'mt-5',
   },
 };
 
 /**
- * Static, full-height conversation card for capturing a chat as one shareable
- * image. No scrolling container, no virtualization: the card hugs its content.
- * Turns are avatar-free; user bubbles reuse the exact `UserPlainTextBlock`
- * chrome from `ai-gui/view.tsx`, assistant prose renders through
- * `MarkdownRenderer` exactly like a finished turn.
+ * The one backdrop. Deep-sea night from the brand mark's palette (#35c8b0 teal,
+ * #2f77bf blue, #1f4f7f navy) with a soft horizon glow and a vignette that
+ * keeps the edges quiet. It carries both card palettes: a light card reads as
+ * paper on it, and a dark one separates on its hairline and shadow.
+ */
+const BACKDROP: CSSProperties = {
+  background:
+    'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%),' +
+    'radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%),' +
+    'radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%),' +
+    'radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%),' +
+    'linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+};
+
+/** Prose size, fixed for both formats and independent of the app's font-size setting. */
+const BODY_FONT_SIZE = 15;
+
+const CODE_SCOPE = 'lody-chat-share-card';
+
+/**
+ * Clears the floating language label that the block's own insets do not already
+ * account for, plus a little air. Measured against the rendered label rather
+ * than derived: it is absolutely positioned against the code block while this
+ * padding sits on the `pre` inside the block's and the body's own insets, so the
+ * arithmetic is not local to either file. A label that changes height in
+ * src/tailwind/index.css changes this.
+ */
+const CODE_LABEL_CLEARANCE = '1.5rem';
+
+/**
+ * Code never overflows a share card: an image has no horizontal scrollbar, so
+ * an unwrapped line is simply a line the reader cannot see. Soft-wrapping is a
+ * property of the medium, not a preference, so it is not a prop.
  *
- * The card uses an opaque theme surface so its text remains readable without
- * a backdrop. The footer carries the Lody brand and an optional QR code.
+ * The language label is an opaque mask parked over the block's top-right corner,
+ * which works in the app because a long first line scrolls out from under it. A
+ * wrapped line never scrolls, so it would stay masked forever; a labelled block
+ * starts its first line below the label instead.
+ *
+ * The block's copy control goes away: an affordance nobody can press is not
+ * something to photograph, and the preview is hoverable, so leaving it in means
+ * a captured image can carry a button the reader will try to click.
+ *
+ * None of these is `!important`: the app's code styles live in
+ * `@layer components`, where an important declaration outranks an unlayered one,
+ * so the body's important `padding-block` cannot be overridden from here — while
+ * its unlayered ordinary declarations win as usual. That is why the wrap and the
+ * clearance both land on the `pre`, which carries no important padding.
+ */
+const CODE_CSS = [
+  `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block-body] pre` +
+    '{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;}',
+  `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block][data-language]:not([data-language=''])` +
+    ` [data-streamdown=code-block-body] pre{padding-block-start:${CODE_LABEL_CLEARANCE};}`,
+  `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block-actions]{display:none;}`,
+].join('');
+
+/**
+ * Static, full-height conversation card for capturing a chat as one shareable
+ * image. No scrolling container and no virtualization: the card hugs its
+ * content, and a long selection simply makes a long image.
+ *
+ * One fixed template. Every turn is left-aligned against the same gutter — a
+ * shared image has no "me" side to hang a bubble from — with the human prompt
+ * as a tinted block and the reply as ordinary prose through `MarkdownRenderer`,
+ * exactly as a finished turn renders in the app. Provenance is a single caption
+ * band at the foot of the card, and the product sign-off prints on the backdrop
+ * below it, where it costs the conversation no room.
  */
 export function ChatShareCard({
   messages,
   title,
-  shareUrl = DEFAULT_SHARE_URL,
-  code,
-  backdrop = 'none',
-  framePadding = 'regular',
-  footerVariant = 'stacked',
-  showQr = true,
+  format,
   theme,
   meta,
   className,
-  onAssetsReadyChange,
 }: ChatShareCardProps) {
-  const { t } = useTranslation();
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const needsQr =
-    showQr &&
-    (footerVariant === 'stacked' ||
-      footerVariant === 'row' ||
-      (footerVariant === 'canvas' && backdrop !== 'none'));
-  useEffect(() => {
-    onAssetsReadyChange?.(!needsQr || qrDataUrl !== null);
-  }, [needsQr, qrDataUrl, onAssetsReadyChange]);
-
-  useEffect(() => {
-    if (!showQr || footerVariant === 'minimal' || footerVariant === 'exif') {
-      setQrDataUrl(null);
-      return undefined;
-    }
-    let cancelled = false;
-    QRCode.toDataURL(shareUrl, {
-      margin: 0,
-      width: 160,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#101828', light: '#ffffff' },
-    })
-      .then((url) => {
-        if (!cancelled) setQrDataUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setQrDataUrl(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [shareUrl, footerVariant, showQr]);
-
-  const wrap = code?.wrap ?? false;
-  const collapseAfter = code?.collapseAfter ?? 0;
-
-  // Collapse over-tall code blocks post-render: MarkdownRenderer owns the code
-  // DOM and Shiki re-renders the lines in async passes, and Storybook arg
-  // changes re-render the whole block — either one can wipe styles/nodes we
-  // injected. So every observed mutation re-derives the collapsed state from
-  // scratch: restore all bodies first, then clip those still over the limit.
-  const contentRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const root = contentRef.current;
-    if (!root || collapseAfter <= 0) return undefined;
-
-    let applying = false;
-    let raf = 0;
-
-    const resetBody = (body: HTMLElement) => {
-      body.style.maxHeight = '';
-      body.style.overflow = '';
-      body.style.position = '';
-      body.querySelectorAll('[data-share-collapse-ui]').forEach((node) => node.remove());
-    };
-
-    const applyCollapse = () => {
-      if (applying) return;
-      applying = true;
-      try {
-        root
-          .querySelectorAll<HTMLElement>("[data-streamdown='code-block-body']")
-          .forEach((body) => {
-            resetBody(body);
-            const lines = body.querySelectorAll('pre > code > span').length;
-            if (lines <= collapseAfter) return; // 0 = highlight not painted yet; observer revisits
-
-            body.style.maxHeight = `${Math.round(collapseAfter * CODE_LINE_HEIGHT_PX)}px`;
-            body.style.overflow = 'hidden';
-            body.style.position = 'relative';
-
-            const fade = document.createElement('div');
-            fade.dataset.shareCollapseUi = 'true';
-            fade.style.cssText =
-              'position:absolute;inset-inline:0;bottom:0;height:44px;pointer-events:none;' +
-              'background:linear-gradient(to bottom, transparent, var(--markdown-code-block-bg, rgba(16,24,40,0.04)) 75%);';
-            const pill = document.createElement('div');
-            pill.dataset.shareCollapseUi = 'true';
-            pill.style.cssText =
-              'position:absolute;inset-inline:0;bottom:6px;display:flex;justify-content:center;pointer-events:none;';
-            const label = document.createElement('span');
-            label.style.cssText =
-              'font-size:11px;line-height:1;padding:4px 10px;border-radius:9999px;' +
-              'background:hsl(var(--muted));color:hsl(var(--muted-foreground));';
-            label.textContent = t('chatShareCard.collapsedLines', { count: lines - collapseAfter });
-            pill.appendChild(label);
-            body.appendChild(fade);
-            body.appendChild(pill);
-          });
-      } finally {
-        applying = false;
-      }
-    };
-
-    const schedule = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(applyCollapse);
-    };
-
-    schedule();
-    const observer = new MutationObserver(() => {
-      if (!applying) schedule();
-    });
-    observer.observe(root, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      cancelAnimationFrame(raf);
-      root.querySelectorAll<HTMLElement>("[data-streamdown='code-block-body']").forEach(resetBody);
-    };
-  }, [collapseAfter, messages, t]);
-
-  const framed = backdrop !== 'none';
+  const layout = LAYOUT[format];
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
-  const themeScopeClass =
-    theme === 'light' ? 'light-scope' : theme === 'dark' ? 'dark-scope' : undefined;
-
-  const card = (
-    <div
-      className={cn(
-        'relative w-[420px] overflow-hidden',
-        themeScopeClass,
-        framed
-          ? // Solid card on a gradient canvas, ray.so-style: big soft shadow, no glass.
-            'rounded-2xl border border-black/[0.06] bg-card text-card-foreground shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] dark:border-white/10'
-          : // Keep the theme surface opaque even without a surrounding canvas.
-            cn(
-              'border border-black/[0.08] bg-card',
-              'dark:border-white/[0.09]',
-              'text-card-foreground'
-            ),
-        className
-      )}
-    >
-      {wrap ? (
-        <style>
-          {
-            '.lody-chat-share-card-wrap .markdown-renderer [data-streamdown=code-block-body] pre { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }'
-          }
-        </style>
-      ) : null}
-
-      {/* Header: small brand row on top, then the session title as a real
-          document-style headline so it carries the image. */}
-      <div className="px-6 pt-5">
-        <div className="flex items-center gap-2">
-          <img src={lodyLogo} alt="" className="size-3.5 scale-[1.64] rounded-md" />
-          <span className="text-sm font-semibold">Lody</span>
-        </div>
-        {title ? (
-          <div className="mt-3 text-lg font-semibold leading-snug tracking-tight text-foreground">
-            {title}
-          </div>
-        ) : null}
-      </div>
-
-      <div
-        ref={contentRef}
-        className={cn('px-6 pt-4 pb-5 space-y-4', wrap && 'lody-chat-share-card-wrap')}
-      >
-        {messages.map((message) =>
-          message.role === 'user' ? (
-            <div key={message.id} className="flex max-w-full justify-end">
-              <div className="min-w-0 max-w-full rounded-[1.15rem] border border-foreground/[0.08] bg-foreground/[0.05] px-3.5 py-2">
-                <div className="min-w-0 max-w-full whitespace-pre-wrap text-sm text-foreground [overflow-wrap:anywhere]">
-                  {message.text}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <MarkdownRenderer key={message.id} text={message.text} isStreaming={false} />
-          )
-        )}
-      </div>
-
-      {/* Footer: three layouts — centered stack, single row, or minimal line
-          with the QR floating at the card's bottom-right corner. */}
-      {footerVariant === 'stacked' && (
-        <div
-          className={cn(
-            'flex flex-col items-center gap-2.5 px-5 pt-5 pb-6 text-center',
-            framed
-              ? 'border-t border-border'
-              : 'border-t border-black/[0.05] bg-white/35 backdrop-blur-xl dark:border-white/[0.07] dark:bg-white/[0.04]'
-          )}
-        >
-          <img src={lodyLogo} alt="" className="size-7 scale-[1.64] rounded-md" />
-          <div className="text-[13px] font-medium text-muted-foreground">lody.ai</div>
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={t('chatShareCard.qrAlt')}
-              className="mt-0.5 size-10 rounded-md bg-white p-1 dark:bg-white/90"
-            />
-          ) : null}
-        </div>
-      )}
-
-      {footerVariant === 'row' && (
-        <div
-          className={cn(
-            'flex items-center gap-3 px-5 py-2.5',
-            framed
-              ? 'border-t border-border'
-              : 'border-t border-black/[0.05] bg-white/35 backdrop-blur-xl dark:border-white/[0.07] dark:bg-white/[0.04]'
-          )}
-        >
-          <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />
-          <div className="min-w-0 flex-1 -mt-0.5 text-[13px] font-medium text-muted-foreground">
-            lody.ai
-          </div>
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={t('chatShareCard.qrAlt')}
-              className="size-9 rounded-md bg-white p-1 dark:bg-white/90"
-            />
-          ) : null}
-        </div>
-      )}
-
-      {/* EXIF caption, camera-style: brand + device left, bold spec line and
-          muted sub-line right. No QR — the caption band stays clean. */}
-      {footerVariant === 'exif' && (
-        <div
-          style={{
-            fontFamily:
-              '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif',
-          }}
-          className={cn(
-            'flex items-center gap-2.5 px-6 py-3.5',
-            // Camera-caption band: brighter than the conversation surface.
-            framed
-              ? 'border-t border-border bg-white dark:bg-white/[0.04]'
-              : 'border-t border-black/[0.05] dark:border-white/[0.07]'
-          )}
-        >
-          {meta?.icon ?? <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />}
-          <div className="min-w-0 truncate text-[13px] font-semibold text-foreground">
-            {meta?.title ?? 'Lody'}
-          </div>
-          <div className="ml-auto min-w-0 text-right">
-            {meta?.params && meta.params.length > 0 ? (
-              <div className="flex items-baseline justify-end gap-2.5 truncate text-[12px] font-medium text-foreground">
-                {meta.params.map((param) => (
-                  <span key={param} className="shrink-0">
-                    {param}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {meta?.sub ? (
-              <div className="mt-0.5 truncate text-[10.5px] leading-tight text-muted-foreground">
-                {meta.sub}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
-
-      {/* `canvas` moves branding onto the gradient frame (see below); inside
-          the card it falls back to the minimal line when there is no frame. */}
-      {(footerVariant === 'minimal' || (footerVariant === 'canvas' && !framed)) && (
-        <div
-          className={cn(
-            'flex items-center justify-center gap-1.5 px-5 py-3',
-            framed
-              ? 'border-t border-border'
-              : 'border-t border-black/[0.05] dark:border-white/[0.07]'
-          )}
-        >
-          <img src={lodyLogo} alt="" className="size-3.5 scale-[1.64] rounded-md" />
-          <span className="text-[11px] text-muted-foreground">lody.ai</span>
-        </div>
-      )}
-    </div>
-  );
-
-  if (!framed) return card;
+  const themeScopeClass = theme === 'light' ? 'light-scope' : 'dark-scope';
+  const captionParams = meta?.params?.filter((param) => param.trim().length > 0) ?? [];
 
   return (
-    <div
-      className={cn(FRAME_PADDING_CLASSES[framePadding], themeScopeClass)}
-      style={BACKDROP_STYLES[backdrop]}
-    >
-      {card}
-      {footerVariant === 'canvas' ? (
-        <div className="mt-8 flex items-center justify-center gap-2.5">
-          <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />
-          <span className="text-[13px] font-medium tracking-wide text-white/85">lody.ai</span>
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={t('chatShareCard.qrAlt')}
-              className="ml-2 size-9 rounded-md bg-white p-1 shadow-[0_2px_10px_rgba(0,0,0,0.25)]"
-            />
+    <div className={cn('w-fit', layout.frame, themeScopeClass, className)} style={BACKDROP}>
+      <style>{CODE_CSS}</style>
+      <div
+        className={cn(
+          'relative overflow-hidden bg-card text-card-foreground',
+          layout.radius,
+          'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
+          'ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.10]'
+        )}
+        style={{ width: layout.width }}
+      >
+        {title ? (
+          <div className={cn(layout.gutter, layout.top)}>
+            <div
+              className={cn(
+                layout.titleSize,
+                'line-clamp-2 font-semibold leading-snug tracking-tight text-foreground'
+              )}
+            >
+              {title}
+            </div>
+          </div>
+        ) : null}
+
+        <div
+          className={cn(
+            CODE_SCOPE,
+            layout.gutter,
+            title ? layout.afterTitle : layout.top,
+            layout.bottom
+          )}
+        >
+          {messages.map((message, index) => {
+            const previous = index === 0 ? undefined : messages[index - 1];
+            // A reply belongs to the prompt above it; anything else opens a new
+            // exchange and gets the wider gap.
+            const marginTop =
+              previous === undefined
+                ? 0
+                : message.role === 'assistant' && previous.role === 'user'
+                  ? layout.replyGap
+                  : layout.exchangeGap;
+            return (
+              <div key={message.id} style={{ marginTop }}>
+                {message.role === 'user' ? (
+                  <div
+                    className={cn(
+                      layout.promptRadius,
+                      layout.promptPad,
+                      'border border-foreground/[0.07] bg-foreground/[0.045]'
+                    )}
+                  >
+                    <div
+                      className="whitespace-pre-wrap leading-[1.55] text-foreground [overflow-wrap:anywhere]"
+                      style={{ fontSize: BODY_FONT_SIZE }}
+                    >
+                      {message.text}
+                    </div>
+                  </div>
+                ) : (
+                  <MarkdownRenderer text={message.text} size={BODY_FONT_SIZE} isStreaming={false} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Caption band, camera-style: the runtime that produced the
+            conversation on the left, its parameters and the capture date on the
+            right. It carries no brand mark — the backdrop below signs the card. */}
+        <div
+          className={cn(
+            'flex items-center gap-2.5 border-t border-border/70',
+            layout.gutter,
+            layout.captionPad
+          )}
+        >
+          <div className="shrink-0">
+            {meta?.icon ?? <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />}
+          </div>
+          <div className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+            {meta?.name ?? 'Lody'}
+          </div>
+          {captionParams.length > 0 || meta?.date ? (
+            <div className="min-w-0 max-w-[62%] text-right">
+              {captionParams.length > 0 ? (
+                <div className="truncate text-[12px] font-medium text-foreground">
+                  {captionParams.join(' · ')}
+                </div>
+              ) : null}
+              {meta?.date ? (
+                <div className="mt-0.5 truncate text-[10.5px] leading-tight text-muted-foreground">
+                  {meta.date}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
-      ) : null}
+      </div>
+
+      <div className={cn(layout.signature, 'flex items-center justify-center gap-2')}>
+        <img src={lodyLogo} alt="" className="size-4 scale-[1.64] rounded" />
+        <span className="text-[12px] font-medium tracking-wide text-white/85">lody.ai</span>
+      </div>
     </div>
   );
 }
