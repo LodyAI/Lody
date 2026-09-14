@@ -534,19 +534,29 @@ hover already use, which steps away from the surface in both palettes at once.
 
 A standing fact about the thing beside it, and the one part of this system on
 **no rung**: it sits on a page, a card, a menu row or a modal panel, so it can
-take no background from the ladder. Its fill is a _film_ — the tone at 8% of
-`label` or 14% of a tone over whatever is underneath, the form a destructive
+take no background from the ladder. Its fill is a _film_ — the tone at 12% of
+`label` or 22% of a tone over whatever is underneath, the form a destructive
 ghost Button's hover already takes — so one declaration reads on every rung and
-in both palettes.
+in both palettes. Those two started at 8 and 14, which was a film too thin to
+tell apart: the closest pair of tones measured 0.019 apart in oklab in the light
+palette and 0.026 in the dark one, and is now 0.030 and 0.035.
 
 The words stay `badge.label` in every tone, and that is measured rather than
 preferred: `warning` is 2.8:1 on a near-white surface, a colour tuned for a 16px
 mark where the bar is 3:1, used as 11px text where it is 4.5:1. A badge is never
 wordless, so the tint carries the tone and the word carries the fact.
 
+`badge.label` is `label`, not `secondaryLabel`, and that is the same measurement
+made about the neutral ink rather than the coloured one. A badge's word sits on
+the badge's own film rather than on the page, and there `secondaryLabel` was
+3.9:1 on a danger chip and 3.4:1 inside a popup — under the bar before the films
+were strengthened, not because of it. `label` clears 4.5:1 in every tone on every
+rung in both palettes, by 9:1 at the narrowest.
+
 It is metadata, so it takes the caption step the rules give a row's trailing
-metadata, `secondaryLabel` because it is _about_ the thing, `radius.mini` at
-`badge.height`, and figures at one width. It neither grows nor shrinks: a
+metadata — which is how it stays quieter than the thing it is attached to, by
+size rather than by a colour that cannot carry its own words — at `radius.mini`
+and `badge.height`, with figures at one width. It neither grows nor shrinks: a
 surface that must cap a long one caps the badge, because a chip that shrank
 would be clipped by a tight row rather than by a decision.
 

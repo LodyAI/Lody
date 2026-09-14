@@ -513,6 +513,14 @@ over whatever is underneath, and its words stay ink in all five — `warning` is
 text, and a badge is never wordless, so the tint carries the tone and the word
 carries the fact.
 
+The film is 12% of `label` for neutral and 22% of the tone for the rest, and the
+word is `label`. Both numbers moved once the five chips were measured against
+each other rather than each on its own: at 8% and 14% the closest pair was 0.019
+apart in oklab in the light palette and 0.026 in the dark, which is a film too
+thin to read as five tones. And `secondaryLabel`, the obvious ink for metadata,
+was only 3.4:1 on a badge inside a popup — the word sits on the film rather than
+on the page, and 11px text wants 4.5:1.
+
 ```tsx
 <Badge>Plus</Badge>
 <Badge tone="running">Opening Lody Desktop…</Badge>
