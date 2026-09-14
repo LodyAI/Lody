@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/704
 
 [中文](2026-09-14-cli-desktop-cache-reset.zh.md)
 
