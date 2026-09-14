@@ -20,3 +20,7 @@ Translation: current
 曾把「宿主返回的 offset 字节」写成发表证据，那不是用户确认项，已撤回。不用当前 `deviceMayWriteDocument` 在 `open` 上拒绝，否则合法历史会在撤权后失效。不用 receipt：未获单独批准，且本阶段明确信任宿主执行。
 
 测试：`test/snapshot-admission.test.ts`（guest/陌生/设备不一致/过期与延迟不续期/验签期间租约到期不得发表/验签期间撤权/排队中改请求对象不延长原截止/同 offset 替换/幂等/撤权后新发表失败且历史仍可 open/无端口 fail-closed/校验失败不推进游标），以及 C1 加密快照 bootstrap 走准入头。生产 JWT 截止未验。独立 review 在 `baea079` 上用真实 Ed25519 验签把时钟推到 `expires` 后仍 accepted，属 P1；修复后不得再只在 `authenticate` 之前检查租约。
+
+## 恢复设备权限修正（2026-09-14）
+
+白皮书对照发现 `deviceMayWriteDocument` 错误放行非 Guest 成员的恢复设备。现明确只允许 personal/machine 类型。回归通过真实签名账本登记 R，绕过诚实客户端 seal 检查，验证宿主拒绝 R 且不保存快照。本次恢复既定权限，不新增信任协议。本阶段回归 93 项通过，包类型检查通过。生产接入与本轮工作区修复的独立复审仍分开。

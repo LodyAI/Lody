@@ -35,10 +35,10 @@ const UPDATE_HEADER = 1;
 const SNAPSHOT_HEADER = 2;
 const encoder = new TextEncoder();
 
-/** True when the device is currently admitted and its member is not a guest. */
+/** Only active personal/machine devices of non-guest members may write content. */
 export function deviceMayWriteDocument(state: OrgState, deviceIdHex: string): boolean {
   const device = state.devices.get(deviceIdHex);
-  if (!device) return false;
+  if (!device || (device.kind !== 'personal' && device.kind !== 'machine')) return false;
   let membershipHex = '';
   for (const byte of device.membershipId) membershipHex += byte.toString(16).padStart(2, '0');
   const member = state.members.get(membershipHex);

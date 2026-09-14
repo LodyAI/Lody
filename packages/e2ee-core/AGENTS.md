@@ -55,7 +55,8 @@ in-package tests only; do not re-export it.
   `authenticate` verifies a signature without decrypting and is not publication
   permission. `streams-content.ts` seals updates and content snapshots through
   the existing streams-crdt provider `seal`/`open`. Honest clients require
-  `deviceMayWriteDocument` to seal snapshots; guests cannot. Bind Org/genesis,
+  `deviceMayWriteDocument` to seal snapshots; guests and recovery devices cannot.
+  Only active personal/machine devices may write content. Bind Org/genesis,
   resource, kind/model, epoch, and the opaque continuation offset. Publication
   admission is `./snapshot-admission`: current device write, submitter bound to
   signing device, and the 15-minute lease. Recheck that original lease after

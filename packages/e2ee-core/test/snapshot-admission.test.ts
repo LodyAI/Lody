@@ -347,6 +347,59 @@ it('uses current ledger document-write, not mere key possession', async () => {
   expect(deviceMayWriteDocument(revoked.ledger.state, ownerHex)).toBe(true);
 });
 
+it('rejects recovery-device snapshots through ledger-backed host admission', async () => {
+  const owner = await ed25519();
+  const created = await signGenesis(owner);
+  const recovery = {
+    ...(await ed25519()),
+    publicKey: new Uint8Array(await crypto.subtle.exportKey('raw', writerPair.publicKey)),
+    sign: async (bytes: Uint8Array) =>
+      new Uint8Array(
+        await crypto.subtle.sign('Ed25519', writerPair.privateKey, new Uint8Array(bytes))
+      ),
+  };
+  const admitted = await append(
+    created.ledger,
+    owner,
+    await admitDeviceOp(created.anchor, recovery, 'recovery', false)
+  );
+  const device = hex(recovery.publicKey);
+  const author = { actor: 'A', memberInstance: 'A1', device };
+  const contentCipher = new ContentCipher({ authorize: () => device });
+  const provider = createStreamsContentProvider({
+    cipher: contentCipher,
+    genesis,
+    resource,
+    model: 'loro',
+    writeEpoch: 0,
+    author,
+    signingKey: writerPair.privateKey,
+    readKey: () => epochKey,
+    // Malicious writer bypasses the honest-client guard, but not host admission.
+    mayWriteDocument: () => true,
+  });
+  const sealed = await provider.seal({
+    plaintext: new TextEncoder().encode('recovery device must not publish'),
+    context: {
+      protocol: 'loro-streams-crdt-payload-protection',
+      version: 2,
+      kind: 'snapshot',
+      continuationOffset: '10',
+    } as PayloadProtectionContext,
+    additionalData: () => new Uint8Array([1, 2, 3]),
+  });
+  const host = createContentSnapshotPublication({
+    cipher: contentCipher,
+    now: () => 1000,
+    mayWriteDocument: (signer) => deviceMayWriteDocument(admitted.ledger.state, signer.device),
+  });
+  expect(deviceMayWriteDocument(admitted.ledger.state, device)).toBe(false);
+  await expect(
+    host.admit(put('10', wrapSnapshotEnvelope(sealed.header, sealed.sealed), device, { now: 1000 }))
+  ).rejects.toMatchObject({ message: 'unauthorized' });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+});
+
 it('fail-closes snapshot PUT until a host admission port is supplied', async () => {
   const { server, streamUrl } = await listenDurableContent();
   servers.push({ close: () => closeHttp(server) });
@@ -433,7 +486,7 @@ it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor un
     streamUrl: url,
     adapter: createLoroDocAdapter(readerDoc),
     remoteCursorStore: {
-      load: (streamUrl) => store.load(streamUrl),
+      load: (urlToLoad) => store.load(urlToLoad),
       async save(cursor) {
         expect(persisted).toBeDefined();
         await store.save(cursor);
