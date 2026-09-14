@@ -24,7 +24,11 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   `lib/error-boundary-report.ts` is the pure copy builder.
 - Crash screens never reload/restart/reset by themselves. `resetKeys` recovery stops at
   `MAX_AUTOMATIC_RESETS` per repeating error; the fallback reports that retrying stopped,
-  stays visible, and waits for a button press.
+  stays visible, and waits for a button press. "Repeating" ignores ids and digit runs, so
+  a per-request id cannot fork one error into many and spend that budget forever.
+- A cloud query throws into render and keeps throwing. An optional surface inside a larger
+  boundary owns an inline `ErrorBoundary`, so a backend failure degrades locally instead of
+  replacing the host subtree.
 - `lib/clear-local-cache.ts` owns `markCacheClearPending` (recoverable `lody*` caches,
   still signed in) and `startHardReset` (full wipe/sign-out with its own confirmation
   dialog). Defer asynchronous deletes to next boot; clear synchronous storage BEFORE
