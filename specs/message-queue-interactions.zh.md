@@ -16,12 +16,27 @@ Translation: current
   意图：命令直接为本次提交传入 `queueBehavior: "inverse"`，普通 Enter 不传覆盖项。它不
   修改设置，并继续遵守普通的可用性、实时活动和未完成消息记录保护。输入框聚焦、有内容且
   可以发送属于命令本身的可用条件，因此用户重绑快捷键后仍受同一限制。
-- 当前 turn 可接受引导时，每条排队消息都提供“引导”操作。选择后续项必须以该项为目标。
-  客户端把该项的持久 ID 和预期活动 turn 一并发给所属 daemon；daemon 重新确认两者，在一次
-  Session Doc 更新中只消费该项为下一个用户 turn，再停止预期 turn。“引导”绝不修改队列顺序：
-  从 `[A, B, C]` 选择 C 后，正在执行的是 C，队列剩下 `[A, B]`。
-- 过期的“引导”选择必须是失败且无副作用的操作。所选 ID 已不存在，或预期 turn 已不再拥有
-  执行权时，daemon 不得停止任何 turn。Renderer 等待 daemon 确认，不自行移除队列项或写历史。
+- 精确队列项引导是版本化 daemon workflow。只有
+  `MachineMeta.protocolCapabilities.queueItemSteer` 声明受支持版本时，Renderer 才能调用
+  `session/queue-steer`；缺少 capability 即表示不支持。请求携带持久队列 ID 和预期活动 turn，
+  具体执行方式由 daemon 而非 Renderer 决定：
+
+  | 当前 daemon/runtime                                                           | 引导行为                                                                          |
+  | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+  | 支持精确队列项协议，且支持 acknowledged native ACP Steer                      | 原子消费目标行为 `pending_apply`，再通过 `steerPrompt` 注入当前 prompt。          |
+  | 支持精确队列项协议，但不支持 native ACP Steer                                 | 原子消费目标行为下一个用户 turn，再只停止预期 turn。                              |
+  | 旧 daemon，但 authoritative capability 声明支持 acknowledged native ACP Steer | 保留旧版真正 native Steer 路径。                                                  |
+  | 旧 daemon，且不支持 acknowledged native ACP Steer                             | 仅保留既有队首 interrupt 行为；禁用后续行“引导”，并要求升级 daemon 才能精确选择。 |
+
+  任何兼容路径都不得先重排后续项再取消。从 `[A, B, C]` 通过精确协议选择 C 时，只消费 C，
+  剩余队列保持 `[A, B]`。
+
+- 过期或冲突的精确“引导”选择必须失败且无副作用。所选 ID 已不存在、编辑 lease 仍有效，或
+  预期 turn 已不再拥有执行权时，daemon 不得提交 native Steer，也不得停止任何 turn。Renderer
+  等待确认，不自行移除队列项或为精确协议写历史。
+- daemon 会按 session、预期 turn 和队列 ID，为最近已消费的精确请求保留有界 receipt。
+  同一 daemon 进程内因响应丢失而重试时，应返回已记录结果，不得再次消费或取消。若消费
+  成功但取消失败，消息仍是持久 follow-up；receipt 仍保留时的重试不得复制它。
 - 序号和非编辑状态的消息正文共同组成队列重排拖动区域。“引导”、“编辑”和“移除”是独立
   控件，不能触发拖动。
 - 编辑状态保留已有键盘与焦点行为，并在编辑结束前禁用该行重排。

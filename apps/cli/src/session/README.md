@@ -25,8 +25,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end and owns exact-item queue
-  Steer serialization: validate the active turn and queued item, consume that item,
-  then cancel only the expected turn. It also owns ACP prompt, turn ids,
+  Steer serialization: validate the active turn, queued item, and editing lease, then
+  choose native `steerPrompt` or exact cancel-and-dispatch. It also owns ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —

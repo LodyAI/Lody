@@ -37,6 +37,8 @@ export type MessageQueueDisplayProps = {
   onEditSave: (item: MessageQueueItem, task: string) => void | Promise<void>;
   onSteer: (item: MessageQueueItem) => void | Promise<void>;
   showSteerAction?: boolean;
+  steerActionScope?: 'all' | 'head';
+  steerDisabledReason?: string;
   className?: string;
 };
 
@@ -52,6 +54,8 @@ export function MessageQueueDisplay({
   onEditSave,
   onSteer,
   showSteerAction = false,
+  steerActionScope = 'all',
+  steerDisabledReason,
   className,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
@@ -157,6 +161,8 @@ export function MessageQueueDisplay({
                     item={item}
                     index={index}
                     showSteerAction={showSteerAction}
+                    steerDisabled={steerActionScope === 'head' && index > 0}
+                    steerDisabledReason={steerDisabledReason}
                     canReorder={canReorder}
                     isEditing={isEditing}
                     editValue={isEditing ? editing.editValue : ''}

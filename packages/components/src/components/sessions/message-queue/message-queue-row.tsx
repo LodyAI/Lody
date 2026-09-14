@@ -18,6 +18,8 @@ export type MessageQueueRowProps = {
   item: MessageQueueItem;
   index: number;
   showSteerAction: boolean;
+  steerDisabled?: boolean;
+  steerDisabledReason?: string;
   canReorder: boolean;
   isEditing: boolean;
   editValue: string;
@@ -284,7 +286,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
-  const { item, showSteerAction, isEditing, onStartEdit, onRemove, onSteer } = props;
+  const {
+    item,
+    showSteerAction,
+    steerDisabled,
+    steerDisabledReason,
+    isEditing,
+    onStartEdit,
+    onRemove,
+    onSteer,
+  } = props;
 
   // In edit mode the textarea owns the row: it carries its own confirm button, so we
   // render no row-level actions that would compete for the click mid-edit.
@@ -301,6 +312,8 @@ function RowActions(props: MessageQueueRowProps) {
             'sessions.messageQueue.guide',
             'Steer the active response with this message'
           )}
+          disabled={steerDisabled}
+          disabledReason={steerDisabledReason}
           onClick={() => {
             void onSteer(item);
           }}
@@ -326,21 +339,28 @@ function RowActions(props: MessageQueueRowProps) {
 function TextAction({
   text,
   ariaLabel,
+  disabled,
+  disabledReason,
   onClick,
 }: {
   text: string;
   ariaLabel: string;
+  disabled?: boolean;
+  disabledReason?: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       aria-label={ariaLabel}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       className={cn(
         'flex h-5 shrink-0 items-center justify-center rounded px-1.5',
         'text-[11px] font-medium text-muted-foreground transition-colors',
         'hover:bg-muted hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+        'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground'
       )}
       onClick={onClick}
     >

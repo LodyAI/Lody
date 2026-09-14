@@ -338,17 +338,24 @@ describe('SessionExecutionService', () => {
     ).turnRuntimeBySession.set(sessionId, runtime);
     const cancel = vi.spyOn(service, 'cancelSession').mockResolvedValue({ success: true });
 
-    await expect(
-      service.steerQueuedMessage({
-        sessionId,
-        expectedTurnId: activeTurnId,
-        queueItemId: 'C',
-        requestedByUserId: 'owner-user',
-      })
-    ).resolves.toMatchObject({
+    const request = {
+      sessionId,
+      expectedTurnId: activeTurnId,
+      queueItemId: 'C',
+      requestedByUserId: 'owner-user',
+    };
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
       accepted: true,
       disposition: 'accepted',
       queueItemId: 'C',
+      userTurnId: 'user:C',
+    });
+
+    // A response-loss retry returns the receipt instead of consuming or
+    // cancelling a second time after the active turn has moved on.
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: true,
+      disposition: 'accepted',
       userTurnId: 'user:C',
     });
 
@@ -359,6 +366,8 @@ describe('SessionExecutionService', () => {
     expect(sessionDoc.consumeMessageQueueItemAsUserTurn.mock.invocationCallOrder[0]).toBeLessThan(
       cancel.mock.invocationCallOrder[0]!
     );
+    expect(sessionDoc.consumeMessageQueueItemAsUserTurn).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('keeps the active turn running when the selected queue identity is gone', async () => {
@@ -414,6 +423,114 @@ describe('SessionExecutionService', () => {
       )
     ).toBe(runtime);
   });
+
+  it('keeps the active turn and queue row while the target editing lease is active', async () => {
+    const sessionId = 'session-queue-steer-editing' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        id: sessionId,
+        userId: 'owner-user',
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      })),
+      consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({ type: 'editing' as const })),
+    };
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {},
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi.spyOn(service, 'cancelSession');
+
+    await expect(
+      service.steerQueuedMessage({
+        sessionId,
+        expectedTurnId: activeTurnId,
+        queueItemId: 'C',
+        requestedByUserId: 'owner-user',
+      })
+    ).resolves.toMatchObject({ accepted: false, disposition: 'queue-item-editing' });
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('does not consume or cancel again after consumption succeeded but cancellation failed', async () => {
+    const sessionId = 'session-queue-steer-cancel-failed' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const entry = {
+      id: 'user:C',
+      role: 'user' as const,
+      userId: 'owner-user',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      items: [{ type: 'text' as const, text: 'task C' }],
+      status: 'pending' as const,
+      read: false,
+      inputConfig: { prompt: 'task C' },
+    };
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ id: sessionId })),
+      consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({
+        type: 'consumed' as const,
+        entry,
+      })),
+    };
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {},
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi
+      .spyOn(service, 'cancelSession')
+      .mockResolvedValue({ success: false, error: 'cancel failed' });
+    const request = {
+      sessionId,
+      expectedTurnId: activeTurnId,
+      queueItemId: 'C',
+      requestedByUserId: 'owner-user',
+    };
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      userTurnId: 'user:C',
+      error: 'cancel failed',
+    });
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      userTurnId: 'user:C',
+    });
+    expect(sessionDoc.consumeMessageQueueItemAsUserTurn).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
@@ -432,7 +549,30 @@ describe('SessionExecutionService', () => {
       steerPrompt,
       currentModel: undefined,
     };
+    const queuedItem: MessageQueueItem = {
+      $cid: 'queue-user-2',
+      task: 'change direction',
+      userId: 'user-1',
+      userTurnId: 'user-2',
+      timestamp: '2026-07-11T00:00:00.000Z',
+      acpSessionConfig: { prompt: 'change direction' },
+    };
     const sessionDoc = {
+      getMetaState: vi.fn(async () => ({
+        id: 'session-steer',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      })),
+      consumeMessageQueueItemAsUserTurn: vi.fn(
+        async (cid: string, buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null) => {
+          expect(cid).toBe(queuedItem.$cid);
+          const entry = buildEntry(queuedItem);
+          if (!entry) return { type: 'invalid' as const };
+          return { type: 'consumed' as const, entry };
+        }
+      ),
       updateHistory: vi.fn(async () => {}),
     };
     const upsertDocMeta = vi.fn(async () => {});
@@ -491,15 +631,13 @@ describe('SessionExecutionService', () => {
     ).turnRuntimeBySession.set(sessionId, runtime);
 
     await expect(
-      service.steerSession({
+      service.steerQueuedMessage({
         sessionId,
         expectedTurnId: 'assistant:user-1',
-        userTurnId: 'user-2',
-        userId: 'user-1',
-        timestamp: '2026-07-11T00:00:00.000Z',
-        inputConfig: { prompt: 'change direction' },
+        queueItemId: queuedItem.$cid,
+        requestedByUserId: 'user-1',
       })
-    ).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+    ).resolves.toMatchObject({ accepted: true, disposition: 'accepted', userTurnId: 'user-2' });
     expect(onTurnSettled).toHaveBeenCalledOnce();
     expect(onTurnSettled).toHaveBeenCalledWith('handled');
 
@@ -518,16 +656,21 @@ describe('SessionExecutionService', () => {
     );
     expect(runtime.turnId).toBe('assistant:user-2');
     expect(runtime.userTurnId).toBe('user-2');
-    expect(runtime.invocation).toEqual({
+    expect(runtime.invocation).toMatchObject({
       requesterUserId: 'user-1',
       sourceTurnId: 'user-2',
       inputConfig: { prompt: 'change direction' },
     });
-    expect(service.getActiveInvocationContext(sessionId)).toEqual({
+    expect(service.getActiveInvocationContext(sessionId)).toMatchObject({
       requesterUserId: 'user-1',
       sourceTurnId: 'user-2',
       inputConfig: { prompt: 'change direction' },
     });
+    expect(sessionDoc.consumeMessageQueueItemAsUserTurn).toHaveBeenCalledWith(
+      queuedItem.$cid,
+      expect.any(Function),
+      { publishDispatch: false }
+    );
     expect(initialPromptRun.successor?.turnId).toBe('assistant:user-2');
     expect(runtime.activePromptRun.turnId).toBe('assistant:user-2');
 

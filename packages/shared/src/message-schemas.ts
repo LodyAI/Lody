@@ -691,9 +691,11 @@ export const SessionQueueSteerResponseSchema = z
     disposition: z.enum([
       'accepted',
       'queue-item-missing',
+      'queue-item-editing',
       'invalid-queue-item',
       'no-active-turn',
       'stale-turn',
+      'unsupported',
       'busy',
       'error',
     ]),

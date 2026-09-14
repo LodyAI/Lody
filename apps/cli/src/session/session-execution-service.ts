@@ -58,6 +58,7 @@ import {
   hasBuiltinRuntimeOverrideValues,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
+  normalizeSessionTurnInputConfig,
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
@@ -724,6 +725,8 @@ type TurnAnalyticsState = {
   hasReplayPrompt: boolean;
 };
 
+const QUEUE_STEER_RECEIPT_LIMIT = 512;
+
 export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
@@ -738,6 +741,8 @@ export class SessionExecutionService {
   // application never race the boundary. No global concurrency cap (Infinity):
   // this is pure per-session serialization, matching the old hand-rolled lock.
   private readonly steerMutationQueue = new ConcurrentQueue<SessionId>(Number.POSITIVE_INFINITY);
+  /** Bounded receipts make a response-loss retry observationally idempotent. */
+  private readonly queueSteerReceipts = new Map<string, SessionQueueSteerResponse>();
   // Analytics-only state (spec §5b). Tracks per-turn timing + the last status
   // we reported so status_changed can carry from→to + dwell time. Never read by
   // product logic; kept here so capture stays side-effect-only.
@@ -759,6 +764,20 @@ export class SessionExecutionService {
 
   constructor(private readonly deps: SessionExecutionServiceDeps) {
     this.acpAuthenticationManager = new AcpAuthenticationManager(deps.logger);
+  }
+
+  private rememberQueueSteerReceipt(
+    operationKey: string,
+    response: SessionQueueSteerResponse
+  ): SessionQueueSteerResponse {
+    this.queueSteerReceipts.delete(operationKey);
+    this.queueSteerReceipts.set(operationKey, response);
+    while (this.queueSteerReceipts.size > QUEUE_STEER_RECEIPT_LIMIT) {
+      const oldest = this.queueSteerReceipts.keys().next().value;
+      if (oldest === undefined) break;
+      this.queueSteerReceipts.delete(oldest);
+    }
+    return response;
   }
 
   private createPromptHandoffRun(options: {
@@ -1395,6 +1414,11 @@ export class SessionExecutionService {
     queueItemId: string;
     requestedByUserId: string;
   }): Promise<SessionQueueSteerResponse> {
+    const operationKey = JSON.stringify([
+      options.sessionId,
+      options.expectedTurnId,
+      options.queueItemId,
+    ]);
     const respond = (
       disposition: SessionQueueSteerResponse['disposition'],
       details?: { userTurnId?: string; error?: string }
@@ -1409,10 +1433,16 @@ export class SessionExecutionService {
     });
 
     return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
+      const previousReceipt = this.queueSteerReceipts.get(operationKey);
+      if (previousReceipt) return previousReceipt;
+
       const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
       if (!releaseConflict) {
         return respond('busy', { error: 'The session history is being replaced.' });
       }
+      let queueItemConsumed = false;
+      const finishConsumed = (response: SessionQueueSteerResponse): SessionQueueSteerResponse =>
+        queueItemConsumed ? this.rememberQueueSteerReceipt(operationKey, response) : response;
       try {
         const runtime = this.turnRuntimeBySession.get(options.sessionId);
         if (!runtime || !runtime.session || !runtime.promptInFlight || runtime.cancelRequested) {
@@ -1440,19 +1470,68 @@ export class SessionExecutionService {
           return respond('stale-turn');
         }
 
+        const agentClient = runtime.session.agentClient;
+        const useNativeSteer = Boolean(
+          agentClient &&
+          runtime.session.acpSessionId &&
+          agentClient.getAcknowledgedSteerCapability()
+        );
+
         // Queue order and immediate steering are separate mutations. Consume the
         // selected identity directly; A/B keep their relative order when C wins.
+        // Native steer owns dispatch publication through its handoff path.
         const consumed = await sessionDoc.consumeMessageQueueItemAsUserTurn(
           options.queueItemId,
-          (item) => buildQueuedMessageUserTurn(item, meta)
+          (item) =>
+            buildQueuedMessageUserTurn(item, meta, {
+              status: useNativeSteer ? 'pending_apply' : 'pending',
+            }),
+          { publishDispatch: !useNativeSteer }
         );
         if (consumed.type === 'missing') {
           return respond('queue-item-missing');
         }
+        if (consumed.type === 'editing') {
+          return respond('queue-item-editing');
+        }
         if (consumed.type === 'invalid') {
           return respond('invalid-queue-item');
         }
+        queueItemConsumed = true;
         const entry = consumed.entry;
+
+        if (useNativeSteer) {
+          const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);
+          const userId = entry.userId?.trim();
+          const timestamp = entry.timestamp?.trim();
+          if (!inputConfig || !userId || !timestamp) {
+            return finishConsumed(
+              respond('invalid-queue-item', {
+                userTurnId: entry.id,
+                error: 'The queued message cannot be converted to a steer turn.',
+              })
+            );
+          }
+          const nativeResult = await this.steerSessionLocked({
+            sessionId: options.sessionId,
+            expectedTurnId: options.expectedTurnId,
+            userTurnId: entry.id,
+            userId,
+            timestamp,
+            inputConfig,
+          });
+          const rejectedDisposition =
+            nativeResult.disposition === 'applied' ? 'error' : nativeResult.disposition;
+          return finishConsumed(
+            nativeResult.applied
+              ? respond('accepted', { userTurnId: entry.id })
+              : respond(rejectedDisposition, {
+                  userTurnId: entry.id,
+                  error: nativeResult.error,
+                })
+          );
+        }
+
         const cancellation = await this.cancelSession({
           type: 'session/cancel',
           sessionId: options.sessionId,
@@ -1461,14 +1540,16 @@ export class SessionExecutionService {
           turnId: options.expectedTurnId,
         });
         if (!cancellation.success) {
-          return respond('error', {
-            userTurnId: entry.id,
-            error: cancellation.error ?? 'The active turn could not be stopped.',
-          });
+          return finishConsumed(
+            respond('error', {
+              userTurnId: entry.id,
+              error: cancellation.error ?? 'The active turn could not be stopped.',
+            })
+          );
         }
-        return respond('accepted', { userTurnId: entry.id });
+        return finishConsumed(respond('accepted', { userTurnId: entry.id }));
       } catch (error) {
-        return respond('error', { error: formatErrorMessage(error) });
+        return finishConsumed(respond('error', { error: formatErrorMessage(error) }));
       } finally {
         releaseConflict();
       }

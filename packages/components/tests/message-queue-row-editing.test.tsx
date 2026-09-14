@@ -272,4 +272,41 @@ describe('queued message editing commits', () => {
     expect(dragTargets[1]?.textContent).toContain('Later queued task');
     expect(dragTargets[1]?.contains(steerButtons[1] ?? null)).toBe(false);
   });
+
+  it('keeps only the head Steer enabled for a legacy non-native daemon', async () => {
+    const items = [makeItem('cid-0', 'First queued task'), makeItem('cid-1', 'Later queued task')];
+    const steered: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          onRemove: () => undefined,
+          onReorder: () => undefined,
+          onEditStart: () => undefined,
+          onEditCancel: () => undefined,
+          onEditSave: () => undefined,
+          onSteer: (item: MessageQueueItem) => steered.push(item.$cid),
+          showSteerAction: true,
+          steerActionScope: 'head',
+          steerDisabledReason: 'Update the local agent',
+        })
+      );
+    });
+
+    const steerButtons = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Steer the active response with this message"]'
+      )
+    );
+    expect(steerButtons).toHaveLength(2);
+    expect(steerButtons[0]?.disabled).toBe(false);
+    expect(steerButtons[1]?.disabled).toBe(true);
+    expect(steerButtons[1]?.title).toBe('Update the local agent');
+    await act(async () => {
+      steerButtons[1]?.click();
+      steerButtons[0]?.click();
+    });
+    expect(steered).toEqual(['cid-0']);
+  });
 });

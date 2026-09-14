@@ -175,9 +175,11 @@ export interface SessionQueueSteerResponse {
   disposition:
     | 'accepted'
     | 'queue-item-missing'
+    | 'queue-item-editing'
     | 'invalid-queue-item'
     | 'no-active-turn'
     | 'stale-turn'
+    | 'unsupported'
     | 'busy'
     | 'error';
   error?: string;

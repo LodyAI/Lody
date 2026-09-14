@@ -6,6 +6,7 @@ import type {
 import {
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsQueueItemSteerProtocol,
   machineSupportsSubagentCancellation,
   type MachineProtocolCapabilities,
   type CodeCollabV2Error,
@@ -778,6 +779,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionQueueSteerResponse | null> => {
     try {
+      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!machineSupportsQueueItemSteerProtocol({ protocolCapabilities })) {
+        return {
+          type: 'session/queue-steer_response',
+          sessionId: args.sessionId,
+          queueItemId: args.queueItemId,
+          accepted: false,
+          disposition: 'unsupported',
+          error: 'This machine does not support exact queued-message steering.',
+        };
+      }
       if (await canUseLocalMachineRpc(machineId)) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,

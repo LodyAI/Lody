@@ -25,7 +25,8 @@ Contract: specs/session-orchestration.md.
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; Queue Steer consumes exact `$cid`; missing never stops.
+- Queue promotion keeps frozen fields. Exact Steer respects edit leases/native support;
+  missing/stale targets never stop.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC

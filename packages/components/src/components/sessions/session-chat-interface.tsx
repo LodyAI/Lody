@@ -66,7 +66,7 @@ import {
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import { MessageQueueDisplay } from './message-queue';
+import { MessageQueueDisplay, resolveQueuedMessageSteerRoute } from './message-queue';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
@@ -114,6 +114,7 @@ import {
   hasReportedPreviewTarget,
   isSessionGoalCleared,
   isSessionGoalActive,
+  machineSupportsQueueItemSteerProtocol,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
@@ -5182,7 +5183,17 @@ export const SessionChatInterface = memo(
       [captureSessionEvent, reorderMessageQueueItem, t]
     );
 
-    const handleSteerQueuedMessage = useCallback(
+    const queueSteerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const queuedMessageSteerRoute = resolveQueuedMessageSteerRoute({
+      supportsExactDaemonProtocol: machineSupportsQueueItemSteerProtocol(sessionMachine),
+      authority: capabilityAuthority,
+      capability: queueSteerCapability,
+    });
+    const legacyQueueSteerRequiresHead = queuedMessageSteerRoute === 'legacy-head';
+
+    const handleExactQueueItemSteer = useCallback(
       async (item: MessageQueueItem) => {
         if (isExternalHistoryRefreshing || !activeAssistantTurnId || !currentUser?.id) {
           return;
@@ -5207,7 +5218,12 @@ export const SessionChatInterface = memo(
               description:
                 response?.disposition === 'queue-item-missing'
                   ? t('sessions.queueItemMissing', 'That queued message is no longer available')
-                  : response?.error,
+                  : response?.disposition === 'queue-item-editing'
+                    ? t(
+                        'sessions.queueItemEditing',
+                        'Finish editing this queued message before steering it'
+                      )
+                    : response?.error,
             });
           }
         } catch (error) {
@@ -5234,6 +5250,135 @@ export const SessionChatInterface = memo(
         session.id,
         session.machineId,
         t,
+      ]
+    );
+
+    const handleLegacyNativeQueueSteer = useCallback(
+      async (item: MessageQueueItem) => {
+        if (isExternalHistoryRefreshing || !activeAssistantTurnId) return;
+        if (steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        steeringQueueItemIdsRef.current.add(item.$cid);
+        try {
+          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
+          const userId = item.userId?.trim() || currentUser?.id;
+          if (!inputConfig || !userId) {
+            throw new Error('Queued message input is invalid');
+          }
+          const inputBlocks = normalizeSessionInputBlocks(
+            inputConfig.inputBlocks,
+            inputConfig.prompt ?? item.task
+          );
+          const pendingHistoryEntry = buildPendingUserHistoryEntry({
+            userId,
+            inputBlocks,
+            timestamp: item.timestamp,
+            inputConfig,
+            status: 'pending_apply',
+          });
+          if (!pendingHistoryEntry) throw new Error('Queued message is empty');
+
+          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          const { entry } = await addSessionHistory({
+            ...pendingHistoryEntry,
+            id: queuedUserTurnId,
+          });
+          await removeMessageQueueItem(item.$cid);
+          trackMessageSend(entry.id);
+          void touchSessionActivity(session.id).catch((error: unknown) => {
+            console.warn('Failed to update session activity for steer', error);
+          });
+          const applied = await guideHistoryEntry(entry.id, activeAssistantTurnId);
+          captureSessionEvent('session/queue_legacy_native_steer_result', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+            applied,
+          });
+        } catch (error) {
+          console.error('Failed to steer queued message through legacy native path', error);
+          captureSessionEvent('session/queue_legacy_native_steer_failed', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+            error_name: error instanceof Error ? error.name : typeof error,
+            error_message: getErrorMessage(error),
+          });
+          toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
+        } finally {
+          steeringQueueItemIdsRef.current.delete(item.$cid);
+        }
+      },
+      [
+        activeAssistantTurnId,
+        addSessionHistory,
+        captureSessionEvent,
+        currentUser?.id,
+        guideHistoryEntry,
+        isExternalHistoryRefreshing,
+        removeMessageQueueItem,
+        session.id,
+        t,
+        touchSessionActivity,
+        trackMessageSend,
+      ]
+    );
+
+    const handleLegacyHeadQueueSteer = useCallback(
+      async (item: MessageQueueItem) => {
+        if (
+          isExternalHistoryRefreshing ||
+          !activeAssistantTurnId ||
+          messageQueue[0]?.$cid !== item.$cid
+        ) {
+          return;
+        }
+        setInputActionState('ready');
+        pendingUserInterruptRef.current = true;
+        try {
+          await requestSessionCancel(session.id, activeAssistantTurnId);
+          captureSessionEvent('session/queue_legacy_head_steer_succeeded', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+          });
+        } catch (error) {
+          pendingUserInterruptRef.current = false;
+          captureSessionEvent('session/queue_legacy_head_steer_failed', {
+            queue_item_id: item.$cid,
+            active_assistant_turn_id: activeAssistantTurnId,
+            error_name: error instanceof Error ? error.name : typeof error,
+            error_message: getErrorMessage(error),
+          });
+          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
+            description: getErrorMessage(error),
+          });
+        }
+      },
+      [
+        activeAssistantTurnId,
+        captureSessionEvent,
+        isExternalHistoryRefreshing,
+        messageQueue,
+        requestSessionCancel,
+        session.id,
+        t,
+      ]
+    );
+
+    const handleSteerQueuedMessage = useCallback(
+      async (item: MessageQueueItem) => {
+        if (queuedMessageSteerRoute === 'exact-daemon') {
+          await handleExactQueueItemSteer(item);
+          return;
+        }
+        if (queuedMessageSteerRoute === 'legacy-native') {
+          await handleLegacyNativeQueueSteer(item);
+          return;
+        }
+        await handleLegacyHeadQueueSteer(item);
+      },
+      [
+        handleExactQueueItemSteer,
+        handleLegacyHeadQueueSteer,
+        handleLegacyNativeQueueSteer,
+        queuedMessageSteerRoute,
       ]
     );
 
@@ -6162,6 +6307,11 @@ export const SessionChatInterface = memo(
                                 !!activeAssistantTurnId &&
                                 !isExternalHistoryRefreshing
                               }
+                              steerActionScope={legacyQueueSteerRequiresHead ? 'head' : 'all'}
+                              steerDisabledReason={t(
+                                'sessions.messageQueue.updateAgentForLaterSteer',
+                                'Update the local agent to steer a later queued message'
+                              )}
                             />
                           ) : null
                         }

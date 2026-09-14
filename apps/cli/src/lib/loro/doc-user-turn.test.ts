@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createSessionMirror,
+  getServerNow,
   type MessageQueueItem,
   type SessionHistoryInput,
   type SessionId,
@@ -84,6 +85,42 @@ describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
     ).resolves.toEqual({ type: 'missing' });
     expect(state.history).toEqual([]);
     expect(state.mq.map((item) => item.$cid)).toEqual(['A']);
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('does not consume an item while another client holds its editing lease', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    state.mq = [
+      {
+        $cid: 'C',
+        task: 'task C',
+        timestamp: '2026-09-13T00:00:00.000Z',
+        isEditing: true,
+        editingStartedAt: getServerNow(),
+      },
+    ];
+
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn('C', () => createUserTurn('user:C'))
+    ).resolves.toEqual({ type: 'editing' });
+    expect(state.history).toEqual([]);
+    expect(state.mq.map((item) => item.$cid)).toEqual(['C']);
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('can reserve an exact item for native steer without publishing ordinary dispatch', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    state.mq = [{ $cid: 'C', task: 'task C', timestamp: '2026-09-13T00:00:00.000Z' }];
+
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn('C', () => createUserTurn('user:C'), {
+        publishDispatch: false,
+      })
+    ).resolves.toMatchObject({ type: 'consumed', entry: { id: 'user:C' } });
+    expect(state.history.map((entry) => entry.id)).toEqual(['user:C']);
+    expect(state.mq).toEqual([]);
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 });

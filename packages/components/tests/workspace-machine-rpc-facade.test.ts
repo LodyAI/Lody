@@ -69,6 +69,31 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
+  it('does not send the exact queue RPC when an older daemon omits its capability', async () => {
+    const getMachineRpcClient = vi.fn(async () => {
+      throw new Error('Unexpected RPC');
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'remote',
+        resolvePlaneForMachine: async () => 'remote',
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSessionQueueSteer(remoteMachineId, {
+        sessionId,
+        expectedTurnId: 'assistant-active',
+        queueItemId: 'queue-C',
+        requestedByUserId: 'user-1',
+      })
+    ).resolves.toMatchObject({ accepted: false, disposition: 'unsupported' });
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

@@ -25,7 +25,8 @@ const isConfigOptionValueRecord = (
 /** Materialize one durable queue item as the user turn that will execute it. */
 export function buildQueuedMessageUserTurn(
   queuedItem: MessageQueueItem,
-  meta: SessionMeta
+  meta: SessionMeta,
+  options: { status?: 'pending' | 'pending_apply' } = {}
 ): SessionHistoryInput | null {
   const inputBlocks = normalizeSessionInputBlocks(
     queuedItem.acpSessionConfig?.inputBlocks,
@@ -53,6 +54,7 @@ export function buildQueuedMessageUserTurn(
     inputBlocks,
     timestamp: queuedItem.timestamp,
     inputConfig,
+    ...(options.status ? { status: options.status } : {}),
   });
   if (!pendingEntry) return null;
 

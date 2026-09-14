@@ -20,15 +20,31 @@ the queue by hand.
   preference and still obeys the ordinary availability, live-activity, and unfinished-
   transcript safeguards. Composer focus, content, and send readiness are command-level
   availability rules so user-rebound shortcuts retain them.
-- While steering is available for the active turn, every queued message exposes Steer.
-  Selecting an item sends its durable queue identity and the expected active turn to the
-  owning daemon. The daemon revalidates both identities, atomically consumes only that row
-  into the next durable user turn, and then stops the expected turn. Queue order is never
-  rewritten as part of Steer: selecting C from `[A, B, C]` produces the active turn C and
-  leaves `[A, B]`.
-- A stale Steer selection is a failed no-op. If the selected queue identity is missing, or
-  the expected turn no longer owns execution, the daemon must not stop any turn. The
-  renderer waits for this acknowledgement and never removes or materializes the row itself.
+- Exact-item steering is a versioned daemon workflow. A renderer may call
+  `session/queue-steer` only when `MachineMeta.protocolCapabilities.queueItemSteer` advertises
+  a supported version; a missing capability means unsupported. The request carries the
+  durable queue identity and expected active turn. The daemon, not the renderer, chooses the
+  execution mechanism:
+
+  | Active daemon/runtime                                         | Steer behavior                                                                                                                   |
+  | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+  | Exact-item protocol and acknowledged native ACP Steer         | Atomically consume the selected row as `pending_apply`, then inject it into the current prompt through `steerPrompt`.            |
+  | Exact-item protocol without native ACP Steer                  | Atomically consume the selected row as the next user turn, then stop only the expected turn.                                     |
+  | Older daemon with authoritative acknowledged native ACP Steer | Preserve the legacy native Steer path.                                                                                           |
+  | Older daemon without acknowledged native ACP Steer            | Keep the established queue-head interrupt behavior; disable Steer on later rows and require a daemon update for exact selection. |
+
+  No compatibility path may reorder a later item and then cancel. Selecting C from
+  `[A, B, C]` through the exact protocol consumes C and leaves `[A, B]` in that order.
+
+- A stale or conflicting exact Steer selection is a failed no-op. If the selected queue
+  identity is missing, its editing lease is active, or the expected turn no longer owns
+  execution, the daemon must not submit native Steer or stop any turn. The renderer waits for
+  this acknowledgement and never removes or materializes an exact-protocol row itself.
+- The daemon retains a bounded receipt for each recently consumed exact-item request, keyed by
+  session, expected turn, and queue identity. A same-process retry after a lost response returns
+  the recorded result without consuming or cancelling again. If consumption succeeded but
+  cancellation failed, the message remains a durable follow-up and a retained-receipt retry must
+  not duplicate it.
 - The number and non-editing message body form the drag target for queue reordering.
   Steer, edit, and remove remain separate controls and must not begin a drag.
 - Editing keeps its existing keyboard and focus behavior and disables reordering for

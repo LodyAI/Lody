@@ -6,6 +6,7 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsAcpAuthenticationInteractionsProtocol,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsQueueItemSteerProtocol,
 } from '../src/machine-protocol-capabilities';
 
 describe('ACP authentication interaction protocol capability', () => {
@@ -42,6 +43,20 @@ it('requires an advertised local file resource protocol, independent of release 
   ).toBe(false);
   expect(
     machineSupportsLocalFileResourcesProtocol({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
+});
+
+it('requires an advertised exact queue-item steer protocol', () => {
+  expect(machineSupportsQueueItemSteerProtocol(undefined)).toBe(false);
+  expect(
+    machineSupportsQueueItemSteerProtocol({
+      protocolCapabilities: { [MACHINE_PROTOCOL_CAPABILITIES.queueItemSteer]: 0 },
+    })
+  ).toBe(false);
+  expect(
+    machineSupportsQueueItemSteerProtocol({
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     })
   ).toBe(true);

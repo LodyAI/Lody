@@ -1742,6 +1742,12 @@ const acpRuntimeConfigEqual = (
  */
 const EDITING_LEASE_MS = 5 * 60 * 1000;
 
+const hasActiveMessageQueueEditingLease = (item: MessageQueueItem): boolean => {
+  if (!item.isEditing) return false;
+  const startedAt = item.editingStartedAt ?? 0;
+  return getServerNow() - startedAt < EDITING_LEASE_MS;
+};
+
 export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta> {
   mirror: import('@lody/shared').SessionMirror | null = null;
   handle: RepoDocHandle | null = null;
@@ -2868,9 +2874,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       // crash, killed tab). Treat `editingStartedAt` as a lease; once it expires we
       // dispatch the message anyway so the queue can't get stuck forever. A missing
       // `editingStartedAt` (e.g. items written by older clients) is treated as expired.
-      const startedAt = first.editingStartedAt ?? 0;
-      const editingAge = getServerNow() - startedAt;
-      if (editingAge < EDITING_LEASE_MS) {
+      if (hasActiveMessageQueueEditingLease(first)) {
         return null;
       }
     }
@@ -2914,16 +2918,19 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   /**
    * Consume one exact queue identity into history as a single Session Doc mutation.
    *
-   * The callback runs against the current queue row, so a peer deletion cannot
-   * degrade into a successful no-op followed by an unrelated turn cancellation.
-   * The dispatch pointer is published only after the history/queue mutation exists.
+   * The callback and editing-lease check run against the current queue row, so a
+   * peer delete/edit cannot degrade into an unrelated turn cancellation. Ordinary
+   * dispatch publishes its pointer after the history/queue mutation; native Steer
+   * can reserve the entry without publishing because its handoff owns activation.
    */
   async consumeMessageQueueItemAsUserTurn(
     cid: string,
-    buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null
+    buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null,
+    options: { publishDispatch?: boolean } = {}
   ): Promise<
     | { type: 'consumed'; entry: SessionHistoryInput }
     | { type: 'missing' }
+    | { type: 'editing' }
     | { type: 'invalid' }
   > {
     if (!this.mirror) {
@@ -2934,12 +2941,17 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       value:
         | { type: 'consumed'; entry: SessionHistoryInput }
         | { type: 'missing' }
+        | { type: 'editing' }
         | { type: 'invalid' };
     } = { value: { type: 'missing' } };
     this.mirror.setState((prev) => {
       const queue = (prev.mq ?? []) as MessageQueueItem[];
       const item = queue.find((candidate) => candidate.$cid === cid);
       if (!item) return prev;
+      if (hasActiveMessageQueueEditingLease(item)) {
+        outcome.value = { type: 'editing' };
+        return prev;
+      }
 
       const entry = buildEntry(item);
       if (!entry) {
@@ -2960,7 +2972,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       return prev;
     });
 
-    if (outcome.value.type === 'consumed') {
+    if (outcome.value.type === 'consumed' && options.publishDispatch !== false) {
       await this.repo.upsertDocMeta(this.roomId, {
         latestUserMsgId: outcome.value.entry.id,
       } satisfies Partial<SessionMeta>);
