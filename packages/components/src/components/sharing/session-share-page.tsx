@@ -41,7 +41,7 @@ import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pil
 import { Sheet, SheetContent, SheetTitle } from '@/ui/sheet';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/theme-provider';
-import { SessionShareComposer } from './session-share-composer';
+import { SessionShareActions } from './session-share-actions';
 import {
   ShareBrandLink,
   ShareViewerIdentity,
@@ -240,7 +240,7 @@ function ShareConversationPane({
               }
             />
           </SessionReadonlyContext.Provider>
-          <SessionShareComposer
+          <SessionShareActions
             createAgentPrompt={createAgentPrompt}
             onCopyMarkdown={() => void copy()}
             copyDisabled={copying || snapshot.status !== 'ready'}
@@ -314,35 +314,52 @@ export function SessionShareSurface(props: {
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
   const treeRows = () =>
-    tree.map((node) => (
-      <div
-        key={node.id}
-        className={`flex items-center rounded-md ${node.id === panes.root.id ? 'bg-accent' : 'hover:bg-accent/50'}`}
-      >
-        <SessionRowLeadingSlot
-          menuLabel=""
-          openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
-            setCollapsed((previous) => {
-              const next = new Set(previous);
-              if (next.has(node.id)) next.delete(node.id);
-              else next.add(node.id);
-              return next;
-            })
+    tree.map((node) => {
+      // A child Tab is named by the tab strip, so the tree marks the root the
+      // main pane belongs to — selecting a Tab keeps its conversation lit.
+      const active = node.id === panes.root.id;
+      return (
+        <div
+          key={node.id}
+          className={cn(
+            'flex items-center rounded-md border border-transparent transition-colors',
+            // Not `bg-accent`: `--accent` is not one of this project's theme
+            // tokens, so that utility resolved to no background at all and the
+            // tree had no visible selection. Tint the reader's own foreground,
+            // matching how the app marks a selected sidebar row.
+            active
+              ? 'border-foreground/10 bg-foreground/10'
+              : 'hover:border-foreground/5 hover:bg-foreground/5'
           )}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            props.onSelect(node.id);
-            setTreeSheetOpen(false);
-          }}
-          aria-current={node.id === panes.root.id ? 'page' : undefined}
-          className="min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]"
         >
-          {title(node.item.title)}
-        </button>
-      </div>
-    ));
+          <SessionRowLeadingSlot
+            menuLabel=""
+            openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
+              setCollapsed((previous) => {
+                const next = new Set(previous);
+                if (next.has(node.id)) next.delete(node.id);
+                else next.add(node.id);
+                return next;
+              })
+            )}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              props.onSelect(node.id);
+              setTreeSheetOpen(false);
+            }}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]',
+              active ? 'font-medium text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            {title(node.item.title)}
+          </button>
+        </div>
+      );
+    });
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
@@ -383,12 +400,24 @@ export function SessionShareSurface(props: {
         </div>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-        {hasTree && treeVisible && (
+        {hasTree && (
+          // The toggle animates width rather than mounting and unmounting: a
+          // conditional element cannot transition, so the tree used to blink in
+          // and out and shove the transcript sideways with it. The inner column
+          // keeps its own width so the rows slide out of a clipping box instead
+          // of reflowing to nothing on the way.
           <nav
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
-            className="hidden shrink-0 overflow-auto border-border bg-muted/20 p-2 sm:block sm:w-56 sm:border-r"
+            inert={!treeVisible || undefined}
+            className={cn(
+              'hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-out',
+              'motion-reduce:transition-none sm:block',
+              treeVisible ? 'sm:w-56' : 'sm:w-0'
+            )}
           >
-            {treeRows()}
+            <div className="h-full w-56 overflow-y-auto border-r border-border bg-muted/20 p-2">
+              {treeRows()}
+            </div>
           </nav>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -443,23 +472,44 @@ export function SessionSharePage(props: SessionSharePageProps) {
   );
 }
 
+/**
+ * Reads the selected conversation, keeping the ones already read.
+ *
+ * A published deployment is immutable, so a conversation that loaded once can
+ * never have a different answer later: re-fetching it when the visitor walks
+ * back through the tree only buys a loading state. The cache is plain memory
+ * scoped to one `StaticShare` — it is not a durable history cache, survives no
+ * reload, and a new deployment or credential replaces the share object and
+ * empties it with the same render.
+ */
 function useShareConversation(share: StaticShare | null, conversationId: string | undefined) {
-  const [state, setState] = useState<{
-    share: StaticShare;
-    id: string;
-    snapshot: SessionShareReaderSnapshot;
-  } | null>(null);
+  const [cache, setCache] = useState<{
+    share: StaticShare | null;
+    snapshots: ReadonlyMap<string, SessionShareReaderSnapshot>;
+  }>({ share, snapshots: new Map() });
+  if (cache.share !== share) setCache({ share, snapshots: new Map() });
+  const current =
+    cache.share === share && conversationId ? cache.snapshots.get(conversationId) : undefined;
+  // Only a completed read may be reused. A failed one is retried on return,
+  // since "unavailable" here can also mean a transient network failure.
+  const cached = current?.status === 'ready';
   useEffect(() => {
-    if (!share || !conversationId) return undefined;
+    if (!share || !conversationId || cached) return undefined;
     const reader = createSessionShareReader({
       share,
       conversationId,
-      onChange: (snapshot) => setState({ share, id: conversationId, snapshot }),
+      onChange: (snapshot) =>
+        setCache((previous) => {
+          if (previous.share !== share) return previous;
+          const snapshots = new Map(previous.snapshots);
+          snapshots.set(conversationId, snapshot);
+          return { share, snapshots };
+        }),
     });
     void reader.start();
     return () => reader.close();
-  }, [share, conversationId]);
-  return state?.share === share && state?.id === conversationId ? state.snapshot : loadingSnapshot;
+  }, [share, conversationId, cached]);
+  return current ?? loadingSnapshot;
 }
 
 function SessionShareReaderPage({ apiOrigin, shareId, secret }: SessionSharePageProps) {

@@ -54,7 +54,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   and never create a workspace runtime, Repo, Flock, machine connection, source
   attachment request or local durable history cache. Navigation is manifest-only.
   `session-share-reader.ts` reads a single immutable history; no polling, Loro
-  document or source fallback. One conversation is selected at a time.
+  document or source fallback. One conversation is selected at a time. A `ready`
+  read is cached in memory per `StaticShare`; attachments and reloads re-read.
   Capture removes `system_notice/task_proposal` from display containers before
   attachment I/O; reader validation rejects it. Preserve `subagent_task` and
   opaque tool/text content. This is not keyword-based task redaction.
@@ -64,6 +65,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   content and must stay reachable, never dropped with the pane. Reuse controlled
   presentation only, not workspace runtime hooks. The left tree uses the app's
   `session-row-leading-slot.tsx`, not a second connector/disclosure implementation.
+  It marks the open pane's root; tint with `foreground`, as `--accent` is no
+  token here and `bg-accent` paints nothing.
 - Markdown is dynamic and uses the existing conversation-copy builder, range
   selection, budget/truncation rules and result notices. No stored Markdown object.
 - The shared file-attachment rollout switch defaults off: capture replaces typed
@@ -87,7 +90,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   to left: viewer identity, language toggle, theme control. English/Chinese uses
   `lody-language`, without app/OneSignal hooks. The tree is a left sidebar on wide
   viewports and a left drawer on narrow ones; CSS selects each layout's toggle,
-  never a viewport hook. Theme offers only Light/Dark, coerces other stored values
+  never a viewport hook. Its toggle animates width, rows mounted and `inert`
+  while closed. Theme offers only Light/Dark, coerces other stored values
   to Light, and drives the reader ThemeProvider independently of app appearance.
   Publication does not embed the reader.
 - `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
@@ -95,9 +99,9 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   showing a name or avatar requires the host to establish it. Signed-out renders
   no identity placeholder or login entry, on either wide or narrow viewports.
 - Name panes with the app's `shared/tab-pill-strip.tsx`, never a second title bar,
-  for both single conversations and child Tabs. `session-share-composer.tsx` uses
-  `chat/composer-surface.ts`'s exact resting surface, inert and `aria-hidden`, with
-  visitor actions floated over it, including per-pane Markdown copy.
+  for both single conversations and child Tabs. `session-share-actions.tsx` is the
+  foot: one row with Markdown copy, Copy Agent Prompt and its disclosure. Never
+  imitate the composer; a visitor cannot write.
 - The host owns origin/build/CSP and an isolated anonymous platform/store.
 
 - Static share snapshots render through `createSharedChatStreamBuilder`, which owns

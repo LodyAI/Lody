@@ -118,6 +118,120 @@ describe('static share presentation', () => {
   });
   const render = () => act(async () => root.render(<SessionShareSurface {...props} />));
 
+  it('keeps a conversation it already read, so returning to it needs no second read', async () => {
+    const reads: string[] = [];
+    // A read that never settles: any second read would leave the page loading,
+    // so a live export proves the transcript came from memory rather than from
+    // a repeat fetch that merely happened to be fast.
+    let hang = false;
+    const open = vi.spyOn(sharing, 'openStaticShare').mockResolvedValue({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: props.manifest!,
+      createAgentAccess: async () => ({ url: '', expiresAt: '' }),
+      readHistory: async (conversationId: string) => {
+        reads.push(conversationId);
+        if (hang) await new Promise(() => {});
+        return [
+          {
+            id: `m-${conversationId}`,
+            role: 'assistant',
+            timestamp: '2026-09-12T00:00:00Z',
+            finished: true,
+            items: [{ type: 'text', text: `Answer in ${conversationId}` }],
+            fileDiff: [],
+          },
+        ] satisfies SessionHistory[];
+      },
+      readObject: vi.fn(),
+      readAttachment: vi.fn(),
+    });
+    const exportButton = () =>
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+        node.textContent?.includes('Copy as Markdown')
+      )!;
+    const openTree = (id: string) =>
+      act(async () => {
+        const nav = container.querySelector('nav[aria-label="Conversation tree"]')!;
+        [...nav.querySelectorAll<HTMLButtonElement>('button')]
+          .find((node) => node.textContent === id)!
+          .click();
+      });
+    try {
+      await act(async () =>
+        root.render(
+          <SessionSharePage
+            apiOrigin="https://api.example.test"
+            shareId="share"
+            secret={'a'.repeat(64)}
+          />
+        )
+      );
+      expect(reads).toEqual(['c1']);
+      await openTree('Review');
+      expect(reads).toEqual(['c1', 'c3']);
+      hang = true;
+      await openTree('Main');
+      // No third read, and the export is live immediately: the transcript is
+      // on screen rather than behind a loading state.
+      expect(reads).toEqual(['c1', 'c3']);
+      expect(exportButton().disabled).toBe(false);
+      await act(async () => exportButton().click());
+      expect(writeText.mock.lastCall?.[0]).toContain('Answer in c1');
+    } finally {
+      open.mockRestore();
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
+  it('marks the tree entry the open pane belongs to, including from a child Tab', async () => {
+    const open = vi.spyOn(sharing, 'openStaticShare').mockResolvedValue({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: props.manifest!,
+      createAgentAccess: async () => ({ url: '', expiresAt: '' }),
+      readHistory: async () => [],
+      readObject: vi.fn(),
+      readAttachment: vi.fn(),
+    });
+    const marked = () =>
+      container.querySelector('nav[aria-label="Conversation tree"] [aria-current="page"]')
+        ?.textContent;
+    try {
+      await act(async () =>
+        root.render(
+          <SessionSharePage
+            apiOrigin="https://api.example.test"
+            shareId="share"
+            secret={'a'.repeat(64)}
+          />
+        )
+      );
+      expect(marked()).toBe('Main');
+      await act(async () =>
+        [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          .find((node) => node.textContent === 'Notes')!
+          .click()
+      );
+      // A child Tab is named by the tab strip, so the tree keeps pointing at
+      // the independent conversation the visitor is reading inside.
+      expect(marked()).toBe('Main');
+      await act(async () =>
+        [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            'nav[aria-label="Conversation tree"] button'
+          ),
+        ]
+          .find((node) => node.textContent === 'Review')!
+          .click()
+      );
+      expect(marked()).toBe('Review');
+    } finally {
+      open.mockRestore();
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
   it('copies the prompt in the reader language, including after a language switch', async () => {
     const link = {
       url: 'https://api.example.test/api/share-agent/token',
@@ -220,6 +334,23 @@ describe('static share presentation', () => {
     )!;
     await act(async () => review.click());
     expect(props.onSelect).toHaveBeenCalledWith('c3');
+  });
+
+  it('collapses the sidebar in place so it can animate, and keeps it out of the way', async () => {
+    await render();
+    const sidebarToggle = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Toggle conversation tree"]'
+    )!;
+    const tree = () => container.querySelector('nav[aria-label="Conversation tree"]')!;
+    expect(tree().hasAttribute('inert')).toBe(false);
+    await act(async () => sidebarToggle.click());
+    expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false');
+    // The rows stay mounted — an element that unmounts cannot transition — but
+    // a collapsed tree must not take focus or clicks on the way out.
+    expect(tree().textContent).toContain('Main');
+    expect(tree().hasAttribute('inert')).toBe(true);
+    await act(async () => sidebarToggle.click());
+    expect(tree().hasAttribute('inert')).toBe(false);
   });
 
   it('reaches the conversation tree as a drawer where a sidebar does not fit', async () => {

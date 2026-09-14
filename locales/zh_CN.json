@@ -4050,7 +4050,6 @@
   "sharing.appearance": "外观：{{mode}}",
   "sharing.conversations": "分享的对话",
   "sharing.signIn": "登录 Lody",
-  "sharing.agentComposerPlaceholder": "交给你自己的 Agent 继续…",
   "sharing.copyAgentPrompt": "复制 Agent Prompt",
   "sharing.switchLanguage": "切换语言：{{language}}",
   "sharing.manager.credentialStorageFailed": "无法在此设备保存分享链接。请允许浏览器存储后重试，本次未执行发布。",

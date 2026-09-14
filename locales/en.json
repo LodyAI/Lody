@@ -4050,7 +4050,6 @@
   "sharing.appearance": "Appearance: {{mode}}",
   "sharing.conversations": "Shared conversations",
   "sharing.signIn": "Sign in to Lody",
-  "sharing.agentComposerPlaceholder": "Continue with your own agent…",
   "sharing.copyAgentPrompt": "Copy Agent Prompt",
   "sharing.switchLanguage": "Switch language: {{language}}",
   "sharing.manager.credentialStorageFailed": "Could not save the share link on this device. Allow browser storage and retry. This attempt did not publish.",

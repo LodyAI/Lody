@@ -128,7 +128,10 @@ independent child conversations appear in the left conversation tree and child
 Tabs in the main tab bar. It has no right pane, so a side-panel child appears in
 that same tab bar rather than being hidden; published content is never
 unreachable. Relationships come from the manifest, not hidden references in
-history. Navigation never expands the manifest.
+history. Navigation never expands the manifest. A conversation the visitor has
+already opened reappears without a second fetch: completed reads of the pinned
+deployment stay in memory for the life of the page, and no part of a share is
+written to durable storage.
 
 Markdown is generated only when requested, using the existing conversation-copy
 builder, range selection, budget rules and result notices. It is a readable

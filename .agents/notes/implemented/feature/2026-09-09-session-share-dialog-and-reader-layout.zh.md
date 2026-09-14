@@ -88,3 +88,6 @@ Translation: current
 限制：该入口是客户端渲染的 SPA，因此缓存的主题是在阅读端挂载时应用，而非首帧之前。跨 origin 共享主题不
 可能，也未尝试——`localStorage` 按 origin 隔离，因此 `share.lody.ai` 与应用域名各自保留选择，这正是页内
 控件存在的原因。截图使用合成 fixture；未使用任何已部署的后端。
+
+读取页的底部、对话树选中态与侧栏开关后来被替换，见
+[分享读取页的导航与底部](2026-09-14-share-reader-navigation-and-foot.zh.md)。
