@@ -13,7 +13,8 @@
 - Repeated identity lookups reuse an unchanged pending transaction. Reads must not
   commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
 - Subscribe and capture the initial directory without a gap. Notifications carry structural ranges or changed turn ids. The display
-  cache rejects stale async reads. CLI reads in-process synchronously; auto-seen
+  cache rejects stale async reads. Turn ID edits (including deletion) are structural:
+  notify by position so readers can remove the old identity before re-keying. CLI reads in-process synchronously; auto-seen
   scans directory scalars only and permission checks have no await gap.
 - Ordinary commands propagate writer errors; absence returns a boolean where the
   caller needs it. Only import and editable-tail replacement use phased results:

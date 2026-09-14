@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
-import { createLoroSessionData } from '../src/session-data';
+import { createLoroSessionData, type SessionDataChange } from '../src/session-data';
 import { createHistoryWriter } from '../src/history-writer';
 import type { SessionId } from '../src/ids';
 const sessionId = 'review-boundaries' as SessionId;
@@ -168,6 +168,44 @@ it('reuses pending reads while observing uncommitted replacement, duplicates and
       peer.free();
     }
   } finally {
+    data.dispose();
+    doc.free();
+  }
+});
+
+it('distinguishes turn identity edits from nested IDs and ordinary content changes', async () => {
+  const doc = new LoroDoc();
+  const writer = createHistoryWriter(doc);
+  writer.append(turn('first'));
+  writer.append(turn('second'));
+  const data = createLoroSessionData({ doc, sessionId, writer });
+  const changes: SessionDataChange[] = [];
+  const observation = data.history.observe((change) => changes.push(change));
+  await observation.initial;
+  try {
+    const map = doc.getList('history').get(1) as LoroMap;
+    const nested = map.setContainer('future', new LoroMap());
+    nested.set('id', 'nested');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'changed', ids: ['second'] }]);
+    nested.set('id', 'nested-renamed');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'changed', ids: ['second'] }]);
+    map.set('status', 'seen');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'changed', ids: ['second'] }]);
+    map.set('id', 'renamed');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'structure', from: 1, to: 2 }]);
+    map.delete('id');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'structure', from: 1, to: 2 }]);
+    map.set('id', 'restored');
+    doc.commit();
+    expect(changes.splice(0)).toEqual([{ kind: 'structure', from: 1, to: 2 }]);
+    expect(data.history.readTurn('restored')).toMatchObject({ turn: { id: 'restored' } });
+  } finally {
+    observation.unsubscribe();
     data.dispose();
     doc.free();
   }

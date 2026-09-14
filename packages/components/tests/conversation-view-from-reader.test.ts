@@ -1,6 +1,6 @@
 import { writeStoredField } from './conversation-view-fixtures';
 import { describe, expect, it, vi } from 'vitest';
-import type { LoroMap } from 'loro-crdt';
+import { LoroDoc, type LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import { createHistoryWriter } from '@lody/shared';
 import {
@@ -737,6 +737,58 @@ describe('createConversationViewFromReader Loro-only wiring', () => {
  */
 describe('createConversationViewFromReader audit regressions', () => {
   const checkpoint = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it.each(['rename', 'remove'] as const)(
+    're-keys a cached turn when a synchronized peer edits its identity: %s',
+    async (edit) => {
+      const doc = buildSessionDoc(buildFixtureHistory(3));
+      const peer = new LoroDoc();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+      const view = createConversationViewFromReader(data.history, {
+        sessionId: FIXTURE_SESSION_ID,
+        tailKeep: 0,
+        scheduleIdle: () => () => {},
+        yieldToEventLoop: () => Promise.resolve(),
+      });
+      try {
+        await checkpoint();
+        const lease = view.acquireRange(0, 6);
+        await lease.ready;
+        expect(view.turn(1)?.id).toBe('a-0');
+        const sibling = view.turn(0);
+        const remoteTurn = peer.getList('history').get(1) as LoroMap;
+        if (edit === 'rename') remoteTurn.set('id', 'renamed');
+        else remoteTurn.delete('id');
+        peer.commit();
+        doc.import(peer.export({ mode: 'update', from: doc.version() }));
+        await flushReaderChanges();
+        await checkpoint();
+
+        expect(view.turnCount).toBe(6);
+        expect(view.indexOf('a-0')).toBe(-1);
+        expect(view.turn(0)).toBe(sibling);
+        expect(view.index(2)?.id).toBe('u-1');
+        expect(data.history.readTurn('a-0')).toEqual({ state: 'missing' });
+        if (edit === 'rename') {
+          expect(view.indexOf('renamed')).toBe(1);
+          const renamed = view.acquireRange(1, 2);
+          await renamed.ready;
+          expect(view.turn(1)?.id).toBe('renamed');
+          renamed.release();
+        } else {
+          expect(view.turn(1)).toBeUndefined();
+          expect(data.history.readDirectory(1, 2)).toEqual([{ position: 1, state: 'invalid' }]);
+        }
+        lease.release();
+      } finally {
+        view.dispose();
+        data.dispose();
+        peer.free();
+        doc.free();
+      }
+    }
+  );
 
   it('a scalar change to an early turn preserves the later directory rows', async () => {
     // `to` from the ranged event is a local endpoint, not the list length; a

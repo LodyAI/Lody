@@ -174,10 +174,18 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     return rows;
   };
 
+  const isTurnIdentityEdit = (event: LoroEventBatch['events'][number]) =>
+    event.path[0] === HISTORY_ROOT_KEY &&
+    event.path.length === 2 &&
+    event.diff.type === 'map' &&
+    Object.hasOwn(event.diff.updated, 'id');
+
   /**
    * The raw positions a batch touched, for a consumer that re-reads only the
    * affected window. Structural list edits report `[structuralFrom, length)`
-   * because later positions shifted; child edits report their own turn.
+   * because later positions shifted. In-place turn ID edits also need positions:
+   * a consumer still keyed by the old ID cannot resolve the new (or missing) ID.
+   * Other child edits report their own turn.
    */
   const changeRangeOf = (
     batch: LoroEventBatch
@@ -205,6 +213,10 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       if (event.path[0] !== HISTORY_ROOT_KEY) continue;
       const index = event.path[1];
       if (typeof index === 'number') {
+        if (isTurnIdentityEdit(event)) {
+          structural = true;
+          structuralFrom = Math.min(structuralFrom, index);
+        }
         from = Math.min(from, index);
         to = Math.max(to, index + 1);
       } else {
@@ -239,11 +251,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     if (
       batch.events.some(
         (event) =>
-          (event.target === list.id && event.diff.type === 'list') ||
-          (event.path[0] === HISTORY_ROOT_KEY &&
-            event.path.length === 2 &&
-            event.diff.type === 'map' &&
-            Object.hasOwn(event.diff.updated, 'id'))
+          (event.target === list.id && event.diff.type === 'list') || isTurnIdentityEdit(event)
       )
     )
       identityDirty = true;
