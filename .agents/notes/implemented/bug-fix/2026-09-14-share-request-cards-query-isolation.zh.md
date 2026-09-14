@@ -61,3 +61,22 @@ Convex 报告查询失败的常规方式：在查询恢复之前，每次渲染�
 服务端成因在本仓库边界之外：失败的查询位于托管后端，上面的 request ID 是唯一线索。在
 后端修复之前，受影响的用户看到的是提示而不是待确认的分享请求。该回退界面不可达任何
 可发布的操作。
+
+## 同一份报告还暴露了失效的防循环预算
+
+`ErrorBoundary` 的文档约定是：同一个重复错误在 `MAX_AUTOMATIC_RESETS` 次之后停止
+`resetKeys` 自动恢复（见[崩溃恢复规则](../../../../packages/components/src/lib/AGENTS.md)）。
+但对任何 Convex 失败它都没有生效：`errorSignature()` 以原始 message 为键，而 Convex 的
+message 内嵌每次请求不同的 id ——
+`[CONVEX Q(…)] [Request ID: a99e396cc57c8c07] Server Error` ——
+于是同一个重复错误的每次出现都被当作新错误，预算永远到不了。用户来回切换会话时，崩溃的
+子树会被无限重新渲染。同文件的 `computeErrorFingerprint()` 早就为分析分组剥离了这些 id，
+只是签名没有复用它。
+
+两者现在共用 `normalizeErrorMessage()`。放宽分组是有意的：仅在 id 或数字串上不同的两个
+错误，对恢复而言就是同一个错误；查询名或错误类型不同的仍然会被区分开。
+
+这也解释了为什么本次上报的崩溃可能一直在重复而未被察觉；进而说明：不能从崩溃报告的
+render trace 推断后端失败是否具有确定性——trace 的记录点在边界之外，无论其下的子树是否
+正在崩溃，它看起来都一样。
+

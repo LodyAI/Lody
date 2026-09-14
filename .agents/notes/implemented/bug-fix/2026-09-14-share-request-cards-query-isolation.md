@@ -73,3 +73,26 @@ The server-side cause is out of this repository's boundary: the failing query li
 in the hosted backend, and the request ID above is the only handle on it. Until
 that is fixed, affected users see the notice instead of their pending share
 requests. Nothing publishable is reachable from the fallback.
+
+## The same report exposed a defeated loop guard
+
+`ErrorBoundary` is documented to stop automatic `resetKeys` recovery after
+`MAX_AUTOMATIC_RESETS` per repeating error
+([crash recovery rules](../../../../packages/components/src/lib/AGENTS.md)). It did
+not, for any Convex failure: `errorSignature()` keyed on the raw message, and a
+Convex message embeds a per-request id —
+`[CONVEX Q(…)] [Request ID: a99e396cc57c8c07] Server Error` — so every occurrence
+of one repeating error looked new and the budget never engaged. A user switching
+sessions re-rendered the crashed subtree indefinitely. The sibling
+`computeErrorFingerprint()` already normalized ids away for analytics grouping;
+the signature simply did not use it.
+
+Both now share `normalizeErrorMessage()`. The widened grouping is deliberate:
+two errors that differ only in ids or digit runs are one error for recovery
+purposes, and distinct query names or error types still separate them.
+
+This is why the reported crash could have been repeating unnoticed, which in turn
+is why no conclusion about the backend failure's determinism can be drawn from
+the crash report's render trace: that trace is emitted above the boundary, so it
+looks identical whether or not the subtree beneath was crashing.
+
