@@ -813,7 +813,7 @@ export function AccountSettingsPure({
 
             return (
               <div key={member.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-                <UserAvatar user={member.user} className="h-7 w-7 shrink-0 text-[11px]" />
+                <UserAvatar user={member.user} size="large" className="shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium leading-tight">
                     {member.user?.name || '—'}

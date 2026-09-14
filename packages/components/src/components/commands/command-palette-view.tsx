@@ -1,6 +1,6 @@
 import { Command as CommandIcon, MessagesSquare, SearchX } from 'lucide-react';
 import { CommandDialog, CommandInput, CommandItem, CommandList } from '@/ui/command';
-import { Kbd as KeyHint } from '@/ui/kbd';
+import { Kbd as KeyHint } from '@lody/ui/kbd';
 import { Kbd } from './kbd';
 
 export type PaletteResult = {

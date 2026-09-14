@@ -24,35 +24,69 @@ describe('Badge', () => {
     expect(html).not.toContain('<button');
   });
 
-  test('each tone is one fill over the same chip', () => {
+  test('a tone is a film and a word, and nothing else moves with it', () => {
     const chips = TONES.map((tone) =>
       classesAt(renderToStaticMarkup(<Badge tone={tone}>{tone}</Badge>))
     );
-    // Five different fills…
+    // Five different chips…
     expect(new Set(chips.map((names) => names.join(' '))).size).toBe(TONES.length);
-    // …and one chip: everything but the fill is shared, so a tone cannot grow
-    // its own height, corner or type step.
+    // …made of one chip: everything a tone does not own is shared, so a tone
+    // cannot grow its own height, corner or type step.
     const shared = chips.reduce<string[]>(
       (kept, names) => kept.filter((name) => names.includes(name)),
       chips[0] ?? []
     );
-    for (const names of chips) expect(names.length).toBe(shared.length + 1);
+    // A tone owns exactly two declarations: the film, and the word. The neutral
+    // one owns two as well — StyleX drops the root's `color` class from a chip
+    // whose tone declares its own, so the base ink is a class only the neutral
+    // chip carries and is therefore not in the shared set either.
+    for (const [index, names] of chips.entries()) {
+      expect(names.length, `the ${TONES[index]} badge owns the wrong number of declarations`).toBe(
+        shared.length + 2
+      );
+    }
   });
 
-  test('the words stay ink in every tone', () => {
-    // `warning` is 2.8:1 on a near-white surface: a colour tuned for a 16px
-    // mark, where the bar is 3:1, rather than for 11px text, where it is 4.5:1.
-    // A badge always carries its word, so the tint says which kind it is and
-    // the label colour is one decision for all four. StyleX hashes a class per
-    // property and value, so the class a bare `color: badge.label` compiles to
-    // is the class every tone has to carry.
-    const ink = stylex.create({ label: { color: badge.label } });
-    const expected = (stylex.props(ink.label).className ?? '').split(' ').filter(Boolean);
-    expect(expected.length).toBe(1);
-    for (const tone of TONES) {
+  test('a tone’s word is that tone pulled halfway to the ink', () => {
+    // The rule this replaces said the words stay ink in every tone, and the
+    // measurement behind it stands: the *raw* `warning` is 2.8:1 on a near-white
+    // surface, a colour tuned for a 16px mark where the bar is 3:1, used as 11px
+    // text where it is 4.5:1. What it left out is that the raw tone is not the
+    // only way to carry a hue — halfway to `label`, a tone keeps its hue and
+    // gains the ink's contrast, and the worst of the four then measures 5.2:1 on
+    // its own chip. That is the mark a person actually reads on a 20px chip,
+    // and in the dark palette it is the only thing that separates `running`
+    // from `warning` at all.
+    // Written out one by one because StyleX compiles `create` from a literal:
+    // a token read through a loop variable is not something it can evaluate.
+    const ink = stylex.create({
+      running: { color: badge.runningLabel },
+      success: { color: badge.successLabel },
+      warning: { color: badge.warningLabel },
+      danger: { color: badge.dangerLabel },
+      neutral: { color: badge.label },
+    });
+    const classFor = (style: (typeof ink)[keyof typeof ink]) => {
+      const names = (stylex.props(style).className ?? '').split(' ').filter(Boolean);
+      // One property, one value, one class — so what follows compares the chip
+      // against the declaration itself rather than against a copy of it.
+      expect(names.length).toBe(1);
+      return names[0];
+    };
+    for (const tone of ['running', 'success', 'warning', 'danger'] as const) {
       const names = classesAt(renderToStaticMarkup(<Badge tone={tone}>a</Badge>));
-      expect(names, `the ${tone} badge does not take the label colour`).toContain(expected[0]);
+      expect(names, `the ${tone} badge does not carry its own word colour`).toContain(
+        classFor(ink[tone])
+      );
     }
+    // And the neutral one has no tone to carry, so it keeps the base ink.
+    expect(classesAt(renderToStaticMarkup(<Badge>a</Badge>))).toContain(classFor(ink.neutral));
+    // The four are four: a tone whose word matched another's would be the bug
+    // this replaces, wearing a different colour.
+    const distinct = new Set(
+      (['running', 'success', 'warning', 'danger'] as const).map((tone) => classFor(ink[tone]))
+    );
+    expect(distinct.size).toBe(4);
   });
 
   test('a caller’s glyph is given a box, and a badge without one has none', () => {

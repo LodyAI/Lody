@@ -7,6 +7,8 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
+import { Avatar, type AvatarSize } from '../avatar/avatar';
+import { avatar as avatarTokens } from '../avatar/avatar.tokens.stylex';
 import { Badge, type BadgeTone } from '../badge/badge';
 import { badge as badgeTokens } from '../badge/badge.tokens.stylex';
 import { Button } from '../button/button';
@@ -41,6 +43,8 @@ import {
   DotGlyph,
   TickGlyph,
 } from '../internal/glyphs';
+import { Kbd, KbdGroup } from '../kbd/kbd';
+import { kbd as kbdTokens, kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
 import { ContextMenu } from '../menu/context-menu';
 import { Menu } from '../menu/menu';
 import { Menubar } from '../menu/menubar';
@@ -87,6 +91,17 @@ export interface UiGalleryProps {
 }
 
 const styles = stylex.create({
+  /**
+   * The ground the ladder stands on, and it has to be the page.
+   *
+   * It was the region rung, and a rung can only be shown against a different
+   * one: in the dark palette `secondaryBackground` and `elevatedBackground` are
+   * both `rgb(22,22,22)`, so the `card` and `modal` chips were the same fill as
+   * the stage under them and a ladder could not show its own card step. On the
+   * page rung exactly one chip matches its ground — `page` — and that one is
+   * supposed to: the page rung *is* the page. A card that cannot be told from
+   * what it sits on is a lie; a page that cannot be is the truth.
+   */
   stage: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -94,7 +109,7 @@ const styles = stylex.create({
     gap: space[3],
     boxSizing: 'border-box',
     padding: space[4],
-    backgroundColor: colors.secondaryBackground,
+    backgroundColor: colors.background,
     borderRadius: radius.large,
     cornerShape: corner.shape,
   },
@@ -320,6 +335,29 @@ const styles = stylex.create({
   // are what a reader is here to see. `dialog.width`, `dialog.drawerSize` and
   // `dialog.inset` are reported by probes instead, because a panel scaled to fit
   // a board can no longer report its own width.
+  /**
+   * What a modal panel is shown standing on: the page, with the overlay over
+   * it. The rung states three things at once — the elevated background, the
+   * large shadow, and the overlay — and the stand-in was painting two of them,
+   * on the board's own panel, which is the card rung. In the dark palette that
+   * surface is the panel's own `rgb(22,22,22)`, so the third was not merely
+   * missing: the stand-in had no background step either.
+   *
+   * One element paints both, because `dialogReplica` needs this box to stay the
+   * containing block for the cross and a second positioned layer would take it:
+   * `background-image` puts the overlay over the page colour in place.
+   */
+  modalStage: {
+    boxSizing: 'border-box',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '260px',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+    backgroundImage: `linear-gradient(${colors.overlay}, ${colors.overlay})`,
+  },
   dialogReplica: {
     // `relative` rather than `static`: the cross is pinned to the panel's own
     // padding box, so the stand-in has to stay the containing block for it.
@@ -388,6 +426,24 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
   },
+  /**
+   * The page rung, for a sample that *is* a rung.
+   *
+   * The board's own palette panel is the card rung — `elevatedBackground` under
+   * `shadow.card` — so a Card dropped straight into it is the same fill twice
+   * under two shadows, which is the nesting the rules forbid by name. In the
+   * dark palette that reads as a card with no background at all: both surfaces
+   * are `rgb(22,22,22)` and the only thing left to separate them is a shadow
+   * already spent on the panel. A rung can only be shown on a different one, so
+   * these samples sit on the page.
+   */
+  pageRung: {
+    boxSizing: 'border-box',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+  },
   /** A badge is on no rung, so the board puts the same four on three of them. */
   badgeRung: {
     display: 'flex',
@@ -426,6 +482,10 @@ const styles = stylex.create({
   },
   // The tooltip stand-in: the chip alone, with nothing to hover.
   tooltipReplica: { position: 'static', zIndex: 'auto', pointerEvents: 'auto' },
+  /** A chip with something beside the words: the row that shows a cap on one. */
+  tooltipReplicaRow: { display: 'inline-flex', alignItems: 'center', gap: space[1.5] },
+  /** A caller's glyph states 100% of the box the fallback gave it. */
+  avatarGlyph: { display: 'block', width: '100%', height: '100%' },
   // Something to point at, so the real tooltips above have an anchor that is not
   // a control with opinions of its own.
   tooltipAnchor: {
@@ -796,7 +856,23 @@ const CARD_COLORS = [
 const BADGE_TONES: BadgeTone[] = ['neutral', 'running', 'success', 'warning', 'danger'];
 
 const BADGE_COLORS = [
-  { name: 'badge.label', value: badgeTokens.label, note: 'ink in every tone' },
+  { name: 'badge.label', value: badgeTokens.label, note: 'the neutral word, and the ink' },
+  {
+    name: 'badge.runningLabel',
+    value: badgeTokens.runningLabel,
+    note: 'the tone, halfway to the ink',
+  },
+  {
+    name: 'badge.successLabel',
+    value: badgeTokens.successLabel,
+    note: 'it worked, in its own hue',
+  },
+  {
+    name: 'badge.warningLabel',
+    value: badgeTokens.warningLabel,
+    note: 'the one the rules warn of',
+  },
+  { name: 'badge.dangerLabel', value: badgeTokens.dangerLabel, note: 'it did not, in its own hue' },
   {
     name: 'badge.neutralFill',
     value: badgeTokens.neutralFill,
@@ -819,6 +895,56 @@ const BADGE_RUNGS = [
   { name: 'on a card', style: styles.card, use: 'the rung a Card is on' },
   { name: 'on a menu', style: styles.floating, use: 'inside a popup, where named fills collapse' },
 ];
+
+/**
+ * The rungs an avatar comes in, and what each one is for. The step inside the
+ * box follows from the box, which is the whole point of the ladder: the deleted
+ * implementation had one size and every call site restated both.
+ */
+const AVATAR_SIZES: { name: string; size: AvatarSize; use: string }[] = [
+  {
+    name: 'mini \u00b7 16',
+    size: 'mini',
+    use: 'in a line of text, where an icon would be: a picture or a mark first',
+  },
+  { name: 'small \u00b7 20', size: 'small', use: 'a sidebar row, a compact list' },
+  { name: 'medium \u00b7 24', size: 'medium', use: 'a list of people; the default' },
+  { name: 'large \u00b7 32', size: 'large', use: 'an account row, the avatar editor' },
+  { name: 'xlarge \u00b7 64', size: 'xlarge', use: 'the screen is about this person' },
+];
+
+const AVATAR_COLORS = [
+  {
+    name: 'avatar.fallbackBackground',
+    value: avatarTokens.fallbackBackground,
+    note: 'a gray: a stand-in for a face has no role',
+  },
+  {
+    name: 'avatar.fallbackLabel',
+    value: avatarTokens.fallbackLabel,
+    note: 'label: the letters are the person',
+  },
+];
+
+const KBD_COLORS = [
+  { name: 'kbd.background', value: kbdTokens.background, note: 'a gray: it is hardware' },
+  { name: 'kbd.label', value: kbdTokens.label, note: 'metadata about the command' },
+];
+
+/**
+ * A face the board can actually load. A remote avatar would leave the image row
+ * showing its fallback on a machine with no network, which is the one thing
+ * this row exists to tell apart.
+ */
+const SAMPLE_FACE =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+      '<rect width="64" height="64" fill="hsl(220 82% 65%)"/>' +
+      '<circle cx="32" cy="25" r="11" fill="hsl(0 0% 100%)"/>' +
+      '<path d="M8 64c0-14 11-22 24-22s24 8 24 22z" fill="hsl(0 0% 100%)"/>' +
+      '</svg>'
+  );
 
 const STRIP_SIZES: { name: string; size: TabsSize }[] = [
   { name: 'small · 28', size: 'small' },
@@ -1649,51 +1775,59 @@ function DialogReplica() {
   return (
     <Row>
       <LegendKey>{'dialog · stand-in'}</LegendKey>
-      <div
-        ref={(node) => {
-          padding.ref.current = node;
-          gap.ref.current = node;
-          panelRadius.ref.current = node;
-          panelShadow.ref.current = node;
-        }}
-        {...stylex.props(modal.popup, styles.dialogReplica)}
-      >
-        <div ref={headerGap.ref} {...stylex.props(modal.header)}>
-          <h3
-            ref={(node) => {
-              titleSize.ref.current = node;
-              titleLeading.ref.current = node;
-            }}
-            {...stylex.props(modal.title)}
-          >
-            Delete this session?
-          </h3>
-          <p
-            ref={(node) => {
-              descriptionSize.ref.current = node;
-              descriptionLeading.ref.current = node;
-            }}
-            {...stylex.props(modal.description)}
-          >
-            Its transcript and every file it wrote go with it.
+      <div {...stylex.props(styles.modalStage)}>
+        <div
+          ref={(node) => {
+            padding.ref.current = node;
+            gap.ref.current = node;
+            panelRadius.ref.current = node;
+            panelShadow.ref.current = node;
+          }}
+          {...stylex.props(modal.popup, styles.dialogReplica)}
+        >
+          <div ref={headerGap.ref} {...stylex.props(modal.header)}>
+            <h3
+              ref={(node) => {
+                titleSize.ref.current = node;
+                titleLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.title)}
+            >
+              Delete this session?
+            </h3>
+            <p
+              ref={(node) => {
+                descriptionSize.ref.current = node;
+                descriptionLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.description)}
+            >
+              Its transcript and every file it wrote go with it.
+            </p>
+          </div>
+          <p {...stylex.props(styles.dialogBody)}>
+            The body is whatever the surface writes; the panel states only the room around it.
           </p>
-        </div>
-        <p {...stylex.props(styles.dialogBody)}>
-          The body is whatever the surface writes; the panel states only the room around it.
-        </p>
-        <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
-          <Button variant="secondary" size="small">
-            Keep
+          <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
+            <Button variant="secondary" size="small">
+              Keep
+            </Button>
+            <Button variant="destructive" size="small">
+              Delete
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            aria-label="Close"
+            {...stylex.props(modal.close)}
+          >
+            <span {...stylex.props(styles.replicaCloseGlyph)}>
+              <CloseGlyph />
+            </span>
           </Button>
-          <Button variant="destructive" size="small">
-            Delete
-          </Button>
         </div>
-        <Button variant="ghost" size="small" icon aria-label="Close" {...stylex.props(modal.close)}>
-          <span {...stylex.props(styles.replicaCloseGlyph)}>
-            <CloseGlyph />
-          </span>
-        </Button>
       </div>
       <div {...stylex.props(styles.replicaCaption)}>
         <span {...stylex.props(styles.rungUse)}>
@@ -2125,7 +2259,7 @@ function AlertRow({ tone }: { tone: FeedbackTone }) {
   return (
     <Row>
       <LegendKey>{tone}</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Alert.Root tone={tone}>
           <Alert.Title>Worktree setup finished</Alert.Title>
           <Alert.Description>
@@ -2142,7 +2276,7 @@ function AlertActionsRow() {
   return (
     <Row>
       <LegendKey>answers</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Alert.Root tone="danger">
           <Alert.Title>Sync failed</Alert.Title>
           <Alert.Description>The machine did not answer in time.</Alert.Description>
@@ -2671,7 +2805,7 @@ function CardRow() {
   return (
     <Row>
       <LegendKey>card</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Card.Root>
           <Card.Header>
             <Card.Title as="h4">Worktree setup</Card.Title>
@@ -2703,7 +2837,7 @@ function InteractiveCardRow() {
   return (
     <Row>
       <LegendKey>interactive</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <button type="button" {...stylex.props(styles.cardButton)}>
           <Card.Root interactive>
             <Card.Header>
@@ -2713,11 +2847,11 @@ function InteractiveCardRow() {
           </Card.Root>
         </button>
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         Only the fill answers the pointer. The ladder names the region rung for this, and in the
         dark palette that is the card rung's own value — so the hover is mixed toward label instead,
         the way a row's highlight is.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2805,6 +2939,246 @@ function BadgeDimensions() {
     { name: 'badge.glyphSize', value: badgeTokens.glyphSize },
     { name: 'badge.labelSize', value: badgeTokens.labelSize },
     { name: 'badge.labelLeading', value: badgeTokens.labelLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A caller's mark inside a fallback, drawn here rather than in
+ * `internal/glyphs` because it is exactly that: a caller's. The package draws
+ * the marks that belong to a part — an accordion's chevron, a message's tone —
+ * and a face-shaped stand-in belongs to the surface that knows it has no name
+ * to make letters out of.
+ */
+function PersonGlyph() {
+  return (
+    <svg {...stylex.props(styles.avatarGlyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 8.5a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5ZM2.75 14c0-2.6 2.35-4 5.25-4s5.25 1.4 5.25 4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The ladder, and the letters each rung picks for itself. */
+function AvatarSizeRow({ name, size, use }: { name: string; size: AvatarSize; use: string }) {
+  const { ref, value } = useMeasured<HTMLSpanElement>('width');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Avatar.Root ref={ref} size={size}>
+          <Avatar.Fallback>WW</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size={size}>
+          <Avatar.Image src={SAMPLE_FACE} alt="" />
+          <Avatar.Fallback>WW</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size={size} shape="tile">
+          <Avatar.Fallback>L</Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+      <span {...stylex.props(styles.rungUse)}>{use}</span>
+    </Row>
+  );
+}
+
+/**
+ * The two shapes, side by side at one rung. A circle is a person and a tile is
+ * a thing, and the tile's corner comes from the radius-by-size table rather
+ * than from a token of its own.
+ */
+function AvatarShapeRow() {
+  return (
+    <Row>
+      <LegendKey>shape</LegendKey>
+      <Cluster>
+        <Avatar.Root size="large">
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large" shape="tile">
+          <Avatar.Fallback>LY</Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        circle · a person, at radius.full on corner.round — a squircle there is a superellipse,
+        which turns a face into a rounded square. tile · a thing, whose mark was drawn square.
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * What is standing in, and what it is standing in for. Base UI picks between
+ * the two from the image's own loading status, so a surface writes both and
+ * never writes the condition — a broken URL leaves the letters up rather than
+ * flashing a torn image over them.
+ */
+function AvatarFallbackRow() {
+  return (
+    <Row>
+      <LegendKey>fallback</LegendKey>
+      <Cluster>
+        <Avatar.Root size="large">
+          <Avatar.Image src={SAMPLE_FACE} alt="" />
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large">
+          <Avatar.Image src="https://lody.invalid/gone.png" alt="" />
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large">
+          <Avatar.Fallback>
+            <Avatar.Glyph>
+              <PersonGlyph />
+            </Avatar.Glyph>
+          </Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large" shape="tile">
+          <Avatar.Fallback style={{ backgroundColor: 'hsl(268 62% 52%)', color: 'hsl(0 0% 100%)' }}>
+            L
+          </Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        a picture · letters, when the URL is gone · a mark, when there is no name to make letters
+        out of · an identity colour, which is the surface&apos;s: which hue belongs to which
+        workspace is a product fact and not a token.
+      </span>
+    </Row>
+  );
+}
+
+function AvatarDimensions() {
+  const dimensions = [
+    { name: 'avatar.sizeMini', value: avatarTokens.sizeMini },
+    { name: 'avatar.sizeSmall', value: avatarTokens.sizeSmall },
+    { name: 'avatar.sizeMedium', value: avatarTokens.sizeMedium },
+    { name: 'avatar.sizeLarge', value: avatarTokens.sizeLarge },
+    { name: 'avatar.sizeXlarge', value: avatarTokens.sizeXlarge },
+    { name: 'avatar.initialsMini', value: avatarTokens.initialsMini },
+    { name: 'avatar.initialsSmall', value: avatarTokens.initialsSmall },
+    { name: 'avatar.initialsMedium', value: avatarTokens.initialsMedium },
+    { name: 'avatar.initialsLarge', value: avatarTokens.initialsLarge },
+    { name: 'avatar.initialsXlarge', value: avatarTokens.initialsXlarge },
+    { name: 'avatar.glyphMini', value: avatarTokens.glyphMini },
+    { name: 'avatar.glyphSmall', value: avatarTokens.glyphSmall },
+    { name: 'avatar.glyphMedium', value: avatarTokens.glyphMedium },
+    { name: 'avatar.glyphLarge', value: avatarTokens.glyphLarge },
+    { name: 'avatar.glyphXlarge', value: avatarTokens.glyphXlarge },
+    { name: 'avatar.tileRadiusMini', value: avatarTokens.tileRadiusMini },
+    { name: 'avatar.tileRadiusSmall', value: avatarTokens.tileRadiusSmall },
+    { name: 'avatar.tileRadiusMedium', value: avatarTokens.tileRadiusMedium },
+    { name: 'avatar.tileRadiusLarge', value: avatarTokens.tileRadiusLarge },
+    { name: 'avatar.tileRadiusXlarge', value: avatarTokens.tileRadiusXlarge },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** Single keys, and the chords they are pressed in. */
+function KbdRow() {
+  return (
+    <Row>
+      <LegendKey>keys</LegendKey>
+      <Cluster>
+        <Kbd>&#8593;</Kbd>
+        <Kbd>&#8595;</Kbd>
+        <Kbd>&#8629;</Kbd>
+        <Kbd>esc</Kbd>
+        <Kbd>Shift</Kbd>
+        <KbdGroup>
+          <Kbd>&#8984;</Kbd>
+          <Kbd>K</Kbd>
+        </KbdGroup>
+        <KbdGroup>
+          <Kbd>&#8984;</Kbd>
+          <Kbd>&#8679;</Kbd>
+          <Kbd>P</Kbd>
+        </KbdGroup>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        one cap is at least as wide as it is tall, so a chord of `K` and `Shift` does not jump
+        between eight pixels and forty. A group is a kbd around kbds, which is what HTML gives this
+        shape.
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * The same caps standing on the one surface that inverts.
+ *
+ * This is the row that would catch the regression: a cap carrying the page's
+ * own gray onto a tooltip is a light chip on a dark one with the letters gone.
+ * `Tooltip.Content` declares `kbdOnInvertedTheme` on its popup, and the board
+ * composes the very same two styles rather than describing them, so a chip this
+ * package no longer draws cannot be reported here.
+ */
+function KbdOnChipRow() {
+  return (
+    <Row>
+      <LegendKey>on a tooltip</LegendKey>
+      <Cluster>
+        <div
+          {...stylex.props(
+            chip.popup,
+            kbdOnInvertedTheme,
+            styles.tooltipReplica,
+            styles.tooltipReplicaRow
+          )}
+        >
+          <span>Open the command palette</span>
+          <KbdGroup>
+            <Kbd>&#8984;</Kbd>
+            <Kbd>K</Kbd>
+          </KbdGroup>
+        </div>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        A component token group is how a surface tells what is inside it what it is standing on.
+        StyleX has no descendant selector, and unlike the one the deleted implementation used it
+        also reaches a cap a caller wrapped in something of their own.
+      </span>
+    </Row>
+  );
+}
+
+function KbdDimensions() {
+  const dimensions = [
+    { name: 'kbd.height', value: kbdTokens.height },
+    { name: 'kbd.minWidth', value: kbdTokens.minWidth },
+    { name: 'kbd.paddingX', value: kbdTokens.paddingX },
+    { name: 'kbd.gap', value: kbdTokens.gap },
+    { name: 'kbd.radius', value: kbdTokens.radius },
+    { name: 'kbd.labelSize', value: kbdTokens.labelSize },
+    { name: 'kbd.labelLeading', value: kbdTokens.labelLeading },
   ];
   return (
     <Row>
@@ -3784,6 +4158,45 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
           </Rows>
           <Grid>
             {BADGE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Avatar · who this is"
+        rule="The second part of this system on no rung, and the one that is not a film: what an avatar stands in for is opaque — a photograph — and a translucent stand-in would show a row's hover through a face. So the fallback takes a gray, which is what the rules reserve the gray ramp for: a thing with no role, the same reading that gave Skeleton its own. The ladder is the point. The deleted implementation had one size, and of its twenty-seven call sites twenty-one named a box and fifteen also named a type step for the letters — h-5 w-5 text-[9px], h-7 w-7 text-[11px], h-16 w-16 text-xl — which is two facts a surface had to keep in step and eight different answers about what two letters in a circle means. Here the box picks the letters. A person is a circle at radius.full on corner.round; a thing is a tile, because a circle around a logo is a crop and the mark inside it was drawn square."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {AVATAR_SIZES.map((entry) => (
+              <AvatarSizeRow key={entry.name} {...entry} />
+            ))}
+            <AvatarShapeRow />
+            <AvatarFallbackRow />
+            <AvatarDimensions />
+          </Rows>
+          <Grid>
+            {AVATAR_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Kbd · a key on the keyboard"
+        rule="A gray, because the rules name a kbd among the things with no role: a cap stands for a piece of hardware rather than for anything on this screen, so accent would claim it is live, ink would claim it is stored and a tone would claim it reported something. It is never a control — no hover, no focus ring, no pressed state — and it is not a menu row's shortcut either: the rules give that slot plain trailing metadata, because a column of chips down a menu's right edge turns a quiet list into a keyboard diagram. A cap is for the surfaces where the keys are the subject. The word inside it is the caller's, since which key a person presses depends on their platform and this package carries no dictionary."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <KbdRow />
+            <KbdOnChipRow />
+            <KbdDimensions />
+          </Rows>
+          <Grid>
+            {KBD_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>

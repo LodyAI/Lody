@@ -38,13 +38,7 @@ export function SettingsAccountEntry({
         !mobile && active && 'bg-secondary text-secondary-foreground'
       )}
     >
-      <UserAvatar
-        user={user}
-        className={cn(
-          'shrink-0 text-xs',
-          mobile ? 'h-9 w-9' : 'h-6 w-6 text-[10px]'
-        )}
-      />
+      <UserAvatar user={user} size={mobile ? 'large' : 'medium'} className="shrink-0" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">
           {user.name || user.email || t('settings.tabs.account')}

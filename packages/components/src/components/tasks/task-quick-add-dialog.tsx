@@ -27,7 +27,7 @@ import {
 } from '@/ui/dropdown-menu';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
-import { Kbd } from '@/ui/kbd';
+import { Kbd } from '@lody/ui/kbd';
 import { getTaskStatusPresentation, TASK_STATUS_PRESENTATION } from './task-status-presentation';
 import { TaskProjectSelector } from './task-project-selector';
 import { projectRefKey } from './task-project-key';

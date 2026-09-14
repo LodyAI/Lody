@@ -269,11 +269,7 @@ export function SessionRowAuthorAvatar({
 }) {
   if (!author) return null;
   return (
-    <UserAvatar
-      user={author}
-      className="h-[18px] w-[18px] shrink-0"
-      fallbackClassName="text-[9px] font-medium"
-    />
+    <UserAvatar user={author} size="small" className="shrink-0" />
   );
 }
 

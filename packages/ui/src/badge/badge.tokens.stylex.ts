@@ -22,6 +22,9 @@ import { radius, space, text } from '../tokens/scales.stylex';
  * the bar, used as 11px text where the bar is 4.5:1. A badge is never wordless,
  * so unlike an Alert's mark it does not need colour to say which kind it is:
  * the tint carries the tone and the word carries the fact.
+ *
+ * Which neutral ink carries it is a second measurement, and it went the other
+ * way: see `label` below.
  */
 export const badge = stylex.defineVars({
   // A 20px chip on the 16px corner: the rules put `radius.mini` on the small
@@ -34,25 +37,77 @@ export const badge = stylex.defineVars({
   // whatever holds them and StyleX has no descendant selector to reach one
   // with. It is the menu row's leading box at a badge's scale.
   glyphSize: '12px',
-  // Metadata is *about* the thing it sits beside rather than the thing itself,
-  // which is what the rules give `secondaryLabel`, and it takes the caption
-  // step the rules give a row's trailing metadata.
-  label: colors.secondaryLabel,
+  /**
+   * The neutral word, and the ink every tone's word is pulled toward.
+   *
+   * `label`, not `secondaryLabel`. Metadata is *about* the thing it sits beside,
+   * which is the reading that first gave this `secondaryLabel` — but a badge's
+   * word sits on the badge's own film rather than on the page, and measured
+   * there `secondaryLabel` was 3.9:1 on a danger chip and 3.4:1 on one inside a
+   * popup, under the 4.5:1 that 11px text needs. It was under it before the
+   * films were strengthened; the tint only made a failing number worse.
+   *
+   * A badge stays quieter than the thing it is attached to by taking the
+   * caption step, which is a size — not by taking a colour that cannot carry
+   * its own words.
+   */
+  label: colors.label,
   labelSize: text.captionSize,
   labelLeading: text.captionLeading,
-  // The films. `label` is far stronger against either palette's background than
-  // any of the tones, so the neutral one is thinner; the tones sit at the
-  // strength a destructive menu row's highlight uses, which is the mix this
-  // system already trusts to read on a surface without becoming a fill.
-  neutralFill: `color-mix(in oklab, ${colors.label} 8%, transparent)`,
+  /**
+   * The word carries the tone, and that is the part of this chip a person
+   * actually reads.
+   *
+   * The rules say not to colour a badge's words with its tone, and the
+   * measurement behind that rule stands: the **raw** `warning` is 2.8:1 on a
+   * near-white surface, a colour tuned for a 16px mark where the bar is 3:1,
+   * used as 11px text where it is 4.5:1. What the rule left out is that the raw
+   * tone is not the only way to carry a hue. Pulled **halfway to `label`**, a
+   * tone keeps its hue and gains the ink's contrast: measured on its own chip,
+   * on every rung and in both palettes, the worst of the four is 5.2:1.
+   *
+   * This is what the film alone could not do. A 20px chip's tint is a wash a
+   * few percent off its surface; its word is the mark a person looks at. In the
+   * light palette the four words land 0.097 apart in oklab at the closest, and
+   * in the dark palette 0.048 — against 0.030 and 0.035 for the films they sit
+   * on. The dark palette is where this earns its place: there `accent` is a
+   * pale peach and `warning` an amber, twenty-six degrees apart, so their films
+   * are two brown washes and no percentage separates them. Their words are a
+   * peach and a gold, at four times the chroma.
+   *
+   * Half is not a round number chosen for tidiness. At 60% of the tone the
+   * worst word is 4.2:1 — under the bar on the floating rung, where the chip is
+   * already a step darker — and at 40% the hues start washing out. Half clears
+   * the bar with room on every rung and keeps the chroma that makes the point.
+   *
+   * `label` itself is the fifth: a neutral badge has no tone to carry.
+   */
+  runningLabel: `color-mix(in oklab, ${colors.accent} 50%, ${colors.label})`,
+  successLabel: `color-mix(in oklab, ${colors.success} 50%, ${colors.label})`,
+  warningLabel: `color-mix(in oklab, ${colors.warning} 50%, ${colors.label})`,
+  dangerLabel: `color-mix(in oklab, ${colors.destructive} 50%, ${colors.label})`,
+  /**
+   * The films. `label` is far stronger against either palette's background than
+   * any of the tones, so the neutral one stays thinner than the rest.
+   *
+   * 12 and 22 rather than the 8 and 14 these started at. At the first strength
+   * the five tones were not far enough apart to be told apart: measured off the
+   * rendered board, the closest pair was 0.019 in oklab in the light palette
+   * (neutral against success) and 0.026 in the dark one (running against
+   * warning). At 12/22 those are 0.030 and 0.035. It is still a film — the word
+   * is what says which tone this is, and the tint only has to make that
+   * believable at a glance — but a film nobody can separate is a film doing
+   * nothing.
+   */
+  neutralFill: `color-mix(in oklab, ${colors.label} 12%, transparent)`,
   // The one tone the message family does not have, and `Progress` does: a badge
   // marking something that is happening now takes the colour the rules give
   // live state by name. It is the film, not the words — the accent is never a
   // fill a person presses, and a badge is nothing a person presses.
-  runningFill: `color-mix(in oklab, ${colors.accent} 14%, transparent)`,
-  successFill: `color-mix(in oklab, ${colors.success} 14%, transparent)`,
-  warningFill: `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
-  dangerFill: `color-mix(in oklab, ${colors.destructive} 14%, transparent)`,
+  runningFill: `color-mix(in oklab, ${colors.accent} 22%, transparent)`,
+  successFill: `color-mix(in oklab, ${colors.success} 22%, transparent)`,
+  warningFill: `color-mix(in oklab, ${colors.warning} 22%, transparent)`,
+  dangerFill: `color-mix(in oklab, ${colors.destructive} 22%, transparent)`,
 });
 
 /**
@@ -61,10 +116,14 @@ export const badge = stylex.defineVars({
  * document root keeps the root palette inside a themed subtree.
  */
 export const badgePaletteTheme = stylex.createTheme(badge, {
-  label: colors.secondaryLabel,
-  neutralFill: `color-mix(in oklab, ${colors.label} 8%, transparent)`,
-  runningFill: `color-mix(in oklab, ${colors.accent} 14%, transparent)`,
-  successFill: `color-mix(in oklab, ${colors.success} 14%, transparent)`,
-  warningFill: `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
-  dangerFill: `color-mix(in oklab, ${colors.destructive} 14%, transparent)`,
+  label: colors.label,
+  runningLabel: `color-mix(in oklab, ${colors.accent} 50%, ${colors.label})`,
+  successLabel: `color-mix(in oklab, ${colors.success} 50%, ${colors.label})`,
+  warningLabel: `color-mix(in oklab, ${colors.warning} 50%, ${colors.label})`,
+  dangerLabel: `color-mix(in oklab, ${colors.destructive} 50%, ${colors.label})`,
+  neutralFill: `color-mix(in oklab, ${colors.label} 12%, transparent)`,
+  runningFill: `color-mix(in oklab, ${colors.accent} 22%, transparent)`,
+  successFill: `color-mix(in oklab, ${colors.success} 22%, transparent)`,
+  warningFill: `color-mix(in oklab, ${colors.warning} 22%, transparent)`,
+  dangerFill: `color-mix(in oklab, ${colors.destructive} 22%, transparent)`,
 });

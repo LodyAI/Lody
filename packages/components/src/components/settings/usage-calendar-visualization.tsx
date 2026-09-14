@@ -1753,12 +1753,10 @@ function UsageDayDetailPanel({
                       label,
                       tokens: row.tokens,
                       icon: (
-                        <Avatar className="size-4 shrink-0">
-                          {user?.image ? <AvatarImage src={user.image} alt="" /> : null}
-                          <AvatarFallback className="bg-foreground/15 text-[8px] font-medium uppercase text-foreground/80">
-                            {label.slice(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <Avatar.Root size="mini">
+                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+                        </Avatar.Root>
                       ),
                     };
                   })}

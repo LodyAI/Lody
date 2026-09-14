@@ -39,7 +39,7 @@ import {
   isDraftPr,
   isPullRequestMergeabilityPending,
 } from '@/lib/github-pr-details-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -133,24 +133,24 @@ function prToBadgeMeta(pr: GitHubPullRequestDetails): SessionPullRequestMeta {
   };
 }
 
+/**
+ * A GitHub account, which is a person: a circle, and the rung picks the letters
+ * inside it. The three hand-tuned type steps this used to carry are gone with
+ * the ladder.
+ */
 function UserAvatar({
   user,
-  size = 'md',
+  size = 'medium',
 }: {
   user: { login: string; avatarUrl: string } | null | undefined;
-  size?: 'xs' | 'sm' | 'md';
+  size?: AvatarSize;
 }) {
   const login = user?.login ?? 'ghost';
-  const sizeClass = size === 'xs' ? 'h-4 w-4' : size === 'sm' ? 'h-5 w-5' : 'h-6 w-6';
-  const fallbackTextClass =
-    size === 'xs' ? 'text-[8px]' : size === 'sm' ? 'text-[10px]' : 'text-[11px]';
   return (
-    <Avatar className={cn('shrink-0', sizeClass)}>
-      {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={login} />}
-      <AvatarFallback className={fallbackTextClass}>
-        {login.slice(0, 2).toUpperCase()}
-      </AvatarFallback>
-    </Avatar>
+    <Avatar.Root size={size} className="shrink-0">
+      {user?.avatarUrl && <Avatar.Image src={user.avatarUrl} alt={login} />}
+      <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+    </Avatar.Root>
   );
 }
 
@@ -377,7 +377,7 @@ const IssueCommentItem = memo(function IssueCommentItem({
       <header className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <UserAvatar
           user={comment.user ? { login, avatarUrl: comment.user.avatarUrl } : null}
-          size="md"
+          size="medium"
         />
         <span className="text-sm font-medium leading-none">{login}</span>
         <span className="text-[11px] text-muted-foreground leading-none">
@@ -480,7 +480,7 @@ const ReviewSubmissionItem = memo(function ReviewSubmissionItem({
       <header className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <UserAvatar
           user={review.user ? { login, avatarUrl: review.user.avatarUrl } : null}
-          size="md"
+          size="medium"
         />
         <span className="text-sm font-medium leading-none">{login}</span>
         <ReviewStateBadge state={review.state} />
@@ -1200,7 +1200,7 @@ export const PrTabView = memo(function PrTabView({
                 <>
                   <UserAvatar
                     user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
-                    size="xs"
+                    size="mini"
                   />
                   <span className="font-medium text-foreground">{pr.user.login}</span>
                 </>

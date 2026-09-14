@@ -3217,9 +3217,9 @@ function UserMessageAuthorAvatar({
 }) {
   const { t } = useTranslation();
   const displayName = user?.name?.trim() || user?.email?.trim();
-  const avatar = (
-    <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
-  );
+  // One rung on both shells: the 28/32 split was a size that had drifted rather
+  // than a decision, and `@lody/ui`'s ladder has nothing between them.
+  const avatar = <UserAvatar user={user} size="large" showIcon />;
 
   if (isMobile || !showProfile || !displayName) {
     return avatar;
@@ -3246,11 +3246,7 @@ function UserMessageAuthorAvatar({
         aria-label={t('sessions.senderProfile', 'Sender profile')}
       >
         <div className="flex items-center gap-3.5 p-4">
-          <UserAvatar
-            user={user}
-            className="h-16 w-16 shrink-0 text-xl"
-            fallbackClassName="bg-primary/10 text-primary"
-          />
+          <UserAvatar user={user} size="xlarge" className="shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-foreground">
               {user?.name?.trim() || displayName}
