@@ -14,20 +14,25 @@ parsing treated shell fragments such as `$(git ...)` as TeX and dropped
 characters like the `&` in `2>&1`, so the displayed command was not the command
 that ran. The stored history and the executed command were intact — the damage
 was render-time only. The renderer now detects text content blocks that hold a
-serialized JSON payload and shows them as verbatim pretty-printed code, keeping
-only prose on the Markdown path. Legitimate `$...$` math in prose is unaffected;
+serialized JSON payload and shows them as untouched verbatim code, keeping only
+prose on the Markdown path. Legitimate `$...$` math in prose is unaffected;
 tool `resource` text blocks still render as Markdown and remain exposed to the
 same artifact.
 
 ## Decision and boundaries
 
-`formatToolCallJsonText` (`packages/components/src/lib/tool-call-json-text.ts`)
-returns a pretty-printed JSON string when a text block trims to a payload that
+`detectToolCallJsonText` (`packages/components/src/lib/tool-call-json-text.ts`)
+returns the original text, trimmed but otherwise untouched, when a text block
 parses as a JSON object or array, and `null` otherwise (primitives, prose,
 broken JSON). `StandardToolContentBlock`'s `text` case
 (`packages/components/src/components/ai-gui/view.tsx`) renders the detected
 payload in the same monospace `<pre>` treatment already used for raw tool
 output; everything else continues to `MarkdownBlock` unchanged.
+
+`JSON.parse` only validates; the payload is never re-serialized. Routing
+numeric lexemes through JavaScript numbers corrupts integers beyond 2^53
+(64-bit IDs) and rewrites forms like `1e10`, which would recreate the same
+displayed-differs-from-actual defect on the digits.
 
 The classifier lives in a leaf lib module, not in `view.tsx`: the package's
 test module-graph rule forbids pulling the whole `view.tsx` import graph into a
@@ -40,16 +45,19 @@ previously recorded sessions already carry these blocks in history, so a
 producer-side change would leave existing transcripts mangled. Disabling math
 for every tool-call text block was rejected because tool results can contain
 legitimate prose with `$...$` math; the JSON parse check separates data from
-prose instead. Pretty-printing reformats whitespace inside the payload, which
-matches the existing raw-output `<pre>` and trades byte-faithful display for
-readability.
+prose instead. Pretty-printing via `JSON.stringify` was dropped after review
+pointed out the numeric-lexeme corruption above; a lexeme-preserving
+pretty-printer would keep readability but adds a hand-rolled JSON tokenizer to
+a display path, which the verbatim approach avoids at the cost of single-line
+payloads staying single-line.
 
 ## Evidence and limits
 
 The regression test feeds the real-world payload shape (a `git commit --amend`
 command containing `$(...)`, `2>&1`, and nested quotes) and asserts the output
-preserves every fragment verbatim; prose, primitives, and malformed JSON stay
-on the Markdown path. New unit tests pass 6/6; package typecheck, oxlint on the
+is the input verbatim; integer lexemes beyond 2^53 and exponent forms are
+asserted to keep their exact digits; prose, primitives, and malformed JSON stay
+on the Markdown path. Unit tests pass 8/8; package typecheck, oxlint on the
 touched files, and Prettier are clean. `markdown-idle-rerender` and
 `markdown-streaming-reparse` fail in a fresh worktree on the unmodified base
 (jotai storage environment), so they are unrelated to this change. Tool

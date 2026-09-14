@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatToolCallJsonText } from '../src/lib/tool-call-json-text';
+import { detectToolCallJsonText } from '../src/lib/tool-call-json-text';
 
-describe('formatToolCallJsonText', () => {
-  it('formats serialized tool input verbatim, preserving shell fragments math parsing ate', () => {
+describe('detectToolCallJsonText', () => {
+  it('returns serialized tool input verbatim, preserving shell fragments math parsing ate', () => {
     // Real payload shape behind the mangled rendering: single-`$` math treated
     // `$(...)` spans as TeX and the `&` in `2>&1` was dropped on display.
     const command =
@@ -13,40 +13,44 @@ describe('formatToolCallJsonText', () => {
       "git log -1 --format='%h %an <%ae>'";
     const text = JSON.stringify({ command, timeout: 60 });
 
-    const formatted = formatToolCallJsonText(text);
-
-    expect(formatted).not.toBeNull();
-    expect(formatted).toContain('$(git -C /repo config user.name)');
-    expect(formatted).toContain('$(git -C /repo config user.email)');
-    expect(formatted).toContain('2>&1');
-    expect(formatted).toContain('%h %an <%ae>');
-    expect(formatted).toContain('"timeout": 60');
+    expect(detectToolCallJsonText(text)).toBe(text);
   });
 
-  it('pretty-prints the payload over multiple lines', () => {
-    const formatted = formatToolCallJsonText('{"a":1,"b":{"c":2}}');
-    expect(formatted).toBe('{\n  "a": 1,\n  "b": {\n    "c": 2\n  }\n}');
+  it('never re-serializes: integer lexemes beyond 2^53 keep their exact digits', () => {
+    // JSON.parse rounds these to ...776000 / ...000120 (sic); re-stringifying
+    // would display an identifier the upstream tool never received.
+    const text = '{"id":9223372036854775807,"snowflake":1737000000000000123}';
+    expect(detectToolCallJsonText(text)).toBe(text);
   });
 
-  it('formats a top-level JSON array', () => {
-    expect(formatToolCallJsonText('[1, "two"]')).toBe('[\n  1,\n  "two"\n]');
+  it('never re-serializes: exponent and fractional forms stay as written', () => {
+    const text = '{"big":1e10,"small":1E-7,"neg":-0.5}';
+    expect(detectToolCallJsonText(text)).toBe(text);
+  });
+
+  it('returns a top-level JSON array verbatim', () => {
+    expect(detectToolCallJsonText('[1, "two"]')).toBe('[1, "two"]');
+  });
+
+  it('trims surrounding whitespace but does not touch the payload', () => {
+    expect(detectToolCallJsonText('  {"a":1}\n')).toBe('{"a":1}');
   });
 
   it('returns null for prose, keeping it on the Markdown path', () => {
-    expect(formatToolCallJsonText('The price is $x$ plus $y$.')).toBeNull();
-    expect(formatToolCallJsonText('See {the docs} for details.')).toBeNull();
+    expect(detectToolCallJsonText('The price is $x$ plus $y$.')).toBeNull();
+    expect(detectToolCallJsonText('See {the docs} for details.')).toBeNull();
   });
 
   it('returns null for JSON primitives', () => {
-    expect(formatToolCallJsonText('"just a string"')).toBeNull();
-    expect(formatToolCallJsonText('42')).toBeNull();
-    expect(formatToolCallJsonText('null')).toBeNull();
+    expect(detectToolCallJsonText('"just a string"')).toBeNull();
+    expect(detectToolCallJsonText('42')).toBeNull();
+    expect(detectToolCallJsonText('null')).toBeNull();
   });
 
   it('returns null for text that only looks like JSON', () => {
-    expect(formatToolCallJsonText('{not json}')).toBeNull();
-    expect(formatToolCallJsonText('{"truncated":')).toBeNull();
-    expect(formatToolCallJsonText('')).toBeNull();
-    expect(formatToolCallJsonText('   ')).toBeNull();
+    expect(detectToolCallJsonText('{not json}')).toBeNull();
+    expect(detectToolCallJsonText('{"truncated":')).toBeNull();
+    expect(detectToolCallJsonText('')).toBeNull();
+    expect(detectToolCallJsonText('   ')).toBeNull();
   });
 });

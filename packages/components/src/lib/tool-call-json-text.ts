@@ -5,8 +5,13 @@
  * single-`$` math parsing consume shell fragments such as `$(...)` and drop
  * characters like the `&` in `2>&1`. Detect those payloads so the renderer
  * can show them as verbatim code instead of Markdown.
+ *
+ * `JSON.parse` only validates; the original text is returned untouched.
+ * Re-serializing would route numeric lexemes through JavaScript numbers and
+ * corrupt integers beyond 2^53 (64-bit IDs) or rewrite forms like `1e10`,
+ * recreating the same displayed-differs-from-actual problem on the digits.
  */
-export const formatToolCallJsonText = (text: string): string | null => {
+export const detectToolCallJsonText = (text: string): string | null => {
   const trimmed = text.trim();
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
   let parsed: unknown;
@@ -16,5 +21,5 @@ export const formatToolCallJsonText = (text: string): string | null => {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
-  return JSON.stringify(parsed, null, 2);
+  return trimmed;
 };

@@ -129,7 +129,7 @@ import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
-import { formatToolCallJsonText } from '@/lib/tool-call-json-text';
+import { detectToolCallJsonText } from '@/lib/tool-call-json-text';
 import { FileIcon } from '@/components/icons/file-icons';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
@@ -6445,7 +6445,7 @@ const StandardToolContentBlock = ({
     case 'text': {
       // Raw tool input arrives as serialized JSON text; keep it out of the
       // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
-      const jsonText = formatToolCallJsonText(content.text);
+      const jsonText = detectToolCallJsonText(content.text);
       if (jsonText !== null) {
         return (
           <pre
