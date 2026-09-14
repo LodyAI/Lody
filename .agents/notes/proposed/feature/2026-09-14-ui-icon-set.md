@@ -13,9 +13,9 @@ conventions but none of its paths, and records three decisions that came out of
 drawing it: a variant is a layer treatment of one drawing rather than a second
 drawing; a glyph's cut-outs are a mask and never a painted panel colour; and a
 stateful icon moves by a single registered custom property that CSS
-transitions, with no path morphing. The set is in the package with its board
-and tests; whether it becomes the product's icon language, and which product
-callers migrate, is not decided here.
+transitions, with no path morphing. The set is in the package with its own
+playground and its tests; whether it becomes the product's icon language, and
+which product callers migrate, is not decided here.
 
 ## Problem
 
@@ -65,8 +65,26 @@ the silhouette.
 
 **Icons state no size and no colour.** The rules give the box to whatever holds
 a glyph; an icon fills it and inherits `currentColor`, the contract
-`glyphs.tsx` already has. The board is the holder and shows each icon at 16, 20,
-24 and 32.
+`glyphs.tsx` already has. The playground is the holder and states every size and
+colour it applies from the outside.
+
+**The set's surface is a playground, not a board row.** The first draft put the
+set in `src/gallery` as four more rows, and the gallery is reached through
+`packages/components`' Storybook. That was wrong twice. The board's question is
+"what is this token's value", answered once per token off the rendered node; an
+icon has no token, and its question is asked 75 times — find the drawing, put it
+at the size the surface uses, in that surface's colour, on the rung it will sit
+on, and take it away as markup. Those are controls, not samples, and a row on a
+board cannot carry them. And the set is `@lody/ui`'s, while Storybook belongs to
+a package that only consumes it: looking at an icon should not require building
+the product's component library. So `packages/ui/playground` is a Vite page of
+its own — `pnpm --filter @lody/ui playground` — with search, a size slider from
+12 to 64, the four treatments, the semantic tones, the four rungs (the accent
+rung is where a glyph's mask shows, since the cut is a hole and the rung shows
+through), a per-icon panel with the drawing enlarged on the 24 grid and
+`copy svg`, and the stateful icons under a slow-motion switch. It is dev-only:
+nothing in `playground/` is exported, and the package still depends on React,
+Base UI and StyleX alone at runtime.
 
 **A stateful icon moves by one number.** `--lody-icon-t` is registered with
 `CSS.registerProperty` as a `<number>` so CSS can transition it; every part of
@@ -106,17 +124,21 @@ repository artifact; a future change edits the registry directly.
 `test/icons.test.tsx` pins the registry's shape and its stay on the grid, the
 accessibility contract, the four treatments, mask uniqueness, that outer strokes
 survive a glyph, that bulk has no outline, and that a stateful icon's two states
-are the same markup with one number changed. `test/gallery.test.tsx` renders the
-board with the new section. jsdom applies none of the CSS, so the rest was seen
-on the static Storybook board in Chromium, both palettes: every icon in its
-24px box, the four sizes, the four treatments with transparent glyph cuts, and
-the two-state pairs. The transition was driven live: `--lody-icon-t` resolves
-as a registered number, the sidebar divider computes to `translateX(-3px)` in
-the collapsed state, and flipping the property interpolates it over ~330 ms
-(`-1.56 → -2.45 → -2.82 → -2.97 → -3`). The static build itself needed a larger
-Node heap and does not link the StyleX stylesheet on the gallery story; the
-check injected `assets/600-*.css` by hand, a harness defect separate from this
-change.
+are the same markup with one number changed. The board in `src/gallery` has no
+icon section and `test/gallery.test.tsx` is unchanged: an icon adds no token, so
+the test that fails on a token without an entry has nothing to say about one.
+
+The drawings themselves were seen earlier on the static Storybook board in
+Chromium, both palettes — every icon in its 24px box, the four sizes, the four
+treatments with transparent glyph cuts, the two-state pairs — and the transition
+was driven live there: `--lody-icon-t` resolves as a registered number, the
+sidebar divider computes to `translateX(-3px)` in the collapsed state, and
+flipping the property interpolates it over ~330 ms
+(`-1.56 → -2.45 → -2.82 → -2.97 → -3`). That check predates the move and is the
+evidence for the drawings, not for the playground: **the playground page itself
+has not been opened.** Whoever picks this up runs
+`pnpm --filter @lody/ui playground` and `pnpm --filter @lody/ui typecheck`
+first.
 
 ## Deliberately not done
 
@@ -124,3 +146,9 @@ No product caller migrates; `glyphs.tsx` keeps its 16 grid until a caller does.
 No optically corrected 16px family. No `Spinner` from `refresh`: a turn is one
 transition, a spinner is an animation and already exists. The other exploration
 of a wider family in this repository's notes is a separate proposal.
+
+The playground does not scrub `--lody-icon-t` by hand. A stateful icon takes a
+boolean and writes the number itself, and `Frame` states `style` after spreading
+its rest props, so a holder cannot pass one in; slow motion is a duration
+override on the host page instead. Making the number an input is a change to the
+components, and was not made for a dev page.

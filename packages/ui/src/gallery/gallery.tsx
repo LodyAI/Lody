@@ -44,25 +44,6 @@ import {
   TickGlyph,
 } from '../internal/glyphs';
 import { Kbd, KbdGroup } from '../kbd/kbd';
-import { Icon, type IconVariant } from '../icons/icon';
-import {
-  ICONS,
-  ICON_FAMILIES,
-  ICON_NAMES,
-  type IconFamily,
-  type IconName,
-} from '../icons/registry';
-import {
-  BellRingIcon,
-  CheckDrawIcon,
-  ChevronToggleIcon,
-  EyeToggleIcon,
-  FolderToggleIcon,
-  PlayPauseIcon,
-  RefreshTurnIcon,
-  SidebarToggleIcon,
-  StarToggleIcon,
-} from '../icons/stateful';
 import { kbd as kbdTokens, kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
 import { ContextMenu } from '../menu/context-menu';
 import { Menu } from '../menu/menu';
@@ -110,18 +91,6 @@ export interface UiGalleryProps {
 }
 
 const styles = stylex.create({
-  /**
-   * The box an icon is given. An icon states no size of its own — the rules
-   * give that to whatever holds the glyph — so the board is the holder here,
-   * and it holds each one at the four sizes a product surface uses.
-   */
-  iconBox: { width: '24px', height: '24px', color: colors.label, flexShrink: 0 },
-  iconBox16: { width: '16px', height: '16px', color: colors.label, flexShrink: 0 },
-  iconBox20: { width: '20px', height: '20px', color: colors.label, flexShrink: 0 },
-  iconBox32: { width: '32px', height: '32px', color: colors.label, flexShrink: 0 },
-  iconMuted: { color: colors.secondaryLabel },
-  iconAccent: { color: colors.accent },
-  iconStates: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
   /**
    * The ground the ladder stands on, and it has to be the page.
    *
@@ -3134,168 +3103,6 @@ function AvatarDimensions() {
 }
 
 /** Single keys, and the chords they are pressed in. */
-const ICON_FAMILY_NAMES: Record<IconFamily, string> = {
-  navigation: 'navigation',
-  actions: 'actions',
-  files: 'files',
-  git: 'git & code',
-  status: 'status',
-  product: 'agent & product',
-};
-
-const ICON_VARIANTS: IconVariant[] = ['outline', 'duotone', 'glyph', 'bulk'];
-
-/** The icons that carry a layer model, and so have four treatments. */
-const LAYERED_ICONS = ICON_NAMES.filter((name) => ICONS[name].layers != null);
-
-const ICON_SIZE_SAMPLE: IconName[] = ['session', 'branch', 'terminal', 'diff', 'sparkle', 'folder'];
-
-function IconFamilyRow({ family }: { family: IconFamily }) {
-  return (
-    <Row>
-      <LegendKey>{ICON_FAMILY_NAMES[family]}</LegendKey>
-      <Cluster>
-        {ICON_FAMILIES[family].map((name) => (
-          <Sample key={name} name={name}>
-            <div {...stylex.props(styles.iconBox)}>
-              <Icon name={name} />
-            </div>
-          </Sample>
-        ))}
-      </Cluster>
-    </Row>
-  );
-}
-
-function IconSizeRow() {
-  const boxes = [
-    ['16', styles.iconBox16],
-    ['20', styles.iconBox20],
-    ['24', styles.iconBox],
-    ['32', styles.iconBox32],
-  ] as const;
-  return (
-    <Row>
-      <LegendKey>sizes</LegendKey>
-      <Cluster>
-        {boxes.map(([size, box]) => (
-          <Sample key={size} name={`${size}px`}>
-            <div {...stylex.props(styles.iconStates)}>
-              {ICON_SIZE_SAMPLE.map((name) => (
-                <div key={name} {...stylex.props(box)}>
-                  <Icon name={name} />
-                </div>
-              ))}
-            </div>
-          </Sample>
-        ))}
-      </Cluster>
-      <span {...stylex.props(styles.rungUse)}>
-        one drawing at every size: the 16px rendering is the 24 grid scaled, which is why no two
-        parallel strokes sit closer than 2px.
-      </span>
-    </Row>
-  );
-}
-
-function IconVariantRow({ variant }: { variant: IconVariant }) {
-  return (
-    <Row>
-      <LegendKey>{variant}</LegendKey>
-      <Cluster>
-        {LAYERED_ICONS.map((name) => (
-          <Sample key={name} name={name}>
-            <div {...stylex.props(styles.iconStates)}>
-              <div {...stylex.props(styles.iconBox)}>
-                <Icon name={name} variant={variant} />
-              </div>
-              <div {...stylex.props(styles.iconBox, styles.iconAccent)}>
-                <Icon name={name} variant={variant} />
-              </div>
-              <div {...stylex.props(styles.iconBox16, styles.iconMuted)}>
-                <Icon name={name} variant={variant} />
-              </div>
-            </div>
-          </Sample>
-        ))}
-      </Cluster>
-    </Row>
-  );
-}
-
-function IconStateRow() {
-  // Each pair is rendered on demand rather than held as elements in a list, so
-  // no element sits in an array without a key.
-  const pairs: { name: string; off: () => ReactNode; on: () => ReactNode }[] = [
-    {
-      name: 'sidebar',
-      off: () => <SidebarToggleIcon collapsed={false} />,
-      on: () => <SidebarToggleIcon collapsed />,
-    },
-    {
-      name: 'chevron',
-      off: () => <ChevronToggleIcon open={false} />,
-      on: () => <ChevronToggleIcon open />,
-    },
-    {
-      name: 'check',
-      off: () => <CheckDrawIcon checked={false} />,
-      on: () => <CheckDrawIcon checked />,
-    },
-    {
-      name: 'eye',
-      off: () => <EyeToggleIcon hidden={false} />,
-      on: () => <EyeToggleIcon hidden />,
-    },
-    {
-      name: 'play / pause',
-      off: () => <PlayPauseIcon playing={false} />,
-      on: () => <PlayPauseIcon playing />,
-    },
-    {
-      name: 'star',
-      off: () => <StarToggleIcon starred={false} />,
-      on: () => <StarToggleIcon starred />,
-    },
-    {
-      name: 'bell',
-      off: () => <BellRingIcon ringing={false} />,
-      on: () => <BellRingIcon ringing />,
-    },
-    {
-      name: 'refresh',
-      off: () => <RefreshTurnIcon turned={false} />,
-      on: () => <RefreshTurnIcon turned />,
-    },
-    {
-      name: 'folder',
-      off: () => <FolderToggleIcon open={false} />,
-      on: () => <FolderToggleIcon open />,
-    },
-  ];
-  return (
-    <Row>
-      <LegendKey>two states</LegendKey>
-      <Cluster>
-        {pairs.map(({ name, off, on }) => (
-          <Sample key={name} name={name}>
-            <div {...stylex.props(styles.iconStates)}>
-              <div {...stylex.props(styles.iconBox)}>{off()}</div>
-              <div {...stylex.props(styles.iconBox)}>{on()}</div>
-            </div>
-          </Sample>
-        ))}
-      </Cluster>
-      <span {...stylex.props(styles.rungUse)}>
-        one svg, two values of one number: its parts move by transform, opacity and dash offset
-        only, so at rest each state is the static drawing, and a browser without the property
-        transition snaps to it. Nothing is added for a state: the collapsed sidebar is the open one
-        with its rows shrunk to a rail.
-      </span>
-    </Row>
-  );
-}
-
 function KbdRow() {
   return (
     <Row>
@@ -4393,24 +4200,6 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>
-        </PaletteSplit>
-      </Section>
-
-      <Section
-        title="Icons · one grid, four treatments"
-        rule="The set is drawn in this package rather than taken from an icon library, for the reason the glyphs already were: the package depends on React, Base UI and StyleX and nothing else. Every icon is on a 24 grid with a 20 live area, a 1.5 stroke with round caps and joins, 2px corners on a container and 2px nodes for the git family, and a family shares one skeleton — the chat family one bubble, the file family one folded sheet, the git family the same two columns — so its members line up in a list. An icon states no size and no colour: it fills the box it is given and inherits currentColor, so the part holding it owns both, which is how the package's glyphs already work. Where an icon has a layer model, four treatments come from the same paths: outline; duotone, the stroke over its back layer at 18%; glyph, everything filled with the marks cut out through a mask so the cut is a hole and not the panel's colour; and bulk, no stroke at all, the back layer at 35% and the front at 100% so the depth is the difference between two fills. A stateful icon is one svg whose parts are functions of one number, which CSS transitions."
-      >
-        <PaletteSplit palettes={palettes}>
-          <Rows>
-            {(Object.keys(ICON_FAMILIES) as IconFamily[]).map((family) => (
-              <IconFamilyRow key={family} family={family} />
-            ))}
-            <IconSizeRow />
-            {ICON_VARIANTS.map((variant) => (
-              <IconVariantRow key={variant} variant={variant} />
-            ))}
-            <IconStateRow />
-          </Rows>
         </PaletteSplit>
       </Section>
     </Board>
