@@ -9,6 +9,7 @@
   "sharing.request.notice": "The agent asked to publish a static copy. Nothing is published until you review and confirm.",
   "sharing.request.review": "Review and share",
   "sharing.request.failed": "Could not dismiss the request. Try again.",
+  "sharing.request.unavailable": "Could not load pending share requests.",
   "sharing.static.includeChildren": "Also share {{count}} sub-conversations",
   "sharing.static.includeChildrenPartial": "Also share sub-conversations ({{selected}} of {{count}})",
   "sharing.static.limit": "A share can contain at most {{count}} conversations.",

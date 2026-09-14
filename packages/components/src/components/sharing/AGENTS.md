@@ -39,6 +39,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   Review locks the explicit target set; confirmation is app-only. Keep its editor
   mounted when begin consumes the request. Confirmed half-deployments remain visible
   and can be abandoned; a published request cannot use cancellation to revoke a share.
+  Its query throws into render, so keep it inside its own boundary: a cloud failure
+  degrades to the inline retry notice, never into the conversation.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. It must never be imported by the anonymous entry. Workspace E2EE

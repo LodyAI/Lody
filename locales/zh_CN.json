@@ -8,6 +8,7 @@
   "sharing.request.notice": "Agent 请求发布一份静态副本。在你确认之前不会发布任何内容。",
   "sharing.request.review": "查看并分享",
   "sharing.request.failed": "未能忽略此请求，请重试。",
+  "sharing.request.unavailable": "无法加载待处理的分享请求。",
   "sharing.static.includeChildren": "同时分享 {{count}} 个子对话",
   "sharing.static.attachmentNotice": "图片也会一起共享，暂不包含文件附件。",
   "sharing.static.includeChildrenPartial": "同时分享子对话（已选 {{selected}} / {{count}}）",
