@@ -120,7 +120,8 @@ as collapsing — `hoverFill` lands 2/255 from `raisedBackground` in the light
 palette, `selectedFill` resolves to exactly `raisedBackground` in the dark one —
 so a badge that took a background from the ladder would be invisible somewhere
 by construction. Its fill is a **film**: the tone at 8% of `label` or 14% of an
-outcome colour over whatever is underneath, which is the form
+outcome colour over whatever is underneath (12% and 22% since the follow-up
+below), which is the form
 `Button`'s destructive ghost hover already takes. One declaration, every rung,
 both palettes. The board carries the same five badges on the page, the card and
 the floating rung for exactly this reason.
@@ -135,7 +136,10 @@ afford a coloured mark because the mark is a graphic; a badge is only words. And
 it does not need the colour to be legible as a *kind*, because unlike an Alert's
 mark a badge is never wordless: the tint carries the tone and the word carries
 the fact. `badge.label` is `secondaryLabel` for all five tones, which is also
-what most callers had already written by hand as `text-muted-foreground`.
+what most callers had already written by hand as `text-muted-foreground`. That
+last sentence is the part the follow-up below corrects: the argument for not
+using a *tone* as the ink was sound, and the choice of which neutral ink to use
+instead was never measured on the film it would sit on.
 
 **Five tones, and the fifth is `running`.** The four outcomes are the message
 family's, imported as its type so the vocabulary cannot drift into two; the
@@ -209,6 +213,49 @@ Twenty-nine surfaces, and two Radix files deleted (`badge.tsx`,
   wherever it was decorative; where it carried meaning it became a tone — a paid
   invoice is `success` and a checkout in flight is `running`.
 - **Separator** — four, three of which were restating its colour.
+
+## Follow-up, 2026-09-14: a film too thin to read, and an ink that never cleared
+
+The five tones were reported as hard to tell apart in use, and measuring them
+**against each other** rather than each on its own showed why. Off the rendered
+board, the closest pair of composited chips was 0.019 apart in oklab in the
+light palette (neutral against success) and 0.026 in the dark one (running
+against warning) — a difference that survives a swatch comparison and does not
+survive a 20px chip glanced at in a row.
+
+The films are now **12% of `label`** for neutral and **22% of the tone** for the
+rest, which puts those closest pairs at 0.030 and 0.035. That is still a film:
+the word is what says which tone a badge is, and the tint only has to make that
+believable at a glance. A film nobody can separate is a film doing nothing.
+
+**And the ink was already failing.** Raising the tint is the kind of change that
+costs contrast, so the word was measured on its own chip — which, it turns out,
+the original change never did. `secondaryLabel` on a danger badge was **3.9:1**
+on the page and **3.4:1** on one inside a popup, against the 4.5:1 that 11px
+text needs. Those are the *old* numbers: the film's strength made a failing
+number worse rather than causing it.
+
+So `badge.label` is `colors.label`. It clears 4.5:1 in every tone on every rung
+in both palettes, by 9:1 at the narrowest, measured off Chromium's own
+compositing rather than modelled. A badge stays quieter than the thing it is
+attached to by taking the caption step, which is a size — not by taking a colour
+that cannot carry its own words. This is the same correction the avatar's
+initials took for the same reason, four days later and in the opposite
+direction from the one the original note assumed.
+
+What the note above got right and keeps: do not colour the *words* with the
+tone. `warning` at 11px is still 2.8:1, and that argument is untouched.
+
+### The pair that stays close
+
+`running` against `warning` in the **dark** palette is the worst pair at any
+film strength, and raising it only scales the gap. The cause is upstream of this
+component: dark `accent` is `hsl(27 100% 80%)` and dark `warning` is
+`hsl(43 96% 56%)`, sixteen degrees of hue apart, so a wash of either over a
+near-black surface lands in the same warm brown. Separating them means moving a
+semantic colour that every focus ring, link and live indicator in the product
+reads, which is not a decision a badge gets to make. Recorded rather than fixed;
+the word is what tells those two apart, and a badge always has one.
 
 ## Deliberately not done
 
