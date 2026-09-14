@@ -242,3 +242,13 @@ this page is the full text of the rules summarised there.
   `<input type="file">` on every platform (Windows included — the renderer no
   longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
   routes each selection by MIME into the image or file state machine.
+  Proposed replacement: [send-time attachment preparation](../../specs/session-files.md).
+  That draft unifies new-conversation and continuation drafts, moves task ownership
+  out of the composer, and delays existing transfers until Send. Permanent local
+  references belong to a separate PR; immediate transfer remains the current implementation.
+
+The draft Spec also separates composer takeover/focus from actual submission.
+Its proposed Effect integration covers child-draft promotion, warmup cleanup,
+frozen user choices versus current runtime facts, submission side effects, and
+post-submit delivery ownership. These are proposed changes; the source behavior
+described above has not been replaced.
