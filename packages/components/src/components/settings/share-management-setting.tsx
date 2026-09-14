@@ -221,7 +221,7 @@ function ShareManagementList({
             <AlertDialogDescription>
               {t(
                 'sharing.static.invalidateNotice',
-                'The previous link will stop working. Already downloaded copies cannot be recalled.'
+                'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

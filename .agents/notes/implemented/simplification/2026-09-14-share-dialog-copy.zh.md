@@ -11,8 +11,9 @@ PR: https://github.com/LodyAI/Lody/pull/682
 静态分享对话框的设置页原本堆叠四段说明文案。现在只保留公开链接访问提示，以及一行
 图片/文件附件范围说明。被移除的两段曾披露：已发布的包包含思考与工具记录、标题会在
 链接预览中公开、之后的新消息不会加入，以及运行配置和类型明确的终端输出会被省略。
-冻结、投影和发布行为不变，只是确认文案变短。分享 Spec 与分享组件说明同步去掉了
-首屏披露义务。
+冻结、投影和发布行为不变，只是确认文案变短。未完成草稿与撤销文案也在同一次整理中
+压缩，并保留“已下载副本无法收回”的警告。分享 Spec 与分享组件说明同步去掉了首屏披露
+义务。
 
 ## 决策
 
@@ -20,6 +21,9 @@ PR: https://github.com/LodyAI/Lody/pull/682
 拥有链接的人都可以查看这个对话，以及图片会共享、文件附件不包含。发布包与之前完全一致：
 `session-share-export.ts` 与 `session-share-package.ts` 仍按相同字段投影和省略，读取者
 仍会收到思考与工具内容，类型明确的终端输出仍在传输层被省略。
+
+同一次整理还压掉了未完成草稿提示中的编辑器/凭据细节，并收紧了撤销及撤销后的文案。
+撤销确认仍保留“已下载的副本无法收回”，因为这是该操作不可逆的后果。
 
 这会有意移除产品中唯一一处披露：分享可能包含敏感的思考/工具记录、标题会在链接预览中
 公开、终端输出会被丢弃。保留这项披露并非无足轻重的副作用，而是本次请求的改动本身。
@@ -30,5 +34,6 @@ PR: https://github.com/LodyAI/Lody/pull/682
 
 移除两个不再使用的键（`sharing.static.contentNotice`、`sharing.static.historyOmissions`）
 并在两个语言文件中更新 `sharing.static.attachmentNotice` 后，`node scripts/check-i18n.mjs`
-通过。`session-share-manager.test.tsx` 的 15 个用例全部通过，`@lody/components` 的类型检查
-（`tsgo --noEmit`）通过，oxlint 对改动组件无告警。未运行完整的 workspace `pnpm check`。
+通过。`session-share-manager.test.tsx` 与 `share-management-setting.test.tsx` 共 18 个用例
+全部通过，`@lody/components` 的类型检查（`tsgo --noEmit`）通过，oxlint 对改动组件无告警。
+未运行完整的 workspace `pnpm check`。

@@ -226,7 +226,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           <Note>
             {t(
               'sharing.static.draftRecovery',
-              'Its upload credentials were discarded when the editor closed. Discard it to share this conversation again; nothing was published.'
+              'Discard it to share this conversation again; nothing was published.'
             )}
           </Note>
           {props.error && <Note tone="alert">{props.error}</Note>}
@@ -456,7 +456,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             <AlertDialogDescription>
               {t(
                 'sharing.static.invalidateNotice',
-                'The previous link will stop working. Already downloaded copies cannot be recalled.'
+                'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
