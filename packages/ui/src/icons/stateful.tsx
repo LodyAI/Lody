@@ -42,14 +42,43 @@ const styles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   centred: { transformBox: 'view-box', transformOrigin: '12px 12px' },
-  // sidebar: the divider slides from 10 to 6.5 and the rows shrink into the
-  // rail as dots, so the collapsed state is still a sidebar — a narrow one
-  // showing only marks — rather than a frame with a symbol pasted on it.
-  sidebarDivider: { transformBox: 'view-box', transform: `translateX(calc(${t} * -3.5px))` },
-  sidebarRows: {
+  /*
+   * sidebar: the divider slides from 10 to 8.5 and the rows retract into the
+   * rail as marks, so the collapsed state is still a sidebar — a narrow one
+   * showing only marks — rather than a frame with a symbol pasted on it.
+   *
+   * The rail those marks live in is 5 units wide and its two strokes take 1.5
+   * of them, which leaves 3.5: one mark of 2, with 0.75 of air on either side.
+   * A third mark does not fit that rhythm, so the middle row fades and the
+   * outer two become the marks.
+   *
+   * A row retracts by its dash and not by `scaleX`. A horizontal scale leaves
+   * a stroke's thickness alone but squashes its round caps, so a row scaled to
+   * nothing is a 0.8-wide sliver rather than the 2-wide mark
+   * `sidebar-collapsed` draws — the two states would be two different
+   * drawings. A dash retracted to zero length is a round cap and nothing else,
+   * which is a dot; the uniform scale that carries it from 1.5 to 2 grows the
+   * stroke without touching its shape.
+   */
+  sidebarDivider: { transformBox: 'view-box', transform: `translateX(calc(${t} * -1.5px))` },
+  // The gap is longer than the path, so the repeat lands past the end and the
+  // retracted row is one dot at its start rather than one at either end.
+  sidebarRow: { strokeDasharray: `calc(1 - ${t}) 2` },
+  sidebarRowTop: {
     transformBox: 'view-box',
-    transformOrigin: '5.5px 0',
-    transform: `translateX(calc(${t} * -0.75px)) scaleX(calc(1 - ${t} * 0.8))`,
+    transformOrigin: '5.5px 8px',
+    transform: `translate(calc(${t} * 0.5px), calc(${t} * 1.5px)) scale(calc(1 + ${t} / 3))`,
+  },
+  sidebarRowMiddle: {
+    transformBox: 'view-box',
+    transformOrigin: '5.5px 10.5px',
+    transform: `translate(calc(${t} * 0.5px), calc(${t} * 1.5px)) scale(calc(1 + ${t} / 3))`,
+    opacity: `calc(1 - ${t})`,
+  },
+  sidebarRowBottom: {
+    transformBox: 'view-box',
+    transformOrigin: '5.5px 13px',
+    transform: `translate(calc(${t} * 0.5px), calc(${t} * 1.5px)) scale(calc(1 + ${t} / 3))`,
   },
   chevron: {
     transformBox: 'view-box',
@@ -141,7 +170,9 @@ const PANEL = 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a
 
 /**
  * The sidebar, and whether it is open: the same frame, its divider moved and
- * its rows shrunk to the marks of a rail. Nothing is added in either state.
+ * its rows retracted to the marks of a rail. Nothing is added in either state,
+ * and t = 1 is `sidebar-collapsed` exactly — the marks land on (6, 9.5) and
+ * (6, 14.5) at a weight of 2, which is what the registry draws there.
  */
 export const SidebarToggleIcon = forwardRef<
   SVGSVGElement,
@@ -151,9 +182,21 @@ export const SidebarToggleIcon = forwardRef<
     <Frame ref={ref} t={collapsed ? 1 : 0} {...rest}>
       <path d={PANEL} />
       <path d="M10 4.5v15" {...stylex.props(styles.sidebarDivider)} />
-      <g {...stylex.props(styles.sidebarRows)}>
-        <path d="M5.5 8h2.5M5.5 10.5h2.5M5.5 13h2.5" />
-      </g>
+      <path
+        d="M5.5 8h2.5"
+        pathLength={1}
+        {...stylex.props(styles.sidebarRow, styles.sidebarRowTop)}
+      />
+      <path
+        d="M5.5 10.5h2.5"
+        pathLength={1}
+        {...stylex.props(styles.sidebarRow, styles.sidebarRowMiddle)}
+      />
+      <path
+        d="M5.5 13h2.5"
+        pathLength={1}
+        {...stylex.props(styles.sidebarRow, styles.sidebarRowBottom)}
+      />
     </Frame>
   );
 });
