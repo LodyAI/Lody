@@ -2567,6 +2567,28 @@ const SessionDetail = ({
     });
   }, [activeDraftTab, activeTabSession, activeTabSessionId, t]);
 
+  // The share is finished, so the whole flow ends: the preview closes and the
+  // chat drops the selection behind it. Resolve the surface by the session the
+  // card was built from rather than whatever tab is active now — the export is
+  // async and the user may have moved on while the save dialog was up.
+  const handleShareImageCompleted = useCallback(
+    (action: 'copied' | 'saved') => {
+      const targetSessionId = shareImageTarget?.session.id;
+      setShareImageTarget(null);
+      if (targetSessionId) {
+        const chatRef = chatRefsMap.current.get(targetSessionId);
+        if (chatRef && 'cancelShareImageSelection' in chatRef) chatRef.cancelShareImageSelection();
+      }
+      // A save announced itself through the native dialog or the browser's
+      // download UI. A copy did not, and the preview that used to say so has
+      // just closed, so this is the last place it can be said.
+      if (action === 'copied') {
+        toast.success(t('sessions.shareImage.copied', 'Image copied to clipboard'));
+      }
+    },
+    [shareImageTarget, t]
+  );
+
   const handleOpenSearch = useCallback(() => {
     if (activeDraftTab) {
       return;
@@ -6043,6 +6065,7 @@ const SessionDetail = ({
         onOpenChange={(open) => {
           if (!open) setShareImageTarget(null);
         }}
+        onCompleted={handleShareImageCompleted}
         session={shareImageTarget?.session ?? null}
         messages={shareImageTarget?.messages ?? []}
         agentName={shareImageTarget?.agentName}

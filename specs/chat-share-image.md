@@ -12,7 +12,16 @@ The selection unit is a persisted user or assistant message with prose. A folded
 assistant turn remains one selectable message even when it occupies multiple
 virtual rows. Mouse drag, Shift range extension, Ctrl/Command inversion, and
 edge scrolling preserve chronological order. Cancelling selection restores the
-composer; closing the preview retains the selection.
+composer. Dismissing the preview retains the selection, so it can be reopened and
+adjusted, but finishing the share ends the whole flow: once the image is on the
+clipboard or written to disk, the preview closes and the selection goes with it.
+Nothing is left armed behind a task the user has completed.
+
+A cancelled save dialog finishes nothing. It closes neither the preview nor the
+selection, because backing out of a file picker is not a share, and clearing a
+selection under someone who did that would throw away work still in hand. The
+export reports whether it actually saved rather than merely whether it failed,
+which is what lets the two be told apart.
 
 The card displays prose, while its approximate token count includes stored
 thinking, plans, and textual tool input/output from selected messages. This is
@@ -104,6 +113,10 @@ PNG export captures the card and its ground, independent of preview scrolling
 or scaling. It waits for fonts and images, disables duplicate export or copy
 actions, and reports failures for retry. Electron uses its native save dialog;
 browsers download the file. Canceling the save dialog preserves the preview.
+
+A finished copy is announced outside the preview, because the preview is gone by
+then: a save has the native dialog or the browser's own download UI behind it,
+while a copy would otherwise complete in silence.
 
 The preview also provides an explicit Copy image action. It captures the same PNG
 as export and writes it only to the local system clipboard: Electron delegates the

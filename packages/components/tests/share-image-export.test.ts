@@ -34,7 +34,9 @@ describe('share image export', () => {
       captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
       return new Blob([]);
     });
-    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow('PNG encoding failed');
+    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow(
+      'PNG encoding failed'
+    );
     expect(captured).toEqual([1, 3, 4, 2, 7, 8]);
     expect(card.innerHTML).toBe(original);
   });
@@ -49,7 +51,9 @@ describe('share image export', () => {
       captured = Array.from(element.querySelectorAll('li')).map((item) => item.value);
       throw new Error('Capture failed');
     });
-    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow('Capture failed');
+    await expect(exportShareImage(card, undefined, 'lody-conversation')).rejects.toThrow(
+      'Capture failed'
+    );
     expect(captured).toEqual([3, 2, 1, 9, 0, -1]);
     expect(card.innerHTML).toBe(original);
   });
@@ -64,7 +68,13 @@ describe('share image export', () => {
       createObjectURL: () => 'blob:share-image',
       revokeObjectURL: (url: string) => revoked.push(url),
     });
-    await exportShareImage(document.createElement('div'), 'Review / rendering', 'lody-conversation');
+    const result = await exportShareImage(
+      document.createElement('div'),
+      'Review / rendering',
+      'lody-conversation'
+    );
+    // A browser download has no cancel signal, so this path always reports a save.
+    expect(result).toEqual({ saved: true });
     expect(downloads).toEqual([{ name: 'Review - rendering.png', url: 'blob:share-image' }]);
     expect(document.querySelector('a[download]')).toBeNull();
     expect(revoked).toEqual([]);
@@ -72,7 +82,7 @@ describe('share image export', () => {
     expect(revoked).toEqual(['blob:share-image']);
   });
 
-  it('hands PNG bytes to the native save dialog and accepts cancellation', async () => {
+  it('reports a cancelled native save as no save, so callers can leave the preview open', async () => {
     const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
     mocks.toBlob.mockResolvedValue({
       type: 'image/png',
@@ -86,8 +96,29 @@ describe('share image export', () => {
         return { saved: false, canceled: true };
       },
     });
-    await exportShareImage(document.createElement('div'), undefined, 'lody-conversation');
+    const result = await exportShareImage(
+      document.createElement('div'),
+      undefined,
+      'lody-conversation'
+    );
     expect(saved).toEqual({ fileName: 'lody-conversation.png', bytes });
+    // Not a failure — nothing is thrown — but not a save either. A caller that
+    // read this as success would close the surface under someone who was only
+    // backing out of the file picker.
+    expect(result).toEqual({ saved: false });
+  });
+
+  it('reports a completed native save', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71]).buffer;
+    mocks.toBlob.mockResolvedValue({
+      type: 'image/png',
+      size: bytes.byteLength,
+      arrayBuffer: async () => bytes,
+    });
+    mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: true }) });
+    await expect(
+      exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
+    ).resolves.toEqual({ saved: true });
   });
 
   it('propagates native save failure so the dialog can offer retry', async () => {
@@ -97,7 +128,9 @@ describe('share image export', () => {
       arrayBuffer: async () => new ArrayBuffer(1),
     });
     mocks.bridge.mockReturnValue({ saveAs: async () => ({ saved: false, error: 'Disk full' }) });
-    await expect(exportShareImage(document.createElement('div'), undefined, 'lody-conversation')).rejects.toThrow('Disk full');
+    await expect(
+      exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
+    ).rejects.toThrow('Disk full');
   });
 
   it('hands PNG bytes to Electron clipboard and propagates copy failure', async () => {
@@ -116,9 +149,7 @@ describe('share image export', () => {
     mocks.bridge.mockReturnValue({
       copyToClipboard: async () => ({ copied: false, error: 'Clipboard busy' }),
     });
-    await expect(copyShareImage(document.createElement('div'))).rejects.toThrow(
-      'Clipboard busy'
-    );
+    await expect(copyShareImage(document.createElement('div'))).rejects.toThrow('Clipboard busy');
   });
 
   it('writes the captured PNG with the browser clipboard when no native bridge exists', async () => {
@@ -170,9 +201,9 @@ describe('share image export', () => {
       new Blob(['svg'], { type: 'image/svg+xml' }),
     ]) {
       mocks.toBlob.mockResolvedValue(blob);
-      await expect(exportShareImage(document.createElement('div'), undefined, 'lody-conversation')).rejects.toThrow(
-        'PNG encoding failed'
-      );
+      await expect(
+        exportShareImage(document.createElement('div'), undefined, 'lody-conversation')
+      ).rejects.toThrow('PNG encoding failed');
     }
   });
 });

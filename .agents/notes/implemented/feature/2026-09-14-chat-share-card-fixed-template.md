@@ -152,6 +152,25 @@ it; on a handset they are the primary touch targets instead, and `h-9` is alread
 under the 44pt guidance without shrinking it further. Do not unify the two for
 consistency — the inconsistency is the point.
 
+Finishing the share ends the flow. The preview closes and the chat drops the
+selection behind it, because leaving a surface armed behind a task the user has
+completed is just state they have to clear by hand. Dismissing the preview still
+retains the selection — that is the case where someone wants to go back and adjust
+it — so the two are distinguished by a completion callback rather than by
+`onOpenChange`, which cannot tell them apart.
+
+That exposed a defect in `exportShareImage`: it swallowed a cancelled save dialog
+and resolved exactly like a successful one, so closing on "export resolved" would
+have torn the flow down under someone who had only backed out of the file picker,
+against a guarantee the Spec already made. It now returns `{ saved }`. A browser
+download has no cancel signal to read and always reports a save, which is honest —
+the browser owns the transfer from the click onward.
+
+The completion callback carries which action finished, because the two leave
+different feedback behind. A save has the native dialog or the browser's download
+UI; a copy has nothing once the preview is gone, so the host toasts for it and
+only for it.
+
 The preview surface follows: one palette switch, `Copy image` and `Export PNG`.
 It opens on whatever appearance the app is currently wearing, reset in a
 render-phase branch rather than an effect so a reopened dialog never paints the

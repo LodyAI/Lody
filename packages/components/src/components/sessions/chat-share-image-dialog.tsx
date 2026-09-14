@@ -354,6 +354,19 @@ export interface ChatShareImageDialogProps {
    * to open on either card; the product never passes it.
    */
   initialDestination?: ChatShareCardDestination;
+  /**
+   * The image reached its destination — copied, or actually written to disk. The
+   * host ends the whole flow here, this surface and the selection behind it. It
+   * does NOT fire for a dismissal or for a cancelled save dialog: backing out of
+   * a file picker is not a finished share, and tidying the selection away under
+   * someone who did that would lose work they still had in hand.
+   *
+   * Which action finished is passed on because the two have different feedback
+   * left behind them. A save has the native dialog or the browser's own download
+   * UI; a copy has nothing once this surface is gone, so the host is the only
+   * place left to say it worked.
+   */
+  onCompleted?: (action: 'copied' | 'saved') => void;
 }
 
 /**
@@ -376,6 +389,7 @@ export function ChatShareImageDialog({
   messages,
   agentName,
   initialDestination,
+  onCompleted,
 }: ChatShareImageDialogProps) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
@@ -438,7 +452,12 @@ export function ChatShareImageDialog({
     setOperation('export');
     setExportError(false);
     try {
-      await exportShareImage(exportRef.current, session?.title, 'lody-conversation');
+      const { saved } = await exportShareImage(
+        exportRef.current,
+        session?.title,
+        'lody-conversation'
+      );
+      if (saved) onCompleted?.('saved');
     } catch {
       setExportError(true);
     } finally {
@@ -458,6 +477,7 @@ export function ChatShareImageDialog({
     try {
       await copyShareImage(exportRef.current);
       setCopied(true);
+      onCompleted?.('copied');
     } catch {
       setExportError(true);
     } finally {

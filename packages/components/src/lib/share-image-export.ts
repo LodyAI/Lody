@@ -85,12 +85,19 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
  * Saves the captured PNG. `title` is the user-facing name the card was built
  * from (a session title, a workspace name); `fallback` is the surface's own
  * stem, used when the title is empty or sanitizes away to nothing.
+ *
+ * Resolves `{ saved: false }` when the user dismissed the native save dialog.
+ * That is not a failure — nothing went wrong and nothing is to be reported — but
+ * it is not a save either, and a caller that treats the two alike will tidy the
+ * surface away under someone who was only backing out of the file picker. A
+ * browser download has no cancel signal to read: the browser owns the transfer
+ * from the click onward, so that path always reports a save.
  */
 export async function exportShareImage(
   element: HTMLElement,
   title: string | undefined,
   fallback: string
-): Promise<void> {
+): Promise<{ saved: boolean }> {
   const blob = await captureShareImage(element);
 
   const name =
@@ -103,7 +110,7 @@ export async function exportShareImage(
   if (bridge) {
     const result = await bridge.saveAs({ fileName, bytes: await blob.arrayBuffer() });
     if (!result.saved && !result.canceled) throw new Error(result.error || 'Image save failed');
-    return;
+    return { saved: result.saved === true };
   }
 
   const url = URL.createObjectURL(blob);
@@ -118,4 +125,5 @@ export async function exportShareImage(
     // Let the browser consume the download before releasing its bytes.
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  return { saved: true };
 }
