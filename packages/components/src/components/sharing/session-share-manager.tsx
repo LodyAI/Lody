@@ -257,22 +257,22 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             )}
           </Note>
         )}
-        <Note>
-          {!canPublish
-            ? t(
-                'settings.shares.otherPublisher',
-                'Published by another workspace member. Link credentials are private to the publisher.'
-              )
-            : active
-              ? t(
-                  'sharing.static.updateNotice',
-                  'Updating replaces the published copy with the current history and its public title. The link stays the same.'
-                )
-              : t(
-                  'sharing.static.contentNotice',
-                  'A static copy of the current history is published, including thinking and tool records. The title is public in link previews. Later messages are not added.'
-                )}
-        </Note>
+        {!canPublish && (
+          <Note>
+            {t(
+              'settings.shares.otherPublisher',
+              'Published by another workspace member. Link credentials are private to the publisher.'
+            )}
+          </Note>
+        )}
+        {active && canPublish && (
+          <Note>
+            {t(
+              'sharing.static.updateNotice',
+              'Updating replaces the published copy with the current history and its public title. The link stays the same.'
+            )}
+          </Note>
+        )}
         {children.length > 0 && canPublish && !selectionLocked && (
           <label className="-mx-2 flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-hover has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
             <Checkbox
@@ -303,13 +303,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         <Note>
           {t(
             'sharing.static.attachmentNotice',
-            'Images are included. File attachments and external resources are not included.'
-          )}
-        </Note>
-        <Note>
-          {t(
-            'sharing.static.historyOmissions',
-            'Runtime settings and terminal output are omitted. Terminal commands are retained.'
+            'Images are also shared. File attachments are not included.'
           )}
         </Note>
         {!props.canCapture && canPublish && (

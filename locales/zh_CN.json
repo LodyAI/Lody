@@ -1,5 +1,4 @@
 {
-  "sharing.static.historyOmissions": "省略运行配置和终端输出，仅保留终端命令。",
   "sharing.toggleTree": "展开或收起对话树",
   "sharing.fileAttachmentOmitted": "文件附件未包含在此次分享中",
   "sharing.request.incomplete": "此部署尚未发布，编辑器关闭后无法续传。请先放弃部署，再让 Agent 使用新的 requestId 重新发起分享请求。",
@@ -12,7 +11,7 @@
   "sharing.request.failed": "未能忽略此请求，请重试。",
   "sharing.static.draft": "上一次分享没有完成发布。",
   "sharing.static.includeChildren": "同时分享 {{count}} 个子对话",
-  "sharing.static.attachmentNotice": "包含图片，暂不包含文件附件和外部资源。",
+  "sharing.static.attachmentNotice": "图片也会一起共享，暂不包含文件附件。",
   "sharing.static.includeChildrenPartial": "同时分享子对话（已选 {{selected}} / {{count}}）",
   "sharing.static.limit": "每份分享最多包含 {{count}} 个对话。",
   "sharing.static.sourceUnavailable": "所选源对话不可用，已发布的副本不受影响。",
@@ -22,7 +21,6 @@
   "sharing.static.revoke": "撤销分享",
   "sharing.static.invalidateNotice": "原链接将失效，已经下载的副本无法收回。",
   "sharing.static.publicNotice": "拥有链接的人都可以查看这个对话。",
-  "sharing.static.contentNotice": "发布的是当前内容的静态副本，包含思考过程与工具记录。标题会在链接预览中公开。之后的新消息不会自动加入。",
   "sharing.static.updateNotice": "更新会用当前内容和标题替换已发布的副本，链接保持不变。",
   "sharing.static.revokedNotice": "上一个链接已撤销。重新分享会生成新的链接。",
   "sharing.static.share": "分享对话",
