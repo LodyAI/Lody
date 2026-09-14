@@ -229,7 +229,7 @@ describe('MessageHandler ACP batching', () => {
       });
 
       await host.flushACPUpdatesNow(sessionId);
-      expect(await doc.getHistory()).toEqual([]);
+      expect(await doc.sessionData.history.readAll()).toEqual([]);
 
       host.enqueueACPUpdate(sessionId, {
         sessionId,
@@ -241,7 +241,7 @@ describe('MessageHandler ACP batching', () => {
       });
       await host.flushACPUpdatesNow(sessionId);
 
-      expect(await doc.getHistory()).toMatchObject([
+      expect(await doc.sessionData.history.readAll()).toMatchObject([
         {
           id: 'assistant:autonomous-auto:41',
           role: 'assistant',

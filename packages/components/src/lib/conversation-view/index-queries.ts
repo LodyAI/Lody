@@ -1,4 +1,8 @@
-import { isAutonomousTurnId, resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
+import {
+  isAutonomousTurnId,
+  resolveActiveAssistantTurnId,
+  type SessionHistory,
+} from '@lody/shared';
 import { isEmptyAssistantIndexRow } from './index-row';
 import {
   conversationTailStart,
@@ -73,7 +77,11 @@ export function resolveLastAssistantTurnIds(
       }
     }
   }
-  return { lastAssistantMessageId, lastCompletedAssistantMessageId, lastForkableAssistantMessageId };
+  return {
+    lastAssistantMessageId,
+    lastCompletedAssistantMessageId,
+    lastForkableAssistantMessageId,
+  };
 }
 
 export function countUserTurns(view: Pick<ConversationView, 'turnCount' | 'index'>): number {

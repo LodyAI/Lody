@@ -14,6 +14,7 @@ export type BuildChatStreamItemsResult = {
   items: ChatStreamItem[];
   lastAssistantMessageId: string | null;
   lastCompletedAssistantMessageId: string | null;
+  lastForkableAssistantMessageId: string | null;
   cache: BuildChatStreamItemsCache;
 };
 
@@ -208,6 +209,7 @@ export function buildChatStreamItems(
       permissionWaitMs: entry.permissionWaitMs,
       userId: entry.userId,
       acpTurnId: entry.acpTurnId,
+      acpTurnOrigin: entry.acpTurnOrigin,
       modelInfo: entry.modelInfo,
       fileDiff: entry.fileDiff,
       finished: entry.finished,

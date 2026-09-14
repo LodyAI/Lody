@@ -22,6 +22,7 @@ import {
   mergeSubagentTaskPayload,
 } from './claude-subagent-task';
 import { parseCodexCollabAgentTasks } from './codex-collab-agent-task';
+import { isAutonomousTurnId } from './turn-identity';
 
 type StoredToolCallContent = NonNullable<Extract<MessageContent, { type: 'tool_call' }>['content']>;
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;

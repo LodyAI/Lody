@@ -138,26 +138,31 @@ describe('SessionForkDestinationPopover', () => {
   it('keeps a legacy assistant forkable when an autonomous turn follows it', async () => {
     await initI18n('en');
     const sessionId = 'legacy-before-auto' as SessionId;
-    const { items, lastForkableAssistantMessageId } = buildChatStreamItems(
-      [
-        {
-          id: 'legacy',
-          role: 'assistant',
-          timestamp: '2026-09-10T00:00:00Z',
-          items: [{ type: 'text', text: 'Earlier reply' }],
-          fileDiff: [],
-          finished: true,
-        },
-        {
-          id: 'autonomous',
-          role: 'assistant',
-          timestamp: '2026-09-10T00:01:00Z',
-          items: [{ type: 'text', text: 'Scheduled reply' }],
-          fileDiff: [],
-          acpTurnId: 'auto:41',
-          finished: true,
-        },
-      ] as never,
+    const history = [
+      {
+        id: 'legacy',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:00:00Z',
+        items: [{ type: 'text', text: 'Earlier reply' }],
+        fileDiff: [],
+        finished: true,
+      },
+      {
+        id: 'autonomous',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:01:00Z',
+        items: [{ type: 'text', text: 'Scheduled reply' }],
+        fileDiff: [],
+        acpTurnId: 'auto:41',
+        finished: true,
+      },
+    ] as never;
+    const { items, lastForkableAssistantMessageId } = buildFromView(
+      createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => history,
+        subscribe: () => () => {},
+      }),
       sessionId
     );
     const onFork = vi.fn();

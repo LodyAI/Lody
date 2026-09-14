@@ -332,7 +332,7 @@ describe('SessionExecutionService', () => {
       clearEngineTurnActivity,
     });
     deps.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({
-      getHistory: async () => [],
+      sessionData: { history: { readAll: () => [] } },
     })) as never;
     const service = new SessionExecutionService(deps);
 
@@ -354,7 +354,7 @@ describe('SessionExecutionService', () => {
       isEngineTurnActive: vi.fn(() => false),
     });
     deps.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({
-      getHistory: async () => [],
+      sessionData: { history: { readAll: () => [] } },
     })) as never;
     const service = new SessionExecutionService(deps);
     const result = await service.cancelSession({
