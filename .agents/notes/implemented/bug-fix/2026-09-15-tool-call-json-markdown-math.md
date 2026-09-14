@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-15-tool-call-json-markdown-math.zh.md)
 
+PR: [#711](https://github.com/LodyAI/Lody/pull/711)
+
 ## Abstract
 
 Expanding a tool call showed its raw input JSON mangled: single-`$` inline math

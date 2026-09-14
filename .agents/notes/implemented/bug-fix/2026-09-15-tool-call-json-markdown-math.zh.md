@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-15-tool-call-json-markdown-math.md)
 
+PR: [#711](https://github.com/LodyAI/Lody/pull/711)
+
 ## 摘要
 
 展开 tool call 时，它的原始输入 JSON 显示是花的：单 `$` 行内数学解析把 `$(git ...)` 这类 shell 片段当成 TeX 公式，并丢掉了 `2>&1` 里的 `&`，导致显示的命令并不是实际执行的命令。历史存储和实际执行的命令都是完好的——损坏只发生在渲染时。现在渲染层会识别出内容为序列化 JSON 的文本块，改用逐字展示的等宽代码（美化排版）呈现，只有散文继续走 Markdown 路径。散文里合法的 `$...$` 公式不受影响；工具的 `resource` 文本块仍按 Markdown 渲染，同样的显示问题在那里依然存在。
