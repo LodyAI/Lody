@@ -158,7 +158,7 @@ describe('C2 public-package black-box consumer', () => {
       false
     );
     expect(specifiers.some((value) => value.includes('ledger-fixtures'))).toBe(false);
-    expect(specifiers.some((value) => value.includes('@lody/' + 'convex'))).toBe(false);
+    expect(specifiers.some((value) => value.includes(['@lody', 'convex'].join('/')))).toBe(false);
     expect(specifiers.filter((value) => value === '@lody/e2ee-core')).toHaveLength(2);
     expect(specifiers).toContain('@lody/e2ee-core/ledger');
     expect(specifiers).toContain('@lody/e2ee-core/ledger-node');
@@ -345,5 +345,47 @@ describe('C2 public-package black-box consumer', () => {
       expect(error).toBeInstanceOf(LedgerError);
       expect((error as LedgerError).code).toBe('unauthorized');
     }
+  });
+
+  it('bootstraps from a signed snapshot using only public exports', async () => {
+    const owner = await device();
+    const k0 = random(32);
+    const userId = random(32);
+    const ownerMembership = random(16);
+    const commitment = await commitEpochKey(new Uint8Array(32), 0, k0);
+    const body = encodeGenesisBody({
+      signer: owner.publicKey,
+      userId,
+      membershipId: ownerMembership,
+      encryptionPublicKey: owner.enc,
+      epochCommitment: commitment,
+    });
+    const genesis = encodeSignedRecord(body, await owner.sign(signingBytesForBody(body)));
+    const anchor = await hashRecord(genesis);
+    const audited = await Ledger.verify({ anchor, records: [genesis] });
+    const proposal = audited.prepareSnapshot(owner.publicKey);
+    const snapshot = await Ledger.finalizeSnapshot(
+      proposal,
+      await owner.sign(proposal.signingBytes)
+    );
+    const joined = await Ledger.verifySnapshot({
+      trust: {
+        genesis: proposal.genesis,
+        endorser: owner.publicKey,
+        head: proposal.head,
+        headSignature: await owner.sign(proposal.headAttestationSigningBytes),
+      },
+      snapshot,
+    });
+    expect(joined.origin).toBe('snapshot');
+    const peer = await device();
+    const other = await device();
+    const cmp = Ledger.compareNotes(
+      joined.comparisonNote(peer.publicKey),
+      audited.comparisonNote(other.publicKey),
+      { originalEndorser: owner.publicKey }
+    );
+    expect(cmp.kind).toBe('agree');
+    if (cmp.kind === 'agree') expect(cmp.independent).toBe(true);
   });
 });

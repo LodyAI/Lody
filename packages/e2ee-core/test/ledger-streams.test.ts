@@ -3,7 +3,12 @@ import type { AddressInfo } from 'node:net';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControlFreshnessLease } from '@lody/e2ee-core';
-import { LedgerClient, MAX_RECORD_BYTES, MemoryLedgerStore } from '@lody/e2ee-core/ledger';
+import {
+  LedgerClient,
+  MAX_LEDGER_READ_PAGE_RECORDS,
+  MAX_RECORD_BYTES,
+  MemoryLedgerStore,
+} from '@lody/e2ee-core/ledger';
 import {
   CONTROL_STREAM_CONTENT_TYPE,
   createBoundedStreamsFetch,
@@ -11,6 +16,7 @@ import {
   StreamsLedgerStream,
 } from '@lody/e2ee-core/streams';
 import { listenDurableCas } from '../bench/ds-cas-server';
+import { buildChain } from '../bench/chain';
 import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
 
 function hex(bytes: Uint8Array): string {
@@ -458,6 +464,22 @@ describe('L7 Streams CAS peer', () => {
     expect(backend.posts.every((path) => path.endsWith('/append-cas'))).toBe(true);
   });
 
+  it('syncs 1025 signed records from one StreamsClient HTTP page', async () => {
+    const count = MAX_LEDGER_READ_PAGE_RECORDS + 1;
+    const built = await buildChain(count + 1);
+    const peer = new HttpPeer();
+    peer.pageSize = count;
+    for (const record of built.records.slice(1)) peer.append(frameLedgerRecord(record));
+    const client = await LedgerClient.open(
+      built.records[0]!,
+      new MemoryLedgerStore(),
+      stream(peer.fetch)
+    );
+    const view = await client.read();
+    expect(view.length).toBe(count + 1);
+    expect(view.head).toEqual(built.ledger.head);
+  }, 120_000);
+
   function tcpSdk(streamUrl: string) {
     return new StreamsLedgerStream(
       new StreamsClient({
@@ -536,21 +558,25 @@ describe('L7 Streams CAS peer', () => {
       )
     ).record;
     const { server, streamUrl } = await listenDurableCas();
-    const url = streamUrl('e2eetest', 'org-control');
+    const casUrl = streamUrl('e2eetest', 'org-control');
     try {
-      const put = await fetch(url, {
+      const put = await fetch(casUrl, {
         method: 'PUT',
         headers: { 'Content-Type': CONTROL_STREAM_CONTENT_TYPE },
       });
       expect(put.status).toBe(201);
-      const head = await fetch(url, { method: 'HEAD' });
+      const head = await fetch(casUrl, { method: 'HEAD' });
       expect(head.status).toBe(200);
       expect(head.headers.get('Stream-Extensions')).toContain('append-cas');
-      const leader = await LedgerClient.open(created.record, new MemoryLedgerStore(), tcpSdk(url));
+      const leader = await LedgerClient.open(
+        created.record,
+        new MemoryLedgerStore(),
+        tcpSdk(casUrl)
+      );
       const follower = await LedgerClient.open(
         created.record,
         new MemoryLedgerStore(),
-        tcpSdk(url)
+        tcpSdk(casUrl)
       );
       const [a, b] = await Promise.all([leader.submit(first), follower.submit(second)]);
       const statuses = [a.status, b.status].sort();

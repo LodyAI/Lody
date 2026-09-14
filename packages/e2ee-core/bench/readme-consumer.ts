@@ -124,6 +124,31 @@ const ownerHex = Buffer.from(transferred.state.owner).toString('hex');
 const successorHex = Buffer.from(membershipId).toString('hex');
 if (ownerHex !== successorHex) throw new Error('transfer-owner');
 
+const snapProposal = transferred.prepareSnapshot(owner.publicKey);
+const snapshot = await LedgerA.finalizeSnapshot(
+  snapProposal,
+  await owner.sign(snapProposal.signingBytes)
+);
+const fromSnapshot = await LedgerB.verifySnapshot({
+  trust: {
+    genesis: snapProposal.genesis,
+    endorser: owner.publicKey,
+    head: snapProposal.head,
+    headSignature: await owner.sign(snapProposal.headAttestationSigningBytes),
+  },
+  snapshot,
+});
+if (fromSnapshot.origin !== 'snapshot') throw new Error('snapshot-origin');
+if (fromSnapshot.length !== fromZero.length) throw new Error('snapshot-length');
+if (fromSnapshot.head.some((byte, i) => byte !== fromZero.head[i]))
+  throw new Error('snapshot-head');
+const note = LedgerA.compareNotes(
+  fromSnapshot.comparisonNote(extra.publicKey),
+  fromZero.comparisonNote(applicant.publicKey),
+  { originalEndorser: owner.publicKey }
+);
+if (note.kind !== 'agree' || !note.independent) throw new Error('snapshot-compare');
+
 process.stdout.write(
   `${JSON.stringify(
     {
@@ -134,6 +159,9 @@ process.stdout.write(
       transferLength: transferred.length,
       fromZeroMatchesExtend: true,
       transferredOwner: successorHex,
+      snapshotOrigin: fromSnapshot.origin,
+      snapshotBytes: snapshot.byteLength,
+      snapshotAgreesFullAudit: true,
       head: Buffer.from(transferred.head).toString('hex'),
     },
     null,

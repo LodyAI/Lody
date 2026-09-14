@@ -8,8 +8,8 @@ in-package tests only; do not re-export it.
 - Public exports: root `Ledger`/`LedgerError`/`ContentCipher`/recovery-file/
   `createUserIdentity`/`restoreUserIdentity`/`ControlFreshnessLease`; subpaths
   `./ledger`, `./ledger-node`, `./streams`, `./streams-content`. Never pass
-  `verified=true`; existing verify uses an out-of-band genesis hash. The new
-  signed-snapshot bootstrap API is pending, not provided by these exports.
+  `verified=true`. Snapshot join uses out-of-band genesis, endorser, attested
+  head, and the endorser's signature over that head.
 - Org identity is the genesis record hash. `protocolVersion=1` only in genesis.
   Ordinary records omit Org ID, sequence, and generic operation IDs. Wire is
   `@ipld/dag-cbor` fixed arrays; keys, signatures, and hashes are raw bytes.
@@ -23,7 +23,9 @@ in-package tests only; do not re-export it.
   Bind actual complete state, replay facts, Org/genesis, position and head;
   comparing only the head does not authenticate the imported state. Independent
   comparison detects divergent views, not globally latest or honest history.
-  Freeze the new API/format before implementing; no arbitrary trusted-state input.
+  Confirmed DEC-001 (2026-09-14): `verifySnapshot` trust is out-of-band
+  genesis + endorser + attested head + endorser signature over that head.
+  Only Owner/Admin personal+canManage may endorse. No `verified=true`.
   Preserve rollback/CAS/freshness, historical-key and recovery guarantees.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `openEpochEnvelope` returns plaintext only when epoch matches and

@@ -5,6 +5,8 @@ export const MAX_RECORD_BYTES = 8192;
 export const MAX_DEPTH = 8;
 export const MAX_ARRAY_LENGTH = 32;
 export const MAX_BSTR_BYTES = 256;
+export const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+export const MAX_SNAPSHOT_ARRAY_LENGTH = 16_384;
 
 export type CborValue = null | boolean | number | Uint8Array | readonly CborValue[];
 
@@ -20,7 +22,7 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-function asPlain(value: unknown, depth: number): CborValue {
+function asPlain(value: unknown, depth: number, maxArray: number, maxBstr: number): CborValue {
   if (depth > MAX_DEPTH) fail('nesting');
   if (value === null || value === true || value === false) return value;
   if (typeof value === 'number') {
@@ -28,19 +30,24 @@ function asPlain(value: unknown, depth: number): CborValue {
     return value;
   }
   if (value instanceof Uint8Array) {
-    if (value.byteLength > MAX_BSTR_BYTES) fail('oversize');
+    if (value.byteLength > maxBstr) fail('oversize');
     return copyBytes(value);
   }
   if (Array.isArray(value)) {
-    if (value.length > MAX_ARRAY_LENGTH) fail('oversize');
-    return value.map((item) => asPlain(item, depth + 1));
+    if (value.length > maxArray) fail('oversize');
+    return value.map((item) => asPlain(item, depth + 1, maxArray, maxBstr));
   }
-  fail('canonical');
+  return fail('canonical');
 }
 
-export function decodeCbor(bytes: Uint8Array, owned = false): CborValue {
+function decodeBounded(
+  bytes: Uint8Array,
+  owned: boolean,
+  maxBytes: number,
+  maxArray: number
+): CborValue {
   if (bytes.byteLength === 0) fail('truncated');
-  if (bytes.byteLength > MAX_RECORD_BYTES) fail('oversize');
+  if (bytes.byteLength > maxBytes) fail('oversize');
   const stable = owned ? bytes : copyBytes(bytes);
   let decoded: unknown;
   try {
@@ -75,7 +82,15 @@ export function decodeCbor(bytes: Uint8Array, owned = false): CborValue {
     }
     fail('canonical');
   }
-  return asPlain(decoded, 0);
+  return asPlain(decoded, 0, maxArray, MAX_BSTR_BYTES);
+}
+
+export function decodeCbor(bytes: Uint8Array, owned = false): CborValue {
+  return decodeBounded(bytes, owned, MAX_RECORD_BYTES, MAX_ARRAY_LENGTH);
+}
+
+export function decodeSnapshotCbor(bytes: Uint8Array, owned = false): CborValue {
+  return decodeBounded(bytes, owned, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ARRAY_LENGTH);
 }
 
 export function encodeCanonical(value: CborValue): Uint8Array<ArrayBuffer> {
@@ -87,6 +102,13 @@ export function encodeCanonical(value: CborValue): Uint8Array<ArrayBuffer> {
 export function encodeCbor(value: CborValue): Uint8Array<ArrayBuffer> {
   const bytes = encodeCanonical(value);
   decodeCbor(bytes, true);
+  return bytes;
+}
+
+export function encodeSnapshotCbor(value: CborValue): Uint8Array<ArrayBuffer> {
+  const bytes = copyBytes(encode(value));
+  if (bytes.byteLength > MAX_SNAPSHOT_BYTES) fail('oversize');
+  decodeSnapshotCbor(bytes, true);
   return bytes;
 }
 

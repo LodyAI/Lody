@@ -25,6 +25,9 @@ export const JOIN_DOMAIN = text.encode('lody-e2ee/join/v1\0');
 export const POSSESS_DOMAIN = text.encode('lody-e2ee/possess/v1\0');
 export const EPOCH_COMMIT_DOMAIN = text.encode('lody-e2ee/epoch-key/v1\0');
 export const HISTORY_AEAD_DOMAIN = text.encode('lody-e2ee/epoch-history/v1\0');
+export const SNAPSHOT_DOMAIN = text.encode('lody-e2ee/snapshot/v1\0');
+export const SNAPSHOT_DIGEST_DOMAIN = text.encode('lody-e2ee/snapshot-digest/v1\0');
+export const HEAD_ATTEST_DOMAIN = text.encode('lody-e2ee/head-attest/v1\0');
 
 export type Hash = Uint8Array;
 export type SigningPublicKey = Uint8Array;
@@ -102,6 +105,21 @@ export function checkHistoryPacket(value: Uint8Array): Uint8Array {
 
 export function recordSigningBytes(bodyBytes: Uint8Array): Uint8Array {
   return concat([SIGNATURE_DOMAIN, bodyBytes]);
+}
+
+export function snapshotSigningBytes(bodyBytes: Uint8Array): Uint8Array {
+  return concat([SNAPSHOT_DOMAIN, bodyBytes]);
+}
+
+export function headAttestationSigningBytes(genesis: Hash, head: Hash): Uint8Array {
+  return concat([HEAD_ATTEST_DOMAIN, checkHash(genesis), checkHash(head)]);
+}
+
+export function snapshotStateDigest(bodyWithoutSigner: Uint8Array): Hash {
+  const digest = sha256.create();
+  digest.update(SNAPSHOT_DIGEST_DOMAIN);
+  digest.update(bodyWithoutSigner);
+  return digest.digest();
 }
 
 export function joinSigningBytes(payload: CborValue): Uint8Array {

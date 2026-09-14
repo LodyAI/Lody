@@ -3,15 +3,23 @@ import { hashRecord, type Hash } from './crypto';
 import { fail } from './error';
 import { Ledger } from './ledger';
 import { decodeRecord } from './schema';
+import type { SnapshotTrust } from './snapshot';
 
-export const MAX_LEDGER_READ_RECORDS = 4096;
-export const MAX_LEDGER_READ_PAGES = 4096;
+/** Cumulative verified records a client may retain. 10k from-zero chains must fit. */
+export const MAX_LEDGER_RECORDS = 16_384;
+/** Extend/work chunk. Adapter HTTP pages may be larger; refresh slices instead of rejecting. */
+export const MAX_LEDGER_READ_PAGE_RECORDS = 1_024;
+export const MAX_LEDGER_READ_PAGES = 256;
+/** @deprecated Use MAX_LEDGER_RECORDS. Kept as the cumulative read budget alias. */
+export const MAX_LEDGER_READ_RECORDS = MAX_LEDGER_RECORDS;
 
 export interface LedgerJournal {
   readonly genesis: Uint8Array;
   readonly records: readonly Uint8Array[];
   readonly pending: Uint8Array | null;
   readonly offset: string;
+  readonly snapshot?: Uint8Array;
+  readonly snapshotTrust?: SnapshotTrust;
 }
 
 export interface LedgerTransaction {
@@ -57,37 +65,43 @@ function copyRecordList(records: readonly Uint8Array[]): Uint8Array[] {
   });
 }
 
+function copyTrust(trust: SnapshotTrust): SnapshotTrust {
+  return {
+    genesis: copyBytes(trust.genesis),
+    endorser: copyBytes(trust.endorser),
+    head: copyBytes(trust.head),
+    headSignature: copyBytes(trust.headSignature),
+  };
+}
+
 function copyJournal(journal: LedgerJournal): LedgerJournal {
   return {
     genesis: copyBytes(journal.genesis),
     records: copyRecordList(journal.records),
     pending: journal.pending === null ? null : copyBytes(journal.pending),
     offset: journal.offset,
+    snapshot: journal.snapshot ? copyBytes(journal.snapshot) : undefined,
+    snapshotTrust: journal.snapshotTrust ? copyTrust(journal.snapshotTrust) : undefined,
   };
 }
 
 async function containsHash(ledger: Ledger, record: Uint8Array): Promise<boolean> {
-  const digest = await hashRecord(record);
-  for (let i = 0; i < ledger.length; i++) {
-    if (bytesEqual(ledger.hashAt(i), digest)) return true;
-  }
-  return false;
+  return ledger.hasRecordHash(await hashRecord(record));
 }
 
 export class LedgerClient {
   private readonly anchor: Hash;
-  private readonly genesisRecord: Uint8Array;
+  private readonly genesisRecord: Uint8Array | null;
 
   constructor(
-    genesisRecord: Uint8Array,
+    genesisRecord: Uint8Array | null,
     anchor: Hash,
     private readonly store: LedgerStore,
     private readonly stream: LedgerStream
   ) {
-    if (!(genesisRecord instanceof Uint8Array) || !(anchor instanceof Uint8Array)) {
-      fail('canonical');
-    }
-    this.genesisRecord = copyBytes(genesisRecord);
+    if (!(anchor instanceof Uint8Array)) fail('canonical');
+    if (genesisRecord !== null && !(genesisRecord instanceof Uint8Array)) fail('canonical');
+    this.genesisRecord = genesisRecord === null ? null : copyBytes(genesisRecord);
     this.anchor = copyBytes(anchor);
     checkOffset(stream.initialOffset);
   }
@@ -103,6 +117,63 @@ export class LedgerClient {
     return new LedgerClient(record, anchor, store, stream);
   }
 
+  static async openFromSnapshot(input: {
+    trust: SnapshotTrust;
+    snapshot: Uint8Array;
+    store: LedgerStore;
+    stream: LedgerStream;
+  }): Promise<LedgerClient> {
+    const snapshot = copyBytes(input.snapshot);
+    const trust = copyTrust(input.trust);
+    const incoming = await Ledger.verifySnapshot({ trust, snapshot, suffix: [] });
+    const client = new LedgerClient(null, trust.genesis, input.store, input.stream);
+    await input.store.exclusive(async (tx) => {
+      const loaded = await tx.load();
+      if (loaded) {
+        if (!bytesEqual(loaded.genesis, trust.genesis)) fail('wrong-anchor');
+        const existing =
+          loaded.snapshot && loaded.snapshotTrust
+            ? await Ledger.verifySnapshot({
+                trust: loaded.snapshotTrust,
+                snapshot: loaded.snapshot,
+                suffix: loaded.records,
+              })
+            : loaded.records.length === 0
+              ? fail('genesis-mismatch')
+              : await Ledger.verify({ anchor: loaded.genesis, records: loaded.records });
+        if (incoming.length < existing.length) fail('replay');
+        if (incoming.length === existing.length && !bytesEqual(incoming.head, existing.head)) {
+          fail('replay');
+        }
+        if (incoming.length === existing.length) return;
+        fail('replay');
+      }
+      await tx.save({
+        genesis: copyBytes(trust.genesis),
+        records: [],
+        pending: null,
+        offset: input.stream.initialOffset,
+        snapshot,
+        snapshotTrust: trust,
+      });
+    });
+    return client;
+  }
+
+  static async openJournal(
+    genesis: Hash,
+    store: LedgerStore,
+    stream: LedgerStream
+  ): Promise<LedgerClient> {
+    const client = new LedgerClient(null, genesis, store, stream);
+    await store.exclusive(async (tx) => {
+      const loaded = await tx.load();
+      if (!loaded) fail('invalid-operation');
+      if (!bytesEqual(loaded.genesis, genesis)) fail('wrong-anchor');
+    });
+    return client;
+  }
+
   private async save(
     tx: LedgerTransaction,
     session: Session,
@@ -115,6 +186,10 @@ export class LedgerClient {
       records: copyRecordList(records),
       pending: pending === null ? null : copyBytes(pending),
       offset,
+      snapshot: session.journal.snapshot ? copyBytes(session.journal.snapshot) : undefined,
+      snapshotTrust: session.journal.snapshotTrust
+        ? copyTrust(session.journal.snapshotTrust)
+        : undefined,
     };
     await tx.save(copyJournal(next));
     session.journal = next;
@@ -124,16 +199,26 @@ export class LedgerClient {
     const loaded = await tx.load();
     const journal = loaded
       ? copyJournal(loaded)
-      : {
-          genesis: copyBytes(this.anchor),
-          records: [copyBytes(this.genesisRecord)],
-          pending: null,
-          offset: this.stream.initialOffset,
-        };
+      : this.genesisRecord
+        ? {
+            genesis: copyBytes(this.anchor),
+            records: [copyBytes(this.genesisRecord)],
+            pending: null,
+            offset: this.stream.initialOffset,
+          }
+        : fail('invalid-operation');
     if (!bytesEqual(journal.genesis, this.anchor)) fail('wrong-anchor');
-    if (journal.records.length === 0) fail('genesis-mismatch');
-    const ledger = await Ledger.verify({ anchor: this.anchor, records: journal.records });
     checkOffset(journal.offset);
+    const ledger =
+      journal.snapshot && journal.snapshotTrust
+        ? await Ledger.verifySnapshot({
+            trust: journal.snapshotTrust,
+            snapshot: journal.snapshot,
+            suffix: journal.records,
+          })
+        : journal.records.length === 0
+          ? fail('genesis-mismatch')
+          : await Ledger.verify({ anchor: this.anchor, records: journal.records });
     return { journal, ledger };
   }
 
@@ -147,17 +232,37 @@ export class LedgerClient {
       if (page.records.length === 0) {
         if (!page.upToDate) fail('canonical');
         if (page.nextOffset === session.journal.offset) return;
-        if (session.journal.records.length !== 1) fail('canonical');
+        if (session.journal.records.length !== 1 && !session.journal.snapshot) fail('canonical');
       }
       if (seen.has(page.nextOffset) && page.records.length > 0) fail('replay');
-      if (session.journal.records.length + page.records.length > MAX_LEDGER_READ_RECORDS) {
-        fail('oversize');
-      }
+      if (page.records.length > MAX_LEDGER_RECORDS) fail('oversize');
       const copied = copyRecordList(page.records);
-      const extended = copied.length === 0 ? session.ledger : await session.ledger.extend(copied);
-      const records = [...session.journal.records, ...copied];
+      const fresh: Uint8Array[] = [];
+      let expectedParent = session.ledger.head;
+      const snapshotMode = session.journal.snapshot !== undefined;
+      for (const record of copied) {
+        if (await containsHash(session.ledger, record)) continue;
+        if (snapshotMode) {
+          const decoded = decodeRecord(record);
+          if (decoded.body.type === 'genesis') continue;
+          if (decoded.body.type !== 'ordinary') fail('canonical');
+          if (!bytesEqual(decoded.body.fields.previousHash, expectedParent)) continue;
+          fresh.push(record);
+          expectedParent = await hashRecord(record);
+          continue;
+        }
+        fresh.push(record);
+      }
+      if (session.journal.records.length + fresh.length > MAX_LEDGER_RECORDS) fail('oversize');
+      let ledger = session.ledger;
+      let records = [...session.journal.records];
+      for (let i = 0; i < fresh.length; i += MAX_LEDGER_READ_PAGE_RECORDS) {
+        const slice = fresh.slice(i, i + MAX_LEDGER_READ_PAGE_RECORDS);
+        ledger = await ledger.extend(slice);
+        records = [...records, ...slice];
+      }
       await this.save(tx, session, session.journal.pending, page.nextOffset, records);
-      session.ledger = extended;
+      session.ledger = ledger;
       seen.add(page.nextOffset);
       if (page.upToDate) return;
     }
@@ -262,7 +367,7 @@ export class MemoryLedgerStore implements LedgerStore {
 export class MemoryLedgerStream implements LedgerStream {
   readonly initialOffset = 'empty:/+';
   records: Uint8Array[] = [];
-  pageSize = 4096;
+  pageSize = MAX_LEDGER_READ_PAGE_RECORDS;
   mode: 'ok' | 'lost-response' | 'false-ack' | 'unsupported' = 'ok';
   inflight: Promise<void> | null = null;
 

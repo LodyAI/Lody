@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { LedgerClient, MemoryLedgerStore, MemoryLedgerStream } from '../src/ledger';
-import { admitDeviceOp, append, ed25519, random, signGenesis } from './ledger-fixtures';
+import {
+  LedgerClient,
+  MAX_LEDGER_READ_PAGE_RECORDS,
+  MemoryLedgerStore,
+  MemoryLedgerStream,
+} from '../src/ledger';
+import { buildChain } from '../bench/chain';
+import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -282,4 +288,18 @@ describe('L6 page and cursor catch-up', () => {
     expect(resumed.length).toBe(3);
     expect(inner.journal?.offset).toBe('opaque:2/+');
   });
+});
+
+describe('adapter pages larger than the extend chunk', () => {
+  it('syncs 1025 signed records from one MemoryLedgerStream page', async () => {
+    const count = MAX_LEDGER_READ_PAGE_RECORDS + 1;
+    const built = await buildChain(count + 1);
+    const stream = new MemoryLedgerStream();
+    stream.pageSize = count;
+    stream.records = built.records.slice(1).map((record) => new Uint8Array(record));
+    const client = await LedgerClient.open(built.records[0]!, new MemoryLedgerStore(), stream);
+    const view = await client.read();
+    expect(view.length).toBe(count + 1);
+    expect(view.head).toEqual(built.ledger.head);
+  }, 120_000);
 });

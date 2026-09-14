@@ -17,10 +17,14 @@ export {
   MAX_RECOVERY_MATERIAL_BYTES,
 } from './recovery-file';
 export type { RecoveryBackupContext } from './recovery-file';
+export { createRecoveryDeviceSecret, importRecoveryDevice } from './recovery-device';
+export type { RecoveryDeviceHandle, RecoveryDeviceSecretView } from './recovery-device';
 export { createUserIdentity, restoreUserIdentity } from './user-identity';
 export type { UserIdentity } from './user-identity';
 export { Ledger, LedgerError } from './ledger';
 export type {
+  Comparison,
+  ComparisonNote,
   Device,
   DeviceKind,
   EpochState,
@@ -32,4 +36,6 @@ export type {
   OrgState,
   Proposal,
   Role,
+  SnapshotProposal,
+  SnapshotTrust,
 } from './ledger';

@@ -269,12 +269,16 @@ const record = await ledger.finalize(proposal, signature);
 ### 6.1 签名快照引导（已确认方向，尚未实现）
 
 2026-09-13 决策修订：首次加入不要求全历史验签/权限重放，取消 10k/100ms 接入门槛。
+标题仍写「尚未实现」以保持链接；`verifySnapshot` 已按 2026-09-14 确认的 API 开始落地，S3–S5 未完成。
 采用已有设备对当前权限状态的签名背书，允许加入后通过额外信道与其他成员核对。
 这不是继承 MLS 协议或证明，也不是把旧 `Ledger.verify` 改成跳过签名。
 
 - **信任起点。** 接收端固定预期 Org 与背书设备身份。配对或额外信道确认可认证
   公钥；未独立核验的首次联系仍依赖目录。签名匹配不能证明真人身份，快照不能
-  仅凭内部自称 Owner/Admin 来证明签署者资格。确切背书资格及引导证据在实现前定稿。
+  仅凭内部自称 Owner/Admin 来证明签署者资格。2026-09-14 确认：信任输入为外带
+  `genesis`、`endorser`、担保的最新 `head`，以及 endorser 对该 head 的签名
+  （`lody-e2ee/head-attest/v1\0` || genesis || head），表示担保该版本及此前版本。
+  加入背书者须为声称状态中当前有效的 Owner/Admin 个人管理设备。
 - **背书内容。** 签名及跨端核对摘要必须绑定协议/用途、Org 创世身份、账本位置与
   head，以及接收端实际采用的完整权限状态。状态须足以独立处理后缀，包括成员
   实例/角色、设备公钥/能力/撤销、Owner、Epoch 承诺，以及已消费请求、旧成员实例
@@ -299,9 +303,12 @@ const record = await ledger.finalize(proposal, signature);
   或 `verified=true`。R 恢复不因本变更强制要求管理员实时在线；所需引导材料的持久
   保存、验证及缺失错误须单独验收，解开 R 私钥或内容钥不能自行授予快照可信性。
 
-快照精确 wire、认证输入和 API 尚未冻结。当前 `Ledger.verify/extend` 及其已通过测试
-只证明旧全量/增量路径；在独立入口完成前不得把反序列化对象当成账本视图。冻结普通
-记录 wire 不变；快照不是新普通 op，也不向每条日志重新加入序号字段。
+2026-09-14 确认入口：`prepareSnapshot` / `finalizeSnapshot` / `verifySnapshot` /
+`comparisonNote` / `compareNotes`。`verifySnapshot({ trust, snapshot, suffix })`
+的 `trust` 含 genesis、endorser、head、headSignature。快照为链外 DAG-CBOR，不是
+普通 op。当前 `Ledger.verify/extend` 测试只证明全量/增量路径；快照路径以
+`test/ledger-snapshot.test.ts` 为准，S3–S5 未完成前不得交接。不得把反序列化对象
+当成账本视图。普通记录 wire 不变。
 
 ### 6.2 已建立起点后的增量对账
 

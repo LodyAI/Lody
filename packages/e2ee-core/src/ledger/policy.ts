@@ -14,7 +14,6 @@ import {
   possessionSigningBytes,
   type DeviceKind,
   type GenesisFields,
-  type JoinRequest,
   type Operation,
   type Role,
 } from './schema';
@@ -46,6 +45,11 @@ export interface OrgState {
   readonly epoch: EpochState;
 }
 
+export interface HistoryPacketRow {
+  commitment: Uint8Array;
+  packet: Uint8Array;
+}
+
 export interface InternalState {
   genesis: Hash;
   owner: Uint8Array;
@@ -58,10 +62,21 @@ export interface InternalState {
   usedMembershipIds: Set<string>;
   closedJoins: Set<string>;
   usedCommitments: Set<string>;
-  hashes: Uint8Array[];
+  hashes: Array<Uint8Array | undefined>;
+  origin: 'genesis' | 'snapshot';
+  endorser: Uint8Array | null;
+  snapshotLength: number | null;
+  historyPackets: Map<number, HistoryPacketRow>;
 }
 
 export function cloneState(state: InternalState): InternalState {
+  const historyPackets = new Map<number, HistoryPacketRow>();
+  for (const [epoch, row] of state.historyPackets) {
+    historyPackets.set(epoch, {
+      commitment: copyBytes(row.commitment),
+      packet: copyBytes(row.packet),
+    });
+  }
   return {
     genesis: state.genesis,
     owner: copyBytes(state.owner),
@@ -74,7 +89,11 @@ export function cloneState(state: InternalState): InternalState {
     usedMembershipIds: new Set(state.usedMembershipIds),
     closedJoins: new Set(state.closedJoins),
     usedCommitments: new Set(state.usedCommitments),
-    hashes: state.hashes.map(copyBytes),
+    hashes: state.hashes.map((hash) => (hash ? copyBytes(hash) : undefined)),
+    origin: state.origin,
+    endorser: state.endorser ? copyBytes(state.endorser) : null,
+    snapshotLength: state.snapshotLength,
+    historyPackets,
   };
 }
 
@@ -234,6 +253,18 @@ export function applyGenesis(fields: GenesisFields, recordHash: Hash): InternalS
     closedJoins: new Set(),
     usedCommitments: new Set([keyId(fields.epochCommitment)]),
     hashes: [copyBytes(recordHash)],
+    origin: 'genesis',
+    endorser: null,
+    snapshotLength: null,
+    historyPackets: new Map([
+      [
+        0,
+        {
+          commitment: copyBytes(fields.epochCommitment),
+          packet: new Uint8Array(0),
+        },
+      ],
+    ]),
   };
 }
 
@@ -354,6 +385,10 @@ export function applyOperation(
         keyCommitment: copyBytes(operation.commitment),
         rotationRequired: false,
       };
+      state.historyPackets.set(operation.epoch, {
+        commitment: copyBytes(operation.commitment),
+        packet: copyBytes(operation.previousEpochKey),
+      });
       return;
     }
   }

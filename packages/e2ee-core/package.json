@@ -29,6 +29,7 @@
     "bench:l7-production-cas": "tsx bench/l7-production-cas.ts",
     "bench:l7-sqlite-riverrun-race": "tsx bench/l7-sqlite-riverrun-race.ts",
     "bench:device-gap": "tsx bench/device-gap.ts",
+    "bench:ed25519-backends": "tsx bench/ed25519-backends.ts",
     "format": "prettier --write src test bench package.json tsconfig.json README.md AGENTS.md",
     "format:check": "prettier --check src test bench package.json tsconfig.json README.md AGENTS.md"
   },

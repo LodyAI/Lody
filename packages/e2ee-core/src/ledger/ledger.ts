@@ -3,9 +3,12 @@ import {
   assertSignature,
   bytesEqual,
   checkHash,
+  checkSignature,
   checkSigningPublicKey,
   hashRecordBytes,
+  headAttestationSigningBytes,
   recordSigningBytes,
+  snapshotSigningBytes,
   verifySignature,
   type Hash,
   type Signature,
@@ -32,6 +35,18 @@ import {
   type Operation,
 } from './schema';
 import type { SigJob } from './node-sig-pool';
+import {
+  assertEndorserEligible,
+  compareNotes,
+  decodeSignedSnapshot,
+  encodeSignedSnapshot,
+  encodeSnapshotBody,
+  stateDigestOf,
+  type Comparison,
+  type ComparisonNote,
+  type SnapshotProposal,
+  type SnapshotTrust,
+} from './snapshot';
 
 export interface TrustAnchor {
   readonly genesis: Hash;
@@ -50,6 +65,8 @@ export interface Proposal {
   readonly bodyBytes: Uint8Array;
   readonly signingBytes: Uint8Array;
 }
+
+export type { Comparison, ComparisonNote, SnapshotProposal, SnapshotTrust };
 
 function withPosition(position: number, run: () => void): void {
   try {
@@ -175,11 +192,32 @@ export class Ledger {
   }
 
   get head(): Hash {
-    return copyBytes(this.internal.hashes[this.internal.hashes.length - 1]!);
+    const head = this.internal.hashes[this.internal.hashes.length - 1];
+    if (!head) fail('invalid-operation');
+    return copyBytes(head);
   }
 
   get length(): number {
     return this.internal.hashes.length;
+  }
+
+  get origin(): 'genesis' | 'snapshot' {
+    return this.internal.origin;
+  }
+
+  get snapshotLength(): number | null {
+    return this.internal.snapshotLength;
+  }
+
+  historyPackets(): ReadonlyMap<number, { commitment: Hash; packet: Uint8Array }> {
+    const packets = new Map<number, { commitment: Hash; packet: Uint8Array }>();
+    for (const [epoch, row] of this.internal.historyPackets) {
+      packets.set(epoch, {
+        commitment: copyBytes(row.commitment),
+        packet: copyBytes(row.packet),
+      });
+    }
+    return packets;
   }
 
   get state(): OrgState {
@@ -198,7 +236,17 @@ export class Ledger {
     if (!Number.isSafeInteger(position) || position < 0 || position >= this.length) {
       fail('invalid-operation');
     }
-    return copyBytes(this.internal.hashes[position]!);
+    const hash = this.internal.hashes[position];
+    if (!hash) fail('invalid-operation');
+    return copyBytes(hash);
+  }
+
+  hasRecordHash(digest: Hash): boolean {
+    const want = checkHash(digest);
+    for (const hash of this.internal.hashes) {
+      if (hash && bytesEqual(hash, want)) return true;
+    }
+    return false;
   }
 
   static async verify(input: { anchor: Hash; records: readonly Uint8Array[] }): Promise<Ledger> {
@@ -298,5 +346,70 @@ export class Ledger {
     const recordBytes = encodeSignedRecord(proposal.bodyBytes, signature);
     await this.extend([recordBytes]);
     return recordBytes;
+  }
+
+  prepareSnapshot(endorserPublicKey: SigningPublicKey): SnapshotProposal {
+    const signer = checkSigningPublicKey(endorserPublicKey);
+    assertEndorserEligible(this.internal, signer);
+    const bodyBytes = encodeSnapshotBody(this.internal, signer);
+    return Object.freeze({
+      signer,
+      genesis: copyBytes(this.internal.genesis),
+      head: this.head,
+      length: this.length,
+      bodyBytes,
+      signingBytes: snapshotSigningBytes(bodyBytes),
+      headAttestationSigningBytes: headAttestationSigningBytes(this.internal.genesis, this.head),
+    });
+  }
+
+  static async finalizeSnapshot(
+    proposal: SnapshotProposal,
+    signature: Signature
+  ): Promise<Uint8Array> {
+    checkSigningPublicKey(proposal.signer);
+    assertSignature(proposal.signer, proposal.signingBytes, checkSignature(signature));
+    return encodeSignedSnapshot(proposal.bodyBytes, signature);
+  }
+
+  static async verifySnapshot(input: {
+    trust: SnapshotTrust;
+    snapshot: Uint8Array;
+    suffix?: readonly Uint8Array[];
+  }): Promise<Ledger> {
+    const genesis = checkHash(input.trust.genesis);
+    const endorser = checkSigningPublicKey(input.trust.endorser);
+    const attestedHead = checkHash(input.trust.head);
+    const headSignature = checkSignature(input.trust.headSignature);
+    if (!(input.snapshot instanceof Uint8Array)) fail('canonical');
+    assertSignature(endorser, headAttestationSigningBytes(genesis, attestedHead), headSignature);
+    const decoded = decodeSignedSnapshot(copyBytes(input.snapshot));
+    if (!bytesEqual(decoded.genesis, genesis)) fail('wrong-anchor');
+    if (!bytesEqual(decoded.signer, endorser)) fail('wrong-anchor');
+    if (!bytesEqual(decoded.head, attestedHead)) fail('wrong-anchor');
+    assertSignature(decoded.signer, snapshotSigningBytes(decoded.bodyBytes), decoded.signature);
+    const ledger = new Ledger(decoded.state);
+    const suffix = input.suffix ?? [];
+    if (suffix.length === 0) return ledger;
+    return ledger.extend(suffix);
+  }
+
+  comparisonNote(localDevicePublicKey: SigningPublicKey): ComparisonNote {
+    const noteSigner = checkSigningPublicKey(localDevicePublicKey);
+    return Object.freeze({
+      genesis: copyBytes(this.internal.genesis),
+      length: this.length,
+      head: this.head,
+      stateDigest: stateDigestOf(this.internal),
+      noteSigner,
+    });
+  }
+
+  static compareNotes(
+    local: ComparisonNote,
+    remote: ComparisonNote,
+    opts: { originalEndorser: SigningPublicKey }
+  ): Comparison {
+    return compareNotes(local, remote, checkSigningPublicKey(opts.originalEndorser));
   }
 }

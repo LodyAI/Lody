@@ -132,7 +132,7 @@ function decodeRole(value: CborValue): Exclude<Role, 'owner'> {
   if (role === ROLE_ADMIN) return 'admin';
   if (role === ROLE_MEMBER) return 'member';
   if (role === ROLE_GUEST) return 'guest';
-  fail('invalid-operation');
+  return fail('invalid-operation');
 }
 
 function encodeKind(kind: DeviceKind): number {
@@ -146,7 +146,7 @@ function decodeKind(value: CborValue): DeviceKind {
   if (kind === KIND_PERSONAL) return 'personal';
   if (kind === KIND_MACHINE) return 'machine';
   if (kind === KIND_RECOVERY) return 'recovery';
-  fail('invalid-operation');
+  return fail('invalid-operation');
 }
 
 function joinPayload(genesis: Hash, request: Omit<JoinRequest, 'signature'>): CborValue {
@@ -244,6 +244,7 @@ function encodeOperation(operation: Operation): CborValue {
         copyBytes(operation.previousEpochKey),
       ];
   }
+  return fail('unknown-operation');
 }
 
 function decodeOperation(value: CborValue): Operation {
@@ -325,7 +326,7 @@ function decodeOperation(value: CborValue): Operation {
       };
     }
     default:
-      fail('unknown-operation');
+      return fail('unknown-operation');
   }
 }
 
@@ -393,7 +394,7 @@ function decodeBody(value: CborValue): Body {
       },
     };
   }
-  fail('canonical');
+  return fail('canonical');
 }
 
 function bodyBytesFromRecord(record: Uint8Array, bodyValue: CborValue): Uint8Array {

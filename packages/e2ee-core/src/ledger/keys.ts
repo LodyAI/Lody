@@ -74,7 +74,7 @@ export function openHistoryPacket(
       historyAad(genesis, epoch)
     ).decrypt(packet.subarray(NONCE_BYTES));
   } catch {
-    fail('invalid-operation');
+    return fail('invalid-operation');
   }
 }
 

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LedgerClient, MemoryLedgerStream } from '../src/ledger';
+import { Ledger, LedgerClient, MemoryLedgerStream } from '../src/ledger';
 import {
   decodeLedgerJournal,
   encodeLedgerJournal,
@@ -223,5 +223,57 @@ describe('L6 sqlite journal restart', () => {
     ).toThrow();
     const ownerPending = JSON.stringify(['lody-e2ee-journal/v0', 'aa', ['bb'], null, 'empty:/+']);
     expect(() => decodeLedgerJournal(`${ownerPending} `)).toThrow();
+    expect(() =>
+      decodeLedgerJournal(JSON.stringify(['lody-e2ee-journal/v1', 'aa', [], null, 'empty:/+']))
+    ).toThrow();
+  });
+
+  it('restarts a snapshot journal from sqlite without prefix records', async () => {
+    const path = location();
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const phone = await ed25519();
+    const extra = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, phone, 'personal', true)
+      )
+    ).record;
+    const proposal = created.ledger.prepareSnapshot(owner.publicKey);
+    const snapshot = await Ledger.finalizeSnapshot(
+      proposal,
+      await owner.sign(proposal.signingBytes)
+    );
+    const trust = {
+      genesis: proposal.genesis,
+      endorser: owner.publicKey,
+      head: proposal.head,
+      headSignature: await owner.sign(proposal.headAttestationSigningBytes),
+    };
+    const stream = new MemoryLedgerStream();
+    stream.records = [created.record, extra];
+    const store = new SqliteLedgerStore(path);
+    const first = await LedgerClient.openFromSnapshot({ trust, snapshot, store, stream });
+    expect((await first.submit(extra)).status).toBe('committed');
+    const encoded = await new SqliteLedgerStore(path).exclusive(async (tx) => {
+      const journal = await tx.load();
+      if (!journal?.snapshot) throw new Error('missing-snapshot-journal');
+      expect(journal.records).toHaveLength(1);
+      return encodeLedgerJournal(journal);
+    });
+    expect(encoded.startsWith('["lody-e2ee-journal/v1"')).toBe(true);
+    expect(decodeLedgerJournal(encoded).snapshot?.byteLength).toBe(snapshot.byteLength);
+
+    const restarted = await LedgerClient.openJournal(
+      created.anchor,
+      new SqliteLedgerStore(path),
+      stream
+    );
+    const view = await restarted.read();
+    expect(view.origin).toBe('snapshot');
+    expect(view.length).toBe(2);
+    expect(view.state.devices.size).toBe(2);
+    expect(() => view.hashAt(1)).not.toThrow();
   });
 });

@@ -18,7 +18,7 @@ export type LedgerErrorCode =
   | 'invalid-operation';
 
 export class LedgerError extends Error {
-  readonly name = 'LedgerError';
+  override readonly name = 'LedgerError';
   constructor(
     readonly code: LedgerErrorCode,
     readonly position?: number

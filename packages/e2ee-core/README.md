@@ -5,9 +5,11 @@ authenticated device's signed authorization-state snapshot, then every increment
 Full replay remains an optional audit. The 10k/100ms gate is withdrawn, not passed;
 SIMD/Wasm/multithreading optimization for that target is no longer required.
 See [snapshot trust and acceptance](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现).
-Existing examples/tests below exercise the full-replay API, not the pending
-snapshot API. Independent comparison binds actual state as well as chain head;
-endorsement is not independent verification of all history. Product integration remains paused.
+`Ledger.verifySnapshot` is implemented for the confirmed S1 API (out-of-band
+genesis + endorser + attested head + head signature). Independent comparison
+binds actual state as well as chain head; endorsement is not independent
+verification of all history. S3–S5 (client compare, recovery persistence,
+public-export consumer) are not done. Product integration remains paused.
 
 **Publication scope (2026-09-14):** this update commits documentation only. The
 recovery-device, Lean correspondence and backend-probe revisions described below
@@ -28,6 +30,7 @@ import {
   encodeGenesisBody,
   encodeSignedRecord,
   hashRecord,
+  LedgerClient,
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
 
@@ -44,6 +47,25 @@ const ledger = await Ledger.verify({
   records: [genesis],
 });
 const next = await ledger.extend(suffix);
+
+const proposal = ledger.prepareSnapshot(ownerDevicePub);
+const snapshot = await Ledger.finalizeSnapshot(proposal, await sign(proposal.signingBytes));
+const joined = await Ledger.verifySnapshot({
+  trust: {
+    genesis: proposal.genesis,
+    endorser: ownerDevicePub,
+    head: proposal.head,
+    headSignature: await sign(proposal.headAttestationSigningBytes),
+  },
+  snapshot,
+  suffix,
+});
+const joiner = await LedgerClient.openFromSnapshot({
+  trust: { genesis, endorser, head, headSignature },
+  snapshot,
+  store,
+  stream,
+});
 ```
 
 CAS on exact DAG-CBOR bytes: `LedgerClient` from `@lody/e2ee-core/ledger`. Streams

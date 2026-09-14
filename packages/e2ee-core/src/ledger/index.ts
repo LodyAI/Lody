@@ -1,5 +1,13 @@
 export { Ledger } from './ledger';
-export type { LedgerSummary, Proposal, TrustAnchor } from './ledger';
+export type {
+  Comparison,
+  ComparisonNote,
+  LedgerSummary,
+  Proposal,
+  SnapshotProposal,
+  SnapshotTrust,
+  TrustAnchor,
+} from './ledger';
 export { LedgerError } from './error';
 export type { LedgerErrorCode } from './error';
 export {
@@ -16,11 +24,14 @@ export {
   HASH_BYTES,
   HISTORY_AEAD_DOMAIN,
   HISTORY_PACKET_BYTES,
+  HEAD_ATTEST_DOMAIN,
   JOIN_DOMAIN,
   MEMBERSHIP_ID_BYTES,
   POSSESS_DOMAIN,
   PROTOCOL_VERSION,
   RECORD_HASH_DOMAIN,
+  SNAPSHOT_DIGEST_DOMAIN,
+  SNAPSHOT_DOMAIN,
   REQUEST_ID_BYTES,
   SIGNATURE_BYTES,
   SIGNATURE_DOMAIN,
@@ -28,6 +39,7 @@ export {
   USER_ID_BYTES,
   commitEpochKey,
   hashRecord,
+  headAttestationSigningBytes,
 } from './crypto';
 export type { EncryptionPublicKey, Hash, Signature, SigningPublicKey } from './crypto';
 export {
@@ -63,6 +75,8 @@ export {
   LedgerClient,
   MemoryLedgerStore,
   MemoryLedgerStream,
+  MAX_LEDGER_RECORDS,
+  MAX_LEDGER_READ_PAGE_RECORDS,
   MAX_LEDGER_READ_PAGES,
   MAX_LEDGER_READ_RECORDS,
 } from './submit';
