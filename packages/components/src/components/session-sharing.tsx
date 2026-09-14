@@ -178,10 +178,16 @@ function getSessionShareActionLabel(
   }
 }
 
-/** Shared chrome for status pills in the session conversation header (Private, Archived). */
+/** Shared chrome for status pills in the session conversation header (Private, Archived).
+ *
+ * The line height is `normal`, not `leading-none`. `items-center` centres the
+ * label's LINE BOX, and a line box shorter than the font's own leaves the
+ * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
+ * is zero and the ink lands where the font intends, for whatever interface
+ * font is selected. */
 const SESSION_HEADER_STATUS_PILL_CLASS =
   'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
-  'text-[0.7rem] font-medium leading-none text-muted-foreground transition-colors ' +
+  'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
   'hover:border-border hover:text-foreground ' +
   'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
   'text-foreground/80';

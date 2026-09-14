@@ -83,6 +83,20 @@ The "…" menu keeps its entry. The request was for the header *in addition to*
 the menu, and the menu is still the only desktop surface that lists every
 session action in one place.
 
+### Centring the pill's label
+
+Adding a word beside the icon exposed a defect the icon-only states had hidden:
+the shared pill chrome set `leading-none`, and `items-center` centres a label's
+line box, not its glyphs. A line box shorter than the font's own puts the ink
+about 1.2px above the icon beside it — measured from rendered pixels at 8×
+device scale, the label's ink centre sat 1.25px above the button's centre while
+the icon's sat on it. The chrome now uses `line-height: normal`, where the
+half-leading is zero and the ink lands where the font intends; the same
+measurement then reads 0.13–0.25px, inside a device pixel. `normal` rather than
+a fixed line height because the interface font is user-selectable, so the
+correction has to follow whatever font is in use. The fix is in the shared
+constant, so the Archived pill gets it too.
+
 ## Alternatives considered
 
 **Two pills — keep "Private", add "Shared" beside it.** It loses no information,
