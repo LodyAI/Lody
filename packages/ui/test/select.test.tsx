@@ -7,7 +7,7 @@ import { Input } from '../src/field/input';
 import { Select } from '../src/field/select';
 import { PopupContainerProvider } from '../src/popup/portal-container';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
-import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
+import { all, classesOf, click, mount, one, press, until, type Mounted } from './dom';
 
 const FRUIT = [
   { value: 'gala', label: 'Gala' },
@@ -229,9 +229,18 @@ describe('Select list', () => {
   test('End walks to the last row and Home back to the first', async () => {
     mounted = await mount(<Fruit defaultValue="gala" />);
     await click(trigger());
+    // The keys are only meaningful once the list has taken the keyboard, and
+    // the highlight is what says it has: moving focus off a row clears every
+    // mark, which is exactly what a key arriving a beat early would find.
+    const highlighted = () => options().findIndex((row) => row.hasAttribute('data-highlighted'));
+    await until(() => highlighted() === 0, 'the list to take the keyboard on its first row');
+
     await press('End');
+    await until(() => highlighted() === 2, 'End to walk to the last row');
     expect(options()[2].hasAttribute('data-highlighted')).toBe(true);
+
     await press('Home');
+    await until(() => highlighted() === 0, 'Home to walk back to the first row');
     expect(options()[0].hasAttribute('data-highlighted')).toBe(true);
   });
 

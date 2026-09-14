@@ -182,6 +182,31 @@ shipping an unreadable one or deferring the cap.
   still unmigrated; the scroll area in particular has thirteen callers and a
   wide class-based API, and belongs in its own change.
 
+## Follow-up: CI caught the suite waiting on scheduler luck
+
+`select.test.tsx`'s "End walks to the last row" failed once on CI and passed on
+the commit before it, on a change that touched only the gallery and two
+documents. It was not a regression and it was not the component: `dom.tsx`
+settles every interaction with a **fixed two animation frames**, which is enough
+on an idle machine and is otherwise exactly the "scheduler luck" the root
+testing rule forbids. Base UI schedules part of a popup's state on its own
+animation frame, so how many frames an interaction needs is a property of the
+machine that ran it — at one frame a *different* test in the same file fails
+than at two, which is how the fragility was measured rather than guessed.
+
+The keyboard tests in that file all press a key immediately after opening the
+list; the failing one was the only one that did not first state the precondition
+the others assert. A probe showed why that matters: moving focus off a row
+clears every `data-highlighted` mark, so a key arriving a beat early finds a
+list with no active row and does nothing — which is the failure CI reported.
+
+`dom.tsx` gains `until(ready, what)`, a bounded wait on an explicit condition
+that throws with what it was waiting for, and the test states its precondition
+and both of its effects through it. Verified by running the suite with the frame
+budget cut to one, which is the stress proxy: before, the select file failed
+there; after, all 244 pass. At zero frames the menu suite fails wholesale, which
+is not load but a popup never opening — the proxy has a floor.
+
 ## Verification
 
 `pnpm --filter @lody/ui typecheck` and `pnpm --filter @lody/ui test` (243
