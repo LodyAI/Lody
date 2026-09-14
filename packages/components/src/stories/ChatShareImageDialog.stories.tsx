@@ -108,8 +108,8 @@ export const CustomRuntime: Story = {
   },
 };
 
-/** The phone card inside the desktop shell; the real handset surface is a drawer. */
-export const PhoneCardFormat: Story = {
+/** The chat-sized card inside the desktop shell; the handset surface is a drawer. */
+export const ChatDestination: Story = {
   ...Default,
-  args: { ...Default.args, formatOverride: 'phone' },
+  args: { ...Default.args, initialDestination: 'chat' },
 };

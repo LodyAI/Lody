@@ -9,10 +9,11 @@ const meta = {
     layout: 'centered',
   },
   argTypes: {
-    format: {
+    destination: {
       control: 'inline-radio',
-      options: ['phone', 'desktop'],
-      description: 'Chosen by the device sharing; the product never offers it as a control.',
+      options: ['chat', 'post'],
+      description:
+        "Where the image is going: the card's width and its mat together. `chat` is 360 in a thin bleed, `post` is 560 in a real mat.",
     },
     theme: {
       control: 'inline-radio',
@@ -24,12 +25,6 @@ const meta = {
       options: ['none', 'lody', 'welcome', 'aurora', 'ocean', 'sunset'],
       description:
         'The ground the card is printed on; part of the exported image. `none` drops the mat, and the sign-off falls back into the caption.',
-    },
-    destination: {
-      control: 'inline-radio',
-      options: ['chat', 'post'],
-      description:
-        'Where the image is going, which is the only thing that sizes the mat. Inert without a ground.',
     },
   },
   tags: ['autodocs'],
@@ -96,59 +91,49 @@ const multiTurnMessages: ChatShareCardMessage[] = [
   },
 ];
 
-export const DesktopLight: Story = {
+export const PostLight: Story = {
   args: {
     title: '渲染性能排查',
     messages: multiTurnMessages,
-    format: 'desktop',
+    destination: 'post',
     theme: 'light',
     backdrop: 'lody',
-    destination: 'post',
     meta: demoMeta,
   },
 };
 
-export const DesktopDark: Story = {
-  args: { ...DesktopLight.args, theme: 'dark' },
+export const PostDark: Story = {
+  args: { ...PostLight.args, theme: 'dark' },
 };
 
-export const PhoneLight: Story = {
-  args: { ...DesktopLight.args, format: 'phone' },
+export const ChatLight: Story = {
+  args: { ...PostLight.args, destination: 'chat' },
 };
 
-export const PhoneDark: Story = {
-  args: { ...DesktopLight.args, format: 'phone', theme: 'dark' },
+export const ChatDark: Story = {
+  args: { ...PostLight.args, destination: 'chat', theme: 'dark' },
 };
 
 /** The only light ground in the set: the sign-off has to ink the other way. */
 export const WelcomeBackdrop: Story = {
-  args: { ...DesktopLight.args, backdrop: 'welcome' },
+  args: { ...PostLight.args, backdrop: 'welcome' },
 };
 
 export const WelcomeBackdropDarkCard: Story = {
-  args: { ...DesktopLight.args, backdrop: 'welcome', theme: 'dark' },
+  args: { ...PostLight.args, backdrop: 'welcome', theme: 'dark' },
 };
 
 export const SunsetBackdrop: Story = {
-  args: { ...DesktopLight.args, backdrop: 'sunset', theme: 'dark' },
+  args: { ...PostLight.args, backdrop: 'sunset', theme: 'dark' },
 };
 
 /** No mat: the card is the whole image, and `lody.ai` moves into the caption. */
 export const NoBackdrop: Story = {
-  args: { ...DesktopLight.args, backdrop: 'none' },
+  args: { ...PostLight.args, backdrop: 'none' },
 };
 
 export const NoBackdropDarkCard: Story = {
-  args: { ...DesktopLight.args, backdrop: 'none', theme: 'dark' },
-};
-
-/** The two destinations side by side: a thin bleed for a thread, a mat for a feed. */
-export const ChatDestination: Story = {
-  args: { ...DesktopLight.args, destination: 'chat' },
-};
-
-export const ChatDestinationPhone: Story = {
-  args: { ...DesktopLight.args, format: 'phone', destination: 'chat' },
+  args: { ...PostLight.args, backdrop: 'none', theme: 'dark' },
 };
 
 export const Untitled: Story = {
@@ -165,10 +150,9 @@ export const Untitled: Story = {
         text: '闭包是函数连同它定义时所在作用域的变量一起被打包保存的机制，因此函数即使离开了定义它的作用域，仍然能访问当时的变量。',
       },
     ],
-    format: 'phone',
+    destination: 'chat',
     theme: 'light',
     backdrop: 'welcome',
-    destination: 'post',
     meta: demoMeta,
   },
 };
@@ -210,10 +194,9 @@ export const LongCodeLines: Story = {
   args: {
     title: '并发 helper review',
     messages: codeHeavyMessages,
-    format: 'desktop',
+    destination: 'post',
     theme: 'dark',
     backdrop: 'lody',
-    destination: 'post',
     meta: demoMeta,
   },
 };

@@ -18,15 +18,21 @@ import {
   CHAT_SHARE_BACKDROP_STYLES,
   type ChatShareCardBackdrop,
   type ChatShareCardDestination,
-  type ChatShareCardFormat,
 } from '@/components/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
 /** Opening ground: the brand's own, so an untouched export is the signature card. */
 const DEFAULT_BACKDROP: ChatShareCardBackdrop = 'lody';
 
-/** A share card is a poster until its author says otherwise. */
-const DEFAULT_DESTINATION: ChatShareCardDestination = 'post';
+/**
+ * The destination is the user's to state, but it still needs an opening guess,
+ * and the device is the best one available: most images exported from a handset
+ * are going into a conversation, most exported from a desktop are going somewhere
+ * they will be read on their own. This is the only thing the device decides, and
+ * one tap overrides it.
+ */
+const defaultDestination = (isMobile: boolean): ChatShareCardDestination =>
+  isMobile ? 'chat' : 'post';
 
 /** Capture date on the card: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
 function formatShareImageDate(timestamp: string | undefined): string | undefined {
@@ -147,10 +153,10 @@ function PaletteToggle({
 }
 
 /**
- * Where the image is going. Named for the destination rather than for the
- * padding it sets: the person exporting knows whether this is going into a
- * thread or onto a feed, and has no way to judge "24pt" against "56pt". It is
- * inert without a ground, because then there is no mat to size.
+ * Where the image is going, which is the card's width and its mat together.
+ * Named for the destination rather than for either measurement: the person
+ * exporting knows whether this is going into a thread or onto a feed, and has no
+ * way to judge "360 × thin" against "560 × matted".
  */
 function DestinationToggle({
   value,
@@ -290,20 +296,20 @@ export interface ChatShareImageDialogProps {
   /** Custom Runtime's configured display name. */
   agentName?: string;
   /**
-   * Overrides the device-derived card format. Stories use it to show both
-   * forms; the product never passes it.
+   * Seeds the destination instead of guessing it from the device. Stories use it
+   * to open on either card; the product never passes it.
    */
-  formatOverride?: ChatShareCardFormat;
+  initialDestination?: ChatShareCardDestination;
 }
 
 /**
  * Preview and export for "Share as image". The card is a fixed template, so this
  * surface is a preview with three controls and two actions rather than an editor:
- * the palette the card is printed in, the ground it is printed on, and where the
- * image is going, which is the only thing that sizes that ground. The phone
- * and desktop forms are chosen by the device being shared from, and everything
- * else about the image — its bands, their order, their margins, their type — is
- * already decided.
+ * where the image is going, which is the card's whole shape; the ground it is
+ * printed on; and the palette it is printed in. Everything else about the image —
+ * its bands, their order, their margins, their type — is already decided. The
+ * device chooses nothing about the image, only the opening guess at its
+ * destination and whether this surface is a dialog or a drawer.
  *
  * The same preview, controls and actions render in a bottom drawer on a handset
  * and in a dialog on a desktop.
@@ -314,11 +320,10 @@ export function ChatShareImageDialog({
   session,
   messages,
   agentName,
-  formatOverride,
+  initialDestination,
 }: ChatShareImageDialogProps) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
-  const format: ChatShareCardFormat = formatOverride ?? (isMobile ? 'phone' : 'desktop');
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const appTheme = useResolvedTheme() === 'dark' ? 'dark' : 'light';
   const modelName = messages.findLast((message) => message.role === 'assistant')?.modelName;
@@ -332,7 +337,9 @@ export function ChatShareImageDialog({
   );
   const [theme, setTheme] = useState<'light' | 'dark'>(appTheme);
   const [backdrop, setBackdrop] = useState<ChatShareCardBackdrop>(DEFAULT_BACKDROP);
-  const [destination, setDestination] = useState<ChatShareCardDestination>(DEFAULT_DESTINATION);
+  const [destination, setDestination] = useState<ChatShareCardDestination>(
+    initialDestination ?? defaultDestination(isMobile)
+  );
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -349,7 +356,7 @@ export function ChatShareImageDialog({
     if (open) {
       setTheme(appTheme);
       setBackdrop(DEFAULT_BACKDROP);
-      setDestination(DEFAULT_DESTINATION);
+      setDestination(initialDestination ?? defaultDestination(isMobile));
       setExportError(false);
       setCopied(false);
     }
@@ -422,10 +429,9 @@ export function ChatShareImageDialog({
         <ChatShareCard
           messages={messages}
           title={session?.title?.trim() || undefined}
-          format={format}
+          destination={destination}
           theme={theme}
           backdrop={backdrop}
-          destination={destination}
           meta={meta}
         />
       </div>
@@ -477,15 +483,9 @@ export function ChatShareImageDialog({
     </Button>
   );
 
-  // `none` has no mat, so the destination has nothing to size; it stays visible
-  // and inert rather than disappearing, so the row does not relayout on a swatch.
   const controls = (
     <>
-      <DestinationToggle
-        value={destination}
-        onChange={setDestination}
-        disabled={exporting || backdrop === 'none'}
-      />
+      <DestinationToggle value={destination} onChange={setDestination} disabled={exporting} />
       <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
       <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
     </>

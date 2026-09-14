@@ -11,29 +11,26 @@ export interface ChatShareCardMessage {
 }
 
 /**
- * The card has exactly two forms and the device being shared from picks one;
- * there is no format control and no other appearance switch but light/dark.
- * `phone` is sized to a handset's own content width, so an image opened in a
- * chat thread sets its text at the size the reader's own apps do. `desktop` is
- * wide enough for a ~70-character line of prose and a real line of code, which
- * is what a post or a README needs. They differ in measure and margin only:
- * type sizes are shared, so two cards taken from two devices set the same words
- * at the same size.
- */
-export type ChatShareCardFormat = 'phone' | 'desktop';
-
-/**
- * How much ground the card is matted on — named for where the image is going,
- * not for how much padding it has, because the person exporting knows the
- * destination and has no way to judge a measurement. `chat` is a thin bleed for
- * an image that lands inside a message thread, where the mat is mostly wasted
- * height and the reader is already looking at the card. `post` is a real mat for
- * an image that stands alone in a feed, a README or a slide, where the ground is
- * what keeps the card off the page behind it.
+ * The card has exactly two forms, and where the image is going picks one. This
+ * is the whole shape of the card: its width and its mat are one decision, not
+ * two, because they answer the same question.
  *
- * It is the same fraction of the card's width in both forms — roughly a
- * twentieth and a tenth — so the two destinations look like the same decision on
- * a handset and on a desktop.
+ * `chat` is a 360pt card in a thin bleed. The image lands inside a message
+ * thread, so it is read at a handset's own content width — its text sets at the
+ * size the reader's other apps set theirs — and the mat is mostly wasted height
+ * in a conversation the reader is already looking at.
+ *
+ * `post` is a 560pt card in a real mat. The image stands alone in a feed, a
+ * README or a slide, so it gets room for a ~70-character line of prose and a
+ * genuine line of code, and a ground that holds it off whatever is behind it.
+ *
+ * The device doing the exporting decides nothing here. It used to, as a proxy
+ * for the destination, which was wrong in both directions: a desktop user
+ * sending a card into a group chat got a wide card, and a phone user posting to
+ * a feed got a narrow one. The destination is now asked directly.
+ *
+ * The two differ in measure and margin only — type sizes are shared — so a chat
+ * card and a post card set the same words at the same size.
  */
 export type ChatShareCardDestination = 'chat' | 'post';
 
@@ -51,7 +48,8 @@ export interface ChatShareCardMeta {
 export interface ChatShareCardProps {
   messages: ChatShareCardMessage[];
   title?: string;
-  format: ChatShareCardFormat;
+  /** Where the image is going: the card's width and its mat, as one decision. */
+  destination: ChatShareCardDestination;
   /**
    * Pins the exported palette to a bundled Lody theme rather than following the
    * app: the image must look the way the preview did, whatever the app is
@@ -62,16 +60,14 @@ export interface ChatShareCardProps {
   theme: 'light' | 'dark';
   /** Canvas printed behind the card; `none` exports the card on its own corners. */
   backdrop: ChatShareCardBackdrop;
-  /** Where the image is going, which is how much ground it is matted on. */
-  destination: ChatShareCardDestination;
   meta?: ChatShareCardMeta;
   className?: string;
 }
 
 interface CardLayout {
-  /** Card width in CSS pixels; a ground adds its destination's `frame` on every side. */
+  /** Card width in CSS pixels; a ground adds `frame` on every side of it. */
   width: number;
-  frame: Record<ChatShareCardDestination, string>;
+  frame: string;
   radius: string;
   /**
    * The one horizontal inset every band uses — title, conversation and caption
@@ -97,16 +93,21 @@ interface CardLayout {
 }
 
 /**
- * The whole padding system, as two rows rather than values sprinkled through
- * the markup, so "the desktop card breathes more" stays one decision. Every
- * value sits on a 4px grid, and the vertical rhythm is deliberately unequal:
- * the gap that separates two exchanges is twice the gap that binds a prompt to
- * its reply, which is what makes a tall card scannable without speaker labels.
+ * Every dimension of both cards, as two rows rather than values sprinkled
+ * through the markup, so "a post breathes more than a message" stays one
+ * decision instead of a dozen. Every value sits on a 4px grid, and the vertical
+ * rhythm is deliberately unequal: the gap that separates two exchanges is twice
+ * the gap that binds a prompt to its reply, which is what makes a tall card
+ * scannable without speaker labels.
+ *
+ * The mats are deliberately NOT the same fraction of their card. A message wants
+ * the least wasted height it can get away with while still reading as a card, a
+ * post wants presentation; 4% and 10% is that difference, not an inconsistency.
  */
-const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
-  phone: {
+const LAYOUT: Record<ChatShareCardDestination, CardLayout> = {
+  chat: {
     width: 360,
-    frame: { chat: 'p-4', post: 'p-9' },
+    frame: 'p-4',
     radius: 'rounded-[22px]',
     gutter: 'px-5',
     top: 'pt-6',
@@ -120,9 +121,9 @@ const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
     captionPad: 'py-3.5',
     signature: 'mt-4',
   },
-  desktop: {
+  post: {
     width: 560,
-    frame: { chat: 'p-8', post: 'p-14' },
+    frame: 'p-14',
     radius: 'rounded-[26px]',
     gutter: 'px-7',
     top: 'pt-7',
@@ -244,7 +245,8 @@ const CODE_CSS = [
  * image. No scrolling container and no virtualization: the card hugs its
  * content, and a long selection simply makes a long image.
  *
- * One fixed template. Every turn is left-aligned against the same gutter — a
+ * One fixed template in two sizes, chosen by where the image is going. Every
+ * turn is left-aligned against the same gutter — a
  * shared image has no "me" side to hang a bubble from — with the human prompt
  * as a tinted block and the reply as ordinary prose through `MarkdownRenderer`,
  * exactly as a finished turn renders in the app. Provenance is a single caption
@@ -255,14 +257,13 @@ const CODE_CSS = [
 export function ChatShareCard({
   messages,
   title,
-  format,
+  destination,
   theme,
   backdrop,
-  destination,
   meta,
   className,
 }: ChatShareCardProps) {
-  const layout = LAYOUT[format];
+  const layout = LAYOUT[destination];
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
   const themeScopeClass = theme === 'light' ? 'light-scope' : 'dark-scope';
@@ -383,15 +384,17 @@ export function ChatShareCard({
     </>
   );
 
-  // Without a ground there is nothing to print the sign-off on, and nothing for
-  // the destination to size: the card itself is the whole exported image.
+  // Without a ground there is nothing to print the sign-off on and no mat to
+  // inset: the card itself is the whole exported image. Its width still follows
+  // the destination.
+  //
   if (backdrop === 'none') {
     return <div className={cn('w-fit', themeScopeClass, className)}>{card}</div>;
   }
 
   return (
     <div
-      className={cn('w-fit', layout.frame[destination], themeScopeClass, className)}
+      className={cn('w-fit', layout.frame, themeScopeClass, className)}
       style={CHAT_SHARE_BACKDROP_STYLES[backdrop]}
     >
       {card}

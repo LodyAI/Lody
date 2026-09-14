@@ -13,10 +13,10 @@ numeric code-collapse field, roughly a thousand reachable combinations of which
 only a few produced an image worth sending. The controls also hid two defects —
 the default footer printed the agent's name with no Lody mark anywhere on the
 image, and the default QR code always encoded the product home page rather than
-the conversation. The card is now one template with three choices — the palette it
-is printed in, the ground it is printed on, and where the image is going, none of
-which can change its layout — issued in a phone form and a desktop form that the
-sharing device selects; every
+the conversation. The card is now one template with three choices — where the
+image is going, the ground it is printed on, and the palette it is printed in,
+none of which can change its layout — issued in a chat size and a post size that
+the destination selects; every
 band shares one horizontal inset, turns are left-aligned with an unequal vertical
 rhythm instead of right-hung bubbles, and the preview is a preview with two
 actions rather than a control panel. The card still grows without a height limit,
@@ -26,16 +26,22 @@ user picked, and a whole conversation meant for reading belongs in a share link.
 
 ## Decision
 
-The template's only variable is the device. `phone` is 360pt wide inside a 16pt
-backdrop; `desktop` is 560pt inside 32pt. They differ in measure and margin only
-— type sizes are shared and are pinned rather than read from the reader's
-conversation font setting — so two cards taken from two devices set the same
-words at the same size. `ChatShareImageDialog` derives the form from
-`useIsMobile()` and exposes no control for it; `formatOverride` exists for
-stories alone.
+The template's only variable is where the image is going. `chat` is 360pt wide in
+a 16pt bleed; `post` is 560pt in a 56pt mat. They differ in measure and margin
+only — type sizes are shared and are pinned rather than read from the reader's
+conversation font setting — so a chat card and a post card set the same words at
+the same size.
 
-Both cards' padding lives in one `LAYOUT` table rather than in the markup, so
-"the desktop card breathes more" stays a single decision. One `gutter` value
+That axis started as the device: `useIsMobile()` picked the width, on the
+reasoning that the device you are exporting from stands in for where the image is
+going. It does not. A desktop user sending a card into a group chat got the wide
+one and a handset user posting to a feed got the narrow one, and neither could
+say so. The device now seeds nothing but the opening guess, which one tap
+overrides, and decides nothing else about the image — only whether this surface
+is a dialog or a drawer.
+
+Both cards' dimensions live in one `LAYOUT` table rather than in the markup, so
+"a post breathes more than a message" stays a single decision. One `gutter` value
 serves the title band, the conversation and the caption, which is what the
 previous card could not do: it mixed `px-5` and `px-6` between bands and hung
 user turns from the right edge, so nothing in the card shared a left edge. Turns
@@ -74,18 +80,19 @@ user. `none` keeps its place in that set and takes the sign-off into the caption
 left column, the same fallback the usage card already documents, rather than
 earning a band of its own.
 
-The mat's size came back as a third choice, and it is asked as a destination
-rather than as an amount. The original control offered "Compact", "Regular" and
-"Spacious", which are three words for a number the person exporting has no way to
-judge: nobody knows whether they want 32pt or 56pt of gradient, and nobody has to,
-because they do know whether this image is going into a message thread or onto a
-feed. A card read inside a thread is already the thing the reader is looking at,
-so its ground is a thin bleed; a card posted alone has to hold itself off whatever
-is behind it, so its ground is a real mat. Both take the same fraction of the
-card's width in both forms — about a twentieth and a tenth — so the choice means
-the same thing on a handset as on a desktop, and the two values per format live in
-the same `LAYOUT` table as everything else. `none` leaves nothing to size, so the
-control goes inert rather than disappearing and relaying out the row.
+The mat came back with the width rather than as its own control, and both are
+asked as a destination rather than as an amount. The original padding control
+offered "Compact", "Regular" and "Spacious" — three words for a number the person
+exporting has no way to judge. Nobody knows whether they want 32pt or 56pt of
+gradient, and nobody has to, because they do know whether this image is going into
+a message thread or onto a feed. That is also the same question the width answers,
+which is why the two collapsed into one control instead of sitting beside each
+other: a 560pt card in a thin bleed and a 360pt card in a deep mat are both
+combinations nobody wants, and offering them separately only invites them.
+
+The two mats are deliberately not the same fraction of their card — about 4% and
+10%. A message wants the least wasted height that still reads as a card, a post
+wants presentation; that is a difference, not an inconsistency.
 
 Code soft-wrapping became unconditional. An image has no horizontal scrollbar, so
 an unwrapped line is a line the reader cannot see; that is a property of the
@@ -127,7 +134,10 @@ messages states something other than what the user selected, and the product
 already publishes whole conversations as static share links. A single card size
 with the surrounding UI adapting per device was also considered and rejected in
 favour of two image forms, on the grounds that a card pasted into a phone chat
-thread and one pasted into a post are read at different widths.
+thread and one pasted into a post are read at different widths. Deriving which of
+those two forms to use from the exporting device was implemented and then
+corrected: it is a guess at the destination, and the destination can simply be
+asked.
 
 Fixing every ground into one — the signature gradient, chosen by the light/dark
 switch — was implemented and then reverted on the requester's judgement. It would
@@ -141,7 +151,7 @@ unrecoverable, to save a control that costs one row of swatches.
 intended behavior and was updated in the same change, including the stale
 sentence in [the usage card spec](../../../../specs/usage-share-image.md) that
 described this card as justifying a large set of appearance controls. Stories
-cover both forms in both palettes, both destinations, every ground that needs its
+cover both destinations in both palettes, every ground that needs its
 own judgement — the pale one against both card palettes, a saturated one, and no
 ground at all in both palettes — an untitled card, and a code block whose signature
 line is far wider than either card.

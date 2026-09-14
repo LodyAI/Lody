@@ -24,25 +24,31 @@ remains the session creation date; elapsed runtime is not displayed.
 
 The card is a fixed template. Its bands, their order, their type scale and their
 margins are the same on every card, and the preview offers exactly three choices,
-none of which can change that: the palette the card is printed in, the ground it
-is printed on, and where the image is going. The palette opens on whichever appearance the app is
-currently wearing. The template exists in two forms, and the device being shared
-from picks one: a phone form sized to a handset's own content width, and a
-desktop form wide enough for a line of prose and a line of code. They differ in
-measure and margin only — type sizes are shared, and are independent of the
-reader's conversation font setting — so two cards taken from two devices set the
-same words at the same size. Nothing in the product selects the form.
+none of which can change that: where the image is going, the ground it is printed
+on, and the palette it is printed in. The palette opens on whichever appearance
+the app is currently wearing.
 
-Where the image is going is the only thing that sizes the ground, and it is asked
-as a destination rather than as an amount. A card sent into a message thread is
-read inside a conversation the reader is already looking at, so its ground is a
-thin bleed; a card posted to a feed, a README or a slide has to hold itself off
-whatever is behind it, so its ground is a real mat. The person exporting knows
-which of those they are doing and cannot judge one measurement against another,
-so the card asks the question they can answer. Both destinations take the same
-fraction of the card's width in both forms, so the choice means the same thing on
-a handset as on a desktop, and it is inert without a ground because then there is
-no mat to size.
+Where the image is going is the card's whole shape — its width and its mat
+together, because they answer the same question. A card sent into a message
+thread is read inside a conversation the reader is already looking at, so it is
+sized to a handset's own content width and matted in a thin bleed; the mat there
+is mostly wasted height. A card posted to a feed, a README or a slide stands
+alone, so it is wide enough for a line of prose and a genuine line of code, and
+its ground has to hold it off whatever is behind it. The two mats are
+deliberately not the same fraction of their card: a message wants the least
+wasted height that still reads as a card, a post wants presentation.
+
+The device doing the exporting decides nothing about the image. It is only the
+opening guess at the destination, which one tap overrides. Using it to pick the
+card's shape was wrong in both directions — a desktop user sending a card into a
+group chat got the wide one, and a handset user posting to a feed got the narrow
+one — so the destination is asked directly instead. Asking it as a destination
+rather than as a measurement is the point: the person exporting knows where the
+image is going and cannot judge one width or one margin against another.
+
+The two forms differ in measure and margin only. Type sizes are shared, and are
+independent of the reader's conversation font setting, so a chat card and a post
+card set the same words at the same size.
 
 A chosen ground is part of the exported image rather than a border added around
 it, the same as on the usage card. The set is the product's own — its signature
@@ -94,7 +100,8 @@ copy leaves the preview open for retry. Copying does not publish the conversatio
 or change the saved image behavior.
 
 The preview is a preview and not an editor: the palette switch, the ground
-swatches, the destination switch and the two actions are all it carries. It is a dialog on a desktop and a bottom drawer on a
+swatches, the destination switch and the two actions are all it carries. The
+destination stays live without a ground: it still sets the card's width. It is a dialog on a desktop and a bottom drawer on a
 handset, with the same preview, the same control and the same actions in both.
 
 Evidence: [selection tests](../packages/components/tests/message-selection.test.tsx),
