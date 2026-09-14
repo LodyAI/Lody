@@ -300,8 +300,6 @@ export function ProviderSetupRow({
             customAcp={config.customAcp}
             runtimeOverrides={config.runtimeOverrides}
             env={config.env}
-            purpose={setup.setupRevision ? 'provision-provider-credential' : undefined}
-            setupRevision={setup.setupRevision}
             compact
           />
         </div>

@@ -1,9 +1,6 @@
 import {
-  agentConfigContainsCodexCredential,
-  applyProviderSetupCancellationToFlock,
   deleteAgentConfigFromFlock,
   getAgentConfigRoomId,
-  getLodyCodexCustomProvider,
   getMachineFlockAgentConfigs,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDocId,
@@ -145,20 +142,8 @@ export async function deleteMachineAgentConfig(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
-  const now = getServerNow();
-  const changed = getLodyCodexCustomProvider(config.env)
-    ? applyProviderSetupCancellationToFlock(
-        handle.flock,
-        {
-          v: 1,
-          id: config.id,
-          machineId: config.machineId,
-          cancelledAt: now,
-        },
-        now,
-        config
-      )
-    : deleteAgentConfigFromFlock(handle.flock, config, now);
+  // Deleting the row also records an opt-out when needed, both in one commit (see deleteAgentConfigFromFlock).
+  const changed = deleteAgentConfigFromFlock(handle.flock, config, getServerNow());
   if (!changed) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
     return;
@@ -259,8 +244,6 @@ function normalizeAgentConfigMeta(raw: unknown): AgentConfigMeta | null {
   if (!id || !machineId || !name || !cliType || !agentType) {
     return null;
   }
-  const env = isStringRecord(raw.env) ? raw.env : {};
-  if (agentConfigContainsCodexCredential({ env })) return null;
 
   return {
     ...raw,
@@ -270,7 +253,7 @@ function normalizeAgentConfigMeta(raw: unknown): AgentConfigMeta | null {
     description: typeof raw.description === 'string' ? raw.description : undefined,
     cliType,
     agentType,
-    env,
+    env: isStringRecord(raw.env) ? raw.env : {},
   } as AgentConfigMeta;
 }
 

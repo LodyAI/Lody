@@ -1,11 +1,8 @@
 import { atom } from 'jotai';
 import {
   AGENT_CONFIG_DOC_PREFIX,
-  agentConfigContainsCodexCredential,
-  assertAgentConfigDoesNotContainCodexCredential,
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
-  getLodyCodexCustomProvider,
   getMachineFlockDocId,
   getServerNow,
   hasBuiltinRuntimeOverrideValues,
@@ -17,7 +14,6 @@ import {
   machineFlockKeys,
   findBuiltinAgentOptOutToRetract,
   planBuiltinAgentOptOutForDeletedConfig,
-  providerSetupContainsCodexCredential,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   type AgentBrandId,
@@ -49,7 +45,6 @@ export async function writeAgentConfigToMachineFlock(
   runtime: WorkspaceRuntime,
   config: AgentConfigMeta
 ): Promise<MachineFlockRowMap> {
-  assertAgentConfigDoesNotContainCodexCredential(config);
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
   await runtime.writer.flockRowPut(flockDocId, key, config);
@@ -98,12 +93,9 @@ async function writeProviderSetupToMachineFlock(
   runtime: WorkspaceRuntime,
   setup: ProviderSetupTask
 ): Promise<MachineFlockRowMap> {
-  if (providerSetupContainsCodexCredential(setup.config)) {
-    throw new Error('Provider setup rows cannot contain credentials');
-  }
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
   const key = machineFlockKeys.providerSetup(setup.id);
-  await runtime.writer.replaceProviderSetup(flockDocId, setup);
+  await runtime.writer.flockRowPut(flockDocId, key, setup);
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   return {
     ...readMachineFlockRowsFromFlock(handle.flock),
@@ -113,42 +105,54 @@ async function writeProviderSetupToMachineFlock(
 
 async function cancelProviderSetupInMachineFlock(
   runtime: WorkspaceRuntime,
-  cancellation: ProviderSetupCancellation,
+  setup: ProviderSetupTask,
   optimisticRows: MachineFlockRowMap
 ): Promise<MachineFlockRowMap> {
-  const flockDocId = getMachineFlockDocId(runtime.workspaceId, cancellation.machineId);
-  const cancellationKey = machineFlockKeys.providerSetupCancellation(cancellation.id);
-  const setupKey = machineFlockKeys.providerSetup(cancellation.id);
-  const configKey = machineFlockKeys.agentConfig(cancellation.id);
+  const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
+  const cancelledAt = getServerNow();
+  const cancellation: ProviderSetupCancellation = {
+    v: 1,
+    id: setup.id,
+    machineId: setup.machineId,
+    cancelledAt,
+  };
+  const cancellationKey = machineFlockKeys.providerSetupCancellation(setup.id);
+  const setupKey = machineFlockKeys.providerSetup(setup.id);
+  const configKey = machineFlockKeys.agentConfig(setup.id);
 
-  const capturedConfig = getMachineFlockAgentConfigs(optimisticRows)[cancellation.id];
-  const effectiveCancellation = await runtime.writer.applyProviderSetupCancellation(
-    flockDocId,
-    cancellation,
-    capturedConfig
-  );
+  // The durable marker is the cancellation accept boundary. The target CLI can
+  // reconcile both rows from it even if either best-effort cleanup is interrupted.
+  // Nothing is read from the mirror before it, so the boundary is never delayed.
+  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
 
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = {
-    ...optimisticRows,
     ...readMachineFlockRowsFromFlock(handle.flock),
+    ...optimisticRows,
+    [serializeMachineFlockKey(cancellationKey)]: {
+      key: cancellationKey,
+      value: cancellation,
+    },
   };
-  if (!effectiveCancellation) return rows;
-  rows[serializeMachineFlockKey(cancellationKey)] = {
-    key: cancellationKey,
-    value: effectiveCancellation,
-  };
-  const currentSetup = getMachineFlockProviderSetups(rows)[cancellation.id];
-  if (
-    currentSetup &&
-    (!effectiveCancellation.setupRevision ||
-      currentSetup.setupRevision === effectiveCancellation.setupRevision)
-  ) {
-    delete rows[serializeMachineFlockKey(setupKey)];
+  // Once the setup is published as an agentConfig, cancelling is the user removing this
+  // provider and needs the same removal record as deleting it from the list, or the next
+  // CLI startup adds it back.
+  const publishedConfigs = getMachineFlockAgentConfigs(rows);
+  const optOut =
+    setup.id in publishedConfigs
+      ? planBuiltinAgentOptOutForDeletedConfig(rows, publishedConfigs[setup.id], cancelledAt)
+      : null;
+  if (optOut) {
+    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
+    rows[serializeMachineFlockKey(optOut.key)] = optOut;
   }
-  if (!effectiveCancellation.preservePublishedConfig) {
-    delete rows[serializeMachineFlockKey(configKey)];
-  }
+  await Promise.allSettled([
+    runtime.writer.flockRowDelete(flockDocId, setupKey),
+    runtime.writer.flockRowDelete(flockDocId, configKey),
+  ]);
+
+  delete rows[serializeMachineFlockKey(setupKey)];
+  delete rows[serializeMachineFlockKey(configKey)];
   return rows;
 }
 
@@ -187,8 +191,6 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
   const runtimeOverrides = isBuiltinRuntimeOverrides(raw.runtimeOverrides)
     ? raw.runtimeOverrides
     : undefined;
-  const env = isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {};
-  if (agentConfigContainsCodexCredential({ env })) return null;
 
   let titleGeneration: TitleGenerationConfig | undefined;
   if (isPlainObject(raw.titleGeneration)) {
@@ -216,7 +218,7 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
     agentType,
     customAcp,
     runtimeOverrides,
-    env,
+    env: isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {},
     prompt: typeof raw.prompt === 'string' ? raw.prompt : '',
     titleGeneration,
     machineId,
@@ -371,58 +373,36 @@ export const cmdCreateAgentConfigAtom = atom(
   }
 );
 
-export type CreateProviderSetupInput = {
-  config: AgentConfigMeta;
-  setupRevision?: string;
-};
-
-export const cmdCreateProviderSetupAtom = atom(
-  null,
-  async (get, set, input: CreateProviderSetupInput) => {
-    const { config, setupRevision } = input;
-    const runtime = get(activeWorkspaceRuntimeAtom);
-    if (!runtime) throw new Error('Runtime not ready');
-    const provider = getLodyCodexCustomProvider(config.env);
-    if (
-      config.cliType !== 'builtin' ||
-      !supportsBuiltinProviderSetup(config.agentType) ||
-      (hasBuiltinRuntimeOverrideValues(config.runtimeOverrides) &&
-        !(config.agentType === 'codex' && provider && setupRevision))
-    ) {
-      throw new Error('Provider setup is not supported for this agent');
-    }
-    if (providerSetupContainsCodexCredential(config)) {
-      throw new Error('Provider setup rows cannot contain credentials');
-    }
-    const now = getServerNow();
-    const replacesPublishedConfig = get(getAllAgentConfigAtom).some(
-      (entry) => entry.id === config.id
-    );
-    if (provider && !setupRevision?.trim()) {
-      throw new Error('Codex provider setup requires an exact setup revision');
-    }
-    const setup: ProviderSetupTask = {
-      v: 1,
-      id: config.id,
-      machineId: config.machineId,
-      config,
-      status: provider ? 'awaiting-auth' : 'queued',
-      attempt: 1,
-      createdAt: now,
-      updatedAt: now,
-      ...(replacesPublishedConfig ? { replacesPublishedConfig: true } : {}),
-      ...(setupRevision ? { setupRevision } : {}),
-    };
-    const rows = await writeProviderSetupToMachineFlock(runtime, setup);
-    set(setMachineFlockRowsForMachineAtom, {
-      workspaceId: runtime.workspaceId,
-      machineId: setup.machineId,
-      rows,
-      mode: 'merge',
-    });
-    return setup.id;
+export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: AgentConfigMeta) => {
+  const runtime = get(activeWorkspaceRuntimeAtom);
+  if (!runtime) throw new Error('Runtime not ready');
+  if (
+    config.cliType !== 'builtin' ||
+    !supportsBuiltinProviderSetup(config.agentType) ||
+    hasBuiltinRuntimeOverrideValues(config.runtimeOverrides)
+  ) {
+    throw new Error('Provider setup is not supported for this agent');
   }
-);
+  const now = getServerNow();
+  const setup: ProviderSetupTask = {
+    v: 1,
+    id: config.id,
+    machineId: config.machineId,
+    config,
+    status: 'queued',
+    attempt: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const rows = await writeProviderSetupToMachineFlock(runtime, setup);
+  set(setMachineFlockRowsForMachineAtom, {
+    workspaceId: runtime.workspaceId,
+    machineId: setup.machineId,
+    rows,
+    mode: 'merge',
+  });
+  return setup.id;
+});
 
 export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
@@ -445,58 +425,35 @@ export const cmdRetryProviderSetupAtom = atom(null, async (get, set, setupId: Ag
   });
 });
 
-export type CancelProviderSetupInput = {
-  id: AgentConfigId;
-  machineId: MachineId;
-  expectedSetupRevision?: string;
-  preservePublishedConfig?: boolean;
-};
+export const deleteProviderSetupAtom = atom(null, async (get, set, setupId: AgentConfigId) => {
+  const runtime = get(activeWorkspaceRuntimeAtom);
+  if (!runtime) throw new Error('Runtime not ready');
+  const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === setupId);
+  if (!setup) return;
+  const optimisticRows =
+    get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[String(setup.machineId)] ??
+    {};
+  const rows = await cancelProviderSetupInMachineFlock(runtime, setup, optimisticRows);
+  set(setMachineFlockRowsForMachineAtom, {
+    workspaceId: runtime.workspaceId,
+    machineId: setup.machineId,
+    rows,
+  });
+});
 
-export const deleteProviderSetupAtom = atom(
-  null,
-  async (get, set, input: CancelProviderSetupInput) => {
-    const runtime = get(activeWorkspaceRuntimeAtom);
-    if (!runtime) throw new Error('Runtime not ready');
-    const setup = get(getAllProviderSetupsAtom).find((entry) => entry.id === input.id);
-    if (
-      input.expectedSetupRevision &&
-      (!setup || setup.setupRevision !== input.expectedSetupRevision)
-    ) {
-      return;
-    }
-    const optimisticRows =
-      get(machineFlockRowsByWorkspaceAtom)[String(runtime.workspaceId)]?.[
-        String(input.machineId)
-      ] ?? {};
-    const cancellation: ProviderSetupCancellation = {
-      v: 1,
-      id: input.id,
-      machineId: input.machineId,
-      cancelledAt: getServerNow(),
-      ...((input.preservePublishedConfig ?? setup?.replacesPublishedConfig)
-        ? { preservePublishedConfig: true }
-        : {}),
-      ...(input.expectedSetupRevision ? { setupRevision: input.expectedSetupRevision } : {}),
-    };
-    const rows = await cancelProviderSetupInMachineFlock(runtime, cancellation, optimisticRows);
-    set(setMachineFlockRowsForMachineAtom, {
+export const deleteAgentConfigAtom = atom(null, async (get, _set, configId: AgentConfigId) => {
+  const runtime = get(activeWorkspaceRuntimeAtom);
+  if (!runtime) throw new Error('Runtime not ready');
+  const config = get(getAllAgentConfigAtom).find((entry) => entry.id === configId);
+  if (config) {
+    const rows = await deleteAgentConfigFromMachineFlock(runtime, config);
+    _set(setMachineFlockRowsForMachineAtom, {
       workspaceId: runtime.workspaceId,
-      machineId: input.machineId,
+      machineId: config.machineId,
       rows,
     });
   }
-);
-
-export const deleteAgentConfigAtom = atom(null, async (get, _set, config: AgentConfigMeta) => {
-  const runtime = get(activeWorkspaceRuntimeAtom);
-  if (!runtime) throw new Error('Runtime not ready');
-  const rows = await deleteAgentConfigFromMachineFlock(runtime, config);
-  _set(setMachineFlockRowsForMachineAtom, {
-    workspaceId: runtime.workspaceId,
-    machineId: config.machineId,
-    rows,
-  });
-  await runtime.writer.deleteDoc(getAgentConfigRoomId(config.id));
+  await runtime.writer.deleteDoc(getAgentConfigRoomId(configId));
 });
 
 export const cmdUpdateAgentConfigAtom = atom(null, async (get, _set, config: AgentConfigMeta) => {

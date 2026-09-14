@@ -3,10 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  computeTitleGenerationDefaults,
   buildLodyCodexCustomProviderEnv,
-  CODEX_API_KEY_ENV,
   CODEX_CONFIG_ENV,
+  computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
   DEEPSEEK_HARNESS_BASE_URL_ENV,
   formatCustomAcpCommandLine,
@@ -15,15 +14,13 @@ import {
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getLodyCodexCustomProvider,
-  getLodyCodexCredentialBinding,
-  isAllowedCredentialEndpoint,
-  isReservedCodexCredentialEnvKey,
-  LODY_CODEX_PROVIDER_STATE_ENV,
   getRegistryAcpLaunchKind,
   machineSupportsProviderSetupProtocol,
-  machineSupportsCodexCustomEndpointCredentials,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
+  isAllowedCodexEndpoint,
+  LODY_CODEX_API_KEY_ENV,
+  LODY_CODEX_PROVIDER_STATE_ENV,
   parseCustomAcpCommandLine,
   removeLodyCodexCustomProviderEnv,
   serializeCustomAcpLaunchSpec,
@@ -614,10 +611,6 @@ export type AgentConfigSubmitPayload = {
   brandId?: AgentBrandId;
   /** Persist as a durable target-machine setup instead of publishing immediately. */
   backgroundSetup?: true;
-  /** One-shot secret sent through the encrypted machine authentication flow. */
-  codexApiKey?: string;
-  /** Causal token for matching the durable setup row to the one-shot RPC. */
-  setupRevision?: string;
 };
 
 export type AgentConfigDialogMode =
@@ -756,7 +749,7 @@ function hydrateCodexAuthenticationForm(form: AgentConfigFormData): AgentConfigF
     ...form,
     codexAuthenticationMode:
       form.codexAuthenticationMode ?? (customProvider ? 'api-key' : 'chatgpt'),
-    codexApiKey: form.codexApiKey ?? '',
+    codexApiKey: form.codexApiKey ?? form.env[LODY_CODEX_API_KEY_ENV] ?? '',
     codexBaseUrl: form.codexBaseUrl ?? customProvider?.baseUrl ?? '',
   };
 }
@@ -814,16 +807,12 @@ function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, s
   return additionalEnv;
 }
 
-function omitCodexManagedEnv(
-  env: Record<string, string>,
-  managedKeys: readonly string[]
-): Record<string, string> {
-  const managedKeySet = new Set(managedKeys);
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      ([key]) => !managedKeySet.has(key) && !isReservedCodexCredentialEnvKey(key)
-    )
-  );
+function omitCodexManagedEnv(env: Record<string, string>): Record<string, string> {
+  const additionalEnv = { ...env };
+  delete additionalEnv[CODEX_CONFIG_ENV];
+  delete additionalEnv[LODY_CODEX_API_KEY_ENV];
+  delete additionalEnv[LODY_CODEX_PROVIDER_STATE_ENV];
+  return additionalEnv;
 }
 
 function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigFormData {
@@ -861,6 +850,7 @@ function buildCodexSubmitEnv(formData: AgentConfigFormData): Record<string, stri
   }
   return buildLodyCodexCustomProviderEnv(formData.env, {
     baseUrl: formData.codexBaseUrl ?? '',
+    apiKey: formData.codexApiKey ?? '',
   });
 }
 
@@ -1000,13 +990,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const [formData, setFormData] = useState<AgentConfigFormData>(initialForm);
   const [submitting, setSubmitting] = useState(false);
-  const requestOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      if (!nextOpen && submitting) return;
-      onOpenChange(nextOpen);
-    },
-    [onOpenChange, submitting]
-  );
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
@@ -1144,7 +1127,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     usesAcpProtocolAuthentication(formData.cliType) &&
     machineSupportsAcpProtocolAuthentication(machine);
   const showAuthenticationPanel =
-    mode.kind === 'edit'
+    !(isCodexBuiltin && codexAuthenticationMode === 'api-key') &&
+    (mode.kind === 'edit'
       ? supportsBuiltinAuthentication({
           cliType: formData.cliType,
           agentType: formData.agentType,
@@ -1152,9 +1136,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           env: formData.env,
         }) ||
         (authRequired && usesProtocolAuthentication)
-      : authRequired &&
-        (isManagedBuiltin || usesProtocolAuthentication) &&
-        !(isCodexBuiltin && codexAuthenticationMode === 'api-key');
+      : authRequired && (isManagedBuiltin || usesProtocolAuthentication));
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1218,102 +1200,60 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // only safe once that daemon advertises the protocol. Derived here rather
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
-  const codexSubmitEnv = useMemo(() => {
-    if (
-      !isCodexBuiltin ||
-      codexAuthenticationMode !== 'api-key' ||
-      !isAllowedCredentialEndpoint(formData.codexBaseUrl ?? '')
-    ) {
-      return null;
-    }
-    try {
-      return buildCodexSubmitEnv(formData);
-    } catch {
-      return null;
-    }
-  }, [codexAuthenticationMode, formData, isCodexBuiltin]);
-  const codexCredentialProvisioningRequired = useMemo(() => {
-    if (!isCodexBuiltin || codexAuthenticationMode !== 'api-key') return false;
-    if (mode.kind === 'create' || formData.codexApiKey?.trim()) return true;
-    if (!codexSubmitEnv) return true;
-    return (
-      getLodyCodexCredentialBinding(mode.config) !==
-      getLodyCodexCredentialBinding({
-        cliType: formData.cliType,
-        agentType: formData.agentType,
-        customAcp: parsedCustomAcp ?? undefined,
-        runtimeOverrides: formData.runtimeOverrides,
-        env: codexSubmitEnv,
-      })
-    );
-  }, [codexAuthenticationMode, codexSubmitEnv, formData, isCodexBuiltin, mode, parsedCustomAcp]);
   const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
   const backgroundBuiltinSetup =
     supportsProviderSetup &&
-    ((isCodexBuiltin && codexCredentialProvisioningRequired) ||
-      (requiresBuiltinCreationVerification && (usesDefaultManagedRuntime || isBubBuiltin)));
+    requiresBuiltinCreationVerification &&
+    (usesDefaultManagedRuntime || isBubBuiltin);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
-  const buildSubmitPayload = useCallback(
-    (setupRevision?: string): AgentConfigSubmitPayload => {
-      let env = { ...formData.env };
-      if (activePreset) {
-        env = buildPresetEnv(activePreset, activeCredentialMode, formData);
-      } else if (isDeepSeekBuiltinForm(formData)) {
-        env = buildDeepSeekSubmitEnv(formData);
-      } else if (isCodexBuiltinForm(formData)) {
-        env = codexSubmitEnv ?? buildCodexSubmitEnv(formData);
-      }
-      const agentType = formData.agentType as AgentType;
-      const titleGeneration = acpProvidesSessionTitle
-        ? undefined
-        : isPreset
-          ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
-          : formData.titleGeneration;
-      return {
-        id: agentConfigId,
-        name: formData.name.trim(),
-        cliType: formData.cliType,
-        agentType,
-        customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
-        runtimeOverrides: formData.runtimeOverrides,
-        prompt: formData.prompt,
-        env,
-        titleGeneration,
-        description: undefined,
-        brandId: resolvedBrandId,
-        ...(backgroundBuiltinSetup ? { backgroundSetup: true } : {}),
-        ...(isCodexBuiltinForm(formData) && codexCredentialProvisioningRequired
-          ? {
-              codexApiKey: formData.codexApiKey?.trim(),
-              setupRevision,
-            }
-          : {}),
-      };
-    },
-    [
-      activeCredentialMode,
-      activePreset,
-      acpProvidesSessionTitle,
-      agentConfigId,
-      backgroundBuiltinSetup,
-      codexCredentialProvisioningRequired,
-      codexSubmitEnv,
-      formData,
-      isCustom,
-      isPreset,
-      parsedCustomAcp,
-      resolvedBrandId,
-    ]
-  );
+  const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
+    let env = { ...formData.env };
+    if (activePreset) {
+      env = buildPresetEnv(activePreset, activeCredentialMode, formData);
+    } else if (isDeepSeekBuiltinForm(formData)) {
+      env = buildDeepSeekSubmitEnv(formData);
+    } else if (isCodexBuiltinForm(formData)) {
+      env = buildCodexSubmitEnv(formData);
+    }
+    const agentType = formData.agentType as AgentType;
+    const titleGeneration = acpProvidesSessionTitle
+      ? undefined
+      : isPreset
+        ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
+        : formData.titleGeneration;
+    return {
+      id: agentConfigId,
+      name: formData.name.trim(),
+      cliType: formData.cliType,
+      agentType,
+      customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
+      runtimeOverrides: formData.runtimeOverrides,
+      prompt: formData.prompt,
+      env,
+      titleGeneration,
+      description: undefined,
+      brandId: resolvedBrandId,
+      ...(backgroundBuiltinSetup ? { backgroundSetup: true } : {}),
+    };
+  }, [
+    activeCredentialMode,
+    activePreset,
+    acpProvidesSessionTitle,
+    agentConfigId,
+    backgroundBuiltinSetup,
+    formData,
+    isCustom,
+    isPreset,
+    parsedCustomAcp,
+    resolvedBrandId,
+  ]);
   const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
-    const payload = buildSubmitPayload(
-      codexCredentialProvisioningRequired ? crypto.randomUUID() : undefined
-    );
+    const payload = buildSubmitPayload();
     const payloadKey = JSON.stringify(payload);
     if (lastPersistedPayloadKeyRef.current === payloadKey) return;
     await onSubmit(payload);
     lastPersistedPayloadKeyRef.current = payloadKey;
-  }, [buildSubmitPayload, codexCredentialProvisioningRequired, onSubmit]);
+  }, [buildSubmitPayload, onSubmit]);
 
   useEffect(() => {
     if (
@@ -1649,11 +1589,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const additionalEnv = isDeepSeekBuiltin
     ? omitDeepSeekProtectedEnv(formData.env)
     : managesCodexEnvironment
-      ? omitCodexManagedEnv(formData.env, [
-          CODEX_API_KEY_ENV,
-          CODEX_CONFIG_ENV,
-          LODY_CODEX_PROVIDER_STATE_ENV,
-        ])
+      ? omitCodexManagedEnv(formData.env)
       : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
@@ -1883,24 +1819,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       }
     }
     if (isCodexBuiltin && codexAuthenticationMode === 'api-key') {
-      if (
-        codexCredentialProvisioningRequired &&
-        (!machineSupportsProviderSetupProtocol(machine) ||
-          !machineSupportsCodexCustomEndpointCredentials(machine))
-      ) {
-        return t(
-          'agents.disableReason.codexCredentialProtocol',
-          'Update Lody on this machine to configure a Codex API key securely'
-        );
-      }
-      if (codexCredentialProvisioningRequired && !(formData.codexApiKey ?? '').trim()) {
+      if (!(formData.codexApiKey ?? '').trim()) {
         return t('agents.disableReason.missingCodexApiKey', 'Please enter your Codex API Key');
       }
       const baseUrl = (formData.codexBaseUrl ?? '').trim();
       if (!baseUrl) {
         return t('agents.disableReason.missingCodexBaseUrl', 'Please enter a Base URL');
       }
-      if (!isAllowedCredentialEndpoint(baseUrl)) {
+      if (!isAllowedCodexEndpoint(baseUrl)) {
         return t(
           'agents.disableReason.invalidCodexBaseUrl',
           'Use HTTPS, or HTTP only for a loopback endpoint'
@@ -2047,7 +1973,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         {isNarrowLayout && (
           <button
             type="button"
-            onClick={() => requestOpenChange(false)}
+            onClick={() => onOpenChange(false)}
             aria-label={t('common.close', 'Close')}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -2159,7 +2085,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {isNarrowLayout && (
             <button
               type="button"
-              onClick={() => (canGoBack ? setMobileView('picker') : requestOpenChange(false))}
+              onClick={() => (canGoBack ? setMobileView('picker') : onOpenChange(false))}
               aria-label={
                 canGoBack
                   ? t('settings.agent.dialog.back', 'Back to type list')
@@ -2617,7 +2543,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               <p className="mb-2 text-xs text-muted-foreground">
                 {t(
                   'settings.agent.dialog.codex.envHint',
-                  'The generated CODEX_CONFIG and machine-local credential slot are managed above.'
+                  'CODEX_CONFIG and the API key are set above and cannot be overridden here.'
                 )}
               </p>
             ) : null}
@@ -2629,13 +2555,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   return;
                 }
                 if (managesCodexEnvironment) {
-                  const managedKeys = [
-                    CODEX_API_KEY_ENV,
+                  const next = omitCodexManagedEnv(env);
+                  for (const key of [
                     CODEX_CONFIG_ENV,
+                    LODY_CODEX_API_KEY_ENV,
                     LODY_CODEX_PROVIDER_STATE_ENV,
-                  ];
-                  const next = omitCodexManagedEnv(env, managedKeys);
-                  for (const key of managedKeys) {
+                  ]) {
                     if (formData.env[key]) next[key] = formData.env[key];
                   }
                   updateEnvironment(next);
@@ -2666,7 +2591,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            onClick={() => requestOpenChange(false)}
+            onClick={() => onOpenChange(false)}
             disabled={submitting}
             size="sm"
           >
@@ -2697,7 +2622,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={requestOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName={
           nestedInDialog
@@ -3145,7 +3070,7 @@ function CodexAuthenticationPanel({
           <p className="text-xs leading-relaxed text-muted-foreground">
             {t(
               'settings.agent.dialog.codex.chatgptHelp',
-              'Use Codex with your ChatGPT account. Lody will ask you to sign in when verification needs it.'
+              'Use the ChatGPT account already signed in on this machine.'
             )}
           </p>
         </TabsContent>
@@ -3177,7 +3102,7 @@ function CodexAuthenticationPanel({
             label={t('settings.agent.dialog.codex.apiKeyLabel', 'API Key')}
             hint={t(
               'settings.agent.dialog.codex.apiKeyHelp',
-              'Sent securely to this machine, stored locally, and injected only when Codex starts.'
+              'Stored and synchronized with this provider configuration.'
             )}
             icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
           >

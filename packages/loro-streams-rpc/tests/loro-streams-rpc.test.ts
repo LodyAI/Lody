@@ -1460,9 +1460,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-1',
       action: 'start',
       configId,
-      purpose: 'provision-provider-credential',
-      setupRevision: 'revision-1',
-      expectedBindingDigest: 'a'.repeat(64),
       onProgress,
       timeoutMs: 5000,
     });
@@ -1477,19 +1474,9 @@ describe('LoroStreamsMachineRpcClient', () => {
         requestId: 'auth-1',
         action: 'start',
         configId,
-        purpose: 'provision-provider-credential',
-        setupRevision: 'revision-1',
-        expectedBindingDigest: 'a'.repeat(64),
       })
     );
-    expect(request.params).toEqual({
-      requestId: 'auth-1',
-      action: 'start',
-      configId,
-      purpose: 'provision-provider-credential',
-      setupRevision: 'revision-1',
-      expectedBindingDigest: 'a'.repeat(64),
-    });
+    expect(request.params).toEqual({ requestId: 'auth-1', action: 'start', configId });
 
     fake.pushBatch({
       messages: [

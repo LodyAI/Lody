@@ -16,18 +16,11 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   and the panel clips its overflow, so a `md:`-width label column silently hides the
   control.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
-  Codex offers ChatGPT sign-in or a Base URL + API Key path. The latter persists only
-  generated `CODEX_CONFIG` metadata with `requires_openai_auth=false`; send the key
-  through encrypted Machine ACP authentication input for machine-local storage and
-  launch-time injection. Credential-changing edits stage a revision in provider setup;
-  never update published launch/binding fields before the target daemon verifies that
-  revision, and merge current display metadata when publishing. Delete and ChatGPT
-  transitions write a revision-independent setup cancellation as the durable cleanup
-  intent, then delete with the captured config even after optimistic projection hides it;
-  neither waits for the machine. Additional env cannot override managed keys, including
-  differently cased aliases of the machine-local credential key. A provider Dialog cannot
-  be dismissed while its submit owns provisioning. Arbitrary user-authored `CODEX_CONFIG`
-  remains untouched.
+  Codex offers ChatGPT or Base URL + API Key as two configurations of the same builtin
+  runtime. Store the generated `CODEX_CONFIG` and API key in `AgentConfig.env`, matching
+  other API-key Providers; the API-key path must not offer or run ChatGPT login. Additional
+  env cannot override fields owned by the Codex form. This supports choosing a config for a
+  new Session, not switching an existing Session between authentication modes.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
   `https://api.deepseek.com`) and never a new AgentConfigMeta field. Model ids come from

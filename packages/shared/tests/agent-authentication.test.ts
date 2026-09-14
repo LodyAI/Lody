@@ -30,21 +30,18 @@ describe('hasBuiltinEnvAuthentication', () => {
   });
 
   it('does not infer authentication from arbitrary provider env keys', () => {
-    // Codex custom model providers may set `requires_openai_auth = false`, so the
-    // agent — not an env heuristic — decides whether sign-in is required.
     expect(hasBuiltinEnvAuthentication('codex', { OPENAI_API_KEY: 'sk-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('kimi', { MOONSHOT_API_KEY: 'sk-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('grok', { XAI_API_KEY: 'xai-test' })).toBe(false);
     expect(hasBuiltinEnvAuthentication('auggie', { ANTHROPIC_API_KEY: 'sk-test' })).toBe(false);
   });
 
-  it('recognizes the Codex custom provider owned by the credential form', () => {
+  it('recognizes the complete Codex API-key provider config', () => {
     const env = buildLodyCodexCustomProviderEnv(
       {},
-      {
-        baseUrl: 'https://relay.example.com/v1',
-      }
+      { baseUrl: 'https://relay.example.com/v1', apiKey: 'sk-test' }
     );
+
     expect(hasBuiltinEnvAuthentication('codex', env)).toBe(true);
   });
 });
@@ -103,6 +100,19 @@ describe('supportsBuiltinAuthentication', () => {
           ANTHROPIC_BASE_URL: 'http://localhost:11434',
           ANTHROPIC_AUTH_TOKEN: 'ollama',
         },
+      })
+    ).toBe(false);
+  });
+
+  it('refuses sign-in for the generated Codex API-key provider', () => {
+    expect(
+      supportsBuiltinAuthentication({
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: buildLodyCodexCustomProviderEnv(
+          {},
+          { baseUrl: 'https://relay.example.com/v1', apiKey: 'sk-test' }
+        ),
       })
     ).toBe(false);
   });

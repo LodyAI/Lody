@@ -40,12 +40,10 @@ describe('AcpAuthenticationAuthorizationView', () => {
     expect(isAllowedAcpAuthorizationUrl('not a url')).toBe(false);
   });
 
-  it('keeps staged credential provisioning scoped to its exact setup revision', () => {
+  it('identifies an authentication target only by machine and persisted config', () => {
     const target = {
       machineId: 'machine-1' as MachineId,
       configId: 'config-1' as AgentConfigId,
-      purpose: 'provision-provider-credential' as const,
-      setupRevision: 'revision-1',
     };
 
     expect(
@@ -63,18 +61,6 @@ describe('AcpAuthenticationAuthorizationView', () => {
       areAcpAuthenticationTargetsEqual(target, {
         ...target,
         machineId: 'machine-2' as MachineId,
-      })
-    ).toBe(false);
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        ...target,
-        setupRevision: 'revision-2',
-      })
-    ).toBe(false);
-    expect(
-      areAcpAuthenticationTargetsEqual(target, {
-        machineId: target.machineId,
-        configId: target.configId,
       })
     ).toBe(false);
   });
