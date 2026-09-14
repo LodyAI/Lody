@@ -28,6 +28,13 @@ export interface UseStickyScrollOptions {
   vlistRef: RefObject<VirtualizerHandle | null>;
   /** Total number of items in the list. Used as the scroll-to target index. */
   itemCount: number;
+  /**
+   * Whether the caller is about to mount the virtualizer. `itemCount` alone
+   * cannot say: a non-null leading fragment counts as a row, so a session that
+   * is still acquiring its document reports one item while rendering an empty
+   * state and no `Virtualizer` at all.
+   */
+  hasVirtualizedRows?: boolean;
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   /**
@@ -132,6 +139,7 @@ export function useStickyScroll({
   sessionId,
   vlistRef,
   itemCount,
+  hasVirtualizedRows = true,
   initialContentReady = true,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
@@ -142,13 +150,18 @@ export function useStickyScroll({
    * Virtua's measurements from the last time this session was open. Without
    * them the first layout uses estimated row heights, so the restore offset
    * lands in the wrong coordinate space and the conversation stays hidden
-   * across the correction — the blank flash on open. Captured on the first
-   * render that has rows, because `Virtualizer` reads `cache` only at mount.
+   * across the correction — the blank flash on open.
+   *
+   * Taken on the first render that actually mounts the virtualizer, because
+   * `Virtualizer` reads `cache` only at mount and the snapshot is keyed by row
+   * count. Reading it during the empty state a session renders while its
+   * document is acquired would answer for a one-row list and then never ask
+   * again for the real conversation.
    */
   const initialVirtualizerCacheRef = useRef<{ taken: boolean; value?: CacheSnapshot }>({
     taken: false,
   });
-  if (!initialVirtualizerCacheRef.current.taken && itemCount > 0) {
+  if (!initialVirtualizerCacheRef.current.taken && hasVirtualizedRows && itemCount > 0) {
     initialVirtualizerCacheRef.current = {
       taken: true,
       value: getVirtualizerCache(sessionId, itemCount),

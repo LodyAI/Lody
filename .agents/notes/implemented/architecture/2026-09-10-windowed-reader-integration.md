@@ -70,7 +70,18 @@ virtualizer ref before cleanup effects run. A session opened for the first time
 is unaffected, and the remaining blank is the one commit Virtua needs before it
 knows its viewport size.
 
+The snapshot is consumed on the first render that actually mounts the
+virtualizer, not the first render with a positive item count. A session whose
+document is still being acquired renders the empty sentinel and returns before
+`Virtualizer` mounts, yet every hook above that return has already run, and the
+always non-null leading fragment counts as one row. Keying the read on the item
+count alone therefore answered for a one-row list and never asked again for the
+real conversation, leaving the flash in place on the shipped path while the
+synthetic story — which passed no leading content — still improved.
+
 Measured on the production Storybook build over two warm 3,000-turn
-conversations: 54 ms blank before, 33 ms after; the first, uncached open is
+conversations, with the story rendering the empty state and a non-null leading
+fragment as the session page does: 54 ms blank before, 57 ms with the snapshot
+read ungated, 17-35 ms once it waits for real rows. The first, uncached open is
 unchanged. `e2e/scripts/capture-conversation-open-flicker.mjs` samples the pane
 every animation frame and is how those numbers are taken.

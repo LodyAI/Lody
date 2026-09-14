@@ -48,7 +48,14 @@ Virtua 的行测量现在与阅读位置一起按会话缓存，经 `Virtualizer
 停止时写入，不在卸载时写入——React 会在清理副作用运行前解绑虚拟器 ref。
 首次打开的会话行为不变，剩余空白是 Virtua 得知视口尺寸前必需的那一次提交。
 
-在生产 Storybook 构建上、两个预热的 3,000 轮会话之间切换实测：修复前空白
-54 毫秒，修复后 33 毫秒；首次未命中缓存的打开不变。
-`e2e/scripts/capture-conversation-open-flicker.mjs` 逐帧采样面板，上述数字
-由它测得。
+快照在真正挂载虚拟器的那次渲染才消费，而不是首个 itemCount 为正的渲染。
+文档仍在获取中的会话会渲染空态并在 `Virtualizer` 挂载前返回，但该 return
+之上的所有 hook 都已执行，而恒非 null 的 leading fragment 本身算一行。
+只按 itemCount 判断会为一个单行列表作答，此后不再为真实会话请求快照，
+正式路径上的闪烁依旧存在——而未传 leading content 的合成 story 反而有改善。
+
+在生产 Storybook 构建上、两个预热的 3,000 轮会话之间切换实测（story 按会话
+页的形态渲染空态并传入非 null 的 leading fragment）：修复前空白 54 毫秒，
+快照读取未加门控时 57 毫秒，等待真实行之后 17–35 毫秒；首次未命中缓存的
+打开不变。`e2e/scripts/capture-conversation-open-flicker.mjs` 逐帧采样面板，
+上述数字由它测得。

@@ -1423,6 +1423,12 @@ export const SessionChatStreamView = forwardRef<
       return undefined;
     }, [scrollRowToTop, virtualRows]);
 
+    // Whether this render reaches the virtualized branch below. A session whose
+    // document is still being acquired renders the empty sentinel and returns
+    // before `Virtualizer` mounts, yet every hook above that return has already
+    // run — including the one that reads the stored row measurements.
+    const hasVirtualizedRows = virtualRows.length > 0;
+
     const {
       scrollRef: scrollContainerRef,
       scrollElement: scrollViewportElement,
@@ -1436,6 +1442,7 @@ export const SessionChatStreamView = forwardRef<
       sessionId,
       initialContentReady: initialWindowReady,
       vlistRef,
+      hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),

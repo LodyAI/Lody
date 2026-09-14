@@ -222,11 +222,17 @@ function OpenFlickerStory({ rounds }: { rounds: number }) {
   );
 }
 
+/**
+ * `view` is nullable on purpose: the session page mounts this surface while
+ * `useSessionDoc` is still acquiring the document, so the first render of a
+ * newly opened session has no turns and takes the empty-state branch. Anything
+ * that reads per-session state at mount has to survive that render.
+ */
 function OpenedStream({
   view,
   streamSessionId = sessionId,
 }: {
-  view: ConversationView;
+  view: ConversationView | null;
   streamSessionId?: SessionId;
 }) {
   const {
@@ -243,6 +249,10 @@ function OpenedStream({
       items={items}
       sessionId={streamSessionId}
       className="h-full"
+      // The session page always supplies a non-null fragment here, even when it
+      // renders no DOM, so it counts as a Virtua row. Anything deriving "is
+      // there anything to virtualize" from the item count must survive that.
+      leadingContent={<></>}
       renderMessageRow={renderMessageRow}
       showScrollToLatest={false}
       lastAssistantMessageId={lastAssistantMessageId}
@@ -273,11 +283,18 @@ export const OpenShortConversation: Story = {
 function SwitchFlickerStory({ rounds }: { rounds: number }) {
   const [views, setViews] = useState<readonly ConversationView[] | null>(null);
   const [current, setCurrent] = useState(0);
+  // The incoming session's document is not there on the first render, exactly
+  // as the session page sees it. Clearing this a commit later reproduces the
+  // empty-state render every real session switch goes through.
+  const [documentPending, setDocumentPending] = useState(false);
   useEffect(() => {
     const built = SWITCH_SESSION_IDS.map((id) => openWindowedView(rounds, id));
     setViews(built);
     return () => built.forEach((view) => view.dispose());
   }, [rounds]);
+  useEffect(() => {
+    if (documentPending) setDocumentPending(false);
+  }, [documentPending]);
   return (
     <div className="flex h-screen flex-col bg-background">
       <div className="flex shrink-0 items-center gap-2 p-2">
@@ -288,7 +305,10 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
             data-testid={`select-conversation-${index}`}
             disabled={!views}
             className="rounded border px-3 py-1 text-sm"
-            onClick={() => setCurrent(index)}
+            onClick={() => {
+              setDocumentPending(true);
+              setCurrent(index);
+            }}
           >
             Conversation {index + 1}
           </button>
@@ -299,7 +319,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
         {views && (
           <OpenedStream
             key={current}
-            view={views[current]!}
+            view={documentPending ? null : views[current]!}
             streamSessionId={SWITCH_SESSION_IDS[current]!}
           />
         )}

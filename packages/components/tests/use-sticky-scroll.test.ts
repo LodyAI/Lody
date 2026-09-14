@@ -76,6 +76,7 @@ type HarnessProps = {
   vlist: MockVirtualizerHandle | null;
   scrollElement: HTMLDivElement | null;
   itemCount: number;
+  hasVirtualizedRows?: boolean;
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
@@ -237,6 +238,7 @@ function HookHarness({
   vlist,
   scrollElement,
   itemCount,
+  hasVirtualizedRows,
   initialContentReady,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
@@ -248,6 +250,7 @@ function HookHarness({
     sessionId,
     vlistRef,
     itemCount,
+    hasVirtualizedRows,
     initialContentReady,
     onAtBottomChange,
     skipNextViewportResizeAutoScrollRef,
@@ -839,6 +842,37 @@ describe('useStickyScroll Virtua adapter', () => {
         scrollElement: second.scrollElement,
         itemCount: 4,
       });
+      expect(latestResult?.initialVirtualizerCache).toBe(measured);
+    });
+
+    it('waits for the real rows when the session opens on its empty state', async () => {
+      const sessionId = 'session-measurements-late-rows' as SessionId;
+      const measured = measurementsOf('settled');
+      const first = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(first.scrollElement, measured),
+        scrollElement: first.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+
+      await closeHarness();
+
+      // A session whose document is still being acquired renders the empty
+      // sentinel: no virtualized rows, but the non-null leading fragment still
+      // counts as one item. Answering then would answer for a one-row list.
+      const second = createScrollFixture();
+      const props = {
+        sessionId,
+        vlist: createMockVirtualizerHandle(second.scrollElement, measurementsOf('cold')),
+        scrollElement: second.scrollElement,
+      };
+      await renderHarness({ ...props, itemCount: 1, hasVirtualizedRows: false });
+      expect(latestResult?.initialVirtualizerCache).toBeUndefined();
+
+      // The conversation arrives and the virtualizer is about to mount.
+      await renderHarness({ ...props, itemCount: 4, hasVirtualizedRows: true });
       expect(latestResult?.initialVirtualizerCache).toBe(measured);
     });
 
