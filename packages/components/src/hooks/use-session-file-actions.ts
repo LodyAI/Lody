@@ -16,7 +16,10 @@ import { downloadBytesAsFile, getDownloadFileName } from '@/lib/download-file';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import type { FileWorkspaceOpenResult } from '@/lib/file-workspace-provider';
+import type {
+  FileWorkspaceBinarySnapshot,
+  FileWorkspaceOpenResult,
+} from '@/lib/file-workspace-provider';
 import {
   normalizeSessionFileActionPlatform,
   resolveOpenFileLabel,
@@ -68,7 +71,10 @@ export type SessionFileActions = {
   /** The remote stand-in for the local-host actions. */
   readonly download: ((filePath: string) => void) | null;
   /** The subset the file-error card renders, or undefined with nothing to offer. */
-  readonly buildErrorActions: (filePath: string) => SessionFileErrorActions | undefined;
+  readonly buildErrorActions: (
+    filePath: string,
+    snapshot?: FileWorkspaceBinarySnapshot
+  ) => SessionFileErrorActions | undefined;
   /**
    * The same actions as a menu, for the file tree's context menu and the side
    * panel's ⋯ menu. Stable across renders so a memoized tree row can take it.
@@ -378,9 +384,11 @@ export function useSessionFileActions({
     };
 
     return (filePath: string) => {
-      if (exportingRef.current) return;
-      exportingRef.current = true;
-      setSharing(true);
+      if (nativeShell) {
+        if (exportingRef.current) return;
+        exportingRef.current = true;
+        setSharing(true);
+      }
       void (async () => {
         try {
           const exportBytes = async (bytes: Uint8Array) => {
@@ -411,22 +419,29 @@ export function useSessionFileActions({
               : t('sessions.fileActions.downloadFailed', 'Could not download that file.')
           );
         } finally {
-          exportingRef.current = false;
-          setSharing(false);
+          if (nativeShell) {
+            exportingRef.current = false;
+            setSharing(false);
+          }
         }
       })();
     };
   }, [availability.download, fileProvider, nativeShell, session, t]);
 
   const buildErrorActions = useCallback(
-    (filePath: string): SessionFileErrorActions | undefined => {
+    (
+      filePath: string,
+      snapshot?: FileWorkspaceBinarySnapshot
+    ): SessionFileErrorActions | undefined => {
       const trimmed = filePath.trim();
       if (!session || !trimmed) return undefined;
       const onCopyPath = () => copyPath(trimmed);
       if (!localHost || !resolveHostPath(trimmed))
         return {
           onCopyPath,
-          ...(nativeShell && download ? { onShare: () => download(trimmed), sharing } : {}),
+          ...(nativeShell && download && snapshot?.bytes
+            ? { onShare: () => download(trimmed), sharing }
+            : {}),
         };
       return {
         onCopyPath,

@@ -44,3 +44,12 @@ component tests). Use Buffer.equals for exact length-and-byte comparison instead
 the fixture, chunk boundary, and timeout stay unchanged. Locally the native suite
 dropped from 4,482 ms to 163 ms; all 36 related tests passed with two workers, as did
 targeted formatting and lint. These timings are observations, not test assertions.
+
+Review follow-up: the notice action builder now requires a binary snapshot with
+bytes before exposing native sharing. Error cards call it without a snapshot and
+retain copy/local-host actions; empty binary snapshots remain shareable. The
+export guard and pending state now apply only to native shells so overlapping
+browser downloads are independent. All 32 related tests passed, including explicit
+deferred-read coverage for concurrent browser downloads and native lock release,
+plus notice availability for missing and empty bytes. Targeted lint passed; the
+existing local dependency/submodule limitations still apply to full checks.

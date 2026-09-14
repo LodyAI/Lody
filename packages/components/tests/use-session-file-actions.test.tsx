@@ -115,6 +115,7 @@ describe('remote file download action', () => {
   });
 
   afterEach(async () => {
+    nativeShell = false;
     if (root) {
       await act(async () => {
         root?.unmount();
@@ -140,6 +141,82 @@ describe('remote file download action', () => {
       download?.('docs/huge.log');
     });
   };
+
+  it('offers native notice sharing only with complete binary bytes, including empty files', async () => {
+    nativeShell = true;
+    let actions!: SessionFileActions;
+    function Probe() {
+      actions = useSessionFileActions({
+        session,
+        fileProvider: {
+          openFile: async () => ({ status: 'unavailable', reason: 'blob-too-large' }),
+        },
+      });
+      return null;
+    }
+    await act(async () => {
+      root?.render(createElement(Provider, null, createElement(Probe)));
+    });
+    expect(actions.buildErrorActions('large.deb')?.onShare).toBeUndefined();
+    expect(actions.buildErrorActions('metadata.deb', { kind: 'binary' })?.onShare).toBeUndefined();
+    expect(
+      actions.buildErrorActions('empty.deb', { kind: 'binary', bytes: new Uint8Array(0) })?.onShare
+    ).toBeTypeOf('function');
+    expect(
+      actions.buildErrorActions('package.deb', { kind: 'binary', bytes: Uint8Array.of(1) })?.onShare
+    ).toBeTypeOf('function');
+    expect(actions.buildErrorActions('large.deb')?.onCopyPath).toBeTypeOf('function');
+  });
+
+  it.each([false, true])(
+    'preserves browser concurrency and only locks native exports (native=%s)',
+    async (native) => {
+      nativeShell = native;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let actions!: SessionFileActions;
+      const fileProvider = {
+        openFile: async (path: string): Promise<FileWorkspaceOpenResult> => {
+          await ready;
+          return {
+            status: 'ready',
+            entry: { entryType: 'file', path },
+            snapshot: { kind: 'binary', bytes: Uint8Array.of(path === 'a.deb' ? 1 : 2) },
+          } as FileWorkspaceOpenResult;
+        },
+      };
+      function Probe() {
+        actions = useSessionFileActions({ session, fileProvider });
+        return null;
+      }
+      await act(async () => {
+        root?.render(createElement(Provider, null, createElement(Probe)));
+      });
+      await act(async () => {
+        actions.download?.('a.deb');
+        actions.download?.('b.deb');
+      });
+      await act(async () => {
+        release();
+      });
+      if (native) {
+        expect(sharedBytes).toEqual(Uint8Array.of(1));
+        expect(downloadBytesAsFile.mock.calls).toEqual([]);
+        await act(async () => {
+          actions.download?.('b.deb');
+        });
+        expect(sharedBytes).toEqual(Uint8Array.of(2));
+      } else {
+        expect(downloadBytesAsFile.mock.calls).toEqual([
+          ['a.deb', Uint8Array.of(1)],
+          ['b.deb', Uint8Array.of(2)],
+        ]);
+        expect(sharedBytes).toBeUndefined();
+      }
+    }
+  );
 
   it('downloads the bytes of a file the preview API can return', async () => {
     await runDownload({
