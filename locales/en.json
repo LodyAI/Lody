@@ -4173,5 +4173,9 @@
   "sessions.pendingSendClose": "Close and keep messages",
   "sessions.attachmentDraft": "Waiting to upload",
   "sessions.attachmentPrepared": "Ready",
+  "sessions.attachmentUploading": "Uploading · {{progress}}%",
+  "sessions.pendingMessageUploading": "Waiting to send · Uploading attachments",
+  "sessions.pendingMessageWaiting": "Waiting to send",
+  "sessions.pendingMessageUploadFailed": "Not sent · Attachment upload failed",
   "sessions.attachmentPreparingNotSent": "Preparing attachments · not sent yet"
 }
