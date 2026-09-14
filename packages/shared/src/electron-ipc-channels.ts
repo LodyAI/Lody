@@ -26,6 +26,7 @@ export type IpcPushMap = {
   'updater.state': ElectronUpdaterState;
   'publicBrowser.state': ElectronPublicBrowserState;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
+  'app.sendLifecycle': { requestId: string; phase: 'check' | 'commit'; reason: 'quit' | 'reload' | 'close' };
   'app.deepLink': string;
   'app.menuAction': string;
   'app.fullscreen': boolean;
@@ -54,6 +55,7 @@ export const IPC_PUSH_CHANNELS = {
   updaterState: 'updater.state',
   publicBrowserState: 'publicBrowser.state',
   sessionControlResponse: 'sessionControl.response',
+  appSendLifecycle: 'app.sendLifecycle',
   appDeepLink: 'app.deepLink',
   appMenuAction: 'app.menuAction',
   appFullscreen: 'app.fullscreen',

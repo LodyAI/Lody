@@ -1,3 +1,8 @@
+import {
+  registerRendererSendLifecycle,
+  resolveRendererSendLifecycle,
+  prepareRendererSendsForExit
+} from '../../services/renderer-send-lifecycle'
 import { assertProductWindowSender } from '../assert-sender'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
@@ -97,6 +102,21 @@ export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
+  async registerSendLifecycle() {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) registerRendererSendLifecycle(window)
+  }
+
+  @IpcMethod()
+  async replySendLifecycle(input: unknown) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    resolveRendererSendLifecycle(event.sender.id, input)
+  }
+
+  @IpcMethod()
   async openWindow(raw: WindowTarget) {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
@@ -108,7 +128,11 @@ export class AppIpc extends IpcService {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
     for (const window of productWindows) {
-      if (window.webContents !== event.sender) window.destroy()
+      if (window.webContents !== event.sender) {
+        if (!(await prepareRendererSendsForExit('close', window)))
+          throw new Error('Cache clearing was cancelled')
+        window.destroy()
+      }
     }
   }
 

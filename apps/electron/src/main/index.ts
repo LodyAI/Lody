@@ -1,3 +1,4 @@
+import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import {
   registerLocalFileResourceScheme,
   installLocalFileResourceProtocol
@@ -305,34 +306,35 @@ if (hasSingleInstanceLock) {
     })
 
     let cliShutdownComplete = false
+    let preparingQuit = false
     app.on('before-quit', (event) => {
-      setAppQuitting(true)
-      setWindowsTrayAvailable(false)
-      windowsTrayService.stop()
-      windowBadgeService.reset()
-      terminalRelay.destroy()
-      loroDataPlaneRelay.destroy()
-      appUpdaterService.stop()
-      publicBrowserService.destroyAll()
-
       if (cliShutdownComplete) {
-        // Cleanup already ran on the first pass; let this quit proceed.
         cliService.killAllProcesses()
         return
       }
-
-      // Defer the quit until the embedded CLI has actually exited. Killing it
-      // fire-and-forget would let the app exit while the CLI is still shutting
-      // down, orphaning it holding the local ports + terminal socket and breaking
-      // the next launch. shutdownForQuit() SIGTERMs, waits briefly, then SIGKILLs.
       event.preventDefault()
-      void Promise.allSettled([
-        cliService.shutdownForQuit(),
-        flushElectronMainErrorReporting()
-      ]).finally(() => {
+      if (preparingQuit) return
+      preparingQuit = true
+      void (async () => {
+        if (!(await prepareRendererSendsForExit('quit'))) return
+        setAppQuitting(true)
+        setWindowsTrayAvailable(false)
+        windowsTrayService.stop()
+        windowBadgeService.reset()
+        terminalRelay.destroy()
+        loroDataPlaneRelay.destroy()
+        appUpdaterService.stop()
+        publicBrowserService.destroyAll()
+        await Promise.allSettled([cliService.shutdownForQuit(), flushElectronMainErrorReporting()])
         cliShutdownComplete = true
         app.quit()
-      })
+      })()
+        .catch((error: unknown) => {
+          console.error('[Electron] Could not finish renderer shutdown', error)
+        })
+        .finally(() => {
+          preparingQuit = false
+        })
     })
 
     process.on('exit', () => {

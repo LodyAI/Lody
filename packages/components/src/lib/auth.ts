@@ -1,3 +1,4 @@
+import { requestSessionSendExit } from './session-send-exit';
 import { createAuthClient } from 'better-auth/react';
 import { organizationClient } from 'better-auth/client/plugins';
 import { convexClient, crossDomainClient } from '@convex-dev/better-auth/client/plugins';
@@ -63,7 +64,8 @@ export const persistAuthToken = (token: string) => {
   writeStoredAuthToken(token);
 };
 
-export const signOutWithoutRedirect = async (authClient: LodyAuthClient) => {
+export const signOutWithoutRedirect = async (authClient: LodyAuthClient, options?: { sessionExpired?: boolean }) => {
+  if (!options?.sessionExpired && !(await requestSessionSendExit('logout'))) return false;
   // Fence token requests at logout intent, before Better Auth's async sign-out
   // updates useSession(). Otherwise a token request that completes in that
   // network window can still authenticate Convex as the previous user.
@@ -75,9 +77,10 @@ export const signOutWithoutRedirect = async (authClient: LodyAuthClient) => {
   } catch (error) {
     console.error('Sign out error:', error);
   }
+  return true;
 };
 
 export const signOutWithAuthClient = async (authClient: LodyAuthClient) => {
-  await signOutWithoutRedirect(authClient);
+  if (!(await signOutWithoutRedirect(authClient))) return;
   replaceAppWindowLocation(`${import.meta.env.BASE_URL}login`);
 };

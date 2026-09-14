@@ -4140,5 +4140,22 @@
   "promptShortcut.loadFailed": "无法加载快捷方式，请重新选择以重试。",
   "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
   "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。",
-  "sessions.attachmentTransferInterrupted": "传输已中断，返回后可重试。"
+  "sessions.attachmentTransferInterrupted": "传输已中断，返回后可重试。",
+  "sessions.pendingSends": "待发送消息（{{count}}）",
+  "sessions.sendRecoveryUnavailable": "无法读取待发送消息。已保存的内容仍被保留。",
+  "sessions.attachmentMessage": "带附件的消息",
+  "sessions.sendWaitingForSync": "已写入历史 · 等待同步",
+  "sessions.sendConfirmingResult": "正在确认发送结果",
+  "sessions.sendSavedLocally": "已保存在本机 · 尚未提交",
+  "sessions.retryPendingSend": "继续发送",
+  "sessions.cancelPendingSend": "取消发送",
+  "sessions.pendingSendExitTitle": "还有消息尚未完成发送",
+  "sessions.pendingSendDestructiveExit": "请先完成或取消待发送消息，再退出登录或清理缓存。部分消息可能已经发送，需要保留恢复数据来确认结果。",
+  "sessions.pendingSendRetainedExit": "待发送消息会保留在本机。部分消息可能已经发送。返回此工作区后可以确认结果或继续发送。",
+  "sessions.stayWithPendingSends": "留在此处",
+  "sessions.leaveWithPendingSends": "离开并保留消息",
+  "sessions.pendingSendExitUnavailable": "无法确认待发送消息的状态。请保持 Lody 打开并重试。",
+  "sessions.pendingSendQuit": "退出并保留消息",
+  "sessions.pendingSendReload": "重新加载并保留消息",
+  "sessions.pendingSendClose": "关闭并保留消息"
 }

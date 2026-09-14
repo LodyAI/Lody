@@ -1,3 +1,4 @@
+import { acceptSessionUserTurn } from './session-send-admission';
 import type {
   SessionHistory,
   SessionHistoryInput,
@@ -231,17 +232,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
       console.warn('Failed to pre-create session doc stream', { sessionId, error });
     });
-    await runtime.writer.startSession(
-      sessionId,
-      sessionMeta as unknown as Record<string, unknown>,
-      historyEntry,
-      {
-        userTurnId: historyEntry.id,
-        userId,
-        timestamp,
-        inputConfig: inputConfig as unknown as Record<string, unknown>,
-      }
-    );
+    await acceptSessionUserTurn(runtime, sessionId, historyEntry, { kind: 'dispatch' }, sessionMeta);
     publishSessionMeta(sessionRoomId, sessionMeta);
     recordChat(sessionMeta, sessionId, true, history.items);
     return { sessionId, sessionMeta, historyEntry };
@@ -250,7 +241,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
   const addSessionHistory = async (
     sessionId: SessionId,
     history: Omit<SessionHistoryInput, 'id'>,
-    options?: { dispatch?: boolean }
+    options?: { dispatch?: boolean; guideExpectedTurnId?: string }
   ) => {
     if (!runtime) {
       throw new Error('Runtime not ready');
@@ -288,7 +279,12 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
         inputConfig: inputConfig as unknown as Record<string, unknown>,
       };
     }
-    await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
+    if (entry.role === 'user') {
+      await acceptSessionUserTurn(runtime, sessionId, entry,
+        options?.guideExpectedTurnId ? { kind: 'guide', expectedTurnId: options.guideExpectedTurnId } : { kind: options?.dispatch ? 'dispatch' : 'queue' });
+    } else {
+      await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
+    }
     // session/chat fires once for every user message dispatched through Lody —
     // the session-creating turn AND every follow-up — so it tracks active-use
     // frequency, unlike session/start_success which only covers creation. This
@@ -308,6 +304,13 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
   ) => {
     if (!runtime) {
       throw new Error('Runtime not ready');
+    }
+    const saved = await runtime.sendJournal?.read(userTurnId);
+    if (saved) {
+      const active = await runtime.sendJournal!.activate(userTurnId, { kind: 'dispatch' });
+      await runtime.sendJournal!.submit(sessionId);
+      if (active) await runtime.sendJournal!.deliver(active);
+      return;
     }
     const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
       const read = await sessionStore.sessionData.history.readTurn(userTurnId);
@@ -380,6 +383,19 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    const saved = await runtime.sendJournal?.read(userTurnId);
+    if (saved) {
+      const active = await runtime.sendJournal!.activate(userTurnId, { kind: 'guide', expectedTurnId });
+      await runtime.sendJournal!.submit(sessionId);
+      if (active) await runtime.sendJournal!.deliver(active);
+      const completed = await runtime.sendJournal!.read(userTurnId);
+      if (completed?.guideOffer === 'applied') {
+        onRpcDelivered(sessionId, userTurnId);
+        return true;
+      }
+      if (completed?.guideOffer === 'not-applied') return false;
+      throw new Error('Guide outcome is uncertain; the original message is retained');
+    }
     const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
       const read = await sessionStore.sessionData.history.readTurn(userTurnId);
       return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
@@ -451,7 +467,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       userTurnId,
       response ? `${response.disposition}${response.error ? `: ${response.error}` : ''}` : 'timeout'
     );
-    return false;
+    throw new Error('Guide outcome is uncertain; the original message is retained');
   };
 
   return {

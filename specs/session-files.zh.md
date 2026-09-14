@@ -145,6 +145,8 @@ guide 冻结所指向的 assistant turn。准备完成前该 turn 已结束且�
 
 固定 ID 本身不能阻止 LoroList 重复 append。实现必须验证同记录多窗口互斥、writer 核对、队列提升及重连行为，不能把“请求发了两次但 ID 一样”当成成功去重。保障目标是一次本机提交不制造重复消息，不宣称提供新的分布式 exactly-once Agent 执行机制。
 
+恢复通过现有 HistoryWriter 在临时 fork 上准备精确的 CRDT 操作。先持久化原始基线，再用严格 IndexedDB 事务保存操作字节，最后导入实时文档并 flush。重放同一操作不会重复 append；回执未知时禁止重新 append。当前 Streams 适配器只监听本地编辑，因此导入操作后必须显式执行 repo 同步。目标 transport 同步成功只代表持久交接，不代表 Agent 已执行。提交和投递分别使用会话级 Web Lock；投递前检查更早的未完成消息。恢复记录按账号和 workspace 隔离，窗口之间只广播失效通知。
+
 区分三层证据：
 
 1. **writer 接受**：本地 CRDT 已变更，不代表数据已写盘，更不代表 Daemon 收到。

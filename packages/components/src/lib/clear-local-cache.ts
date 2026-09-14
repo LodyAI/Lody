@@ -1,3 +1,5 @@
+import { requestSessionSendExit } from './session-send-exit';
+import { hasPendingSessionSends, SESSION_SEND_DATABASE, SESSION_SEND_STORAGE_LOCK } from './session-send-journal-storage';
 /**
  * "Clear cache" support shared by web, mobile (Capacitor), and desktop (Electron).
  *
@@ -44,6 +46,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  SESSION_SEND_DATABASE,
   EAGER_SYNC_HIGH_WATER_DB_NAME,
   EAGER_SYNC_CACHE_DB,
   'lody:repo-file-paths',
@@ -177,7 +180,15 @@ function deleteDatabaseBestEffort(name: string): Promise<void> {
  *   visited workspaces are already covered via the cached workspace-info map.
  */
 export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    return navigator.locks.request(SESSION_SEND_STORAGE_LOCK, () => clearRecoverableCache(extraNames));
+  }
+  return clearRecoverableCache(extraNames);
+}
+
+async function clearRecoverableCache(extraNames: string[]): Promise<void> {
   if (typeof indexedDB !== 'undefined') {
+    if (await hasPendingSessionSends(indexedDB)) throw new Error('Pending messages need their local recovery data. Finish or cancel them before clearing caches.');
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
       ...knownWorkspaceDatabaseNames(),
@@ -186,7 +197,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     try {
       const databases = (await indexedDB.databases?.()) ?? [];
       for (const database of databases) {
-        if (database.name && database.name.startsWith('lody')) {
+        if (database.name && database.name.startsWith('lody') && database.name !== SESSION_SEND_DATABASE) {
           names.add(database.name);
         }
       }
@@ -198,7 +209,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     // explicitly destructive hard reset below may remove these databases.
     await Promise.all(
       [...names]
-        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .filter((name) => name !== SESSION_SEND_DATABASE && !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
         .map(deleteDatabaseBestEffort)
     );
   }
@@ -225,6 +236,17 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
  * signed out and factory-fresh.
  */
 export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<void> {
+  const clear = async () => {
+    if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+      throw new Error('Pending messages must be completed or canceled before resetting local data');
+    }
+    await clearRecoverableLocalData(extraNames);
+  };
+  if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(SESSION_SEND_STORAGE_LOCK, clear);
+  else await clear();
+}
+
+async function clearRecoverableLocalData(extraNames: string[]): Promise<void> {
   clearWebStorage();
   clearCookies();
 
@@ -373,6 +395,10 @@ async function revokeServerSessionBestEffort(): Promise<void> {
  * crashed.
  */
 export async function startHardReset(): Promise<void> {
+  if (!(await requestSessionSendExit('cache-clear'))) return;
+  if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+    throw new Error('Pending messages must be completed or canceled before resetting local data');
+  }
   await revokeServerSessionBestEffort();
   clearWebStorage();
   clearCookies();
@@ -402,9 +428,11 @@ let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   const mode = readPendingLocalClearMode();
   if (!mode) return null;
-  await getIpcServices()?.app.prepareCacheClear();
-
   try {
+    if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+      throw new Error('Pending messages must be completed or canceled before clearing caches');
+    }
+    await getIpcServices()?.app.prepareCacheClear();
     if (mode === 'hard') {
       await clearAllLodyLocalData();
     } else {
@@ -435,6 +463,10 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
+  if (mode === 'cache') {
+    await clearAllLodyLocalCache(extraNames);
+    return;
+  }
   await Promise.all(
     extraNames
       .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
@@ -461,5 +493,5 @@ export function reloadApp(): void {
       return;
     }
   }
-  window.location.reload();
+  void requestSessionSendExit('reload').then((allowed) => { if (allowed) window.location.reload(); });
 }

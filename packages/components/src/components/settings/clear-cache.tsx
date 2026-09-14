@@ -1,3 +1,4 @@
+import { requestSessionSendExit } from '@/lib/session-send-exit';
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +29,7 @@ export function useClearCache() {
   const [isClearing, setIsClearing] = useState(false);
 
   const confirmClear = useCallback(async () => {
+    if (!(await requestSessionSendExit('cache-clear'))) { setDialogOpen(false); return; }
     setIsClearing(true);
     try {
       if (params.workspaceName) {
