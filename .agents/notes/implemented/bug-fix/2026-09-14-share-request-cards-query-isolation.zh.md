@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-14-share-request-cards-query-isolation.md)
 
+PR：[#692](https://github.com/LodyAI/Lody/pull/692)
+
 ## 摘要
 
 `sessionSharing:listRequests` 查询失败会摧毁整个对话：云查询在渲染期间抛出，而待确认的

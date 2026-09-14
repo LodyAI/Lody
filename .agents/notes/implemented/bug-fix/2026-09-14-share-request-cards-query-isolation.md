@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-14-share-request-cards-query-isolation.zh.md)
 
+PR: [#692](https://github.com/LodyAI/Lody/pull/692)
+
 ## Abstract
 
 A failing `sessionSharing:listRequests` query destroyed the conversation: the cloud
