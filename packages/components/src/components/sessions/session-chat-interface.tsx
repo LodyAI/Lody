@@ -1,3 +1,8 @@
+import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
+import {
+  buildDraftUserHistoryEntry,
+  type SessionAttachmentDraft,
+} from '@/lib/session-attachment-draft';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
@@ -97,7 +102,6 @@ import type {
 } from '@lody/shared';
 import {
   buildConversationMarkdown,
-  buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   countPendingQueuedUserTurns,
   collectConversationMessages,
@@ -1820,6 +1824,7 @@ export type SessionChatInterfaceHandle = {
 };
 
 export type DispatchInputBlocksOptions = {
+  attachments?: SessionAttachmentDraft[];
   forceQueue?: boolean;
   forceDirect?: boolean;
   modeIdOverride?: string | null;
@@ -3597,6 +3602,7 @@ export const SessionChatInterface = memo(
       async (
         inputBlocks: SessionInputBlock[],
         options?: {
+          attachments?: SessionAttachmentDraft[];
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
@@ -3636,13 +3642,16 @@ export const SessionChatInterface = memo(
 
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
-            const pendingHistoryEntry = buildPendingUserHistoryEntry({
-              userId: derivedUserId,
-              inputBlocks,
-              timestamp: new Date().toISOString(),
-              inputConfig,
-              status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
-            });
+            const pendingHistoryEntry = buildDraftUserHistoryEntry(
+              {
+                userId: derivedUserId,
+                inputBlocks,
+                timestamp: new Date().toISOString(),
+                inputConfig,
+                status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
+              },
+              options?.attachments
+            );
             if (!pendingHistoryEntry) {
               return false;
             }
@@ -3652,6 +3661,7 @@ export const SessionChatInterface = memo(
             const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
               guideExpectedTurnId: options?.guideExpectedTurnId,
+              attachments: options?.attachments,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -3747,7 +3757,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
         >
       ): Promise<boolean> => {
         try {
@@ -3803,6 +3817,7 @@ export const SessionChatInterface = memo(
             userId: derivedUserId,
             userTurnId,
             acpSessionConfig: queuedInputConfig,
+            attachments: options?.attachments,
           });
           return true;
         } catch (err) {
@@ -3844,7 +3859,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3855,6 +3874,7 @@ export const SessionChatInterface = memo(
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          attachments: options?.attachments,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -3866,7 +3886,7 @@ export const SessionChatInterface = memo(
         options?: DispatchInputBlocksOptions
       ): Promise<boolean> => {
         const normalized = normalizeSessionInputBlocks(inputBlocks, '');
-        if (normalized.length === 0) {
+        if (normalized.length === 0 && !options?.attachments?.length) {
           return false;
         }
         if (!sessionDocReady) {
@@ -3920,6 +3940,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            attachments: options?.attachments,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -3941,6 +3962,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            attachments: options?.attachments,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -3970,7 +3992,17 @@ export const SessionChatInterface = memo(
           modelIdOverride: turnModelId,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          attachments: options?.attachments,
         });
+        if (
+          accepted &&
+          runtime?.sendJournal
+            ?.getSnapshot()
+            .some((record) => record.sessionId === session.id && record.stage === 'saved')
+        ) {
+          directDispatchInFlightRef.current = false;
+          setInputActionState('ready');
+        }
         if (!accepted) {
           captureSessionEvent('session/message_submit_failed', {
             ...inputSummary,
@@ -3983,6 +4015,8 @@ export const SessionChatInterface = memo(
         return accepted;
       },
       [
+        runtime?.sendJournal,
+        session.id,
         captureSessionEvent,
         configOptionValues,
         directDispatchInputBlocks,
@@ -4031,9 +4065,10 @@ export const SessionChatInterface = memo(
     const handleSendMessage = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
-        agentRole?: SessionTurnAgentRoleSelection
+        agentRole?: SessionTurnAgentRoleSelection,
+        attachments?: SessionAttachmentDraft[]
       ): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks, { agentRole });
+        return await dispatchInputBlocks(inputBlocks, { agentRole, attachments });
       },
       [dispatchInputBlocks]
     );
@@ -5145,7 +5180,7 @@ export const SessionChatInterface = memo(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
-          const pendingHistoryEntry = buildPendingUserHistoryEntry({
+          const pendingHistoryEntry = buildDraftUserHistoryEntry({
             userId: item.userId,
             inputBlocks,
             timestamp: item.timestamp,
@@ -6171,23 +6206,26 @@ export const SessionChatInterface = memo(
                         commandsEnabled={isVisible}
                         freeTurnLimitNotice={freeSessionTurnNotice}
                         queueDisplay={
-                          messageQueue.length > 0 ? (
-                            <MessageQueueDisplay
-                              sessionId={session.id}
-                              items={messageQueue}
-                              onRemove={handleRemoveQueueItem}
-                              onReorder={handleReorderQueueItem}
-                              onEditStart={handleStartQueueItemEdit}
-                              onEditCancel={handleCancelQueueItemEdit}
-                              onEditSave={handleSaveQueueItemEdit}
-                              onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
-                            />
-                          ) : null
+                          <>
+                            <SessionPendingMessages sessionId={session.id} />
+                            {messageQueue.length > 0 ? (
+                              <MessageQueueDisplay
+                                sessionId={session.id}
+                                items={messageQueue}
+                                onRemove={handleRemoveQueueItem}
+                                onReorder={handleReorderQueueItem}
+                                onEditStart={handleStartQueueItemEdit}
+                                onEditCancel={handleCancelQueueItemEdit}
+                                onEditSave={handleSaveQueueItemEdit}
+                                onSteer={handleSteerQueuedMessage}
+                                showSteerAction={
+                                  isSessionActive &&
+                                  !!activeAssistantTurnId &&
+                                  !isExternalHistoryRefreshing
+                                }
+                              />
+                            ) : null}
+                          </>
                         }
                         mcp={mcpSelection.menu}
                         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
