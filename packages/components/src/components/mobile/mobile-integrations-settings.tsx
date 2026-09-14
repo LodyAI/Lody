@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { Badge } from '@/ui/badge';
-import { ArrowUpRight, Book, Github, Loader2, Search } from 'lucide-react';
+import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -88,7 +89,9 @@ function MobileCloudIntegrationsSettings() {
   const setPersonalOperationPreference = useCloudMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(cloudOperations.github.refreshPersonalGitHubProfile);
+  const refreshPersonalGitHubProfile = useCloudAction(
+    cloudOperations.github.refreshPersonalGitHubProfile
+  );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -357,7 +360,7 @@ function MobileCloudIntegrationsSettings() {
                 }}
                 disabled={showGitHubConnectSpinner || !workspaceAuthReady}
               >
-                {showGitHubConnectSpinner ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {showGitHubConnectSpinner ? <Spinner className="h-3.5 w-3.5" /> : null}
                 {t('settings.integrations.github.connect')}
                 {!showGitHubConnectSpinner ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
               </Button>
@@ -386,7 +389,7 @@ function MobileCloudIntegrationsSettings() {
             )}
           >
             {updatingPersonalPreference ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <Spinner className="h-4 w-4 text-muted-foreground" />
             ) : (
               <Switch
                 checked={personalIdentityEnabled}
@@ -462,7 +465,7 @@ function MobileCloudIntegrationsSettings() {
         ) : null}
         {workspaceReposLoading ? (
           <div className="flex items-center justify-center gap-2 px-4 py-6 text-[0.9rem] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Spinner className="h-4 w-4" />
             {t('settings.integrations.github.loading')}
           </div>
         ) : repos.length === 0 ? (

@@ -133,21 +133,10 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
     finished?: boolean;
   }): Promise<void> {
     const entry = this.buildEntry(options);
-    await this.args.sessionDoc.updateHistory((history) => {
-      const index = history.findIndex((item) => item.id === this.historyId);
-      if (index === -1) {
-        const insertBeforeEntryId = this.args.insertBeforeEntryId;
-        if (insertBeforeEntryId) {
-          const insertIndex = history.findIndex((item) => item.id === insertBeforeEntryId);
-          if (insertIndex !== -1) {
-            return [...history.slice(0, insertIndex), entry, ...history.slice(insertIndex)];
-          }
-        }
-        return [...history, entry];
-      }
-      const next = [...history];
-      next[index] = entry;
-      return next;
+    await this.args.sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: entry,
+      beforeTurnId: this.args.insertBeforeEntryId,
     });
   }
 

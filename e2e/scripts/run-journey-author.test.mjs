@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   assertCandidatePathSet,
+  assertJourneyAuthorNodeRuntime,
   buildCodexEnvironment,
   buildCodexExecArgs,
   buildValidationEnvironment,
@@ -15,6 +16,23 @@ import {
   validateMain,
   validationCommandPlan,
 } from './run-journey-author.mjs';
+
+void test('requires the workspace Node-API floor before authoring a journey', () => {
+  assert.throws(
+    () =>
+      assertJourneyAuthorNodeRuntime({
+        nodeVersion: 'v23.5.0',
+        nodeApiVersion: '9',
+      }),
+    /Node-API 10/u
+  );
+  assert.doesNotThrow(() =>
+    assertJourneyAuthorNodeRuntime({
+      nodeVersion: 'v23.6.0',
+      nodeApiVersion: '10',
+    })
+  );
+});
 
 void test('keeps author artifacts out of repository source paths and refuses overwrite', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lody-author-artifacts-'));

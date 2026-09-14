@@ -24,6 +24,7 @@ import {
   User,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -400,8 +401,10 @@ export function SessionInfoCard({
     rows.push({
       key: 'sharing',
       icon: (
-        <SharingIcon
-          className={cn('h-3.5 w-3.5', sharing.visibility === 'unknown' && 'animate-spin')}
+        <Spinner
+          icon={SharingIcon}
+          spinning={sharing.visibility === 'unknown'}
+          className="h-3.5 w-3.5"
           aria-hidden="true"
         />
       ),

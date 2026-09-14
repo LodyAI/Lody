@@ -1,13 +1,14 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   DEEPSEEK_HARNESS_HOME_ENV,
+  DEEPSEEK_HARNESS_VERSION,
   DeepSeekHarnessMixedSessionCompressionError,
   resolveDeepSeekHarnessHome,
   resolveDeepSeekHarnessProcessLaunch,
@@ -35,15 +36,23 @@ async function createSessionArtifact(
   return artifact;
 }
 
-async function readGeneratedConfig(
-  launch: Awaited<ReturnType<typeof resolveDeepSeekHarnessProcessLaunch>>
+async function readGeneratedProfile(
+  launch: Awaited<ReturnType<typeof resolveDeepSeekHarnessProcessLaunch>>,
+  rootDir: string
 ) {
-  const configFlagIndex = launch.args.indexOf('--config');
-  const configPath = launch.args.at(configFlagIndex + 1);
-  if (configFlagIndex < 0 || configPath === undefined) {
-    throw new Error('DeepSeek Harness launch did not include a config path');
+  const profileFlagIndex = launch.args.indexOf('--profile');
+  const profileName = launch.args.at(profileFlagIndex + 1);
+  if (profileFlagIndex < 0 || profileName === undefined) {
+    throw new Error('DeepSeek Harness launch did not include a profile name');
   }
-  return { configPath, config: await readFile(configPath, 'utf8') };
+  const profileDir = join(rootDir, 'profiles', profileName);
+  const [packageJson, cordisYml, cordisPatchYml, pnpmWorkspaceYaml] = await Promise.all([
+    readFile(join(profileDir, 'package.json'), 'utf8'),
+    readFile(join(profileDir, 'cordis.yml'), 'utf8'),
+    readFile(join(profileDir, 'cordis.patch.yml'), 'utf8'),
+    readFile(join(profileDir, 'pnpm-workspace.yaml'), 'utf8'),
+  ]);
+  return { profileName, profileDir, packageJson, cordisYml, cordisPatchYml, pnpmWorkspaceYaml };
 }
 
 describe('resolveDeepSeekHarnessHome', () => {
@@ -66,7 +75,7 @@ describe('resolveDeepSeekHarnessHome', () => {
 });
 
 describe('resolveDeepSeekHarnessProcessLaunch', () => {
-  it('publishes an importable adapter URL while preserving the preset filesystem path', async () => {
+  it('publishes the adapter path and the preset root into a dsh profile', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
     temporaryRoots.push(rootDir);
     const adapterDir = join(rootDir, '应用 #100%');
@@ -75,14 +84,17 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     await writeFile(adapterPath, 'export const marker = "synthetic-acp-loaded";');
 
     const launch = await resolveDeepSeekHarnessProcessLaunch({ adapterPath, rootDir });
-    const { config } = await readGeneratedConfig(launch);
+    const profile = await readGeneratedProfile(launch, rootDir);
     // Read the generated YAML's JSON-quoted scalar without evaluating its !!js tags.
-    const entry = config.split('\n- id: acp-agent\n')[1];
-    const name = entry?.split('\n').find((line) => line.startsWith('  name: '));
-    if (!name) throw new Error('Generated config has no ACP adapter entry');
-    const specifier: unknown = JSON.parse(name.slice('  name: '.length));
+    const entry = profile.cordisPatchYml.split('\n    - id: acp-agent\n')[1];
+    const name = entry?.split('\n').find((line) => line.startsWith('      name: '));
+    if (!name) throw new Error('Generated profile has no ACP adapter entry');
+    const specifier: unknown = JSON.parse(name.slice('      name: '.length));
     if (typeof specifier !== 'string') throw new Error('ACP adapter entry is not a string');
-    expect(new URL(specifier).protocol).toBe('file:');
+    // Cordis resolves `name` as a module specifier, so the generator renders a
+    // `file:` URL. A raw Windows drive path would parse as the `c:` scheme.
+    expect(specifier.startsWith('file:')).toBe(true);
+    expect(resolve(fileURLToPath(specifier))).toBe(resolve(adapterPath));
 
     // A separate Node process exercises its native ESM loader, not Vite's import transform.
     const { stdout } = await promisify(execFile)(process.execPath, [
@@ -92,15 +104,18 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
       specifier,
     ]);
     expect(stdout.trim()).toBe('synthetic-acp-loaded');
-    expect(config).toContain(`path: ${JSON.stringify(join(adapterDir, 'deepseek-agent-presets'))}`);
-
-    const repeated = await readGeneratedConfig(
-      await resolveDeepSeekHarnessProcessLaunch({ adapterPath, rootDir })
+    expect(profile.cordisPatchYml).toContain(
+      `path: ${JSON.stringify(join(adapterDir, 'deepseek-agent-presets'))}`
     );
-    expect(repeated).toEqual(await readGeneratedConfig(launch));
+
+    const repeated = await readGeneratedProfile(
+      await resolveDeepSeekHarnessProcessLaunch({ adapterPath, rootDir }),
+      rootDir
+    );
+    expect(repeated).toEqual(profile);
   });
 
-  it('publishes and loads the generated ACP config from the resolved Harness home', async () => {
+  it('publishes and loads the generated ACP profile from the resolved Harness home', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
     temporaryRoots.push(rootDir);
 
@@ -108,17 +123,27 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
       adapterPath: '/bundled/deepseek-acp.js',
       rootDir,
     });
-    const { configPath, config } = await readGeneratedConfig(launch);
+    const profile = await readGeneratedProfile(launch, rootDir);
 
-    expect(dirname(configPath)).toBe(rootDir);
-    expect(existsSync(configPath)).toBe(true);
-    expect(config).toContain('compression: zstd');
-    expect(launch.args).toContain('dsh-acp-demo');
+    expect(profile.profileName.startsWith('lody-acp-')).toBe(true);
+    expect(profile.profileDir).toBe(join(rootDir, 'profiles', profile.profileName));
+    expect(profile.cordisYml).toBe('[]\n');
+    expect(profile.packageJson).toContain('"@deepseek-ai/dsh-base"');
+    expect(profile.cordisPatchYml).toContain('compression: zstd');
+    expect(launch.args).toContain('dsh');
+    expect(launch.args).toContain('--profile');
+    expect(launch.args).toContain(profile.profileName);
+    expect(launch.args).not.toContain('dsh-acp-demo');
     expect(launch.args).not.toContain('--force');
     expect(launch.args).not.toContain('--legacy-peer-deps');
     expect(launch.args).not.toContain('@deepseek-ai/dsh@0.1.0-rc.6');
+    // The Cordis ecosystem versions independently of the Harness family, and
+    // a `DEEPSEEK_HARNESS_VERSION` specifier for it fails the cold install.
+    expect(launch.args).toContain('@deepseek-ai/cordis@4.0.2');
+    expect(launch.args).toContain('@deepseek-ai/cordis-plugin-hmr@1.0.17');
+    expect(launch.args).not.toContain(`@deepseek-ai/cordis@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);
-    expect(await readdir(rootDir)).toContain(basename(configPath));
+    expect(await readdir(rootDir)).toEqual(expect.arrayContaining(['profiles', 'sessions']));
   });
 
   it('uses zstd when an existing standalone Harness root is compressed', async () => {
@@ -132,9 +157,9 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
       adapterPath: '/bundled/deepseek-acp.js',
       rootDir,
     });
-    const { config } = await readGeneratedConfig(launch);
+    const profile = await readGeneratedProfile(launch, rootDir);
 
-    expect(config).toContain('compression: zstd');
+    expect(profile.cordisPatchYml).toContain('compression: zstd');
     expect(await readFile(artifact, 'utf8')).toBe('zstd-bytes');
   });
 
@@ -149,13 +174,13 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
       adapterPath: '/bundled/deepseek-acp.js',
       rootDir,
     });
-    const { config } = await readGeneratedConfig(launch);
+    const profile = await readGeneratedProfile(launch, rootDir);
 
-    expect(config).toContain('compression: none');
+    expect(profile.cordisPatchYml).toContain('compression: none');
     expect(await readFile(artifact, 'utf8')).toBe('raw-jsonl');
   });
 
-  it('rejects mixed roots before publishing config and leaves both artifacts unchanged', async () => {
+  it('rejects mixed roots before publishing a profile and leaves both artifacts unchanged', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
     temporaryRoots.push(rootDir);
     const sessionsRoot = join(rootDir, 'sessions');

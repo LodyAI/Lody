@@ -2,12 +2,8 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Files: [README.md](README.md). Data: `context/message-flow.md`. Package:
-[../../../AGENTS.md](../../../AGENTS.md). Scopes:
-[components/](components/AGENTS.md), [message-queue/](message-queue/AGENTS.md).
-
-Each rule is compressed; its heading links the full text. Read it before
-changing those files.
+Parent AGENTS apply. Files: [README.md](README.md); data: `context/message-flow.md`.
+Read each heading’s linked context before changing its files.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -55,6 +51,8 @@ changing those files.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
 
+- Message-list crash fallback preserves the composer and copies the shared report,
+  including the original error and caught React component stacks.
 - Read receipts are gated on VISIBILITY, not on being mounted: keep the
   explicit per-surface `isVisible` prop.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
@@ -99,9 +97,10 @@ changing those files.
 - Canonical cluster in CONSTANT order + exactly one staged item; no items hides
   the bar (unless syncing) and the stage never empties or relayouts on click.
 - The stage icon is inert, colour is reserved for genuine status, and nothing
-  in the bar pulses or relayouts.
-- The Open preview chip stays gated on a real reported preview target, and
-  repository actions are priority-ordered and never duplicated below the reply.
+  in the bar pulses.
+- Open preview stays gated on a real reported target; repository actions are
+  priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
+  below the reply.
 
 ## [Auto review, status slot](../../../../../.agents/docs/sessions-auto-review.md)
 

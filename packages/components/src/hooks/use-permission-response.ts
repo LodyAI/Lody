@@ -12,14 +12,19 @@ export function usePermissionResponse() {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
 
   const respondToPermission = useCallback(
-    async (sessionId: SessionId, requestId: string, outcome: PermissionOutcome): Promise<void> => {
+    async (
+      sessionId: SessionId,
+      requestId: string,
+      outcome: PermissionOutcome,
+      options?: { turnId?: string }
+    ): Promise<void> => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
 
       // Awaiting the writer call is the accept boundary: the local authored
       // write is durable, so there's no need to block on remote sync.
-      await runtime.writer.respondSessionPermission(sessionId, requestId, outcome);
+      await runtime.writer.respondSessionPermission(sessionId, requestId, outcome, options);
     },
     [runtime]
   );

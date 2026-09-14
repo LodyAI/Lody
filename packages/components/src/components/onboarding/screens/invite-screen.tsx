@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, Mail, Plus, Send, X } from 'lucide-react';
+import { ArrowRight, Mail, Plus, Send, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -70,7 +71,7 @@ export function InviteScreenView({
             className="gap-2"
             disabled={!hasAnything || sending || pendingCount === 0}
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sending ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
             {pendingCount > 0
               ? t('onboarding.invite.sendCount', 'Send {{count}} & continue', {
                   count: pendingCount,
@@ -128,7 +129,7 @@ export function InviteScreenView({
                     <InviteStatusLine status={invite.status} errorMessage={invite.errorMessage} />
                   </div>
                   {invite.status === 'sending' ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   ) : (
                     <Button
                       variant="ghost"

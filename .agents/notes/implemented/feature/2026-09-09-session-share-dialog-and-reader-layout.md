@@ -135,3 +135,6 @@ reader mounts, not before first paint. Cross-origin theme sharing is not possibl
 was not attempted — `localStorage` is per-origin, so `share.lody.ai` keeps a separate
 selection from the app domain, which is why the in-page control exists. The screenshots
 used synthetic fixtures; no deployed backend was exercised.
+
+The reader's foot, tree selection and sidebar toggle were later replaced; see
+[share reader navigation and foot](2026-09-14-share-reader-navigation-and-foot.md).

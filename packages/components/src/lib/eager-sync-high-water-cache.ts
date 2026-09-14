@@ -1,4 +1,4 @@
-import type { SessionId, WorkspaceId } from '@lody/shared';
+import type { SessionId } from '@lody/shared';
 import type { EagerSyncHighWaterStore } from '../providers/background-sync-coordinator';
 
 export const EAGER_SYNC_HIGH_WATER_DB_NAME = 'lody:eager-sync-high-water';
@@ -29,8 +29,8 @@ const getBrowserIndexedDb = (): IDBFactory | null => {
   }
 };
 
-const keyOf = (workspaceId: WorkspaceId, sessionId: SessionId): string =>
-  `${workspaceId}:${sessionId}`;
+const keyOf = (cacheNamespace: string, sessionId: SessionId): string =>
+  `${cacheNamespace}:${sessionId}`;
 
 const normalizeMaxEntries = (value: number | undefined): number => {
   if (value == null) {
@@ -101,18 +101,15 @@ function openHighWaterDb(indexedDb: IDBFactory): Promise<IDBDatabase> {
   });
 }
 
-async function readWorkspaceRows(
-  db: IDBDatabase,
-  workspaceId: WorkspaceId
-): Promise<HighWaterRow[]> {
+async function readWorkspaceRows(db: IDBDatabase, cacheNamespace: string): Promise<HighWaterRow[]> {
   const tx = db.transaction(EAGER_SYNC_HIGH_WATER_STORE_NAME, 'readonly');
   const store = tx.objectStore(EAGER_SYNC_HIGH_WATER_STORE_NAME);
   const request = store.indexNames.contains(EAGER_SYNC_HIGH_WATER_WORKSPACE_INDEX)
-    ? store.index(EAGER_SYNC_HIGH_WATER_WORKSPACE_INDEX).getAll(workspaceId)
+    ? store.index(EAGER_SYNC_HIGH_WATER_WORKSPACE_INDEX).getAll(cacheNamespace)
     : store.getAll();
   const [rows] = await Promise.all([requestToPromise<unknown[]>(request), transactionDone(tx)]);
   return rows.filter(
-    (row): row is HighWaterRow => isHighWaterRow(row) && row.workspaceId === workspaceId
+    (row): row is HighWaterRow => isHighWaterRow(row) && row.workspaceId === cacheNamespace
   );
 }
 
@@ -136,10 +133,10 @@ async function deleteRows(db: IDBDatabase, keys: string[]): Promise<void> {
 
 async function pruneWorkspaceRows(
   db: IDBDatabase,
-  workspaceId: WorkspaceId,
+  cacheNamespace: string,
   maxEntries: number
 ): Promise<void> {
-  const rows = await readWorkspaceRows(db, workspaceId);
+  const rows = await readWorkspaceRows(db, cacheNamespace);
   if (rows.length <= maxEntries) {
     return;
   }
@@ -220,7 +217,7 @@ function createMemoryHighWaterStore(options: {
 }
 
 export async function createEagerSyncHighWaterStore(
-  workspaceId: WorkspaceId,
+  cacheNamespace: string,
   options: {
     maxEntries?: number;
     now?: () => number;
@@ -237,7 +234,7 @@ export async function createEagerSyncHighWaterStore(
   let rows: HighWaterRow[];
   try {
     db = await openHighWaterDb(indexedDb);
-    rows = await readWorkspaceRows(db, workspaceId);
+    rows = await readWorkspaceRows(db, cacheNamespace);
   } catch {
     db?.close();
     return createMemoryHighWaterStore({ maxEntries, now });
@@ -279,15 +276,17 @@ export async function createEagerSyncHighWaterStore(
       pruneMemory(values, cachedAtBySession, maxEntries);
 
       const row: HighWaterRow = {
-        key: keyOf(workspaceId, sessionId),
-        workspaceId,
+        key: keyOf(cacheNamespace, sessionId),
+        // Keep the persisted field name for schema compatibility. Its value is
+        // the cache namespace, which is workspace-scoped in single-window clients.
+        workspaceId: cacheNamespace,
         sessionId,
         lastMessageAt,
         cachedAt,
       };
       void enqueueWrite(async () => {
         await putRow(db, row);
-        await pruneWorkspaceRows(db, workspaceId, maxEntries);
+        await pruneWorkspaceRows(db, cacheNamespace, maxEntries);
       });
     },
     flush: () => writeChain,

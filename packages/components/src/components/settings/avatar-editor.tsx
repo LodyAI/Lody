@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import type { AvatarKind } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -99,11 +100,7 @@ export function AvatarEditor({
             isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           )}
         >
-          {isUploading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Pencil className="h-3.5 w-3.5" />
-          )}
+          {isUploading ? <Spinner className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
         </span>
       </button>
     </div>

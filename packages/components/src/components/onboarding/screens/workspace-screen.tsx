@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Building2, Check, Loader2, Plus, RotateCcw } from 'lucide-react';
+import { ArrowRight, Building2, Check, Plus, RotateCcw } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -217,7 +218,7 @@ export function WorkspaceScreenView({
       primaryAction={
         creating ? (
           <Button size="lg" disabled={!canSubmitCreate} onClick={onSubmitCreate} className="gap-2">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {saving ? <Spinner className="h-4 w-4" /> : null}
             {createError
               ? t('common.retry', 'Retry')
               : repairingWorkspace
@@ -326,7 +327,7 @@ export function WorkspaceScreenView({
                   role="status"
                   className="flex max-w-full items-start gap-1.5 text-xs leading-5 text-muted-foreground"
                 >
-                  <Loader2 className="mt-1 size-3 shrink-0 animate-spin" />
+                  <Spinner className="mt-1 size-3 shrink-0" />
                   <span className="min-w-0 break-words">
                     {newSlugCheckSlow
                       ? t(
@@ -391,7 +392,7 @@ export function WorkspaceScreenView({
           >
             {workspacesStatus === 'loading' ? (
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Spinner className="h-4 w-4" />
                 {t('onboarding.workspace.loading', 'Loading workspaces…')}
               </div>
             ) : workspacesStatus === 'error' ? (
@@ -410,7 +411,7 @@ export function WorkspaceScreenView({
                   onClick={onRetryWorkspaces}
                   className="gap-2"
                 >
-                  <RotateCcw className={cn('size-3.5', retryingWorkspaces && 'animate-spin')} />
+                  <Spinner icon={RotateCcw} spinning={retryingWorkspaces} className="size-3.5" />
                   {t('common.retry', 'Retry')}
                 </Button>
               </div>

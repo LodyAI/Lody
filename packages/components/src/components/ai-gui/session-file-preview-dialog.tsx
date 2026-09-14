@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Check, Copy, Download, FileWarning, Loader2, X } from 'lucide-react';
+import { Check, Copy, Download, FileWarning, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { Dialog, DialogClose, DialogContentWithoutClose, DialogTitle } from '@/ui/dialog';
 import { Button } from '@/ui/button';
@@ -117,11 +118,7 @@ export function SessionFilePreviewPanel({
             disabled={isDownloading}
             aria-label={t('sessions.fileDownload', 'Download')}
           >
-            {isDownloading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Download className="size-4" />
-            )}
+            {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
           </Button>
           {/* Divider separates content actions (copy/download) from the window
               action (close), and the close sits inline in the same row instead
@@ -170,7 +167,7 @@ export function SessionFilePreviewPanel({
       <div className="mt-3 max-h-[55vh] min-w-0 overflow-y-auto">
         {status.kind === 'loading' ? (
           <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
+            <Spinner className="size-4" />
             {t('sessions.filePreviewLoading', 'Loading preview…')}
           </div>
         ) : status.kind === 'error' ? (

@@ -32,7 +32,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
-- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats).
+- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
+  and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
+  Commit & Push action; both cancellation routes run `syncWorkspaceGitState` alone,
+  which self-gates on the session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`
@@ -83,6 +86,17 @@ the work per trigger, not the trigger rate; keeping that rate sane is the connec
 boundary's job, and `onMetaRoomSynced` is rate-limited in `../lib/loro/connection-recovery.ts`
 while the cheap "back online" edge moved to `onStreamsOnline`
 (context/code-collab-flow.md).
+
+### Per-session check chain cost
+
+The dispatch branch of a session check awaits the whole agent turn, and the session mirror
+fires a check on every commit while the agent streams, so a long turn accumulates hundreds of
+triggers behind the blocked chain. Each check re-reads the full history (about 130 ms on a
+13 MB session doc) and settles every await on microtasks, so an uncoalesced drain pinned the
+daemon for up to 42 s without ever reaching the timer phase. `enqueueSessionCheck` therefore
+reuses a queued check that has not started yet — at most one follow-up per turn — and a check
+that follows another one in the chain yields one macrotask first
+([note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-dispatch-check-coalescing.md)).
 
 ### Turn ordering
 

@@ -7,11 +7,11 @@ import {
   ChevronRight,
   CircleHelp,
   Folder,
-  Loader2,
   LockKeyhole,
   MonitorCog,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -203,7 +203,7 @@ export function AccountMachinesOverviewView({
 
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
             {t('workspace.machines.loadingVisibility', 'Loading machines')}
           </div>
         ) : items.length === 0 ? (

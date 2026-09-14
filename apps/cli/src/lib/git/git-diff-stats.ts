@@ -160,6 +160,30 @@ export const isWorkspaceDirty = async (runGit: GitRunner): Promise<boolean | und
 };
 
 /**
+ * Whether the branch carries local commits its upstream does not have.
+ *
+ * The companion to `isWorkspaceDirty`, and NOT redundant with it: `git status`
+ * goes clean the instant the agent commits, so a commit whose push failed or
+ * was skipped leaves a clean worktree while the PR head still points at the
+ * previous commit. Without this probe the Info Bar would offer Merge on a PR
+ * that is missing the work sitting in the local branch.
+ *
+ * Same `undefined` contract as `isWorkspaceDirty`, and for the same reason. It
+ * also covers the no-upstream case: `@{u}` fails when the branch never got a
+ * tracking ref, and reporting that as "nothing to push" is the exact false
+ * all-clear this probe exists to prevent.
+ */
+export const hasUnpushedCommits = async (runGit: GitRunner): Promise<boolean | undefined> => {
+  try {
+    const count = await runGit(['rev-list', '@{u}..HEAD', '--count']);
+    const parsed = Number.parseInt(count.trim(), 10);
+    return Number.isFinite(parsed) ? parsed > 0 : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * List untracked, non-ignored files (relative paths). `git diff <base>` does NOT report
  * untracked files, so callers that need the full working-tree delta (e.g. bash/codegen-created
  * new files) must enumerate them separately. Uses NUL separation to stay correct for paths
@@ -181,24 +205,6 @@ export const listUntrackedFiles = async (
     return out.split('\0').filter((entry) => entry.length > 0);
   } catch {
     return [];
-  }
-};
-
-/**
- * Check if local branch has commits not yet pushed to its upstream remote.
- * Returns false if there is no upstream configured or if the branch is up to date.
- */
-export const hasUnpushedCommits = async (runGit: GitRunner): Promise<boolean> => {
-  if (!(await isInsideGitWorktree(runGit))) {
-    return false;
-  }
-
-  try {
-    const count = await runGit(['rev-list', '@{u}..HEAD', '--count']);
-    return parseInt(count.trim(), 10) > 0;
-  } catch {
-    // No upstream configured or other error — treat as nothing to push
-    return false;
   }
 };
 

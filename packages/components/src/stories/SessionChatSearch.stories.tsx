@@ -29,7 +29,7 @@ type Story = StoryObj<typeof meta>;
 const sessionId = 'session-search-storybook' as SessionId;
 
 const buildItems = (messages: SessionHistoryParsed[]): ChatStreamItem[] =>
-  messages.map((message) => ({ type: 'message', sessionId, message }) as const);
+  messages.map((message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const);
 
 const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   message,

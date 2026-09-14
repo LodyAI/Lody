@@ -116,6 +116,18 @@ target is absent here; the receiver edit is limited to provider eligibility.
 
 ## Review follow-up: scoped repairs
 
+2026-09-14 integration correction: Lody main `6de01729` already includes #664,
+which migrates the DSH launcher to profile files, the `dsh` command, and explicit
+per-package version specifiers. The earlier launcher incompatibility applies to
+the pre-merge branch, not this integrated tree. Merge DSH `ee8570f`, retaining
+durable usage handling alongside transient assistant streaming and untracking all
+generated `dist` files. DSH build, 19 tests, and format check pass. Codex native
+compaction fixes are retained alongside usage accounting; its build and 19
+usage/transport tests pass, while 112 ACP tests fail setup because the isolated
+dependencies lack the Codex executable. Root checks still lack workspace dependencies.
+Official Harness 0.1.5-rc.2 source retains the normal completed-request usage
+shape and cache/reasoning bucket semantics; this is not an authenticated E2E claim.
+
 Dependency review PRs: [Codex #42](https://github.com/LodyAI/acp-extension-codex/pull/42),
 [Claude #26](https://github.com/LodyAI/acp-extension-claude/pull/26), and
 [Kimi #10](https://github.com/LodyAI/acp-extension-kimi/pull/10). Core #9 and DSH #16

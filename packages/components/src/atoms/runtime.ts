@@ -1,7 +1,9 @@
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
+import type { SessionData } from '@lody/shared/session-data';
 import { atom } from 'jotai';
 import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
+import type { ConversationView } from '@/lib/conversation-view';
 import type {
   InferInputType,
   InferType,
@@ -75,20 +77,27 @@ import { readStoredAuthToken } from '@/lib/auth-bootstrap';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from './workspace-context';
 
-export type SessionDocState = InferType<typeof sessionDocSchema>;
-export type SessionDocInput = InferInputType<typeof sessionDocSchema>;
+/**
+ * Control-plane state of a session doc. `history` is deliberately absent: the
+ * renderer reads turns through `SessionDocStore.history` (a `ConversationView`)
+ * and writes them through `SessionDocStore.sessionData.commands`, so opening a long
+ * conversation never materializes the whole list.
+ */
+export type SessionDocState = Omit<InferType<typeof sessionDocSchema>, 'history'>;
+export type SessionDocInput = Omit<InferInputType<typeof sessionDocSchema>, 'history'>;
+/** The draft `setState` updaters receive; history is not writable through it. */
+export type SessionDocDraft = Omit<SessionDocMeta, 'history'>;
 export type PreviewVisualCommentDocState = InferType<typeof previewVisualCommentDocSchema>;
 export type PreviewVisualCommentDocInput = InferInputType<typeof previewVisualCommentDocSchema>;
 
 export type SessionDocUpdater =
-  | Partial<SessionDocMeta>
+  | Partial<SessionDocDraft>
   | Partial<SessionDocInput>
-  | ((state: SessionDocMeta) => void)
-  | ((state: Readonly<SessionDocMeta>) => SessionDocMeta)
+  | ((state: SessionDocDraft) => void)
+  | ((state: Readonly<SessionDocDraft>) => SessionDocDraft)
   | ((state: Readonly<SessionDocInput>) => SessionDocInput);
 
 export type SessionDocStore = {
-  readonly historyWriter: import('@lody/shared').HistoryWriter;
   readonly sessionId: SessionId;
   readonly roomId: string;
   readonly doc: LoroDoc;
@@ -99,6 +108,10 @@ export type SessionDocStore = {
   getState: () => SessionDocState;
   setState: (updater: SessionDocUpdater) => void;
   subscribe: (listener: (state: SessionDocState) => void) => () => void;
+  /** Windowed read access to the session's turns; see `lib/conversation-view`. */
+  readonly history: ConversationView;
+  /** CRDT-neutral history reads, commands and stored-copy capabilities. */
+  readonly sessionData: SessionData;
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.

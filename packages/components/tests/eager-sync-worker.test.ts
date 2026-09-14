@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createLoroStreamsTokenProvider } from '@lody/shared';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import {
   base64ToBytes,
@@ -9,6 +10,7 @@ import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 import type { EagerSyncSnapshot } from '../src/providers/eager-sync-snapshot-cache';
 import type {
+  EagerSyncAuthContext,
   EagerSyncTransport,
   EagerSyncWorkerInput,
   EagerSyncWorkerOutput,
@@ -47,7 +49,10 @@ class TestWorker {
 function clientHarness(
   resolveTransport = async (): Promise<EagerSyncTransport> => ({ plane: 'local' }),
   readSnapshot = async (_scope: string, _roomId: string): Promise<EagerSyncSnapshot | undefined> =>
-    undefined
+    undefined,
+  auth: (context?: EagerSyncAuthContext) => Promise<string | undefined> = async () => {
+    throw new Error('Local prefetch must never request cloud credentials');
+  }
 ) {
   const starts = [deferred<TestWorker>(), deferred<TestWorker>(), deferred<TestWorker>()];
   const workers: TestWorker[] = [];
@@ -58,9 +63,7 @@ function clientHarness(
     scope: 'scope',
     resolveTransport,
     readSnapshot,
-    auth: async () => {
-      throw new Error('Local prefetch must never request cloud credentials');
-    },
+    auth,
     createWorker: () => {
       const index = workers.length;
       const worker = new TestWorker((started) => starts[index].resolve(started));
@@ -334,5 +337,151 @@ describe('worker raw-document prefetch', () => {
     expect(listeners.size).toBe(0);
     remote.free();
     foreground.free();
+  });
+});
+
+describe('eager-sync cloud auth bridge', () => {
+  const cloudTransport = async (): Promise<EagerSyncTransport> => ({
+    plane: 'cloud',
+    streamId: 'stream',
+    options: {
+      bucketId: 'bucket',
+      metaStreamId: 'meta',
+      baseUrl: 'https://streams.example.com',
+      shardUrls: undefined,
+    },
+  });
+  // The worker's transport reports which token the gateway rejected. Everything
+  // between it and the token provider has to keep that value, otherwise the
+  // provider cannot tell a real rejection from a stale one and hands the
+  // rejected token straight back.
+
+  it('forwards the whole auth context from the worker module onto the wire', async () => {
+    vi.resetModules();
+    let capturedAuth: ((context?: EagerSyncAuthContext) => Promise<string | undefined>) | undefined;
+    vi.doMock('../src/providers/eager-sync-worker-task', () => ({
+      runEagerSyncWorkerTask: async (
+        _request: unknown,
+        deps: { auth(context?: EagerSyncAuthContext): Promise<string | undefined> }
+      ) => {
+        capturedAuth = deps.auth;
+        return 'synced' as const;
+      },
+    }));
+    const posted: EagerSyncWorkerOutput[] = [];
+    const fakeSelf = {
+      onmessage: null as ((event: MessageEvent<EagerSyncWorkerInput>) => void) | null,
+      // Clone like a real Worker boundary would, so a non-cloneable context
+      // field fails here instead of only in a browser.
+      postMessage: (message: EagerSyncWorkerOutput) => posted.push(structuredClone(message)),
+    };
+    vi.stubGlobal('self', fakeSelf);
+    try {
+      await import('../src/providers/eager-sync.worker');
+      fakeSelf.onmessage?.({
+        data: {
+          type: 'start',
+          scope: 'scope',
+          workspaceId: 'workspace',
+          roomId: 'room',
+          peerId: 'peer',
+          lastMessageAt: 1,
+          connected: true,
+          transport: await cloudTransport(),
+        },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      expect(capturedAuth).toBeDefined();
+
+      const pending = capturedAuth?.({ reason: 'unauthorized', previousToken: 'jwt-1' });
+      expect(posted.find((message) => message.type === 'auth')).toEqual({
+        type: 'auth',
+        id: 1,
+        context: { reason: 'unauthorized', previousToken: 'jwt-1' },
+      });
+
+      // The reply still resolves the caller that is waiting on the wire id.
+      fakeSelf.onmessage?.({
+        data: { type: 'auth-result', id: 1, token: 'jwt-2' },
+      } as MessageEvent<EagerSyncWorkerInput>);
+      expect(await pending).toBe('jwt-2');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.doUnmock('../src/providers/eager-sync-worker-task');
+      vi.resetModules();
+    }
+  });
+
+  it('refreshes a rejected JWT through the held provider callback instead of returning it', async () => {
+    const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
+    let issued = 0;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace',
+      authToken: 'raw-token',
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as { workspaceId: string });
+        return new Response(JSON.stringify({ token: `jwt-${++issued}`, expiresIn: 900 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
+    // Mirrors createWorkspaceRuntime: exactly one callback for the provider's
+    // lifetime, so its last-token memory survives across worker jobs.
+    const authCallback = provider.createAuthCallback();
+    // Await the provider's own promise rather than a tick count: the encrypted
+    // cache path is genuinely async, so counting microtasks would be a race.
+    const settled: Array<Promise<string | undefined>> = [];
+    const h = clientHarness(cloudTransport, undefined, (context) => {
+      const pending = authCallback(context);
+      settled.push(pending);
+      return pending;
+    });
+    const result = h.client.prefetch('room', 1, new AbortController().signal);
+    const worker = await h.starts[0].promise;
+    const settle = async (index: number) => {
+      // The client registers its reply handler before this await.
+      await settled[index];
+    };
+
+    worker.emit({ type: 'auth', id: 1, context: { reason: 'request' } });
+    await settle(0);
+    expect(worker.inputs).toContainEqual({ type: 'auth-result', id: 1, token: 'jwt-1' });
+
+    worker.emit({
+      type: 'auth',
+      id: 2,
+      context: { reason: 'unauthorized', previousToken: 'jwt-1' },
+    });
+    await settle(1);
+    expect(worker.inputs).toContainEqual({ type: 'auth-result', id: 2, token: 'jwt-2' });
+    expect(bodies).toEqual([
+      { workspaceId: 'workspace' },
+      { workspaceId: 'workspace', rejectedToken: 'jwt-1' },
+    ]);
+
+    // A transport that reports no previousToken still refreshes: the held
+    // callback remembers the token it last handed to that worker.
+    worker.emit({ type: 'auth', id: 3, context: { reason: 'unauthorized' } });
+    await settle(2);
+    expect(worker.inputs).toContainEqual({ type: 'auth-result', id: 3, token: 'jwt-3' });
+    expect(bodies.at(-1)).toEqual({ workspaceId: 'workspace', rejectedToken: 'jwt-2' });
+
+    // A stale 401 naming a token the cache has already moved past must NOT
+    // invalidate the replacement. This is the case the last-token fallback
+    // cannot mask: if `previousToken` were dropped anywhere on the way, the
+    // callback would fall back to jwt-3 and throw away a perfectly good token.
+    worker.emit({
+      type: 'auth',
+      id: 4,
+      context: { reason: 'unauthorized', previousToken: 'jwt-2' },
+    });
+    await settle(3);
+    expect(worker.inputs).toContainEqual({ type: 'auth-result', id: 4, token: 'jwt-3' });
+    expect(bodies).toHaveLength(3);
+
+    worker.emit({ type: 'complete', outcome: 'synced' });
+    expect(await result).toBe('synced');
+    h.client.dispose();
   });
 });

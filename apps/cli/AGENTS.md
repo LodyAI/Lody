@@ -7,6 +7,10 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Build and packaging
 
+- The Node 22 bundle uses native top-level await. Do not run a browser TLA
+  compatibility transform over its output chunks. Validate the CLI SSR build
+  under `NODE_OPTIONS=--max-old-space-size=2048`; increasing the heap is not a fix.
+
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog variables exist in the shell.
 - INVARIANT: the dev output layout must match production's — `index.js` plus flat sibling
@@ -17,7 +21,8 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `name` stays `lody` in every composition.
 - Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
   adapter capabilities from a stale `dist/`.
-- `engines.node` is pinned to `>=22.14.0` by better-sqlite3's `NAPI_VERSION=10`, and
+- `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
+  `NAPI_VERSION=10`, and
   `src/utils/sqlite-runtime-support.ts` must stay the FIRST import in `src/index.ts` — older Node
   segfaults on the SQLite binding instead of throwing.
 - Read [apps/electron/AGENTS.md](../electron/AGENTS.md) — embedded packaging, native deps/ABI,

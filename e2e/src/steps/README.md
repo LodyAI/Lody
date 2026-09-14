@@ -7,6 +7,7 @@
 | `agent-role.steps.ts`                | Creates a Role and proves accepted Session execution remains frozen                              |
 | `agent-provider-lifecycle.steps.ts`  | Rejects invalid drafts and drives two Providers through rollback, revisit, dispatch, and cleanup |
 | `conversation-context-copy.steps.ts` | Drives user/assistant prefixes, user-stopped streaming, completed follow-up, and isolation       |
+| `desktop-windows.steps.ts`           | Verifies auxiliary Workspace connection and persistent cache namespace isolation                 |
 | `mcp-catalog-editing.steps.ts`       | Exercises MCP catalog edits, enabled-state persistence, and deletion                             |
 | `mcp-catalog.steps.ts`               | Carries an explicit MCP selection through catalog, composer, and dispatch                        |
 | `project-lifecycle.steps.ts`         | Adds, selects, removes, and verifies a synthetic local project                                   |

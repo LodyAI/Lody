@@ -8,7 +8,8 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock3, Info, Loader2, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock3, Info, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   getAskUserQuestionAnswerKey,
@@ -473,7 +474,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
           {!isReadonly && autoResolveSeconds !== null ? (
             <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
               {isAutoResolveExpired ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Spinner className="h-3 w-3" />
               ) : (
                 <Clock3 className="h-3 w-3" />
               )}
@@ -501,11 +502,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
             aria-label={t('sessions.cancel', 'Cancel')}
             className="-mr-1 mt-0.5 h-5 w-5 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
           >
-            {mode.isPendingCancel ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <X className="h-3 w-3" />
-            )}
+            {mode.isPendingCancel ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
           </Button>
         ) : null}
       </div>
@@ -647,7 +644,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
               className="h-8 gap-1.5 px-3 text-xs"
             >
               {mode.kind === 'interactive' && mode.isPendingSubmit ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <ArrowUp className="h-3.5 w-3.5" />
               )}
@@ -695,7 +692,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
               className="h-6 gap-1.5 px-3 text-xs"
             >
               {mode.kind === 'interactive' && mode.isPendingSubmit ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <ArrowUp className="h-3.5 w-3.5" />
               )}

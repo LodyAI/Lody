@@ -39,7 +39,6 @@ import {
   SESSION_DOC_PREFIX,
   type SessionStatus,
   LORO_STREAMS_BUCKET_ID,
-  createSessionMirror,
   ClientToServerSchema,
   ServerToClientSchema,
   type ClientToServer,
@@ -73,6 +72,7 @@ import {
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
+import { createConversationSession } from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -84,6 +84,7 @@ import { LoroDoc, EphemeralStore } from 'loro-crdt';
 import {
   WorkspaceRuntime,
   type PreviewVisualCommentDocStore,
+  type SessionDocState,
   type SessionDocStore,
   type TaskDocStore,
 } from '@/atoms/runtime';
@@ -146,6 +147,22 @@ export type WorkspaceRuntimeAnalyticsEvent = {
   name: string;
   properties: Record<string, unknown>;
 };
+
+export function resolveWorkspaceRuntimeCacheIdentity(
+  workspaceId: WorkspaceId,
+  windowId: string
+): {
+  namespace: string;
+  repoDbName: string;
+  remoteCursorDbName: string;
+} {
+  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  return {
+    namespace,
+    repoDbName: `lody-loro-repo-db-${namespace}`,
+    remoteCursorDbName: `lody-loro-stream-cursors-${namespace}`,
+  };
+}
 
 type RuntimeDeps = {
   /**
@@ -374,6 +391,7 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 }
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -398,10 +416,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     | null = null;
   const repo = await LoroRepo.create({
     storageAdapter: new IndexedDBStorageAdaptor({
-      dbName:
-        'lody-loro-repo-db-' +
-        deps.workspaceId +
-        (desktopWindowId() ? ':' + desktopWindowId() : ''),
+      dbName: cacheIdentity.repoDbName,
     }),
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
@@ -426,7 +441,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     );
   };
   const remoteCursorStore = createResilientRemoteCursorStore({
-    dbName: 'lody-loro-stream-cursors-' + deps.workspaceId,
+    dbName: cacheIdentity.remoteCursorDbName,
     shouldBypassPrimaryLoad: shouldBypassMetaRemoteCursorLoad,
     onWarning: (message, context) => {
       console.warn(message, {
@@ -471,6 +486,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let metaSub: RepoRoomSubscription | null = null;
   let cloudMetaTracker: RoomSyncTracker | null = null;
   let streamsTokenProvider: LoroStreamsTokenProvider | null = null;
+  // One long-lived auth callback per provider. `createAuthCallback()` remembers
+  // the last token it handed out, which is the only fallback left when a
+  // transport reports `unauthorized` without a `previousToken`. A callback
+  // created per invocation always starts with an empty memory and would make
+  // the provider return the rejected token unchanged.
+  let eagerSyncAuthCallback: ReturnType<LoroStreamsTokenProvider['createAuthCallback']> | null =
+    null;
   let jsonStreamClient: LoroStreamsJsonStreamClient | null = null;
   let machineRpcStreamsClientReady: Promise<LoroStreamsJsonStreamClient> | null = null;
   let transportStreamsBaseUrl: string | null = null;
@@ -1523,6 +1545,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         authToken: () => authToken,
         onEvent: logTokenProviderEvent,
       });
+      eagerSyncAuthCallback = streamsTokenProvider.createAuthCallback();
     }
     return streamsTokenProvider;
   };
@@ -2620,6 +2643,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (invalidateTokenProvider) {
       streamsTokenProvider?.invalidate();
       streamsTokenProvider = null;
+      eagerSyncAuthCallback = null;
     }
     detachMetaRoomStatusListener?.();
     detachMetaRoomStatusListener = null;
@@ -2969,6 +2993,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     transportStreamsBaseUrl = null;
     streamsTokenProvider?.invalidate();
     streamsTokenProvider = null;
+    eagerSyncAuthCallback = null;
   };
 
   const joinAndWatchMetaRoom = async (syncPhase: 'initial' | 'recovery') => {
@@ -3695,9 +3720,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
       };
     },
-    auth: async (reason) => {
-      if (!cloudPlaneEnabled || !streamsTokenProvider) return undefined;
-      return streamsTokenProvider.createAuthCallback()(reason ? { reason } : undefined);
+    auth: async (context) => {
+      if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
+      return eagerSyncAuthCallback(context);
     },
   });
 
@@ -3707,6 +3732,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // Open persisted doc immediately - this reads from local IndexedDB
     // and does NOT require transport/workspaceId
     const persistedDoc = await repo.openPersistedDoc(roomId);
+    const sessionDoc = persistedDoc.doc as LoroDoc;
 
     // Only an actual store consumer materializes a prefetched snapshot. Import
     // merges with this replica's unsent user edits; never replace its document.
@@ -3723,10 +3749,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
     }
 
-    const mirror = createSessionMirror({
-      doc: persistedDoc.doc as LoroDoc,
-      // Plan is now stored per-turn on history entries, not at root level
-      initialState: { session: { id: sessionId }, history: [] },
+    const {
+      mirror,
+      history,
+      sessionData,
+      dispose: disposeConversation,
+    } = createConversationSession(sessionDoc, {
+      sessionId,
     });
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
@@ -3857,18 +3886,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         syncTracker.subscribeSyncState((state) => {
           listener(syncLeaseCount > 0 || roomSub || syncJoinPromise ? state : 'idle');
         }),
-      getState: () => mirror.getState(),
-      historyWriter: mirror.historyWriter,
+      getState: () => mirror.getState() as SessionDocState,
       setState: (updater) => {
         mirror.setState(updater as never);
       },
-      subscribe: (listener) => mirror.subscribe(listener),
+      subscribe: (listener) => mirror.subscribe(listener as never),
+      history,
+      sessionData,
       dispose: () => {
         disposed = true;
         materializedSessionIds.delete(sessionId);
         stopSyncNow();
         syncTracker.dispose();
-        mirror.dispose();
+        disposeConversation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
         await transportReady.promise;
@@ -4279,7 +4309,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     watchHandles.push(watchHandle);
 
     backgroundSyncCoordinatorStartPromise = (async () => {
-      const highWaterStore = await createEagerSyncHighWaterStore(workspaceId);
+      const highWaterStore = await createEagerSyncHighWaterStore(cacheIdentity.namespace);
       if (disposePromise) {
         highWaterStore.close();
         return;

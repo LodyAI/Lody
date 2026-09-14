@@ -100,6 +100,15 @@ Codex 先需归一化并解决模型/生命周期归属。不能编造 delta 费
 
 ## 审查后续：范围内修复
 
+2026-09-14 集成结论更正：Lody main `6de01729` 已包含 #664，启动器已迁移到
+多文件 profile、`dsh` 命令和逐包版本 specifier。此前启动器不兼容的结论适用于
+合并前分支，不适用于当前集成结果。合入 DSH `ee8570f`，同时保留持久事件统计与
+临时思考流，并取消跟踪全部生成的 `dist` 文件。DSH 构建、19 项测试、格式检查通过。
+Codex 保留原生压缩取消修复及统计改动，构建和 19 项用量/通信测试通过；112 项 ACP
+测试因隔离依赖缺少 Codex 可执行文件而在初始化失败。根检查仍缺工作区依赖。
+官方 Harness 0.1.5-rc.2 源码仍保留正常完成请求的 usage 结构和缓存/推理桶口径；
+这不代表已完成鉴权端到端验证。
+
 关联审查 PR：[Codex #42](https://github.com/LodyAI/acp-extension-codex/pull/42)、
 [Claude #26](https://github.com/LodyAI/acp-extension-claude/pull/26)、
 [Kimi #10](https://github.com/LodyAI/acp-extension-kimi/pull/10)。Core #9 和 DSH #16

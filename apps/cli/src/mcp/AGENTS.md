@@ -62,6 +62,10 @@ Parent instructions apply.
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and
   Machine RPC snapshot. Operation rules: [orchestration/AGENTS.md](../orchestration/AGENTS.md).
+- `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
+  `limit` counts displayable turns, the cursor is the raw position from the previous page, and
+  hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a
+  scan budget never claims the history ended.
 - Bound every task reply: body 64 KiB with head-and-tail truncation
   (`bodyTruncated`/`bodyOmittedBytes`), newest 20 comments with `commentCount`, 50 links,
   `lody_task_list` 20/100 with `matched`. `lody_task_edit_body` still matches exactly against the

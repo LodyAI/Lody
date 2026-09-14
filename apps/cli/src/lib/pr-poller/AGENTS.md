@@ -91,7 +91,6 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared
   mutable state and may be briefly stale after Git operations outside Lody; the
   next runtime branch sync / metadata reprojection is the accepted repair path.
-  This does NOT authorize post-turn automatic commit/push in the shared directory.
 - **No turn-end hook.** Post-turn freshness comes from the `lastMessageAt`
   activity rule (high lane for 10 min); do not re-add scheduler callbacks to
   turn finalization.

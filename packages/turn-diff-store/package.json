@@ -4,7 +4,7 @@
   "description": "Content-defined, compressed SQLite storage for local turn diff snapshots.",
   "type": "module",
   "engines": {
-    "node": ">=22.14.0"
+    "node": ">=22.14.0 <23 || >=23.6.0"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",

@@ -28,7 +28,7 @@ describe('acp notification fixtures', () => {
 
     try {
       await appendAutonomousACPNotifications(doc, notifications);
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const toolCalls = history
         .flatMap((h) => {
           const rawItems = h.items;

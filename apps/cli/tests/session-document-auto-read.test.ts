@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { LoroMap } from 'loro-crdt';
+import { updateTestHistory } from './history-port-fixture';
+import { describe, expect, it, vi } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,6 +19,43 @@ const createUserEntry = (id: string, text: string): SessionHistoryInput => ({
 });
 
 describe('SessionDocument auto read', () => {
+  it('acknowledges from shallow fields without reading assistant bodies on notifications', async () => {
+    const repo = await LoroRepo.create({});
+    const session = new SessionDocument(repo, uuidv4() as SessionId);
+    try {
+      await session.initOffline({
+        history: [
+          createUserEntry('user', 'hello'),
+          {
+            id: 'assistant',
+            role: 'assistant',
+            timestamp: 'synthetic',
+            items: [{ type: 'text', text: 'long body' }],
+          },
+        ],
+      });
+      const bodies: string[] = [];
+      const original = LoroMap.prototype.toJSON;
+      const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(function () {
+        const id = this.get('id');
+        if (typeof id === 'string') bodies.push(id);
+        return original.call(this);
+      });
+      try {
+        const doc = session.handle!.doc;
+        (doc.getList('history').get(1) as LoroMap).set('finished', true);
+        doc.commit();
+        expect(bodies).toEqual([]);
+        expect(session.sessionData.history.readDirectory(0, 1)[0]?.scalars?.status).toBe('seen');
+        expect(session.sessionData.history.readDirectory(1, 2)[0]?.scalars?.finished).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await repo.destroy();
+    }
+  });
+
   it('marks latest user entry as read on history updates', async () => {
     const repo = await LoroRepo.create({});
     try {
@@ -24,10 +63,14 @@ describe('SessionDocument auto read', () => {
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
 
-      await doc.updateHistory((history) => history.concat(createUserEntry('h1', 'hi')));
-      await Promise.resolve();
+      await updateTestHistory(doc, (history) => history.concat(createUserEntry('h1', 'hi')));
+      // Auto-read is a background port command now: wait for the accepted write
+      // instead of assuming a single microtask.
+      await vi.waitFor(async () => {
+        expect((await doc.sessionData.history.readAll())[0]!.status).toBe('seen');
+      });
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.role).toBe('user');
       expect(history[0]!.status).toBe('seen');
@@ -44,12 +87,15 @@ describe('SessionDocument auto read', () => {
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
 
-      await doc.updateHistory((history) =>
+      await updateTestHistory(doc, (history) =>
         history.concat([createUserEntry('h1', 'first'), createUserEntry('h2', 'second')])
       );
-      await Promise.resolve();
+      await vi.waitFor(async () => {
+        const current = await doc.sessionData.history.readAll();
+        expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
+      });
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(2);
       const first = history.find((entry) => entry.id === 'h1');
       const second = history.find((entry) => entry.id === 'h2');
@@ -68,12 +114,16 @@ describe('SessionDocument auto read', () => {
       const sessionId = uuidv4() as SessionId;
       const doc = new SessionDocument(repo, sessionId);
       await doc.initOffline({ history: [] });
-      await doc.updateHistory(() => [
+      await updateTestHistory(doc, () => [
         createUserEntry('h1', 'first'),
         createUserEntry('h2', 'second'),
       ]);
+      await vi.waitFor(async () => {
+        const current = await doc.sessionData.history.readAll();
+        expect(current.find((entry) => entry.id === 'h2')?.status).toBe('seen');
+      });
 
-      const before = await doc.getHistory();
+      const before = await doc.sessionData.history.readAll();
       expect(before).toHaveLength(2);
       const beforeFirst = before.find((entry) => entry.id === 'h1');
       const beforeSecond = before.find((entry) => entry.id === 'h2');
@@ -84,7 +134,7 @@ describe('SessionDocument auto read', () => {
 
       await doc.markLatestUserHistoryAsSeenIfNeeded();
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(2);
       const first = history.find((entry) => entry.id === 'h1');
       const second = history.find((entry) => entry.id === 'h2');

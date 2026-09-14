@@ -129,6 +129,7 @@ describe('acpOwnsSessionTitleGeneration', () => {
   it('keeps isolated title generation for adapters without ACP title support', () => {
     expect(acpOwnsSessionTitleGeneration('builtin', 'kimi')).toBe(false);
     expect(acpOwnsSessionTitleGeneration('builtin', 'deepseek')).toBe(false);
+    expect(acpOwnsSessionTitleGeneration('builtin', 'bub')).toBe(false);
   });
 
   // The table describes each agent's managed runtime. An override can aim the

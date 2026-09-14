@@ -351,7 +351,7 @@ Work through these tasks systematically.`,
 
       // Apply notifications to history
       await appendAutonomousACPNotifications(doc, notifications);
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
 
       // Export notification data
       const fixturesDir = path.join(__dirname, '..', 'fixtures', 'acp');

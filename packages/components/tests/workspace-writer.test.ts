@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
-import { LoroDoc } from 'loro-crdt';
+import { LoroDoc, LoroList } from 'loro-crdt';
 import {
   createPreviewVisualComment,
   createPreviewVisualCommentDoc,
   createSessionMirror,
+  createHistoryWriter,
   type SessionHistory,
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
 import {
@@ -148,7 +150,16 @@ describe('createDirectWorkspaceWriter', () => {
         repo: {} as never,
         acquireSessionStore: async () => {
           await acquired;
-          return mirror as never;
+          // Windowed composition has no full-history Mirror callback.
+          const historyWriter = createHistoryWriter(doc);
+          return {
+            historyWriter,
+            sessionData: createLoroSessionData({
+              sessionId: 'session' as never,
+              doc,
+              writer: historyWriter,
+            }),
+          } as never;
         },
         releaseSessionStoreRef: () => {},
         acquirePreviewVisualCommentStore: async () => {
@@ -176,7 +187,16 @@ describe('createDirectWorkspaceWriter', () => {
       if (mode === 'before acquisition')
         doc.import(peer.export({ mode: 'update', from: doc.version() }));
       release();
-      await pending;
+      const listToJSON = LoroList.prototype.toJSON;
+      const guard = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(function () {
+        if (this.id === doc.getList('history').id) throw new Error('Full history body read');
+        return listToJSON.call(this);
+      });
+      try {
+        await pending;
+      } finally {
+        guard.mockRestore();
+      }
       const localUpdate = doc.export({ mode: 'update', from: peer.version() });
       const peerUpdate = peer.export({ mode: 'update', from: doc.version() });
       doc.import(peerUpdate);
@@ -225,7 +245,15 @@ describe('createDirectWorkspaceWriter', () => {
     });
     const writer = createDirectWorkspaceWriter({
       repo: {} as never,
-      acquireSessionStore: async () => mirror as never,
+      acquireSessionStore: async () =>
+        ({
+          ...mirror,
+          sessionData: createLoroSessionData({
+            sessionId: 'session-1' as never,
+            doc,
+            writer: mirror.historyWriter,
+          }),
+        }) as never,
       releaseSessionStoreRef: () => {},
       acquirePreviewVisualCommentStore: async () => {
         throw new Error('not used');
