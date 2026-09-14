@@ -12,11 +12,11 @@ Translation: pending
 完整账本保留供可选审计与历史密钥。签名、核对摘要必须绑定实际完整状态、Org、
 创世、位置和 head；签署者信任必须外部建立，不能由快照自封 Owner。与另一位
 已认证诚实成员的独立核对可以发现分歧，不证明历史完全合法或全球最新。
-新入口尚未实现，资格/格式/API 先定稿；增量、持久化、恢复和真实消费者须重新验收。
-以公开规范 §6.1/§11 为准。S1 最小 API 提案见
-[2026-09-14 签名权限快照](2026-09-14-e2ee-signed-snapshot.zh.md)，尚未确认、尚未实现。
+新入口已按确认 API 落地于 `70ffef7`；S1–S5 快照阶段已整理，不是 V4。
+以公开规范 §6.1/§11 为准。S1 确认与实现见
+[2026-09-14 签名权限快照](2026-09-14-e2ee-signed-snapshot.zh.md)。R2/C3 为后续验收（DEC-002），仍未验。
 下面的 freeze、测试和 B 门槛描述均为修订前历史，
-不代表新入口通过。原有撤权、CAS/新鲜度、内容快照来源与恢复边界不变。
+不覆盖快照入口或 V4。原有撤权、CAS/新鲜度、内容快照来源与恢复边界不变。
 
 ## 历史摘要
 
@@ -25,9 +25,8 @@ Translation: pending
 `plans/20260913-e2ee-independent-package-handoff.zh.md`。P1/P2 已勾；P3 **未通过总项**
 （K1–K3/R1/R4/C1/M1 已勾；R3 文件双进程含成员失效已测但 PRF 未过不勾；C2 部分；
 M2/M3 部分：Lean 投影对照 `Ledger.state`，复用 id=`replay`、Guest+machine=`unauthorized`；
-B/R2/C3 未勾）。JSON/hex 原型内部化为 `src/legacy.ts`。V1 landed=0。V4 未勾：代码
-freeze 不是验收完成，也不是人类交接。B 保持 100ms 未达标（不勾）；R2/C3 为宿主/设备
-前提（不勾）。生产 Streams CAS 仍 501。未 push、未启用产品 E2EE。
+B 已撤销；R2/C3 后续验收仍未验）。JSON/hex 原型内部化为 `src/legacy.ts`。V1 landed=0。V4 未勾：代码
+freeze 不是验收完成，也不是人类交接。B 不勾；R2/C3 为后续验收阶段（DEC-002），仍未验。生产 Streams CAS 仍 501。未 push、未启用产品 E2EE。
 
 2026-09-13 C3 改在 `http://localhost` 探测（有效 WebAuthn RP ID，不再用 127.0.0.1
 的 invalid domain）。Chrome 152 headless：`isUVPAA=true`，`credentials.create({prf})`

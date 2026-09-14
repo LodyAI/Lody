@@ -1,15 +1,17 @@
 # @lody/e2ee-core
 
-**Design update (2026-09-13; not implemented):** normal first join will verify an
-authenticated device's signed authorization-state snapshot, then every increment.
-Full replay remains an optional audit. The 10k/100ms gate is withdrawn, not passed;
-SIMD/Wasm/multithreading optimization for that target is no longer required.
-See [snapshot trust and acceptance](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现).
-`Ledger.verifySnapshot` is implemented for the confirmed S1 API (out-of-band
-genesis + endorser + attested head + head signature). Independent comparison
-binds actual state as well as chain head; endorsement is not independent
-verification of all history. S3–S5 (client compare, recovery persistence,
-public-export consumer) are not done. Product integration remains paused.
+**Design update (2026-09-13; snapshot stage landed 2026-09-14):** normal first
+join verifies an authenticated device's signed authorization-state snapshot, then
+every increment. Full replay remains an optional audit. The 10k/100ms gate is
+withdrawn, not passed; SIMD/Wasm/multithreading optimization for that target is
+no longer required. See [snapshot trust and acceptance](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现)
+(heading kept for the stable link). `Ledger.verifySnapshot` and
+`LedgerClient.openFromSnapshot` are implemented at
+`70ffef73edaa50f50a935f5fe8a78aadab4f13be`. Independent comparison binds actual
+state as well as chain head; endorsement is not independent verification of all
+history. Snapshot-stage S1–S5 is packaged for later review; that is not V4, not
+merge/push, and not product enablement. Real-phone Passkey PRF (R2/C3) is a later
+acceptance stage and remains untested. Product integration remains paused.
 
 **Publication scope (2026-09-14):** this update commits documentation only. The
 recovery-device, Lean correspondence and backend-probe revisions described below

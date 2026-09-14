@@ -269,7 +269,7 @@ const record = await ledger.finalize(proposal, signature);
 ### 6.1 签名快照引导（已确认方向，尚未实现）
 
 2026-09-13 决策修订：首次加入不要求全历史验签/权限重放，取消 10k/100ms 接入门槛。
-标题仍写「尚未实现」以保持链接；`verifySnapshot` 已按 2026-09-14 确认的 API 开始落地，S3–S5 未完成。
+标题仍写「尚未实现」以保持链接；`verifySnapshot` / `openFromSnapshot` 已按 2026-09-14 确认的 API 落地于 `70ffef7`。S1–S5 快照阶段已整理，可供后续审查和接手；不是 V4、不是 merge/push、不是产品上线。R2/C3（真机/Passkey）为后续验收，仍未验。
 采用已有设备对当前权限状态的签名背书，允许加入后通过额外信道与其他成员核对。
 这不是继承 MLS 协议或证明，也不是把旧 `Ledger.verify` 改成跳过签名。
 
@@ -307,8 +307,9 @@ const record = await ledger.finalize(proposal, signature);
 `comparisonNote` / `compareNotes`。`verifySnapshot({ trust, snapshot, suffix })`
 的 `trust` 含 genesis、endorser、head、headSignature。快照为链外 DAG-CBOR，不是
 普通 op。当前 `Ledger.verify/extend` 测试只证明全量/增量路径；快照路径以
-`test/ledger-snapshot.test.ts` 为准，S3–S5 未完成前不得交接。不得把反序列化对象
-当成账本视图。普通记录 wire 不变。
+`test/ledger-snapshot.test.ts`、`test/ledger-snapshot-client.test.ts` 和公开
+`bench/readme-consumer.ts` 为准。S1–S5 快照阶段已整理于 `70ffef7`，不是 V4。
+不得把反序列化对象当成账本视图。普通记录 wire 不变。
 
 ### 6.2 已建立起点后的增量对账
 
