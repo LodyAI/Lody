@@ -482,7 +482,6 @@ export const LoroSessionQueueSteerRpcRequestSchema = BaseRpcRequestSchema.extend
       sessionId: SessionIdSchema,
       expectedTurnId: z.string().trim().min(1),
       queueItemId: z.string().trim().min(1),
-      requestedByUserId: z.string().trim().min(1),
     })
     .strict(),
 }).strict();
@@ -2732,7 +2731,6 @@ export class LoroStreamsMachineRpcClient {
     sessionId: SessionId;
     expectedTurnId: string;
     queueItemId: string;
-    requestedByUserId: string;
     timeoutMs?: number;
   }): Promise<SessionQueueSteerResponse | null> {
     return (await this.sendRequest({
@@ -2742,7 +2740,6 @@ export class LoroStreamsMachineRpcClient {
         sessionId: options.sessionId,
         expectedTurnId: options.expectedTurnId,
         queueItemId: options.queueItemId,
-        requestedByUserId: options.requestedByUserId,
       },
     })) as SessionQueueSteerResponse | null;
   }
@@ -3231,7 +3228,6 @@ export class LoroStreamsMachineRpcClient {
             sessionId: SessionId;
             expectedTurnId: string;
             queueItemId: string;
-            requestedByUserId: string;
           };
         }
       | {

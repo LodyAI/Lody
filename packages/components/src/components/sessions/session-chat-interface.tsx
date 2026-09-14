@@ -5116,7 +5116,7 @@ export const SessionChatInterface = memo(
 
     const handleExactQueueItemSteer = useCallback(
       async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId || !currentUser?.id) {
+        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
           return;
         }
         if (steeringQueueItemIdsRef.current.has(item.$cid)) return;
@@ -5126,7 +5126,7 @@ export const SessionChatInterface = memo(
             session.id,
             activeAssistantTurnId,
             item.$cid,
-            { machineId: session.machineId, requestedByUserId: currentUser.id }
+            { machineId: session.machineId }
           );
           captureSessionEvent('session/queue_steer_result', {
             queue_item_id: item.$cid,
@@ -5165,7 +5165,6 @@ export const SessionChatInterface = memo(
       [
         activeAssistantTurnId,
         captureSessionEvent,
-        currentUser?.id,
         isExternalHistoryRefreshing,
         requestSessionQueueSteer,
         session.id,

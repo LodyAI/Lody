@@ -55,8 +55,8 @@ and the `file/preview` namespace are in
   dispatch watcher — never run the agent turn inside the handler. Its `expiresAt`
   is deliberately short (== client timeout, ~15s) because a server restart replays
   the request stream from offset `'-1'`.
-- Session orchestration authorization is checked source-side with the source CLI
-  token because workspace RPC cannot authenticate a claimed requester identity.
+- Authorize orchestration at source (CLI token or renderer access snapshot);
+  workspace RPC never trusts claimed requester ids.
   `session/live-status` reads the target
   daemon's active-presence controller and must not infer liveness from durable
   `SessionMeta.status` or message pointers.

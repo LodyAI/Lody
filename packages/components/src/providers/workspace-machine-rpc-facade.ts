@@ -95,6 +95,8 @@ export type WorkspaceMachineRpcFacadeDeps = {
   getMachineProtocolCapabilities: (
     machineId: MachineId
   ) => Promise<MachineProtocolCapabilities | undefined>;
+  /** Authenticated source snapshot; null means cloud authorization is not ready. */
+  getAuthorizedMachineIds?: () => ReadonlySet<MachineId> | null;
   getMachineRpcClient: (machineId: MachineId) => Promise<LoroStreamsMachineRpcClient>;
 };
 
@@ -774,7 +776,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       sessionId: SessionId;
       expectedTurnId: string;
       queueItemId: string;
-      requestedByUserId: string;
     },
     options?: { timeoutMs?: number }
   ): Promise<SessionQueueSteerResponse | null> => {
@@ -809,6 +810,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionQueueSteerResponse;
+      }
+      const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
+      if (!authorizedMachineIds?.has(machineId)) {
+        return {
+          type: 'session/queue-steer_response',
+          sessionId: args.sessionId,
+          queueItemId: args.queueItemId,
+          accepted: false,
+          disposition: 'error',
+          error: 'Source authorization for this machine is unavailable or denied.',
+        };
       }
       return await (
         await getMachineRpcClient(machineId)

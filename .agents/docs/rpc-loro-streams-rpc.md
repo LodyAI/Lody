@@ -25,6 +25,9 @@ request names both the expected active turn and exact queued item, and callers r
 negotiated `queueItemSteer` protocol capability. The CLI consumes the item only when its
 editing lease is inactive, then preserves native ACP Steer when acknowledged or cancels the
 expected turn for ordinary follow-up dispatch. Missing, editing, and stale targets do neither.
+Before a remote renderer writes this control request, it fails closed against its authenticated
+`machines:listVisibleMachines` snapshot. The retained request contains no requester identity:
+the target daemon cannot authenticate such a claim and must not grant its owner fast path from it.
 
 ## Remote lifecycle acknowledgements
 

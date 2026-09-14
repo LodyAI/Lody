@@ -1720,6 +1720,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
       return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
     },
+    getAuthorizedMachineIds: deps.getAuthorizedMachineIds,
     workspaceId,
     targetRouter,
     getMachineRpcClient,

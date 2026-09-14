@@ -322,7 +322,6 @@ export type WorkspaceRuntime = {
       sessionId: SessionId;
       expectedTurnId: string;
       queueItemId: string;
-      requestedByUserId: string;
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionQueueSteerResponse | null>;

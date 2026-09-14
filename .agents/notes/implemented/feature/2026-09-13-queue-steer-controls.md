@@ -26,6 +26,11 @@ the selected identity is missing.
   `session/queue-steer` only when that version is present; missing means unsupported. The
   request names the queue `$cid` and expected active turn, and the renderer waits for the
   result without changing queue or history locally.
+- Authorize a remote request before appending it, using the renderer's authenticated,
+  Convex-authoritative visible-machine snapshot. Fail closed while that snapshot is unavailable
+  or excludes the target. The RPC carries no requester identity because a target daemon cannot
+  authenticate an identity claimed by a workspace stream writer. Same-host local IPC remains the
+  trusted local control path.
 - Let the daemon choose the execution mechanism after validating both identities and the
   target's editing lease. With acknowledged native ACP Steer, it atomically consumes the row
   as `pending_apply` and enters the existing `steerPrompt` handoff. Without native Steer, it
@@ -61,8 +66,8 @@ become accidental drag starters.
 - CLI service and Session Doc tests cover exact C consumption, native `steerPrompt`, exact
   cancellation, missing and active-edit rejection, cancellation failure, and response-loss
   retries.
-- Machine RPC and protocol-capability tests cover both required identities and mixed-version
-  negotiation.
+- Machine RPC and protocol-capability tests cover the queue/turn identities, rejection of a
+  requester identity claim, source authorization, and mixed-version negotiation.
 - Component tests use synthetic pointer state. Physical touch dragging and a full
   provider-backed steer run were not exercised.
 

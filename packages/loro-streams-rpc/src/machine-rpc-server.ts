@@ -356,7 +356,6 @@ type RpcServerDeps = {
     sessionId: SessionId;
     expectedTurnId: string;
     queueItemId: string;
-    requestedByUserId: string;
   }) => Promise<SessionQueueSteerResponse>;
   steerSession?: (args: {
     sessionId: SessionId;
@@ -1127,7 +1126,6 @@ export class LoroStreamsMachineRpcServer {
             sessionId: request.params.sessionId as SessionId,
             expectedTurnId: request.params.expectedTurnId,
             queueItemId: request.params.queueItemId,
-            requestedByUserId: request.params.requestedByUserId,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;

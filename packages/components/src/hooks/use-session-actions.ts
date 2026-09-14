@@ -305,7 +305,7 @@ export type SessionActions = {
     sessionId: SessionId,
     expectedTurnId: string,
     queueItemId: string,
-    options: { requestedByUserId: string; machineId?: MachineId | null }
+    options?: { machineId?: MachineId | null }
   ) => Promise<SessionQueueSteerResponse | null>;
   /**
    * Run a goal action through the agent's control extension.
@@ -964,13 +964,13 @@ export function useSessionActions(): SessionActions {
       sessionId: SessionId,
       expectedTurnId: string,
       queueItemId: string,
-      options: { requestedByUserId: string; machineId?: MachineId | null }
+      options?: { machineId?: MachineId | null }
     ): Promise<SessionQueueSteerResponse | null> => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
       const roomId = getSessionRoomId(sessionId);
-      let machineId = options.machineId ?? null;
+      let machineId = options?.machineId ?? null;
       if (!machineId) {
         const existing = await runtime.repo.getDocMeta(roomId);
         const meta = isLoroRepoDocDeleted(existing)
@@ -978,15 +978,13 @@ export function useSessionActions(): SessionActions {
           : (existing?.meta as SessionMeta | undefined);
         machineId = meta?.machineId ?? null;
       }
-      const requestedByUserId = options.requestedByUserId.trim();
-      if (!machineId || !requestedByUserId) {
+      if (!machineId) {
         return null;
       }
       return await runtime.requestSessionQueueSteer(machineId, {
         sessionId,
         expectedTurnId,
         queueItemId,
-        requestedByUserId,
       });
     },
     [runtime]

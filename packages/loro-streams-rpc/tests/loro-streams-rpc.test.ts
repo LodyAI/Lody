@@ -115,11 +115,32 @@ describe('queued message steer RPC schema', () => {
         sessionId: 'session-1',
         expectedTurnId: 'assistant:user-1',
         queueItemId: 'queue-C',
-        requestedByUserId: 'user-1',
       },
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('rejects an untrusted requester identity claim', () => {
+    const result = LoroStreamsRpcRequestSchema.safeParse({
+      jsonrpc: '2.0',
+      id: 'request-queue-steer-1',
+      method: 'session/queue-steer',
+      rpcVersion: '1',
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      replyTo: 'workspace-1:rpc:res',
+      sentAt: 1,
+      expiresAt: 2,
+      params: {
+        sessionId: 'session-1',
+        expectedTurnId: 'assistant:user-1',
+        queueItemId: 'queue-C',
+        requestedByUserId: 'owner-user',
+      },
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 

@@ -47,7 +47,6 @@ describe('local Machine RPC', () => {
         sessionId: 'session-1',
         expectedTurnId: 'assistant:turn-0',
         queueItemId: 'queue-C',
-        requestedByUserId: 'user-1',
       },
     },
     {

@@ -49,7 +49,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
         sessionId,
         expectedTurnId: 'assistant-active',
         queueItemId: 'queue-C',
-        requestedByUserId: 'user-1',
       })
     ).resolves.toMatchObject({ accepted: true, queueItemId: 'queue-C' });
     expect(invoke).toHaveBeenCalledWith(
@@ -62,7 +61,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
           sessionId,
           expectedTurnId: 'assistant-active',
           queueItemId: 'queue-C',
-          requestedByUserId: 'user-1',
         },
       })
     );
@@ -88,10 +86,68 @@ describe('createWorkspaceMachineRpcFacade', () => {
         sessionId,
         expectedTurnId: 'assistant-active',
         queueItemId: 'queue-C',
-        requestedByUserId: 'user-1',
       })
     ).resolves.toMatchObject({ accepted: false, disposition: 'unsupported' });
     expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before remote queue Steer when source authorization is unavailable', async () => {
+    const requestSessionQueueSteer = vi.fn();
+    const getMachineRpcClient = vi.fn(async () => ({ requestSessionQueueSteer }));
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getAuthorizedMachineIds: () => null,
+      targetRouter: {
+        getPlaneForMachine: () => 'remote',
+        resolvePlaneForMachine: async () => 'remote',
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSessionQueueSteer(remoteMachineId, {
+        sessionId,
+        expectedTurnId: 'assistant-active',
+        queueItemId: 'queue-C',
+      })
+    ).resolves.toMatchObject({ accepted: false, disposition: 'error' });
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('sends remote queue Steer only for a source-authorized machine and carries no identity claim', async () => {
+    const requestSessionQueueSteer = vi.fn(async () => ({
+      type: 'session/queue-steer_response' as const,
+      sessionId,
+      queueItemId: 'queue-C',
+      userTurnId: 'user-C',
+      accepted: true,
+      disposition: 'accepted' as const,
+    }));
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getAuthorizedMachineIds: () => new Set([remoteMachineId]),
+      targetRouter: {
+        getPlaneForMachine: () => 'remote',
+        resolvePlaneForMachine: async () => 'remote',
+      },
+      getMachineRpcClient: async () => ({ requestSessionQueueSteer }) as never,
+    });
+
+    await expect(
+      facade.requestSessionQueueSteer(remoteMachineId, {
+        sessionId,
+        expectedTurnId: 'assistant-active',
+        queueItemId: 'queue-C',
+      })
+    ).resolves.toMatchObject({ accepted: true });
+    expect(requestSessionQueueSteer).toHaveBeenCalledWith({
+      sessionId,
+      expectedTurnId: 'assistant-active',
+      queueItemId: 'queue-C',
+      timeoutMs: 5_000,
+    });
   });
 
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {

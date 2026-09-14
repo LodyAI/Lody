@@ -201,7 +201,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
         sessionId: SessionIdSchema,
         expectedTurnId: z.string().trim().min(1),
         queueItemId: z.string().trim().min(1),
-        requestedByUserId: z.string().trim().min(1),
       })
       .strict(),
   }).strict(),

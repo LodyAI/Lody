@@ -340,7 +340,6 @@ describe('SessionExecutionService', () => {
       sessionId,
       expectedTurnId: activeTurnId,
       queueItemId: 'C',
-      requestedByUserId: 'owner-user',
     };
     await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
       accepted: true,
@@ -407,7 +406,6 @@ describe('SessionExecutionService', () => {
         sessionId,
         expectedTurnId: activeTurnId,
         queueItemId: 'C',
-        requestedByUserId: 'owner-user',
       })
     ).resolves.toMatchObject({
       accepted: false,
@@ -460,7 +458,6 @@ describe('SessionExecutionService', () => {
         sessionId,
         expectedTurnId: activeTurnId,
         queueItemId: 'C',
-        requestedByUserId: 'owner-user',
       })
     ).resolves.toMatchObject({ accepted: false, disposition: 'queue-item-editing' });
     expect(cancel).not.toHaveBeenCalled();
@@ -511,7 +508,6 @@ describe('SessionExecutionService', () => {
       sessionId,
       expectedTurnId: activeTurnId,
       queueItemId: 'C',
-      requestedByUserId: 'owner-user',
     };
 
     await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
@@ -633,7 +629,6 @@ describe('SessionExecutionService', () => {
         sessionId,
         expectedTurnId: 'assistant:user-1',
         queueItemId: queuedItem.$cid,
-        requestedByUserId: 'user-1',
       })
     ).resolves.toMatchObject({ accepted: true, disposition: 'accepted', userTurnId: 'user-2' });
     expect(onTurnSettled).toHaveBeenCalledOnce();

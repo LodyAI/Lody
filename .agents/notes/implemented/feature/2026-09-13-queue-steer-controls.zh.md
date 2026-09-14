@@ -21,6 +21,9 @@ Translation: current
 - 在 `MachineMeta.protocolCapabilities` 声明 `queueItemSteer`。只有该版本存在时，Renderer
   才调用 `session/queue-steer`；缺失即表示不支持。请求携带队列 `$cid` 与预期活动 turn，
   Renderer 等待结果，不在本地修改队列或历史。
+- 远程请求写入前，Renderer 必须使用已认证且以 Convex 为权威来源的可见 machine 快照做
+  授权；快照尚不可用或不包含目标时应 fail closed。RPC 不携带请求者身份，因为目标 daemon
+  无法认证 workspace stream 写入者声称的身份。同机 local IPC 仍是可信的本地控制路径。
 - Daemon 确认两个 ID 及目标 editing lease 后决定执行机制。支持 acknowledged native ACP
   Steer 时，原子消费目标行为 `pending_apply`，并进入既有 `steerPrompt` handoff；否则消费为
   普通 pending turn，再只取消预期活动 turn。
@@ -48,7 +51,8 @@ native steer，因为 `steerPrompt` 注入当前 prompt，而 cancel-and-dispatc
   拖动区域边界。
 - CLI service 与 Session Doc 测试覆盖精确消费 C、native `steerPrompt`、精确取消、目标缺失、
   editing lease、取消失败及响应丢失重试。
-- Machine RPC 与 protocol capability 测试覆盖两个必需 ID 和混合版本协商。
+- Machine RPC 与 protocol capability 测试覆盖队列／turn 两个 ID、拒绝请求者身份声明、来源
+  授权以及混合版本协商。
 - 组件测试使用合成指针状态；未验证物理触摸拖动和完整的 Provider-backed steer 流程。
 
 ## 参考

@@ -1414,7 +1414,6 @@ export class SessionExecutionService {
     sessionId: SessionId;
     expectedTurnId: string;
     queueItemId: string;
-    requestedByUserId: string;
   }): Promise<SessionQueueSteerResponse> {
     const operationKey = JSON.stringify([
       options.sessionId,

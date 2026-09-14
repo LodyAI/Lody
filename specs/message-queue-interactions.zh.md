@@ -31,6 +31,11 @@ Translation: current
   任何兼容路径都不得先重排后续项再取消。从 `[A, B, C]` 通过精确协议选择 C 时，只消费 C，
   剩余队列保持 `[A, B]`。
 
+  远程 Renderer 在写入请求前，必须使用其已认证的权威 machine-access 快照验证目标；快照
+  不可用时应 fail closed。请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
+  声称的成员 ID，目标 daemon 也不得用它命中 owner fast path。同机 local IPC 已是可信的
+  本地控制边界。
+
 - 过期或冲突的精确“引导”选择必须失败且无副作用。所选 ID 已不存在、编辑 lease 仍有效，或
   预期 turn 已不再拥有执行权时，daemon 不得提交 native Steer，也不得停止任何 turn。Renderer
   等待确认，不自行移除队列项或为精确协议写历史。

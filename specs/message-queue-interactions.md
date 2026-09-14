@@ -36,6 +36,12 @@ the queue by hand.
   No compatibility path may reorder a later item and then cancel. Selecting C from
   `[A, B, C]` through the exact protocol consumes C and leaves `[A, B]` in that order.
 
+  A remote renderer must authorize the target before writing the request, using its
+  authenticated authoritative machine-access snapshot and failing closed if that snapshot is
+  unavailable. The request carries no requester identity: workspace Machine RPC cannot
+  authenticate a caller-supplied member ID, and the target daemon must not use one for an owner
+  fast path. Same-host local IPC is already the trusted local control boundary.
+
 - A stale or conflicting exact Steer selection is a failed no-op. If the selected queue
   identity is missing, its editing lease is active, or the expected turn no longer owns
   execution, the daemon must not submit native Steer or stop any turn. The renderer waits for

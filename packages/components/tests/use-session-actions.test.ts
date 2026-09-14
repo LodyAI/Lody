@@ -389,16 +389,12 @@ describe('useSessionActions', () => {
     const actions = await renderActions(runtime);
 
     await expect(
-      actions.requestSessionQueueSteer(sessionId, 'assistant-active', 'queue-C', {
-        machineId,
-        requestedByUserId: 'user-1',
-      })
+      actions.requestSessionQueueSteer(sessionId, 'assistant-active', 'queue-C', { machineId })
     ).resolves.toMatchObject({ accepted: true, queueItemId: 'queue-C' });
     expect(requestSessionQueueSteer).toHaveBeenCalledWith(machineId, {
       sessionId,
       expectedTurnId: 'assistant-active',
       queueItemId: 'queue-C',
-      requestedByUserId: 'user-1',
     });
   });
 
