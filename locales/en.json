@@ -655,6 +655,8 @@
   "composer.pastedTextRemove": "Remove pasted text",
   "composer.pastedTextSummary": "{{charCount}} chars · {{lineCount}} lines",
   "composer.pastedTextTitle": "Pasted text",
+  "composer.pastedTextTooLarge": "Pasted text is too large ({{size}}).",
+  "composer.pastedTextTooLargeDescription": "The limit is {{limit}}. Attach it as a file instead.",
   "composer.promptPlaceholder.base": "",
   "composer.promptPlaceholder.commands": "Press '/' for commands.",
   "composer.promptPlaceholder.commandsMentions": "Press '/' for commands, '@' for mentions.",
