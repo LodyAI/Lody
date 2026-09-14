@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#715](https://github.com/LodyAI/Lody/pull/715)
+
 [English](2026-09-14-mcp-chat-network-boundaries.md)
 
 ## 摘要
