@@ -119,6 +119,50 @@ only mode where that is reachable. Only Chromium was checked, which is also the
 only engine that draws `corner-shape: squircle`. `pnpm check` was not run to
 completion for the whole repository in this session.
 
+## Follow-up, 2026-09-14: the board's own panel is a rung
+
+Three separate reports of "this component looks wrong" turned out to be one
+board defect, and none of them were the component.
+
+`PaletteSplit`'s panel is `elevatedBackground` under `shadow.card` — **it is the
+card rung**. So every sample that *is* a rung was being shown on itself. In the
+light palette the card rung and the page are both white and the shadow still
+separates them, which is why this survived review; in the dark palette
+`elevatedBackground` is `rgb(22,22,22)` and the panel is the same value, so a
+`Card` had no background step at all and the only thing left was a shadow
+already spent on the panel behind it. The report was "did you change something
+about `background`? the contrast is terrible" — nothing had changed; the board
+had never shown it.
+
+It reached further than the Card:
+
+- The **elevation ladder** stood on `secondaryBackground`, and in the dark
+  palette that is `rgb(22,22,22)` as well — the same value as
+  `elevatedBackground`. A ladder of surfaces could not show its own `card` or
+  `modal` step. It stands on the page rung now, where exactly one chip matches
+  its ground: `page`, which is supposed to. A card that cannot be told from what
+  it sits on is a lie; a page that cannot be is the truth.
+- An **Alert** takes the card rung by the ladder's own table, so the four tones
+  were four tints of the panel they sat on. They sit on the page now.
+- The **modal stand-in** was painting two of the three things its own caption
+  says the rung states — the background and the shadow, but not the overlay —
+  on a surface that cancelled the first. It stands on the page under
+  `colors.overlay`, painted as a `background-image` because `dialogReplica`
+  needs that box to stay the containing block for its close button.
+
+**The rule this leaves:** a sample that *is* a rung has to be given a different
+rung to stand on. The badge section already did this — three explicit strips,
+`on a page` / `on a card` / `on a menu` — and that was read as a badge-specific
+flourish rather than as the general case it is.
+
+Two things this does not fix, recorded rather than hidden. The card-to-page step
+in the dark palette is `rgb(22,22,22)` against `rgb(16,16,16)`, six values of
+255; it reads because the shadow carries most of the work, and moving it means
+moving `elevatedBackground`, which every card, alert, dialog and panel in the
+product reads. And the board's own panel still sits on the board's own page fill
+with only its shadow between them — the same relationship a card has to a page,
+which is the thing the panel is.
+
 ## Follow-ups
 
 Primitives that migrate into `@lody/ui` after the Button add their states to the

@@ -91,6 +91,17 @@ export interface UiGalleryProps {
 }
 
 const styles = stylex.create({
+  /**
+   * The ground the ladder stands on, and it has to be the page.
+   *
+   * It was the region rung, and a rung can only be shown against a different
+   * one: in the dark palette `secondaryBackground` and `elevatedBackground` are
+   * both `rgb(22,22,22)`, so the `card` and `modal` chips were the same fill as
+   * the stage under them and a ladder could not show its own card step. On the
+   * page rung exactly one chip matches its ground — `page` — and that one is
+   * supposed to: the page rung *is* the page. A card that cannot be told from
+   * what it sits on is a lie; a page that cannot be is the truth.
+   */
   stage: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -98,7 +109,7 @@ const styles = stylex.create({
     gap: space[3],
     boxSizing: 'border-box',
     padding: space[4],
-    backgroundColor: colors.secondaryBackground,
+    backgroundColor: colors.background,
     borderRadius: radius.large,
     cornerShape: corner.shape,
   },
@@ -324,6 +335,29 @@ const styles = stylex.create({
   // are what a reader is here to see. `dialog.width`, `dialog.drawerSize` and
   // `dialog.inset` are reported by probes instead, because a panel scaled to fit
   // a board can no longer report its own width.
+  /**
+   * What a modal panel is shown standing on: the page, with the overlay over
+   * it. The rung states three things at once — the elevated background, the
+   * large shadow, and the overlay — and the stand-in was painting two of them,
+   * on the board's own panel, which is the card rung. In the dark palette that
+   * surface is the panel's own `rgb(22,22,22)`, so the third was not merely
+   * missing: the stand-in had no background step either.
+   *
+   * One element paints both, because `dialogReplica` needs this box to stay the
+   * containing block for the cross and a second positioned layer would take it:
+   * `background-image` puts the overlay over the page colour in place.
+   */
+  modalStage: {
+    boxSizing: 'border-box',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '260px',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+    backgroundImage: `linear-gradient(${colors.overlay}, ${colors.overlay})`,
+  },
   dialogReplica: {
     // `relative` rather than `static`: the cross is pinned to the panel's own
     // padding box, so the stand-in has to stay the containing block for it.
@@ -391,6 +425,24 @@ const styles = stylex.create({
     color: 'inherit',
     textAlign: 'start',
     cursor: 'pointer',
+  },
+  /**
+   * The page rung, for a sample that *is* a rung.
+   *
+   * The board's own palette panel is the card rung — `elevatedBackground` under
+   * `shadow.card` — so a Card dropped straight into it is the same fill twice
+   * under two shadows, which is the nesting the rules forbid by name. In the
+   * dark palette that reads as a card with no background at all: both surfaces
+   * are `rgb(22,22,22)` and the only thing left to separate them is a shadow
+   * already spent on the panel. A rung can only be shown on a different one, so
+   * these samples sit on the page.
+   */
+  pageRung: {
+    boxSizing: 'border-box',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
   },
   /** A badge is on no rung, so the board puts the same four on three of them. */
   badgeRung: {
@@ -1723,51 +1775,59 @@ function DialogReplica() {
   return (
     <Row>
       <LegendKey>{'dialog · stand-in'}</LegendKey>
-      <div
-        ref={(node) => {
-          padding.ref.current = node;
-          gap.ref.current = node;
-          panelRadius.ref.current = node;
-          panelShadow.ref.current = node;
-        }}
-        {...stylex.props(modal.popup, styles.dialogReplica)}
-      >
-        <div ref={headerGap.ref} {...stylex.props(modal.header)}>
-          <h3
-            ref={(node) => {
-              titleSize.ref.current = node;
-              titleLeading.ref.current = node;
-            }}
-            {...stylex.props(modal.title)}
-          >
-            Delete this session?
-          </h3>
-          <p
-            ref={(node) => {
-              descriptionSize.ref.current = node;
-              descriptionLeading.ref.current = node;
-            }}
-            {...stylex.props(modal.description)}
-          >
-            Its transcript and every file it wrote go with it.
+      <div {...stylex.props(styles.modalStage)}>
+        <div
+          ref={(node) => {
+            padding.ref.current = node;
+            gap.ref.current = node;
+            panelRadius.ref.current = node;
+            panelShadow.ref.current = node;
+          }}
+          {...stylex.props(modal.popup, styles.dialogReplica)}
+        >
+          <div ref={headerGap.ref} {...stylex.props(modal.header)}>
+            <h3
+              ref={(node) => {
+                titleSize.ref.current = node;
+                titleLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.title)}
+            >
+              Delete this session?
+            </h3>
+            <p
+              ref={(node) => {
+                descriptionSize.ref.current = node;
+                descriptionLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.description)}
+            >
+              Its transcript and every file it wrote go with it.
+            </p>
+          </div>
+          <p {...stylex.props(styles.dialogBody)}>
+            The body is whatever the surface writes; the panel states only the room around it.
           </p>
-        </div>
-        <p {...stylex.props(styles.dialogBody)}>
-          The body is whatever the surface writes; the panel states only the room around it.
-        </p>
-        <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
-          <Button variant="secondary" size="small">
-            Keep
+          <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
+            <Button variant="secondary" size="small">
+              Keep
+            </Button>
+            <Button variant="destructive" size="small">
+              Delete
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            aria-label="Close"
+            {...stylex.props(modal.close)}
+          >
+            <span {...stylex.props(styles.replicaCloseGlyph)}>
+              <CloseGlyph />
+            </span>
           </Button>
-          <Button variant="destructive" size="small">
-            Delete
-          </Button>
         </div>
-        <Button variant="ghost" size="small" icon aria-label="Close" {...stylex.props(modal.close)}>
-          <span {...stylex.props(styles.replicaCloseGlyph)}>
-            <CloseGlyph />
-          </span>
-        </Button>
       </div>
       <div {...stylex.props(styles.replicaCaption)}>
         <span {...stylex.props(styles.rungUse)}>
@@ -2199,7 +2259,7 @@ function AlertRow({ tone }: { tone: FeedbackTone }) {
   return (
     <Row>
       <LegendKey>{tone}</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Alert.Root tone={tone}>
           <Alert.Title>Worktree setup finished</Alert.Title>
           <Alert.Description>
@@ -2216,7 +2276,7 @@ function AlertActionsRow() {
   return (
     <Row>
       <LegendKey>answers</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Alert.Root tone="danger">
           <Alert.Title>Sync failed</Alert.Title>
           <Alert.Description>The machine did not answer in time.</Alert.Description>
@@ -2745,7 +2805,7 @@ function CardRow() {
   return (
     <Row>
       <LegendKey>card</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <Card.Root>
           <Card.Header>
             <Card.Title as="h4">Worktree setup</Card.Title>
@@ -2777,7 +2837,7 @@ function InteractiveCardRow() {
   return (
     <Row>
       <LegendKey>interactive</LegendKey>
-      <div {...stylex.props(styles.disclosureBlock)}>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
         <button type="button" {...stylex.props(styles.cardButton)}>
           <Card.Root interactive>
             <Card.Header>
@@ -2787,11 +2847,11 @@ function InteractiveCardRow() {
           </Card.Root>
         </button>
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         Only the fill answers the pointer. The ladder names the region rung for this, and in the
         dark palette that is the card rung's own value — so the hover is mixed toward label instead,
         the way a row's highlight is.
-      </span>
+      </Note>
     </Row>
   );
 }
