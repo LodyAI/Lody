@@ -3,6 +3,7 @@ import { forwardRef, type CSSProperties, type ReactNode, type SVGProps } from 'r
 import { appendClassName } from '../internal/class-name';
 import { duration, ease } from '../tokens/scales.stylex';
 import { ICON_STROKE } from './icon';
+import { ICONS, type IconName } from './registry';
 
 /**
  * The icons that have two states, and the way between them.
@@ -30,6 +31,13 @@ function registerT() {
 
 const t = `var(${T})`;
 const NO_MOTION = '@media (prefers-reduced-motion: reduce)';
+
+/** The one path an icon of the static set is drawn with, for a state that moves all of it. */
+function onePath(name: IconName): string {
+  const mark = ICONS[name].marks[0];
+  if (!('path' in mark)) throw new Error(`${name} is not drawn as a single path`);
+  return mark.path;
+}
 
 const styles = stylex.create({
   icon: {
@@ -110,10 +118,14 @@ const styles = stylex.create({
     fillOpacity: t,
     transform: `scale(calc(1 + sin(${t} * 3.1416) * 0.15))`,
   },
+  // The bell swings about its nub, so the mouth is 16 units from the pivot and
+  // the corner furthest from it decides the angle: at 14 degrees the stroke's
+  // edge lands 0.03 from the canvas, which is inside but is not a margin. 12
+  // leaves 0.42 and reads the same.
   bell: {
     transformBox: 'view-box',
     transformOrigin: '12px 4px',
-    transform: `rotate(calc(sin(${t} * 6.2832) * 14deg))`,
+    transform: `rotate(calc(sin(${t} * 6.2832) * 12deg))`,
   },
   spin: {
     transformBox: 'view-box',
@@ -167,6 +179,14 @@ const Frame = forwardRef<SVGSVGElement, FrameProps>(function Frame(
 });
 
 const PANEL = 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z';
+
+/**
+ * The bell swings as one piece, so it is the static drawing and not a copy of
+ * it: a stateful icon that restates a path drifts from the set the first time
+ * the set is redrawn, which is how the collapsed sidebar came to be two
+ * different pictures. `test/icons.test.tsx` holds this to the registry.
+ */
+const BELL = onePath('bell');
 
 /**
  * The sidebar, and whether it is open: the same frame, its divider moved and
@@ -277,7 +297,7 @@ export const BellRingIcon = forwardRef<SVGSVGElement, StatefulIconProps & { ring
     return (
       <Frame ref={ref} t={ringing ? 1 : 0} {...rest}>
         <g {...stylex.props(styles.bell)}>
-          <path d="M12 3.5V5M6.5 17v-6a5.5 5.5 0 0 1 11 0v6l1.5 1.5H5zM10 20.5a2 2 0 0 0 4 0" />
+          <path d={BELL} />
         </g>
       </Frame>
     );

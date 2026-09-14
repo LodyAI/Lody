@@ -563,11 +563,29 @@ export const ICONS: Record<IconName, IconDefinition> = {
     marks: [{ circle: [12, 8, 3.5] }, { path: 'M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6' }],
   },
   bell: {
-    marks: [{ path: 'M12 3.5V5M6.5 17v-6a5.5 5.5 0 0 1 11 0v6l1.5 1.5H5zM10 20.5a2 2 0 0 0 4 0' }],
+    // A bell is wider than it is tall. Drawn with an 11-wide dome over 6 units
+    // of straight side it was neither: a tube with a cap on it, 14 across and 13
+    // down. The dome is 12 now and the side sweeps out to a mouth 16.4 across a
+    // 12.7-tall body.
+    //
+    // The sweep is a curve rather than a flange, and the mouth has thickness,
+    // because a flange is a spike: the flare met the mouth line at 39 degrees,
+    // which `stroke-linejoin: round` hides in the outline and a fill cannot —
+    // glyph and bulk grew horns. Rounding the spike is not the answer either,
+    // since a 0.8 radius at that angle eats 2.28 units of a 3.2-unit flare. So
+    // the side arrives at the mouth vertically, turns through a 0.7 corner, and
+    // the mouth is a line under it. The clapper's arc is a segment and not a
+    // half-circle, so it hangs a unit clear and stops at the live area rather
+    // than 1.25 past it; `front` is that same silhouette filled, for bulk.
+    marks: [
+      {
+        path: 'M12 3.5v1.5M12 5.5a6 6 0 0 1 6 6c0 2.6 2.2 4.8 2.2 6a.7 .7 0 0 1-.7 .7H4.5a.7 .7 0 0 1-.7-.7c0-1.2 2.2-3.4 2.2-6a6 6 0 0 1 6-6zM10 20.5a3 3 0 0 0 4 0',
+      },
+    ],
     layers: {
-      mass: 'M6.5 17v-6a5.5 5.5 0 0 1 11 0v6l1.5 1.5H5z',
-      front: 'M9.25 19.5h5.5a2.75 2.75 0 0 1-5.5 0z',
-      outer: 'M12 3.5V5M10 20.5a2 2 0 0 0 4 0',
+      mass: 'M12 5.5a6 6 0 0 1 6 6c0 2.6 2.2 4.8 2.2 6a.7 .7 0 0 1-.7 .7H4.5a.7 .7 0 0 1-.7-.7c0-1.2 2.2-3.4 2.2-6a6 6 0 0 1 6-6z',
+      front: 'M9.75 19.75h4.5a2.25 2.25 0 0 1-4.5 0z',
+      outer: 'M12 3.5v1.5M10 20.5a3 3 0 0 0 4 0',
     },
   },
   settings: {

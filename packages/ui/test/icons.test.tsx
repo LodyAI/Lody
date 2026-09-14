@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 import { Icon, createIcon, type IconVariant } from '../src/icons/icon';
 import { ICONS, ICON_FAMILIES, ICON_NAMES, type IconName } from '../src/icons/registry';
-import { ChevronToggleIcon, IconFrame, SidebarToggleIcon } from '../src/icons/stateful';
+import {
+  BellRingIcon,
+  ChevronToggleIcon,
+  IconFrame,
+  SidebarToggleIcon,
+} from '../src/icons/stateful';
 import { SidebarIcon } from '../src/icons/index';
 
 const VARIANTS: IconVariant[] = ['outline', 'duotone', 'glyph', 'bulk'];
@@ -188,6 +193,16 @@ describe('a stateful icon', () => {
     expect(renderToStaticMarkup(<ChevronToggleIcon open title="Collapse" />)).toContain(
       'role="img"'
     );
+  });
+
+  test('the bell that rings is the bell the set draws', () => {
+    // A stateful icon that restates a path drifts from the static one the first
+    // time the set is redrawn — which is how the collapsed sidebar became two
+    // different pictures. Where a state moves the whole drawing, it reads it.
+    const mark = ICONS.bell.marks[0];
+    expect('path' in mark).toBe(true);
+    const outline = (mark as { path: string }).path;
+    expect(renderToStaticMarkup(<BellRingIcon ringing={false} />)).toContain(`d="${outline}"`);
   });
 
   test('a frame can be pinned between the states', () => {
