@@ -6,6 +6,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Message hub and transports
 
+- `command-effect.ts` — Promise/Effect adapters that preserve typed command failures.
+  `command-runtime.ts` owns workspace selection and scoped manager lifecycle;
+  `workspace.ts` owns cloud workspace read parsing, bounded retries and cancellation.
+
 - `message-handler.ts` — the CLI's central message hub (largest file): session chat
   handling (`handleSessionChat`), ACP update buffering/flush, Code Collab v2 machine
   RPC wiring, local project control, session file upload/send, and the turn cloud

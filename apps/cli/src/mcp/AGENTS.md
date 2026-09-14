@@ -49,6 +49,12 @@ Parent instructions apply.
 
 ## Session and Task tool contracts
 
+- Single `session_chat` retries only pre-accept workspace reads, never the whole send. After
+  acceptance, materialization failure returns the stored fixed Operation for recovery; an unreadable
+  receipt means uncertainty and requires the original ID. Cancellation must join non-cancelable
+  writes before manager release. Preserve MCP requester context across Effect/Promise boundaries.
+  Failure diagnostics use safe stage/ID/endpoint/cause-code fields, never raw prompts or credentials.
+
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
   Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
   before its fallible availability step: a transient post-accept failure returns the active fixed

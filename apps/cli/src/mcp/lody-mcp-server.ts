@@ -4,7 +4,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Effect } from 'effect';
+import { Cause, Data, Effect, Option } from 'effect';
+import { commandPromise, runCommandEffect } from '@/lib/command-effect';
+import { WorkspaceAccessError } from '@/lib/workspace';
+import { safeAccessQueryErrorDetails } from '@/utils/access-query-error';
+import { getLogger } from '@/utils/logger';
 import { z } from 'zod';
 import {
   getAcpCapabilityCacheKey,
@@ -89,8 +93,10 @@ import {
   LocalDaemonAvailabilityError,
   normalizeCliValue,
   resolveWorkspaceOrThrow,
+  resolveWorkspaceEffect,
   syncWorkspaceMetaForRead,
   withWorkspaceManager,
+  withWorkspaceManagerEffect,
   getCommandSessionSharingPort,
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
@@ -1014,6 +1020,9 @@ const jsonTextResult = (value: unknown, isError = false) =>
   textResult(JSON.stringify(value, null, 2), isError);
 
 const normalizeMcpError = (error: unknown) => {
+  if (error instanceof WorkspaceAccessError || error instanceof OperationReceiptUnavailableError) {
+    return error.toLodyError();
+  }
   if (error instanceof LodyOperationStoreError) {
     return error.toLodyError();
   }
@@ -2733,142 +2742,246 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
   });
 };
 
-const startSessionChatOperation = async (args: SessionChatToolInput): Promise<unknown> => {
-  if (!args.operationId) {
-    throw new Error('operationId is required');
-  }
-  const ctx = getSessionContext();
-  const auth = getCliAuthContextOrThrow('mcp');
-  const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-  return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
-    const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
-    if (!currentSession) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Requester Session not found: ${ctx.sessionId}`,
-        false
-      );
-    }
-    const invoking = await resolveInvokingTurnContext(currentSession);
-    const canonicalCommand = {
-      sessionId: args.sessionId,
-      prompt: args.prompt,
-      ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
+class OperationReceiptUnavailableError extends Data.TaggedError(
+  'OperationReceiptUnavailableError'
+)<{
+  operationId: string;
+  cause: unknown;
+}> {
+  toLodyError() {
+    return {
+      code: 'OPERATION_RESULT_UNAVAILABLE',
+      message: `Operation ${this.operationId} may already be accepted. Use lody_operation_get with this ID; do not send a new Operation.`,
+      retryable: true,
     };
-    const retry = await withOperationStore((store) =>
-      store.findMatchingRetry(
-        ctx.sessionId as SessionId,
-        args.operationId!,
-        'session_chat',
-        canonicalCommand,
-        invoking.identity.userId,
-        invoking.identity.sourceTurnId
-      )
-    );
-    if (retry) {
-      return await withOperationStore((store) => store.snapshot(retry));
+  }
+}
+
+const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
+  const ctx = getSessionContext();
+  return Effect.gen(function* () {
+    if (!args.operationId) {
+      return yield* Effect.fail(new Error('operationId is required'));
     }
-    const targetSession = await readCurrentSessionMeta(manager, args.sessionId as SessionId);
-    if (!targetSession) {
-      throw new LodyOperationStoreError(
-        'SESSION_NOT_FOUND',
-        `Target Session not found: ${args.sessionId}`,
-        false
-      );
-    }
-    assertDifferentMcpSession(currentSession, targetSession);
-    await assertMachineOnlineForSingleCommand(manager, targetSession.machineId, ctx);
-    try {
-      await validateSessionChatTarget({
-        auth,
-        workspace,
-        manager,
-        sessionId: targetSession.id,
-        delegatedRequester: toDelegatedSessionRequester(invoking.identity),
-      });
-    } catch (error) {
-      if (error instanceof WorkspaceSyncUnavailableError) {
-        throw error;
-      }
-      const machineAccessError = toMachineAccessMcpError(error);
-      if (machineAccessError) {
-        throw new LodyOperationStoreError(
-          machineAccessError.code,
-          machineAccessError.message,
-          machineAccessError.retryable
-        );
-      }
-      throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
-    }
-    const preallocatedUserTurnId = randomUUID();
-    const materializationClaimToken = randomUUID();
-    const timing = operationDeadline(args.deadlineSeconds);
-    const accepted = await withOperationStore((store) =>
-      store.accept(
-        {
-          workspaceId: workspace.id as WorkspaceId,
-          ownerMachineId: ctx.machineId as MachineId,
-          requesterSessionId: ctx.sessionId as SessionId,
-          requesterUserId: invoking.identity.userId,
-          operationId: args.operationId!,
-          kind: 'session_chat',
-          canonicalCommand,
-          frozenContinuationConfig: {
-            ...(currentSession.agentConfigId
-              ? { agentConfigId: currentSession.agentConfigId }
-              : {}),
-            inputConfig: invoking.frozenInputConfig,
-            sourceTurnId: invoking.identity.sourceTurnId,
-          },
-          initiatorChainDepth: invoking.chainDepth,
-          ...timing,
-          items: [activeOperationItem(args.sessionId as SessionId, preallocatedUserTurnId)],
-        },
-        { materializationClaimToken }
-      )
-    );
-    if (accepted.operation.state === 'finished') {
-      return await withOperationStore((store) => store.snapshot(accepted.operation));
-    }
-    const pendingItem = accepted.operation.items[0];
-    if (!pendingItem || pendingItem.status !== 'active') {
-      throw new Error('Single chat Operation is missing its active target item.');
-    }
-    if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
-      const result = await sendSessionChatResult(
-        auth,
-        workspace,
-        manager,
-        pendingItem.target.sessionId,
-        args.prompt,
-        {
-          ...resolveTurnDispatchConfig({}),
-          taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
-        },
-        undefined,
-        undefined,
-        {
-          userTurnId: pendingItem.target.userTurnId,
-          chainDepth: invoking.chainDepth + 1,
-        },
-        toDelegatedSessionRequester(invoking.identity)
-      );
-      if (result.userTurnId !== pendingItem.target.userTurnId) {
-        throw new Error('Chat result did not preserve the preallocated target turn id.');
-      }
-      await withOperationStore((store) =>
-        store.markItemInputDurable(
-          ctx.sessionId as SessionId,
-          args.operationId!,
-          0,
-          materializationClaimToken
+    const operationId = args.operationId;
+    let acceptance: 'no' | 'unknown' | 'yes' = 'no';
+    const stageEffect = <A, E>(stage: string, effect: Effect.Effect<A, E>) =>
+      effect.pipe(
+        Effect.withSpan(`mcp.session_chat.${stage}`),
+        Effect.tapErrorCause((cause) =>
+          Effect.sync(() =>
+            getLogger('mcp').debug(
+              JSON.stringify({
+                stage,
+                ...(stage === 'workspace.resolve' ? { endpoint: 'auth.workspace-list' } : {}),
+                operationId,
+                requesterSessionId: ctx.sessionId,
+                accepted: acceptance,
+                ...safeAccessQueryErrorDetails(Option.getOrUndefined(Cause.failureOption(cause))),
+                interrupted: Cause.isInterrupted(cause),
+              })
+            )
+          )
         )
       );
-    }
-    return snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
+    // These legacy Promise ports do not support cancellation. Join them before releasing the manager;
+    // only the workspace query below is interruptible all the way down to its fetch AbortSignal.
+    const stage = <A>(name: string, run: () => Promise<A>) =>
+      stageEffect(
+        name,
+        commandPromise(() => runWithMcpSessionContext(ctx, run)).pipe(Effect.uninterruptible)
+      );
+    const auth = yield* stage('auth.read', async () => getCliAuthContextOrThrow('mcp'));
+    const workspace = yield* stageEffect(
+      'workspace.resolve',
+      resolveWorkspaceEffect(auth, getMcpWorkspaceId(ctx))
+    );
+    return yield* stageEffect(
+      'manager.use',
+      withWorkspaceManagerEffect(auth, workspace, 'mcp', (manager) =>
+        Effect.gen(function* () {
+          yield* stage('meta.sync', () =>
+            syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`)
+          );
+          const currentSession = yield* stage('requester.read', () =>
+            readCurrentSessionMeta(manager, ctx.sessionId as SessionId)
+          );
+          if (!currentSession) {
+            return yield* Effect.fail(
+              new LodyOperationStoreError(
+                'SESSION_NOT_FOUND',
+                `Requester Session not found: ${ctx.sessionId}`,
+                false
+              )
+            );
+          }
+          const invoking = yield* stage('invocation.read', () =>
+            resolveInvokingTurnContext(currentSession)
+          );
+          const canonicalCommand = {
+            sessionId: args.sessionId,
+            prompt: args.prompt,
+            ...(args.deadlineSeconds !== undefined
+              ? { deadlineSeconds: args.deadlineSeconds }
+              : {}),
+          };
+          const retry = yield* stage('operation.lookup', () =>
+            withOperationStore((store) =>
+              store.findMatchingRetry(
+                ctx.sessionId as SessionId,
+                operationId,
+                'session_chat',
+                canonicalCommand,
+                invoking.identity.userId,
+                invoking.identity.sourceTurnId
+              )
+            )
+          );
+          const receipt = () =>
+            stage('receipt.read', () =>
+              snapshotOperation(ctx.sessionId as SessionId, operationId)
+            ).pipe(
+              Effect.mapError(
+                (cause) => new OperationReceiptUnavailableError({ operationId, cause })
+              )
+            );
+          if (retry) {
+            acceptance = 'yes';
+            return yield* receipt();
+          }
+          const targetSession = yield* stage('target.read', () =>
+            readCurrentSessionMeta(manager, args.sessionId as SessionId)
+          );
+          if (!targetSession) {
+            return yield* Effect.fail(
+              new LodyOperationStoreError(
+                'SESSION_NOT_FOUND',
+                `Target Session not found: ${args.sessionId}`,
+                false
+              )
+            );
+          }
+          yield* stage('target.presence', async () => {
+            assertDifferentMcpSession(currentSession, targetSession);
+            await assertMachineOnlineForSingleCommand(manager, targetSession.machineId, ctx);
+          });
+          yield* stage('target.access', () =>
+            validateSessionChatTarget({
+              auth,
+              workspace,
+              manager,
+              sessionId: targetSession.id,
+              delegatedRequester: toDelegatedSessionRequester(invoking.identity),
+            })
+          ).pipe(
+            Effect.mapError((error) => {
+              if (error instanceof WorkspaceSyncUnavailableError) {
+                return error;
+              }
+              const machineAccessError = toMachineAccessMcpError(error);
+              if (machineAccessError) {
+                return new LodyOperationStoreError(
+                  machineAccessError.code,
+                  machineAccessError.message,
+                  machineAccessError.retryable
+                );
+              }
+              return new LodyOperationStoreError(
+                'COMMAND_REJECTED',
+                formatMcpErrorMessage(error),
+                false
+              );
+            })
+          );
+          const preallocatedUserTurnId = randomUUID();
+          const materializationClaimToken = randomUUID();
+          const timing = operationDeadline(args.deadlineSeconds);
+          acceptance = 'unknown';
+          const accepted = yield* stage('operation.accept', () =>
+            withOperationStore((store) =>
+              store.accept(
+                {
+                  workspaceId: workspace.id as WorkspaceId,
+                  ownerMachineId: ctx.machineId as MachineId,
+                  requesterSessionId: ctx.sessionId as SessionId,
+                  requesterUserId: invoking.identity.userId,
+                  operationId,
+                  kind: 'session_chat',
+                  canonicalCommand,
+                  frozenContinuationConfig: {
+                    ...(currentSession.agentConfigId
+                      ? { agentConfigId: currentSession.agentConfigId }
+                      : {}),
+                    inputConfig: invoking.frozenInputConfig,
+                    sourceTurnId: invoking.identity.sourceTurnId,
+                  },
+                  initiatorChainDepth: invoking.chainDepth,
+                  ...timing,
+                  items: [activeOperationItem(args.sessionId as SessionId, preallocatedUserTurnId)],
+                },
+                { materializationClaimToken }
+              )
+            )
+          ).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof LodyOperationStoreError
+                ? cause
+                : new OperationReceiptUnavailableError({ operationId, cause })
+            )
+          );
+          acceptance = 'yes';
+          if (accepted.operation.state === 'finished') {
+            return yield* receipt();
+          }
+          const pendingItem = accepted.operation.items[0];
+          if (!pendingItem || pendingItem.status !== 'active') {
+            return yield* receipt();
+          }
+          if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
+            yield* stage('input.materialize', async () => {
+              const result = await sendSessionChatResult(
+                auth,
+                workspace,
+                manager,
+                pendingItem.target.sessionId,
+                args.prompt,
+                {
+                  ...resolveTurnDispatchConfig({}),
+                  taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
+                },
+                undefined,
+                undefined,
+                {
+                  userTurnId: pendingItem.target.userTurnId,
+                  chainDepth: invoking.chainDepth + 1,
+                },
+                toDelegatedSessionRequester(invoking.identity)
+              );
+              if (result.userTurnId !== pendingItem.target.userTurnId) {
+                throw new Error('Chat result did not preserve the preallocated target turn id.');
+              }
+              await withOperationStore((store) =>
+                store.markItemInputDurable(
+                  ctx.sessionId as SessionId,
+                  operationId,
+                  0,
+                  materializationClaimToken
+                )
+              );
+            }).pipe(Effect.catchAll(() => Effect.void));
+            // Acceptance is durable. Failures leave the fixed item for coordinator recovery, never resend.
+          }
+          return yield* receipt();
+        })
+      )
+    );
   });
 };
+
+const startSessionChatOperation = (
+  args: SessionChatToolInput,
+  options?: { signal?: AbortSignal }
+): Promise<unknown> => runCommandEffect(startSessionChatOperationEffect(args), options);
 
 const mapWithConcurrency = async <T, R>(
   values: readonly T[],
@@ -3966,6 +4079,7 @@ export const __lodyMcpServerInternals = {
   readSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   startSessionChatOperation,
+  startSessionChatOperationEffect,
   startSessionChatManyOperation,
   getSessionContext,
   resolveOperationStorePathForContext,
@@ -4397,10 +4511,10 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
         'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and completion arrives automatically as a continuation, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only.',
       inputSchema: SessionChatToolInputSchema,
     },
-    async (args: SessionChatToolInput) => {
+    async (args: SessionChatToolInput, extra) => {
       try {
         if (args.operationId) {
-          return jsonTextResult(await startSessionChatOperation(args));
+          return jsonTextResult(await startSessionChatOperation(args, { signal: extra.signal }));
         }
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');

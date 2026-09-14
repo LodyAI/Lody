@@ -1,65 +1,10 @@
 import { Data, Duration, Effect, Schedule } from 'effect';
 import type { MachineAccessCheckResult } from '@/lib/workspace';
 import { formatErrorWithCauses } from '@/utils/format-error';
-
-const DEFAULT_BOUNDED_RETRY_DELAYS_MS = [250, 1_000, 2_000] as const;
-const RETRYABLE_NETWORK_ERROR_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ENETDOWN',
-  'ENETUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'ETIMEDOUT',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_HEADERS_TIMEOUT',
-  'UND_ERR_SOCKET',
-]);
-const RETRYABLE_NETWORK_ERROR_MESSAGE =
-  /\b(fetch failed|failed to fetch|network error|socket hang up|connection (?:reset|refused)|timed? out|econnrefused|econnreset|enetdown|enetunreach|enotfound|eai_again|etimedout)\b/iu;
-
-type ErrorRecord = {
-  cause?: unknown;
-  code?: unknown;
-  errors?: unknown;
-  message?: unknown;
-  status?: unknown;
-  statusCode?: unknown;
-};
-
-const isRetryableHttpStatus = (value: unknown): boolean =>
-  typeof value === 'number' && (value === 408 || value === 429 || value >= 500);
-
-const isRetryableMachineAccessCause = (
-  error: unknown,
-  seen: ReadonlySet<unknown> = new Set()
-): boolean => {
-  if (seen.has(error) || (typeof error !== 'object' && typeof error !== 'string')) {
-    return false;
-  }
-  if (typeof error === 'string') {
-    return RETRYABLE_NETWORK_ERROR_MESSAGE.test(error);
-  }
-
-  const nextSeen = new Set(seen);
-  nextSeen.add(error);
-  const record = error as ErrorRecord;
-  if (typeof record.code === 'string' && RETRYABLE_NETWORK_ERROR_CODES.has(record.code)) {
-    return true;
-  }
-  if (isRetryableHttpStatus(record.status) || isRetryableHttpStatus(record.statusCode)) {
-    return true;
-  }
-  if (typeof record.message === 'string' && RETRYABLE_NETWORK_ERROR_MESSAGE.test(record.message)) {
-    return true;
-  }
-  if (Array.isArray(record.errors)) {
-    for (const nested of record.errors) {
-      if (isRetryableMachineAccessCause(nested, nextSeen)) return true;
-    }
-  }
-  return record.cause !== undefined && isRetryableMachineAccessCause(record.cause, nextSeen);
-};
+import {
+  ACCESS_QUERY_RETRY_DELAYS_MS,
+  isTransientAccessQueryError,
+} from '@/utils/access-query-error';
 
 export class MachineAccessVerificationError extends Error {
   readonly code: 'MACHINE_ACCESS_UNAVAILABLE' | 'MACHINE_ACCESS_CHECK_FAILED';
@@ -97,7 +42,7 @@ export interface BoundedMachineAccessRetryOptions {
 export async function readMachineAccessWithBoundedRetry(
   options: BoundedMachineAccessRetryOptions
 ): Promise<MachineAccessCheckResult> {
-  const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_BOUNDED_RETRY_DELAYS_MS;
+  const retryDelaysMs = options.retryDelaysMs ?? ACCESS_QUERY_RETRY_DELAYS_MS;
   const maxAttempts = retryDelaysMs.length + 1;
   const sleep =
     options.sleep ??
@@ -109,7 +54,7 @@ export async function readMachineAccessWithBoundedRetry(
     try {
       return await options.verify();
     } catch (error) {
-      const retryable = isRetryableMachineAccessCause(error);
+      const retryable = isTransientAccessQueryError(error);
       const delayMs = retryDelaysMs[attempt - 1];
       if (!retryable || delayMs === undefined) {
         throw new MachineAccessVerificationError(retryable, attempt, error);

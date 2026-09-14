@@ -24,7 +24,7 @@ import {
 } from '@lody/shared/node/local-ipc';
 import { AuthClient } from '@/lib/auth';
 import { LoroDocumentManager } from '@/lib/loro/doc';
-import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import { listWorkspacesForTokenEffect, type WorkspaceSummary } from '@/lib/workspace';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
 import { initCliAnalytics } from '@/lib/analytics/posthog';
 import { flushTelemetry } from '@/instrument';
@@ -38,6 +38,7 @@ import {
   createCloudSessionSharingPort,
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
+import { commandPromise, runCommandEffect } from '@/lib/command-effect';
 import type { CloudSessionSharingPort } from '@lody/platform';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
@@ -224,11 +225,22 @@ export async function resolveWorkspaceOrThrow(
   auth: AuthContext,
   selector?: string
 ): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
-  const effectiveSelector =
-    normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
+  return runCommandEffect(resolveWorkspaceEffect(auth, selector));
 }
+
+export const resolveWorkspaceEffect = (auth: AuthContext, selector?: string) =>
+  listWorkspacesForTokenEffect(auth.token).pipe(
+    Effect.flatMap((workspaces) =>
+      Effect.try({
+        try: () =>
+          selectWorkspaceSummary(
+            workspaces,
+            normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID)
+          ),
+        catch: (error) => error,
+      })
+    )
+  );
 
 export async function withWorkspaceManager<T>(
   auth: AuthContext,
@@ -236,38 +248,49 @@ export async function withWorkspaceManager<T>(
   loggerName: string,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
+  return runCommandEffect(
+    withWorkspaceManagerEffect(auth, workspace, loggerName, (manager) =>
+      commandPromise(() => fn(manager))
+    )
+  );
+}
+
+/** Acquisition is not detached on interruption: once acquired, the manager is always released. */
+export function withWorkspaceManagerEffect<T, E>(
+  auth: AuthContext,
+  workspace: WorkspaceSummary,
+  loggerName: string,
+  use: (manager: LoroDocumentManager) => Effect.Effect<T, E>
+): Effect.Effect<T, unknown> {
   // One-shot commands write directly into the workspace repo and rely on
   // Loro Streams to reach the cloud (and the daemon); without the remote
   // transport the write would silently strand in the local SQLite store.
   if (!LODY_AUTH_URL) {
-    throw new Error('Cloud workspace commands require LODY_AUTH_URL');
+    return Effect.fail(new Error('Cloud workspace commands require LODY_AUTH_URL'));
   }
   const logger = getLogger(loggerName);
-  const manager = await LoroDocumentManager.create(
-    workspace.id as WorkspaceId,
-    auth.userId,
-    logger,
-    {
-      attachRemoteOnCreate: true,
-      streamsTokens: createCloudStreamsTokenPort({
-        token: auth.token,
-        authBaseUrl: LODY_AUTH_URL,
-        authSiteUrl: LODY_AUTH_SITE_URL,
-        logger,
-      }),
-      cloudBilling: createCloudBillingPort({ token: auth.token }),
-    }
+  const authBaseUrl = LODY_AUTH_URL;
+  return Effect.acquireUseRelease(
+    commandPromise(() =>
+      LoroDocumentManager.create(workspace.id as WorkspaceId, auth.userId, logger, {
+        attachRemoteOnCreate: true,
+        streamsTokens: createCloudStreamsTokenPort({
+          token: auth.token,
+          authBaseUrl,
+          authSiteUrl: LODY_AUTH_SITE_URL,
+          logger,
+        }),
+        cloudBilling: createCloudBillingPort({ token: auth.token }),
+      })
+    ),
+    use,
+    (manager) =>
+      Effect.promise(async () => {
+        await manager.cleanUp({ fast: true, preserveSessionStatus: true }).catch(() => {
+          getLogger(loggerName).debug('Workspace manager cleanup failed (stage=manager.release)');
+        });
+      })
   );
-
-  try {
-    return await fn(manager);
-  } finally {
-    await manager.cleanUp({ fast: true, preserveSessionStatus: true }).catch((error: unknown) => {
-      getLogger(loggerName).debug(
-        `Failed to clean up workspace manager for ${workspace.id}: ${formatErrorMessage(error)}`
-      );
-    });
-  }
 }
 
 export async function ensureWorkspaceMetaSynced(
