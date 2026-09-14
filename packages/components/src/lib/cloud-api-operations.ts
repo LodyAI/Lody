@@ -157,17 +157,23 @@ export const cloudOperations = {
     ),
   },
   sessionSharing: {
-    requestVerification: mutation<ConvexApi['sessionSharing']['requestVerification']>(
-      'sessionSharing:requestVerification'
+    listRequests: query<ConvexApi['sessionSharing']['listRequests']>('sessionSharing:listRequests'),
+    cancelRequest: mutation<ConvexApi['sessionSharing']['cancelRequest']>(
+      'sessionSharing:cancelRequest'
     ),
+    list: query<ConvexApi['sessionSharing']['list']>('sessionSharing:list'),
     getManagement: query<ConvexApi['sessionSharing']['getManagement']>(
       'sessionSharing:getManagement'
     ),
-    create: mutation<ConvexApi['sessionSharing']['create']>('sessionSharing:create'),
-    updateTargets: mutation<ConvexApi['sessionSharing']['updateTargets']>(
-      'sessionSharing:updateTargets'
+    beginDeployment: mutation<ConvexApi['sessionSharing']['beginDeployment']>(
+      'sessionSharing:beginDeployment'
     ),
-    reset: mutation<ConvexApi['sessionSharing']['reset']>('sessionSharing:reset'),
+    publishDeployment: mutation<ConvexApi['sessionSharing']['publishDeployment']>(
+      'sessionSharing:publishDeployment'
+    ),
+    resetCredential: mutation<ConvexApi['sessionSharing']['resetCredential']>(
+      'sessionSharing:resetCredential'
+    ),
     revoke: mutation<ConvexApi['sessionSharing']['revoke']>('sessionSharing:revoke'),
   },
   activity: {

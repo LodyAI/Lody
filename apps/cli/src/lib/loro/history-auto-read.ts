@@ -1,97 +1,43 @@
-import {
-  getLegacyReadForSessionHistoryStatus,
-  resolveSessionHistoryStatus,
-  type SessionMirror,
-  type SessionHistoryInput,
-} from '@lody/shared';
-
-type SessionDocMirror = Pick<SessionMirror, 'subscribe' | 'getState' | 'setState'>;
+import { resolveSessionHistoryStatus } from '@lody/shared';
 
 export type AutoMarkLatestUserHistoryAsReadHandle = {
   dispose: () => void;
 };
 
-const findLatestUserHistoryEntry = (
-  history: SessionHistoryInput[]
-): SessionHistoryInput | undefined => {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i];
-    if (entry?.role === 'user') {
-      return entry;
-    }
-  }
-  return undefined;
-};
-
-/**
- * Attaches a small policy on top of the session history:
- * - Whenever history changes, if there is a new user message, mark the latest one as seen.
- *
- * Notes:
- * - We defer the write into a microtask to avoid nested `setState()` inside `subscribe()`,
- *   which can lead to re-entrant updates and harder-to-reason-about ordering.
- * - The operation is idempotent and only touches the latest unread user entry.
- */
+/** Observe only shallow directory fields. Assistant bodies are never read just
+ * to acknowledge the newest user turn. Composition alone does not arm this policy. */
 export const attachAutoMarkLatestUserHistoryAsRead = (
-  mirror: SessionDocMirror
+  data: import('@lody/shared/session-data').LoroSessionData,
+  markTurnSeen: (id: string) => boolean
 ): AutoMarkLatestUserHistoryAsReadHandle => {
   let disposed = false;
-  let pendingTurnId: string | null = null;
-
-  const unsubscribe = mirror.subscribe((next) => {
-    if (disposed) {
+  let marking: string | undefined;
+  const check = () => {
+    if (disposed) return;
+    for (let position = data.history.count() - 1; position >= 0; position--) {
+      const row = data.history.readDirectory(position, position + 1)[0];
+      if (row?.scalars?.role !== 'user') continue;
+      if (
+        !row.turnId ||
+        marking === row.turnId ||
+        resolveSessionHistoryStatus(row.scalars) !== 'pending'
+      )
+        return;
+      marking = row.turnId;
+      try {
+        markTurnSeen(row.turnId);
+      } finally {
+        marking = undefined;
+      }
       return;
     }
-
-    const history = (next.history as SessionHistoryInput[]) ?? [];
-    const latestUserEntry = findLatestUserHistoryEntry(history);
-    if (!latestUserEntry || resolveSessionHistoryStatus(latestUserEntry) !== 'pending') {
-      return;
-    }
-
-    const turnId = latestUserEntry.id;
-    if (pendingTurnId === turnId) {
-      return;
-    }
-    pendingTurnId = turnId;
-
-    void Promise.resolve().then(() => {
-      if (disposed) {
-        return;
-      }
-      if (pendingTurnId !== turnId) {
-        return;
-      }
-      pendingTurnId = null;
-
-      const current = mirror.getState().history ?? [];
-      const shouldMarkRead = current.some(
-        (entry) => entry?.id === turnId && resolveSessionHistoryStatus(entry) === 'pending'
-      );
-      if (!shouldMarkRead) {
-        return;
-      }
-
-      mirror.setState((prev) => {
-        const histories = prev.history ?? [];
-        for (let i = histories.length - 1; i >= 0; i--) {
-          const entry = histories[i];
-          if (entry?.id === turnId && resolveSessionHistoryStatus(entry) === 'pending') {
-            entry.status = 'seen';
-            entry.read = getLegacyReadForSessionHistoryStatus('seen');
-            break;
-          }
-        }
-        return prev;
-      });
-    });
-  });
-
+  };
+  const observation = data.history.observe(check);
+  check();
   return {
-    dispose: () => {
+    dispose() {
       disposed = true;
-      pendingTurnId = null;
-      unsubscribe();
+      observation.unsubscribe();
     },
   };
 };

@@ -39,7 +39,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -125,6 +125,7 @@ import {
   PinOff,
   Wrench,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -171,6 +172,8 @@ import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-dur
 import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import type { TurnIndexRow } from '@/lib/conversation-view';
+import { TurnPlaceholderRow } from './turn-placeholder-row';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
@@ -309,10 +312,22 @@ export interface SessionMessageItem {
   type: 'message';
   sessionId: SessionId;
   message: SessionHistoryParsed;
+  /** Absolute position of the turn in the conversation (`ConversationView` index). */
+  turnIndex: number;
 }
 
 export interface EmptySessionItem {
   type: 'empty';
+}
+
+/**
+ * A turn the view has not hydrated: renders as `TurnPlaceholderRow` under the
+ * turn's id so hydration swaps content beneath a stable Virtua key.
+ */
+export interface PlaceholderSessionItem {
+  type: 'placeholder';
+  row: TurnIndexRow;
+  turnIndex: number;
 }
 
 export type MessageFileDiffEntriesByTurn = Readonly<
@@ -330,7 +345,7 @@ const OUTLINE_JUMP_TOLERANCE_PX = 2;
  */
 const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
 
-export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
+export type ChatStreamItem = SessionMessageItem | EmptySessionItem | PlaceholderSessionItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
@@ -371,11 +386,21 @@ type AssistantChatVirtualRow = {
 type StandardChatVirtualRow = {
   type: 'standard';
   key: string;
+  /** Absolute turn index (the `empty` item uses its list position). */
   messageIndex: number;
-  item: ChatStreamItem;
+  item: SessionMessageItem | EmptySessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow;
+type PlaceholderChatVirtualRow = {
+  type: 'placeholder';
+  key: string;
+  messageIndex: number;
+  item: PlaceholderSessionItem;
+};
+
+type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+
+/** One row per placeholder item, identity-stable while the item is. */
 
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
@@ -421,9 +446,25 @@ export const resolveAssistantMessageActions = (
 
 export type GoalCommand = SessionGoalCommand;
 
+export type VisibleTurnRange = { from: number; to: number };
+
+/** Exposes row identity at the measurement boundary without inspecting message DOM. */
+function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
+  return <div {...props} data-virtual-index={index} />;
+}
+
 export interface SessionChatStreamViewProps {
+  initialWindowReady?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
+  /**
+   * Reports the turn indexes currently inside the viewport (`[from, to)`), on
+   * scroll and after the initial position restore. The connected stream turns
+   * this into the hydrated window.
+   */
+  onVisibleTurnRangeChange?: (range: VisibleTurnRange) => void;
+  /** The outline hovered a round with no preview yet; hydrate it so one appears. */
+  onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
@@ -860,13 +901,24 @@ export const buildChatVirtualRows = ({
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
-  for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
-    const item = items[messageIndex];
-    if (!item) continue;
-    if (item.type !== 'message' || item.message.role !== 'assistant') {
+  for (let position = 0; position < items.length; position += 1) {
+    const item = items[position];
+    // Empty presentation must not seed Virtua's size cache for the first row.
+    if (!item || item.type === 'empty') continue;
+    if (item.type === 'placeholder') {
+      // No per-row cache: `TurnPlaceholderRow` is memoized on `item.row`, which
+      // `buildChatStreamItems` already keeps stable, so the row object is never
+      // compared by identity (unlike an assistant row, which is passed whole).
+      rows.push({ type: 'placeholder', key: item.row.id, messageIndex: item.turnIndex, item });
+      continue;
+    }
+    // Rows speak in absolute turn indexes so outline anchors and scroll
+    // targets are independent of which turns happen to be hydrated.
+    const messageIndex = item.turnIndex;
+    if (item.message.role !== 'assistant') {
       rows.push({
         type: 'standard',
-        key: item.type === 'message' ? item.message.id : `empty-${messageIndex}`,
+        key: item.message.id,
         messageIndex,
         item,
       });
@@ -1183,6 +1235,7 @@ export const SessionChatStreamView = forwardRef<
     {
       items,
       sessionId,
+      initialWindowReady = true,
       className,
       leadingContent,
       emptyState,
@@ -1209,6 +1262,8 @@ export const SessionChatStreamView = forwardRef<
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
+      onVisibleTurnRangeChange,
+      onOutlinePreviewRound,
     },
     ref
   ) => {
@@ -1336,7 +1391,7 @@ export const SessionChatStreamView = forwardRef<
      * `resolveActiveOutlineIndex` reads positions back out of. Without the
      * `offset` compensation a jump settles a padding's worth low, and the
      * outline rail then reports the round BEFORE the one that was asked for.
-     * (`scrollViewportToRealBottom` compensates the bottom padding the same way.)
+     * Bottom following uses the DOM extent, which already includes padding.
      */
     const scrollRowToTop = useCallback(
       (rowIndex: number, smooth = false) => {
@@ -1377,6 +1432,7 @@ export const SessionChatStreamView = forwardRef<
       handleScroll,
     } = useStickyScroll({
       sessionId,
+      initialContentReady: initialWindowReady,
       vlistRef,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
@@ -1564,18 +1620,65 @@ export const SessionChatStreamView = forwardRef<
     // message while the list sits at its start. setState with an unchanged
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
+
+    // Which turns are in the viewport, from Virtua's own index math; the only
+    // input the hydration window has. Read through refs so a report never
+    // re-creates the scroll handler, and deduplicated so a settled viewport
+    // stops producing updates.
+    const virtualRowsRef = useLatestRef(virtualRows);
+    const onVisibleTurnRangeChangeRef = useLatestRef(onVisibleTurnRangeChange);
+    const lastVisibleRangeRef = useRef<VisibleTurnRange | null>(null);
+    const reportVisibleTurnRange = useCallback(() => {
+      const vlist = vlistRef.current;
+      const report = onVisibleTurnRangeChangeRef.current;
+      if (!vlist || !report) return;
+      const rows = virtualRowsRef.current;
+      if (rows.length === 0) return;
+      const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
+      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const endRow = clampRow(
+        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+      );
+      const from = rows[startRow]?.messageIndex;
+      const to = rows[endRow]?.messageIndex;
+      if (from === undefined || to === undefined) return;
+      const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
+      const last = lastVisibleRangeRef.current;
+      if (last && last.from === next.from && last.to === next.to) return;
+      lastVisibleRangeRef.current = next;
+      report(next);
+    }, [leadingRowCount, onVisibleTurnRangeChangeRef, virtualRowsRef]);
+    useEffect(() => {
+      if (!initialScrollRestored) return;
+      reportVisibleTurnRange();
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
         syncActiveOutlineIndex();
+        reportVisibleTurnRange();
       },
-      [handleScroll, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+    );
+
+    const handleOutlinePreview = useCallback(
+      (outlineIndex: number) => {
+        const entry = outlineEntries[outlineIndex];
+        if (!entry || entry.preview) return;
+        onOutlinePreviewRound?.(entry.messageIndex);
+      },
+      [onOutlinePreviewRound, outlineEntries]
     );
 
     const scrollToIndex = useCallback(
       (messageIndex: number, smooth?: boolean) => {
-        const messageItem = items[messageIndex];
+        // `messageIndex` is an absolute turn index; a placeholder row exists for
+        // every non-hydrated turn, so a target is always addressable.
+        const messageItem = items.find(
+          (candidate) => candidate.type === 'message' && candidate.turnIndex === messageIndex
+        );
         let virtualIndex = -1;
         if (messageItem?.type === 'message' && activeSearchBlockId) {
           const prefix = getMessageItemPrefix(messageItem.message.id, 0).slice(0, -1);
@@ -1653,7 +1756,9 @@ export const SessionChatStreamView = forwardRef<
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
-    if ((!items.length || (hasOnlyEmptyItem && emptyState)) && leadingContent == null) {
+    // A non-null leading Fragment may render no DOM. Keep the entire empty
+    // state outside Virtua even then, and mount it only with real messages.
+    if (!items.length || hasOnlyEmptyItem) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -1661,11 +1766,28 @@ export const SessionChatStreamView = forwardRef<
               ref={scrollRootRef}
               className={cn('relative bg-background', className)}
             >
-              {emptyState ?? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  No messages yet
+              <div
+                className="flex h-full flex-col overflow-y-auto"
+                style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
+              >
+                {leadingContent == null ? null : (
+                  <div className="shrink-0" data-conversation-leading-content="">
+                    {leadingContent}
+                  </div>
+                )}
+                {agentActivityLabel && (
+                  <div className="shrink-0 pt-2">
+                    <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  {emptyState ?? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      {noMessagesLabel}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </ContainerQueryProvider>
           </SessionImagePreviewContext.Provider>
         </SessionChatActionContext.Provider>
@@ -1692,6 +1814,7 @@ export const SessionChatStreamView = forwardRef<
               // header at rest while later content scrolls under it and blurs.
               // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
               style={{
+                visibility: initialWindowReady && initialScrollRestored ? 'visible' : 'hidden',
                 display: 'block',
                 overflowY: 'auto',
                 contain: 'strict',
@@ -1702,6 +1825,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <Virtualizer
                 ref={vlistRef}
+                item={ConversationVirtualRow}
                 shift={false}
                 onScroll={handleStreamScroll}
                 onScrollEnd={handleStreamScrollEnd}
@@ -1717,6 +1841,9 @@ export const SessionChatStreamView = forwardRef<
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
                 {virtualRows.map((row, rowIndex) => {
+                  if (row.type === 'placeholder') {
+                    return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+                  }
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
@@ -1798,6 +1925,7 @@ export const SessionChatStreamView = forwardRef<
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                onPreviewRound={handleOutlinePreview}
                 overlayRoot={outlineOverlayRoot}
                 enableArrivalIntent
               />
@@ -2640,7 +2768,7 @@ const WorktreeScriptNoticeView = ({
             {title}
           </span>
           {isRunning ? (
-            <Loader2 className="h-3 w-3 flex-none shrink-0 animate-spin text-muted-foreground" />
+            <Spinner className="h-3 w-3 flex-none shrink-0 text-muted-foreground" />
           ) : null}
         </Fragment>
       }
@@ -2889,7 +3017,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Loader2 className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 animate-spin text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 text-muted-foreground" />
               )}
               <div
                 className={cn(
@@ -3141,7 +3269,7 @@ const ResendUndeliveredDialog = ({
             {t('common.cancel', 'Cancel')}
           </AlertDialogCancel>
           <AlertDialogAction disabled={isResending} onClick={onConfirm}>
-            {isResending ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : null}
+            {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -3632,11 +3760,7 @@ const AssistantForkButton = ({
       )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
-      {isForking ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <GitFork className="h-3.5 w-3.5" />
-      )}
+      {isForking ? <Spinner className="h-3.5 w-3.5" /> : <GitFork className="h-3.5 w-3.5" />}
     </Button>
   );
 
@@ -5783,7 +5907,7 @@ const ToolCallCard = memo(function ToolCallCard({
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
@@ -5793,10 +5917,7 @@ const ToolCallCard = memo(function ToolCallCard({
     const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <StatusIcon
-          className={cn('h-4 w-4 shrink-0', isCompacting && 'animate-spin')}
-          aria-hidden="true"
-        />
+        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -5896,9 +6017,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? (
-    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  ) : null;
+  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;
@@ -6305,15 +6424,17 @@ const StandardToolContentBlock = ({
   onFilePathClick?: (filePath: string) => void;
   fontSize: ConversationFontSize;
 }) => {
+  const readonly = useContext(SessionReadonlyContext);
   switch (content.type) {
     case 'text':
       return (
         <MarkdownBlock text={content.text} size={fontSize} onFilePathClick={onFilePathClick} />
       );
     case 'image': {
-      const src = content.uri
-        ? sanitizeToolContentHref(content.uri)
-        : buildSafeBase64DataUrl(content.mimeType, content.data);
+      const src =
+        content.uri && !readonly
+          ? sanitizeToolContentHref(content.uri)
+          : buildSafeBase64DataUrl(content.mimeType, content.data);
       if (!src) return null;
       return (
         <div className="space-y-2">
@@ -6339,7 +6460,7 @@ const StandardToolContentBlock = ({
       );
     }
     case 'resource_link': {
-      const href = sanitizeToolContentHref(content.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.uri);
       if (!href) {
         return (
           <div
@@ -6374,7 +6495,7 @@ const StandardToolContentBlock = ({
           />
         );
       }
-      const href = sanitizeToolContentHref(content.resource.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
         <div className="space-y-2">

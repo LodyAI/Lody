@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@/ui/button';
@@ -78,7 +79,7 @@ function UpdateStatusText({
     const p = percent != null ? Math.round(percent) : 0;
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <Spinner className="h-3.5 w-3.5" />
         {t('settings.about.downloading', { percent: String(p) })}
       </span>
     );
@@ -238,7 +239,7 @@ export function MobileAboutSettings() {
                 disabled={isInstalling}
               >
                 {isInstalling ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1 h-3.5 w-3.5" />
                 ) : (
                   <Download className="mr-1 h-3.5 w-3.5" />
                 )}
@@ -254,7 +255,7 @@ export function MobileAboutSettings() {
                 }}
                 disabled={isChecking || phase === 'downloading'}
               >
-                {isChecking ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                {isChecking ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
                 {t('settings.about.checkForUpdates')}
               </Button>
             )}

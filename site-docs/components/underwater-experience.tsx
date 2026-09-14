@@ -1,5 +1,7 @@
 'use client';
 
+import { OptionalEnhancement } from './optional-enhancement';
+
 /**
  * UnderwaterExperience
  *
@@ -414,15 +416,23 @@ export function UnderwaterExperience({
 
   return (
     <>
-      <Suspense
+      <OptionalEnhancement
         fallback={
           <div className="underwater-bg underwater-landing__bg" aria-hidden="true">
             <div className="underwater-bg__overlay" />
           </div>
         }
       >
-        <UnderwaterPointCloudBackground className="underwater-landing__bg" diveRef={diveRef} />
-      </Suspense>
+        <Suspense
+          fallback={
+            <div className="underwater-bg underwater-landing__bg" aria-hidden="true">
+              <div className="underwater-bg__overlay" />
+            </div>
+          }
+        >
+          <UnderwaterPointCloudBackground className="underwater-landing__bg" diveRef={diveRef} />
+        </Suspense>
+      </OptionalEnhancement>
 
       <main id="main-content" className="underwater-main">
         <div className="underwater-hero">
@@ -509,13 +519,15 @@ export function UnderwaterExperience({
                       `previewArmed` only gates the FIRST mount; it never flips back,
                       so this cannot remount ghost scripts mid-scroll. */}
                   {previewArmed ? (
-                    <Suspense fallback={null}>
-                      <LandingAppPreview
-                        locale={locale}
-                        demo={activeDemo}
-                        ghostEnabled={demosLive && stageInView}
-                      />
-                    </Suspense>
+                    <OptionalEnhancement>
+                      <Suspense fallback={null}>
+                        <LandingAppPreview
+                          locale={locale}
+                          demo={activeDemo}
+                          ghostEnabled={demosLive && stageInView}
+                        />
+                      </Suspense>
+                    </OptionalEnhancement>
                   ) : null}
                 </div>
               </div>

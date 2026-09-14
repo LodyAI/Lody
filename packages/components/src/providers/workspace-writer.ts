@@ -106,7 +106,8 @@ export interface WorkspaceWriter {
   respondSessionPermission(
     sessionId: string,
     requestId: string,
-    outcome: PermissionOutcome
+    outcome: PermissionOutcome,
+    options?: { turnId?: string }
   ): Promise<void>;
 
   /** Message-queue mutations (durable CRDT on the session doc). */

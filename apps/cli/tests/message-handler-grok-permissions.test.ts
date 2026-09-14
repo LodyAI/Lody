@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import {
@@ -18,6 +19,7 @@ import type { SessionDoc } from '../src/lib/loro/session-doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 // Permission tests need no code-collaboration database or user-profile writes.
 vi.mock('../src/lib/code-collab/code-collab-v2-diff-store', () => ({
@@ -73,14 +75,14 @@ function fixture(initialMode = 'ask') {
         client: AgentClient
       ) => Promise<RequestPermissionResponse>)
     | undefined;
-  const doc = {
+  const doc = withHistoryPort({
     updateHistory: vi.fn(async (update: (prev: unknown[]) => unknown[]) => {
       history = update(history);
       for (const listener of historyListeners) listener();
     }),
     setLastMessageAt: async () => {},
     getMetaState: async () => ({ title: 'Synthetic session', userId: 'user' }),
-    getHistory: async () => history,
+    getHistory: () => history,
     setStatus: vi.fn(async (_status: unknown, meta?: { awaitingUserSince?: number }) => {
       if (meta?.awaitingUserSince) awaitingUser = true;
     }),
@@ -97,7 +99,10 @@ function fixture(initialMode = 'ask') {
       },
       getState: () => ({ history }),
     },
-  };
+  });
+  (doc as { sessionData?: unknown }).sessionData = fakeSessionData(doc.updateHistory as never);
+  Object.assign(doc, { agentWrites: (doc as any).sessionData.agentWrites });
+  withHistoryPort(doc);
   const workspace = {
     sessions: new Map(),
     repo: {
@@ -233,8 +238,10 @@ describe('Grok Always Approve in the durable permission flow', () => {
     await f.waitForPending();
     expect(f.outcome('second')).toBeUndefined();
     const rejected: Outcome = { outcome: 'selected', optionId: 'reject' };
-    await f.answer('second', rejected);
+    const storing = f.answer('second', rejected);
+    // Same stack: the stored decision wins before any Promise callback runs.
     f.setMode('always-approve');
+    await storing;
     await expect(next).resolves.toEqual({ outcome: rejected });
     expect(f.outcome('second')).toEqual(rejected);
   });

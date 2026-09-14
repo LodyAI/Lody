@@ -2,6 +2,7 @@ import { CliType } from './ai';
 export * from './history-writer';
 export * from './history-write-schema';
 export * from './session-mirror';
+export * from './session-control-plane';
 import type { AgentConfigId, MachineId, SessionId, TaskId, WorkspaceId } from './ids';
 import { PREVIEW_COMMENT_DOC_PREFIX, getLoroPreviewCommentStreamId } from './preview-comment-types';
 import { TASK_DOC_PREFIX, getLoroTaskStreamId } from './task-types';

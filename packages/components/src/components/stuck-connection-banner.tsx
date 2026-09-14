@@ -2,7 +2,8 @@ import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
 import { motion } from 'framer-motion';
-import { Loader2, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { ClearCacheConfirmDialog, useClearCache } from './settings/clear-cache';
@@ -54,10 +55,7 @@ export function StuckConnectionBanner({
         className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur"
       >
         <div className="flex items-center gap-2">
-          <Loader2
-            className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-            aria-hidden="true"
-          />
+          <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
           <Button
             variant="ghost"

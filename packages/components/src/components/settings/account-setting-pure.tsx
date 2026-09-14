@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils';
 import type { Invitation } from 'better-auth/plugins';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
-  Loader2,
   UserPlus,
   Mail,
   Clock,
@@ -17,6 +16,7 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -462,7 +462,7 @@ export function AccountSettingsPure({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin" />
+        <Spinner className="h-8 w-8" />
       </div>
     );
   }
@@ -558,7 +558,7 @@ export function AccountSettingsPure({
                     {userNameBaseline || t('settings.profile.nameEmpty')}
                   </span>
                   {isSavingUserName ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   ) : (
                     <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
                   )}
@@ -653,7 +653,7 @@ export function AccountSettingsPure({
                 >
                   <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
                   {isRenamingOrganization ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   ) : (
                     <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
                   )}
@@ -737,7 +737,7 @@ export function AccountSettingsPure({
                   }}
                   disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
                 >
-                  {isCreatingCliApiKey && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  {isCreatingCliApiKey && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
@@ -778,7 +778,7 @@ export function AccountSettingsPure({
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {revokingCliApiKeyId ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
                 ) : (
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 )}
@@ -951,7 +951,7 @@ export function AccountSettingsPure({
                       }}
                     >
                       {cancellingInvitationIds.has(invitation.id) ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Spinner className="h-3.5 w-3.5" />
                       ) : (
                         <X className="h-3.5 w-3.5" />
                       )}
@@ -987,7 +987,7 @@ export function AccountSettingsPure({
         >
           {isLoadingCliApiKeys ? (
             <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
               {t('settings.account.cliAuth.loadingRecords')}
             </div>
           ) : cliApiKeys.length === 0 ? (
@@ -1051,7 +1051,7 @@ export function AccountSettingsPure({
                     disabled={revokingCliApiKeyId === apiKey.id}
                   >
                     {revokingCliApiKeyId === apiKey.id ? (
-                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="mr-1.5 h-3.5 w-3.5" />
                     ) : (
                       <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                     )}
@@ -1180,7 +1180,7 @@ export function AccountSettingsPure({
             >
               {isLeaving ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1293,7 +1293,7 @@ export function AccountSettingsPure({
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1383,7 +1383,7 @@ export function AccountSettingsPure({
             >
               {isDeletingAccount ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('common.processing')}
                 </>
               ) : (

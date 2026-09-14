@@ -71,7 +71,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "bench:conversation": "vitest bench benchmarks/conversation-window.bench.ts --run"
   },
   "dependencies": {
     "@zumer/snapdom": "^2.24.15",

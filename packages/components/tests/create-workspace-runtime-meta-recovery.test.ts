@@ -37,8 +37,23 @@ const mocks = vi.hoisted(() => {
     run: () => void;
   }> = [];
   const streamClient = {};
+  // Identity for the Streams token provider and its auth callbacks, so tests can
+  // prove the eager-sync bridge holds ONE callback per provider instead of
+  // rebuilding one per invocation (a rebuilt callback forgets its last token).
+  const providerIdentity = { providers: 0, callbacks: 0 };
+  const authInvocations: Array<{
+    providerId: number;
+    callbackId: number;
+    context?: { reason: string; previousToken?: string };
+  }> = [];
+  const eagerSyncDeps: Array<{
+    auth(context?: { reason: string; previousToken?: string }): Promise<string | undefined>;
+  }> = [];
 
   return {
+    providerIdentity,
+    authInvocations,
+    eagerSyncDeps,
     setTransportAdapter,
     addTransport,
     removeTransport,
@@ -298,6 +313,18 @@ vi.mock('@lody/loro-streams-rpc', () => ({
   LORO_STREAMS_RPC_RETENTION_SECONDS: 60,
 }));
 
+vi.mock('../src/providers/eager-sync-worker-client', () => ({
+  createEagerSyncWorkerClient: vi.fn((deps: (typeof mocks.eagerSyncDeps)[number]) => {
+    mocks.eagerSyncDeps.push(deps);
+    return {
+      prefetch: vi.fn(async () => 'skipped' as const),
+      cancel: vi.fn(),
+      cancelAll: vi.fn(),
+      dispose: vi.fn(),
+    };
+  }),
+}));
+
 vi.mock('@lody/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@lody/shared')>();
   return {
@@ -305,13 +332,22 @@ vi.mock('@lody/shared', async (importOriginal) => {
     buildLoroStreamsTokenEndpoint: vi.fn(
       () => 'https://tokens.example.test/api/loro-streams/token'
     ),
-    createLoroStreamsTokenProvider: vi.fn(() => ({
-      getToken: vi.fn(async () => 'streams-token'),
-      invalidate: mocks.tokenProviderInvalidate,
-      getGatewayBaseUrl: vi.fn(() => actual.DEFAULT_LORO_STREAMS_BASE_URL),
-      getShardHostSuffix: vi.fn(() => undefined),
-      createAuthCallback: vi.fn(() => async () => 'streams-token'),
-    })),
+    createLoroStreamsTokenProvider: vi.fn(() => {
+      const providerId = ++mocks.providerIdentity.providers;
+      return {
+        getToken: vi.fn(async () => 'streams-token'),
+        invalidate: mocks.tokenProviderInvalidate,
+        getGatewayBaseUrl: vi.fn(() => actual.DEFAULT_LORO_STREAMS_BASE_URL),
+        getShardHostSuffix: vi.fn(() => undefined),
+        createAuthCallback: vi.fn(() => {
+          const callbackId = ++mocks.providerIdentity.callbacks;
+          return async (context?: { reason: string; previousToken?: string }) => {
+            mocks.authInvocations.push({ providerId, callbackId, context });
+            return 'streams-token';
+          };
+        }),
+      };
+    }),
   };
 });
 
@@ -323,6 +359,10 @@ import {
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mocks.providerIdentity.providers = 0;
+    mocks.providerIdentity.callbacks = 0;
+    mocks.authInvocations.length = 0;
+    mocks.eagerSyncDeps.length = 0;
     mocks.setTransportAdapter.mockClear();
     mocks.addTransport.mockClear();
     mocks.removeTransport.mockClear();
@@ -914,6 +954,62 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(mocks.presenceShouldRestartOnExternalWake).toHaveBeenCalledTimes(1);
     expect(mocks.presenceStop).toHaveBeenCalledTimes(presenceStopCallsAfterInitialAttach + 1);
     expect(mocks.presenceStart).toHaveBeenCalledTimes(2);
+
+    await runtime.dispose();
+  });
+  it('gives eager-sync one held auth callback per provider and forwards its context', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    const bridge = mocks.eagerSyncDeps.at(-1);
+    expect(bridge).toBeDefined();
+
+    // A callback rebuilt per invocation starts with an empty last-token memory
+    // and makes the provider return a rejected JWT unchanged, so the bridge has
+    // to reuse one callback for the provider's lifetime.
+    expect(await bridge?.auth({ reason: 'request' })).toBe('streams-token');
+    expect(await bridge?.auth({ reason: 'unauthorized', previousToken: 'jwt-1' })).toBe(
+      'streams-token'
+    );
+    expect(await bridge?.auth({ reason: 'unauthorized' })).toBe('streams-token');
+    const callbackIds = new Set(mocks.authInvocations.map((entry) => entry.callbackId));
+    expect(callbackIds.size).toBe(1);
+    // The context reaches the provider unreduced, `previousToken` included.
+    expect(mocks.authInvocations.map((entry) => entry.context)).toEqual([
+      { reason: 'request' },
+      { reason: 'unauthorized', previousToken: 'jwt-1' },
+      { reason: 'unauthorized' },
+    ]);
+
+    await runtime.dispose();
+  });
+
+  it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    const bridge = mocks.eagerSyncDeps.at(-1);
+    await bridge?.auth({ reason: 'request' });
+    const firstProvider = mocks.authInvocations.at(-1)?.providerId;
+
+    // Signing out drops the provider; a stale callback must never be served.
+    await runtime.setAuthToken(null);
+    expect(await bridge?.auth({ reason: 'request' })).toBeUndefined();
+
+    // Signing back in builds a new provider, and the bridge follows it.
+    await runtime.setAuthToken('auth-token-2');
+    expect(await bridge?.auth({ reason: 'request' })).toBe('streams-token');
+    const rebound = mocks.authInvocations.at(-1);
+    expect(rebound?.providerId).not.toBe(firstProvider);
+    expect(rebound?.callbackId).not.toBe(mocks.authInvocations[0]?.callbackId);
 
     await runtime.dispose();
   });

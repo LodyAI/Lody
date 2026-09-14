@@ -50,7 +50,6 @@ import {
   Github,
   SquarePen,
   Link2,
-  Loader2,
   MessageSquareMore,
   PanelLeft,
   Plus,
@@ -58,6 +57,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   SessionList,
   type SessionListProps,
@@ -468,7 +468,7 @@ function ConnectionPill({
       data-workspace-status={state}
     >
       {isLoading ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+        <Spinner className="h-3 w-3 shrink-0" aria-hidden />
       ) : (
         <span className="h-1.5 w-1.5 rounded-full bg-status-danger" aria-hidden />
       )}

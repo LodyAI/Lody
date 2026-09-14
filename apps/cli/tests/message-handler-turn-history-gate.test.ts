@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 
@@ -158,20 +159,20 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       // The eager assistant-entry creation (execution service does this before
       // the prompt) must defer while the user entry is missing locally.
       await handler.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       // Streamed output arrives and the batch window elapses — still nothing
       // may be persisted ahead of the user entry.
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'hello'));
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, ' world'));
       await vi.advanceTimersByTimeAsync(200);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       // The user entry syncs in (as the web client's CRDT write would land).
-      await doc.updateHistory((history) => [...history, userEntry(userTurnId)]);
+      await updateTestHistory(doc, (history) => [...history, userEntry(userTurnId)]);
       await vi.advanceTimersByTimeAsync(200);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([
         ['user', userTurnId],
         ['assistant', turnId],
@@ -195,11 +196,11 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       });
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'stalled sync'));
       await vi.advanceTimersByTimeAsync(200);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       await vi.advanceTimersByTimeAsync(DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([['assistant', turnId]]);
     } finally {
       await destroyRepoOnRealTimers(repo);
@@ -212,7 +213,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     const { repo, doc, handler } = await createHandlerHarness(sessionId);
 
     try {
-      await doc.updateHistory((history) => [...history, userEntry(userTurnId)]);
+      await updateTestHistory(doc, (history) => [...history, userEntry(userTurnId)]);
       const turnId = handler.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'crdt',
         sessionDoc: doc,
@@ -221,7 +222,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'immediate'));
       await vi.advanceTimersByTimeAsync(20);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([
         ['user', userTurnId],
         ['assistant', turnId],

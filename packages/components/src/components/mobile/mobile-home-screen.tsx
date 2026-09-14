@@ -22,7 +22,6 @@ import {
   Folders,
   Github,
   ListTodo,
-  Loader2,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -32,6 +31,7 @@ import {
   Settings,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MdChat, MdChecklist, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
@@ -2088,7 +2088,7 @@ function LocalProjectsList({
                         {project.removalState === 'waiting_for_device' ? (
                           <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                         ) : (
-                          <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                          <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
                         )}
                         <span className="truncate">
                           {project.removalState === 'waiting_for_device'

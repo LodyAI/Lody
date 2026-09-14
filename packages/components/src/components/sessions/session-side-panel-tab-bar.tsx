@@ -1,14 +1,6 @@
 import { memo, useEffect, useRef, type ReactNode } from 'react';
-import {
-  FileDiff,
-  Files,
-  GitPullRequest,
-  Loader2,
-  MessageSquare,
-  MonitorPlay,
-  Plus,
-  X,
-} from 'lucide-react';
+import { FileDiff, Files, GitPullRequest, MessageSquare, MonitorPlay, Plus, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { ScrollArea } from '@/ui/scroll-area';
@@ -144,7 +136,7 @@ const INACTIVE_TAB_CLASS =
 
 function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   if (tab.pending) {
-    return <Loader2 className="h-3.5 w-3.5 animate-spin opacity-70" />;
+    return <Spinner className="h-3.5 w-3.5 opacity-70" />;
   }
   switch (tab.kind) {
     case 'files':

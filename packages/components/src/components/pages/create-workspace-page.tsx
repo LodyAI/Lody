@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
@@ -239,7 +239,7 @@ export function CreateWorkspacePage({
               >
                 {creating ? (
                   <span className="flex items-center">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-2 h-4 w-4" />
                     {paidRequired
                       ? t('billing.startingCheckout', 'Starting checkout...')
                       : t('common.creating')}

@@ -15,7 +15,6 @@ import {
   ChevronUp,
   Download,
   Laptop,
-  Loader2,
   LogOut,
   MoreHorizontal,
   Pencil,
@@ -25,6 +24,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -467,7 +467,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     >
                       {machine.name || machine.id}
                     </h2>
-                    {renameSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {renameSaving && <Spinner className="h-3.5 w-3.5" />}
                     {!isMobile && manageableOwnMachine && (
                       <Button
                         variant="ghost"
@@ -497,7 +497,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     onClick={() => void handlePing()}
                   >
                     {pinging ? (
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="mr-1 h-3.5 w-3.5" />
                     ) : (
                       <Activity className="mr-1 h-3.5 w-3.5" />
                     )}
@@ -518,7 +518,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     {t('workspace.machines.shareMachineLabel', 'Share machine')}
                   </span>
                   {sharing ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <Spinner className="h-4 w-4 text-muted-foreground" />
                   ) : (
                     <Switch
                       checked={effectiveShared}
@@ -546,7 +546,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       onClick={() => void handleRestartDaemon()}
                     >
                       {restartingDaemon ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Spinner className="h-3.5 w-3.5" />
                       ) : (
                         <RotateCcw className="h-3.5 w-3.5" />
                       )}
@@ -621,7 +621,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       aria-label={t('workspace.machines.moreActions', 'Machine options')}
                     >
                       {sharing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Spinner className="h-4 w-4" />
                       ) : (
                         <MoreHorizontal className="h-4 w-4" />
                       )}
@@ -688,7 +688,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={pinging}
                       >
                         {pinging ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <Activity className="h-3.5 w-3.5" />
                         )}
@@ -710,7 +710,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {upgradingDaemon ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <Download className="h-3.5 w-3.5" />
                         )}
@@ -728,7 +728,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {restartingDaemon ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <RotateCcw className="h-3.5 w-3.5" />
                         )}
@@ -824,7 +824,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   onClick={() => void handleUpgradeDaemon()}
                 >
                   {upgradingDaemon ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="mr-1 h-3.5 w-3.5" />
                   ) : (
                     <Download className="mr-1 h-3.5 w-3.5" />
                   )}
@@ -898,7 +898,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('workspace.machines.removeAction', 'Remove')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -938,7 +938,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {revoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
             </AlertDialogAction>
           </AlertDialogFooter>

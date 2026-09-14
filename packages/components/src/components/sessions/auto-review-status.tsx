@@ -1,4 +1,5 @@
-import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Check, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   isBlockingFinding,
@@ -84,9 +85,8 @@ export function AutoReviewStatus({
     >
       <div className="flex items-center gap-2">
         {busy ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-        ) : run.state === 'merged' ||
-          (run.state === 'reviewed' && blocking.length === 0) ? (
+          <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : run.state === 'merged' || (run.state === 'reviewed' && blocking.length === 0) ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
         ) : (
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
@@ -118,9 +118,7 @@ export function AutoReviewStatus({
         </Button>
       </div>
 
-      {run.blocked ? (
-        <p className="mt-1.5 text-muted-foreground">{run.blocked.summary}</p>
-      ) : null}
+      {run.blocked ? <p className="mt-1.5 text-muted-foreground">{run.blocked.summary}</p> : null}
 
       {/* The confirmation prompt has exactly one exit, and this is it. Without
           the button the run waits forever: the workspace-level flag that would

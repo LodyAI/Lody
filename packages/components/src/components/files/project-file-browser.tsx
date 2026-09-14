@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileText, Loader2 } from 'lucide-react';
+import { FileText } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
@@ -100,7 +101,7 @@ function ProjectFileContent({ content }: { readonly content: FileContentState })
   if (content.status === 'loading') {
     return (
       <div className="flex min-h-0 items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('workspace.projects.loadingFile', 'Loading file')}
       </div>
     );

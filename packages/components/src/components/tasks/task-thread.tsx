@@ -1,15 +1,7 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  ArrowUp,
-  Bot,
-  Image as ImageIcon,
-  Loader2,
-  MessagesSquare,
-  Unlink,
-  User,
-  X,
-} from 'lucide-react';
+import { ArrowUp, Bot, Image as ImageIcon, MessagesSquare, Unlink, User, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   buildTaskImageMarkdownUrl,
   extractTaskImageIdsFromMarkdown,
@@ -422,7 +414,7 @@ export function TaskThread({
               aria-label={t('tasks.thread.addImage', 'Add image')}
             >
               {uploadingImages ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <ImageIcon className="h-3.5 w-3.5" />
               )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, Download, Loader2 } from 'lucide-react';
+import { Check, Copy, Download } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -467,7 +468,7 @@ export function ChatShareImageDialog({
             disabled={exporting || !assetsReady || messages.length === 0}
           >
             {operation === 'copy' ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Spinner className="size-4" />
             ) : copied ? (
               <Check className="size-4" />
             ) : (
@@ -482,7 +483,7 @@ export function ChatShareImageDialog({
             disabled={exporting || !assetsReady || messages.length === 0}
           >
             {operation === 'export' ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Spinner className="size-4" />
             ) : (
               <Download className="size-4" />
             )}

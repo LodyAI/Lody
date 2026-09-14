@@ -10,7 +10,8 @@ import {
 import { getAllAgentConfigAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
-import { Bot, Loader2 } from 'lucide-react';
+import { Bot } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
 import { OptionSelector, type OptionSelectorOption } from './option-selector';
 
@@ -133,7 +134,7 @@ export function AgentSelector({
           )}
         >
           {loading ? (
-            <Loader2 className="h-3! w-3! shrink-0 animate-spin opacity-70" />
+            <Spinner className="h-3! w-3! shrink-0 opacity-70" />
           ) : (
             renderAgentIcon(option)
           )}

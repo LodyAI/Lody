@@ -297,7 +297,10 @@ function TourWindow({
 
   const items = useMemo(
     () =>
-      history.map((message) => ({ type: 'message', sessionId: TOUR_SESSION_ID, message }) as const),
+      history.map(
+        (message, turnIndex) =>
+          ({ type: 'message', sessionId: TOUR_SESSION_ID, message, turnIndex }) as const
+      ),
     [history]
   );
 

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -220,7 +221,7 @@ export function ProviderRow({
               }}
             >
               {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
@@ -279,7 +280,7 @@ export function ProviderRow({
               }}
               className={cn('bg-destructive text-destructive-foreground hover:bg-destructive/90')}
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>

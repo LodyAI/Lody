@@ -3,6 +3,7 @@ import {
   type CSSProperties,
   type ReactNode,
   useState,
+  useContext,
   useCallback,
   useMemo,
   useLayoutEffect,
@@ -59,6 +60,7 @@ import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
+import { SessionReadonlyContext } from './session-readonly-context';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -988,14 +990,27 @@ const AgentFileLink = ({
   );
 };
 
+function isWorkspaceResourceHref(href: string): boolean {
+  try {
+    return (
+      isMarkdownAgentFileHref(href) ||
+      /\/(?:api\/)?workspaces\/|\/session-(?:images|files)\//i.test(decodeURIComponent(href))
+    );
+  } catch {
+    return true;
+  }
+}
+
 const createMarkdownComponents = ({
   copyAgentFileLabel,
   openAgentFileLabel,
   onAgentFileLinkClick,
+  readonly,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
+  readonly: boolean;
 }): Components => ({
   inlineCode: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, inline: _inline, ...rest } = props;
@@ -1024,6 +1039,11 @@ const createMarkdownComponents = ({
   },
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
+    // Workspace resource links are display-only in a publication, not a second
+    // download API. Ordinary article/GitHub links remain explicit external navigation.
+    if (readonly && href && isWorkspaceResourceHref(href)) {
+      return <span>{children}</span>;
+    }
 
     if (isMarkdownAgentFileHref(href)) {
       return (
@@ -1052,6 +1072,33 @@ const createMarkdownComponents = ({
 });
 
 function TaskMarkdownImage(props: MarkdownImageProps) {
+  const readonly = useContext(SessionReadonlyContext);
+  // No workspace task hook or URI fetch is mounted for an anonymous publication.
+  // Typed share images are handled separately through the manifest attachment reader.
+  if (readonly) {
+    const inline =
+      typeof props.src === 'string' &&
+      /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/.test(props.src);
+    return inline ? (
+      <img
+        src={props.src}
+        alt={props.alt ?? ''}
+        className="my-2 max-h-[32rem] max-w-full rounded-md object-contain"
+      />
+    ) : (
+      <span
+        role="img"
+        aria-label={props.alt || 'Image'}
+        className="my-2 block text-sm text-muted-foreground"
+      >
+        {props.alt || 'Image'}
+      </span>
+    );
+  }
+  return <WorkspaceMarkdownImage {...props} />;
+}
+
+function WorkspaceMarkdownImage(props: MarkdownImageProps) {
   const { node: _node, src, alt, ...rest } = props;
   const taskImageId = src ? parseTaskImageMarkdownUrl(src) : null;
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
@@ -1115,6 +1162,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }) {
   const { t } = useTranslation();
   const resolvedTheme = useResolvedTheme();
+  const readonly = useContext(SessionReadonlyContext);
   const containerRef = useRef<HTMLDivElement>(null);
   const search = useSessionSearch();
   const searchMatch = useSessionSearchBlock(searchBlockId ?? '');
@@ -1144,8 +1192,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         copyAgentFileLabel,
         openAgentFileLabel,
         onAgentFileLinkClick,
+        readonly: readonly !== null,
       }),
-    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel]
+    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel, readonly]
   );
 
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);

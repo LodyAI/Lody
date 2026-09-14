@@ -28,7 +28,8 @@ Ownership and explanations: [README.md](README.md).
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
   7px centre. Draw nesting regardless of working/unread/waiting status. Only children
   widen the slot from 14px to 26px for a 12px title indent without shifting the background.
-  Keep geometry in `sidebar-row-shared.tsx`; context-menu expand/collapse uses the same
+  Keep geometry in the pure `session-row-leading-slot.tsx` (re-exported by
+  `sidebar-row-shared.tsx` and reused by anonymous shares); context-menu expand/collapse uses the same
   toggle callback.
 - Desktop working/waiting/unread status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`. Pass those three flags to the end slot, never the leading

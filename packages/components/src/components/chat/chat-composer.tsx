@@ -23,6 +23,7 @@ import {
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
 import { cn } from '@/lib/utils';
+import { COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
 import {
   CombinedMentionTextarea,
   type CombinedMentionTextareaHandle,
@@ -611,11 +612,10 @@ export function ChatComposer({
   );
 
   const sessionContainerClassName = cn(
-    'flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150',
+    COMPOSER_SESSION_SURFACE_CLASS,
     // Desktop session spacing belongs to the clickable card, not an inert strip below it.
     !isMobile && 'pb-3.5',
-    'border border-foreground/[0.10] bg-background focus-within:border-ring/40',
-    'dark:border-input-border/70 dark:bg-input/90',
+    'focus-within:border-ring/40',
     mentionSurfaceClassName
   );
 

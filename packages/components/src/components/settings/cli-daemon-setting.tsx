@@ -1,4 +1,5 @@
-import { Loader2, Play, RotateCcw, Square } from 'lucide-react';
+import { Play, RotateCcw, Square } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { ElectronCliState } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -65,7 +66,7 @@ export function CliDaemonSetting() {
             onClick={() => void restart()}
           >
             {isRestarting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : isStopped ? (
               <Play className="h-3.5 w-3.5" />
             ) : (
@@ -82,7 +83,7 @@ export function CliDaemonSetting() {
             onClick={() => void terminate()}
           >
             {isTerminating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <Square className="h-3.5 w-3.5" />
             )}

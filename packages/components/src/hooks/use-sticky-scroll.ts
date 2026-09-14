@@ -11,7 +11,11 @@ import {
 import { useStickToBottom } from 'use-stick-to-bottom';
 import type { VirtualizerHandle } from 'virtua';
 import type { SessionId } from '@lody/shared';
-import { getScrollBottomPaddingOffset, scrollViewportToRealBottom } from './sticky-scroll-dom';
+import {
+  getScrollElementMaxOffset,
+  isInitialScrollLayoutReady,
+  scrollViewportToRealBottom,
+} from './sticky-scroll-dom';
 import { getScrollPosition, saveScrollPosition } from './use-scroll-position-cache';
 
 export interface UseStickyScrollOptions {
@@ -19,6 +23,7 @@ export interface UseStickyScrollOptions {
   vlistRef: RefObject<VirtualizerHandle | null>;
   /** Total number of items in the list. Used as the scroll-to target index. */
   itemCount: number;
+  initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   /**
    * Set by the session composer immediately before it changes its own height.
@@ -82,7 +87,6 @@ function useStickyViewportResizeObserver(options: {
     if (!scrollElement || typeof ResizeObserver === 'undefined') return undefined;
 
     let previousHeight = scrollElement.getBoundingClientRect().height;
-    let rafId: number | null = null;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -91,28 +95,16 @@ function useStickyViewportResizeObserver(options: {
         previousHeight = height;
         if (skipNextViewportResizeAutoScrollRef?.current) {
           skipNextViewportResizeAutoScrollRef.current = false;
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId);
-            rafId = null;
-          }
           continue;
         }
         if (!stickyBottomRef.current || itemCountRef.current <= 0) continue;
-        if (suppressAutoScrollRef?.current || rafId !== null) continue;
-
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          if (stickyBottomRef.current && !suppressAutoScrollRef?.current) {
-            scrollToRealBottom();
-          }
-        });
+        if (!suppressAutoScrollRef?.current) scrollToRealBottom();
       }
     });
 
     observer.observe(scrollElement);
     return () => {
       observer.disconnect();
-      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [
     itemCountRef,
@@ -128,6 +120,7 @@ export function useStickyScroll({
   sessionId,
   vlistRef,
   itemCount,
+  initialContentReady = true,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
   suppressAutoScrollRef,
@@ -160,6 +153,8 @@ export function useStickyScroll({
   const scrollElementRef = useRef<HTMLDivElement | null>(null);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const initialScrollRestoredRef = useRef(false);
+  const initialPositionAppliedRef = useRef(false);
+  const settleInitialLayoutRef = useRef(() => {});
   const [initialScrollRestored, setInitialScrollRestored] = useState(false);
 
   const handleWheelUp = useCallback(
@@ -195,35 +190,136 @@ export function useStickyScroll({
   );
 
   const scrollToRealBottom = useCallback(() => {
-    const currentScrollElement = scrollElementRef.current;
     scrollViewportToRealBottom({
+      scrollElement: scrollElementRef.current,
       itemCount: itemCountRef.current,
-      vlist: vlistRef.current,
-      scrollElement: currentScrollElement,
-      bottomOffset: getScrollBottomPaddingOffset(currentScrollElement),
+      // Mark programmatic corrections so shrinking content does not look like
+      // a user scrolling upward and releasing the follow lock.
+      setScrollTop: (offset) => {
+        state.scrollTop = offset;
+      },
     });
-  }, [itemCountRef, vlistRef]);
+  }, [state]);
 
-  useEffect(() => {
-    if (initialScrollRestoredRef.current || itemCount === 0) return;
-    if (!vlistRef.current) return;
+  const settleInitialLayout = useCallback(() => {
+    if (initialScrollRestoredRef.current || !initialPositionAppliedRef.current) return;
+    const viewport = scrollElementRef.current;
+    const virtualizer = vlistRef.current;
+    if (!viewport || !virtualizer) return;
+    const cached = cachedPositionAtMountRef.current;
+    if (cached?.type === 'offset') {
+      const target = Math.min(cached.scrollOffset, getScrollElementMaxOffset(viewport));
+      if (Math.abs(viewport.scrollTop - target) > 1) return;
+    }
+    if (
+      !isInitialScrollLayoutReady(viewport, virtualizer, itemCountRef.current, state.isAtBottom)
+    ) {
+      return;
+    }
+    initialScrollRestoredRef.current = true;
+    setInitialScrollRestored(true);
+  }, [state, vlistRef]);
+  settleInitialLayoutRef.current = settleInitialLayout;
 
-    const cachedState = cachedPositionAtMountRef.current;
-    requestAnimationFrame(() => {
-      const currentVlist = vlistRef.current;
-      if (!currentVlist) return;
-
-      if (cachedState?.type === 'offset') {
-        stopScroll();
-        currentVlist.scrollTo(cachedState.scrollOffset);
-      } else {
-        void scrollToBottomWithLock({ animation: 'instant' });
+  // Observe the bounded mounted row set, not streamed descendants. A row can
+  // grow before Virtua commits its spacer, so observing only the spacer misses
+  // a paint. Row measurement, spacer commits and scroll delivery all converge
+  // on the same initial-layout check; no guessed number of frames or timer.
+  useLayoutEffect(() => {
+    const content = scrollElement?.firstElementChild;
+    if (!(content instanceof HTMLElement)) return undefined;
+    const follow = () => {
+      if (
+        initialPositionAppliedRef.current &&
+        state.isAtBottom &&
+        !suppressAutoScrollRef?.current
+      ) {
         scrollToRealBottom();
       }
-      initialScrollRestoredRef.current = true;
-      setInitialScrollRestored(true);
+      settleInitialLayout();
+    };
+    const resizeObserver = new ResizeObserver(follow);
+    resizeObserver.observe(content);
+    const rows = new Set<Element>();
+    const observeRows = () => {
+      for (const row of rows) {
+        if (row.parentElement !== content) {
+          resizeObserver.unobserve(row);
+          rows.delete(row);
+        }
+      }
+      for (const row of content.children) {
+        if (!rows.has(row)) {
+          rows.add(row);
+          resizeObserver.observe(row);
+        }
+      }
+      mutationObserver.disconnect();
+      mutationObserver.observe(content, {
+        attributes: true,
+        attributeFilter: ['style'],
+        childList: true,
+      });
+      for (const row of rows)
+        mutationObserver.observe(row, { attributes: true, attributeFilter: ['style'] });
+    };
+    let spacerHeight = content.style.height;
+    const mutationObserver = new MutationObserver((records) => {
+      const membershipChanged = records.some((record) => record.type === 'childList');
+      const geometryChanged =
+        membershipChanged ||
+        spacerHeight !== content.style.height ||
+        records.some((record) => record.target !== content);
+      spacerHeight = content.style.height;
+      if (membershipChanged) observeRows();
+      // Virtua also toggles pointer-events during scrolling. That is not a
+      // geometry change and must not compete with a scrollbar drag.
+      if (geometryChanged) follow();
     });
-  }, [itemCount, scrollToBottomWithLock, scrollToRealBottom, stopScroll, vlistRef]);
+    observeRows();
+    follow();
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [scrollElement, scrollToRealBottom, settleInitialLayout, state, suppressAutoScrollRef]);
+
+  // Restore before paint, and keep the same follow intent when a placeholder
+  // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
+  // would expose the old bottom for a frame (or several hydration commits).
+  useLayoutEffect(() => {
+    if (!scrollElement || itemCount === 0 || !initialContentReady) return;
+    const currentVlist = vlistRef.current;
+    if (!currentVlist) return;
+
+    if (initialPositionAppliedRef.current) {
+      if (state.isAtBottom && !suppressAutoScrollRef?.current) scrollToRealBottom();
+      settleInitialLayout();
+      return;
+    }
+
+    const cachedState = cachedPositionAtMountRef.current;
+    if (cachedState?.type === 'offset') {
+      stopScroll();
+      currentVlist.scrollTo(cachedState.scrollOffset);
+    } else {
+      void scrollToBottomWithLock({ animation: 'instant' });
+      scrollToRealBottom();
+    }
+    initialPositionAppliedRef.current = true;
+    settleInitialLayout();
+  }, [
+    itemCount,
+    initialContentReady,
+    scrollElement,
+    scrollToBottomWithLock,
+    scrollToRealBottom,
+    settleInitialLayout,
+    state,
+    stopScroll,
+    suppressAutoScrollRef,
+    vlistRef,
+  ]);
 
   // Search jumps and group expansion are deliberate reading-position changes.
   // Release follow in a layout effect so ResizeObserver cannot pull the list to
@@ -241,6 +337,8 @@ export function useStickyScroll({
 
   const handleScroll = useCallback(
     (offset: number) => {
+      settleInitialLayoutRef.current();
+      if (!initialScrollRestoredRef.current) return;
       const scrollOffset = scrollElementRef.current?.scrollTop ?? offset;
       const followingBottom = state.isAtBottom;
       saveScrollPosition(

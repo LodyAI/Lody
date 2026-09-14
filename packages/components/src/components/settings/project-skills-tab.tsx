@@ -3,16 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import {
-  AlertCircle,
-  Boxes,
-  Info,
-  Loader2,
-  PackageOpen,
-  RefreshCw,
-  Search,
-  User,
-} from 'lucide-react';
+import { AlertCircle, Boxes, Info, PackageOpen, RefreshCw, Search, User } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
 import { SkillDetailDialog } from './skill-detail';
 import { SkillScopeBadge, SkillSymlinkBadge, SkillVersionBadge } from './skill-badges';
@@ -24,7 +16,6 @@ import {
 } from '@/hooks/use-project-skills';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
-import { cn } from '@/lib/utils';
 
 /**
  * Desktop "Skills" sub-tab for a project detail pane (local + GitHub).
@@ -96,7 +87,7 @@ export function ProjectSkillsView({
   if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center gap-2 rounded-md border border-border/60 bg-muted/15 px-3 py-10 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <Spinner className="h-3.5 w-3.5" />
         {t('workspace.projects.skills.loading', 'Loading skills')}
       </div>
     );
@@ -137,7 +128,7 @@ export function ProjectSkillsView({
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           {isRefreshing ? (
             <>
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <Spinner className="h-3.5 w-3.5 shrink-0" />
               <span>{t('workspace.projects.skills.refreshing', 'Refreshing…')}</span>
             </>
           ) : status === 'error' && stale ? (
@@ -176,7 +167,7 @@ export function ProjectSkillsView({
           disabled={isRefreshing}
           onClick={onRefresh}
         >
-          <RefreshCw className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')} />
+          <Spinner icon={RefreshCw} spinning={isRefreshing} className="h-3.5 w-3.5" />
           {t('workspace.projects.skills.refresh', 'Refresh')}
         </Button>
       </div>
