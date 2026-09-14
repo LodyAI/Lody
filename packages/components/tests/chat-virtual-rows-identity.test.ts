@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import {
+  areAssistantChatVirtualRowsEqual,
   buildChatVirtualRows,
   resolveAssistantMessageActions,
   type AssistantMessageAction,
@@ -51,7 +52,10 @@ const wrap = (message: SessionHistoryParsed): ChatStreamItem => ({
   turnIndex: (nextTurnIndex += 1),
 });
 
-const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number }) =>
+const build = (
+  items: ChatStreamItem[],
+  overrides?: { expansionVersion?: number; copyContextAvailable?: boolean }
+) =>
   buildChatVirtualRows({
     items,
     lastAssistantMessageId:
@@ -62,6 +66,9 @@ const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number 
             item.type === 'message' && item.message.role === 'assistant'
         )?.message.id ?? null,
     expansionVersion: overrides?.expansionVersion ?? 0,
+    ...(overrides?.copyContextAvailable === undefined
+      ? {}
+      : { copyContextAvailable: overrides.copyContextAvailable }),
   });
 
 const makeConversation = () => {
@@ -179,4 +186,29 @@ it('exposes copying during streaming and invalidates only when availability chan
   );
   const unchanged = buildChatVirtualRows({ ...args, copyContextAvailable: true });
   expect(unchanged.every((row, index) => row === withCopy[index])).toBe(true);
+});
+
+/* The live duration label is bound to ONE row by `isLive`. That bound is only as
+   good as the memo: a displaced turn's rebuilt row differs from the mounted one
+   by this flag alone, so if the comparison ignores it the old footer never
+   re-renders and keeps counting beside the new one. */
+it('reports a displaced turn footer as changed when it stops being the live one', () => {
+  const abandoned = wrap(makeMessage('turn-abandoned', 'assistant', [toolCall()], false));
+  const footerOf = (rows: ReturnType<typeof build>, messageId: string) =>
+    rows.find((row) => row.key === `assistant:${messageId}:footer`);
+
+  const whileLive = footerOf(build([abandoned], { copyContextAvailable: true }), 'turn-abandoned');
+  expect(whileLive).toMatchObject({ content: { kind: 'footer', isLive: true } });
+
+  const newTurn = wrap(makeMessage('turn-new', 'assistant', [text('taking over')], false));
+  const afterRows = build([abandoned, newTurn], { copyContextAvailable: true });
+  const afterDisplaced = footerOf(afterRows, 'turn-abandoned');
+  expect(afterDisplaced).toMatchObject({ content: { kind: 'footer', isLive: false } });
+  expect(footerOf(afterRows, 'turn-new')).toMatchObject({
+    content: { kind: 'footer', isLive: true },
+  });
+
+  expect(whileLive).toBeDefined();
+  expect(afterDisplaced).toBeDefined();
+  expect(areAssistantChatVirtualRowsEqual(whileLive!, afterDisplaced!)).toBe(false);
 });

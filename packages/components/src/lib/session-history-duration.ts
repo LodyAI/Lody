@@ -31,6 +31,11 @@ export const resolveSessionHistoryDurationMs = (
  * Unlike the finished form this clamps instead of returning null when the start
  * is in the future — a machine clock running ahead should print `0s` in the
  * slot, not leave it blank, since the slot's whole job is to be occupied.
+ *
+ * `permissionWaitMs` is read for symmetry but is absent on a live entry: the CLI
+ * keeps the running wait in its transient store and writes the field through
+ * `finish-assistant`. So a turn that waited on permission reads HIGH here by the
+ * length of the wait, and steps down when the finished label takes over.
  */
 export const resolveLiveSessionHistoryDurationMs = (
   message: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>,

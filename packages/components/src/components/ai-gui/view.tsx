@@ -3771,8 +3771,15 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
  * reserved unconditionally (it is what pushes the copy button clear of the
  * back-swipe strip), so an in-flight turn showed two icons floating beside a
  * blank gutter. It now counts up from the turn's own `timestamp`, which is the
- * same anchor the finished label resolves from, so the number does not jump
- * when the turn ends — it simply stops.
+ * same anchor the finished label resolves from, so for a turn with no permission
+ * wait the number stops at the end rather than jumping.
+ *
+ * KNOWN GAP: a turn that DID wait on permission steps down at finalization by
+ * the length of that wait. The CLI accumulates the wait in its transient store
+ * and writes `permissionWaitMs` onto the entry only through `finish-assistant`,
+ * so while the turn is live the field is absent here and the live number
+ * includes the user's own thinking time. Closing it needs the live wait state
+ * published from the machine; see the note linked from `README.md`.
  *
  * Its own leaf component so that the tick re-renders this span alone: the
  * shared `useStableNow` ticker is subscribed here, never by the footer (which
@@ -4170,13 +4177,21 @@ const areAssistantVirtualContentsEqual = (
         a.isThinking === b.isThinking
       );
     case 'footer':
-      return b.kind === 'footer' && a.showDuration === b.showDuration;
+      /* `isLive` must be compared: when a newer turn displaces an abandoned
+         unfinished one, the displaced turn's rebuilt row is identical except
+         for this flag, and skipping the re-render would leave its counter
+         running next to the new turn's — exactly the one-row bound the flag
+         exists to enforce. */
+      return b.kind === 'footer' && a.showDuration === b.showDuration && a.isLive === b.isLive;
     default:
       return false;
   }
 };
 
-const areAssistantChatVirtualRowsEqual = (
+/* Exported for `tests/chat-virtual-rows-identity.test.ts`: the memo's equality is
+   the thing under test, and driving it through real rebuilt rows is a stronger
+   check than restating the comparison over hand-built content. */
+export const areAssistantChatVirtualRowsEqual = (
   a: AssistantChatVirtualRow,
   b: AssistantChatVirtualRow
 ): boolean =>

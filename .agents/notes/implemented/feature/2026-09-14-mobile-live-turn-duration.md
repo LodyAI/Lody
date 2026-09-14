@@ -14,10 +14,12 @@ finished turn. While the agent was still working the bar therefore rendered two
 icons beside a conspicuously empty gutter, and the one question a user has at
 that moment (how long has this been going?) had no answer on screen. The slot now
 counts up once a second from the turn's own `timestamp`, the same anchor the
-finished label resolves from, so when the turn ends the number stops rather than
-jumps. The ticking is confined to a leaf component subscribed to the shared
-shared `useStableNow` ticker, so one live turn costs one re-rendering span rather
-than a re-render of every visible footer. The limit worth naming: "live" means
+finished label resolves from, so a turn that never waited on permission stops
+rather than jumps — one that did steps down by the length of the wait, because
+the machine writes `permissionWaitMs` only at finalization. The ticking is
+confined to a leaf component subscribed to the shared `useStableNow` ticker, so
+one live turn costs one re-rendering span rather than a re-render of every
+visible footer. The limit worth naming: "live" means
 the conversation's last assistant turn with `finished !== true`, which is a
 structural claim, not a liveness probe — a turn the machine abandoned without
 writing `finished` keeps the slot empty rather than counting forever, but only
@@ -40,8 +42,29 @@ defines the finished label as `(endedAt - timestamp) - permissionWaitMs`;
 `resolveLiveSessionHistoryDurationMs` is the same expression with `now` in place
 of `endedAt`. That equality is the point: the live and finished labels are one
 quantity observed at two moments, so the transition at turn end is a stop, not a
-correction. It also inherits the permission-wait subtraction for free, which a
-presence anchor could not express at all.
+correction.
+
+### The permission wait is the one term the live path cannot see
+
+That equality holds for the `timestamp` term and breaks for `permissionWaitMs`.
+The CLI accumulates the wait in its transient store
+(`apps/cli/src/lib/session-transient-store.ts`) as each request resolves and puts
+it on the history entry only through the `finish-assistant` action
+(`message-handler.ts`). A live entry therefore has no `permissionWaitMs` at all,
+so the live label counts the user's own thinking time, and at finalization it
+steps DOWN by the whole wait. For a turn with no permission card — the common
+case, and every case under an auto-approving mode — the two agree exactly.
+
+No client-side repair is sound. The client can see *that* a request is
+unanswered (a `tool_call` whose `permissionRequest` has no `outcome`) but not
+when the wait began: `PermissionRequestInfoSchema` carries no timestamp.
+Accumulating the pause by observation fails for a second reason — the footer
+lives in a virtualized list, so scrolling the live turn out of view unmounts the
+observer and loses the total. Closing this properly means publishing the live
+wait from the machine: the running `permissionWaitMs` written as each request
+resolves, plus the start of an in-flight wait, so a client can subtract both
+without local state. That is a schema plus CLI change and is deliberately not in
+this one.
 
 The one deliberate divergence: a start in the future (a machine clock running
 ahead) clamps to `0s` instead of returning null as the finished form does. The
@@ -112,6 +135,13 @@ that one; restoring a 1s sample period fails the phase case and only that one.
 driving the live story in a browser read `Worked for 48s` and `Worked for 51s`
 three seconds apart.
 
+`tests/chat-virtual-rows-identity.test.ts` pins the memo: when a newer turn
+displaces an abandoned unfinished one, the displaced footer's rebuilt row must
+NOT compare equal to the mounted one. Without `isLive` in that comparison the
+memo skips the re-render and the old label keeps counting beside the new turn's,
+defeating the one-row bound; the test fails in exactly that state.
+
 Not verified: behavior across a device sleep/resume, where the interval is
 throttled — the next tick corrects the value, but the interim frame was not
-observed on a real device.
+observed on a real device. The permission-wait step-down above is a known unfixed
+gap, not a verification limit.
