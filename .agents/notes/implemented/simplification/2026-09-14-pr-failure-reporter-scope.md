@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/699
 
 English | [中文](2026-09-14-pr-failure-reporter-scope.zh.md)
 
