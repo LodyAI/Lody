@@ -547,6 +547,7 @@ export const sessionPreviewDocSchema = schema.LoroMap(
 export const sessionExternalHistoryCursorDocSchema = schema.LoroMap(
   {
     importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+    hashVersion: schema.Number({ required: false }),
     // One atomic value: concurrent clients must not merge half of two baselines.
     storedHistoryBaseline: schema.String({ required: false }),
   },
@@ -750,6 +751,12 @@ export type ExternalAcpHistorySyncMeta = {
   sourceAcpSessionId: ACPSessionId;
   sourceUpdatedAt?: string;
   replayDigest?: string;
+  /**
+   * Canonical-hash version `replayDigest` was computed with. Absent means v1
+   * (written before hash versions existed). It versions the digest only; the
+   * session doc cursor carries its own version for `importedTurnHashes`.
+   */
+  hashVersion?: number;
   importedTurnCount: number;
   /** @deprecated Legacy bulky cursor. New writes do not store per-turn hashes in meta. */
   importedTurnHashes?: string[];
@@ -776,6 +783,13 @@ export type SessionPreviewLegacyMetaFields = {
 
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
+  /**
+   * Canonical-hash version `importedTurnHashes` were computed with. Absent means
+   * v1. It is deliberately independent of `ExternalAcpHistorySyncMeta.hashVersion`:
+   * a conflict marker may advance only the metadata while this cursor stays v1, and
+   * a v1 cursor must never be read as v2 (that manufactures a false prefix_mismatch).
+   */
+  hashVersion?: number;
   /** Versioned JSON bound to this cursor's source hashes, not the metadata digest. */
   storedHistoryBaseline?: string;
 };
