@@ -232,23 +232,22 @@ this page is the full text of the rules summarised there.
   float shadow). The old bottom bar row is gone: machine name + workdir badge moved to
   `SessionHeaderMenu` (`machineName` prop). Mobile keeps the single
   `MobileSessionRunConfig` button + sheet.
-  Pending-attachment state machines: `pendingImages` (images) **and** `pendingFiles`
-  (files; cloud upload via `@/lib/session-file-upload.ts` with sha256/textPreview,
-  abort + part retry). Oversize images (>5 MiB) auto-degrade to files. Send blocks
-  while either is uploading. Desktop same-machine uploads use
-  `@/lib/electron-session-file-sender.ts` / `localProjects.sendSessionFileLocal`, return
-  a `transport:'local'` block into the same `pendingFiles[].uploaded` slot, and fall
-  back to cloud on handoff failure. The composer exposes one unfiltered hidden
-  `<input type="file">` on every platform (Windows included — the renderer no
-  longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
-  routes each selection by MIME into the image or file state machine.
-  Proposed replacement: [send-time attachment preparation](../../specs/session-files.md).
-  That draft unifies new-conversation and continuation drafts, moves task ownership
-  out of the composer, and delays existing transfers until Send. Permanent local
-  references belong to a separate PR; immediate transfer remains the current implementation.
+  Images and files stay as local drafts until Send. Oversize images (>5 MiB)
+  degrade to files using the existing validation. The composer passes immutable
+  Blob snapshots with the complete input to the workspace submission journal.
+  Successful persistence releases the composer; a pending-message view owns
+  progress, retry, and cancellation. Existing-session direct/queue/guide and new
+  or child-session sends share this boundary, including attachment-only input.
+  Same-session text waits behind attachment preparation. Local creation metadata
+  stays in a renderer overlay until prepared history can be committed.
 
-The draft Spec also separates composer takeover/focus from actual submission.
-Its proposed Effect integration covers child-draft promotion, warmup cleanup,
-frozen user choices versus current runtime facts, submission side effects, and
-post-submit delivery ownership. These are proposed changes; the source behavior
-described above has not been replaced.
+The workspace Effect owner joins upload, local handoff, store borrows, and warmup
+cleanup before closing their dependencies. Successful attachment receipts survive
+retry; cancellation prevents stale completion from publishing history. Desktop
+same-machine files still use `localProjects.sendSessionFileLocal`, including its
+existing cloud fallback and backfill policy. Permanent local references remain a
+[separate proposal](../../specs/local-attachment-references.md).
+
+See the [draft Spec](../../specs/session-files.md) for ownership, recovery, and
+acceptance boundaries. Implementation and deterministic tests do not establish
+packaged-device or native-mobile-shell acceptance.

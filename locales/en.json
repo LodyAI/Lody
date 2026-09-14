@@ -4164,5 +4164,8 @@
   "sessions.pendingSendExitUnavailable": "Could not confirm pending messages. Keep Lody open and try again.",
   "sessions.pendingSendQuit": "Quit and keep messages",
   "sessions.pendingSendReload": "Reload and keep messages",
-  "sessions.pendingSendClose": "Close and keep messages"
+  "sessions.pendingSendClose": "Close and keep messages",
+  "sessions.attachmentDraft": "Waiting to upload",
+  "sessions.attachmentPrepared": "Ready",
+  "sessions.attachmentPreparingNotSent": "Preparing attachments · not sent yet"
 }

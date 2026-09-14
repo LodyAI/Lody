@@ -30,7 +30,7 @@ function decodeRecords(
   return values.map((value) => {
     if (!value || typeof value !== 'object') throw new Error('Invalid session recovery record');
     const record = value as SessionSendRecord;
-    if (record.version !== 1)
+    if (record.version !== 1 && record.version !== 2)
       throw new Error('Unsupported session recovery version; execute a compatible application');
     if (
       record.accountId !== accountId ||
@@ -47,6 +47,25 @@ function decodeRecords(
     ) {
       throw new Error('Invalid session recovery record; content retained for recovery');
     }
+    if (
+      record.attachments !== undefined &&
+      (record.version !== 2 ||
+        !Array.isArray(record.attachments) ||
+        record.attachments.some(
+          (attachment) =>
+            !attachment ||
+            typeof attachment.id !== 'string' ||
+            !attachment.id ||
+            !['image', 'file'].includes(attachment.kind) ||
+            !(attachment.source instanceof Blob) ||
+            typeof attachment.name !== 'string' ||
+            typeof attachment.mimeType !== 'string' ||
+            !Number.isFinite(attachment.lastModified)
+        ) ||
+        new Set(record.attachments.map((attachment) => attachment.id)).size !==
+          record.attachments.length)
+    )
+      throw new Error('Invalid saved attachments; content retained for recovery');
     return record;
   });
 }
@@ -140,12 +159,18 @@ export function createSessionSendJournalStorage(args: {
         const active = values.filter((value) => value.stage !== 'delivered');
         const bytes = active.reduce(
           (sum, value) =>
-            sum + JSON.stringify(value.entry).length * 2 + (value.update?.byteLength ?? 0),
+            sum +
+            JSON.stringify(value.entry).length * 2 +
+            (value.update?.byteLength ?? 0) +
+            (value.attachments?.reduce((total, item) => total + item.source.size, 0) ?? 0),
           0
         );
         if (
           active.length >= MAX_PENDING_RECORDS ||
-          bytes + JSON.stringify(record.entry).length * 2 > MAX_PENDING_BYTES
+          bytes +
+            JSON.stringify(record.entry).length * 2 +
+            (record.attachments?.reduce((total, item) => total + item.source.size, 0) ?? 0) >
+            MAX_PENDING_BYTES
         ) {
           throw new Error(
             'Pending message storage is full; finish or remove pending messages first'
@@ -169,16 +194,53 @@ export function createSessionSendJournalStorage(args: {
           args.accountId,
           args.workspaceId
         );
+        const current = values.find((item) => item.id === record.id);
+        if (!current) throw new Error('Submission was removed; stale work cannot restore it');
+        if (current?.cancelRequested) {
+          if (record.stage !== 'saved')
+            throw new DOMException('Submission canceled before publication', 'AbortError');
+          record = { ...record, cancelRequested: true };
+        }
         const bytes = [
           ...values.filter((value) => value.id !== record.id && value.stage !== 'delivered'),
           record,
         ].reduce(
           (sum, value) =>
-            sum + JSON.stringify(value.entry).length * 2 + (value.update?.byteLength ?? 0),
+            sum +
+            JSON.stringify(value.entry).length * 2 +
+            (value.update?.byteLength ?? 0) +
+            (value.attachments?.reduce((total, item) => total + item.source.size, 0) ?? 0),
           0
         );
         if (bytes > MAX_PENDING_BYTES) throw new Error('Pending message storage is full');
         await requestValue(store.put(record));
+      }),
+    requestCancel: (id) =>
+      mutate(async (store) => {
+        const current = await requestValue<SessionSendRecord | undefined>(store.get(key(id)));
+        if (!current) return undefined;
+        if (current.stage !== 'saved')
+          throw new Error('Submission may already be accepted; reconcile before cancellation');
+        if (current.creation) {
+          const records = decodeRecords(
+            await requestValue<unknown[]>(store.index('scope').getAll(scope)),
+            args.accountId,
+            args.workspaceId
+          );
+          const next = records
+            .filter(
+              (item) =>
+                item.sessionId === current.sessionId &&
+                item.id !== id &&
+                item.stage === 'saved' &&
+                !item.cancelRequested
+            )
+            .sort((a, b) => a.sequence - b.sequence)[0];
+          if (next) await requestValue(store.put({ ...next, creation: current.creation }));
+        }
+        const canceled = { ...current, cancelRequested: true };
+        await requestValue(store.put(canceled));
+        return canceled;
       }),
     remove: (id) =>
       mutate(async (store) => {

@@ -9,9 +9,10 @@ that carry an invariant — the directory itself is the list of hooks.
 `use-session-actions.ts` binds admission, analytics, and Jotai observations to
 `lib/session-submission.ts`. The latter owns the ordinary Promise entry points
 for creation, initial history, continuation, dispatch, and guide. It has no React
-lifetime or second writer. This extraction preserves existing upload/acceptance
-behavior; persistent delivery and deferred attachment transfer are later layers
-of the [attachment draft plan](../../../../specs/session-files.md).
+lifetime or second writer. The workspace journal durably accepts the full input before releasing the
+composer, prepares attachments on Send, and serializes same-session submission.
+`use-session-preparation` holds an owned warmup lease; attachment takeover cancels
+and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
 
 ## Horizontal wheel scrolling
 

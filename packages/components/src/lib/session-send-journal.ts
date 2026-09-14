@@ -1,9 +1,13 @@
+import type { SessionAttachmentDraft } from './session-attachment-draft';
 import type { SessionHistory, SessionId, SessionMeta } from '@lody/shared';
 import type { SessionSendResources } from './session-send-resources';
 import { throwIfSendAborted } from './session-send-resources';
 
 export type SessionSendRecord = {
-  version: 1;
+  version: 1 | 2;
+  attachments?: SessionAttachmentDraft[];
+  targetMachineId?: import('@lody/shared').MachineId;
+  cancelRequested?: boolean;
   id: string;
   sessionId: SessionId;
   accountId: string;
@@ -25,6 +29,7 @@ export type SessionSendJournalStorage = {
   list(): Promise<SessionSendRecord[]>;
   insert(record: Omit<SessionSendRecord, 'sequence'>): Promise<SessionSendRecord>;
   put(record: SessionSendRecord): Promise<void>;
+  requestCancel?(id: string): Promise<SessionSendRecord | undefined>;
   remove(id: string): Promise<void>;
   close(): Promise<void>;
 };
@@ -37,6 +42,14 @@ export type SessionSendJournalPorts = {
   notifyExternal?(): void;
   /** Cross-window exclusion for the same account/workspace/session. */
   lock<A>(key: string, signal: AbortSignal, execute: () => Promise<A>): Promise<A>;
+  prepareInput?(
+    record: SessionSendRecord,
+    signal: AbortSignal,
+    checkpoint: (
+      patch: Partial<Pick<SessionSendRecord, 'attachments' | 'entry' | 'queue'>>
+    ) => Promise<void>,
+    report: (id: string, progress: number) => void
+  ): Promise<void>;
   /** Flush the source baseline, validate once, and prepare immutable CRDT operations. */
   prepare(record: SessionSendRecord, signal: AbortSignal): Promise<Uint8Array>;
   /** Recover the original baseline, import exact operations and confirm local persistence. */
@@ -54,12 +67,14 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
   let snapshot: readonly SessionSendRecord[] = [];
   const listeners = new Set<() => void>();
   const running = new Map<SessionId, Promise<void>>();
+  const preparations = new Map<string, AbortController>();
   let closed = false;
   let refreshGeneration = 0;
   const refresh = async () => {
     const generation = ++refreshGeneration;
     const records = await ports.storage.list();
     if (closed || generation !== refreshGeneration) return;
+    for (const record of records) if (record.cancelRequested) preparations.get(record.id)?.abort();
     snapshot = records.sort((a, b) => a.sequence - b.sequence);
     for (const listener of listeners) {
       try {
@@ -91,12 +106,55 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
           .sort((a, b) => a.sequence - b.sequence);
         for (let record of records) {
           throwIfSendAborted(signal);
-          if (record.version !== 1) throw new Error('Unsupported session send record version');
+          const latestRecord = (await ports.storage.list()).find((item) => item.id === record.id);
+          if (!latestRecord) continue;
+          record = latestRecord;
+          if (record.version !== 1 && record.version !== 2)
+            throw new Error('Unsupported session send record version');
           if (record.stage === 'delivered') continue;
+          const preparation = new AbortController();
+          preparations.set(record.id, preparation);
+          const preparationSignal = AbortSignal.any([signal, preparation.signal]);
           try {
+            if (record.cancelRequested) {
+              await ports.storage.remove(record.id);
+              continue;
+            }
             if (record.stage === 'saved') {
-              const update = await ports.prepare(record, signal);
-              throwIfSendAborted(signal);
+              await ports.prepareInput?.(
+                record,
+                preparationSignal,
+                async (patch) => {
+                  const next = { ...record, ...patch };
+                  await ports.storage.put(next);
+                  record = next;
+                  await changed();
+                  throwIfSendAborted(preparationSignal);
+                },
+                (id, progress) => {
+                  if (preparationSignal.aborted) return;
+                  snapshot = snapshot.map((item) =>
+                    item.id === record.id
+                      ? {
+                          ...item,
+                          attachments: item.attachments?.map((attachment) =>
+                            attachment.id === id ? { ...attachment, progress } : attachment
+                          ),
+                        }
+                      : item
+                  );
+                  for (const listener of listeners) {
+                    try {
+                      listener();
+                    } catch (error) {
+                      console.error(error);
+                    }
+                  }
+                }
+              );
+              throwIfSendAborted(preparationSignal);
+              const update = await ports.prepare(record, preparationSignal);
+              throwIfSendAborted(preparationSignal);
               record = {
                 ...record,
                 update,
@@ -113,6 +171,12 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
               await ports.storage.put(record);
             }
           } catch (error) {
+            const latest = (await ports.storage.list()).find((item) => item.id === record.id);
+            if (latest?.cancelRequested && latest.stage === 'saved') {
+              await ports.storage.remove(record.id);
+              await changed();
+              continue;
+            }
             // Failed preparation/commit blocks later same-session submissions.
             // Keep exact operations across lost acknowledgements and interruption.
             await ports.storage.put({
@@ -121,6 +185,8 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
             });
             await changed();
             throw error;
+          } finally {
+            preparations.delete(record.id);
           }
           await changed();
         }
@@ -147,7 +213,12 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
             current = next;
           });
           throwIfSendAborted(signal);
-          await ports.storage.put({ ...current, stage: 'delivered', error: undefined });
+          await ports.storage.put({
+            ...current,
+            stage: 'delivered',
+            error: undefined,
+            attachments: undefined,
+          });
         } catch (error) {
           await ports.storage.put({
             ...current,
@@ -197,7 +268,7 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
       try {
         await ports.resources.run((signal) =>
           ports.lock('admission', signal, async () => {
-            saved = await ports.storage.insert({ ...record, stage: 'saved', version: 1 });
+            saved = await ports.storage.insert({ ...record, stage: 'saved', version: 2 });
           })
         );
       } catch (error) {
@@ -232,8 +303,12 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
     },
     cancel: async (id: string) =>
       ports.resources.run(async (signal) => {
-        const found = (await ports.storage.list()).find((record) => record.id === id);
+        if (!ports.storage.requestCancel)
+          throw new Error('Recovery storage does not support safe cancellation');
+        const found = await ports.storage.requestCancel(id);
         if (!found) return;
+        preparations.get(id)?.abort();
+        await changed();
         await ports.lock(`submit:${found.sessionId}`, signal, async () => {
           const current = (await ports.storage.list()).find((record) => record.id === id);
           if (current && current.stage !== 'saved')

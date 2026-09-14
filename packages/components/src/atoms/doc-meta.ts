@@ -205,6 +205,12 @@ function listSessionEntries(
 
 // 分类缓存
 export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
+/** Local placeholders from durable submissions; never authored into repo metadata. */
+export const pendingSendSessionMetasAtom = atom<Record<string, SessionMeta>>({});
+const visibleSessionMetaCacheAtom = atom((get) => ({
+  ...get(pendingSendSessionMetasAtom),
+  ...get(sessionMetaCacheAtom),
+}));
 export const machineMetaCacheAtom = atom<Record<string, MachineMeta>>({});
 export const agentConfigMetaCacheAtom = atom<Record<string, AgentConfigMeta>>({});
 export const docMetaCacheReadyAtom = atom(false);
@@ -226,7 +232,7 @@ export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
 // heartbeat.
 export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
   return {
-    ...get(sessionMetaCacheAtom),
+    ...get(visibleSessionMetaCacheAtom),
     ...get(machineMetaCacheAtom),
     ...get(agentConfigMetaCacheAtom),
   };
@@ -240,14 +246,14 @@ export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
  * unrelated meta ticks.
  */
 export const sessionMetaCountAtom = atom((get) =>
-  get(docMetaCacheReadyAtom) ? Object.keys(get(sessionMetaCacheAtom)).length : null
+  get(docMetaCacheReadyAtom) ? Object.keys(get(visibleSessionMetaCacheAtom)).length : null
 );
 
 // 精确订阅 - 使用普通 atom 而非 selectAtom，确保缓存更新时正确触发订阅者
 export const sessionMetaAtomFamily = atomFamily((roomId: string) => {
   let previous: SessionMeta | undefined;
   return atom((get) => {
-    const next = get(sessionMetaCacheAtom)[roomId];
+    const next = get(visibleSessionMetaCacheAtom)[roomId];
     if (!next) {
       previous = undefined;
       return undefined;
@@ -269,7 +275,7 @@ export const agentConfigMetaAtomFamily = atomFamily((roomId: string) =>
 // Session 列表 (active sessions only) — stabilized with structural equality
 let _prevSessionList: SessionListEntry[] = [];
 export const sessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !session.isArchived && !session.parentSessionId
@@ -292,7 +298,7 @@ export const sessionListAtom = atom((get) => {
 // Archived session 列表 — stabilized with structural equality
 let _prevArchivedSessionList: SessionListEntry[] = [];
 export const archivedSessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !!session.isArchived && !session.parentSessionId
@@ -314,7 +320,7 @@ export const archivedSessionListAtom = atom((get) => {
 // All active sessions (including children) — used for child status aggregation
 let _prevAllActiveSessions: SessionMeta[] = [];
 export const allActiveSessionsAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = Object.values(cache).filter((session) => !session.isArchived);
   if (sessionMetaArrayEqual(_prevAllActiveSessions, next)) {
     return _prevAllActiveSessions;
@@ -332,7 +338,7 @@ function createChildSessionsAtomFamily(
   return atomFamily((parentId: SessionId) => {
     let previous: SessionMeta[] = [];
     return atom((get) => {
-      const cache = get(sessionMetaCacheAtom);
+      const cache = get(visibleSessionMetaCacheAtom);
       const next = Object.values(cache).filter((session) => match(session, parentId));
       if (compare) next.sort(compare);
       if (sessionMetaArrayEqual(previous, next)) {

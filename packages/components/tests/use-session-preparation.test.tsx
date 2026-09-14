@@ -1,3 +1,4 @@
+import { createSessionSendResources } from '../src/lib/session-send-resources';
 // @vitest-environment jsdom
 
 import { act, type ReactNode } from 'react';
@@ -19,6 +20,7 @@ import {
 
 type PreparationInput = Parameters<typeof useSessionPreparation>[0];
 
+const owners: ReturnType<typeof createSessionSendResources>[] = [];
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -27,13 +29,14 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (root && container) {
     act(() => root?.unmount());
   }
   root = null;
   container?.remove();
   container = null;
+  await Promise.all(owners.splice(0).map((owner) => owner.dispose()));
   vi.useRealTimers();
 });
 
@@ -233,7 +236,15 @@ function createInput(): {
       disposition: 'cancelled',
     })
   );
+  const sendResources = createSessionSendResources({
+    acquire: async () => {
+      throw new Error('Unexpected borrow');
+    },
+    releaseRef: () => {},
+  });
+  owners.push(sendResources);
   const runtime = {
+    sendResources,
     requestSessionPrepare,
     requestSessionPrepareCancel,
   } as WorkspaceRuntime;
