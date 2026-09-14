@@ -1,4 +1,8 @@
 import {
+  prepareSessionFile,
+  SessionFilePreparationAuthError,
+} from '@/lib/session-file-preparation';
+import {
   useState,
   useCallback,
   useEffect,
@@ -107,15 +111,11 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from 'sonner';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
 import {
-  computeSha256Hex,
-  computeTextPreviewable,
   isUploadAbortedError,
   isSessionFileTransferPhase,
-  uploadSessionFile,
   SESSION_FILE_MAX_SIZE_MB,
   validateSessionFile,
   type SessionFileTransferPhase,
-  type SessionFileUploadProgress,
 } from '@/lib/session-file-upload';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
@@ -160,6 +160,7 @@ type PendingImage = {
   progress: number;
   error?: string;
   uploaded?: SessionImagePayload;
+  abort?: AbortController;
 };
 
 type PendingFile = {
@@ -287,8 +288,11 @@ const setSessionPastedTextDrafts = (
   return next;
 };
 
-const revokeImagePreviewUrls = (images: readonly Pick<PendingImage, 'previewUrl'>[]): void => {
+const revokeImagePreviewUrls = (
+  images: readonly Pick<PendingImage, 'previewUrl' | 'abort'>[]
+): void => {
   for (const image of images) {
+    image.abort?.abort();
     URL.revokeObjectURL(image.previewUrl);
   }
 };
@@ -968,7 +972,12 @@ export const SessionChatInputArea = memo(
 
     const startUpload = useCallback(
       async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId || !authToken) {
+        if (
+          !workspaceId ||
+          !authToken ||
+          !workspaceRuntime ||
+          workspaceRuntime.workspaceId !== workspaceId
+        ) {
           capturePostHogEvent(postHog, 'session/image_upload_failed', {
             channel: 'web',
             entrypoint: 'session_chat',
@@ -992,9 +1001,11 @@ export const SessionChatInputArea = memo(
           return;
         }
 
+        const abort = new AbortController();
         updatePendingImage(targetSessionId, localId, (image) => ({
           ...image,
           status: 'uploading',
+          abort,
           progress: 0,
           error: undefined,
         }));
@@ -1014,20 +1025,26 @@ export const SessionChatInputArea = memo(
         const uploadStartedAtMs = getPerformanceNowMs();
 
         try {
-          const uploaded = await uploadSessionImage({
-            workspaceId,
-            sessionId: targetSessionId,
-            token: authToken,
-            file,
-            onProgress: (progress) => {
-              updatePendingImage(targetSessionId, localId, (image) => ({ ...image, progress }));
-            },
-          });
+          const uploaded = await workspaceRuntime.sendResources.run(
+            (signal) =>
+              uploadSessionImage({
+                signal,
+                workspaceId,
+                sessionId: targetSessionId,
+                token: authToken,
+                file,
+                onProgress: (progress) => {
+                  updatePendingImage(targetSessionId, localId, (image) => ({ ...image, progress }));
+                },
+              }),
+            abort.signal
+          );
           updatePendingImage(targetSessionId, localId, (image) => ({
             ...image,
             status: 'uploaded',
             progress: 100,
             uploaded,
+            abort: undefined,
             error: undefined,
           }));
           capturePostHogEvent(postHog, 'session/image_upload_succeeded', {
@@ -1044,6 +1061,15 @@ export const SessionChatInputArea = memo(
             upload_duration_ms: getDurationSinceMs(uploadStartedAtMs),
           });
         } catch (error) {
+          if (isUploadAbortedError(error)) {
+            updatePendingImage(targetSessionId, localId, (image) => ({
+              ...image,
+              status: 'failed',
+              error: t('sessions.attachmentTransferInterrupted'),
+              abort: undefined,
+            }));
+            return;
+          }
           const errorMessage = error instanceof Error ? error.message : imageUploadFailedLabel;
           const reasonCode = toImageUploadReason(classifyImageUploadReason(error));
           if (
@@ -1052,12 +1078,17 @@ export const SessionChatInputArea = memo(
             getSessionFileDrafts(targetSessionId).length < SESSION_FILE_MAX_COUNT
           ) {
             try {
-              const outcome = await sendSessionFileToLocalRuntime({
-                workspaceId,
-                sessionId: targetSessionId,
-                machineId: session.machineId,
-                file,
-              });
+              const outcome = await workspaceRuntime.sendResources.run(
+                (signal) =>
+                  sendSessionFileToLocalRuntime({
+                    signal,
+                    workspaceId,
+                    sessionId: targetSessionId,
+                    machineId: session.machineId,
+                    file,
+                  }),
+                abort.signal
+              );
               const localFile = outcome?.ok ? outcome.files[0] : undefined;
               if (localFile) {
                 updatePendingImagesForSession(targetSessionId, (prev) => {
@@ -1144,52 +1175,13 @@ export const SessionChatInputArea = memo(
         updatePendingImagesForSession,
         t,
         workspaceId,
+        workspaceRuntime,
       ]
     );
 
     const startFileUpload = useCallback(
       async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId) {
-          updatePendingFile(targetSessionId, localId, (entry) => ({
-            ...entry,
-            status: 'failed',
-            progress: 0,
-            error: fileUploadMissingAuthLabel,
-          }));
-          return;
-        }
-
-        // Desktop local-transport fast path: hand bytes straight to the local CLI
-        // (zero relay round trip). The CLI stores the blob and returns a
-        // transport:'local' block, which we drop into `uploaded` exactly like a
-        // cloud upload — the block then rides the outgoing message via
-        // toFileInputBlock. No progress bar: the handoff completes in one step.
-        // On any failure we fall through to the cloud path below.
-        if (canSendFileLocally && session.machineId) {
-          try {
-            const outcome = await sendSessionFileToLocalRuntime({
-              workspaceId,
-              sessionId: targetSessionId,
-              machineId: session.machineId,
-              file,
-            });
-            if (outcome?.ok && outcome.files[0]) {
-              updatePendingFile(targetSessionId, localId, (entry) => ({
-                ...entry,
-                status: 'uploaded',
-                progress: 100,
-                uploaded: outcome.files[0],
-                error: undefined,
-                abort: undefined,
-              }));
-              return;
-            }
-          } catch {
-            // Local handoff threw; fall back to the cloud upload path.
-          }
-        }
-
-        if (!authToken) {
+        if (!workspaceId || !workspaceRuntime || workspaceRuntime.workspaceId !== workspaceId) {
           updatePendingFile(targetSessionId, localId, (entry) => ({
             ...entry,
             status: 'failed',
@@ -1209,30 +1201,15 @@ export const SessionChatInputArea = memo(
         }));
 
         try {
-          // Compute the integrity hash + text-previewability once before upload;
-          // both ride along to the server and the latter pre-fills the block.
-          const [sha256, textPreview] = await Promise.all([
-            computeSha256Hex(file, {
-              signal: abort.signal,
-              onProgress: (progress) => {
-                updatePendingFile(targetSessionId, localId, (entry) => ({
-                  ...entry,
-                  status: progress.phase,
-                  progress: progress.percent,
-                }));
-              },
-            }),
-            computeTextPreviewable(file),
-          ]);
-          const uploaded = await uploadSessionFile({
+          const uploaded = await prepareSessionFile(workspaceRuntime.sendResources, {
             workspaceId,
             sessionId: targetSessionId,
+            machineId: session.machineId ?? null,
+            canSendLocally: canSendFileLocally,
             token: authToken,
             file,
-            sha256,
-            textPreview,
             signal: abort.signal,
-            onProgress: (progress: SessionFileUploadProgress) => {
+            onProgress: (progress) => {
               updatePendingFile(targetSessionId, localId, (entry) => ({
                 ...entry,
                 status: progress.phase,
@@ -1250,11 +1227,20 @@ export const SessionChatInputArea = memo(
           }));
         } catch (error) {
           if (isUploadAbortedError(error)) {
-            // Removal/clearing aborts in-flight uploads; the entry is already
-            // gone, so leave state untouched.
+            updatePendingFile(targetSessionId, localId, (entry) => ({
+              ...entry,
+              status: 'failed',
+              error: t('sessions.attachmentTransferInterrupted'),
+              abort: undefined,
+            }));
             return;
           }
-          const errorMessage = error instanceof Error ? error.message : fileUploadFailedLabel;
+          const errorMessage =
+            error instanceof SessionFilePreparationAuthError
+              ? fileUploadMissingAuthLabel
+              : error instanceof Error
+                ? error.message
+                : fileUploadFailedLabel;
           updatePendingFile(targetSessionId, localId, (entry) => ({
             ...entry,
             status: 'failed',
@@ -1272,6 +1258,8 @@ export const SessionChatInputArea = memo(
         session.machineId,
         updatePendingFile,
         workspaceId,
+        workspaceRuntime,
+        t,
       ]
     );
 
