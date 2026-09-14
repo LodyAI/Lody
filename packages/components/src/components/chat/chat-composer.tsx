@@ -613,8 +613,6 @@ export function ChatComposer({
 
   const sessionContainerClassName = cn(
     COMPOSER_SESSION_SURFACE_CLASS,
-    // Desktop session spacing belongs to the clickable card, not an inert strip below it.
-    !isMobile && 'pb-3.5',
     'focus-within:border-ring/40',
     mentionSurfaceClassName
   );

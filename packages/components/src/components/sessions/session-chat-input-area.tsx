@@ -2526,12 +2526,14 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
-        className={cn(
-          getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile }),
-          // ChatComposer owns the desktop 8px gap; keep only the native safe-area inset here.
-          !isMobile &&
-            'pb-[max(0px,env(safe-area-inset-bottom,0px)-var(--native-keyboard-height,0px))]'
-        )}
+        className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile })}
+        onMouseDown={(event) => {
+          // Keep the restored shell-owned bottom spacing focusable without
+          // stealing focus from selectors, attachments, or the prompt itself.
+          if (event.button === 0 && event.target === event.currentTarget) {
+            textareaRef.current?.focus({ preventScroll: true });
+          }
+        }}
       >
         {/* The Role editor is a Dialog, so it is hosted OUT here rather than
             inside the run-config menu or the mobile drawer, where it would
