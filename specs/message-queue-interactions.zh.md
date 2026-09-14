@@ -21,11 +21,11 @@ Translation: current
   `session/queue-steer`；缺少 capability 即表示不支持。请求携带持久队列 ID 和预期活动 turn，
   具体执行方式由 daemon 而非 Renderer 决定：
 
-  | 当前 daemon/runtime                                      | 引导行为                                                                      |
-  | -------------------------------------------------------- | ----------------------------------------------------------------------------- |
-  | 支持精确队列项协议，且支持 acknowledged native ACP Steer | 将目标保留为 `pending_apply`，通过持久 handoff saga 后由 `steerPrompt` 注入。 |
-  | 支持精确队列项协议，但不支持 native ACP Steer            | 将目标行持久化并激活为下一用户 turn，从队列删除后再只停止预期 turn。          |
-  | 未声明受支持的 `queueItemSteer` capability               | 所有行的队列“引导”均不可用，包括队首；不因 native ACP capability 而例外。     |
+  | 当前 daemon/runtime                                      | 引导行为                                                                                              |
+  | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+  | 支持精确队列项协议，且支持 acknowledged native ACP Steer | 将目标移交 daemon-owned operation，持久化 `pending_apply` history 与队列删除后，再调用 native Steer。 |
+  | 支持精确队列项协议，但不支持 native ACP Steer            | 将目标行持久化并激活为下一用户 turn，从队列删除后再只停止预期 turn。                                  |
+  | 未声明受支持的 `queueItemSteer` capability               | 所有行的队列“引导”均不可用，包括队首；不因 native ACP capability 而例外。                             |
 
   队列“引导”不提供旧 daemon 兼容路径：不允许 renderer 写历史、legacy native Steer 或
   队首取消。UI 只暴露一个精确队列项 operation，不选择 provider 交付方式。
@@ -48,11 +48,36 @@ Translation: current
   Native 精确“引导”的 requester identity 必须来自已认证的活动 invocation，绝不来自共享
   queue row。若该冻结身份不可用，daemon 必须在消费 row、提交 provider 或停止 turn 之前失败。
 
-  Native handoff 是持久 saga，而不是 CRDT 写入与 provider side effect 之间不存在的原子操作。
-  machine-local、由 daemon 持有的 marker 记录 `reserved`、write-ahead `submitting`、provider `acknowledged`、本地已提交
-  `applied` 或 `fallback`，且在结果持久化前保留所选 queue row。已进入 history 的 `reserved` 和
-  `fallback` 可转为精确普通 turn；若 reservation 在写 history 前中断，则保留 row 在队列。
-  `submitting` 结果不确定，`acknowledged` 可能已有 side effect，原 prompt owner 消失后两者都
+  Native Steer reservation 成功后，所选项的 ownership 从共享可编辑 Queue 转移到
+  daemon-owned Steer operation。此后普通 edit、remove、reorder 和队列 promotion 都不得
+  修改或消费它，即使其他客户端仍显示旧 row。reservation 与普通修改必须共享权威 ownership
+  边界：编辑先提交则已保存内容进入验证快照（或令 reservation 拒绝）；reservation 先成功则
+  后续修改须明确拒绝。被拒绝的编辑保留用户草稿。乐观 UI 成功或客户端本地 editing lease
+  都不证明权威写入端已接受编辑。
+
+  Native 提交顺序为：
+  1. 验证目标标识、内容、编辑归属和 expected turn，并针对并发普通队列修改取得排他 reservation
+     ownership。
+  2. 持久化 daemon-owned reservation marker。
+  3. 将冻结 turn 追加为 `pending_apply`，并确保 history 持久化。
+  4. 从共享 Queue 删除所选 row，并确保删除持久化。
+  5. 持久化 write-ahead submission 证据，再将冻结 turn 传给 `ActiveTurnSteerPort.steer`。
+     port 在提交 provider 前重新验证 live turn ownership。
+
+  reservation、history 或删除任一持久化失败，都禁止提交 provider。网络调用前删除 row
+  是必要条件，但不能替代步骤 1–4 期间的 ownership 边界。Native 恢复依赖 machine-local
+  marker 与冻结 history，不再拿可编辑 queue row 当 retry token。若在 history 持久化前
+  崩溃，须先将 reservation 对账为未提交，剩余 row 才能恢复可编辑；不得把旧客户端编辑
+  报成保存成功，也不得从后来的 queue 内容构建 turn。history 持久化后，恢复可完成删除并
+  恢复同一个 turn，无需 row 仍存在。新的缺失 row 请求仍失败；同一 reserved operation
+  的重试通过 marker 或 receipt 解析。
+
+  Native handoff 在存储与 provider 副作用之间仍非原子操作。已有 machine-local marker
+  记录 `reserved`、write-ahead `submitting`、provider `acknowledged`、本地已提交
+  `applied` 或 `fallback`，须继续支持其恢复。已进入 history 的 `reserved` 或 `fallback`
+  可在队列删除持久化后转为精确普通 turn。旧 operation 残留的 row 须在同一 ownership
+  边界下对账，绝不能覆盖已接受编辑而盲目删除。`submitting` 结果不确定，
+  `acknowledged` 可能已有 side effect，原 prompt owner 消失后两者都
   不得重放，而应落成可见失败。`applied` 证明本地 handoff 已完成，应恢复 accepted 回执，并由
   普通 crash handling 显示被中断的 turn。ACP 没有幂等提交键或交付查询，因此这里必须 fail closed。
 
@@ -60,7 +85,7 @@ Translation: current
   `latestUserMsgId`，且仅在两项写入都成功后删除 row。部分发布后的重试应复用已有 turn ID，
   不得重复追加 history。
 
-- 过期或冲突的精确“引导”选择必须失败且无副作用。所选 ID 已不存在、编辑 lease 仍有效，或
+- reservation 前，过期或冲突的精确“引导”选择必须失败且无副作用。所选 ID 已不存在、编辑 lease 仍有效，或
   预期 turn 已不再拥有执行权时，daemon 不得提交 native Steer，也不得停止任何 turn。Renderer
   等待确认，不自行移除队列项或为精确协议写历史。
 - daemon 会按 session、预期 turn 和队列 ID，为最近已消费的精确请求保留有界内存 receipt；
@@ -72,7 +97,9 @@ Translation: current
   失败必须保持可重试。
 - 序号和非编辑状态的消息正文共同组成队列重排拖动区域。“引导”、“编辑”和“移除”是独立
   控件，不能触发拖动。
-- 编辑状态保留已有键盘与焦点行为，并在编辑结束前禁用该行重排。
+- 未被 reservation 的 row 保留已有编辑键盘与焦点行为，并在编辑结束前禁用该行重排。
+  reserved 项属于 operation，不再是可编辑队列内容；旧客户端的 edit/remove/reorder
+  请求不得修改它，也不得静默成功。
 
 ## 边界与待审事项
 
@@ -83,8 +110,11 @@ Translation: current
 
 ## 实现证据
 
-上述 service/port 拆分与仅按 capability 开放能力是待实现的意图变更。renderer 仍包含
-旧 daemon 的 native/head 路径，execution service 仍拥有队列编排。移除旧路径与回归验证
+上述 service/port 拆分、reservation ownership 转移、提交前持久化删除队列项及仅按
+capability 开放能力均是待实现的意图变更。当前 native 路径仍保留可编辑 row 直到 provider
+handoff；普通 row 更新没有 operation ownership 检查，更新缺失 row 也可能静默成功。
+因此已接受的编辑可能在 handoff 删除 row 时丢失。renderer 也仍包含旧 daemon 的
+native/head 路径，execution service 仍拥有队列编排。实现及双客户端修改/崩溃回归验证
 待按 [Effect 边界提案](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.zh.md)
 完成。新的可用性策略只适用于队列行“引导”，不改变 composer 提交路由。
 

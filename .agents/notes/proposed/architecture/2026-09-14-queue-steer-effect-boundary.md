@@ -12,7 +12,9 @@ operation bookkeeping across `SessionExecutionService`. The proposed boundary
 gives `QueueSteerService` exact selection, validation, durable recovery evidence,
 fallback policy, and results; `ActiveTurnSteerPort` owns native submission and
 live-turn handoff. Effect expresses local resource lifetimes and typed failure
-semantics without making provider submission reversible. Queue Steer requires a
+semantics without making provider submission reversible. Native reservation transfers
+the item out of editable Queue ownership; frozen history and queue removal must be durable
+before provider submission. Queue Steer requires a
 supported `queueItemSteer` capability, with no old-daemon compatibility path.
 The design is revised; implementation and behavioral verification remain pending.
 
@@ -118,14 +120,50 @@ Do not retry the complete delivery operation.
 
 ## Durability and capability policy
 
-QueueSteerService owns durable recovery evidence, including write-ahead evidence
-before entering a potentially submitting port call and durable receipts after its
-result. A crash between these boundaries remains conservatively indeterminate
-unless authoritative evidence proves otherwise. Implement the journal contract
-without phase callbacks or exposing live runtime state. Preserve recovery of the
-existing markers and fail-closed replay guarantees from the
-[original decision](../../implemented/feature/2026-09-13-queue-steer-controls.md);
-do not add a durable phase for every Effect step.
+Keeping an editable queue row after freezing its history permits a lost edit:
+another client saves changed content, native delivery executes the earlier snapshot,
+then row deletion discards the accepted edit. The current native consumption path in
+`SessionDocument.consumeMessageQueueItemAsUserTurn` retains the row, and
+`updateMessageQueueItem` does not check operation ownership. This is an ownership
+contract defect, not merely a missing cleanup step.
+
+The [Spec](../../../../specs/message-queue-interactions.md) now assigns the item to
+the daemon-owned operation when reservation succeeds. The selected sequence is:
+
+```text
+validate and claim exclusive reservation ownership
+→ durable reservation marker
+→ append frozen pending_apply history → history durable
+→ remove selected shared Queue row → removal durable
+→ write-ahead submission evidence
+→ ActiveTurnSteerPort.steer(frozen turn)
+→ durable result / receipt
+```
+
+The queue write authority must serialize reservation with ordinary edit/remove/reorder
+and promotion, including while persistence is awaited. An edit committed first is
+included or causes reservation rejection. Reservation winning first rejects later
+mutations visibly, retaining an editor's draft. A stale client must not receive a
+successful no-op save. A machine-local marker or disabling buttons in one renderer
+cannot by itself enforce this across clients; all mutation paths need the same authority.
+The implementation of that boundary remains pending, and early row removal alone does
+not establish it.
+
+QueueSteerService owns the journal and receipts. Recovery uses its machine-local marker
+and frozen history, not an editable queue row. Before history becomes durable, recovery
+reconciles the reservation as unsubmitted before returning any surviving row to editing.
+After history is durable, recovery can finish removal and recover that same turn even if
+the row is absent. A failed removal commit prevents provider submission. After write-ahead
+submission evidence, a crash remains conservatively indeterminate unless authoritative
+evidence proves otherwise. Reserved-operation retries resolve through the marker or
+receipt rather than ordinary missing-row validation.
+
+Implement these boundaries without phase callbacks or exposing live runtime state.
+Preserve recovery of existing markers and their fail-closed replay guarantees from the
+[original decision](../../implemented/feature/2026-09-13-queue-steer-controls.md), but
+supersede its requirement to retain the shared row until delivery finishes. Reconcile any
+legacy surviving row without deleting accepted edits. Do not add a durable phase for every
+Effect step. The exact ownership, ordering, and failure guarantees have one owner in the Spec.
 
 Core Scope cleanup cannot survive process death. Stop must retain the ACP owner
 until raw completion or confirmed termination; a Promise wrapper cannot cancel
@@ -153,6 +191,14 @@ replay; local failures recover according to durable evidence. Deterministic
 failure/interruption tests must prove local guards release without relinquishing
 a still-running ACP owner. Unsupported daemons must expose no usable queue Steer
 action on any row and issue no legacy submission or cancellation.
+
+Add two-client tests for both orderings of reservation versus edit/save/remove/reorder,
+including a stale client that has not observed removal. A rejected save must retain its draft;
+an accepted edit must not disappear behind the frozen prompt. Exercise failure/crash boundaries
+before history durability, between history and removal durability, and after durable removal
+before submission. Prove provider submission waits for durable removal, ordinary promotion
+cannot consume the reserved row, and recovery succeeds with marker plus history while the row
+is absent. Existing row-retention tests must be revised to the ownership-transfer contract.
 
 Business code and dependency versions are unchanged. This revised design and
 Spec are not implementation evidence; no runtime tests were executed.

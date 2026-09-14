@@ -26,11 +26,11 @@ the queue by hand.
   durable queue identity and expected active turn. The daemon, not the renderer, chooses the
   execution mechanism:
 
-  | Active daemon/runtime                                 | Steer behavior                                                                                                                 |
-  | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-  | Exact-item protocol and acknowledged native ACP Steer | Reserve the selected row as `pending_apply`, retain it through the durable handoff saga, then inject it through `steerPrompt`. |
-  | Exact-item protocol without native ACP Steer          | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.       |
-  | No supported `queueItemSteer` capability              | Queue Steer is unavailable on every row, including the head, regardless of native ACP capability.                              |
+  | Active daemon/runtime                                 | Steer behavior                                                                                                                         |
+  | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+  | Exact-item protocol and acknowledged native ACP Steer | Transfer the selected item to a daemon-owned operation, persist its `pending_apply` history and queue removal, then call native Steer. |
+  | Exact-item protocol without native ACP Steer          | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.               |
+  | No supported `queueItemSteer` capability              | Queue Steer is unavailable on every row, including the head, regardless of native ACP capability.                                      |
 
   Queue Steer provides no old-daemon compatibility path: no renderer-side history
   materialization, legacy native Steer, or queue-head cancellation. The UI exposes one
@@ -56,12 +56,40 @@ the queue by hand.
   invocation, never from the shared queue row. If that frozen identity is unavailable, the
   daemon fails before consuming the row, submitting to the provider, or stopping the turn.
 
-  Native handoff is a durable saga, not an atomic CRDT/provider operation. A machine-local,
-  daemon-owned marker records `reserved`, write-ahead `submitting`, provider `acknowledged`,
-  locally committed `applied`, or `fallback`, and keeps the selected queue row until the result
-  is durable. A `reserved` entry that reached history, or any `fallback`, may become the exact
-  ordinary turn;
-  a reservation interrupted before history leaves the row queued. `submitting` is indeterminate
+  Successful native Steer reservation transfers the selected item's ownership from the shared
+  editable Queue to the daemon-owned Steer operation. From that point ordinary edit, remove,
+  reorder, and queue promotion cannot mutate or consume it, even if another client still
+  displays a stale row. Reservation and ordinary mutations must share an authoritative
+  ownership boundary: an edit committed first is included in the validated snapshot (or causes
+  reservation to reject); a reservation that wins first causes later mutations to reject visibly.
+  A rejected edit retains the user's draft. Neither optimistic UI success nor a client-local
+  editing lease proves that an edit was accepted by that authority.
+
+  The native submission order is:
+  1. Validate the selected identity, content, editing ownership, and expected turn; establish
+     exclusive reservation ownership against concurrent ordinary queue mutations.
+  2. Persist the daemon-owned reservation marker.
+  3. Append the frozen turn as `pending_apply` and make that history durable.
+  4. Remove the selected row from the shared Queue and make its removal durable.
+  5. Persist write-ahead submission evidence, then invoke `ActiveTurnSteerPort.steer` with
+     the frozen turn. The port revalidates live-turn ownership before provider submission.
+
+  Any failure to persist the reservation, history, or removal forbids provider submission.
+  Removing the row before the network call is necessary but does not replace the ownership
+  boundary during steps 1–4. Native recovery uses the machine-local marker plus frozen history,
+  not an editable queue row as a retry token. A pre-history reservation interrupted by a crash
+  must be reconciled as unsubmitted before its surviving row becomes editable again; it must not
+  report a stale edit as saved or construct a turn from later queue content. Once history is
+  durable, recovery can finish removal and recover the same turn without requiring the row to
+  exist. A new missing-row request still fails; replay of the same reserved operation resolves
+  through its marker or receipt.
+
+  Native handoff remains non-atomic across storage and provider side effects. Existing
+  machine-local markers record `reserved`, write-ahead `submitting`, provider `acknowledged`,
+  locally committed `applied`, or `fallback`; their recovery must remain supported. A `reserved`
+  entry that reached history, or a `fallback`, may become the exact ordinary turn after queue
+  removal is durable. A surviving row from an older operation is reconciled under the same
+  ownership boundary, never blindly deleted over an accepted edit. `submitting` is indeterminate
   and `acknowledged` may already have side effects, so neither is replayed after its prompt owner
   disappears. `applied` proves local handoff and recovers as accepted while ordinary crash
   handling makes an interrupted turn visible. This is the fail-closed boundary required because
@@ -71,7 +99,7 @@ the queue by hand.
   history first, publish `latestUserMsgId`, and remove the row only after both writes succeed.
   A retry after partial publication reuses the existing turn ID rather than duplicating history.
 
-- A stale or conflicting exact Steer selection is a failed no-op. If the selected queue
+- Before reservation, a stale or conflicting exact Steer selection is a failed no-op. If the selected queue
   identity is missing, its editing lease is active, or the expected turn no longer owns
   execution, the daemon must not submit native Steer or stop any turn. The renderer waits for
   this acknowledgement and never removes or materializes an exact-protocol row itself.
@@ -85,8 +113,9 @@ the queue by hand.
   activation pointer, and queue-row cleanup are durable; failed recovery remains retryable.
 - The number and non-editing message body form the drag target for queue reordering.
   Steer, edit, and remove remain separate controls and must not begin a drag.
-- Editing keeps its existing keyboard and focus behavior and disables reordering for
-  that row until editing ends.
+- Editing of unreserved rows keeps its existing keyboard and focus behavior and disables
+  reordering for that row until editing ends. A reserved item is operation-owned, not editable
+  queue content; stale-client edit/remove/reorder requests cannot change it or succeed silently.
 
 ## Limits and review questions
 
@@ -100,9 +129,13 @@ reported, never silently replayed.
 
 ## Implementation evidence
 
-The service/port split and capability-only availability above are intended changes, not
-completed implementation. The renderer still contains old-daemon native/head paths and the
-execution service still owns queue orchestration. Removal and regression verification remain
+The service/port split, reservation ownership transfer, pre-submission durable queue removal,
+and capability-only availability above are intended changes, not completed implementation.
+The current native path retains the editable row through provider handoff; ordinary row updates
+do not enforce operation ownership, and missing-row updates can silently succeed. This permits
+an accepted edit to disappear when handoff removes the row. The renderer also still contains
+old-daemon native/head paths and the execution service owns queue orchestration. Implementation
+and two-client mutation/crash regression verification remain
 pending under the [Effect boundary proposal](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.md).
 The new availability policy applies to queued-row Steer, not composer submission routing.
 

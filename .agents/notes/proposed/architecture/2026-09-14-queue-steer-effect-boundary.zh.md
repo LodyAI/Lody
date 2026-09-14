@@ -11,7 +11,9 @@ Translation: current
 `SessionExecutionService`。拟议边界由 `QueueSteerService` 负责精确选择、验证、
 持久恢复证据、fallback 策略与结果；`ActiveTurnSteerPort` 负责 native 提交和 live turn
 交接。Effect 表达本地资源生命周期与类型化失败语义，不会让 provider 提交变得可撤销。
-队列 Steer 必须具备受支持的 `queueItemSteer` capability，不提供旧 daemon 兼容路径。
+Native reservation 将目标移出可编辑 Queue ownership；冻结 history 与队列删除都必须
+在 provider 提交前持久化。队列 Steer 必须具备受支持的 `queueItemSteer` capability，
+不提供旧 daemon 兼容路径。
 设计已修订，实现与行为验证仍待完成。
 
 ## 源码证据
@@ -106,11 +108,43 @@ operation 的持久化边界负责 `PersistenceFailure`。提交后的本地失�
 
 ## 持久化与 capability 策略
 
-QueueSteerService 拥有持久恢复证据：在进入可能提交的 port 调用前持久化 write-ahead
-证据，取得结果后持久化回执。若在这两个边界之间崩溃，除非权威证据证明其他结果，否则
-保守地视为交付不确定。journal 契约的实现不得引入 phase callback 或暴露 live runtime
-状态。保留[原决策](../../implemented/feature/2026-09-13-queue-steer-controls.md)中
-已有 marker 的恢复与保守重放保证；不为每个 Effect 步骤增加 durable phase。
+冻结 history 后保留可编辑 queue row 会丢失编辑：另一客户端保存新内容，native
+delivery 执行先前快照，随后删除 row 丢掉已接受的编辑。当前
+`SessionDocument.consumeMessageQueueItemAsUserTurn` 的 native 消费路径保留 row，
+而 `updateMessageQueueItem` 没有检查 operation ownership。这是 ownership 契约错误，
+不仅是缺少清理步骤。
+
+[Spec](../../../../specs/message-queue-interactions.md) 现规定 reservation 成功时，
+目标归属 daemon-owned operation。选定顺序为：
+
+```text
+验证并取得排他 reservation ownership
+→ 持久化 reservation marker
+→ 追加冻结的 pending_apply history → history 持久化
+→ 删除共享 Queue 中的所选 row → 删除持久化
+→ write-ahead submission 证据
+→ ActiveTurnSteerPort.steer(frozen turn)
+→ 持久化结果 / 回执
+```
+
+队列权威写入端必须让 reservation 与普通 edit/remove/reorder、promotion 串行化，
+包括等待持久化期间。编辑先提交则纳入快照或使 reservation 拒绝；reservation 先成功，
+后续修改须明确拒绝，并保留编辑器草稿。旧客户端不能收到实际无操作的保存成功。
+仅凭 machine-local marker 或在一个 renderer 禁用按钮无法跨客户端保证这一点；
+所有修改路径都需要同一个权威边界。该边界的实现仍待完成，提前删除 row 本身不能建立它。
+
+QueueSteerService 拥有 journal 与回执。恢复依赖 machine-local marker 和冻结 history，
+不再依赖可编辑 queue row。history 持久化前，恢复须先将 reservation 对账为未提交，
+再让残留 row 恢复可编辑。history 持久化后，即使 row 已不存在，也能完成删除并恢复
+同一个 turn。删除持久化失败则禁止提交 provider。write-ahead submission 证据写入后
+发生崩溃，除非权威证据证明其他结果，否则保守地视为交付不确定。reserved operation
+的重试通过 marker 或 receipt 解析，不走普通缺失 row 验证。
+
+实现这些边界不得引入 phase callback 或暴露 live runtime 状态。
+保留[原决策](../../implemented/feature/2026-09-13-queue-steer-controls.md)中已有
+marker 的恢复与保守重放保证，但替代其“共享 row 保留到交付完成”的要求。旧版本残留
+row 的对账不能删除已接受的编辑。不为每个 Effect 步骤增加 durable phase。
+精确 ownership、顺序与失败保证统一由 Spec 定义。
 
 核心 Scope 清理无法跨越进程死亡。Stop 必须保留 ACP owner，直到原始调用完成或确认
 终止；外部工作不配合时，Promise 包装无法取消它。引入 workflow engine 是独立架构
@@ -133,5 +167,12 @@ renderer 当前仍包含旧路径。
 replay；本地失败根据 durable evidence 恢复。确定性失败/中断测试须证明本地 guard
 会释放，且不会放弃仍在运行的 ACP owner。不支持协议的 daemon 上，任何行都不得有
 可用的队列 Steer 操作，也不得发出 legacy submission 或 cancellation。
+
+新增双客户端测试覆盖 reservation 与 edit/save/remove/reorder 的两种先后顺序，
+包括尚未观察到删除的旧客户端。拒绝保存须保留草稿；已接受编辑不能因冻结 prompt 而
+消失。覆盖 history 持久化前、history 与删除持久化之间、删除持久化后但提交前的失败/
+崩溃边界。证明 provider 提交等待删除持久化、普通 promotion 不会消费 reserved row，
+且 row 不存在时仍可凭 marker 与 history 恢复。现有保留 row 的测试须按 ownership
+转移契约修订。
 
 业务代码与依赖版本均未修改。修订后的设计与 Spec 不代表实现证据；未运行 runtime 测试。
