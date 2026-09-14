@@ -146,6 +146,7 @@ function providerFor(
     author,
     signingKey,
     readKey,
+    mayWriteDocument: () => true,
   });
 }
 
@@ -464,7 +465,7 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
           throw new Error('must-not-request-aad');
         },
       })
-    ).rejects.toThrow(/snapshot-evidence-required/);
+    ).rejects.toThrow(/invalid-snapshot-offset/);
     await expect(
       provider.open({
         sealed: new Uint8Array([1]),
@@ -472,7 +473,7 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
         context: snapshot,
         additionalData: new Uint8Array([1]),
       })
-    ).rejects.toThrow(/snapshot-evidence-required/);
+    ).rejects.toThrow(/invalid-snapshot-offset/);
 
     const writerDoc = new LoroDoc();
     const writer = new StreamsCrdt({
@@ -515,6 +516,60 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
     expect(reader.getText('text').toString()).not.toBe('snapshot-secret');
     await catchup.close();
     reader.free();
+  });
+
+  it('bootstraps an encrypted content snapshot plus a suffix without leaking plaintext', async () => {
+    const { server, streamUrl } = await listenDurableContent();
+    servers.push({ close: () => closeHttp(server) });
+    const { anchor, recovered } = await rotatedOrg();
+    const { pair, signingPublic } = await signingPair();
+    const url = streamUrl('c1docs', 'snap-ok');
+    const provider = providerFor(
+      anchor,
+      signingPublic,
+      pair.privateKey,
+      (epoch) => recovered.get(epoch),
+      1,
+      'doc-snap-ok'
+    );
+    const writerDoc = new LoroDoc();
+    const writer = new StreamsCrdt({
+      streamUrl: url,
+      adapter: createLoroDocAdapter(writerDoc),
+      payloadProtectionRequired: true,
+      e2ee: { provider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
+      fetch: globalThis.fetch.bind(globalThis),
+    });
+    expect((await writer.createStream()).ok).toBe(true);
+    writerDoc.getText('text').insert(0, 'snapshot-secret');
+    writerDoc.commit();
+    expect((await writer.appendWriteOnly()).ok).toBe(true);
+    const uploaded = await writer.uploadSnapshotForTesting();
+    expect(uploaded.ok).toBe(true);
+    writerDoc.getText('text').insert(15, '+suffix');
+    writerDoc.commit();
+    expect((await writer.appendWriteOnly()).ok).toBe(true);
+    await writer.close();
+
+    const head = await fetch(url, { method: 'HEAD' });
+    expect(head.headers.get('Stream-Snapshot-Offset')).toBeTruthy();
+    expect(head.headers.get('Stream-Snapshot-Offset')).not.toBe('-1');
+
+    const readerDoc = new LoroDoc();
+    const reader = new StreamsCrdt({
+      streamUrl: url,
+      adapter: createLoroDocAdapter(readerDoc),
+      remoteCursorStore: new InMemoryRemoteCursorStore(),
+      payloadProtectionRequired: true,
+      e2ee: { provider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
+      fetch: globalThis.fetch.bind(globalThis),
+    });
+    const synced = await reader.sync();
+    expect(synced.ok).toBe(true);
+    expect(readerDoc.getText('text').toString()).toBe(writerDoc.getText('text').toString());
+    await reader.close();
+    writerDoc.free();
+    readerDoc.free();
   });
 
   it('decrypts a Flock document over the same real peer', async () => {

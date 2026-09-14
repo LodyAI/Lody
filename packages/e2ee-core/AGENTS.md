@@ -51,8 +51,13 @@ in-package tests only; do not re-export it.
   implicitly. Synthetic fixtures only; real signatures; no crypto stubs.
 - `content.ts`: fixed XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller
   policy supplies authority; `inspectContent` is UNVERIFIED routing metadata.
-  `streams-content.ts` is incomplete: reject snapshots without provenance; do
-  not enable production E2EE.
+  `streams-content.ts` seals updates and content snapshots through the existing
+  streams-crdt provider `seal`/`open` (no parallel encryptSnapshot API). Snapshot
+  writers must have document-write capability (`deviceMayWriteDocument`); guests
+  cannot. Bind Org/genesis, resource, kind/model, epoch, and the opaque
+  continuation offset. Host-admitted bootstrap offset is the publication
+  evidence under the existing 15-minute backend-trust cutoff; a later revoke
+  does not invalidate that admitted snapshot. Do not enable production E2EE.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.

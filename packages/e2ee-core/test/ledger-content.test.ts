@@ -93,6 +93,7 @@ function providerFor(
     author,
     signingKey,
     readKey,
+    mayWriteDocument: () => true,
   });
 }
 
@@ -160,12 +161,12 @@ it('catchup decrypts a Loro update with keys recovered from the public ledger AP
   expect(recovered.get(1)).toEqual(k1);
   expect(recovered.get(0)).toEqual(k0);
 
-  const author = { actor: 'owner', memberInstance: 'm0', device: 'd0' };
+  const docAuthor = { actor: 'owner', memberInstance: 'm0', device: 'd0' };
   const provider = () =>
     createStreamsContentProvider({
       cipher: new ContentCipher({
         authorize(header) {
-          if (header.actor !== author.actor) throw new Error('unauthorized');
+          if (header.actor !== docAuthor.actor) throw new Error('unauthorized');
           return signingPublic;
         },
       }),
@@ -173,7 +174,7 @@ it('catchup decrypts a Loro update with keys recovered from the public ledger AP
       resource: 'doc-1',
       model: 'loro',
       writeEpoch: 1,
-      author,
+      author: docAuthor,
       signingKey: pair.privateKey,
       readKey: (epoch) => recovered.get(epoch),
     });
@@ -607,7 +608,7 @@ describe('C1 public-export catchup variants', () => {
           throw new Error('must-not-request-aad');
         },
       })
-    ).rejects.toThrow(/snapshot-evidence-required/);
+    ).rejects.toThrow(/invalid-snapshot-offset/);
     await expect(
       provider.open({
         sealed: new Uint8Array([1]),
@@ -615,6 +616,6 @@ describe('C1 public-export catchup variants', () => {
         context: snapshot,
         additionalData: new Uint8Array([1]),
       })
-    ).rejects.toThrow(/snapshot-evidence-required/);
+    ).rejects.toThrow(/invalid-snapshot-offset/);
   });
 });
