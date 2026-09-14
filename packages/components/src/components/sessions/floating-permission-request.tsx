@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
@@ -295,7 +296,7 @@ export function PermissionRequestCard({
                 />
                 <span className="min-w-0 flex-1 whitespace-normal break-words">{option.name}</span>
                 {isPending && (
-                  <Loader2 className="mt-0.5 ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  <Spinner className="mt-0.5 ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 )}
               </Button>
             );

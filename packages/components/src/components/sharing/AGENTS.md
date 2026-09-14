@@ -10,7 +10,7 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   publishing, published, unfinished draft — with exactly one primary action each.
   A human action always starts publication, and the package is frozen in full
   before any byte is uploaded. Include all selected stored history, including
-  thought/tool fields except task-proposal notices; disclose the sensitivity and public title on the first
+  thought/tool content with the [sharing projection](../../../../../specs/session-sharing.md); disclose omissions, sensitivity and public title on the first
   screen, never behind a disclosure. `onPublish` freezes (or reuses the frozen
   retry keys), uploads and commits. There is no publication preview or prepare-only action.
 - Progress must stay honest: only the object upload has a byte total, so only it

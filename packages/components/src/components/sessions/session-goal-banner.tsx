@@ -8,7 +8,8 @@ import {
   type KeyboardEvent,
   type SVGProps,
 } from 'react';
-import { ChevronDown, Clock, Loader2, Pause, Play, Target, X } from 'lucide-react';
+import { ChevronDown, Clock, Pause, Play, Target, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
@@ -78,7 +79,7 @@ export const GoalActionButton = ({
       )}
     >
       {loading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       )}

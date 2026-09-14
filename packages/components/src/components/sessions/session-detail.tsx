@@ -13,7 +13,6 @@ import {
   Github,
   Link,
   LockKeyhole,
-  Loader2,
   Monitor,
   PanelBottom,
   PanelLeft,
@@ -23,6 +22,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
@@ -4570,7 +4570,7 @@ const SessionDetail = ({
     <div className="absolute inset-0 flex h-full flex-col items-center justify-center gap-3">
       {showPendingChildTabState ? (
         <>
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Spinner className="h-5 w-5 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
           </p>
@@ -4896,7 +4896,7 @@ const SessionDetail = ({
           ) : activeSessionSharing.visibility === 'private' ? (
             <LockKeyhole className="h-3.5 w-3.5" />
           ) : (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ),
         label: t('sessions.sharing.visibility', 'Visibility'),
         value: `${getSessionSharingLabel(t, activeSessionSharing)} — ${getSessionSharingDescription(t, activeSessionSharing)}`,
@@ -4920,7 +4920,7 @@ const SessionDetail = ({
           mobileMenuActions.push({
             id: 'fork',
             icon: pendingFork ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <GitFork className="h-3.5 w-3.5" />
             ),
@@ -4993,7 +4993,7 @@ const SessionDetail = ({
         id: 'share-with-team',
         icon:
           activeSessionSharing.visibility === 'unknown' ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : activeSessionSharing.privateReason === 'machine-not-registered' ? (
             <Monitor className="h-3.5 w-3.5" />
           ) : activeSessionSharing.canManage ? (

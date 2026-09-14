@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
 import type { ReactNode } from 'react';
 
+import { OptionalEnhancement } from './optional-enhancement';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
@@ -61,7 +62,9 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
       }}
     >
       {/* Shared WebGL field for price / download / changelog — one compile per session. */}
-      <MarketingAtmosphereHost />
+      <OptionalEnhancement>
+        <MarketingAtmosphereHost />
+      </OptionalEnhancement>
       {children}
     </RootProvider>
   );

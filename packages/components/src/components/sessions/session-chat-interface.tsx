@@ -39,7 +39,6 @@ import {
   Github,
   History,
   Image,
-  Loader2,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -53,6 +52,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -1242,7 +1242,7 @@ export function SessionHeaderMenu({
                       ) : sharing.visibility === 'private' ? (
                         <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       ) : (
-                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {getSessionSharingLabel(t, sharing)}
@@ -1283,7 +1283,7 @@ export function SessionHeaderMenu({
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 {isForking ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5 shrink-0" />
                 ) : (
                   <GitFork className="h-3.5 w-3.5 shrink-0" />
                 )}
@@ -1372,7 +1372,7 @@ export function SessionHeaderMenu({
                       />
                       <span className="min-w-0 flex-1 truncate">{member.name}</span>
                       {isPending ? (
-                        <Loader2 className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin" />
+                        <Spinner className="ml-auto h-3.5 w-3.5 shrink-0" />
                       ) : isOwner ? (
                         <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
                       ) : null}
@@ -1394,7 +1394,7 @@ export function SessionHeaderMenu({
               }}
             >
               {sharing.visibility === 'unknown' ? (
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <Spinner className="h-3.5 w-3.5 shrink-0" />
               ) : sharing.privateReason === 'machine-not-registered' ? (
                 <Monitor className="h-3.5 w-3.5 shrink-0" />
               ) : sharing.canManage ? (
@@ -1833,7 +1833,7 @@ interface SessionChatInterfaceProps {
 }
 
 function SpinningLoaderIcon({ className }: { className?: string }) {
-  return <Loader2 className={cn(className, 'animate-spin')} />;
+  return <Spinner className={className} />;
 }
 
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;

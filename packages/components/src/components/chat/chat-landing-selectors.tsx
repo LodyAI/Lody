@@ -1,15 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import {
-  ShieldCheck,
-  Compass,
-  GitBranch,
-  Loader2,
-  PenLine,
-  ShieldOff,
-  Eye,
-  Monitor,
-} from 'lucide-react';
+import { ShieldCheck, Compass, GitBranch, PenLine, ShieldOff, Eye, Monitor } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { AcpSessionSelect, OptionSelector, type AcpSessionSelectOption } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import type {
@@ -246,7 +238,7 @@ export function BranchSelector({
       renderTriggerValue={(option) => (
         <>
           {loading ? (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <Spinner className="h-4 w-4 shrink-0" />
           ) : (
             <GitBranch className="h-4 w-4 shrink-0" />
           )}
@@ -333,7 +325,7 @@ export function MachineSelector({
       renderTriggerValue={(option) => (
         <div className="flex min-w-0 items-center gap-1.5" title={option?.label}>
           {loading ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" />
+            <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" />
           ) : (
             <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
           )}

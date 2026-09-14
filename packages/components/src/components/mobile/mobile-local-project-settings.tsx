@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
-import { ChevronRight, Loader2, Wrench } from 'lucide-react';
+import { ChevronRight, Wrench } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Switch } from '@/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
@@ -112,7 +113,7 @@ export function MobileLocalProjectSettings({
     return (
       <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
         <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner className="h-4 w-4" />
           {t('workspace.projects.loading', 'Loading local projects')}
         </div>
       </MobileSettingsSection>
@@ -157,9 +158,7 @@ export function MobileLocalProjectSettings({
         >
           <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
             <div className="flex items-center gap-2">
-              {row.isUpdating ? (
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              ) : null}
+              {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
               <Switch
                 checked={row.sharedWithTeam}
                 disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}

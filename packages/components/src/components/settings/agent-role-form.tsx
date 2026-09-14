@@ -1,5 +1,5 @@
 import { useId, type FormEvent } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   AGENT_ROLE_NAME_MAX_LENGTH,
@@ -319,7 +319,7 @@ export function AgentRoleForm({
           {t('common.cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || errors.length > 0}>
-          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
+          {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {isEditing ? t('common.save') : t('settings.agentRoles.form.create')}
         </Button>
       </footer>

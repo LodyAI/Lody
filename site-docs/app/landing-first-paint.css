@@ -547,7 +547,16 @@ html.light .underwater-hero__lead {
   background: hsl(var(--landing-border));
 }
 
+.site-nav__mobile {
+  display: none;
+}
+
+.site-nav__toggle::-webkit-details-marker {
+  display: none;
+}
+
 .site-nav__toggle {
+  list-style: none;
   display: none;
   align-items: center;
   justify-content: center;
@@ -631,6 +640,10 @@ html.light .underwater-hero__lead {
 
   .site-nav__actions {
     gap: 0.55rem;
+  }
+
+  .site-nav__mobile {
+    display: block;
   }
 
   .site-nav__toggle {

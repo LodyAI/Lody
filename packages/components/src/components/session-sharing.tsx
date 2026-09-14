@@ -1,10 +1,8 @@
-import { Archive, ChevronDown, Loader2, LockKeyhole, Monitor, Users } from 'lucide-react';
+import { Archive, ChevronDown, LockKeyhole, Monitor, Users } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import {
-  shouldShowPrivateSharingStatus,
-  type SessionSharingState,
-} from '@/lib/session-sharing';
+import { shouldShowPrivateSharingStatus, type SessionSharingState } from '@/lib/session-sharing';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
   DropdownMenu,
@@ -235,9 +233,7 @@ export function SessionAccessControl({
   const title = t('sessions.sharing.privateToYou', 'Private to you');
   const description = getSessionSharingDescription(t, state);
   const shareDisabled =
-    !onShareWithTeam ||
-    state.privateReason === 'machine-not-registered' ||
-    !state.canManage;
+    !onShareWithTeam || state.privateReason === 'machine-not-registered' || !state.canManage;
 
   return (
     <DropdownMenu>
@@ -245,7 +241,11 @@ export function SessionAccessControl({
         <button
           type="button"
           aria-label={`${title}: ${description}`}
-          className={cn(SESSION_HEADER_STATUS_PILL_CLASS, 'data-[state=open]:border-border data-[state=open]:text-foreground', className)}
+          className={cn(
+            SESSION_HEADER_STATUS_PILL_CLASS,
+            'data-[state=open]:border-border data-[state=open]:text-foreground',
+            className
+          )}
         >
           <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
           <span>{triggerLabel}</span>
@@ -321,7 +321,7 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+            {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
             {actionLabel}
           </AlertDialogAction>
         </AlertDialogFooter>

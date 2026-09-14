@@ -50,7 +50,16 @@ worker.onmessage = ({ data }) => {
         new Promise((resolve) => {
           const id = ++authId;
           authRequests.set(id, resolve);
-          worker.postMessage({ type: 'auth', id, reason: context?.reason });
+          // Forward the whole context, not just `reason`: without
+          // `previousToken` the host provider cannot tell which token was
+          // rejected and hands the rejected one straight back.
+          worker.postMessage({
+            type: 'auth',
+            id,
+            context: context
+              ? { reason: context.reason, previousToken: context.previousToken }
+              : undefined,
+          });
         }),
     }).then(
       (outcome) => worker.postMessage({ type: 'complete', outcome }),

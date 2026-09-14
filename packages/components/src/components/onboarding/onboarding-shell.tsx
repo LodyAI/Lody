@@ -10,7 +10,8 @@ import {
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { PlatformContext } from '@lody/platform/react';
-import { ArrowLeft, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/ui/button';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';
@@ -646,7 +647,7 @@ export function OnboardingNextButton({
       className="gap-2"
     >
       {loading === true ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
       ) : isFinish ? (
         <Check className="h-4 w-4" />
       ) : null}

@@ -152,7 +152,6 @@ import {
   FolderPlus,
   Link2,
   LockKeyhole,
-  Loader2,
   Mail,
   FolderOpen,
   Monitor,
@@ -165,6 +164,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -385,7 +385,7 @@ export function RemoveLocalProjectDialog({
               <div className="mt-3 border-t pt-3 text-xs">
                 {isPreflighting ? (
                   <p className="flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                     {t(
                       'sidebar.localProjects.remove.checkingWorktrees',
                       'Checking each worktree for changes…'
@@ -435,7 +435,7 @@ export function RemoveLocalProjectDialog({
             disabled={isRemoving || cleanupBlocked}
             onClick={() => onConfirm({ cleanupWorktrees })}
           >
-            {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {isRemoving ? <Spinner className="h-4 w-4" /> : null}
             {isRemoving
               ? t('common.processing', 'Processing...')
               : t('sidebar.localProjects.remove.confirm', 'Remove project')}
@@ -815,7 +815,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
               shareMenuState === 'share' ? (
                 <Users />
               ) : shareMenuState === 'loading' ? (
-                <Loader2 className="animate-spin" />
+                <Spinner />
               ) : (
                 <LockKeyhole />
               )
@@ -1235,7 +1235,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                           {removalState === 'waiting_for_device' ? (
                             <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                           ) : (
-                            <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                            <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
                           )}
                           <span className="max-w-24 truncate">{removalStateLabel}</span>
                         </span>

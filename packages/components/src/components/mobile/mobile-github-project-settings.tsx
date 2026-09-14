@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, Loader2, Wrench } from 'lucide-react';
+import { ChevronRight, Wrench } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useGithubProjectWorktreeAdmin } from '@/hooks/use-github-project-worktree-admin';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
@@ -35,7 +36,7 @@ export function MobileGithubProjectSettings({ repoFullName }: MobileGithubProjec
     return (
       <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
         <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner className="h-4 w-4" />
           {t('workspace.projects.loading', 'Loading')}
         </div>
       </MobileSettingsSection>

@@ -10,7 +10,9 @@ import {
   readShareResponseBytes,
   SHARE_LIMITS,
   ShareResourceId,
+  mapShareConcurrent,
 } from '@lody/shared/session-sharing';
+import { compress } from '@loro-dev/streams-crdt/zstd';
 import type { WorkspaceRuntime, SessionDocStore } from '@/atoms/runtime';
 import { API_BASE_URL } from '@/lib';
 
@@ -25,12 +27,18 @@ export async function captureSessionShare(options: {
 }) {
   const stores: Array<{ store: SessionDocStore; releaseSync: () => void }> = [];
   try {
-    for (const session of options.sessions) {
-      options.signal.throwIfAborted();
-      await options.runtime.prepareSessionTarget(session.id, session.machineId);
-      const store = await options.runtime.acquireSessionStore(session.id);
-      stores.push({ store, releaseSync: store.acquireSync() });
-    }
+    const orderedStores = await mapShareConcurrent(
+      options.sessions,
+      async (session, _index, signal) => {
+        signal.throwIfAborted();
+        await options.runtime.prepareSessionTarget(session.id, session.machineId);
+        signal.throwIfAborted();
+        const store = await options.runtime.acquireSessionStore(session.id);
+        stores.push({ store, releaseSync: store.acquireSync() });
+        return store;
+      },
+      options.signal
+    );
     // Hydrate every selected document before capturing any history. Capture below
     // then detaches all histories synchronously in a single client event-loop turn.
     await Promise.all(
@@ -58,7 +66,7 @@ export async function captureSessionShare(options: {
       rootSourceId: options.rootSessionId,
       previousSourceIds: options.previousSourceIds,
       capturedAt: new Date().toISOString(),
-      conversations: stores.map(({ store }, index) => {
+      conversations: orderedStores.map((store, index) => {
         const meta = options.sessions[index]!;
         return {
           sourceId: meta.id,
@@ -71,6 +79,7 @@ export async function captureSessionShare(options: {
         };
       }),
       signal: options.signal,
+      compressHistory: compress,
       readAttachment: async ({ conversationSourceId, kind, reference }, signal) => {
         if (kind === 'file' && reference.transport !== 'r2')
           throw new Error('Upload local attachments before sharing');

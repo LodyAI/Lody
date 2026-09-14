@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ExternalLink, Github, Loader2, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -1518,7 +1519,7 @@ export function LoginPage({
           <Button type="submit" className="mt-1 h-10 w-full" disabled={isButtonsDisabled}>
             {isEmailSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 h-4 w-4" />
                 {submitLabel}
               </>
             ) : (

@@ -19,6 +19,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
   targets; never overlay or persist it.
+- Empty history/placeholders stay outside Virtua, even with an empty leading Fragment:
+  zero-height caches can hide the first user row. Preserve live activity labels/tones.
+  Apply the header inset once to the whole empty scroller.
 - Create `operation_progress` cards update in place per materialized target; bind
   status to its exact Turn and subscribe only to its title. `progressMessageId`
   suppresses duplicate completion cards; legacy completions keep successful-target

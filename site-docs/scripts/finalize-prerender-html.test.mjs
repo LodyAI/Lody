@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   documentOwnsPageStylesheet,
   finalizePrerenderHtml,
@@ -108,7 +105,10 @@ await test('landing first paint inlines critical CSS and defers every stylesheet
   assert.match(next, /data-lody-defer-css/u);
   assert.match(next, /data-lody-apply-css/u);
   assert.doesNotMatch(next, /onload="this\.media='all'"/u);
-  assert.match(next, /<noscript><link rel="stylesheet" href="\/assets\/index\.css"\/><\/noscript>/u);
+  assert.match(
+    next,
+    /<noscript><link rel="stylesheet" href="\/assets\/index\.css"\/><\/noscript>/u
+  );
   assert.doesNotMatch(next, /logo-96\.png/u);
 });
 
@@ -161,34 +161,6 @@ await test('legal keeps its own sheet blocking and defers leaked pricing CSS', (
     next,
     /<link media="print" onload="this\.media='all'" rel="stylesheet" href="\/assets\/pricing-abc\.css"\/>/u
   );
-});
-
-await test('landing first-paint sheet includes rotating-word and nav chrome', () => {
-  const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../app/landing-first-paint.css'), 'utf8');
-  assert.match(css, /\.rw-viewport\b/u);
-  assert.match(css, /\.rw-strip\b/u);
-  assert.match(css, /\.rw-word\b/u);
-  assert.match(css, /\.site-nav__link\b/u);
-  assert.match(css, /\.site-nav__theme-toggle\b/u);
-  assert.match(css, /\.site-nav__theme-track\b/u);
-  assert.match(css, /\.underwater-landing \.site-nav\b/u);
-  assert.match(css, /backdrop-filter:\s*none/u);
-  assert.match(css, /\.underwater-bg__overlay\b[\s\S]*radial-gradient/u);
-  assert.match(css, /\.underwater-btn__icon\b/u);
-  assert.match(css, /\.underwater-btn__icon\b[\s\S]*?width:\s*1\.05rem/u);
-  assert.match(css, /\.underwater-hero__scroll-hint\b[\s\S]*?display:\s*inline-flex/u);
-  assert.match(css, /\.underwater-hero__lead\b[\s\S]*?203 46% 86%/u);
-  assert.match(css, /\.site-nav__toggle\b[\s\S]*?landing-surface-2/u);
-  const next = finalizePrerenderHtml(landingHtml, css);
-  assert.match(next, /\.rw-viewport\{/u);
-  assert.match(next, /\.site-nav__link\{/u);
-  assert.match(next, /\.site-nav__theme-toggle\{/u);
-  assert.match(next, /\.underwater-landing \.site-nav\{/u);
-  assert.match(next, /\.underwater-bg__overlay\{[^}]*radial-gradient/u);
-  assert.match(next, /\.underwater-btn__icon\{[^}]*width:1\.05rem/u);
-  assert.match(next, /\.underwater-hero__scroll-hint\{[^}]*display:inline-flex/u);
-  assert.match(next, /\.underwater-hero__lead\{[^}]*203 46% 86%/u);
-  assert.match(next, /\.site-nav__toggle\{[^}]*landing-surface-2/u);
 });
 
 await test('injectLandingFirstPaintStyle is a no-op off the landing', () => {

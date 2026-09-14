@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ImageIcon, ListTodo, Loader2, Plus, Table2 } from 'lucide-react';
+import { Image as ImageIcon, ListTodo, Plus, Table2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useEditor } from '@prosekit/react';
 import { toast } from 'sonner';
 import {
@@ -77,11 +78,7 @@ export function TaskBodyInsertMenu({
             aria-label={t('tasks.body.insert', 'Insert block')}
             className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/10 hover:text-foreground focus-visible:opacity-100 group-hover/body:opacity-100"
           >
-            {uploading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Plus className="h-3.5 w-3.5" />
-            )}
+            {uploading ? <Spinner className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent

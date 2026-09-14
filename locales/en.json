@@ -2,6 +2,7 @@
   "sharing.toggleTree": "Toggle conversation tree",
   "sharing.fileAttachmentOmitted": "File attachment not included in this share",
   "sharing.static.attachmentNotice": "Images are included. File attachments and external resources are not included.",
+  "sharing.static.historyOmissions": "Runtime settings and terminal output are omitted. Terminal commands are retained.",
   "sharing.request.incomplete": "This deployment is not published yet and cannot be resumed after the editor closes. Abandon it, then ask the agent for a new share request with a new requestId.",
   "sharing.request.incompleteOpen": "This deployment is not published yet. Retry in the open editor. Closing it discards the upload credentials; you must then abandon this deployment and request a new share.",
   "sharing.static.draftRecovery": "Its upload credentials were discarded when the editor closed. Discard it to share this conversation again; nothing was published.",

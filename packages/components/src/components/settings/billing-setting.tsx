@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useCloudAction } from '@lody/platform/react';
 import { ConvexError } from 'convex/values';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -564,7 +564,7 @@ function CloudBillingSettings() {
           </AlertDialogHeader>
           {intervalPreview === undefined ? (
             <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner className="h-4 w-4" />
               {t('billing.historyLoading')}
             </div>
           ) : intervalPreview === null ? (
@@ -659,7 +659,7 @@ function CloudBillingSettings() {
                 void handleSwitchInterval();
               }}
             >
-              {switchIntervalPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {switchIntervalPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('billing.switchIntervalConfirm')}
             </AlertDialogAction>
           </AlertDialogFooter>

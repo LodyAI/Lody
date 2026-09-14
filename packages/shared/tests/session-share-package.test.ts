@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SHARE_LIMITS,
   SharePackageManifestSchema,
+  captureShareHistory,
   encodeShareJson,
   shareManifestKey,
   shareObjectDigest,
@@ -11,6 +12,75 @@ import {
 } from '../src/session-share-package';
 
 const digest = '0'.repeat(64);
+it('omits all typed terminal output and only deduplicates an exact first-command title', () => {
+  const tools = [
+    {
+      type: 'tool_call',
+      title: '构建 😀',
+      content: [
+        { type: 'terminal', terminalId: 'live' },
+        { type: 'terminal_output', output: 'short', exitStatus: { exitCode: 0 } },
+        { type: 'terminal_command', command: '构建 😀', cwd: '/project', args: [] },
+        { type: 'terminal_output', output: 'long'.repeat(5000), truncated: true },
+      ],
+    },
+    {
+      type: 'tool_call',
+      title: 'run build',
+      content: [{ type: 'terminal_command', command: 'build' }],
+    },
+    {
+      type: 'tool_call',
+      title: 'build ',
+      content: [{ type: 'terminal_command', command: 'build' }],
+    },
+    {
+      type: 'tool_call',
+      title: 'second',
+      content: [
+        { type: 'terminal_command', command: 'first' },
+        { type: 'terminal_command', command: 'second' },
+      ],
+    },
+    { type: 'tool_call', title: '', content: [{ type: 'terminal_command', command: '' }] },
+    { type: 'tool_call', title: 'nonterminal', content: [{ type: 'content', text: 'keep' }] },
+  ];
+  const source = [
+    {
+      id: 't',
+      role: 'assistant',
+      items: tools,
+      inputConfig: {
+        inputBlocks: [
+          {
+            type: 'content',
+            content: [
+              { type: 'terminal_output', output: 'nested' },
+              { type: 'text', text: 'keep' },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  const before = structuredClone(source);
+  const wire = captureShareHistory(source);
+  expect(wire[0]!.items![0]).not.toHaveProperty('title');
+  expect(wire[0]!.items![4]).not.toHaveProperty('title');
+  expect(wire[0]!.items!.slice(1, 4)).toEqual(tools.slice(1, 4));
+  expect(wire[0]!.items![5]).toEqual(tools[5]);
+  expect(wire[0]!.items![0]!.content).toEqual([tools[0]!.content[2]]);
+  expect(wire[0]!.inputConfig).toEqual({
+    inputBlocks: [{ type: 'content', content: [{ type: 'text', text: 'keep' }] }],
+  });
+  const restored = validateShareHistory(JSON.parse(JSON.stringify(wire)));
+  expect(restored[0]!.items!.map((item) => item.title)).toEqual(tools.map((item) => item.title));
+  expect(validateShareHistory(restored)).toEqual(restored);
+  expect(captureShareHistory(restored)).toEqual(wire);
+  expect(source).toEqual(before);
+  expect(wire[0]!.items![0]).not.toHaveProperty('title');
+});
+
 function manifest() {
   return {
     formatVersion: 1,
@@ -73,7 +143,7 @@ describe('static share package', () => {
           { id: 'c1', title: '', historyObjectId: 'h1', childSessionPlacement: 'side-panel' },
         ],
       },
-      { ...manifest(), formatVersion: 2 },
+      { ...manifest(), formatVersion: 3 },
       { ...manifest(), historyFormatVersion: 2 },
     ];
     for (const value of fixtures)

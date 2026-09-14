@@ -12,7 +12,6 @@ import {
   GitPullRequestArrow,
   GitPullRequestClosed,
   Github,
-  Loader2,
   MessageSquare,
   MinusCircle,
   RefreshCcw,
@@ -20,6 +19,7 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type {
   GitHubCheckRun,
@@ -184,7 +184,7 @@ function InlineCopyButton({ value, label }: { value: string; label: string }) {
 
 function CheckRunIcon({ run }: { run: GitHubCheckRun }) {
   if (run.status !== 'completed') {
-    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-status-warning" />;
+    return <Spinner className="h-3.5 w-3.5 shrink-0 text-status-warning" />;
   }
   if (run.conclusion === 'success' || run.conclusion === 'skipped') {
     return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-status-success" />;
@@ -246,7 +246,7 @@ const ChecksSection = memo(function ChecksSection({
         ? t('sessions.prTab.checksFailed', 'Some checks failed')
         : t('sessions.prTab.checks', 'Checks');
   const headerIcon = running ? (
-    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-status-warning" />
+    <Spinner className="h-4 w-4 shrink-0 text-status-warning" />
   ) : summary.conclusion === 'success' ? (
     <CheckCircle2 className="h-4 w-4 shrink-0 text-status-success" />
   ) : summary.conclusion === 'failure' ? (
@@ -342,7 +342,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
         <p className="min-w-0 flex-1">
           {t(
             'sessions.prTab.mergeConflictNotice',
-            "This branch has conflicts with the base branch — resolve them before it can be merged."
+            'This branch has conflicts with the base branch — resolve them before it can be merged.'
           )}
         </p>
       </section>
@@ -363,7 +363,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
   }
   return (
     <section className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+      <Spinner className="h-4 w-4 shrink-0" />
       <p className="min-w-0 flex-1">
         {t('sessions.prTab.mergeCheckingNotice', 'Checking whether this branch can be merged…')}
       </p>
@@ -705,11 +705,7 @@ function PrHeaderActionButton({
           disabled={busy}
           className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN, 'rounded-r-none border-transparent')}
         >
-          {isMerging ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <GitMerge className="h-3.5 w-3.5" />
-          )}
+          {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
           {mergeMethodShortLabel(mergeMethod, t)}
         </Button>
         <DropdownMenu>
@@ -733,7 +729,11 @@ function PrHeaderActionButton({
               onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
             >
               {HEADER_MERGE_METHODS.map((method) => (
-                <DropdownMenuRadioItem key={method.value} value={method.value} className="items-start">
+                <DropdownMenuRadioItem
+                  key={method.value}
+                  value={method.value}
+                  className="items-start"
+                >
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-sm font-medium">
                       {t(method.labelKey, method.labelFallback)}
@@ -779,7 +779,7 @@ function PrHeaderActionButton({
           className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
         >
           {resolving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : (
             <AlertCircle className="h-3.5 w-3.5" />
           )}
@@ -828,7 +828,7 @@ function PrHeaderActionButton({
           className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
         >
           {kind === 'checking' ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : (
             <GitMerge className="h-3.5 w-3.5" />
           )}
@@ -869,7 +869,7 @@ function PrHeaderActionButton({
           className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
         >
           {isMarkingReady ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : (
             <GitPullRequestArrow className="h-3.5 w-3.5" />
           )}
@@ -909,7 +909,7 @@ function PrHeaderActionButton({
         className={PR_ACTION_BTN}
       >
         {isUpdatingState ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
         ) : (
           <GitPullRequestArrow className="h-3.5 w-3.5 text-github-open" />
         )}
@@ -933,7 +933,7 @@ function PrHeaderActionButton({
         className={PR_ACTION_BTN}
       >
         {isDeletingBranch ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
         ) : (
           <Trash2 className="h-3.5 w-3.5" />
         )}
@@ -954,7 +954,7 @@ function PrHeaderActionButton({
         className={cn(PR_ACTION_BTN, 'text-status-danger')}
       >
         {isUpdatingState ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
         ) : (
           <GitPullRequestClosed className="h-3.5 w-3.5" />
         )}
@@ -1055,7 +1055,7 @@ function Composer({
           disabled={!canSubmit}
           className="gap-1"
         >
-          {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {isPending && <Spinner className="h-3.5 w-3.5" />}
           {t('sessions.prTab.composerSubmit', 'Comment')}
         </Button>
       </div>
@@ -1081,31 +1081,31 @@ function BranchRow({ pr }: { pr: GitHubPullRequestDetails }) {
     <div className="border-b border-border px-4 py-2">
       <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-        <span className="uppercase tracking-wide text-muted-foreground/80">
-          {t('sessions.prTab.base', 'base')}
+          <span className="uppercase tracking-wide text-muted-foreground/80">
+            {t('sessions.prTab.base', 'base')}
+          </span>
+          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
+            {pr.baseRef}
+          </code>
+          <InlineCopyButton
+            value={pr.baseRef}
+            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
+          />
         </span>
-        <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-          {pr.baseRef}
-        </code>
-        <InlineCopyButton
-          value={pr.baseRef}
-          label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-        />
-      </span>
-      <span aria-hidden className="text-muted-foreground/60">
-        ←
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <span className="uppercase tracking-wide text-muted-foreground/80">
-          {t('sessions.prTab.head', 'head')}
+        <span aria-hidden className="text-muted-foreground/60">
+          ←
         </span>
-        <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-          {pr.headRef}
-        </code>
-        <InlineCopyButton
-          value={pr.headRef}
-          label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-        />
+        <span className="inline-flex items-center gap-1">
+          <span className="uppercase tracking-wide text-muted-foreground/80">
+            {t('sessions.prTab.head', 'head')}
+          </span>
+          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
+            {pr.headRef}
+          </code>
+          <InlineCopyButton
+            value={pr.headRef}
+            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
+          />
         </span>
       </div>
     </div>
@@ -1267,9 +1267,9 @@ export const PrTabView = memo(function PrTabView({
             data && <ChecksSection summary={data.checkRuns} />
           )}
 
-          {(mergeKind === 'conflict' ||
-            mergeKind === 'blocked' ||
-            mergeKind === 'checking') && <MergeStatusNotice kind={mergeKind} />}
+          {(mergeKind === 'conflict' || mergeKind === 'blocked' || mergeKind === 'checking') && (
+            <MergeStatusNotice kind={mergeKind} />
+          )}
 
           <section className={cn(embedded ? 'space-y-2' : 'space-y-3')}>
             {conversation.length > 0 && (
@@ -1326,19 +1326,12 @@ export const PrTabView = memo(function PrTabView({
         onDeleteBranch={onDeleteBranch}
         onResolveConflicts={onResolveConflicts}
         isResolvingConflicts={isResolvingConflicts}
-        menuContentClassName={
-          embedded ? 'lody-app-preview-portal-dark' : undefined
-        }
+        menuContentClassName={embedded ? 'lody-app-preview-portal-dark' : undefined}
       />
     ) : null;
 
   return (
-    <div
-      className={cn(
-        'flex h-full min-h-0 flex-col bg-background',
-        className
-      )}
-    >
+    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
       {embedded ? (
         /* Landing: slim bar — badge + merge only (no branch row / github chrome). */
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5">
@@ -1369,11 +1362,10 @@ export const PrTabView = memo(function PrTabView({
                   aria-label={t('sessions.prTab.refresh', 'Refresh')}
                   title={t('sessions.prTab.refresh', 'Refresh')}
                 >
-                  <RefreshCcw
-                    className={cn(
-                      'h-3.5 w-3.5',
-                      (isRefreshing || state === 'loading') && 'animate-spin'
-                    )}
+                  <Spinner
+                    icon={RefreshCcw}
+                    spinning={isRefreshing || state === 'loading'}
+                    className="h-3.5 w-3.5"
                   />
                 </Button>
               )}

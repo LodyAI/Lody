@@ -350,7 +350,7 @@ describe('SessionList PR badge', () => {
     expect(emittedRenderUpdateWarning).toBe(false);
   });
 
-  it('keeps the working animation on an active-only fixed SVG', () => {
+  it('keeps the working animation on an active-only fixed wrapper', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -364,7 +364,7 @@ describe('SessionList PR badge', () => {
     });
 
     const spinner = container.querySelector('[data-session-working-spinner]');
-    expect(spinner?.tagName).toBe('svg');
+    expect(spinner?.tagName).toBe('SPAN');
     expect(spinner?.classList.contains('h-3')).toBe(true);
     expect(spinner?.classList.contains('w-3')).toBe(true);
     expect(spinner?.classList.contains('shrink-0')).toBe(true);

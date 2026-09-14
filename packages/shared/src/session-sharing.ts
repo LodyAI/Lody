@@ -1,6 +1,8 @@
 export * from './session-share-package';
 export * from './session-share-export';
 export * from './session-share-client';
+export * from './session-share-concurrency';
+export * from './session-share-codec';
 
 /** Request intent only; no daemon API accepts approval or publication credentials. */
 export type SessionShareRequestInput = {

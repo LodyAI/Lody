@@ -12,7 +12,8 @@ import {
   type MutableRefObject,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
@@ -2379,7 +2380,7 @@ export const SessionChatInputArea = memo(
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
         <div className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{externalHistorySyncLabel}</span>
         </div>
       ) : null;
@@ -2442,7 +2443,7 @@ export const SessionChatInputArea = memo(
         )}
       >
         {submissionPending || hasBlockingImages || isExternalHistoryRefreshing ? (
-          <Loader2 className={isMobile ? 'h-5 w-5 animate-spin' : 'h-4 w-4 animate-spin'} />
+          <Spinner className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
         ) : (
           <ArrowUp className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
         )}

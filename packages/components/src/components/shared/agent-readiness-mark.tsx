@@ -71,36 +71,22 @@ export function AgentReadinessMark({
       {...(ariaLabel ? { role: 'img', 'aria-label': ariaLabel } : {})}
     >
       {readiness === 'arriving' ? (
-        // -rotate-90 puts 0% at twelve o'clock; the orbit rotation composes on
-        // the inner group so both transforms stay independent.
-        <svg
-          viewBox="0 0 100 100"
-          className="absolute inset-0 h-full w-full -rotate-90"
-          aria-hidden="true"
-        >
-          <circle
-            cx="50"
-            cy="50"
-            r={RING_RADIUS}
-            fill="none"
-            strokeWidth={stroke}
-            className="stroke-border/70"
-          />
-          {determinatePercent !== null ? (
+        <>
+          {/* -rotate-90 puts 0% at twelve o'clock for the determinate fill. */}
+          <svg
+            viewBox="0 0 100 100"
+            className="absolute inset-0 h-full w-full -rotate-90"
+            aria-hidden="true"
+          >
             <circle
               cx="50"
               cy="50"
               r={RING_RADIUS}
               fill="none"
               strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={RING_CIRCUMFERENCE}
-              strokeDashoffset={RING_CIRCUMFERENCE * (1 - determinatePercent / 100)}
-              className="stroke-primary"
-              style={{ transition: 'stroke-dashoffset 400ms ease-out' }}
+              className="stroke-border/70"
             />
-          ) : (
-            <g className="agent-readiness-orbit">
+            {determinatePercent !== null ? (
               <circle
                 cx="50"
                 cy="50"
@@ -108,12 +94,37 @@ export function AgentReadinessMark({
                 fill="none"
                 strokeWidth={stroke}
                 strokeLinecap="round"
-                strokeDasharray={`${RING_CIRCUMFERENCE * ORBIT_ARC_FRACTION} ${RING_CIRCUMFERENCE}`}
+                strokeDasharray={RING_CIRCUMFERENCE}
+                strokeDashoffset={RING_CIRCUMFERENCE * (1 - determinatePercent / 100)}
                 className="stroke-primary"
+                style={{ transition: 'stroke-dashoffset 400ms ease-out' }}
               />
-            </g>
-          )}
-        </svg>
+            ) : null}
+          </svg>
+          {determinatePercent === null ? (
+            // The indeterminate arc orbits on an HTML wrapper, not on an SVG
+            // `<g>`. Chromium will not composite a transform animation whose
+            // target is an SVG element with an effective zoom other than 1
+            // (crbug.com/1186312), and that is every SVG on a Retina display,
+            // so a `<g>` orbit re-runs style, pre-paint and layerize on the
+            // main thread every vsync. A block-level span composites. Same
+            // rule as `ui/spinner.tsx`.
+            <span className="agent-readiness-orbit absolute inset-0" aria-hidden="true">
+              <svg viewBox="0 0 100 100" className="h-full w-full">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={RING_RADIUS}
+                  fill="none"
+                  strokeWidth={stroke}
+                  strokeLinecap="round"
+                  strokeDasharray={`${RING_CIRCUMFERENCE * ORBIT_ARC_FRACTION} ${RING_CIRCUMFERENCE}`}
+                  className="stroke-primary"
+                />
+              </svg>
+            </span>
+          ) : null}
+        </>
       ) : null}
       <AgentIcon
         cliType={cliType}

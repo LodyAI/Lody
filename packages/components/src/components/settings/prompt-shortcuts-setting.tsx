@@ -10,7 +10,8 @@ import {
   type PromptShortcut,
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
-import { Loader2, Plus, SquareSlash, Trash2 } from 'lucide-react';
+import { Plus, SquareSlash, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -259,7 +260,7 @@ function PromptShortcutsSettingContent({
                   .finally(() => setBusy(false));
               }}
             >
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+              {busy ? <Spinner className="mr-2 h-4 w-4" aria-hidden="true" /> : null}
               {t('common.delete', 'Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -314,7 +315,7 @@ export function PromptShortcutsList({
               role="status"
               className="flex items-center gap-1 text-[11px] text-muted-foreground/70"
             >
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+              <Spinner className="h-3 w-3" aria-hidden="true" />
               {t('common.loading', 'Loading…')}
             </span>
           ) : null}

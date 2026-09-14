@@ -12,6 +12,7 @@
     "packages/acp-extension-codex/**/*",
     "packages/acp-extension-core/**/*",
     "packages/acp-extension-grok/**/*",
+    "packages/acp-extension-core/test/**/*",
     "packages/acp-extension-kimi/**/*",
     "site/**/*",
     "functions/**/*",
