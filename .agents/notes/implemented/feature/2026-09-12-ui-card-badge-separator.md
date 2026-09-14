@@ -216,8 +216,9 @@ Twenty-nine surfaces, and two Radix files deleted (`badge.tsx`,
 
 ## Follow-up, 2026-09-14: a film too thin to read, and an ink that never cleared
 
-The five tones were reported as hard to tell apart in use, and measuring them
-**against each other** rather than each on its own showed why. Off the rendered
+The five tones were reported as hard to tell apart in use — twice, the second
+time after the first fix below had shipped — and measuring them **against each
+other** rather than each on its own showed why. Off the rendered
 board, the closest pair of composited chips was 0.019 apart in oklab in the
 light palette (neutral against success) and 0.026 in the dark one (running
 against warning) — a difference that survives a swatch comparison and does not
@@ -243,19 +244,54 @@ that cannot carry its own words. This is the same correction the avatar's
 initials took for the same reason, four days later and in the opposite
 direction from the one the original note assumed.
 
-What the note above got right and keeps: do not colour the *words* with the
-tone. `warning` at 11px is still 2.8:1, and that argument is untouched.
+### And the film was still not enough
 
-### The pair that stays close
+Shipping that was not enough: the dark palette was still reported as
+indistinguishable. Chasing it with a bigger percentage turned out to be the
+wrong instrument, and the reason is visible only in oklch rather than in the ΔE
+the first pass used.
 
-`running` against `warning` in the **dark** palette is the worst pair at any
-film strength, and raising it only scales the gap. The cause is upstream of this
-component: dark `accent` is `hsl(27 100% 80%)` and dark `warning` is
-`hsl(43 96% 56%)`, sixteen degrees of hue apart, so a wash of either over a
-near-black surface lands in the same warm brown. Separating them means moving a
-semantic colour that every focus ring, link and live indicator in the product
-reads, which is not a decision a badge gets to make. Recorded rather than fixed;
-the word is what tells those two apart, and a badge always has one.
+`ΔE` said the dark palette was *better* separated than the light one at every
+strength — 0.035 against 0.030 at the shipped film. What it hid is **which**
+pairs are close. In the light palette the closest pair is neutral against
+success, which is a gray against a green: trivially named apart whatever the
+distance says. In the dark palette it is running against warning, and there
+`accent` is `hsl(27 100% 80%)` — a pale peach — while `warning` is
+`hsl(43 96% 56%)`. Composited at 22% over a near-black surface those land at
+hue 61° with chroma 0.024 and hue 87° with chroma 0.053: two brown washes,
+twenty-six degrees apart, one of them barely chromatic at all. Raising the film
+scales both and separates neither, because the cause is the hue distance and the
+low chroma `accent` brings to it. Every candidate up to 60% was checked; the
+pair stays the closest at all of them.
+
+**So the word carries the tone.** The rule the note above states — do not colour
+a badge's words with its tone — was right about the *raw* tone and wrong to stop
+there. `warning` at 11px is still 2.8:1, and that measurement is untouched. But
+a tone pulled **halfway to `label`** keeps its hue and gains the ink's contrast:
+the worst of the four measures 5.2:1 on its own chip, on every rung, in both
+palettes. `label` was already the ink, so this is the same expression in both
+palettes — it darkens toward near-black in one and lightens toward white in the
+other — rather than a palette-conditional value the component token groups have
+no way to carry.
+
+Half is measured too. At 60% of the tone the worst word is 4.2:1, under the bar
+on the floating rung where the chip is already a step darker; at 40% the hues
+wash out.
+
+This is the move the film could not make. A 20px chip's tint is a wash; its word
+is the mark a person looks at. Measured off the rendered board, the four words
+land 0.097 apart in oklab at the closest in the light palette and 0.048 in the
+dark one, against 0.030 and 0.035 for the films under them — and in the dark
+palette running and warning become a peach and a gold at four times the chroma
+of their washes.
+
+### What is left
+
+`running` and `warning` remain the closest pair in the dark palette; they are
+now a peach word on a brown chip against a gold word on an olive one, which is
+told apart at a glance, rather than two brown chips which were not. Moving them
+properly apart means moving `accent`, which every focus ring, link and live
+indicator in the product reads — still not a decision a badge gets to make.
 
 ## Deliberately not done
 

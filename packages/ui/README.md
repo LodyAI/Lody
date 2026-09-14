@@ -508,18 +508,23 @@ the caller's, because what a press does is a product decision.
 A `Badge` is a standing fact about the thing beside it, and the one part of this
 system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
 so it takes no background from the ladder. Its tone is a *film* of that tone
-over whatever is underneath, and its words stay ink in all five — `warning` is
-2.8:1 on a near-white surface, a colour for a 16px mark rather than for 11px
-text, and a badge is never wordless, so the tint carries the tone and the word
-carries the fact.
+over whatever is underneath — 12% of `label` for neutral, 22% of its own colour
+for the rest — **and its word carries that tone as well**, as the tone pulled
+halfway to `label`.
 
-The film is 12% of `label` for neutral and 22% of the tone for the rest, and the
-word is `label`. Both numbers moved once the five chips were measured against
-each other rather than each on its own: at 8% and 14% the closest pair was 0.019
-apart in oklab in the light palette and 0.026 in the dark, which is a film too
-thin to read as five tones. And `secondaryLabel`, the obvious ink for metadata,
-was only 3.4:1 on a badge inside a popup — the word sits on the film rather than
-on the page, and 11px text wants 4.5:1.
+The raw tone cannot carry it: `warning` is 2.8:1 on a near-white surface, a
+colour for a 16px mark rather than for 11px text. Half the distance to the ink
+keeps the hue and gains the contrast — 5.2:1 at the worst, on every rung in both
+palettes — and the word is the mark a person actually looks at on a 20px chip.
+The four words land 0.097 apart in oklab at the closest in the light palette and
+0.048 in the dark, against 0.030 and 0.035 for the films under them. In the dark
+palette that is the whole difference: `accent` is a pale peach there and
+`warning` an amber, so their films are two brown washes and their words are a
+peach and a gold.
+
+A neutral badge has no tone to carry, so its word is `label` — which is also the
+ink the other four are pulled toward, and not `secondaryLabel`: the word sits on
+the film rather than on the page, where `secondaryLabel` measured 3.4:1.
 
 ```tsx
 <Badge>Plus</Badge>
