@@ -3293,7 +3293,8 @@ function IconStateRow() {
       <span {...stylex.props(styles.rungUse)}>
         one svg, two values of one number: its parts move by transform, opacity and dash offset
         only, so at rest each state is the static drawing, and a browser without the property
-        transition snaps to it.
+        transition snaps to it. Nothing is added for a state: the collapsed sidebar is the open one
+        with its rows shrunk to a rail.
       </span>
     </Row>
   );
