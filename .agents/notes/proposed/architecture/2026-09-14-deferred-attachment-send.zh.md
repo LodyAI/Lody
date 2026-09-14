@@ -94,3 +94,11 @@ public-boundary 检查及文档检查分别通过。已运行 `pnpm format` 并�
 复现：临时目录安装 `effect@3.18.4`（`npm install --prefix <temp> --ignore-scripts --no-audit --no-fund effect@3.18.4`）；按仓库相对路径复制 `specs/models/session-files.effect-probe.mjs` 和 `packages/components/src/providers/store-ref-tracker.ts`；运行 `node --experimental-strip-types --test <temp>/specs/models/session-files.effect-probe.mjs`。只证明这些边界，不证明真实图片 XHR、IPC、writer 持久化、多窗口协调或 E01–E12 已验收。官方 v3 资料及当前源码入口列在 Spec 末尾。
 
 最初设计工作树有 20 个未初始化 ACP 子模块导致的断链错误。独立实施 checkout 已初始化锁定的子模块，文档检查现在为零错误，没有注册的 SHA 保护主题。第一层的三个 actions/composer 套件共 69 项通过；全仓验证与 PR 链接随栈实施状态记录。完整 draft 产品行为和设备验收仍未完成，Spec 保持 draft，本 Note 保持 proposed。
+
+## Layer 2 implementation
+
+第二层为工作区创建一个 Effect 资源所有者；文件准备、图片上传及发送时的 store 借用都由它管理。React 仍使用 Promise 接口，切页不取消上传，工作区关闭先取消并等待任务，再关闭缓存和传输。不能取消的 IPC 必须结束后才能释放依赖。文件准备在新对话和继续对话间共用；取消不能触发备用上传，multipart 清理必须等待。
+
+新增确定性测试覆盖并行取消、迟到的 store 获取、兄弟任务隔离、XHR 实际取消及上传进度与成功响应的区别。该层保持添加时上传；持久化发送和完整 draft 行为仍属于后两层。
+
+第二层验证：`TMPDIR=/private/tmp NODE_ENV=test pnpm check` 全部通过（组件 478 个文件、3,661 个测试），`pnpm format` 和 `pnpm run docs check` 已完成；文档无错误。仍未声称完成真实设备上的 draft 验收。

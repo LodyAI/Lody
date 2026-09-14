@@ -84,3 +84,14 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.
+
+## Attachment transfer ownership
+
+These rules also bind attachment helpers and UI callers.
+
+- Workspace `sendResources` owns attachment preparation, upload cancellation, and
+  send-path session-store borrows. React unmount does not dispose this owner.
+- Workspace disposal awaits its cleanup before destroying transports or caches.
+  Noncancelable IPC must settle before release; only the cache disposes stores.
+- Cancellation reaches underlying I/O and fences late completion; it never
+  authorizes a fallback upload. Await multipart cleanup before returning failure.

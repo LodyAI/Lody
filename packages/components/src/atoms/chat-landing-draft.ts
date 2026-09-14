@@ -24,6 +24,7 @@ export type PendingImage = {
   progress: number;
   error?: string;
   uploaded?: SessionImagePayload;
+  abort?: AbortController;
 };
 
 export type PendingFile = {

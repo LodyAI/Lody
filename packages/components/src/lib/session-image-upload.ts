@@ -87,6 +87,7 @@ type UploadSessionImageArgs = {
   token: string;
   file: File;
   onProgress?: (percent: number) => void;
+  signal?: AbortSignal;
 };
 
 export const uploadSessionImage = async ({
@@ -95,6 +96,7 @@ export const uploadSessionImage = async ({
   token,
   file,
   onProgress,
+  signal,
 }: UploadSessionImageArgs): Promise<SessionImagePayload> => {
   const validationError = validateSessionImageFile(file);
   if (validationError) {
@@ -111,6 +113,7 @@ export const uploadSessionImage = async ({
     formData,
     onProgress,
     errorLabel: 'Image upload',
+    signal,
   });
 
   const imageValue =
