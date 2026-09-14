@@ -28,7 +28,7 @@ the queue by hand.
 
   | Active daemon/runtime                                         | Steer behavior                                                                                                                   |
   | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-  | Exact-item protocol and acknowledged native ACP Steer         | Atomically consume the selected row as `pending_apply`, then inject it into the current prompt through `steerPrompt`.            |
+  | Exact-item protocol and acknowledged native ACP Steer         | Reserve the selected row as `pending_apply`, retain it through the durable handoff saga, then inject it through `steerPrompt`.   |
   | Exact-item protocol without native ACP Steer                  | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.         |
   | Older daemon with authoritative acknowledged native ACP Steer | Preserve the legacy native Steer path.                                                                                           |
   | Older daemon without acknowledged native ACP Steer            | Keep the established queue-head interrupt behavior; disable Steer on later rows and require a daemon update for exact selection. |
@@ -46,6 +46,17 @@ the queue by hand.
   invocation, never from the shared queue row. If that frozen identity is unavailable, the
   daemon fails before consuming the row, submitting to the provider, or stopping the turn.
 
+  Native handoff is a durable saga, not an atomic CRDT/provider operation. A machine-local,
+  daemon-owned marker records `reserved`, write-ahead `submitting`, provider `acknowledged`,
+  locally committed `applied`, or `fallback`, and keeps the selected queue row until the result
+  is durable. A `reserved` entry that reached history, or any `fallback`, may become the exact
+  ordinary turn;
+  a reservation interrupted before history leaves the row queued. `submitting` is indeterminate
+  and `acknowledged` may already have side effects, so neither is replayed after its prompt owner
+  disappears. `applied` proves local handoff and recovers as accepted while ordinary crash
+  handling makes an interrupted turn visible. This is the fail-closed boundary required because
+  ACP supplies no idempotent submission key or delivery-query operation.
+
   For cancel-and-dispatch Steer, the selected queue row is the durable retry marker: append
   history first, publish `latestUserMsgId`, and remove the row only after both writes succeed.
   A retry after partial publication reuses the existing turn ID rather than duplicating history.
@@ -54,11 +65,14 @@ the queue by hand.
   identity is missing, its editing lease is active, or the expected turn no longer owns
   execution, the daemon must not submit native Steer or stop any turn. The renderer waits for
   this acknowledgement and never removes or materializes an exact-protocol row itself.
-- The daemon retains a bounded receipt for each recently consumed exact-item request, keyed by
-  session, expected turn, and queue identity. A same-process retry after a lost response returns
-  the recorded result without consuming or cancelling again. If consumption succeeded but
+- The daemon retains a bounded in-memory receipt for each recently consumed exact-item request,
+  keyed by session, expected turn, and queue identity. Native saga completion also persists its
+  latest receipt in the operation marker, so an immediate retry survives daemon restart; a later
+  native operation may replace that terminal marker. Shared Session metadata is not a recovery
+  authority because collaborators can write it. If consumption succeeded but
   cancellation failed, the message remains a durable follow-up and a retained-receipt retry must
-  not duplicate it.
+  not duplicate it. A native rejection is receipt-eligible only after its history status,
+  activation pointer, and queue-row cleanup are durable; failed recovery remains retryable.
 - The number and non-editing message body form the drag target for queue reordering.
   Steer, edit, and remove remain separate controls and must not begin a drag.
 - Editing keeps its existing keyboard and focus behavior and disables reordering for
@@ -70,7 +84,9 @@ The shortcut changes routing only when Queue and Steer are meaningfully distinct
 idle session still dispatches normally, and a session without positive live prompt
 activity retains the conservative queue barrier even if the inverse intent would be
 Steer. Touch and pointer interactions share the same drag target; installed-app and
-physical-device coverage remains separate from component tests.
+physical-device coverage remains separate from component tests. The provider boundary cannot
+offer exactly-once recovery without protocol support: indeterminate native submissions are
+reported, never silently replayed.
 
 ## Implementation evidence
 
@@ -78,7 +94,7 @@ physical-device coverage remains separate from component tests.
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/`
 - `packages/components/tests/{session-message-submit-route,session-chat-input-submission,message-queue-row-editing}.test.*`
-- `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts}`
+- `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts,src/session/session-queue-steer-operation-store.ts}`
 - [Decision record](../.agents/notes/implemented/feature/2026-09-13-queue-steer-controls.md)
 
 This is a draft for human review. Implementation and passing tests do not approve it.

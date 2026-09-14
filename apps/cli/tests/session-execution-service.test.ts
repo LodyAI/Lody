@@ -46,6 +46,7 @@ import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
 import { shouldWatchSession } from '../src/session/session-dispatch-logic';
+import { createMemoryQueueSteerOperationStore } from '../src/session/session-queue-steer-operation-store';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
 
@@ -163,6 +164,7 @@ const createBaseDeps = (
     machineId: 'machine-1',
     userId: 'owner-user',
     workspaceId: 'workspace-1' as WorkspaceId,
+    queueSteerOperationStore: createMemoryQueueSteerOperationStore(),
     preferredBaseBranch: 'main',
     touchSession: vi.fn(),
     startSessionActivePresence: vi.fn(async () => {}),
@@ -232,7 +234,9 @@ const createBaseDeps = (
 
   const workspaceWithDocFactory = deps.workspaceDocument as unknown as {
     getOrCreateSessionDoc: (...args: unknown[]) => Promise<unknown>;
+    persistPendingChanges?: (reason: string) => Promise<void>;
   };
+  workspaceWithDocFactory.persistPendingChanges ??= vi.fn(async () => {});
   const originalGetOrCreateSessionDoc = workspaceWithDocFactory.getOrCreateSessionDoc;
   workspaceWithDocFactory.getOrCreateSessionDoc = vi.fn(async (...args: unknown[]) =>
     ensureSessionDocDefaults(await originalGetOrCreateSessionDoc(...args))
@@ -315,7 +319,9 @@ describe('SessionExecutionService', () => {
         }
       ),
     };
+    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
     const deps = createBaseDeps({
+      queueSteerOperationStore,
       workspaceDocument: {
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       } as unknown as LoroDocumentManager,
@@ -648,6 +654,389 @@ describe('SessionExecutionService', () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 
+  it('does not cache a native rejection until fallback publication is durable', async () => {
+    const sessionId = 'session-native-steer-recovery-retry' as SessionId;
+    const queuedItem: MessageQueueItem = {
+      $cid: 'C',
+      task: 'task C',
+      userId: 'forged-owner',
+      userTurnId: 'user:C',
+      timestamp: '2026-09-14T00:00:00.000Z',
+      acpSessionConfig: { prompt: 'task C' },
+    };
+    let queue = [queuedItem];
+    let history: SessionHistoryInput[] = [];
+    let meta = {
+      id: sessionId,
+      userId: 'owner-user',
+      machineId: 'machine-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+    } as SessionMeta;
+    let rejectNextActivation = true;
+    let queueSteerPersistenceCount = 0;
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      if (patch.latestUserMsgId && rejectNextActivation) {
+        rejectNextActivation = false;
+        throw new Error('activation unavailable');
+      }
+      meta = { ...meta, ...patch };
+    });
+    const persistPendingChanges = vi.fn(async (reason: string) => {
+      if (reason !== 'queue-steer-commit') return;
+      queueSteerPersistenceCount += 1;
+      if (queueSteerPersistenceCount === 2) {
+        throw new Error('queue Steer persistence unavailable');
+      }
+    });
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => meta),
+      getMessageQueue: vi.fn(async () => queue),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: () => history,
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+      consumeMessageQueueItemAsUserTurn: vi.fn(
+        async (_cid: string, build: (item: MessageQueueItem) => SessionHistoryInput | null) => {
+          const entry = build(queuedItem);
+          if (!entry) return { type: 'invalid' as const };
+          history.push(entry);
+          return { type: 'consumed' as const, entry };
+        }
+      ),
+      removeMessageQueueItem: vi.fn(async (cid: string) => {
+        queue = queue.filter((item) => item.$cid !== cid);
+      }),
+    });
+    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
+    const deps = createBaseDeps({
+      queueSteerOperationStore,
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        persistPendingChanges,
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const activeTurnId = 'assistant:active';
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'user:active',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'codex',
+            appliedNotificationMethod: 'codex/steerApplied',
+            upstreamTurn: 'same',
+            configPolicy: 'active',
+          })),
+          findSteerConfigMismatch: vi.fn(() => null),
+          steerPrompt: vi.fn(() => {
+            throw new AgentSteerNotDeliveredError('provider refused');
+          }),
+        },
+        acpSessionId: 'acp-native-retry' as ACPSessionId,
+      },
+      promptInFlight: true,
+      cancelRequested: false,
+      invocation: {
+        sourceTurnId: 'user:active',
+        requesterUserId: 'authenticated-user',
+        inputConfig: { prompt: 'active' },
+      },
+      activePromptRun: { turnId: activeTurnId },
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const request = { sessionId, expectedTurnId: activeTurnId, queueItemId: 'C' };
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      error: expect.stringContaining('Failed to durably recover'),
+    });
+    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'fallback',
+      completedAt: undefined,
+    });
+    expect(history).toEqual([expect.objectContaining({ id: 'user:C', status: 'pending' })]);
+    expect(queue).toHaveLength(1);
+    expect(
+      (service as unknown as { queueSteerReceipts: Map<string, unknown> }).queueSteerReceipts.size
+    ).toBe(0);
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      error: 'queue Steer persistence unavailable',
+    });
+    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'fallback',
+      completedAt: undefined,
+    });
+    expect(
+      (service as unknown as { queueSteerReceipts: Map<string, unknown> }).queueSteerReceipts.size
+    ).toBe(0);
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'no-active-turn',
+      error: 'provider refused',
+    });
+    expect(queue).toEqual([]);
+    expect(meta.latestUserMsgId).toBe('user:C');
+    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'fallback',
+      completedAt: expect.any(Number),
+      response: { disposition: 'no-active-turn', error: 'provider refused' },
+    });
+    expect(upsertDocMeta.mock.calls.filter(([, patch]) => patch.latestUserMsgId)).toHaveLength(3);
+
+    const restartedService = new SessionExecutionService(deps);
+    await expect(restartedService.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'no-active-turn',
+      error: 'provider refused',
+    });
+    expect(upsertDocMeta.mock.calls.filter(([, patch]) => patch.latestUserMsgId)).toHaveLength(3);
+  });
+
+  it.each(['submitting', 'acknowledged', 'applied'] as const)(
+    'recovers a crashed native Steer in %s without replaying the provider call',
+    async (phase) => {
+      const sessionId = `session-native-steer-crash-${phase}` as SessionId;
+      const operation = {
+        version: 1 as const,
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        sessionId,
+        operationKey: `operation-${phase}`,
+        queueItemId: 'C',
+        expectedTurnId: 'assistant:old',
+        userTurnId: 'user:C',
+        phase,
+        updatedAt: 1,
+      };
+      let queue = [{ $cid: 'A' }, { $cid: 'C' }];
+      let history: SessionHistoryInput[] = [
+        {
+          id: 'user:C',
+          role: 'user',
+          userId: 'authenticated-user',
+          status: 'pending_apply',
+          read: false,
+          items: [{ type: 'text', text: 'task C' }],
+        } as SessionHistoryInput,
+      ];
+      let meta = {
+        id: sessionId,
+        userId: 'owner-user',
+        machineId: 'machine-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      } as SessionMeta;
+      const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      });
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => meta),
+        getMessageQueue: vi.fn(async () => queue),
+        waitUntilSynced: vi.fn(async () => {}),
+        getHistory: () => history,
+        updateHistory: vi.fn(
+          async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+            history = update(history);
+          }
+        ),
+        removeMessageQueueItem: vi.fn(async (cid: string) => {
+          queue = queue.filter((item) => item.$cid !== cid);
+        }),
+      });
+      const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
+      await queueSteerOperationStore.record(operation);
+      const deps = createBaseDeps({
+        queueSteerOperationStore,
+        workspaceDocument: {
+          repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      });
+      const service = new SessionExecutionService(deps);
+
+      await service.recoverPendingQueueSteer(sessionId, sessionDoc);
+      expect(queue).toEqual([{ $cid: 'A' }]);
+      expect(history).toEqual([expect.objectContaining({ id: 'user:C', status: 'failed' })]);
+      expect(meta.latestUserMsgId).toBeUndefined();
+      await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+        phase,
+        completedAt: expect.any(Number),
+        response: {
+          disposition: phase === 'applied' ? 'accepted' : 'error',
+          userTurnId: 'user:C',
+        },
+      });
+      expect(deps.recordChatFailure).toHaveBeenCalledWith(
+        sessionDoc,
+        'agent_disconnected',
+        expect.stringContaining(phase === 'applied' ? 'was applied' : 'not replayed')
+      );
+    }
+  );
+
+  it('recovers a crash after native reservation by dispatching that exact row', async () => {
+    const sessionId = 'session-native-steer-crash-reserved' as SessionId;
+    let queue = [
+      { $cid: 'A' },
+      { $cid: 'B' },
+      { $cid: 'C', isEditing: true, editingStartedAt: Number.MAX_SAFE_INTEGER },
+    ];
+    let history: SessionHistoryInput[] = [
+      {
+        id: 'user:C',
+        role: 'user',
+        userId: 'authenticated-user',
+        status: 'pending_apply',
+        read: false,
+        items: [{ type: 'text', text: 'task C' }],
+      } as SessionHistoryInput,
+    ];
+    let meta = {
+      id: sessionId,
+      userId: 'owner-user',
+      machineId: 'machine-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => meta),
+      getMessageQueue: vi.fn(async () => queue),
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: () => history,
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+      removeMessageQueueItem: vi.fn(async (cid: string) => {
+        queue = queue.filter((item) => item.$cid !== cid);
+      }),
+    });
+    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
+    await queueSteerOperationStore.record({
+      version: 1,
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      sessionId,
+      operationKey: 'operation-reserved',
+      queueItemId: 'C',
+      expectedTurnId: 'assistant:old',
+      userTurnId: 'user:C',
+      phase: 'reserved',
+      updatedAt: 1,
+    });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        queueSteerOperationStore,
+        workspaceDocument: {
+          repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    await service.recoverPendingQueueSteers();
+    expect(queue.map((item) => item.$cid)).toEqual(['A', 'B', 'C']);
+    const editingMarker = await queueSteerOperationStore.read(sessionId);
+    expect(editingMarker).toMatchObject({ phase: 'reserved' });
+    expect(editingMarker?.completedAt).toBeUndefined();
+
+    queue = queue.map((item) => (item.$cid === 'C' ? { ...item, isEditing: false } : item));
+    await service.recoverPendingQueueSteers();
+
+    expect(history).toEqual([expect.objectContaining({ id: 'user:C', status: 'pending' })]);
+    expect(queue).toEqual([{ $cid: 'A' }, { $cid: 'B' }]);
+    expect(meta).toMatchObject({ latestUserMsgId: 'user:C' });
+    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'fallback',
+      completedAt: expect.any(Number),
+      response: { disposition: 'error', userTurnId: 'user:C' },
+    });
+  });
+
+  it('ignores queue Steer recovery markers owned by another machine', async () => {
+    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
+    await queueSteerOperationStore.record({
+      version: 1,
+      workspaceId: 'workspace-1',
+      machineId: 'machine-2',
+      sessionId: 'session-foreign',
+      operationKey: 'foreign-operation',
+      queueItemId: 'C',
+      expectedTurnId: 'assistant:old',
+      userTurnId: 'user:C',
+      phase: 'reserved',
+      updatedAt: 1,
+    });
+    const deps = createBaseDeps({ queueSteerOperationStore });
+    const service = new SessionExecutionService(deps);
+
+    await service.recoverPendingQueueSteers();
+
+    expect(deps.workspaceDocument.getOrCreateSessionDoc).not.toHaveBeenCalled();
+    await expect(
+      queueSteerOperationStore.read('session-foreign' as SessionId)
+    ).resolves.toMatchObject({ machineId: 'machine-2', phase: 'reserved' });
+  });
+
+  it('leaves the row queued when a crash precedes the reserved history write', async () => {
+    const sessionId = 'session-native-steer-pre-history-crash' as SessionId;
+    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
+    await queueSteerOperationStore.record({
+      version: 1,
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      sessionId,
+      operationKey: 'pre-history-operation',
+      queueItemId: 'C',
+      expectedTurnId: 'assistant:old',
+      userTurnId: 'user:C',
+      phase: 'reserved',
+      updatedAt: 1,
+    });
+    const removeMessageQueueItem = vi.fn(async () => {});
+    const sessionDoc = withHistoryPort({
+      waitUntilSynced: vi.fn(async () => {}),
+      getHistory: () => [],
+      getMessageQueue: vi.fn(async () => [{ $cid: 'C', task: 'task C' }]),
+      removeMessageQueueItem,
+    });
+    const deps = createBaseDeps({
+      queueSteerOperationStore,
+      workspaceDocument: {
+        repo: { upsertDocMeta: vi.fn(async () => {}) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+
+    await service.recoverPendingQueueSteers();
+
+    expect(removeMessageQueueItem).not.toHaveBeenCalled();
+    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'reserved',
+      completedAt: expect.any(Number),
+      response: { disposition: 'error' },
+    });
+  });
+
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
@@ -682,6 +1071,8 @@ describe('SessionExecutionService', () => {
         cliType: 'builtin',
         agentType: 'codex',
       })),
+      getMessageQueue: vi.fn(async () => [queuedItem]),
+      removeMessageQueueItem: vi.fn(async () => {}),
       consumeMessageQueueItemAsUserTurn: vi.fn(
         async (cid: string, buildEntry: (item: MessageQueueItem) => SessionHistoryInput | null) => {
           expect(cid).toBe(queuedItem.$cid);
@@ -788,6 +1179,12 @@ describe('SessionExecutionService', () => {
       expect.any(Function),
       { publishDispatch: false }
     );
+    expect(sessionDoc.removeMessageQueueItem).toHaveBeenCalledWith(queuedItem.$cid);
+    await expect(deps.queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
+      phase: 'applied',
+      completedAt: expect.any(Number),
+      response: { disposition: 'accepted', userTurnId: 'user-2' },
+    });
     expect(initialPromptRun.successor?.turnId).toBe('assistant:user-2');
     expect(runtime.activePromptRun.turnId).toBe('assistant:user-2');
 

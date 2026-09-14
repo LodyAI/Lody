@@ -32,8 +32,9 @@ the selected identity is missing.
   authenticate an identity claimed by a workspace stream writer. Same-host local IPC remains the
   trusted local control path.
 - Let the daemon choose the execution mechanism after validating both identities and the
-  target's editing lease. With acknowledged native ACP Steer, it atomically consumes the row
-  as `pending_apply` and enters the existing `steerPrompt` handoff. Native Steer derives its
+  target's editing lease. With acknowledged native ACP Steer, it records a durable phase marker,
+  retains the selected row while history is `pending_apply`, and enters the existing `steerPrompt`
+  handoff. Native Steer derives its
   requester from the authenticated active invocation, never the shared queue row, and fails
   before consumption if that frozen identity is absent. Without native Steer, it
   writes the row as an ordinary pending turn, publishes its activation pointer, removes the
@@ -43,9 +44,19 @@ the selected identity is missing.
   with an authoritative acknowledged-Steer capability uses the legacy native path. Other
   older daemons retain only the established queue-head interrupt; later-row Steer controls
   are disabled with an upgrade explanation.
-- Keep a bounded daemon receipt for each completed exact operation key. A response-loss retry
-  returns the same result instead of consuming or cancelling twice. A cancellation failure
-  after consumption leaves one durable follow-up and is also returned idempotently.
+- Keep a bounded in-memory daemon receipt for each completed exact operation key, and retain the
+  latest native result in its durable saga marker. A response-loss retry, including an immediate
+  retry after daemon restart for native Steer, returns the same result. A cancellation failure
+  after consumption leaves one durable follow-up and is also returned idempotently. Native
+  rejection receipts are written only after fallback publication and row cleanup succeed.
+- Recover native handoff as a saga with `reserved`, write-ahead `submitting`, provider
+  `acknowledged`, locally committed `applied`, and `fallback` phases in a machine-local,
+  daemon-owned marker. Shared Session metadata is not trusted as a recovery authority.
+  `reserved` work that reached history and `fallback` are safe to convert to exact ordinary
+  dispatch; a pre-history reservation leaves the row queued. `submitting` is indeterminate and
+  `acknowledged` may have side effects, so both fail visibly without replay after restart.
+  `applied` proves the local handoff and retains an accepted receipt. The row stays present until
+  the durable result is complete.
 - Make the leading number and message body a single pointer and keyboard drag activator.
   Keep action buttons outside it, and disable it while the row editor owns interaction.
 
@@ -57,6 +68,9 @@ the selected row, causing Stop to target the current turn without any message to
 Renderer-side history materialization remains only for old-daemon native compatibility; it
 cannot provide exact-item atomicity. Removing native steering was rejected because
 `steerPrompt` injects into the current prompt, while cancel-and-dispatch starts a new turn.
+Treating the provider call and CRDT writes as atomic was rejected because ACP exposes neither
+an idempotent caller-owned submission key nor a delivery query; replaying an indeterminate call
+could execute tools twice.
 Making the complete row draggable was also rejected because Steer, edit, and remove would
 become accidental drag starters.
 
@@ -70,6 +84,9 @@ become accidental drag starters.
 - CLI service and Session Doc tests cover exact C consumption, native `steerPrompt`, exact
   cancellation, forged and missing native identity, missing and active-edit rejection,
   activation-publication failure, cancellation failure, and response-loss retries.
+- Crash/recovery tests cover retry after failed fallback publication, exact recovery from
+  `reserved`, non-replay of `submitting`/`acknowledged` provider calls, `applied` cleanup, and
+  durable receipt replay after restart.
 - Machine RPC and protocol-capability tests cover the queue/turn identities, rejection of a
   requester identity claim, source authorization, and mixed-version negotiation.
 - Component tests use synthetic pointer state. Physical touch dragging and a full

@@ -287,6 +287,7 @@ import { SessionDispatchWatcher } from '@/session/session-dispatch-watcher';
 import { SessionUserResolver } from '@/session/session-user-resolver';
 import { SessionForkService } from '@/session/session-fork-service';
 import { createFileSessionForkOperationStore } from '@/session/session-fork-operation-store';
+import { createFileQueueSteerOperationStore } from '@/session/session-queue-steer-operation-store';
 import {
   SessionEditAndResendService,
   type SessionEditAndResendInput,
@@ -2961,6 +2962,10 @@ export class MessageHandler {
       machineId: this.machineId,
       userId: this.userId,
       workspaceId: this.workspaceId,
+      queueSteerOperationStore: createFileQueueSteerOperationStore({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+      }),
       preferredBaseBranch: this.preferredBaseBranch,
       touchSession: (sessionId) => this.touchSession(sessionId),
       startSessionActivePresence: (sessionId, phase) =>
@@ -3410,6 +3415,11 @@ export class MessageHandler {
         });
       },
       onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
+    });
+    void this.executionService.recoverPendingQueueSteers().catch((error: unknown) => {
+      this.logger.debug(
+        `[queue-steer] Failed to recover pending operations: ${formatErrorMessage(error)}`
+      );
     });
     this.sessionForkService = new SessionForkService({
       workspaceDocument: this.workspaceDocument,

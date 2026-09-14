@@ -327,6 +327,7 @@ export type LoroRepoPersistReason =
   | 'session-fork-prepare'
   | 'session-fork-commit'
   | 'session-fork-rollback'
+  | 'queue-steer-commit'
   | 'session-edit-and-resend-commit'
   | 'session-edit-and-resend-rollback';
 
@@ -1743,7 +1744,7 @@ const acpRuntimeConfigEqual = (
  */
 const EDITING_LEASE_MS = 5 * 60 * 1000;
 
-const hasActiveMessageQueueEditingLease = (item: MessageQueueItem): boolean => {
+export const hasActiveMessageQueueEditingLease = (item: MessageQueueItem): boolean => {
   if (!item.isEditing) return false;
   const startedAt = item.editingStartedAt ?? 0;
   return getServerNow() - startedAt < EDITING_LEASE_MS;
@@ -2794,8 +2795,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * The callback and editing-lease check run against the current queue row, with
    * no await gap before the shared HistoryWriter accepts the turn. Ordinary
    * dispatch retains the row until its metadata activation pointer is durable;
-   * native Steer removes it in the same ownership mutation because its handoff
-   * owns activation.
+   * native Steer retains it until the provider handoff is durably resolved.
    */
   async consumeMessageQueueItemAsUserTurn(
     cid: string,
@@ -2842,9 +2842,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       if (existing) {
         const status = resolveSessionHistoryStatus(existing);
         if (
-          !publishDispatch ||
           existing.role !== 'user' ||
-          (status !== 'pending' && status !== 'seen')
+          (publishDispatch ? status !== 'pending' && status !== 'seen' : status !== 'pending_apply')
         ) {
           outcome.value = { type: 'invalid' };
           return prev;
@@ -2855,10 +2854,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       } else {
         this.sessionData.writer.append(entry as SessionHistory);
         outcome.value = { type: 'consumed', entry };
-      }
-      if (!publishDispatch) {
-        // @ts-ignore - mirror state is writable inside setState.
-        prev.mq = queue.filter((candidate) => candidate.$cid !== cid);
       }
       return prev;
     });

@@ -163,12 +163,21 @@ describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
     const target = queue[0]!;
 
     await expect(
-      doc.consumeMessageQueueItemAsUserTurn(target.$cid, () => createUserTurn('user:C'), {
-        publishDispatch: false,
-      })
+      doc.consumeMessageQueueItemAsUserTurn(
+        target.$cid,
+        () => ({ ...createUserTurn('user:C'), status: 'pending_apply' }),
+        { publishDispatch: false }
+      )
+    ).resolves.toMatchObject({ type: 'consumed', entry: { id: 'user:C' } });
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn(
+        target.$cid,
+        () => ({ ...createUserTurn('user:C'), status: 'pending_apply' }),
+        { publishDispatch: false }
+      )
     ).resolves.toMatchObject({ type: 'consumed', entry: { id: 'user:C' } });
     expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['user:C']);
-    expect(await doc.getMessageQueue()).toEqual([]);
+    expect((await doc.getMessageQueue()).map((item) => item.task)).toEqual(['task C']);
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 });

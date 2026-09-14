@@ -25,7 +25,8 @@ Translation: current
   授权；快照尚不可用或不包含目标时应 fail closed。RPC 不携带请求者身份，因为目标 daemon
   无法认证 workspace stream 写入者声称的身份。同机 local IPC 仍是可信的本地控制路径。
 - Daemon 确认两个 ID 及目标 editing lease 后决定执行机制。支持 acknowledged native ACP
-  Steer 时，原子消费目标行为 `pending_apply`，并进入既有 `steerPrompt` handoff。Native Steer
+  Steer 时，先记录持久阶段标记，在 history 为 `pending_apply` 期间保留目标 row，再进入既有
+  `steerPrompt` handoff。Native Steer
   的 requester 必须来自已认证的活动 invocation，绝不信任共享 queue row；若缺少该冻结身份，
   应在消费前失败。否则消费为
   普通 pending turn，发布 activation pointer，并仅在两项写入都成功后删除 queue row，再只
@@ -33,8 +34,16 @@ Translation: current
 - 混合版本兼容不得恢复“先重排后取消”。旧 daemon 若 authoritative capability 声明支持
   acknowledged Steer，则使用旧 native 路径；其他旧 daemon 只保留既有队首 interrupt，后续行
   “引导”禁用并提示升级。
-- Daemon 为已完成的精确操作 key 保留有界 receipt。响应丢失后的重试返回相同结果，不再次
-  消费或取消。消费后取消失败也只留下一个持久 follow-up，并以幂等方式返回。
+- Daemon 为已完成的精确操作 key 保留有界内存 receipt，并在 native saga marker 中保留最近一次
+  持久结果。响应丢失后的重试（包括 native Steer 后 daemon 重启）返回相同结果，不再次消费或
+  取消。消费后取消失败也只留下一个持久 follow-up。Native 拒绝只有在 fallback activation 和
+  row 清理持久成功后才完成 receipt。
+- Native handoff 以 machine-local、由 daemon 持有的 marker 中的 `reserved`、write-ahead
+  `submitting`、provider `acknowledged`、本地已提交 `applied`、`fallback` 阶段组成 saga；共享
+  Session metadata 不作为恢复权威。已进入 history 的
+  `reserved` 与 `fallback` 可安全恢复为精确普通 dispatch；写 history 前中断则保留 row。
+  `submitting` 结果不确定，`acknowledged` 可能已有 side effect，重启后两者均落成可见失败且不
+  重放。`applied` 证明本地 handoff 已完成并恢复 accepted 回执。持久结果完成前始终保留目标 row。
 - 左侧序号和消息正文合并为一个支持鼠标及键盘的拖动区域。操作按钮保持在区域外；编辑器
   接管交互时禁用该行拖动。
 
@@ -44,7 +53,9 @@ Translation: current
 行时，重排仍可能 resolve，进而在没有可提升消息的情况下错误 Stop 当前 turn。也没有让
 Renderer 写历史仅保留给旧 daemon 的 native 兼容路径；它无法提供精确队列项原子性。没有删除
 native steer，因为 `steerPrompt` 注入当前 prompt，而 cancel-and-dispatch 会开启新 turn，两者
-语义不同。没有让整行都可拖动，因为那会使“引导”、“编辑”和“移除”成为意外拖动起点。
+语义不同。也不能把 provider 调用和 CRDT 写入宣称为原子操作：ACP 既没有 caller-owned 幂等
+提交键，也没有交付查询，重放结果不确定的请求可能重复执行工具。没有让整行都可拖动，因为
+那会使“引导”、“编辑”和“移除”成为意外拖动起点。
 
 ## 验证与边界
 
@@ -54,6 +65,8 @@ native steer，因为 `steerPrompt` 注入当前 prompt，而 cancel-and-dispatc
   拖动区域边界。
 - CLI service 与 Session Doc 测试覆盖精确消费 C、native `steerPrompt`、精确取消、目标缺失、
   伪造或缺失的 native identity、editing lease、activation 发布失败、取消失败及响应丢失重试。
+- 崩溃恢复测试覆盖 fallback 发布失败后的重试、`reserved` 精确恢复、`submitting`／
+  `acknowledged` provider 调用不重放、`applied` 清理，以及重启后的持久回执重放。
 - Machine RPC 与 protocol capability 测试覆盖队列／turn 两个 ID、拒绝请求者身份声明、来源
   授权以及混合版本协商。
 - 组件测试使用合成指针状态；未验证物理触摸拖动和完整的 Provider-backed steer 流程。
