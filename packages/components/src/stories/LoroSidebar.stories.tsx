@@ -950,6 +950,8 @@ type ProjectStoryOptions = {
   localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
   localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
   localProjectSessions?: SessionMeta[];
+  localProjects?: LocalProjectMeta[];
+  localProjectSessionsById?: ReadonlyMap<string, SessionMeta[]>;
   remoteProjectSessions?: SessionMeta[];
   initiallyCollapseRemoteProject?: boolean;
   initiallyCollapseLocalProjects?: boolean;
@@ -961,6 +963,8 @@ function ProductionLikeTopContent({
   localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
   localProjectChildSessionsByParent = new Map(),
   localProjectSessions = demoLocalSessions,
+  localProjects = demoProjects,
+  localProjectSessionsById,
   remoteProjectSessions = [],
   initiallyCollapseRemoteProject = false,
   initiallyCollapseLocalProjects = true,
@@ -986,10 +990,10 @@ function ProductionLikeTopContent({
   const projectCollapseStates = useMemo(
     () =>
       Object.fromEntries([
-        ...demoProjects.map((p) => [`${demoMachineId}:${p.id}`, initiallyCollapseLocalProjects]),
+        ...localProjects.map((p) => [`${demoMachineId}:${p.id}`, initiallyCollapseLocalProjects]),
         ...(initiallyCollapseRemoteProject ? [['machine-remote:proj-lody', true]] : []),
       ]),
-    [initiallyCollapseRemoteProject, initiallyCollapseLocalProjects]
+    [initiallyCollapseRemoteProject, initiallyCollapseLocalProjects, localProjects]
   );
   const [collapsedProjects, setCollapsedProjects] =
     useState<Record<string, boolean>>(projectCollapseStates);
@@ -1025,7 +1029,7 @@ function ProductionLikeTopContent({
           <SidebarSectionHeader
             label="Local Projects"
             collapsed={localProjectsCollapsed}
-            count={demoProjects.length}
+            count={localProjects.length}
             isMobile={isMobile}
             toggleLabel="Toggle"
             onToggleCollapsed={() => setLocalProjectsCollapsed((v) => !v)}
@@ -1041,9 +1045,12 @@ function ProductionLikeTopContent({
           />
           {localProjectsCollapsed ? null : (
             <div className="space-y-1">
-              {demoProjects.map((project) => {
+              {localProjects.map((project) => {
                 const key = `${demoMachineId}:${project.id}`;
                 const collapsed = collapsedProjects[key] ?? false;
+                const projectSessions =
+                  localProjectSessionsById?.get(project.id) ??
+                  (project.id === ('proj-lody' as LocalProjectId) ? localProjectSessions : []);
                 return (
                   <LocalProjectItem
                     key={project.id}
@@ -1054,9 +1061,7 @@ function ProductionLikeTopContent({
                     canNavigateProject
                     collapsed={collapsed}
                     isSelected={false}
-                    sessionsForProject={
-                      project.id === ('proj-lody' as LocalProjectId) ? localProjectSessions : []
-                    }
+                    sessionsForProject={projectSessions}
                     childSessionsByParent={localProjectChildSessionsByParent}
                     liveSessionStatuses={localProjectLiveSessionStatuses}
                     formattedPath={project.rootPath}
@@ -1375,79 +1380,82 @@ function projectActivityFixture(
   };
 }
 
-/** The same status cases exercise both production project renderers. */
-function projectActivityStory(
-  kind: 'project' | 'repo',
-  counts: ActivityCounts,
-  collapsed = true,
-  initializing = false,
-  overlapUnreadActive = false
-): Story {
-  const { sessions, liveSessionStatuses, repoFullName, rows } = projectActivityFixture(counts, {
+const activityCases: Array<[string, ActivityCounts, boolean?, boolean?]> = [
+  ['Idle', [0, 0, 0]],
+  ['Permission', [1, 0, 0]],
+  ['Permission x2', [2, 0, 0]],
+  ['Unread', [0, 1, 0]],
+  ['Unread x3', [0, 3, 0]],
+  ['Running', [0, 0, 1]],
+  ['Active x2', [0, 0, 2]],
+  ['Initializing', [0, 0, 1], true],
+  ['Permission and unread', [1, 3, 0]],
+  ['Permission and active', [1, 0, 2]],
+  ['Permission and overlap', [1, 1, 0], false, true],
+  ['Running + unread Session', [0, 1, 0], false, true],
+  ['Unread and active', [0, 3, 2]],
+  ['Mixed remainder', [1, 2, 3]],
+];
+const activityFixtures = activityCases.map(([name, counts, initializing, overlapUnreadActive], i) =>
+  projectActivityFixture(counts, {
+    project: { ...demoProjects[0]!, id: `activity-${i}` as LocalProjectId, name },
+    prefix: `activity-${i}`,
+    repoFullName: `demo/${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
     initializing,
     overlapUnreadActive,
-  });
-  return {
-    render: (args) => (
+  })
+);
+const githubActivityFixtures = activityFixtures.filter(({ project }) =>
+  ['Permission', 'Unread and active', 'Running + unread Session', 'Mixed remainder'].includes(
+    project.name
+  )
+);
+
+/** The collapsed project rows use the real sidebar layout across all project types. */
+export const CollapsedProjectActivity: Story = {
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjects={activityFixtures.map((fixture) => fixture.project)}
+      localProjectSessionsById={new Map(activityFixtures.map((f) => [f.project.id, f.sessions]))}
+      localProjectLiveSessionStatuses={
+        new Map([
+          ...activityFixtures.flatMap((f) => [...f.liveSessionStatuses]),
+          ['remote-sess-running', { type: 'running' }],
+        ])
+      }
+      remoteProjectSessions={demoRemoteSessions}
+      initiallyCollapseLocalProjects
+      initiallyCollapseRemoteProject
+    />
+  ),
+  args: {
+    ...Default.args!,
+    sessionListProps: {
+      ...demoTaskListProps,
+      repos: githubActivityFixtures.map(({ repoFullName }) => ({ repoFullName, collapsed: true })),
+      sessions: [
+        ...demoTaskListProps.sessions.filter((session) => !session.repoFullName),
+        ...githubActivityFixtures.flatMap((fixture) => fixture.rows),
+      ],
+    },
+  },
+};
+
+export const ExpandedProjectActivity: Story = {
+  render: (args) => {
+    const { sessions, liveSessionStatuses } = projectActivityFixture([2, 3, 2]);
+    return (
       <WithProjectsLayout
         {...args}
-        localProjectSessions={kind === 'project' ? sessions : demoLocalSessions}
-        localProjectLiveSessionStatuses={
-          kind === 'project' ? liveSessionStatuses : EMPTY_LIVE_SESSION_STATUSES
-        }
-        initiallyCollapseLocalProjects={collapsed}
+        localProjectSessions={sessions}
+        localProjectLiveSessionStatuses={liveSessionStatuses}
+        initiallyCollapseLocalProjects={false}
       />
-    ),
-    args: {
-      ...Default.args!,
-      sessionListProps:
-        kind === 'repo'
-          ? { ...demoTaskListProps, repos: [{ repoFullName, collapsed }], sessions: rows }
-          : demoTaskListProps,
-    },
-  };
-}
-
-const localActivity = projectActivityStory.bind(null, 'project');
-const repoActivity = projectActivityStory.bind(null, 'repo');
-
-export const CollapsedProjectRunning = localActivity([0, 0, 1]);
-export const CollapsedProjectRunningMultiple = localActivity([0, 0, 3]);
-export const CollapsedProjectUnreadResult = localActivity([0, 1, 0]);
-export const CollapsedProjectUnreadMultiple = localActivity([0, 3, 0]);
-export const CollapsedProjectPermissionRequired = localActivity([1, 0, 0]);
-export const CollapsedProjectPermissionMultiple = localActivity([2, 0, 0]);
-export const CollapsedProjectRunningWithUnread = localActivity([0, 1, 1]);
-export const CollapsedProjectUnreadWithActiveCounts = localActivity([0, 3, 2]);
-export const CollapsedProjectPermissionWithUnread = localActivity([1, 1, 0]);
-export const CollapsedProjectPermissionWithUnreadCounts = localActivity([2, 3, 0]);
-export const CollapsedProjectPermissionPrecedence = localActivity([1, 0, 1]);
-export const CollapsedProjectPermissionWithActiveCounts = localActivity([2, 0, 2]);
-export const CollapsedProjectOverlappingUnreadActive = localActivity([1, 1, 0], true, false, true);
-export const CollapsedProjectMergedRemainder = localActivity([1, 3, 2]);
-export const CollapsedProjectInitializing = localActivity([0, 0, 1], true, true);
-export const ExpandedProjectActivity = localActivity([2, 3, 2], false);
-export const CollapsedGitHubRepositoryRunning = repoActivity([0, 0, 1]);
-export const CollapsedGitHubRepositoryRunningMultiple = repoActivity([0, 0, 3]);
-export const CollapsedGitHubRepositoryUnreadResult = repoActivity([0, 1, 0]);
-export const CollapsedGitHubRepositoryUnreadMultiple = repoActivity([0, 3, 0]);
-export const CollapsedGitHubRepositoryPermissionRequired = repoActivity([1, 0, 0]);
-export const CollapsedGitHubRepositoryPermissionMultiple = repoActivity([2, 0, 0]);
-export const CollapsedGitHubRepositoryRunningWithUnread = repoActivity([0, 1, 1]);
-export const CollapsedGitHubRepositoryUnreadWithActiveCounts = repoActivity([0, 3, 2]);
-export const CollapsedGitHubRepositoryPermissionWithUnread = repoActivity([1, 1, 0]);
-export const CollapsedGitHubRepositoryPermissionWithUnreadCounts = repoActivity([2, 3, 0]);
-export const CollapsedGitHubRepositoryPermissionPrecedence = repoActivity([1, 0, 1]);
-export const CollapsedGitHubRepositoryPermissionWithActiveCounts = repoActivity([2, 0, 2]);
-export const CollapsedGitHubRepositoryOverlappingUnreadActive = repoActivity(
-  [1, 1, 0],
-  true,
-  false,
-  true
-);
-export const CollapsedGitHubRepositoryMergedRemainder = repoActivity([1, 3, 2]);
-export const CollapsedGitHubRepositoryInitializing = repoActivity([0, 0, 1], true, true);
-export const ExpandedGitHubRepositoryActivity = repoActivity([2, 3, 2], false);
+    );
+  },
+  args: Default.args,
+};
 
 export const CollapsedRemoteProjectRunning: Story = {
   name: 'Collapsed remote project · running',

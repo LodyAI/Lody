@@ -27,7 +27,8 @@ import { initI18n } from '../src/i18n';
 
 const machineId = 'machine-test' as MachineId;
 const projectId = 'project-test' as LocalProjectId;
-// Counts are permission / unread / active; expected items retain the raw single count.
+// Counts are permission / unread / active; overlapping states are represented
+// by separate status types while secondary counts remain Session-deduplicated.
 const cases: [string, [number, number, number], string][] = [
   ['idle', [0, 0, 0], ''],
   ['permission', [1, 0, 0], 'permission:1'],
@@ -44,6 +45,7 @@ const cases: [string, [number, number, number], string][] = [
   ['unreads + actives', [0, 3, 2], 'unread:3 active:2'],
   ['three single states', [1, 1, 1], 'permission:1 more:2'],
   ['merged remainder', [2, 3, 2], 'permission:2 more:5'],
+  ['large counts', [1000, 1, 1000], 'permission:1000 more:1001'],
 ];
 function expectedItems(value: string): [string, number][] {
   return value
@@ -179,12 +181,12 @@ describe('collapsed project activity', () => {
   }
 
   it.each([
-    ['permission unread+active', 'permission:1 active:1'],
+    ['permission unread+active', 'permission:1 more:1'],
     ['permission+unread active', 'permission:1 active:1'],
-    ['permission+unread unread+active active', 'permission:1 active:2'],
+    ['permission+unread unread+active active', 'permission:1 more:2'],
     ['permission unread unread+active active', 'permission:1 more:3'],
     ['unread+active active', 'active:2'],
-    ['unread+active unread', 'unread:1 active:1'],
+    ['unread+active unread', 'unread:2'],
     ['unread+active', 'active:1'],
     ['permission+unread', 'permission:1'],
   ])('deduplicates overlapping and nested sources: %s', (states, expected) => {
@@ -233,14 +235,24 @@ describe('collapsed project activity', () => {
               : '',
         ])
       );
+      expect(marks.map((mark) => mark.classList.contains('col-start-2'))).toEqual(
+        items.map((_, index) => items.length === 1 && index === 0)
+      );
       const labelled = kind === 'repo' ? indicator : indicator!.closest('[aria-label]');
       expect(labelled?.getAttribute('aria-label')).toContain(label);
       for (const mark of marks) {
         const status = mark.getAttribute('data-project-activity-status');
         expect(Boolean(mark.querySelector('.lucide-hand'))).toBe(status === 'permission');
-        expect(Boolean(mark.querySelector('[data-session-working-spinner]'))).toBe(
-          status === 'active'
-        );
+        const spinner = mark.querySelector('[data-session-working-spinner]');
+        expect(Boolean(spinner)).toBe(status === 'active');
+        if (spinner) {
+          expect(spinner.tagName).toBe('SPAN');
+          expect(spinner.classList.contains('animate-spin')).toBe(true);
+          expect(spinner.textContent).toBe('');
+          expect(spinner.childElementCount).toBe(1);
+          expect(spinner.firstElementChild?.tagName).toBe('svg');
+          expect(spinner.querySelector('.animate-spin')).toBeNull();
+        }
       }
       expect(container.querySelector('button[aria-label="New session"]')).not.toBeNull();
       expect(container.querySelector('.lucide-chevron-down')).not.toBeNull();
@@ -264,9 +276,9 @@ describe('collapsed project activity', () => {
     });
 
     it.each([
-      [1, 1, 0, '', ['permission', 'active']],
-      [1, 2, 0, '2', ['permission', 'active']],
-      [1, 1, 1, '2', ['permission', 'active']],
+      [1, 1, 0, '1+1', ['permission', 'more']],
+      [1, 2, 0, '1+2', ['permission', 'more']],
+      [1, 1, 1, '1+2', ['permission', 'more']],
       [0, 1, 0, '', ['active']],
       [0, 1, 1, '2', ['active']],
     ] as const)(
@@ -279,7 +291,7 @@ describe('collapsed project activity', () => {
             { overlapUnreadActive: true, childTabs }
           );
           expect(indicator?.textContent).toBe(text);
-          const effectiveUnread = 0;
+          const effectiveUnread = unread;
           const effectiveActive = active + unread;
           const expectedLabel = [
             [permission, 'Request Permission'],

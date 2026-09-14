@@ -17,27 +17,34 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
   const items = getProjectActivityItems(counts);
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1.5 text-[10px] font-medium leading-none tabular-nums"
+      className="inline-grid h-5 shrink-0 grid-cols-[repeat(2,1.75rem)] items-center gap-1 text-[10px] font-medium leading-none tabular-nums"
       aria-hidden="true"
     >
       {items.map(({ status, count }, index) => (
         <span
           key={status}
           data-project-activity-status={status}
-          className="inline-flex h-3.5 items-center gap-0.5"
+          className={`grid h-3.5 w-7 grid-cols-[0.875rem_0.75rem] items-center gap-0.5${
+            items.length === 1 ? ' col-start-2' : ''
+          }`}
         >
           {status === 'more' ? (
-            `+${count}`
+            <span className="col-span-2 flex h-3.5 w-7 items-center justify-center">+{count}</span>
           ) : (
-            <>
-              <SessionRowStatusIndicator
-                isWaitingPermission={status === 'permission'}
-                hasUnreadMessages={status === 'unread'}
-                isWorking={status === 'active'}
-              />
-              {count > 1 || (index === 0 && items[1]?.status === 'more') ? count : null}
-            </>
+            <SessionRowStatusIndicator
+              isWaitingPermission={status === 'permission'}
+              hasUnreadMessages={status === 'unread'}
+              isWorking={status === 'active'}
+            />
           )}
+          {status !== 'more' ? (
+            <span
+              className="text-center"
+              style={count > 999 ? { fontSize: `${30 / String(count).length}px` } : undefined}
+            >
+              {count > 1 || (index === 0 && items[1]?.status === 'more') ? count : null}
+            </span>
+          ) : null}
         </span>
       ))}
     </span>

@@ -1,5 +1,4 @@
 const activityStatuses = ['permission', 'unread', 'active'] as const;
-const sessionStatusPriority = ['permission', 'active', 'unread'] as const;
 type ProjectActivityStatus = (typeof activityStatuses)[number];
 export type ProjectActivityCounts = Record<ProjectActivityStatus, number> & {
   sessionIds: Record<ProjectActivityStatus, string[]>;
@@ -28,17 +27,9 @@ export function getProjectActivityCounts(sessions: ProjectActivitySource[]): Pro
     if (session.hasUnreadMessages) ids.unread.add(id);
     if (session.isWorking && !session.isWaitingPermission) ids.active.add(id);
   }
-  // A single Session is represented by its highest-priority state. The
-  // project row still uses unread before active when choosing its first slot.
-  const ownerById = new Map<string, (typeof sessionStatusPriority)[number]>();
-  for (const status of sessionStatusPriority) {
-    for (const id of ids[status]) {
-      if (!ownerById.has(id)) ownerById.set(id, status);
-    }
-  }
-  for (const status of activityStatuses) {
-    ids[status] = new Set([...ids[status]].filter((id) => ownerById.get(id) === status));
-  }
+  // Preserve overlapping status dimensions so the project row can distinguish
+  // one remaining state from a mixed remainder. Secondary counts still dedupe
+  // these IDs, so one Session cannot inflate `+N`.
   return {
     permission: ids.permission.size,
     unread: ids.unread.size,
@@ -50,7 +41,15 @@ export function getProjectActivityCounts(sessions: ProjectActivitySource[]): Pro
 }
 
 export function getProjectActivityItems(counts: ProjectActivityCounts) {
-  const first = activityStatuses.find((status) => counts[status] > 0);
+  const unreadIds = new Set(counts.sessionIds.unread);
+  const activeIds = new Set(counts.sessionIds.active);
+  const allUnreadAreActive = unreadIds.size > 0 && [...unreadIds].every((id) => activeIds.has(id));
+  const first =
+    counts.permission > 0
+      ? 'permission'
+      : allUnreadAreActive
+        ? 'active'
+        : activityStatuses.find((status) => counts[status] > 0);
   if (!first) return [];
   const represented = new Set(counts.sessionIds[first]);
   const primary = { status: first, count: represented.size };
