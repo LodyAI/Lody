@@ -107,9 +107,16 @@ repository artifact; a future change edits the registry directly.
 accessibility contract, the four treatments, mask uniqueness, that outer strokes
 survive a glyph, that bulk has no outline, and that a stateful icon's two states
 are the same markup with one number changed. `test/gallery.test.tsx` renders the
-board with the new section. jsdom applies none of the CSS, so the transition and
-the mask were checked by rendering the component's markup in Chromium; the
-Storybook board was not opened for this change.
+board with the new section. jsdom applies none of the CSS, so the rest was seen
+on the static Storybook board in Chromium, both palettes: every icon in its
+24px box, the four sizes, the four treatments with transparent glyph cuts, and
+the two-state pairs. The transition was driven live: `--lody-icon-t` resolves
+as a registered number, the sidebar divider computes to `translateX(-3px)` in
+the collapsed state, and flipping the property interpolates it over ~330 ms
+(`-1.56 → -2.45 → -2.82 → -2.97 → -3`). The static build itself needed a larger
+Node heap and does not link the StyleX stylesheet on the gallery story; the
+check injected `assets/600-*.css` by hand, a harness defect separate from this
+change.
 
 ## Deliberately not done
 
