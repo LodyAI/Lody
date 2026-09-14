@@ -83,10 +83,9 @@ into one component at a time. Source-consumed: consumers compile it through
   flex minimum widens a 16px circle. Circle is a person, tile a thing; identity
   colour is a `style`. A `Kbd` is never a menu row's shortcut;
   `Tooltip.Content`'s `kbdOnInvertedTheme` inverts a cap on a chip.
-- Icons are drawn in `src/icons` on the 24 grid at 1.5, never taken from a
-  package. A variant is a layer treatment of one drawing; a glyph cuts through
-  a mask, not a panel colour. A stateful icon moves by one number,
-  `--lody-icon-t`; no morphing. Their surface is `playground/`, not the board.
+- Icons are drawn in `src/icons`, never taken from a package, and their surface
+  is `playground/` rather than the board. The grid, the four treatments and the
+  one number a state moves by: [icon rules](src/icons/AGENTS.md).
 - A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
   and `Content` re-declares it on the positioner, since a popup mounts outside
   the subtree declaring it — a light panel would otherwise open a dark list.
