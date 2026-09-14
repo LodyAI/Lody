@@ -1,3 +1,4 @@
+import { queueItemRevision } from '@lody/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -335,7 +336,9 @@ export function useSessionDoc(
       const mq = await withStore((store) => (store.getState().mq ?? []) as MessageQueueItem[]);
       const idx = mq.findIndex((item) => item.$cid === cid);
       if (idx < 0) {
-        return;
+        throw new Error(
+          'This message is no longer in the editable queue. Your draft was not saved.'
+        );
       }
       const current = mq[idx] as MessageQueueItem;
       const next = updater(current);
@@ -348,7 +351,8 @@ export function useSessionDoc(
       await runtime.writer.updateSessionMessage(
         sessionId,
         cid,
-        next as unknown as Record<string, unknown>
+        next as unknown as Record<string, unknown>,
+        queueItemRevision(current)
       );
     },
     [withStore, runtime, sessionId]
@@ -371,7 +375,11 @@ export function useSessionDoc(
       // Full-order is idempotent and robust across the intent wire; compute the
       // resulting `$cid` order renderer-side.
       const orderedItemIds = arrayMove(mq, fromIndex, toIndex).map((item) => item.$cid);
-      await runtime.writer.reorderSessionMessages(sessionId, orderedItemIds);
+      await runtime.writer.reorderSessionMessages(
+        sessionId,
+        orderedItemIds,
+        mq.map((item) => item.$cid)
+      );
     },
     [withStore, runtime, sessionId]
   );

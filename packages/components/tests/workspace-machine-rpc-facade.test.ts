@@ -17,6 +17,64 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it.each([undefined, { queueItemSteer: 1 }])(
+    'disables every old-daemon queue row for %j',
+    async (capabilities) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'remote',
+          resolvePlaneForMachine: async () => 'remote',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Legacy delivery must not run');
+        },
+      });
+      for (const queueItemId of ['A', 'B', 'C']) {
+        await expect(
+          facade.requestSessionQueueSteer(remoteMachineId, {
+            sessionId,
+            expectedTurnId: 'active',
+            queueItemId,
+          })
+        ).resolves.toMatchObject({ accepted: false, disposition: 'unsupported', queueItemId });
+      }
+    }
+  );
+
+  it('returns a queue mutation failure from local IPC without trying remote delivery', async () => {
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () => ({
+          ok: true,
+          result: {
+            type: 'session/queue-mutate_response',
+            success: false,
+            error: 'Row is reserved',
+          },
+        }),
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Must not use remote');
+      },
+    });
+    await expect(
+      facade.requestSessionQueueMutation(localMachineId, {
+        sessionId,
+        mutation: { kind: 'remove', queueItemId: 'C', expectedRevision: '{}' },
+      })
+    ).resolves.toMatchObject({ success: false, error: 'Row is reserved' });
+  });
   it('sends queued Steer as one exact local daemon operation', async () => {
     const invoke = vi.fn(async () => ({
       ok: true as const,

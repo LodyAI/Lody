@@ -34,7 +34,6 @@ import {
   type ProjectRef,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
-  resolveSessionHistoryStatus,
   getSessionRoomId,
   getServerNow,
   SessionCreateRequestValidated,
@@ -60,13 +59,23 @@ import {
   hasBuiltinRuntimeOverrideValues,
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
-  normalizeSessionTurnInputConfig,
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { randomUUID } from 'node:crypto';
 import type { ModelInfo } from '@lody/shared';
-import { Cause, Data, Effect, Exit, Fiber, type Scope } from 'effect';
+import { Cause, Context, Data, Effect, Exit, Fiber, Layer, type Scope } from 'effect';
+import {
+  ActiveTurnSteerPort,
+  PersistenceFailure,
+  ProviderRejected,
+  ProviderDeliveryUnknown,
+  StaleTurn,
+  type NativeSteerInput,
+  type NativeSteerFailure,
+} from './active-turn-steer-port';
+import { QueueSteerService } from './queue-steer-service';
+import type { SessionQueueMutation } from '@lody/shared';
 import {
   captureGitWorkingTreeDiffBaseline,
   getCurrentCommitHash,
@@ -108,7 +117,7 @@ import type { SessionActivePresencePhase } from '@/lib/loro/session-active-prese
 import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
-import { hasActiveMessageQueueEditingLease, subscribeSessionChanges } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import {
@@ -116,10 +125,8 @@ import {
   resolveResumableAcpSessionId,
 } from './session-dispatch-logic';
 import { resolveSessionLaunchConfig } from './session-launch-config-resolver';
-import { buildQueuedMessageUserTurn } from './queued-message-turn';
 import {
   isQueueSteerMarkerOwnedBy,
-  type QueueSteerOperationMarker,
   type QueueSteerOperationStore,
 } from './session-queue-steer-operation-store';
 import type { MachineAccessVerification } from './session-access-retry';
@@ -734,9 +741,6 @@ type TurnAnalyticsState = {
   hasReplayPrompt: boolean;
 };
 
-const QUEUE_STEER_RECEIPT_LIMIT = 512;
-type QueueSteerOperation = QueueSteerOperationMarker;
-
 export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
@@ -751,8 +755,7 @@ export class SessionExecutionService {
   // application never race the boundary. No global concurrency cap (Infinity):
   // this is pure per-session serialization, matching the old hand-rolled lock.
   private readonly steerMutationQueue = new ConcurrentQueue<SessionId>(Number.POSITIVE_INFINITY);
-  /** Bounded receipts make a response-loss retry observationally idempotent. */
-  private readonly queueSteerReceipts = new Map<string, SessionQueueSteerResponse>();
+  private readonly queueSteer: Context.Tag.Service<typeof QueueSteerService>;
   // Analytics-only state (spec §5b). Tracks per-turn timing + the last status
   // we reported so status_changed can carry from→to + dwell time. Never read by
   // product logic; kept here so capture stays side-effect-only.
@@ -774,71 +777,83 @@ export class SessionExecutionService {
 
   constructor(private readonly deps: SessionExecutionServiceDeps) {
     this.acpAuthenticationManager = new AcpAuthenticationManager(deps.logger);
-  }
-
-  private rememberQueueSteerReceipt(
-    operationKey: string,
-    response: SessionQueueSteerResponse
-  ): SessionQueueSteerResponse {
-    this.queueSteerReceipts.delete(operationKey);
-    this.queueSteerReceipts.set(operationKey, response);
-    while (this.queueSteerReceipts.size > QUEUE_STEER_RECEIPT_LIMIT) {
-      const oldest = this.queueSteerReceipts.keys().next().value;
-      if (oldest === undefined) break;
-      this.queueSteerReceipts.delete(oldest);
-    }
-    return response;
-  }
-
-  private async writeQueueSteerOperation(
-    sessionId: SessionId,
-    operation: Omit<QueueSteerOperation, 'workspaceId' | 'machineId' | 'sessionId' | 'updatedAt'>
-  ): Promise<QueueSteerOperation> {
-    const durable = {
-      ...operation,
-      workspaceId: this.deps.workspaceId,
-      machineId: this.deps.machineId,
-      sessionId,
-      updatedAt: getServerNow(),
-    } satisfies QueueSteerOperation;
-    await this.deps.queueSteerOperationStore.record(durable);
-    return durable;
-  }
-
-  private async clearQueueSteerOperation(sessionId: SessionId): Promise<void> {
-    await this.deps.queueSteerOperationStore.clear(sessionId);
-  }
-
-  private queueSteerResponseFromOperation(
-    sessionId: SessionId,
-    operation: QueueSteerOperation
-  ): SessionQueueSteerResponse | null {
-    if (!operation.completedAt || !operation.response) return null;
-    return {
-      type: 'session/queue-steer_response',
-      sessionId,
-      queueItemId: operation.queueItemId,
-      accepted: operation.response.disposition === 'accepted',
-      disposition: operation.response.disposition,
-      ...(operation.response.userTurnId ? { userTurnId: operation.response.userTurnId } : {}),
-      ...(operation.response.error ? { error: operation.response.error } : {}),
-    };
-  }
-
-  private async completeQueueSteerOperation(
-    sessionId: SessionId,
-    operation: QueueSteerOperation,
-    response: SessionQueueSteerResponse
-  ): Promise<QueueSteerOperation> {
-    return await this.writeQueueSteerOperation(sessionId, {
-      ...operation,
-      response: {
-        disposition: response.disposition,
-        ...(response.userTurnId ? { userTurnId: response.userTurnId } : {}),
-        ...(response.error ? { error: response.error } : {}),
+    const self = this;
+    const active = ActiveTurnSteerPort.of({
+      guard: (sessionId) =>
+        Effect.acquireRelease(
+          Effect.sync(() => self.tryAcquireSessionRewriteConflictLease(sessionId)).pipe(
+            Effect.flatMap((release) =>
+              release
+                ? Effect.succeed(release)
+                : Effect.fail(
+                    new StaleTurn({
+                      disposition: 'busy',
+                      message: 'The session history is being replaced.',
+                    })
+                  )
+            )
+          ),
+          (release) => Effect.sync(release)
+        ).pipe(Effect.asVoid),
+      inspect: (sessionId, expectedTurnId) =>
+        Effect.gen(function* () {
+          const runtime = self.turnRuntimeBySession.get(sessionId);
+          if (!runtime?.session || !runtime.promptInFlight || runtime.cancelRequested) {
+            return yield* new StaleTurn({
+              disposition: 'no-active-turn',
+              message: 'No active prompt owns this turn.',
+            });
+          }
+          if (runtime.turnId !== expectedTurnId) {
+            return yield* new StaleTurn({
+              disposition: 'stale-turn',
+              message: 'The active turn changed.',
+            });
+          }
+          const native = Boolean(
+            runtime.session.acpSessionId &&
+            runtime.session.agentClient?.getAcknowledgedSteerCapability()
+          );
+          const requesterUserId = runtime.invocation?.requesterUserId?.trim() ?? '';
+          if (native && !requesterUserId) {
+            return yield* new ProviderRejected({
+              disposition: 'error',
+              message: 'Active invocation identity is unavailable for native queue Steer.',
+            });
+          }
+          return { native, requesterUserId };
+        }),
+      steer: (input) => self.nativeSteerEffect(input),
+      cancel: (sessionId, expectedTurnId) =>
+        Effect.tryPromise({
+          try: async () => {
+            const response = await self.cancelSession({
+              type: 'session/cancel',
+              sessionId,
+              turnId: expectedTurnId,
+              machineId: deps.machineId,
+              workspaceId: deps.workspaceId,
+            });
+            if (!response.success)
+              throw new Error(response.error ?? 'The active turn could not be stopped.');
+          },
+          catch: (cause) =>
+            new ProviderRejected({ disposition: 'error', message: formatErrorMessage(cause) }),
+        }),
+      ownsPrompt: (sessionId, expectedTurnId) => {
+        const runtime = self.turnRuntimeBySession.get(sessionId);
+        return runtime?.turnId === expectedTurnId && runtime.promptInFlight;
       },
-      completedAt: getServerNow(),
+      activeUserTurnId: (sessionId) => self.getActiveUserTurnId(sessionId),
     });
+    const queueLayer = QueueSteerService.layer({
+      ...deps,
+      requeue: (sessionId, userTurnId) =>
+        self.requeueUndeliveredSteer(sessionId, userTurnId, { canWriteHistory: true }),
+      failTurn: (sessionId, doc, userTurnId) =>
+        self.setTerminalUserTurnStatus(sessionId, doc, userTurnId, 'failed'),
+    }).pipe(Layer.provide(Layer.succeed(ActiveTurnSteerPort, active)));
+    this.queueSteer = Effect.runSync(QueueSteerService.pipe(Effect.provide(queueLayer)));
   }
 
   private createPromptHandoffRun(options: {
@@ -1477,291 +1492,15 @@ export class SessionExecutionService {
     expectedTurnId: string;
     queueItemId: string;
   }): Promise<SessionQueueSteerResponse> {
-    const operationKey = JSON.stringify([
-      options.sessionId,
-      options.expectedTurnId,
-      options.queueItemId,
-    ]);
-    const respond = (
-      disposition: SessionQueueSteerResponse['disposition'],
-      details?: { userTurnId?: string; error?: string }
-    ): SessionQueueSteerResponse => ({
-      type: 'session/queue-steer_response',
-      sessionId: options.sessionId,
-      queueItemId: options.queueItemId,
-      accepted: disposition === 'accepted',
-      disposition,
-      ...(details?.userTurnId ? { userTurnId: details.userTurnId } : {}),
-      ...(details?.error ? { error: details.error } : {}),
-    });
+    return this.steerMutationQueue.enqueue(options.sessionId, () =>
+      Effect.runPromise(this.queueSteer.steerQueueItem(options))
+    );
+  }
 
-    return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
-      const previousReceipt = this.queueSteerReceipts.get(operationKey);
-      if (previousReceipt) return previousReceipt;
-
-      const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
-      if (!releaseConflict) {
-        return respond('busy', { error: 'The session history is being replaced.' });
-      }
-      let receiptEligible = false;
-      let ownsDurableOperation = false;
-      const finish = (response: SessionQueueSteerResponse): SessionQueueSteerResponse =>
-        receiptEligible ? this.rememberQueueSteerReceipt(operationKey, response) : response;
-      try {
-        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(
-          options.sessionId
-        );
-        const meta = await sessionDoc.getMetaState();
-        if (!meta) {
-          return respond('error', { error: 'Session metadata is unavailable.' });
-        }
-
-        const previousOperation = await this.deps.queueSteerOperationStore.read(options.sessionId);
-        if (previousOperation) {
-          if (
-            !isQueueSteerMarkerOwnedBy(
-              previousOperation,
-              this.deps.workspaceId,
-              this.deps.machineId
-            )
-          ) {
-            return respond('busy', { error: 'A queue Steer marker belongs to another owner.' });
-          }
-          const durableReceipt = this.queueSteerResponseFromOperation(
-            options.sessionId,
-            previousOperation
-          );
-          if (durableReceipt && previousOperation.operationKey === operationKey) {
-            return this.rememberQueueSteerReceipt(operationKey, durableReceipt);
-          }
-          // A completed marker is the crash-safe receipt for the immediately
-          // preceding operation. A new exact request may replace it.
-          if (!durableReceipt && previousOperation.operationKey !== operationKey) {
-            return respond('busy', { error: 'Another queued Steer is being recovered.' });
-          }
-          if (!durableReceipt) {
-            const recovery = await this.recoverQueueSteerOperationLocked(
-              options.sessionId,
-              sessionDoc,
-              previousOperation
-            );
-            if (recovery === 'deferred') {
-              return respond('error', {
-                userTurnId: previousOperation.userTurnId,
-                error: 'The previous native Steer delivery is still indeterminate.',
-              });
-            }
-            return this.rememberQueueSteerReceipt(operationKey, recovery);
-          }
-        }
-
-        const runtime = this.turnRuntimeBySession.get(options.sessionId);
-        if (!runtime || !runtime.session || !runtime.promptInFlight || runtime.cancelRequested) {
-          return respond('no-active-turn');
-        }
-        if (runtime.turnId !== options.expectedTurnId) {
-          return respond('stale-turn');
-        }
-
-        const currentRuntime = this.turnRuntimeBySession.get(options.sessionId);
-        if (
-          currentRuntime !== runtime ||
-          runtime.turnId !== options.expectedTurnId ||
-          !runtime.promptInFlight ||
-          runtime.cancelRequested
-        ) {
-          return respond('stale-turn');
-        }
-
-        const agentClient = runtime.session.agentClient;
-        const useNativeSteer = Boolean(
-          agentClient &&
-          runtime.session.acpSessionId &&
-          agentClient.getAcknowledgedSteerCapability()
-        );
-        const authenticatedRequesterUserId = runtime.invocation?.requesterUserId?.trim() ?? '';
-        if (useNativeSteer && !authenticatedRequesterUserId) {
-          return respond('error', {
-            error: 'Active invocation identity is unavailable for native queue Steer.',
-          });
-        }
-
-        let nativeOperation: QueueSteerOperation | undefined;
-        if (useNativeSteer) {
-          const queuedItem = (await sessionDoc.getMessageQueue()).find(
-            (item) => item.$cid === options.queueItemId
-          );
-          if (!queuedItem) return respond('queue-item-missing');
-          const prepared = buildQueuedMessageUserTurn(queuedItem, meta, {
-            status: 'pending_apply',
-          });
-          if (!prepared) return respond('invalid-queue-item');
-          ownsDurableOperation = true;
-          nativeOperation = await this.writeQueueSteerOperation(options.sessionId, {
-            version: 1,
-            operationKey,
-            queueItemId: options.queueItemId,
-            expectedTurnId: options.expectedTurnId,
-            userTurnId: prepared.id,
-            phase: 'reserved',
-          });
-        }
-
-        // Queue order and immediate steering are separate mutations. Consume the
-        // selected identity directly; A/B keep their relative order when C wins.
-        // Native steer keeps the row as its durable retry record until handoff.
-        const consumed = await sessionDoc.consumeMessageQueueItemAsUserTurn(
-          options.queueItemId,
-          (item) => {
-            const queuedTurn = buildQueuedMessageUserTurn(item, meta, {
-              status: useNativeSteer ? 'pending_apply' : 'pending',
-            });
-            if (!queuedTurn || !useNativeSteer) return queuedTurn;
-            if (nativeOperation && queuedTurn.id !== nativeOperation.userTurnId) return null;
-            return { ...queuedTurn, userId: authenticatedRequesterUserId };
-          },
-          { publishDispatch: !useNativeSteer }
-        );
-        if (consumed.type === 'missing') {
-          if (ownsDurableOperation) await this.clearQueueSteerOperation(options.sessionId);
-          return respond('queue-item-missing');
-        }
-        if (consumed.type === 'editing') {
-          if (ownsDurableOperation) await this.clearQueueSteerOperation(options.sessionId);
-          return respond('queue-item-editing');
-        }
-        if (consumed.type === 'invalid') {
-          if (ownsDurableOperation) await this.clearQueueSteerOperation(options.sessionId);
-          return respond('invalid-queue-item');
-        }
-        const entry = consumed.entry;
-
-        if (useNativeSteer) {
-          await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-          const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);
-          const timestamp = entry.timestamp?.trim();
-          if (!inputConfig || !timestamp) {
-            const invalid = respond('invalid-queue-item', {
-              userTurnId: entry.id,
-              error: 'The queued message cannot be converted to a steer turn.',
-            });
-            nativeOperation = await this.recoverQueueSteerAsDispatch(
-              options.sessionId,
-              sessionDoc,
-              nativeOperation!,
-              {
-                disposition: invalid.disposition,
-                userTurnId: invalid.userTurnId,
-                error: invalid.error,
-              }
-            );
-            nativeOperation = await this.completeQueueSteerOperation(
-              options.sessionId,
-              nativeOperation,
-              invalid
-            );
-            receiptEligible = true;
-            return finish(invalid);
-          }
-          let durableRejection = false;
-          const nativeResult = await this.steerSessionLocked({
-            sessionId: options.sessionId,
-            expectedTurnId: options.expectedTurnId,
-            userTurnId: entry.id,
-            userId: authenticatedRequesterUserId,
-            timestamp,
-            inputConfig,
-            onSubmitting: async () => {
-              nativeOperation = await this.writeQueueSteerOperation(options.sessionId, {
-                ...nativeOperation!,
-                phase: 'submitting',
-              });
-            },
-            onAcknowledged: async () => {
-              nativeOperation = await this.writeQueueSteerOperation(options.sessionId, {
-                ...nativeOperation!,
-                phase: 'acknowledged',
-              });
-            },
-            onApplied: async () => {
-              await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-              nativeOperation = await this.writeQueueSteerOperation(options.sessionId, {
-                ...nativeOperation!,
-                phase: 'applied',
-              });
-            },
-            onUndelivered: async (disposition, error) => {
-              nativeOperation = await this.recoverQueueSteerAsDispatch(
-                options.sessionId,
-                sessionDoc,
-                nativeOperation!,
-                {
-                  disposition,
-                  userTurnId: entry.id,
-                  ...(error ? { error } : {}),
-                }
-              );
-              durableRejection = true;
-            },
-          });
-          const rejectedDisposition =
-            nativeResult.disposition === 'applied' ? 'error' : nativeResult.disposition;
-          if (nativeResult.applied) {
-            await sessionDoc.removeMessageQueueItem(options.queueItemId);
-            await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-            const accepted = respond('accepted', { userTurnId: entry.id });
-            nativeOperation = await this.completeQueueSteerOperation(
-              options.sessionId,
-              nativeOperation!,
-              accepted
-            );
-            receiptEligible = true;
-          } else if (durableRejection) {
-            const rejected = respond(rejectedDisposition, {
-              userTurnId: entry.id,
-              error: nativeResult.error,
-            });
-            nativeOperation = await this.completeQueueSteerOperation(
-              options.sessionId,
-              nativeOperation!,
-              rejected
-            );
-            receiptEligible = true;
-          }
-          return finish(
-            nativeResult.applied
-              ? respond('accepted', { userTurnId: entry.id })
-              : respond(rejectedDisposition, {
-                  userTurnId: entry.id,
-                  error: nativeResult.error,
-                })
-          );
-        }
-
-        receiptEligible = true;
-
-        const cancellation = await this.cancelSession({
-          type: 'session/cancel',
-          sessionId: options.sessionId,
-          machineId: this.deps.machineId,
-          workspaceId: this.deps.workspaceId,
-          turnId: options.expectedTurnId,
-        });
-        if (!cancellation.success) {
-          return finish(
-            respond('error', {
-              userTurnId: entry.id,
-              error: cancellation.error ?? 'The active turn could not be stopped.',
-            })
-          );
-        }
-        return finish(respond('accepted', { userTurnId: entry.id }));
-      } catch (error) {
-        return finish(respond('error', { error: formatErrorMessage(error) }));
-      } finally {
-        releaseConflict();
-      }
-    });
+  async mutateQueuedMessage(request: SessionQueueMutation) {
+    return this.steerMutationQueue.enqueue(request.sessionId, () =>
+      Effect.runPromise(this.queueSteer.mutate(request))
+    );
   }
 
   private async steerSessionLocked(options: {
@@ -1771,498 +1510,332 @@ export class SessionExecutionService {
     userId: string;
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
-    onSubmitting?: () => Promise<void>;
-    onAcknowledged?: () => Promise<void>;
-    onApplied?: () => Promise<void>;
-    onUndelivered?: (
-      disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
-      error?: string
-    ) => Promise<void>;
   }): Promise<SessionSteerResponse> {
-    const reject = (
-      disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
-      error?: string
-    ): SessionSteerResponse => ({
-      type: 'session/steer_response',
-      sessionId: options.sessionId,
-      userTurnId: options.userTurnId,
-      applied: false,
-      disposition,
-      ...(error ? { error } : {}),
-    });
-    /**
-     * The agent never took this prompt, so the user turn is still ours to run.
-     * Only for rejections that provably happened before (or instead of) provider
-     * submission — after submission the provider may already have committed the
-     * steer, and re-sending would duplicate it.
-     */
-    const rejectUndelivered = async (
-      disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
-      error?: string
-    ): Promise<SessionSteerResponse> => {
-      recoveryAttempted = true;
-      if (options.onUndelivered) {
-        await options.onUndelivered(disposition, error);
-      } else {
-        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-          canWriteHistory: true,
-        });
-      }
-      return reject(disposition, error);
-    };
-    let recoveryAttempted = false;
-    const runtime = this.turnRuntimeBySession.get(options.sessionId);
-    if (!runtime || !runtime.session) {
-      return await rejectUndelivered('no-active-turn');
-    }
-    if (runtime.turnId !== options.expectedTurnId) {
-      return await rejectUndelivered('stale-turn');
-    }
-    if (!runtime.promptInFlight || runtime.cancelRequested) {
-      return await rejectUndelivered('no-active-turn');
-    }
-    if (runtime.userTurnId === options.userTurnId) {
-      return {
-        type: 'session/steer_response',
+    const self = this;
+    return Effect.runPromise(
+      this.nativeSteerEffect({
         sessionId: options.sessionId,
-        userTurnId: options.userTurnId,
-        applied: true,
-        disposition: 'applied',
-      };
-    }
-    const { agentClient, acpSessionId } = runtime.session;
-    const steerCapability = agentClient?.getAcknowledgedSteerCapability();
-    if (!agentClient || !acpSessionId || !steerCapability) {
-      return await rejectUndelivered('unsupported');
-    }
-    if (steerCapability.configPolicy === 'active') {
-      const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
-      if (mismatch) {
-        return await rejectUndelivered(
-          'unsupported',
-          `Active turn configuration differs: ${mismatch}`
-        );
-      }
-    }
-    const rejectBeforeProviderSubmission = async (): Promise<SessionSteerResponse | null> => {
-      if (
-        this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
-        runtime.turnId !== options.expectedTurnId
-      ) {
-        return await rejectUndelivered('stale-turn');
-      }
-      // No provider request has been submitted yet, so this guide is still
-      // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight || runtime.cancelRequested) {
-        return await rejectUndelivered('no-active-turn');
-      }
-      return null;
-    };
+        expectedTurnId: options.expectedTurnId,
+        turn: {
+          id: options.userTurnId,
+          userId: options.userId,
+          timestamp: options.timestamp,
+          inputConfig: options.inputConfig,
+        },
+      }).pipe(
+        Effect.map(
+          (): SessionSteerResponse => ({
+            type: 'session/steer_response',
+            sessionId: options.sessionId,
+            userTurnId: options.userTurnId,
+            applied: true,
+            disposition: 'applied',
+          })
+        ),
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            if (error._tag === 'ProviderRejected' || error._tag === 'StaleTurn') {
+              yield* Effect.promise(() =>
+                self.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+                  canWriteHistory: true,
+                })
+              );
+            }
+            return {
+              type: 'session/steer_response' as const,
+              sessionId: options.sessionId,
+              userTurnId: options.userTurnId,
+              applied: false,
+              disposition:
+                error._tag === 'ProviderRejected' || error._tag === 'StaleTurn'
+                  ? error.disposition
+                  : ('error' as const),
+              error: error.message,
+            };
+          })
+        )
+      )
+    );
+  }
 
-    // Everything up to `steerPrompt` returning is provably undelivered; after
-    // that only the agent's own inject-or-refuse verdict can say so.
-    let submittedToAgent = false;
-    try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
-      const inputBlocks = normalizeSessionInputBlocks(
-        options.inputConfig.inputBlocks,
-        options.inputConfig.prompt ?? ''
-      );
-      const promptBlocks = await this.deps.buildAcpPromptBlocks({
-        workspaceId: this.deps.workspaceId,
-        sessionId: options.sessionId,
-        inputBlocks,
-        issuePRMentions: options.inputConfig.issuePRMentions,
+  private nativeSteerEffect(
+    input: NativeSteerInput
+  ): Effect.Effect<{ userTurnId: string }, NativeSteerFailure> {
+    const self = this;
+    const options = {
+      ...input,
+      userTurnId: input.turn.id,
+      userId: input.turn.userId,
+      inputConfig: input.turn.inputConfig,
+      timestamp: input.turn.timestamp,
+    };
+    const prepare = <A>(run: () => Promise<A>) =>
+      Effect.tryPromise({
+        try: run,
+        catch: (cause) => new PersistenceFailure({ cause, message: formatErrorMessage(cause) }),
       });
-      const preConfigRejection = await rejectBeforeProviderSubmission();
-      if (preConfigRejection) {
-        return preConfigRejection;
-      }
-      if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
-          sessionDoc,
-          basedOnUserTurnId: options.userTurnId,
-        });
-      }
-
-      const preSubmitRejection = await rejectBeforeProviderSubmission();
-      if (preSubmitRejection) {
-        return preSubmitRejection;
-      }
-      const ownedPromptRun = runtime.activePromptRun;
-      if (runtime.cancelRequested || !ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
-        return await rejectUndelivered(
-          'busy',
-          'Prompt owner is cancelling or transitioning between logical turns'
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = self.turnRuntimeBySession.get(options.sessionId);
+        if (!runtime?.session || !runtime.promptInFlight || runtime.cancelRequested) {
+          return yield* new StaleTurn({
+            disposition: 'no-active-turn',
+            message: 'No active prompt owns this turn.',
+          });
+        }
+        if (runtime.turnId !== options.expectedTurnId) {
+          return yield* new StaleTurn({
+            disposition: 'stale-turn',
+            message: 'The active turn changed.',
+          });
+        }
+        if (runtime.userTurnId === options.userTurnId) return { userTurnId: options.userTurnId };
+        const session = runtime.session;
+        const { agentClient, acpSessionId } = session;
+        const capability = agentClient?.getAcknowledgedSteerCapability();
+        if (!agentClient || !acpSessionId || !capability) {
+          return yield* new ProviderRejected({
+            disposition: 'unsupported',
+            message: 'Native Steer is unavailable.',
+          });
+        }
+        if (capability.configPolicy === 'active') {
+          const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
+          if (mismatch)
+            return yield* new ProviderRejected({
+              disposition: 'unsupported',
+              message: `Active turn configuration differs: ${mismatch}`,
+            });
+        }
+        const validateOwner = () =>
+          Effect.gen(function* () {
+            if (
+              self.turnRuntimeBySession.get(options.sessionId) !== runtime ||
+              runtime.turnId !== options.expectedTurnId
+            ) {
+              return yield* new StaleTurn({
+                disposition: 'stale-turn',
+                message: 'The active turn changed.',
+              });
+            }
+            if (!runtime.promptInFlight || runtime.cancelRequested) {
+              return yield* new StaleTurn({
+                disposition: 'no-active-turn',
+                message: 'The active turn is stopping.',
+              });
+            }
+          });
+        const sessionDoc = yield* prepare(() =>
+          self.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId)
         );
-      }
-
-      const previousTurnId = runtime.turnId;
-      const previousUserTurnId = runtime.userTurnId;
-      await options.onSubmitting?.();
-      const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
-      submittedToAgent = true;
-      const application = await steerRun.applied;
-      try {
-        try {
-          await options.onAcknowledged?.();
-        } catch (error) {
-          this.deps.logger.error(
-            `[${options.sessionId}] Failed to persist accepted steer ${options.userTurnId}: ${formatErrorMessage(error)}`
+        const inputBlocks = normalizeSessionInputBlocks(
+          options.inputConfig.inputBlocks,
+          options.inputConfig.prompt ?? ''
+        );
+        const promptBlocks = yield* prepare(() =>
+          self.deps.buildAcpPromptBlocks({
+            workspaceId: self.deps.workspaceId,
+            sessionId: options.sessionId,
+            inputBlocks,
+            issuePRMentions: options.inputConfig.issuePRMentions,
+          })
+        );
+        yield* validateOwner();
+        if (capability.configPolicy === 'apply') {
+          yield* prepare(() =>
+            self.deps.applyAcpModeAndModel(session, options.inputConfig, {
+              sessionDoc,
+              basedOnUserTurnId: options.userTurnId,
+            })
           );
         }
+        yield* validateOwner();
+        const ownedPromptRun = runtime.activePromptRun;
+        if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
+          return yield* new StaleTurn({
+            disposition: 'busy',
+            message: 'Prompt ownership is transitioning.',
+          });
+        }
+        const previousTurnId = runtime.turnId;
+        const previousUserTurnId = runtime.userTurnId;
+        // Do not allow interruption between submission and registration of the local ACK cleanup.
+        const steerRun = yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const run = yield* Effect.try({
+              try: () => agentClient.steerPrompt(acpSessionId, promptBlocks),
+              catch: (cause) =>
+                new ProviderRejected({
+                  disposition:
+                    cause instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
+                  message: formatErrorMessage(cause),
+                }),
+            });
+            // This handle releases only the adapter's local ACK gate; submission is not a resource.
+            yield* Effect.acquireRelease(
+              Effect.tryPromise({
+                try: () => run.applied,
+                catch: (cause) =>
+                  cause instanceof AgentSteerNotDeliveredError
+                    ? new ProviderRejected({
+                        disposition: 'no-active-turn',
+                        message: formatErrorMessage(cause),
+                      })
+                    : new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
+              }),
+              (application) => Effect.sync(() => application.release())
+            );
+            return run;
+          })
+        );
         if (
           runtime.cancelRequested ||
-          this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
+          self.turnRuntimeBySession.get(options.sessionId) !== runtime ||
           !runtime.promptInFlight ||
           runtime.turnId !== previousTurnId ||
           runtime.activePromptRun !== ownedPromptRun
         ) {
-          // Provider acceptance forbids replay; Stop keeps the source cancellation owner.
           if (runtime.cancelRequested) {
-            await this.setTerminalUserTurnStatus(
-              options.sessionId,
-              sessionDoc,
-              options.userTurnId,
-              'canceled'
-            );
+            yield* Effect.tryPromise({
+              try: () =>
+                self.setTerminalUserTurnStatus(
+                  options.sessionId,
+                  sessionDoc,
+                  options.userTurnId,
+                  'canceled'
+                ),
+              catch: (cause) =>
+                new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
+            });
           }
-          return reject(
-            'stale-turn',
-            'Steer application arrived after cancellation or ownership changed'
-          );
-        }
-
-        // The provider has accepted this steer and may execute tools before
-        // history/finalization catches up. Switch causal identity first.
-        runtime.invocation = {
-          sourceTurnId: options.userTurnId,
-          requesterUserId: options.userId,
-          inputConfig: options.inputConfig,
-        };
-        // Provider acceptance hands the original dispatch forward. A later
-        // user-owned steer turn must not cancel or reopen that responsibility.
-        await this.settleVisibleTurn(runtime, 'handled', { force: true });
-
-        try {
-          await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
-        } catch (error) {
-          this.deps.logger.error(
-            `[${options.sessionId}] Failed to seal applied steer source ${previousTurnId}: ${formatErrorMessage(error)}`
-          );
-        }
-        try {
-          await this.transitionDispatchOwnership({
-            sessionId: options.sessionId,
-            sessionDoc,
-            previousUserTurnId,
-            nextUserTurnId: options.userTurnId,
+          return yield* new ProviderDeliveryUnknown({
+            message: 'Steer application arrived after cancellation or ownership changed.',
           });
-        } catch (error) {
-          this.deps.logger.error(
-            `[${options.sessionId}] Failed to persist applied steer ownership for ${options.userTurnId}: ${formatErrorMessage(error)}`
-          );
-          if (options.onApplied) throw error;
         }
-        const nextTurnId = this.deps.beginConversationTurn(options.sessionId, options.userTurnId, {
-          dispatchSource: 'rpc',
-          sessionDoc,
-        });
-        try {
-          await this.deps.createAssistantEntryForTurn(
-            options.sessionId,
-            sessionDoc,
-            nextTurnId,
-            agentClient.currentModel,
-            options.userTurnId
-          );
-        } catch (error) {
-          this.deps.logger.error(
-            `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
-          );
-        }
-        this.deps.activateConversationTurnForACPUpdates(options.sessionId, nextTurnId);
-        const nextPromptRun = this.createPromptHandoffRun({
-          turnId: nextTurnId,
-          promptPromise: steerRun.completion,
-        });
-        void ownedPromptRun.promptOutcome.then((outcome) => {
-          if (outcome.status === 'rejected') {
-            this.deps.logger.debug(
-              `[${options.sessionId}] Yielded prompt ${ownedPromptRun.turnId} failed after ownership moved forward: ${formatErrorMessage(outcome.error)}`
+        yield* Effect.tryPromise({
+          try: async () => {
+            // The provider has accepted this steer and may execute tools before
+            // history/finalization catches up. Switch causal identity first.
+            runtime.invocation = {
+              sourceTurnId: options.userTurnId,
+              requesterUserId: options.userId,
+              inputConfig: options.inputConfig,
+            };
+            // Provider acceptance hands the original dispatch forward. A later
+            // user-owned steer turn must not cancel or reopen that responsibility.
+            await self.settleVisibleTurn(runtime, 'handled', { force: true });
+
+            try {
+              await self.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
+            } catch (error) {
+              self.deps.logger.error(
+                `[${options.sessionId}] Failed to seal applied steer source ${previousTurnId}: ${formatErrorMessage(error)}`
+              );
+            }
+            try {
+              await self.transitionDispatchOwnership({
+                sessionId: options.sessionId,
+                sessionDoc,
+                previousUserTurnId,
+                nextUserTurnId: options.userTurnId,
+              });
+            } catch (error) {
+              self.deps.logger.error(
+                `[${options.sessionId}] Failed to persist applied steer ownership for ${options.userTurnId}: ${formatErrorMessage(error)}`
+              );
+              throw error;
+            }
+            const nextTurnId = self.deps.beginConversationTurn(
+              options.sessionId,
+              options.userTurnId,
+              {
+                dispatchSource: 'rpc',
+                sessionDoc,
+              }
             );
-          }
+            try {
+              await self.deps.createAssistantEntryForTurn(
+                options.sessionId,
+                sessionDoc,
+                nextTurnId,
+                agentClient.currentModel,
+                options.userTurnId
+              );
+            } catch (error) {
+              self.deps.logger.error(
+                `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
+              );
+            }
+            self.deps.activateConversationTurnForACPUpdates(options.sessionId, nextTurnId);
+            const nextPromptRun = self.createPromptHandoffRun({
+              turnId: nextTurnId,
+              promptPromise: steerRun.completion,
+            });
+            void ownedPromptRun.promptOutcome.then((outcome) => {
+              if (outcome.status === 'rejected') {
+                self.deps.logger.debug(
+                  `[${options.sessionId}] Yielded prompt ${ownedPromptRun.turnId} failed after ownership moved forward: ${formatErrorMessage(outcome.error)}`
+                );
+              }
+            });
+            ownedPromptRun.successor = nextPromptRun;
+            runtime.activePromptRun = nextPromptRun;
+            runtime.turnId = nextTurnId;
+            runtime.userTurnId = options.userTurnId;
+            self.markCurrentTurn(options.sessionId, nextTurnId);
+            ownedPromptRun.signalSuccessor();
+          },
+          catch: (cause) =>
+            new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
         });
-        ownedPromptRun.successor = nextPromptRun;
-        runtime.activePromptRun = nextPromptRun;
-        runtime.turnId = nextTurnId;
-        runtime.userTurnId = options.userTurnId;
-        this.markCurrentTurn(options.sessionId, nextTurnId);
-        ownedPromptRun.signalSuccessor();
-        await options.onApplied?.();
-        return {
-          type: 'session/steer_response',
-          sessionId: options.sessionId,
-          userTurnId: options.userTurnId,
-          applied: true,
-          disposition: 'applied',
-        };
-      } finally {
-        application.release();
-      }
-    } catch (error) {
-      if (recoveryAttempted) {
-        throw error;
-      }
-      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
-      if (!notDelivered) {
-        return reject('error', formatErrorMessage(error));
-      }
-      // `no-active-turn` for the agent's own refusal: it is the disposition
-      // steer-aware clients already treat as "re-send this turn normally", so
-      // an older client recovers the message too.
-      return await rejectUndelivered(
-        error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
-        formatErrorMessage(error)
-      );
-    }
+        return { userTurnId: options.userTurnId };
+      })
+    );
   }
 
-  /**
-   * Reconcile a durable native queue-Steer saga after daemon restart or a
-   * failed recovery write. Provider calls are never replayed: only a reserved
-   * or already-fallback operation is provably safe to publish as an ordinary
-   * turn. A submitting/acknowledged operation becomes a visible failure once
-   * its original prompt owner is gone because ACP has no query/idempotency
-   * contract that could distinguish "not sent" from "already injected". An
-   * applied operation has already committed local ownership and is only cleaned
-   * up; its accepted receipt survives a lost response and daemon restart.
-   */
-  async recoverPendingQueueSteer(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument
-  ): Promise<SessionQueueSteerResponse | 'deferred' | null> {
-    return await this.steerMutationQueue.enqueue(sessionId, async () => {
-      const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
-      if (!releaseConflict) return 'deferred';
-      try {
-        const operation = await this.deps.queueSteerOperationStore.read(sessionId);
-        if (!operation) return null;
-        if (!isQueueSteerMarkerOwnedBy(operation, this.deps.workspaceId, this.deps.machineId)) {
-          return 'deferred';
-        }
-        return await this.recoverQueueSteerOperationLocked(sessionId, sessionDoc, operation);
-      } finally {
-        releaseConflict();
-      }
-    });
+  async recoverPendingQueueSteer(sessionId: SessionId, sessionDoc: SessionDocument) {
+    return this.steerMutationQueue.enqueue(sessionId, () =>
+      Effect.runPromise(this.queueSteer.recover(sessionId, sessionDoc))
+    );
   }
 
   async recoverPendingQueueSteers(): Promise<void> {
-    let operations: QueueSteerOperation[];
-    try {
-      operations = await this.deps.queueSteerOperationStore.list();
-    } catch (error) {
-      this.deps.logger.error(
-        `[queue-steer] Failed to list recovery markers: ${formatErrorMessage(error)}`
-      );
-      return;
-    }
-    for (const operation of operations) {
-      if (
-        operation.completedAt ||
-        !isQueueSteerMarkerOwnedBy(operation, this.deps.workspaceId, this.deps.machineId)
-      ) {
-        continue;
-      }
-      try {
-        const sessionId = operation.sessionId as SessionId;
-        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await this.recoverPendingQueueSteer(sessionId, sessionDoc);
-      } catch (error) {
-        this.deps.logger.error(
-          `[${operation.sessionId}] Failed to recover queued Steer ${operation.operationKey}: ${formatErrorMessage(error)}`
-        );
-      }
-    }
-  }
-
-  private async recoverQueueSteerOperationLocked(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument,
-    operation: QueueSteerOperation
-  ): Promise<SessionQueueSteerResponse | 'deferred'> {
-    const durableReceipt = this.queueSteerResponseFromOperation(sessionId, operation);
-    if (durableReceipt) return durableReceipt;
-    const runtime = this.turnRuntimeBySession.get(sessionId);
-    if (
-      (operation.phase === 'submitting' || operation.phase === 'acknowledged') &&
-      runtime?.turnId === operation.expectedTurnId &&
-      runtime.promptInFlight
-    ) {
-      return 'deferred';
-    }
-
-    await sessionDoc.waitUntilSynced?.();
-    const history = readSessionHistory(sessionDoc.sessionData.history);
-    const entry = history.find(
-      (candidate) => candidate.role === 'user' && candidate.id === operation.userTurnId
+    const self = this;
+    await Effect.runPromise(
+      Effect.tryPromise(() => this.deps.queueSteerOperationStore.list()).pipe(
+        Effect.flatMap((markers) =>
+          Effect.forEach(
+            markers.filter(
+              (marker) =>
+                !marker.completedAt &&
+                isQueueSteerMarkerOwnedBy(marker, self.deps.workspaceId, self.deps.machineId)
+            ),
+            (marker) =>
+              Effect.tryPromise(async () => {
+                const sessionId = marker.sessionId as SessionId;
+                const doc = await self.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+                await self.recoverPendingQueueSteer(sessionId, doc);
+              }).pipe(
+                Effect.catchAll((error) =>
+                  Effect.sync(() =>
+                    self.deps.logger.error(
+                      `[${marker.sessionId}] Queue Steer recovery failed: ${formatErrorMessage(error)}`
+                    )
+                  )
+                )
+              ),
+            { discard: true }
+          )
+        ),
+        Effect.catchAll((error) =>
+          Effect.sync(() =>
+            self.deps.logger.error(
+              `[queue-steer] Failed to list recovery markers: ${formatErrorMessage(error)}`
+            )
+          )
+        )
+      )
     );
-    if (!entry) {
-      if (operation.phase === 'reserved') {
-        // The index is written before queue consumption. No history entry means
-        // the crash happened before reservation crossed the history boundary.
-        const response = {
-          type: 'session/queue-steer_response',
-          sessionId,
-          queueItemId: operation.queueItemId,
-          accepted: false,
-          disposition: 'error',
-          userTurnId: operation.userTurnId,
-          error: 'The daemon restarted before the queued Steer reservation completed.',
-        } satisfies SessionQueueSteerResponse;
-        await this.completeQueueSteerOperation(sessionId, operation, response);
-        return response;
-      }
-      this.deps.logger.error(
-        `[${sessionId}] Queue Steer ${operation.operationKey} is ${operation.phase} but its history entry is unavailable`
-      );
-      return 'deferred';
-    }
-
-    if (operation.phase === 'reserved' || operation.phase === 'fallback') {
-      const fallbackResponse = operation.response ?? {
-        disposition: 'error' as const,
-        userTurnId: operation.userTurnId,
-        error: 'The daemon restarted before native Steer submission; the turn was queued instead.',
-      };
-      const fallbackOperation = await this.recoverQueueSteerAsDispatch(
-        sessionId,
-        sessionDoc,
-        operation,
-        fallbackResponse
-      );
-      const response = {
-        type: 'session/queue-steer_response',
-        sessionId,
-        queueItemId: operation.queueItemId,
-        accepted: false,
-        ...fallbackResponse,
-      } satisfies SessionQueueSteerResponse;
-      await this.completeQueueSteerOperation(sessionId, fallbackOperation, response);
-      return response;
-    }
-
-    const historyStatus = resolveSessionHistoryStatus(entry);
-    if (operation.phase === 'applied' || runtime?.userTurnId === operation.userTurnId) {
-      if (
-        runtime?.userTurnId !== operation.userTurnId &&
-        historyStatus !== 'handled' &&
-        historyStatus !== 'failed' &&
-        historyStatus !== 'canceled'
-      ) {
-        await this.setTerminalUserTurnStatus(sessionId, sessionDoc, operation.userTurnId, 'failed');
-        await this.deps.recordChatFailure(
-          sessionDoc,
-          'agent_disconnected',
-          'The daemon restarted after this Steer was applied. The provider call was not replayed.'
-        );
-      }
-      await sessionDoc.removeMessageQueueItem(operation.queueItemId);
-      await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-      const response = {
-        type: 'session/queue-steer_response',
-        sessionId,
-        queueItemId: operation.queueItemId,
-        accepted: true,
-        disposition: 'accepted',
-        userTurnId: operation.userTurnId,
-      } satisfies SessionQueueSteerResponse;
-      await this.completeQueueSteerOperation(
-        sessionId,
-        { ...operation, phase: 'applied' },
-        response
-      );
-      return response;
-    }
-
-    if (historyStatus === 'handled') {
-      await sessionDoc.removeMessageQueueItem(operation.queueItemId);
-      await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-      const response = {
-        type: 'session/queue-steer_response',
-        sessionId,
-        queueItemId: operation.queueItemId,
-        accepted: true,
-        disposition: 'accepted',
-        userTurnId: operation.userTurnId,
-      } satisfies SessionQueueSteerResponse;
-      await this.completeQueueSteerOperation(
-        sessionId,
-        { ...operation, phase: 'applied' },
-        response
-      );
-      return response;
-    }
-
-    if (historyStatus !== 'failed' && historyStatus !== 'canceled') {
-      await this.setTerminalUserTurnStatus(sessionId, sessionDoc, operation.userTurnId, 'failed');
-      await this.deps.recordChatFailure(
-        sessionDoc,
-        'agent_disconnected',
-        operation.phase === 'acknowledged'
-          ? 'The daemon restarted after the agent acknowledged this Steer but before local handoff completed. It was not replayed because that could execute it twice.'
-          : 'The daemon restarted while delivering this Steer. Delivery could not be confirmed, so it was not replayed.'
-      );
-    }
-    await sessionDoc.removeMessageQueueItem(operation.queueItemId);
-    await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-    const response = {
-      type: 'session/queue-steer_response',
-      sessionId,
-      queueItemId: operation.queueItemId,
-      accepted: false,
-      disposition: 'error',
-      userTurnId: operation.userTurnId,
-      error:
-        operation.phase === 'acknowledged'
-          ? 'The agent acknowledged this Steer before the daemon restarted, but local handoff did not complete; it was not replayed.'
-          : 'Native Steer delivery became indeterminate when the daemon restarted; it was not replayed.',
-    } satisfies SessionQueueSteerResponse;
-    await this.completeQueueSteerOperation(sessionId, operation, response);
-    return response;
-  }
-
-  private async recoverQueueSteerAsDispatch(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument,
-    operation: QueueSteerOperation,
-    response: NonNullable<QueueSteerOperation['response']>
-  ): Promise<QueueSteerOperation> {
-    const queueItem = (await sessionDoc.getMessageQueue()).find(
-      (item) => item.$cid === operation.queueItemId
-    );
-    if (queueItem && hasActiveMessageQueueEditingLease(queueItem)) {
-      throw new Error(`Queued Steer ${operation.userTurnId} is being edited`);
-    }
-    let fallbackOperation = operation;
-    if (operation.phase !== 'fallback' || operation.response !== response) {
-      fallbackOperation = await this.writeQueueSteerOperation(sessionId, {
-        ...operation,
-        phase: 'fallback',
-        response,
-        completedAt: undefined,
-      });
-    }
-    const recovery = await this.requeueUndeliveredSteer(sessionId, operation.userTurnId, {
-      canWriteHistory: true,
-    });
-    if (recovery === 'requeue-failed') {
-      throw new Error(`Failed to durably recover queued Steer ${operation.userTurnId}`);
-    }
-    await sessionDoc.removeMessageQueueItem(operation.queueItemId);
-    await this.deps.workspaceDocument.persistPendingChanges('queue-steer-commit');
-    return fallbackOperation;
   }
 
   /**

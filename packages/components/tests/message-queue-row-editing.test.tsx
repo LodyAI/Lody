@@ -133,6 +133,56 @@ describe('queued message editing commits', () => {
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Rewrite the queue instead' }]);
   });
 
+  it('retains an unsaved draft when another client reserves the last queue row', async () => {
+    const item = makeItem();
+    const render = async (items: MessageQueueItem[]) => {
+      await act(async () => {
+        root?.render(
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items,
+            onRemove: () => {},
+            onReorder: () => {},
+            onSteer: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: async () => {
+              throw new Error('Message is operation-owned');
+            },
+          })
+        );
+      });
+    };
+    await render([item]);
+    const textarea = await startEditing(container!);
+    await act(async () => setTextareaValue(textarea, 'Roll back instead'));
+    await render([]);
+    expect(container?.querySelector('textarea')?.value).toBe('Roll back instead');
+    expect(container?.querySelector('[role="alert"]')?.textContent).toContain('unsaved draft');
+    await pressEnter(container!.querySelector('textarea')!);
+    expect(container?.querySelector('textarea')?.value).toBe('Roll back instead');
+  });
+
+  it('does not reopen an old editing lease when the save ACK arrives before replication', async () => {
+    const item = { ...makeItem(), isEditing: true, editingStartedAt: 1 };
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [item],
+          onRemove: () => {},
+          onReorder: () => {},
+          onSteer: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+        })
+      );
+    });
+    await pressEnter(container!.querySelector('textarea')!);
+    expect(container?.querySelector('textarea')).toBeNull();
+  });
+
   it('focuses the editor when the editing flag arrives before the start write completes', async () => {
     let finishStart!: () => void;
     function QueueWithEarlyUpdate() {

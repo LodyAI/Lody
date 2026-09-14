@@ -1,3 +1,9 @@
+import {
+  SessionQueueMutationSchema,
+  SessionQueueMutationResponseSchema,
+  type SessionQueueMutation,
+  type SessionQueueMutationResponse,
+} from '@lody/shared';
 import { z } from 'zod';
 import {
   StreamsClient,
@@ -194,6 +200,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'file/preview',
   'session/cancel',
   'session/live-status',
+  'session/queue-mutate',
   'session/queue-steer',
   'session/steer',
   'session/goal',
@@ -475,6 +482,11 @@ export const LoroSessionSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
     .strict(),
 }).strict();
 
+export const LoroSessionQueueMutationRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/queue-mutate'),
+  params: SessionQueueMutationSchema,
+}).strict();
+
 export const LoroSessionQueueSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/queue-steer'),
   params: z
@@ -613,6 +625,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroFilePreviewRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
+  LoroSessionQueueMutationRpcRequestSchema,
   LoroSessionQueueSteerRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
   LoroSessionGoalRpcRequestSchema,
@@ -1457,6 +1470,7 @@ export type LoroMachineRpcResult =
   | MachineBugReportResponse
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
+  | SessionQueueMutationResponse
   | SessionQueueSteerResponse
   | SessionSteerResponse
   | SessionGoalResponse
@@ -1663,6 +1677,9 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (method === 'session/queue-mutate') {
+    return { type: 'session/queue-mutate_response', success: false, error: error.message };
+  }
   if (method === 'session/queue-steer') {
     return {
       type: 'session/queue-steer_response',
@@ -1847,6 +1864,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'session/steer') {
     const parsed = SessionSteerResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionSteerResponse) : null;
+  }
+  if (response.method === 'session/queue-mutate') {
+    const parsed = SessionQueueMutationResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
   }
   if (response.method === 'session/queue-steer') {
     const parsed = SessionQueueSteerResponseSchema.safeParse(response.result);
@@ -2727,6 +2748,16 @@ export class LoroStreamsMachineRpcClient {
     })) as SessionSteerResponse | null;
   }
 
+  async requestSessionQueueMutation(
+    options: SessionQueueMutation & { timeoutMs?: number }
+  ): Promise<SessionQueueMutationResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/queue-mutate',
+      timeoutMs: options.timeoutMs ?? 5000,
+      params: { sessionId: options.sessionId, mutation: options.mutation },
+    })) as SessionQueueMutationResponse | null;
+  }
+
   async requestSessionQueueSteer(options: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -3222,6 +3253,11 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'session/queue-mutate';
+          timeoutMs: number;
+          params: SessionQueueMutation;
+        }
+      | {
           method: 'session/queue-steer';
           timeoutMs: number;
           params: {
@@ -3575,6 +3611,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/live-status':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/queue-mutate':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/queue-steer':

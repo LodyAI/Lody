@@ -25,8 +25,8 @@ Contract: specs/session-orchestration.md.
 
 ## Dispatch
 
-- Queue promotion keeps frozen fields. Exact Steer respects edit leases/native support;
-  missing/stale targets never stop.
+- QueueSteerService owns selection/recovery; ActiveTurnSteerPort owns execution.
+  No runtime handles or phase callbacks. Missing/stale targets never stop.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -56,9 +56,9 @@ Contract: specs/session-orchestration.md.
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never steer after Stop; late ACK cancels entry. Native queue Steer keeps row + machine-local
-  phase. Restart dispatches reserved/fallback, fails submitting/acknowledged without replay, and
-  receipts applied. Cache after recovery. Requeue unaccepted via pointer; skip active/handled.
+- Never steer after Stop; late ACK is indeterminate. Reserve against queue mutations/promotion;
+  persist marker, frozen history and removal BEFORE native submission. Scope owns local guards,
+  not provider effects. Only proven non-delivery may requeue; unknown delivery never replays.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   getServerNow,
+  queueItemRevision,
   type MessageQueueItem,
   type SessionHistoryInput,
   type SessionId,
@@ -63,6 +64,39 @@ const createUserTurn = (id: string): SessionHistoryInput => ({
 });
 
 describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
+  it('rejects stale edits, missing rows and stale reorder snapshots without losing accepted content', async () => {
+    const { doc } = createSessionDocument({ upsertDocMeta: async () => {} });
+    const rows = await seedMessageQueue(
+      doc,
+      ['A', 'B', 'C'].map((task) => ({
+        task,
+        userId: 'user-1',
+        timestamp: '2026-09-14T00:00:00.000Z',
+      }))
+    );
+    const selected = rows[2]!;
+    const update = {
+      kind: 'update' as const,
+      queueItemId: selected.$cid,
+      expectedRevision: queueItemRevision(selected),
+      patch: { task: 'Roll back instead' },
+    };
+    await doc.mutateMessageQueue(update);
+    await expect(
+      doc.mutateMessageQueue({ ...update, patch: { task: 'Stale edit' } })
+    ).rejects.toThrow('changed');
+    expect((await doc.getMessageQueue())[2]?.task).toBe('Roll back instead');
+    await doc.removeMessageQueueItem(selected.$cid);
+    await expect(doc.mutateMessageQueue(update)).rejects.toThrow('no longer');
+    await expect(
+      doc.mutateMessageQueue({
+        kind: 'reorder',
+        expectedItemIds: rows.map((row) => row.$cid),
+        orderedItemIds: rows.map((row) => row.$cid).reverse(),
+      })
+    ).rejects.toThrow('changed');
+    expect((await doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+  });
   it('consumes the named later row after activation without reordering the survivors', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const { doc } = createSessionDocument({ upsertDocMeta });

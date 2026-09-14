@@ -67,7 +67,7 @@ describe('file queue Steer operation store', () => {
     await store.record(marker);
     const root = path.join(tempHome, '.lody', 'session-queue-steer-operations');
     await writeFile(path.join(root, 'corrupt.json'), 'not json', 'utf8');
-    await writeFile(path.join(root, 'future.json'), JSON.stringify({ ...marker, version: 2 }));
+    await writeFile(path.join(root, 'future.json'), JSON.stringify({ ...marker, version: 999 }));
     await expect(store.list()).resolves.toEqual([marker]);
   });
 });

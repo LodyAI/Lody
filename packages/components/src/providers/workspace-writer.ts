@@ -15,6 +15,8 @@ import type {
 // uploads them over its own cloud connection; for local targets the local data
 // plane converges the same ops with the CLI. The seam stays so hooks depend on
 // one narrow mutation surface rather than raw repo/store handles.
+// Queue edit/remove/reorder on queueItemSteer v2 instead require the daemon's
+// revision-checked domain operation; failures never authorize a local fallback.
 export interface WorkspaceWriter {
   /** `repo.upsertDocMeta(roomId, patch)` — session/machine doc-meta write. */
   upsertDocMeta(roomId: string, patch: Record<string, unknown>): Promise<void>;
@@ -116,9 +118,14 @@ export interface WorkspaceWriter {
   updateSessionMessage(
     sessionId: string,
     itemId: string,
-    patch: Record<string, unknown>
+    patch: Record<string, unknown>,
+    expectedRevision?: string
   ): Promise<void>;
-  reorderSessionMessages(sessionId: string, orderedItemIds: readonly string[]): Promise<void>;
+  reorderSessionMessages(
+    sessionId: string,
+    orderedItemIds: readonly string[],
+    expectedItemIds?: readonly string[]
+  ): Promise<void>;
 
   /** Mutate the dedicated preview-comment doc (renderer-authored user data). */
   mutatePreviewVisualComments(

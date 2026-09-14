@@ -21,8 +21,11 @@ been removed.
 - `README.md` — package smoke-test notes.
 
 `session/queue-steer` is an identity-based control operation, not queue reordering. Its
-request names both the expected active turn and exact queued item, and callers require the
-negotiated `queueItemSteer` protocol capability. The CLI accepts the item only when its
+request names both the expected active turn and exact queued item, and callers require
+`queueItemSteer` v2. Its paired `session/queue-mutate` domain RPC serializes revision-checked
+edit/remove/reorder against reservation; conflicts fail visibly, without renderer direct-write
+fallback. Native submission waits for durable history and queue removal.
+The CLI accepts the item only when its
 editing lease is inactive, then preserves native ACP Steer when acknowledged or creates an
 ordinary follow-up before cancelling the expected turn. The ordinary path retains the queue
 row until history and its activation pointer are durable. Missing, editing, and stale targets

@@ -1,3 +1,4 @@
+import { queueItemRevision, ACPSessionConfigSchema, type SessionQueueMutation } from '@lody/shared';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
@@ -2776,6 +2777,71 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     });
   }
 
+  /** Compare and mutate synchronously; callers hold the daemon's queue ownership guard. */
+  async mutateMessageQueue(mutation: SessionQueueMutation['mutation']): Promise<void> {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    this.mirror.setState((prev) => {
+      const queue = (prev.mq ?? []) as MessageQueueItem[];
+      let next: MessageQueueItem[];
+      if (mutation.kind === 'reorder') {
+        const ids = queue.map((item) => item.$cid);
+        if (
+          queueItemRevision(ids) !== queueItemRevision(mutation.expectedItemIds) ||
+          new Set(mutation.orderedItemIds).size !== ids.length ||
+          mutation.orderedItemIds.some((id) => !ids.includes(id))
+        ) {
+          throw new Error('The queue changed. Refresh before reordering.');
+        }
+        if (queue.some(hasActiveMessageQueueEditingLease))
+          throw new Error('A queue item is being edited.');
+        next = mutation.orderedItemIds.map((id) => queue.find((item) => item.$cid === id)!);
+      } else {
+        const row = queue.find((item) => item.$cid === mutation.queueItemId);
+        if (!row)
+          throw new Error(
+            'This message is no longer in the editable queue. Your draft was not saved.'
+          );
+        if (queueItemRevision(row) !== mutation.expectedRevision) {
+          throw new Error('This queued message changed. Your draft was not saved.');
+        }
+        if (mutation.kind === 'remove') {
+          next = queue.filter((item) => item !== row);
+        } else {
+          const patch = mutation.patch;
+          const mutable = new Set(['task', 'isEditing', 'editingStartedAt', 'acpSessionConfig']);
+          for (const [key, value] of Object.entries(patch)) {
+            if (
+              !mutable.has(key) &&
+              queueItemRevision(value) !==
+                queueItemRevision((row as unknown as Record<string, unknown>)[key])
+            ) {
+              throw new Error('Queue message identity cannot be changed.');
+            }
+          }
+          if (patch.task !== undefined && typeof patch.task !== 'string')
+            throw new Error('Invalid queued message text.');
+          if (patch.isEditing !== undefined && typeof patch.isEditing !== 'boolean')
+            throw new Error('Invalid editing state.');
+          if (
+            patch.editingStartedAt !== undefined &&
+            (typeof patch.editingStartedAt !== 'number' || !Number.isFinite(patch.editingStartedAt))
+          ) {
+            throw new Error('Invalid editing lease.');
+          }
+          if (patch.acpSessionConfig !== undefined)
+            ACPSessionConfigSchema.partial().parse(patch.acpSessionConfig);
+          next = queue.map((item) =>
+            item === row ? ({ ...row, ...patch, $cid: row.$cid } as MessageQueueItem) : item
+          );
+        }
+      }
+      // @ts-ignore - the mirror exposes a readonly snapshot but owns this mutation
+      prev.mq = next;
+      return prev;
+    });
+    await this.repo.upsertDocMeta(this.roomId, { messageQueueUpdatedAt: getServerNow() });
+  }
+
   async removeMessageQueueItem(cid: string): Promise<void> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
@@ -2795,7 +2861,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * The callback and editing-lease check run against the current queue row, with
    * no await gap before the shared HistoryWriter accepts the turn. Ordinary
    * dispatch retains the row until its metadata activation pointer is durable;
-   * native Steer retains it until the provider handoff is durably resolved.
+   * native Steer leaves removal to QueueSteerService, before provider submission.
    */
   async consumeMessageQueueItemAsUserTurn(
     cid: string,
@@ -2865,59 +2931,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       await this.removeMessageQueueItem(cid);
     }
     return outcome.value;
-  }
-
-  /**
-   * Replace the fields of the message-queue item identified by `$cid`. The
-   * caller supplies the fully-resolved next field set (the renderer resolves its
-   * updater function to a concrete value before sending the intent), so this is a
-   * full replacement of the item's non-`$cid` fields — matching the single-author
-   * write-intent contract (`session-mq-update`).
-   */
-  async updateMessageQueueItem(cid: string, patch: Partial<MessageQueueItem>): Promise<void> {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
-    this.mirror.setState((prev) => {
-      const mq = (prev.mq ?? []) as MessageQueueItem[];
-      // @ts-ignore - mq is read-only in type but writable at runtime
-      prev.mq = mq.map((item: MessageQueueItem) =>
-        item.$cid === cid ? ({ ...item, ...patch, $cid: item.$cid } as MessageQueueItem) : item
-      );
-      return prev;
-    });
-  }
-
-  /**
-   * Reorder the message queue to the given `$cid` order. `orderedCids` is the full
-   * resulting order from the renderer (`session-mq-reorder`); items whose `$cid`
-   * is absent from the list are dropped to the end in their existing relative
-   * order (defensive — the renderer always sends the complete set).
-   */
-  async reorderMessageQueue(orderedCids: readonly string[]): Promise<void> {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
-    this.mirror.setState((prev) => {
-      const mq = (prev.mq ?? []) as MessageQueueItem[];
-      const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
-      const ordered: MessageQueueItem[] = [];
-      for (const cid of orderedCids) {
-        const item = byCid.get(cid);
-        if (item) {
-          ordered.push(item);
-          byCid.delete(cid);
-        }
-      }
-      for (const item of mq) {
-        if (item.$cid !== undefined && byCid.has(item.$cid)) {
-          ordered.push(item);
-        }
-      }
-      // @ts-ignore - mq is read-only in type but writable at runtime
-      prev.mq = ordered;
-      return prev;
-    });
   }
 
   async destroy(options: { preserveStatus?: boolean } = {}) {

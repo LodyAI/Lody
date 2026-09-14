@@ -46,7 +46,7 @@ and the `file/preview` namespace are in
   needs read-check-write atomicity serializes in its own service layer (Code Collab
   `save-text` per absolute path in `code-collab-v2-service.ts`), not in the request loop.
 - Control-plane methods (`machine/status`, `machine/ping`, `session/cancel`,
-  `session/live-status`, `session/queue-steer`, `session/steer`, `session/terminate`, `machine/restart`,
+  `session/live-status`, `session/queue-steer`, `session/queue-mutate`, `session/steer`, `session/terminate`, `machine/restart`,
   `machine/upgrade`, `session/dispatch-turn`)
   bypass the shared semaphore and run on a small dedicated lane
   (`CONTROL_METHODS` in `machine-rpc-server.ts`) so saturated code-collab

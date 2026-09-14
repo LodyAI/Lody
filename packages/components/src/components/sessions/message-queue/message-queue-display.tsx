@@ -63,6 +63,11 @@ export function MessageQueueDisplay({
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
 
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
+  const displacedDraft =
+    editing.editingItem && !items.some((item) => item.$cid === editing.editingCid)
+      ? editing.editingItem
+      : null;
+  const visibleItems = displacedDraft ? [...items, displacedDraft] : items;
 
   const itemIds = useMemo(() => items.map((item) => item.$cid), [items]);
   const canReorder = items.length > 1;
@@ -107,7 +112,7 @@ export function MessageQueueDisplay({
     [onReorder]
   );
 
-  if (items.length === 0) {
+  if (items.length === 0 && !displacedDraft) {
     return null;
   }
 
@@ -146,13 +151,21 @@ export function MessageQueueDisplay({
             WebkitMaskImage: fadeMask,
           }}
         >
+          {displacedDraft && (
+            <p role="alert" className="px-2.5 py-2 text-xs text-destructive">
+              {t(
+                'sessions.messageQueue.draftDisplaced',
+                'This message left the queue. Your unsaved draft is kept below; copy it before dismissing.'
+              )}
+            </p>
+          )}
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-              {items.map((item, index) => {
+              {visibleItems.map((item, index) => {
                 const isEditing = editing.editingCid === item.$cid;
                 return (
                   <MessageQueueRow
@@ -160,10 +173,10 @@ export function MessageQueueDisplay({
                     sessionId={sessionId}
                     item={item}
                     index={index}
-                    showSteerAction={showSteerAction}
+                    showSteerAction={showSteerAction && item !== displacedDraft}
                     steerDisabled={steerActionScope === 'head' && index > 0}
                     steerDisabledReason={steerDisabledReason}
-                    canReorder={canReorder}
+                    canReorder={canReorder && !displacedDraft}
                     isEditing={isEditing}
                     editValue={isEditing ? editing.editValue : ''}
                     isPending={editing.pendingCid === item.$cid}

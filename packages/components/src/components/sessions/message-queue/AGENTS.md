@@ -11,9 +11,9 @@ queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 
 Exact-item Steer requires the negotiated `queueItemSteer` daemon protocol; missing means
 unsupported. The daemon chooses acknowledged native Steer or exact cancel-and-dispatch.
-For older daemons, an authoritative `acknowledgedSteer` capability must retain the legacy
-native path; otherwise only queue-head interrupt stays enabled. Never reorder a later row
-to emulate Steer. A missing, stale, or actively edited exact target must leave the current
+No supported version means no Steer on any row, including the head; no legacy native/cancel path.
+Daemon-reserved rows reject edits/removal/reordering; retain a rejected edit's local draft even
+when the last row disappears. Never reorder to emulate Steer. A missing, stale, or edited target leaves the current
 turn running. A row's number and message body are one drag activator; its actions stay out.
 
 The queue intentionally stays OUT of the composer info bar

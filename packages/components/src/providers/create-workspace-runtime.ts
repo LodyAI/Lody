@@ -1,3 +1,4 @@
+import { machineSupportsQueueItemSteerProtocol, type SessionMeta } from '@lody/shared';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
@@ -1689,6 +1690,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const {
     requestSessionCancel,
     requestSessionQueueSteer,
+    requestSessionQueueMutation,
     requestSessionSteer,
     requestSessionGoal,
     requestSessionTerminate,
@@ -4147,11 +4149,22 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     unload: (taskId) => repo.unloadDoc(getTaskRoomId(taskId)),
   });
 
-  // Dual-author: every client direct-authors its own durable writes and uploads
-  // them over its own cloud connection; local targets additionally converge with
-  // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
+  // Queue controls share the daemon's reservation authority; other user writes remain local.
   const workspaceWriter = createDirectWorkspaceWriter({
     repo,
+    mutateQueue: async (request) => {
+      const session = await repo.getDocMeta(getSessionRoomId(request.sessionId));
+      const machineId = (session?.meta as Partial<SessionMeta> | undefined)?.machineId;
+      if (!machineId) throw new Error('Queue owner is unavailable.');
+      const machine = await repo.getDocMeta(getMachineRoomId(machineId));
+      if (!machine) throw new Error('Queue owner capabilities are unavailable.');
+      const protocolCapabilities = (machine.meta as Partial<MachineMeta>).protocolCapabilities;
+      if (!machineSupportsQueueItemSteerProtocol({ protocolCapabilities })) return false;
+      const response = await requestSessionQueueMutation(machineId, request);
+      if (!response?.success)
+        throw new Error(response?.error ?? 'Queue change could not be confirmed.');
+      return true;
+    },
     acquireSessionStore: sessionStoreCache.acquire,
     releaseSessionStoreRef: sessionStoreCache.releaseRef,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,

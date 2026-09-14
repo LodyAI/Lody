@@ -55,6 +55,11 @@ Translation: current
   后续修改须明确拒绝。被拒绝的编辑保留用户草稿。乐观 UI 成功或客户端本地 editing lease
   都不证明权威写入端已接受编辑。
 
+  `queueItemSteer` v2 通过 `session/queue-mutate` 建立该保证：renderer edit/remove
+  携带观察到的 row revision，reorder 携带观察到的 ID 顺序。所属 daemon 在 reservation
+  边界内比较，并在已接受修改持久化后回复。RPC 失败绝不退回直接写 CRDT。
+  enqueue 和普通发送仍由 renderer 写入；这不是通用 write-intent 协议。
+
   Native 提交顺序为：
   1. 验证目标标识、内容、编辑归属和 expected turn，并针对并发普通队列修改取得排他 reservation
      ownership。
@@ -110,19 +115,18 @@ Translation: current
 
 ## 实现证据
 
-上述 service/port 拆分、reservation ownership 转移、提交前持久化删除队列项及仅按
-capability 开放能力均是待实现的意图变更。当前 native 路径仍保留可编辑 row 直到 provider
-handoff；普通 row 更新没有 operation ownership 检查，更新缺失 row 也可能静默成功。
-因此已接受的编辑可能在 handoff 删除 row 时丢失。renderer 也仍包含旧 daemon 的
-native/head 路径，execution service 仍拥有队列编排。实现及双客户端修改/崩溃回归验证
-待按 [Effect 边界提案](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.zh.md)
-完成。新的可用性策略只适用于队列行“引导”，不改变 composer 提交路由。
+[Effect 边界决策](../.agents/notes/implemented/architecture/2026-09-14-queue-steer-effect-boundary.zh.md)
+记录已实现的 service/port 拆分、v2 修改权威、提交前持久化删除、仅按 capability 开放能力及验证限制。
+确定性测试覆盖 reservation 与第二客户端修改、草稿保留、持久化失败和 marker 恢复。
+真实 provider、已安装应用及进程 kill 的端到端验证尚未完成。
+新的可用性策略只适用于队列行“引导”，不改变 composer 提交路由。
 
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/`
 - `packages/components/tests/{session-message-submit-route,session-chat-input-submission,message-queue-row-editing}.test.*`
 - `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts,src/session/session-queue-steer-operation-store.ts}`
+- `apps/cli/src/session/{queue-steer-service,active-turn-steer-port}.ts`
 - [决策记录](../.agents/notes/implemented/feature/2026-09-13-queue-steer-controls.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

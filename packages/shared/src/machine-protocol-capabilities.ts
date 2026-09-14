@@ -23,7 +23,7 @@ export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
-export const QUEUE_ITEM_STEER_PROTOCOL_VERSION = 1;
+export const QUEUE_ITEM_STEER_PROTOCOL_VERSION = 2;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -132,7 +132,7 @@ export function machineSupportsLocalFileResourcesProtocol(
   );
 }
 
-/** Whether the daemon can atomically steer one exact queued item. */
+/** Whether queue mutations and exact Steer share daemon-owned reservation ordering. */
 export function machineSupportsQueueItemSteerProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {

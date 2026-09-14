@@ -1,3 +1,4 @@
+import type { SessionQueueMutation, SessionQueueMutationResponse } from '@lody/shared';
 import type {
   AgentConfigId,
   CodeCollabV2InitDirectoryOk,
@@ -119,6 +120,7 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/acp-capabilities-refresh-cancel',
   'session/cancel',
   'session/live-status',
+  'session/queue-mutate',
   'session/queue-steer',
   'session/steer',
   'session/goal',
@@ -352,6 +354,7 @@ type RpcServerDeps = {
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
   }) => Promise<LoroSessionLiveStatusRpcResponse>;
+  mutateQueuedMessage?: (args: SessionQueueMutation) => Promise<SessionQueueMutationResponse>;
   steerQueuedMessage?: (args: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -1114,6 +1117,17 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'session/queue-mutate': {
+          const response: SessionQueueMutationResponse = this.deps.mutateQueuedMessage
+            ? await this.deps.mutateQueuedMessage(request.params)
+            : {
+                type: 'session/queue-mutate_response',
+                success: false,
+                error: 'Queue mutation is unavailable on this machine.',
+              };
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'session/queue-steer': {
           if (!this.deps.steerQueuedMessage) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1638,6 +1652,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineBugReportResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
+      | SessionQueueMutationResponse
       | SessionQueueSteerResponse
       | SessionSteerResponse
       | SessionGoalResponse

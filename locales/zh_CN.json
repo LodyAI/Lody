@@ -1795,7 +1795,7 @@
   "sessions.messageQueue.saveEdit": "保存修改（回车）",
   "sessions.messageQueue.title": "排队中的消息",
   "sessions.messageQueue.upNext": "接下来",
-  "sessions.messageQueue.updateAgentForLaterSteer": "更新本地 Agent 后才能引导后续排队消息",
+  "sessions.messageQueue.draftDisplaced": "这条消息已离开队列。未保存的草稿仍保留在下方，请在关闭前复制。",
   "sessions.messageStatus.deliverNow": "重新发送",
   "sessions.messageStatus.deliverNowFailed": "送达失败，请重试",
   "sessions.messageStatus.notDelivered": "未送达",

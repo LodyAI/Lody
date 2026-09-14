@@ -1,3 +1,7 @@
+import {
+  SessionQueueMutationSchema,
+  SessionQueueMutationResponseSchema,
+} from './session-queue-mutation';
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { z } from 'zod';
 import { SESSION_GOAL_ACTIONS } from './goal';
@@ -195,6 +199,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: SessionPreparationCancelSpecSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/queue-mutate'),
+    params: SessionQueueMutationSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/queue-steer'),
     params: z
       .object({
@@ -261,6 +269,7 @@ export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionQueueMutationResponseSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,

@@ -53,6 +53,9 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.
+- Queue edit/remove/reorder on queueItemSteer v2 use the narrow daemon domain RPC,
+  with revision checks against reservation ownership. Never direct-write after RPC failure.
+  Enqueue and other user writes retain their renderer authority.
 - Repo storage, durable Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
   persisted Repo views.

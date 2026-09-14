@@ -3285,6 +3285,7 @@ export class MessageHandler {
           };
         },
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
+        mutateQueuedMessage: async (args) => await this.executionService.mutateQueuedMessage(args),
         steerQueuedMessage: async (args) => await this.executionService.steerQueuedMessage(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -6326,6 +6327,8 @@ export class MessageHandler {
           sessionId: request.params.sessionId as SessionId,
         });
       }
+      case 'session/queue-mutate':
+        return await this.executionService.mutateQueuedMessage(request.params);
       case 'session/queue-steer': {
         return await this.executionService.steerQueuedMessage({
           ...request.params,

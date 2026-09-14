@@ -1,3 +1,4 @@
+import type { SessionQueueMutation, SessionQueueMutationResponse } from '@lody/shared';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type {
   LoroStreamsMachineRpcClient,
@@ -770,6 +771,40 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestSessionQueueMutation = async (
+    machineId: MachineId,
+    args: SessionQueueMutation
+  ): Promise<SessionQueueMutationResponse | null> => {
+    try {
+      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!machineSupportsQueueItemSteerProtocol({ protocolCapabilities })) {
+        throw new Error('This daemon does not support queue ownership controls.');
+      }
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/queue-mutate',
+          params: args,
+          timeoutMs: 5_000,
+        });
+        if (!response) throw new Error('Local queue control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionQueueMutationResponse;
+      }
+      if (!deps.getAuthorizedMachineIds?.()?.has(machineId)) {
+        throw new Error('Source authorization for this machine is unavailable or denied.');
+      }
+      return await (await getMachineRpcClient(machineId)).requestSessionQueueMutation(args);
+    } catch (error) {
+      return {
+        type: 'session/queue-mutate_response',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   const requestSessionQueueSteer = async (
     machineId: MachineId,
     args: {
@@ -810,6 +845,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionQueueSteerResponse;
+        throw new Error('Local queue control is unavailable.');
       }
       const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
       if (!authorizedMachineIds?.has(machineId)) {
@@ -1247,6 +1283,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   return {
     requestSessionCancel,
+    requestSessionQueueMutation,
     requestSessionQueueSteer,
     requestSessionSteer,
     requestSessionGoal,

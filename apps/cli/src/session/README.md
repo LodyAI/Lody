@@ -11,6 +11,13 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 
 ## Files
 
+| Boundary        | Entry                                                 | Ownership                                                               |
+| --------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| Dispatch        | [SessionDispatchWatcher](session-dispatch-watcher.ts) | Observe durable activation and claim ordinary turns.                    |
+| Queue operation | [QueueSteerService](queue-steer-service.ts)           | Exact selection, reservation, delivery policy and recovery evidence.    |
+| Live execution  | [ActiveTurnSteerPort](active-turn-steer-port.ts)      | Native submission and handoff within SessionExecutionService ownership. |
+| Storage         | [SessionDocument](../lib/loro/doc.ts)                 | Revision-checked queue mutations and shared history writes.             |
+
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches
   `repo.watch('doc-metadata')` plus a per-session mirror subscribe and dispatches when
   `latestUserMsgId` differs from `lastHandledUserMsgId`. Also accepts `session/dispatch-turn`
@@ -24,9 +31,9 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
-- `session-execution-service.ts` — runs one turn end-to-end and owns exact-item queue
-  Steer serialization: validate the active turn, queued item, and editing lease, then
-  choose native `steerPrompt` or exact cancel-and-dispatch. It also owns ACP prompt, turn ids,
+- `session-execution-service.ts` — runs one turn end-to-end, implements ActiveTurnSteerPort
+  and serializes queue operations without owning their delivery policy or journal.
+  It owns ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —

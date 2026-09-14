@@ -1,3 +1,6 @@
+import { queueItemRevision } from '@lody/shared';
+import { SessionDocument } from '../src/lib/loro/doc';
+import { composeTestSessionDoc } from './session-doc-fixture';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -246,6 +249,336 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  const ownedQueue = async () => {
+    const sessionId = 'session-owned-queue' as SessionId;
+    let meta = {
+      id: sessionId,
+      userId: 'owner-user',
+      machineId: 'machine-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, sessionId, async () => {}, createSilentLogger());
+    composeTestSessionDoc(doc);
+    vi.spyOn(doc, 'waitUntilSynced').mockResolvedValue(undefined);
+    for (const task of ['A', 'B', 'C'])
+      await doc.pushMessageQueue({
+        task,
+        userId: 'queue-author',
+        userTurnId: 'user:' + task,
+        timestamp: '2026-09-14T00:00:00.000Z',
+        acpSessionConfig: { prompt: task, cliType: 'builtin', agentType: 'codex' },
+      });
+    const rows = await doc.getMessageQueue();
+    const flush = vi.fn(async (_reason: string) => {});
+    const evidence: string[] = [];
+    const steerPrompt = vi.fn(() => {
+      evidence.push('submitted');
+      return {
+        applied: Promise.reject<{ release: () => void }>(new Error('delivery unknown')),
+        completion: Promise.resolve(),
+      };
+    });
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo,
+        getOrCreateSessionDoc: async () => doc,
+        persistPendingChanges: flush,
+      } as never,
+      buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
+    });
+    const service = new SessionExecutionService(deps);
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:active',
+      userTurnId: 'user:active',
+      promptInFlight: true,
+      cancelRequested: false,
+      activePromptRun: {
+        turnId: 'assistant:active',
+        promptOutcome: Promise.resolve({ status: 'fulfilled' as const }),
+        signalSuccessor: () => {},
+      },
+      invocation: { requesterUserId: 'authenticated-user', inputConfig: { prompt: 'active' } },
+      session: {
+        acpSessionId: 'acp-owned',
+        agentClient: {
+          getAcknowledgedSteerCapability: () => ({ provider: 'codex', configPolicy: 'active' }),
+          findSteerConfigMismatch: () => null,
+          steerPrompt,
+        },
+      },
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, unknown> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    return {
+      service,
+      doc,
+      rows,
+      deps,
+      flush,
+      steerPrompt,
+      evidence,
+      runtime,
+      request: { sessionId, expectedTurnId: runtime.turnId, queueItemId: rows[2]!.$cid },
+    };
+  };
+
+  it.each(['update', 'remove', 'reorder'] as const)(
+    'rejects a stale second-client %s after reservation, with removal durable before submission',
+    async (kind) => {
+      const h = await ownedQueue();
+      const entered = createDeferred();
+      const release = createDeferred();
+      let commits = 0;
+      h.flush.mockImplementation(async () => {
+        commits++;
+        if (commits === 1) {
+          expect((await h.doc.sessionData.history.readAll()).at(-1)).toMatchObject({
+            id: 'user:C',
+            status: 'pending_apply',
+            userId: 'authenticated-user',
+          });
+          entered.resolve();
+          await release.promise;
+        }
+        if (commits === 2) {
+          expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+          h.evidence.push('removal-durable');
+        }
+      });
+      const steering = h.service.steerQueuedMessage(h.request);
+      await entered.promise;
+      expect(h.service.tryAcquireSessionRewriteConflictLease(h.request.sessionId)).toBeNull();
+      const mutation =
+        kind === 'reorder'
+          ? {
+              kind,
+              orderedItemIds: h.rows.map((row) => row.$cid).reverse(),
+              expectedItemIds: h.rows.map((row) => row.$cid),
+            }
+          : {
+              kind,
+              queueItemId: h.request.queueItemId,
+              expectedRevision: queueItemRevision(h.rows[2]),
+              ...(kind === 'update' ? { patch: { task: 'Roll back instead' } } : {}),
+            };
+      const editing = h.service.mutateQueuedMessage({
+        sessionId: h.request.sessionId,
+        mutation,
+      } as never);
+      release.resolve();
+      await expect(steering).resolves.toMatchObject({ accepted: false, disposition: 'error' });
+      await expect(editing).resolves.toMatchObject({ success: false });
+      expect(h.evidence).toEqual(['removal-durable', 'submitted']);
+      expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+      // A retry cannot turn unknown external delivery into ordinary dispatch.
+      await h.service.steerQueuedMessage(h.request);
+      expect(h.evidence).toEqual(['removal-durable', 'submitted']);
+      const releaseOwnership = h.service.tryAcquireSessionRewriteConflictLease(h.request.sessionId);
+      expect(releaseOwnership).not.toBeNull();
+      releaseOwnership?.();
+    }
+  );
+
+  it('commits a native handoff and returns its durable receipt after restart', async () => {
+    const h = await ownedQueue();
+    let released = false;
+    h.steerPrompt.mockImplementation(() => ({
+      applied: Promise.resolve({
+        release: () => {
+          released = true;
+        },
+      }),
+      completion: Promise.resolve(),
+    }));
+    await expect(h.service.steerQueuedMessage(h.request)).resolves.toMatchObject({
+      accepted: true,
+      userTurnId: 'user:C',
+    });
+    expect(released).toBe(true);
+    expect(h.runtime.userTurnId).toBe('user:C');
+    expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+    await expect(h.deps.queueSteerOperationStore.read(h.request.sessionId)).resolves.toMatchObject({
+      phase: 'applied',
+      response: { disposition: 'accepted', userTurnId: 'user:C' },
+    });
+    const restarted = new SessionExecutionService(h.deps);
+    await expect(restarted.steerQueuedMessage(h.request)).resolves.toMatchObject({
+      accepted: true,
+      userTurnId: 'user:C',
+    });
+  });
+
+  it('preserves an accepted edit on a surviving legacy reservation instead of deleting it', async () => {
+    const h = await ownedQueue();
+    await h.doc.consumeMessageQueueItemAsUserTurn(
+      h.request.queueItemId,
+      () => ({
+        id: 'user:C',
+        userId: 'authenticated-user',
+        timestamp: '2026-09-14T00:00:00.000Z',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        items: [{ type: 'text', text: 'C' }],
+        inputConfig: { prompt: 'C', cliType: 'builtin', agentType: 'codex' },
+      }),
+      { publishDispatch: false }
+    );
+    await h.deps.queueSteerOperationStore.record({
+      version: 1,
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      sessionId: h.request.sessionId,
+      operationKey: 'legacy',
+      queueItemId: h.request.queueItemId,
+      userTurnId: 'user:C',
+      expectedTurnId: h.request.expectedTurnId,
+      phase: 'reserved',
+      updatedAt: 1,
+    });
+    await h.doc.mutateMessageQueue({
+      kind: 'update',
+      queueItemId: h.request.queueItemId,
+      expectedRevision: queueItemRevision(h.rows[2]),
+      patch: {
+        task: 'Rollback',
+        acpSessionConfig: { prompt: 'Rollback', cliType: 'builtin', agentType: 'codex' },
+      },
+    });
+    const restarted = new SessionExecutionService(h.deps);
+    await expect(restarted.recoverPendingQueueSteer(h.request.sessionId, h.doc)).rejects.toThrow(
+      'preserved'
+    );
+    expect((await h.doc.getMessageQueue())[2]?.task).toBe('Rollback');
+    expect(h.evidence).toEqual([]);
+  });
+
+  it('freezes an edit committed before reservation, not the stale renderer text', async () => {
+    const h = await ownedQueue();
+    await expect(
+      h.service.mutateQueuedMessage({
+        sessionId: h.request.sessionId,
+        mutation: {
+          kind: 'update',
+          queueItemId: h.request.queueItemId,
+          expectedRevision: queueItemRevision(h.rows[2]),
+          patch: {
+            task: 'Roll back instead',
+            acpSessionConfig: {
+              prompt: 'Roll back instead',
+              cliType: 'builtin',
+              agentType: 'codex',
+            },
+          },
+        },
+      })
+    ).resolves.toMatchObject({ success: true });
+    await h.service.steerQueuedMessage(h.request);
+    const entry = (await h.doc.sessionData.history.readAll()).find(
+      (candidate) => candidate.id === 'user:C'
+    );
+    expect(entry).toMatchObject({ inputConfig: { prompt: 'Roll back instead' } });
+    expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+  });
+
+  it.each(['remove', 'reorder'] as const)(
+    'honors a %s committed before reservation',
+    async (kind) => {
+      const h = await ownedQueue();
+      const mutation =
+        kind === 'remove'
+          ? {
+              kind,
+              queueItemId: h.request.queueItemId,
+              expectedRevision: queueItemRevision(h.rows[2]),
+            }
+          : {
+              kind,
+              orderedItemIds: h.rows.map((row) => row.$cid).reverse(),
+              expectedItemIds: h.rows.map((row) => row.$cid),
+            };
+      await expect(
+        h.service.mutateQueuedMessage({ sessionId: h.request.sessionId, mutation })
+      ).resolves.toMatchObject({ success: true });
+      const result = await h.service.steerQueuedMessage(h.request);
+      if (kind === 'remove') {
+        expect(result.disposition).toBe('queue-item-missing');
+        expect(h.evidence).toEqual([]);
+      }
+      expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(
+        kind === 'remove' ? ['A', 'B'] : ['B', 'A']
+      );
+    }
+  );
+
+  it('rejects queue writes sent to a daemon other than the session owner', async () => {
+    const h = await ownedQueue();
+    const meta = await h.doc.getMetaState();
+    vi.spyOn(h.doc, 'getMetaState').mockResolvedValue({
+      ...meta,
+      machineId: 'another-machine',
+    } as SessionMeta);
+    await expect(
+      h.service.mutateQueuedMessage({
+        sessionId: h.request.sessionId,
+        mutation: {
+          kind: 'remove',
+          queueItemId: h.request.queueItemId,
+          expectedRevision: queueItemRevision(h.rows[2]),
+        },
+      })
+    ).resolves.toMatchObject({ success: false, error: 'This daemon does not own the queue.' });
+    expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B', 'C']);
+  });
+
+  it.each(['reservation', 'history', 'removal', 'submission-marker'] as const)(
+    'does not submit after a %s persistence failure and recovers without a shared row',
+    async (stage) => {
+      const h = await ownedQueue();
+      let count = 0;
+      const record = h.deps.queueSteerOperationStore.record.bind(h.deps.queueSteerOperationStore);
+      vi.spyOn(h.deps.queueSteerOperationStore, 'record').mockImplementation(async (marker) => {
+        if (
+          (stage === 'reservation' && marker.phase === 'reserved') ||
+          (stage === 'submission-marker' && marker.phase === 'submitting')
+        )
+          throw new Error('disk unavailable');
+        await record(marker);
+      });
+      h.flush.mockImplementation(async () => {
+        count++;
+        if ((stage === 'history' && count === 1) || (stage === 'removal' && count === 2))
+          throw new Error('disk unavailable');
+      });
+      await expect(h.service.steerQueuedMessage(h.request)).resolves.toMatchObject({
+        accepted: false,
+        error: 'disk unavailable',
+      });
+      expect(h.evidence).toEqual([]);
+      const release = h.service.tryAcquireSessionRewriteConflictLease(h.request.sessionId);
+      expect(release).not.toBeNull();
+      release?.();
+      if (stage !== 'reservation') {
+        const restarted = new SessionExecutionService(h.deps);
+        await restarted.recoverPendingQueueSteer(h.request.sessionId, h.doc);
+        expect(
+          (await h.doc.sessionData.history.readAll()).find((entry) => entry.id === 'user:C')?.status
+        ).toMatch(/^(pending|seen)$/);
+        expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+        expect(h.evidence).toEqual([]);
+      }
+    }
+  );
+
   it('cancels only the named native child and rejects a stale parent turn', async () => {
     const runningChildren = new Set(['child-1', 'child-2']);
     const sessionManager = {
@@ -300,6 +633,7 @@ describe('SessionExecutionService', () => {
     );
     const history: SessionHistoryInput[] = [];
     const sessionDoc = {
+      getMessageQueue: async () => queue,
       getMetaState: vi.fn(async () => ({
         id: sessionId,
         userId: 'owner-user',
@@ -384,6 +718,7 @@ describe('SessionExecutionService', () => {
         cliType: 'builtin',
         agentType: 'codex',
       })),
+      getMessageQueue: async () => [],
       consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({ type: 'missing' as const })),
     };
     const deps = createBaseDeps({
@@ -445,6 +780,16 @@ describe('SessionExecutionService', () => {
       .mockResolvedValue({ type: 'consumed' as const, entry });
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({ id: sessionId })),
+      getMessageQueue: async () => [
+        {
+          $cid: 'C',
+          task: 'task C',
+          userId: 'owner-user',
+          userTurnId: 'user:C',
+          timestamp: '2026-09-13T00:00:00.000Z',
+          acpSessionConfig: { prompt: 'task C' },
+        },
+      ],
       consumeMessageQueueItemAsUserTurn,
     };
     const service = new SessionExecutionService(
@@ -504,6 +849,17 @@ describe('SessionExecutionService', () => {
         cliType: 'builtin',
         agentType: 'codex',
       })),
+      getMessageQueue: async () =>
+        [
+          {
+            $cid: 'C',
+            task: 'task C',
+            userId: 'owner-user',
+            userTurnId: 'user:C',
+            timestamp: '2026-09-13T00:00:00.000Z',
+            acpSessionConfig: { prompt: 'task C' },
+          },
+        ].map((item) => ({ ...item, isEditing: true, editingStartedAt: Number.MAX_SAFE_INTEGER })),
       consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({ type: 'editing' as const })),
     };
     const service = new SessionExecutionService(
@@ -551,6 +907,16 @@ describe('SessionExecutionService', () => {
     };
     const sessionDoc = {
       getMetaState: vi.fn(async () => ({ id: sessionId })),
+      getMessageQueue: async () => [
+        {
+          $cid: 'C',
+          task: 'task C',
+          userId: 'owner-user',
+          userTurnId: 'user:C',
+          timestamp: '2026-09-13T00:00:00.000Z',
+          acpSessionConfig: { prompt: 'task C' },
+        },
+      ],
       consumeMessageQueueItemAsUserTurn: vi.fn(async () => ({
         type: 'consumed' as const,
         entry,
@@ -685,7 +1051,7 @@ describe('SessionExecutionService', () => {
     const persistPendingChanges = vi.fn(async (reason: string) => {
       if (reason !== 'queue-steer-commit') return;
       queueSteerPersistenceCount += 1;
-      if (queueSteerPersistenceCount === 2) {
+      if (queueSteerPersistenceCount === 4) {
         throw new Error('queue Steer persistence unavailable');
       }
     });
@@ -758,17 +1124,14 @@ describe('SessionExecutionService', () => {
     await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
       accepted: false,
       disposition: 'error',
-      error: expect.stringContaining('Failed to durably recover'),
+      error: expect.stringContaining('Failed to recover'),
     });
     await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
       phase: 'fallback',
       completedAt: undefined,
     });
     expect(history).toEqual([expect.objectContaining({ id: 'user:C', status: 'pending' })]);
-    expect(queue).toHaveLength(1);
-    expect(
-      (service as unknown as { queueSteerReceipts: Map<string, unknown> }).queueSteerReceipts.size
-    ).toBe(0);
+    expect(queue).toEqual([]);
 
     await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
       accepted: false,
@@ -779,9 +1142,6 @@ describe('SessionExecutionService', () => {
       phase: 'fallback',
       completedAt: undefined,
     });
-    expect(
-      (service as unknown as { queueSteerReceipts: Map<string, unknown> }).queueSteerReceipts.size
-    ).toBe(0);
 
     await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
       accepted: false,
@@ -795,7 +1155,7 @@ describe('SessionExecutionService', () => {
       completedAt: expect.any(Number),
       response: { disposition: 'no-active-turn', error: 'provider refused' },
     });
-    expect(upsertDocMeta.mock.calls.filter(([, patch]) => patch.latestUserMsgId)).toHaveLength(3);
+    expect(meta.latestUserMsgId).toBe('user:C');
 
     const restartedService = new SessionExecutionService(deps);
     await expect(restartedService.steerQueuedMessage(request)).resolves.toMatchObject({
@@ -803,7 +1163,7 @@ describe('SessionExecutionService', () => {
       disposition: 'no-active-turn',
       error: 'provider refused',
     });
-    expect(upsertDocMeta.mock.calls.filter(([, patch]) => patch.latestUserMsgId)).toHaveLength(3);
+    expect(meta.latestUserMsgId).toBe('user:C');
   });
 
   it.each(['submitting', 'acknowledged', 'applied'] as const)(
@@ -811,7 +1171,8 @@ describe('SessionExecutionService', () => {
     async (phase) => {
       const sessionId = `session-native-steer-crash-${phase}` as SessionId;
       const operation = {
-        version: 1 as const,
+        version: 2 as const,
+        queueRevision: queueItemRevision({ $cid: 'C' }),
         workspaceId: 'workspace-1',
         machineId: 'machine-1',
         sessionId,
@@ -883,18 +1244,14 @@ describe('SessionExecutionService', () => {
       expect(deps.recordChatFailure).toHaveBeenCalledWith(
         sessionDoc,
         'agent_disconnected',
-        expect.stringContaining(phase === 'applied' ? 'was applied' : 'not replayed')
+        expect.stringContaining('not replayed')
       );
     }
   );
 
   it('recovers a crash after native reservation by dispatching that exact row', async () => {
     const sessionId = 'session-native-steer-crash-reserved' as SessionId;
-    let queue = [
-      { $cid: 'A' },
-      { $cid: 'B' },
-      { $cid: 'C', isEditing: true, editingStartedAt: Number.MAX_SAFE_INTEGER },
-    ];
+    let queue = [{ $cid: 'A' }, { $cid: 'B' }, { $cid: 'C' }];
     let history: SessionHistoryInput[] = [
       {
         id: 'user:C',
@@ -935,6 +1292,7 @@ describe('SessionExecutionService', () => {
       workspaceId: 'workspace-1',
       machineId: 'machine-1',
       sessionId,
+      queueRevision: queueItemRevision({ $cid: 'C' }),
       operationKey: 'operation-reserved',
       queueItemId: 'C',
       expectedTurnId: 'assistant:old',
@@ -953,14 +1311,6 @@ describe('SessionExecutionService', () => {
     );
 
     await service.recoverPendingQueueSteers();
-    expect(queue.map((item) => item.$cid)).toEqual(['A', 'B', 'C']);
-    const editingMarker = await queueSteerOperationStore.read(sessionId);
-    expect(editingMarker).toMatchObject({ phase: 'reserved' });
-    expect(editingMarker?.completedAt).toBeUndefined();
-
-    queue = queue.map((item) => (item.$cid === 'C' ? { ...item, isEditing: false } : item));
-    await service.recoverPendingQueueSteers();
-
     expect(history).toEqual([expect.objectContaining({ id: 'user:C', status: 'pending' })]);
     expect(queue).toEqual([{ $cid: 'A' }, { $cid: 'B' }]);
     expect(meta).toMatchObject({ latestUserMsgId: 'user:C' });
@@ -6372,7 +6722,7 @@ describe('SessionExecutionService', () => {
         steerApplied.resolve({ release: () => steerReleased.resolve() });
         await expect(steering).resolves.toMatchObject({
           applied: false,
-          disposition: 'stale-turn',
+          disposition: 'error',
         });
         await steerReleased.promise;
         expect(onTurnSettled).not.toHaveBeenCalled();

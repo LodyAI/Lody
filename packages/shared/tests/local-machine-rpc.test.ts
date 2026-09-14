@@ -7,6 +7,32 @@ import {
 describe('local Machine RPC', () => {
   it.each([
     {
+      method: 'session/queue-mutate',
+      params: {
+        sessionId: 'session-1',
+        mutation: {
+          kind: 'update',
+          queueItemId: 'queue-C',
+          expectedRevision: '{}',
+          patch: { task: 'rollback' },
+        },
+      },
+    },
+    {
+      method: 'session/queue-mutate',
+      params: {
+        sessionId: 'session-1',
+        mutation: { kind: 'remove', queueItemId: 'queue-C', expectedRevision: '{}' },
+      },
+    },
+    {
+      method: 'session/queue-mutate',
+      params: {
+        sessionId: 'session-1',
+        mutation: { kind: 'reorder', expectedItemIds: ['A', 'B'], orderedItemIds: ['B', 'A'] },
+      },
+    },
+    {
       method: 'session/get-active-invocation-context',
       params: { sessionId: 'session-1' },
     },

@@ -33,13 +33,11 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
   deliberately short, so a queued detach/revoke stays prompt. Backfill enable/disable
   flips its authorization generation inside the queued body (S5: a revoked workspace
   must never keep backfill enabled).
-- **Dual-author (no write intents)**: the renderer direct-authors user/UI durable
-  writes against its own repo over its own Streams connection; the CLI authors only
-  agent-produced data. The v4-v6 write-intent envelope (`WorkspaceWriteIntentAuthor`,
-  `intent`/`intent-ack` frames, CLI preview-comment mirror) is REMOVED; never
-  reintroduce a proxy-authoring path (invariants in `specs/local-first-two-plane.md`).
-  Local dispatch triggers off the renderer-authored `latestUserMsgId` doc-meta write
-  plus the local Machine RPC fast path.
+- Renderer user/UI writes use its own repo; never restore generic v4-v6 write intents
+  or CLI preview-comment mirrors. The narrow exception is `session/queue-mutate`
+  on queueItemSteer v2: edit/remove/reorder require daemon ownership and revision checks
+  shared with reservation/promotion. Queue enqueue and ordinary sends remain renderer-authored.
+  Local dispatch watches `latestUserMsgId` plus the Machine RPC fast path.
 
 ## Local Loro data plane
 

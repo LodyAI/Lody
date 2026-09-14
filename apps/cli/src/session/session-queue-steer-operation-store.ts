@@ -33,7 +33,7 @@ const QueueSteerResponseSchema = z
 
 const QueueSteerOperationMarkerSchema = z
   .object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     workspaceId: z.string().min(1),
     machineId: z.string().min(1),
     sessionId: z.string().min(1),
@@ -41,6 +41,7 @@ const QueueSteerOperationMarkerSchema = z
     queueItemId: z.string().min(1),
     expectedTurnId: z.string().min(1),
     userTurnId: z.string().min(1),
+    queueRevision: z.string().min(1).optional(),
     phase: z.enum(['reserved', 'submitting', 'acknowledged', 'applied', 'fallback']),
     response: QueueSteerResponseSchema.optional(),
     completedAt: z.number().finite().optional(),

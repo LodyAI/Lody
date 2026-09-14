@@ -19,6 +19,7 @@ export type MessageQueueEditingCallbacks = {
 
 export type MessageQueueEditing = {
   editingCid: string | null;
+  editingItem: MessageQueueItem | null;
   editValue: string;
   pendingCid: string | null;
   setEditValue: (value: string) => void;
@@ -33,6 +34,7 @@ export function useMessageQueueEditing(
 ): MessageQueueEditing {
   const { onEditStart, onEditCancel, onEditSave } = callbacks;
   const [editingCid, setEditingCid] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<MessageQueueItem | null>(null);
   const [editValue, setEditValue] = useState('');
   const [pendingCid, setPendingCid] = useState<string | null>(null);
 
@@ -40,6 +42,7 @@ export function useMessageQueueEditing(
   const itemsRef = useRef(items);
   const editingCidRef = useRef<string | null>(null);
   const onEditCancelRef = useRef(onEditCancel);
+  const dismissedLeaseRef = useRef<{ cid: string; startedAt?: number } | null>(null);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -55,31 +58,34 @@ export function useMessageQueueEditing(
   useEffect(() => {
     return () => {
       const cid = editingCidRef.current;
-      const item = cid
-        ? itemsRef.current.find((candidate) => candidate.$cid === cid)
-        : undefined;
+      const item = cid ? itemsRef.current.find((candidate) => candidate.$cid === cid) : undefined;
       if (item?.isEditing) {
-        void onEditCancelRef.current(item);
+        void Promise.resolve()
+          .then(() => onEditCancelRef.current(item))
+          .catch((error) => {
+            console.error('Failed to release queued message editing lease', error);
+          });
       }
     };
   }, []);
 
-  // Sync local editing state with server-side `isEditing` flag: if the row disappears or another
-  // client opens an edit, reflect it.
+  // A displaced row must not discard an unsaved local draft.
   useEffect(() => {
     if (editingCid) {
-      const item = items.find((candidate) => candidate.$cid === editingCid);
-      if (!item) {
-        setEditingCid(null);
-        setEditValue('');
-      }
       return;
     }
 
-    const editingItem = items.find((item) => item.isEditing);
-    if (editingItem) {
-      setEditingCid(editingItem.$cid);
-      setEditValue(getEditableTaskText(editingItem));
+    const sharedEditor = items.find((item) => item.isEditing);
+    if (sharedEditor) {
+      const dismissed = dismissedLeaseRef.current;
+      if (
+        dismissed?.cid === sharedEditor.$cid &&
+        dismissed.startedAt === sharedEditor.editingStartedAt
+      )
+        return;
+      setEditingCid(sharedEditor.$cid);
+      setEditingItem(sharedEditor);
+      setEditValue(getEditableTaskText(sharedEditor));
     }
   }, [editingCid, items]);
 
@@ -95,7 +101,9 @@ export function useMessageQueueEditing(
           await onEditCancel(previous);
         }
         await onEditStart(item);
+        dismissedLeaseRef.current = null;
         setEditingCid(item.$cid);
+        setEditingItem(item);
         setEditValue(getEditableTaskText(item));
       } catch (error) {
         console.error('Failed to start queued message edit', error);
@@ -110,8 +118,11 @@ export function useMessageQueueEditing(
     async (item: MessageQueueItem) => {
       setPendingCid(item.$cid);
       try {
-        await onEditCancel(item);
+        if (itemsRef.current.some((candidate) => candidate.$cid === item.$cid))
+          await onEditCancel(item);
+        dismissedLeaseRef.current = { cid: item.$cid, startedAt: item.editingStartedAt };
         setEditingCid(null);
+        setEditingItem(null);
         setEditValue('');
       } catch (error) {
         console.error('Failed to cancel queued message edit', error);
@@ -127,7 +138,10 @@ export function useMessageQueueEditing(
       setPendingCid(item.$cid);
       try {
         await onEditSave(item, editValue.trim());
+        // The daemon ACK can precede its CRDT delta; do not reopen the stale shared lease.
+        dismissedLeaseRef.current = { cid: item.$cid, startedAt: item.editingStartedAt };
         setEditingCid(null);
+        setEditingItem(null);
         setEditValue('');
       } catch (error) {
         console.error('Failed to save queued message edit', error);
@@ -140,6 +154,7 @@ export function useMessageQueueEditing(
 
   return {
     editingCid,
+    editingItem,
     editValue,
     pendingCid,
     setEditValue,

@@ -5,11 +5,6 @@ export type { MessageQueueRowProps } from './message-queue-row';
 export { QueuedImagePreview } from './queued-image-preview';
 export type { QueuedImageBlock } from './queued-image-preview';
 export {
-  resolveQueuedMessageSteerRoute,
-  shouldUseLegacyNativeQueueSteer,
-  type QueuedMessageSteerRoute,
-} from './queued-message-steer-compat';
-export {
   useMessageQueueEditing,
   getEditableTaskText,
   type MessageQueueEditing,

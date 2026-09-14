@@ -51,6 +51,9 @@ it('requires an advertised local file resource protocol, independent of release 
 it('requires an advertised exact queue-item steer protocol', () => {
   expect(machineSupportsQueueItemSteerProtocol(undefined)).toBe(false);
   expect(
+    machineSupportsQueueItemSteerProtocol({ protocolCapabilities: { queueItemSteer: 1 } })
+  ).toBe(false);
+  expect(
     machineSupportsQueueItemSteerProtocol({
       protocolCapabilities: { [MACHINE_PROTOCOL_CAPABILITIES.queueItemSteer]: 0 },
     })

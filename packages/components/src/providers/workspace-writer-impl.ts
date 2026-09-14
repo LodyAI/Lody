@@ -2,6 +2,8 @@ import {
   applyPreviewVisualCommentMutation,
   getServerNow,
   getSessionRoomId,
+  queueItemRevision,
+  type SessionQueueMutation,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
@@ -16,24 +18,21 @@ import type { WorkspaceWriter } from './workspace-writer';
 
 // # WorkspaceWriter implementation
 //
-// Dual-author: every client authors the mutation against its own repo / session
-// stores (identical for Web, Mobile, and Electron; see `workspace-writer.ts`).
-// A pure factory with injected deps so hooks stay agnostic to the runtime.
+// Renderer authorship with a narrow daemon-owned queue-control exception.
+// Injected deps keep transport and capability policy out of hooks.
 
 /** Deps the writer needs from the runtime (repo + session stores). */
 export type DirectWorkspaceWriterDeps = {
   repo: LoroRepo;
+  /** False means a confirmed legacy target; rejection never permits a direct write. */
+  mutateQueue?: (request: SessionQueueMutation) => Promise<boolean>;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
   releaseSessionStoreRef: (sessionId: SessionId) => void;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
   releasePreviewVisualCommentStoreRef: (sessionId: SessionId) => void;
 };
 
-/**
- * Direct-mode writer (web/cloud): applies each mutation to the renderer's own
- * repo / session stores. This is exactly what the hooks did before the seam, so
- * there is zero behavior change in cloud mode.
- */
+/** Ordinary writes stay local; supported queue controls await authoritative daemon acceptance. */
 export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): WorkspaceWriter {
   const withSessionStore = async <T>(
     sessionId: string,
@@ -182,17 +181,47 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async removeSessionMessage(sessionId, itemId) {
-      await withSessionStore(sessionId, (store) => {
+      const remote = await withSessionStore(sessionId, async (store) => {
+        const row = store.getState().mq?.find((item) => item.$cid === itemId);
+        if (!row) throw new Error('This message is no longer in the editable queue.');
+        if (
+          await deps.mutateQueue?.({
+            sessionId: sessionId as SessionId,
+            mutation: {
+              kind: 'remove',
+              queueItemId: itemId,
+              expectedRevision: queueItemRevision(row),
+            },
+          })
+        )
+          return true;
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
 
-    async updateSessionMessage(sessionId, itemId, patch) {
-      await withSessionStore(sessionId, (store) => {
+    async updateSessionMessage(sessionId, itemId, patch, expectedRevision) {
+      const remote = await withSessionStore(sessionId, async (store) => {
+        const row = store.getState().mq?.find((item) => item.$cid === itemId);
+        if (!row)
+          throw new Error(
+            'This message is no longer in the editable queue. Your draft was not saved.'
+          );
+        if (
+          await deps.mutateQueue?.({
+            sessionId: sessionId as SessionId,
+            mutation: {
+              kind: 'update',
+              queueItemId: itemId,
+              expectedRevision: expectedRevision ?? queueItemRevision(row),
+              patch,
+            },
+          })
+        )
+          return true;
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
@@ -202,11 +231,21 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           );
         });
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
 
-    async reorderSessionMessages(sessionId, orderedItemIds) {
-      await withSessionStore(sessionId, (store) => {
+    async reorderSessionMessages(sessionId, orderedItemIds, expectedIds) {
+      const remote = await withSessionStore(sessionId, async (store) => {
+        const expectedItemIds = expectedIds
+          ? [...expectedIds]
+          : (store.getState().mq ?? []).map((item) => item.$cid!);
+        if (
+          await deps.mutateQueue?.({
+            sessionId: sessionId as SessionId,
+            mutation: { kind: 'reorder', orderedItemIds: [...orderedItemIds], expectedItemIds },
+          })
+        )
+          return true;
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
@@ -226,7 +265,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           draft.mq = ordered;
         });
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
 
     async mutatePreviewVisualComments(sessionId, mutation) {

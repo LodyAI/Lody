@@ -46,6 +46,43 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
+  it.each(['update', 'remove', 'reorder'] as const)(
+    'does not direct-write after daemon rejects queue %s',
+    async (kind) => {
+      const row = { $cid: 'C', task: 'Repair database' };
+      const state = { mq: [row] };
+      let references = 0;
+      const writer = createDirectWorkspaceWriter({
+        repo: { upsertDocMeta: async () => {} } as never,
+        acquireSessionStore: async () => {
+          references++;
+          return {
+            getState: () => state,
+            setState: (update: (draft: typeof state) => void) => update(state),
+          } as never;
+        },
+        releaseSessionStoreRef: () => {
+          references--;
+        },
+        acquirePreviewVisualCommentStore: async () => {
+          throw new Error('unused');
+        },
+        releasePreviewVisualCommentStoreRef: () => {},
+        mutateQueue: async () => {
+          throw new Error('Queue item is reserved');
+        },
+      });
+      const request =
+        kind === 'update'
+          ? writer.updateSessionMessage('session', 'C', { task: 'Rollback' })
+          : kind === 'remove'
+            ? writer.removeSessionMessage('session', 'C')
+            : writer.reorderSessionMessages('session', ['C']);
+      await expect(request).rejects.toThrow('reserved');
+      expect(state).toEqual({ mq: [{ $cid: 'C', task: 'Repair database' }] });
+      expect(references).toBe(0);
+    }
+  );
   it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
     'reconciles the durable role without overwriting intervening changes: %s',
     async (scenario) => {

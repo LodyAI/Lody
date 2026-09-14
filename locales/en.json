@@ -1795,7 +1795,7 @@
   "sessions.messageQueue.saveEdit": "Save changes (Enter)",
   "sessions.messageQueue.title": "Queued messages",
   "sessions.messageQueue.upNext": "Up next",
-  "sessions.messageQueue.updateAgentForLaterSteer": "Update the local agent to steer a later queued message",
+  "sessions.messageQueue.draftDisplaced": "This message left the queue. Your unsaved draft is kept below; copy it before dismissing.",
   "sessions.messageStatus.deliverNow": "Deliver now",
   "sessions.messageStatus.deliverNowFailed": "Failed to deliver the message - please try again",
   "sessions.messageStatus.notDelivered": "Not delivered",

@@ -65,6 +65,12 @@ the queue by hand.
   A rejected edit retains the user's draft. Neither optimistic UI success nor a client-local
   editing lease proves that an edit was accepted by that authority.
 
+  `queueItemSteer` v2 binds this guarantee to `session/queue-mutate`: renderer edit/remove
+  carry the observed row revision, and reorder carries the observed ID sequence. The owning
+  daemon compares them under the reservation boundary and persists accepted changes before
+  replying. A failed RPC never falls back to a direct CRDT write. Enqueue and ordinary sends
+  retain their renderer authorship; this is not a generic write-intent protocol.
+
   The native submission order is:
   1. Validate the selected identity, content, editing ownership, and expected turn; establish
      exclusive reservation ownership against concurrent ordinary queue mutations.
@@ -129,14 +135,11 @@ reported, never silently replayed.
 
 ## Implementation evidence
 
-The service/port split, reservation ownership transfer, pre-submission durable queue removal,
-and capability-only availability above are intended changes, not completed implementation.
-The current native path retains the editable row through provider handoff; ordinary row updates
-do not enforce operation ownership, and missing-row updates can silently succeed. This permits
-an accepted edit to disappear when handoff removes the row. The renderer also still contains
-old-daemon native/head paths and the execution service owns queue orchestration. Implementation
-and two-client mutation/crash regression verification remain
-pending under the [Effect boundary proposal](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.md).
+The [Effect boundary decision](../.agents/notes/implemented/architecture/2026-09-14-queue-steer-effect-boundary.md)
+records the implemented service/port split, v2 mutation authority, durable pre-submission removal,
+capability-only availability, and verification limits. Deterministic tests cover reservation versus
+second-client mutations, displaced drafts, persistence failures and marker-based recovery.
+Real provider, installed-app and process-kill end-to-end verification remain outstanding.
 The new availability policy applies to queued-row Steer, not composer submission routing.
 
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
@@ -144,6 +147,7 @@ The new availability policy applies to queued-row Steer, not composer submission
 - `packages/components/src/components/sessions/message-queue/`
 - `packages/components/tests/{session-message-submit-route,session-chat-input-submission,message-queue-row-editing}.test.*`
 - `apps/cli/{tests/session-execution-service.test.ts,src/lib/loro/doc-user-turn.test.ts,src/session/session-queue-steer-operation-store.ts}`
+- `apps/cli/src/session/{queue-steer-service,active-turn-steer-port}.ts`
 - [Decision record](../.agents/notes/implemented/feature/2026-09-13-queue-steer-controls.md)
 
 This is a draft for human review. Implementation and passing tests do not approve it.

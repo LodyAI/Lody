@@ -474,3 +474,4 @@ export interface Attachment {
   uploadedAt: Date;
   uploadedBy: User;
 }
+export * from './session-queue-mutation';
