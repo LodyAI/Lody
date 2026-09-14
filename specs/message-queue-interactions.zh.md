@@ -73,8 +73,16 @@ Translation: current
   2. 持久化 daemon-owned reservation marker。
   3. 将冻结 turn 追加为 `pending_apply`，并确保 history 持久化。
   4. 从共享 Queue 删除所选 row，并确保删除持久化。
-  5. 持久化 write-ahead submission 证据，再将冻结 turn 传给 `ActiveTurnSteerPort.steer`。
-     port 在提交 provider 前重新验证 live turn ownership。
+  5. 调用 `ActiveTurnSteerPort.prepareSteer` 构建 prompt、按需应用 mode/model 并重新验证
+     ownership。准备过程不提交 steer，仅返回不透明 handle。
+  6. 持久化 write-ahead `submitting` 证据后，将 handle 交给 `submitSteer`。此时不再等待
+     prompt 构建或配置应用；port 在 provider 提交前立即再检查 ownership，阻止持久化期间
+     的 Stop 导致过期提交。
+
+  准备失败可将冻结 turn 恢复为普通 dispatch，不写 `submitting` marker。Provider call
+  的普通异常（包括同步连接失败）属于交付不确定；只有明确证明未交付的拒绝才可 fallback。
+  不得将 PersistenceFailure 一律转为 fallback。Prepared handle 仅在进程内单次使用，
+  不是新的持久 phase；write-ahead marker 与 provider call 之间的 crash gap 仍存在。
 
   reservation、history 或删除任一持久化失败，都禁止提交 provider。网络调用前删除 row
   是必要条件，但不能替代步骤 1–4 期间的 ownership 边界。Native 恢复依赖 machine-local

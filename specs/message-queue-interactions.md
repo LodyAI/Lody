@@ -85,8 +85,17 @@ the queue by hand.
   2. Persist the daemon-owned reservation marker.
   3. Append the frozen turn as `pending_apply` and make that history durable.
   4. Remove the selected row from the shared Queue and make its removal durable.
-  5. Persist write-ahead submission evidence, then invoke `ActiveTurnSteerPort.steer` with
-     the frozen turn. The port revalidates live-turn ownership before provider submission.
+  5. Call `ActiveTurnSteerPort.prepareSteer` to build the prompt, apply mode/model when required,
+     and revalidate ownership. Preparation never submits the steer and returns an opaque handle.
+  6. Persist write-ahead `submitting` evidence, then call `submitSteer` with that handle. No prompt
+     building or configuration awaits remain; the port checks ownership again immediately before
+     provider submission so Stop during persistence cannot deliver a stale steer.
+
+  Preparation failure can recover the frozen turn as ordinary dispatch without writing a
+  `submitting` marker. Generic provider-call exceptions, including synchronous connection failures,
+  are indeterminate; only an explicit proven non-delivery rejection may permit fallback.
+  Persistence failures are not blanket fallback triggers. Prepared handles are process-local and
+  single-use, not a new durable phase; the write-ahead-marker/provider-call crash gap remains.
 
   Any failure to persist the reservation, history, or removal forbids provider submission.
   Removing the row before the network call is necessary but does not replace the ownership

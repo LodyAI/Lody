@@ -66,14 +66,19 @@ rewrite/ownership guard 和 adapter 本地 ACK gate 用 Effect.acquireRelease �
 提交到 ACK cleanup 注册之间屏蔽 fiber interruption，避免释放本地 handle 的责任丢失；
 Stop 仍取消 ACP，而非其 owner fiber。Scope 既不能撤销外部提交，也不能跨进程死亡执行。
 
-| 类别                               | 行为                                                                                      |
-| ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| ProviderRejected、提交前 StaleTurn | 只有确定未交付且前提允许才恢复普通 dispatch；reservation 前缺失、编辑中或过期仍无副作用。 |
-| ProviderDeliveryUnknown            | 向上返回错误，不进入 fallback、不重放。包括提交后失去 ownership 或 handoff 失败。         |
-| PersistenceFailure                 | 本地准备/持久化失败；保留 durable evidence，不能从本地失败推导未交付。                    |
+| 类别                                                        | 行为                                                                                      |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| SteerPreparationFailure、ProviderRejected、提交前 StaleTurn | 只有确定未交付且前提允许才恢复普通 dispatch；reservation 前缺失、编辑中或过期仍无副作用。 |
+| ProviderDeliveryUnknown                                     | 向上返回错误，不进入 fallback、不重放。包括提交后失去 ownership 或 handoff 失败。         |
+| PersistenceFailure                                          | Journal/history 持久化失败；保留 durable evidence，不能仅凭错误 tag 推导未交付。          |
 
-Native submission 写前证据之后、本地准备尚未完成的 crash 仍保守地是不确定交付。
-不为每个 Effect 步骤再加 phase，也不重试整个 operation。
+`prepareSteer` 完成 prompt 构建、配置应用和 ownership 验证后，queue service 才写
+`submitting`。只在 preparation 调用处处理其失败，不 blanket catch PersistenceFailure
+来 fallback。`submitSteer` 消费不透明的单次 handle；execution service 用私有 WeakMap
+保留惰性 submission effect，不暴露 runtime 对象或 callback。Journal 持久化后，port 再次
+检查 ownership，provider call 前不再等待异步准备。该调用的普通同步/异步异常均为
+ProviderDeliveryUnknown；明确的 AgentSteerNotDeliveredError 仍证明拒绝交付。无效或已用
+handle 不能重放。写前证据与 provider call 之间的 crash 仍不确定；不新增 phase 或重试整个 operation。
 
 ## 权威写入与恢复
 
@@ -85,7 +90,7 @@ RPC 失败绝不退回直接写入。enqueue、普通发送和其他 UI 数据�
 没有恢复通用 write-intent mirror。旧 daemon 不开放队列 Steer。
 
 Native 顺序是 reservation marker → pending_apply history durable → queue removal durable
-→ submitting marker → native port → durable receipt。任一提交前 barrier 失败禁止 provider 调用。
+→ prepareSteer → submitting marker → submitSteer → durable receipt。任一提交前 barrier 失败禁止 provider 调用。
 恢复使用 marker 和冻结 history；不要求原 row 存在。旧 marker 仍可读；若残留 row 无 revision，
 只有可证明与冻结内容一致且不在编辑中才删除，否则保留并等待对账。不能通过恢复丢掉已接受编辑。
 
@@ -108,6 +113,9 @@ receipt/restart，以及真实 LoroDoc 上的 reservation 与 edit/remove/reorde
 显式 promise gate 验证删除持久化先于 provider，以及 reservation/history/removal/submission-marker
 持久化失败时零提交、marker 加 history 的恢复和本地 guard 释放。组件覆盖 row 消失后的草稿保留，
 共享协议拒绝 v1。测试不使用睡眠或真实网络来决定竞态。
+Prompt 构建或 mode/model 失败时，C 可普通 dispatch、marker 为 fallback，provider 零调用。
+Provider 同步抛错或 ACK 拒绝保留 submission 证据，不 fallback、不重放。
+Submission marker 持久化期间的 Stop 也会在 provider call 前被检查。
 
 Execution suite 用内存传输连接真实 source facade、Streams client/server、LoroDoc 和
 execution service。Machine 可见但私有项目不可见时，两种 control 均拒绝：零 append、无 marker，

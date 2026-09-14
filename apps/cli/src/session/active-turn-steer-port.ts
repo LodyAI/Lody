@@ -29,11 +29,16 @@ export class PersistenceFailure extends Data.TaggedError('PersistenceFailure')<{
   cause: unknown;
 }> {}
 
-export type NativeSteerFailure =
-  | StaleTurn
-  | ProviderRejected
-  | ProviderDeliveryUnknown
-  | PersistenceFailure;
+/** Preparation failed before steer submission; the frozen turn may become ordinary dispatch. */
+export class SteerPreparationFailure extends Data.TaggedError('SteerPreparationFailure')<{
+  message: string;
+  cause: unknown;
+}> {}
+
+/** Opaque, single-use handle; execution state stays with the live-turn owner. */
+export class PreparedSteer extends Data.TaggedClass('PreparedSteer')<{}> {}
+
+export type NativeSteerFailure = StaleTurn | ProviderRejected | ProviderDeliveryUnknown;
 export type NativeSteerInput = {
   sessionId: SessionId;
   expectedTurnId: string;
@@ -49,7 +54,10 @@ export class ActiveTurnSteerPort extends Context.Tag('lody/ActiveTurnSteerPort')
       sessionId: SessionId,
       expectedTurnId: string
     ): Effect.Effect<{ native: boolean; requesterUserId: string }, StaleTurn | ProviderRejected>;
-    steer(input: NativeSteerInput): Effect.Effect<{ userTurnId: string }, NativeSteerFailure>;
+    prepareSteer(
+      input: NativeSteerInput
+    ): Effect.Effect<PreparedSteer, StaleTurn | ProviderRejected | SteerPreparationFailure>;
+    submitSteer(prepared: PreparedSteer): Effect.Effect<{ userTurnId: string }, NativeSteerFailure>;
     cancel(sessionId: SessionId, expectedTurnId: string): Effect.Effect<void, ProviderRejected>;
     ownsPrompt(sessionId: SessionId, expectedTurnId: string): boolean;
     activeUserTurnId(sessionId: SessionId): string | undefined;

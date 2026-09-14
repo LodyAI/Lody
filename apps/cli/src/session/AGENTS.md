@@ -25,8 +25,8 @@ Contract: specs/session-orchestration.md.
 
 ## Dispatch
 
-- QueueSteerService owns selection/recovery; ActiveTurnSteerPort owns execution.
-  No runtime handles or phase callbacks. Missing/stale targets never stop.
+- QueueSteerService selects/recovers; ActiveTurnSteerPort prepares/submits.
+  Prepare before submitting evidence. No runtime handles/phase callbacks; stale/missing never stop.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC

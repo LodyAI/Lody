@@ -67,7 +67,8 @@ import type { ModelInfo } from '@lody/shared';
 import { Cause, Context, Data, Effect, Exit, Fiber, Layer, type Scope } from 'effect';
 import {
   ActiveTurnSteerPort,
-  PersistenceFailure,
+  SteerPreparationFailure,
+  PreparedSteer,
   ProviderRejected,
   ProviderDeliveryUnknown,
   StaleTurn,
@@ -756,6 +757,10 @@ export class SessionExecutionService {
   // this is pure per-session serialization, matching the old hand-rolled lock.
   private readonly steerMutationQueue = new ConcurrentQueue<SessionId>(Number.POSITIVE_INFINITY);
   private readonly queueSteer: Context.Tag.Service<typeof QueueSteerService>;
+  private readonly preparedSteers = new WeakMap<
+    PreparedSteer,
+    Effect.Effect<{ userTurnId: string }, NativeSteerFailure>
+  >();
   // Analytics-only state (spec §5b). Tracks per-turn timing + the last status
   // we reported so status_changed can carry from→to + dwell time. Never read by
   // product logic; kept here so capture stays side-effect-only.
@@ -823,7 +828,8 @@ export class SessionExecutionService {
           }
           return { native, requesterUserId };
         }),
-      steer: (input) => self.nativeSteerEffect(input),
+      prepareSteer: (input) => self.prepareNativeSteerEffect(input),
+      submitSteer: (prepared) => self.submitNativeSteerEffect(prepared),
       cancel: (sessionId, expectedTurnId) =>
         Effect.tryPromise({
           try: async () => {
@@ -1534,7 +1540,11 @@ export class SessionExecutionService {
         ),
         Effect.catchAll((error) =>
           Effect.gen(function* () {
-            if (error._tag === 'ProviderRejected' || error._tag === 'StaleTurn') {
+            if (
+              error._tag === 'ProviderRejected' ||
+              error._tag === 'StaleTurn' ||
+              error._tag === 'SteerPreparationFailure'
+            ) {
               yield* Effect.promise(() =>
                 self.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
                   canWriteHistory: true,
@@ -1558,9 +1568,39 @@ export class SessionExecutionService {
     );
   }
 
-  private nativeSteerEffect(
-    input: NativeSteerInput
+  private registerPreparedSteer(
+    submission: Effect.Effect<{ userTurnId: string }, NativeSteerFailure>
+  ): PreparedSteer {
+    const prepared = new PreparedSteer();
+    this.preparedSteers.set(prepared, submission);
+    return prepared;
+  }
+
+  private submitNativeSteerEffect(
+    prepared: PreparedSteer
   ): Effect.Effect<{ userTurnId: string }, NativeSteerFailure> {
+    return Effect.suspend(() => {
+      const submission = this.preparedSteers.get(prepared);
+      if (!submission)
+        return Effect.fail(
+          new ProviderDeliveryUnknown({
+            message: 'Prepared steer is invalid or already submitted.',
+          })
+        );
+      this.preparedSteers.delete(prepared);
+      return submission;
+    });
+  }
+
+  private nativeSteerEffect(input: NativeSteerInput) {
+    return this.prepareNativeSteerEffect(input).pipe(
+      Effect.flatMap((prepared) => this.submitNativeSteerEffect(prepared))
+    );
+  }
+
+  private prepareNativeSteerEffect(
+    input: NativeSteerInput
+  ): Effect.Effect<PreparedSteer, StaleTurn | ProviderRejected | SteerPreparationFailure> {
     const self = this;
     const options = {
       ...input,
@@ -1572,7 +1612,8 @@ export class SessionExecutionService {
     const prepare = <A>(run: () => Promise<A>) =>
       Effect.tryPromise({
         try: run,
-        catch: (cause) => new PersistenceFailure({ cause, message: formatErrorMessage(cause) }),
+        catch: (cause) =>
+          new SteerPreparationFailure({ cause, message: formatErrorMessage(cause) }),
       });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -1589,7 +1630,8 @@ export class SessionExecutionService {
             message: 'The active turn changed.',
           });
         }
-        if (runtime.userTurnId === options.userTurnId) return { userTurnId: options.userTurnId };
+        if (runtime.userTurnId === options.userTurnId)
+          return self.registerPreparedSteer(Effect.succeed({ userTurnId: options.userTurnId }));
         const session = runtime.session;
         const { agentClient, acpSessionId } = session;
         const capability = agentClient?.getAcknowledgedSteerCapability();
@@ -1658,138 +1700,162 @@ export class SessionExecutionService {
             message: 'Prompt ownership is transitioning.',
           });
         }
-        const previousTurnId = runtime.turnId;
-        const previousUserTurnId = runtime.userTurnId;
-        // Do not allow interruption between submission and registration of the local ACK cleanup.
-        const steerRun = yield* Effect.uninterruptible(
-          Effect.gen(function* () {
-            const run = yield* Effect.try({
-              try: () => agentClient.steerPrompt(acpSessionId, promptBlocks),
-              catch: (cause) =>
-                new ProviderRejected({
-                  disposition:
-                    cause instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
-                  message: formatErrorMessage(cause),
-                }),
-            });
-            // This handle releases only the adapter's local ACK gate; submission is not a resource.
-            yield* Effect.acquireRelease(
-              Effect.tryPromise({
-                try: () => run.applied,
-                catch: (cause) =>
-                  cause instanceof AgentSteerNotDeliveredError
-                    ? new ProviderRejected({
-                        disposition: 'no-active-turn',
-                        message: formatErrorMessage(cause),
-                      })
-                    : new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
-              }),
-              (application) => Effect.sync(() => application.release())
-            );
-            return run;
-          })
-        );
-        if (
-          runtime.cancelRequested ||
-          self.turnRuntimeBySession.get(options.sessionId) !== runtime ||
-          !runtime.promptInFlight ||
-          runtime.turnId !== previousTurnId ||
-          runtime.activePromptRun !== ownedPromptRun
-        ) {
-          if (runtime.cancelRequested) {
-            yield* Effect.tryPromise({
-              try: () =>
-                self.setTerminalUserTurnStatus(
-                  options.sessionId,
-                  sessionDoc,
-                  options.userTurnId,
-                  'canceled'
-                ),
-              catch: (cause) =>
-                new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
-            });
-          }
-          return yield* new ProviderDeliveryUnknown({
-            message: 'Steer application arrived after cancellation or ownership changed.',
-          });
-        }
-        yield* Effect.tryPromise({
-          try: async () => {
-            // The provider has accepted this steer and may execute tools before
-            // history/finalization catches up. Switch causal identity first.
-            runtime.invocation = {
-              sourceTurnId: options.userTurnId,
-              requesterUserId: options.userId,
-              inputConfig: options.inputConfig,
-            };
-            // Provider acceptance hands the original dispatch forward. A later
-            // user-owned steer turn must not cancel or reopen that responsibility.
-            await self.settleVisibleTurn(runtime, 'handled', { force: true });
+        return self.registerPreparedSteer(
+          Effect.scoped(
+            Effect.gen(function* () {
+              yield* validateOwner();
+              if (runtime.activePromptRun !== ownedPromptRun) {
+                return yield* new StaleTurn({
+                  disposition: 'busy',
+                  message: 'Prompt ownership is transitioning.',
+                });
+              }
+              const previousTurnId = runtime.turnId;
+              const previousUserTurnId = runtime.userTurnId;
+              // Do not allow interruption between submission and registration of the local ACK cleanup.
+              const steerRun = yield* Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const run = yield* Effect.try({
+                    try: () => agentClient.steerPrompt(acpSessionId, promptBlocks),
+                    catch: (cause) =>
+                      cause instanceof AgentSteerNotDeliveredError
+                        ? new ProviderRejected({
+                            disposition: 'no-active-turn',
+                            message: formatErrorMessage(cause),
+                          })
+                        : new ProviderDeliveryUnknown({
+                            cause,
+                            message: formatErrorMessage(cause),
+                          }),
+                  });
+                  // This handle releases only the adapter's local ACK gate; submission is not a resource.
+                  yield* Effect.acquireRelease(
+                    Effect.tryPromise({
+                      try: () => run.applied,
+                      catch: (cause) =>
+                        cause instanceof AgentSteerNotDeliveredError
+                          ? new ProviderRejected({
+                              disposition: 'no-active-turn',
+                              message: formatErrorMessage(cause),
+                            })
+                          : new ProviderDeliveryUnknown({
+                              cause,
+                              message: formatErrorMessage(cause),
+                            }),
+                    }),
+                    (application) => Effect.sync(() => application.release())
+                  );
+                  return run;
+                })
+              );
+              if (
+                runtime.cancelRequested ||
+                self.turnRuntimeBySession.get(options.sessionId) !== runtime ||
+                !runtime.promptInFlight ||
+                runtime.turnId !== previousTurnId ||
+                runtime.activePromptRun !== ownedPromptRun
+              ) {
+                if (runtime.cancelRequested) {
+                  yield* Effect.tryPromise({
+                    try: () =>
+                      self.setTerminalUserTurnStatus(
+                        options.sessionId,
+                        sessionDoc,
+                        options.userTurnId,
+                        'canceled'
+                      ),
+                    catch: (cause) =>
+                      new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
+                  });
+                }
+                return yield* new ProviderDeliveryUnknown({
+                  message: 'Steer application arrived after cancellation or ownership changed.',
+                });
+              }
+              yield* Effect.tryPromise({
+                try: async () => {
+                  // The provider has accepted this steer and may execute tools before
+                  // history/finalization catches up. Switch causal identity first.
+                  runtime.invocation = {
+                    sourceTurnId: options.userTurnId,
+                    requesterUserId: options.userId,
+                    inputConfig: options.inputConfig,
+                  };
+                  // Provider acceptance hands the original dispatch forward. A later
+                  // user-owned steer turn must not cancel or reopen that responsibility.
+                  await self.settleVisibleTurn(runtime, 'handled', { force: true });
 
-            try {
-              await self.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
-            } catch (error) {
-              self.deps.logger.error(
-                `[${options.sessionId}] Failed to seal applied steer source ${previousTurnId}: ${formatErrorMessage(error)}`
-              );
-            }
-            try {
-              await self.transitionDispatchOwnership({
-                sessionId: options.sessionId,
-                sessionDoc,
-                previousUserTurnId,
-                nextUserTurnId: options.userTurnId,
+                  try {
+                    await self.finalizeYieldedTurnOutput(
+                      runtime,
+                      options.sessionId,
+                      previousTurnId
+                    );
+                  } catch (error) {
+                    self.deps.logger.error(
+                      `[${options.sessionId}] Failed to seal applied steer source ${previousTurnId}: ${formatErrorMessage(error)}`
+                    );
+                  }
+                  try {
+                    await self.transitionDispatchOwnership({
+                      sessionId: options.sessionId,
+                      sessionDoc,
+                      previousUserTurnId,
+                      nextUserTurnId: options.userTurnId,
+                    });
+                  } catch (error) {
+                    self.deps.logger.error(
+                      `[${options.sessionId}] Failed to persist applied steer ownership for ${options.userTurnId}: ${formatErrorMessage(error)}`
+                    );
+                    throw error;
+                  }
+                  const nextTurnId = self.deps.beginConversationTurn(
+                    options.sessionId,
+                    options.userTurnId,
+                    {
+                      dispatchSource: 'rpc',
+                      sessionDoc,
+                    }
+                  );
+                  try {
+                    await self.deps.createAssistantEntryForTurn(
+                      options.sessionId,
+                      sessionDoc,
+                      nextTurnId,
+                      agentClient.currentModel,
+                      options.userTurnId
+                    );
+                  } catch (error) {
+                    self.deps.logger.error(
+                      `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
+                    );
+                  }
+                  self.deps.activateConversationTurnForACPUpdates(options.sessionId, nextTurnId);
+                  const nextPromptRun = self.createPromptHandoffRun({
+                    turnId: nextTurnId,
+                    promptPromise: steerRun.completion,
+                  });
+                  void ownedPromptRun.promptOutcome.then((outcome) => {
+                    if (outcome.status === 'rejected') {
+                      self.deps.logger.debug(
+                        `[${options.sessionId}] Yielded prompt ${ownedPromptRun.turnId} failed after ownership moved forward: ${formatErrorMessage(outcome.error)}`
+                      );
+                    }
+                  });
+                  ownedPromptRun.successor = nextPromptRun;
+                  runtime.activePromptRun = nextPromptRun;
+                  runtime.turnId = nextTurnId;
+                  runtime.userTurnId = options.userTurnId;
+                  self.markCurrentTurn(options.sessionId, nextTurnId);
+                  ownedPromptRun.signalSuccessor();
+                },
+                catch: (cause) =>
+                  new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
               });
-            } catch (error) {
-              self.deps.logger.error(
-                `[${options.sessionId}] Failed to persist applied steer ownership for ${options.userTurnId}: ${formatErrorMessage(error)}`
-              );
-              throw error;
-            }
-            const nextTurnId = self.deps.beginConversationTurn(
-              options.sessionId,
-              options.userTurnId,
-              {
-                dispatchSource: 'rpc',
-                sessionDoc,
-              }
-            );
-            try {
-              await self.deps.createAssistantEntryForTurn(
-                options.sessionId,
-                sessionDoc,
-                nextTurnId,
-                agentClient.currentModel,
-                options.userTurnId
-              );
-            } catch (error) {
-              self.deps.logger.error(
-                `[${options.sessionId}] Failed to create assistant entry for applied steer ${nextTurnId}: ${formatErrorMessage(error)}`
-              );
-            }
-            self.deps.activateConversationTurnForACPUpdates(options.sessionId, nextTurnId);
-            const nextPromptRun = self.createPromptHandoffRun({
-              turnId: nextTurnId,
-              promptPromise: steerRun.completion,
-            });
-            void ownedPromptRun.promptOutcome.then((outcome) => {
-              if (outcome.status === 'rejected') {
-                self.deps.logger.debug(
-                  `[${options.sessionId}] Yielded prompt ${ownedPromptRun.turnId} failed after ownership moved forward: ${formatErrorMessage(outcome.error)}`
-                );
-              }
-            });
-            ownedPromptRun.successor = nextPromptRun;
-            runtime.activePromptRun = nextPromptRun;
-            runtime.turnId = nextTurnId;
-            runtime.userTurnId = options.userTurnId;
-            self.markCurrentTurn(options.sessionId, nextTurnId);
-            ownedPromptRun.signalSuccessor();
-          },
-          catch: (cause) =>
-            new ProviderDeliveryUnknown({ cause, message: formatErrorMessage(cause) }),
-        });
-        return { userTurnId: options.userTurnId };
+              return { userTurnId: options.userTurnId };
+            })
+          )
+        );
       })
     );
   }

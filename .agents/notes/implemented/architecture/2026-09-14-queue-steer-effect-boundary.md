@@ -72,14 +72,22 @@ Effect.acquireRelease. Interruption is masked between submission and ACK cleanup
 so local cleanup ownership cannot be abandoned. Stop still cancels ACP, not its owner fiber.
 Scope neither reverses external submission nor runs after process death.
 
-| Category                                   | Behavior                                                                                                                                                      |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ProviderRejected, pre-submission StaleTurn | Only proven non-delivery and eligible preconditions allow ordinary dispatch recovery. Missing, editing or stale selection before reservation remains a no-op. |
-| ProviderDeliveryUnknown                    | Return the error without fallback or replay, including ownership loss or handoff failure after submission.                                                    |
-| PersistenceFailure                         | Local preparation/persistence failure; retain durable evidence, never infer non-delivery from a local failure.                                                |
+| Category                                                            | Behavior                                                                                                                                                      |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SteerPreparationFailure, ProviderRejected, pre-submission StaleTurn | Only proven non-delivery and eligible preconditions allow ordinary dispatch recovery. Missing, editing or stale selection before reservation remains a no-op. |
+| ProviderDeliveryUnknown                                             | Return the error without fallback or replay, including ownership loss or handoff failure after submission.                                                    |
+| PersistenceFailure                                                  | Journal/history persistence failure; retain durable evidence, never infer non-delivery from the error tag alone.                                              |
 
-A crash after write-ahead submission evidence but before local preparation finishes remains
-conservatively indeterminate. Do not introduce a phase per Effect step or retry the whole operation.
+`prepareSteer` completes prompt building, configuration application and ownership validation
+before the queue service writes `submitting`. Its failures are handled only at the preparation
+call, not through a blanket PersistenceFailure fallback. `submitSteer` consumes an opaque,
+single-use handle; the execution service privately retains the lazy submission effect in a
+WeakMap, exposing neither runtime objects nor callbacks. The port rechecks ownership after
+journal persistence without asynchronous preparation before the provider call. Generic throws
+from that call are ProviderDeliveryUnknown, whether synchronous or asynchronous; explicit
+AgentSteerNotDeliveredError remains proven rejection. An invalid/reused handle cannot replay.
+Crashes between write-ahead evidence and the provider call remain indeterminate. No new phase
+or whole-operation retry is introduced.
 
 ## Authoritative mutation and recovery
 
@@ -92,7 +100,7 @@ Enqueue, ordinary sends and other UI data remain renderer-authored, without a ge
 write-intent mirror. Old daemons do not expose Queue Steer.
 
 Native order is reservation marker → pending_apply history durable → queue removal durable
-→ submitting marker → native port → durable receipt. Every pre-submit barrier gates provider calls.
+→ prepareSteer → submitting marker → submitSteer → durable receipt. Every pre-submit barrier gates provider calls.
 Recovery uses marker and frozen history, without requiring a surviving row. Existing markers
 remain readable. A legacy row without a revision may be removed only when its frozen content
 is provably unchanged and it is not being edited; otherwise preserve it for reconciliation.
@@ -120,6 +128,9 @@ Explicit promise gates prove durable removal before submission, zero submissions
 reservation/history/removal/submission-marker persistence failure, marker-plus-history recovery,
 and local guard release. Components verify displaced-draft retention; shared negotiation rejects v1.
 No race assertion depends on sleeps or real network scheduling.
+Prompt-build and mode/model failures leave C dispatchable with a fallback marker and no provider
+call. Synchronous provider throws and rejected ACKs retain submission evidence without fallback
+or replay. Stop during submission-marker persistence is checked before any provider call.
 
 The execution suite connects the real source facade, Streams client/server, LoroDoc and execution
 service over an in-memory transport. A visible machine with a denied private project rejects

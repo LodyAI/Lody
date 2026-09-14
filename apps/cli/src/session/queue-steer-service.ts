@@ -397,9 +397,8 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
             }
             yield* flush();
             yield* removeReservedRow(doc, marker);
-            const submitting = yield* write(sessionId, { ...marker, phase: 'submitting' });
-            return yield* active
-              .steer({
+            const preparation = yield* Effect.either(
+              active.prepareSteer({
                 sessionId,
                 expectedTurnId,
                 turn: {
@@ -409,43 +408,58 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
                   inputConfig,
                 },
               })
-              .pipe(
-                Effect.flatMap(() =>
-                  flush().pipe(
-                    Effect.flatMap(() => write(sessionId, { ...marker, phase: 'applied' })),
-                    Effect.flatMap((applied) =>
-                      complete(
-                        sessionId,
-                        applied,
-                        respond(request, 'accepted', { userTurnId: entry.id })
-                      )
-                    )
-                  )
-                ),
-                Effect.catchTag('ProviderRejected', (error) =>
-                  fallback(
-                    sessionId,
-                    doc,
-                    submitting,
-                    respond(request, error.disposition, {
-                      userTurnId: entry.id,
-                      error: error.message,
-                    })
-                  )
-                ),
-                // Pre-submission ownership loss never cancels a newer active turn.
-                Effect.catchTag('StaleTurn', (error) =>
-                  fallback(
-                    sessionId,
-                    doc,
-                    submitting,
-                    respond(request, error.disposition, {
-                      userTurnId: entry.id,
-                      error: error.message,
-                    })
-                  )
+            );
+            if (preparation._tag === 'Left') {
+              const error = preparation.left;
+              return yield* fallback(
+                sessionId,
+                doc,
+                marker,
+                respond(
+                  request,
+                  error._tag === 'SteerPreparationFailure' ? 'error' : error.disposition,
+                  { userTurnId: entry.id, error: error.message }
                 )
               );
+            }
+            const submitting = yield* write(sessionId, { ...marker, phase: 'submitting' });
+            return yield* active.submitSteer(preparation.right).pipe(
+              Effect.flatMap(() =>
+                flush().pipe(
+                  Effect.flatMap(() => write(sessionId, { ...marker, phase: 'applied' })),
+                  Effect.flatMap((applied) =>
+                    complete(
+                      sessionId,
+                      applied,
+                      respond(request, 'accepted', { userTurnId: entry.id })
+                    )
+                  )
+                )
+              ),
+              Effect.catchTag('ProviderRejected', (error) =>
+                fallback(
+                  sessionId,
+                  doc,
+                  submitting,
+                  respond(request, error.disposition, {
+                    userTurnId: entry.id,
+                    error: error.message,
+                  })
+                )
+              ),
+              // Pre-submission ownership loss never cancels a newer active turn.
+              Effect.catchTag('StaleTurn', (error) =>
+                fallback(
+                  sessionId,
+                  doc,
+                  submitting,
+                  respond(request, error.disposition, {
+                    userTurnId: entry.id,
+                    error: error.message,
+                  })
+                )
+              )
+            );
           }).pipe(
             Effect.catchTags({
               StaleTurn: (error) =>

@@ -1,4 +1,4 @@
-import { queueItemRevision } from '@lody/shared';
+import { queueItemRevision, isSessionHistoryPendingForDispatch } from '@lody/shared';
 import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { createWorkspaceMachineRpcFacade } from '../../../packages/components/src/providers/workspace-machine-rpc-facade';
 import { isSessionVisibleToUser } from '../../../packages/components/src/lib/session-visibility';
@@ -339,6 +339,96 @@ describe('SessionExecutionService', () => {
       request: { sessionId, expectedTurnId: runtime.turnId, queueItemId: rows[2]!.$cid },
     };
   };
+
+  it.each(['prompt-build', 'config-apply'] as const)(
+    'dispatches C ordinarily when native %s preparation fails',
+    async (stage) => {
+      const h = await ownedQueue();
+      const failPreparation = async () => {
+        expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+          phase: 'reserved',
+        });
+        expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+        expect(
+          (await h.doc.sessionData.history.readAll()).find((row) => row.id === 'user:C')
+        ).toMatchObject({ status: 'pending_apply' });
+        throw new Error(stage + ' failed');
+      };
+      if (stage === 'prompt-build') h.deps.buildAcpPromptBlocks = failPreparation;
+      else {
+        h.runtime.session.agentClient.getAcknowledgedSteerCapability = () => ({
+          provider: 'codex',
+          configPolicy: 'apply',
+        });
+        h.deps.applyAcpModeAndModel = failPreparation;
+      }
+      expect(await h.service.steerQueuedMessage(h.request)).toMatchObject({
+        accepted: false,
+        error: stage + ' failed',
+      });
+      expect(h.steerPrompt).not.toHaveBeenCalled();
+      expect(
+        isSessionHistoryPendingForDispatch(
+          (await h.doc.sessionData.history.readAll()).find((row) => row.id === 'user:C')
+        )
+      ).toBe(true);
+      expect(await h.doc.getMetaState()).toMatchObject({ latestUserMsgId: 'user:C' });
+      expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+        phase: 'fallback',
+        completedAt: expect.any(Number),
+      });
+      expect(h.runtime.userTurnId).toBe('user:active');
+    }
+  );
+
+  it('revalidates Stop after preparation while the submitting marker is persisted', async () => {
+    const h = await ownedQueue();
+    const record = h.deps.queueSteerOperationStore.record;
+    h.deps.queueSteerOperationStore.record = async (marker) => {
+      await record(marker);
+      if (marker.phase === 'submitting') h.runtime.cancelRequested = true;
+    };
+    expect(await h.service.steerQueuedMessage(h.request)).toMatchObject({
+      accepted: false,
+      disposition: 'no-active-turn',
+    });
+    expect(h.steerPrompt).not.toHaveBeenCalled();
+    expect(await h.doc.getMetaState()).toMatchObject({ latestUserMsgId: 'user:C' });
+    expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+      phase: 'fallback',
+    });
+    expect(h.runtime.userTurnId).toBe('user:active');
+  });
+
+  it.each(['synchronous', 'acknowledgement'] as const)(
+    'never falls back after a %s provider connection failure',
+    async (stage) => {
+      const h = await ownedQueue();
+      h.steerPrompt.mockImplementation(() => {
+        h.evidence.push('submitted');
+        if (stage === 'synchronous') throw new Error('connection failed');
+        return {
+          applied: Promise.reject(new Error('connection failed')),
+          completion: Promise.resolve(),
+        };
+      });
+      expect(await h.service.steerQueuedMessage(h.request)).toMatchObject({
+        accepted: false,
+        error: 'connection failed',
+      });
+      expect(h.evidence).toEqual(['submitted']);
+      const marker = await h.deps.queueSteerOperationStore.read(h.request.sessionId);
+      expect(marker).toMatchObject({ phase: 'submitting' });
+      expect(marker?.completedAt).toBeUndefined();
+      expect(
+        (await h.doc.sessionData.history.readAll()).find((row) => row.id === 'user:C')
+      ).toMatchObject({ status: 'pending_apply' });
+      expect((await h.doc.getMetaState())?.latestUserMsgId).not.toBe('user:C');
+      expect(h.runtime.userTurnId).toBe('user:active');
+      await h.service.steerQueuedMessage(h.request);
+      expect(h.evidence).toEqual(['submitted']);
+    }
+  );
 
   it.each(['startup', 'same-request', 'clear-failure'] as const)(
     'retries C/T after pre-history recovery via %s',
