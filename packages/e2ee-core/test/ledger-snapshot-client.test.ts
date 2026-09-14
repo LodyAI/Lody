@@ -389,4 +389,148 @@ describe('S3 snapshot LedgerClient', () => {
     expect(view.length).toBe(suffix.ledger.length);
     expect(view.origin).toBe('snapshot');
   });
+
+  it('rejects a foreign genesis after the authenticated snapshot boundary', async () => {
+    const owner = await ed25519();
+    const g = await signGenesis(owner);
+    const first = await append(
+      g.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+    const { snapshot, trust } = await signSnapshot(first.ledger, owner);
+    const suffix = await append(
+      first.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+    const foreign = await signGenesis(await ed25519());
+
+    const sequential = new MemoryLedgerStream();
+    sequential.records = [g.record, first.record];
+    const store = new MemoryLedgerStore();
+    const client = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: sequential,
+      store,
+    });
+    const joined = await client.read();
+    expect(joined.length).toBe(first.ledger.length);
+    const before = store.journal?.offset;
+    sequential.records.push(foreign.record);
+    await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(store.journal?.offset).toBe(before);
+    expect(store.journal?.records).toHaveLength(0);
+
+    const restarted = await LedgerClient.openJournal(trust.genesis, store, sequential);
+    await expect(restarted.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(store.journal?.offset).toBe(before);
+
+    sequential.records.push(suffix.record);
+    await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(store.journal?.offset).toBe(before);
+    expect(store.journal?.records).toHaveLength(0);
+
+    const samePage = new MemoryLedgerStream();
+    samePage.records = [g.record, first.record, foreign.record];
+    const sameStore = new MemoryLedgerStore();
+    const sameClient = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: samePage,
+      store: sameStore,
+    });
+    const beforeSame = sameStore.journal?.offset;
+    await expect(sameClient.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(sameStore.journal?.offset).toBe(beforeSame);
+
+    samePage.pageSize = 1;
+    const cross = new MemoryLedgerStore();
+    const crossClient = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: samePage,
+      store: cross,
+    });
+    await expect(crossClient.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(cross.journal?.offset).toBe('opaque:2/+');
+    expect(cross.journal?.snapshotBound).toBe(true);
+
+    const missing = new MemoryLedgerStream();
+    missing.records = [foreign.record];
+    const missingStore = new MemoryLedgerStore();
+    const missingClient = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: missing,
+      store: missingStore,
+    });
+    const missingOffset = missingStore.journal?.offset;
+    await expect(missingClient.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(missingStore.journal?.offset).toBe(missingOffset);
+
+    const emptyFinal = new MemoryLedgerStream();
+    const emptyStore = new MemoryLedgerStore();
+    const emptyClient = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: emptyFinal,
+      store: emptyStore,
+    });
+    const emptyView = await emptyClient.read();
+    expect(emptyView.length).toBe(first.ledger.length);
+    expect(emptyView.origin).toBe('snapshot');
+    expect(emptyStore.journal?.offset).toBe(emptyFinal.initialOffset);
+
+    const prefix = new MemoryLedgerStream();
+    prefix.records = [foreign.record, g.record, first.record, suffix.record];
+    const prefixStore = new MemoryLedgerStore();
+    const prefixClient = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream: prefix,
+      store: prefixStore,
+    });
+    const prefixView = await prefixClient.read();
+    expect(prefixView.head).toEqual(suffix.ledger.head);
+    expect(prefixView.length).toBe(suffix.ledger.length);
+  });
+
+  it('rejects a duplicate known record after the authenticated snapshot boundary', async () => {
+    const owner = await ed25519();
+    const g = await signGenesis(owner);
+    const first = await append(
+      g.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+    const { snapshot, trust } = await signSnapshot(first.ledger, owner);
+    const suffix = await append(
+      first.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+
+    const stream = new MemoryLedgerStream();
+    stream.records = [g.record, first.record];
+    const store = new MemoryLedgerStore();
+    const client = await LedgerClient.openFromSnapshot({
+      trust,
+      snapshot,
+      stream,
+      store,
+    });
+    await client.read();
+    const before = store.journal?.offset;
+    stream.records.push(g.record);
+    await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(store.journal?.offset).toBe(before);
+    expect(store.journal?.records).toHaveLength(0);
+
+    stream.records.push(suffix.record);
+    await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    expect(store.journal?.offset).toBe(before);
+    expect(store.journal?.records).toHaveLength(0);
+  });
 });

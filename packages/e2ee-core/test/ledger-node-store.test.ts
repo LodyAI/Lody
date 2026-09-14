@@ -276,4 +276,74 @@ describe('L6 sqlite journal restart', () => {
     expect(view.state.devices.size).toBe(2);
     expect(() => view.hashAt(1)).not.toThrow();
   });
+
+  it('keeps v1 journals without snapshotBound and fails closed on a foreign genesis after restart', async () => {
+    const path = location();
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const extra = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+      )
+    ).record;
+    const proposal = created.ledger.prepareSnapshot(owner.publicKey);
+    const snapshot = await Ledger.finalizeSnapshot(
+      proposal,
+      await owner.sign(proposal.signingBytes)
+    );
+    const trust = {
+      genesis: proposal.genesis,
+      endorser: owner.publicKey,
+      head: proposal.head,
+      headSignature: await owner.sign(proposal.headAttestationSigningBytes),
+    };
+    const unbound = encodeLedgerJournal({
+      genesis: created.anchor,
+      records: [],
+      pending: null,
+      offset: 'empty:/+',
+      snapshot,
+      snapshotTrust: trust,
+    });
+    expect(unbound.startsWith('["lody-e2ee-journal/v1"')).toBe(true);
+    expect(JSON.parse(unbound)).toHaveLength(7);
+    expect(decodeLedgerJournal(unbound).snapshotBound).toBeUndefined();
+
+    const stream = new MemoryLedgerStream();
+    stream.records = [created.record, extra];
+    const store = new SqliteLedgerStore(path);
+    await store.exclusive((tx) => tx.save(decodeLedgerJournal(unbound)));
+    const first = await LedgerClient.openJournal(created.anchor, store, stream);
+    const joined = await first.read();
+    expect(joined.origin).toBe('snapshot');
+    expect(joined.length).toBe(2);
+    const encoded = await new SqliteLedgerStore(path).exclusive(async (tx) => {
+      const journal = await tx.load();
+      if (!journal) throw new Error('missing-journal');
+      expect(journal.snapshotBound).toBe(true);
+      return encodeLedgerJournal(journal);
+    });
+    expect(JSON.parse(encoded)).toHaveLength(8);
+
+    const foreign = await signGenesis(await ed25519());
+    stream.records.push(foreign.record);
+    const before = await new SqliteLedgerStore(path).exclusive(
+      async (tx) => (await tx.load())?.offset
+    );
+    await expect(first.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    const afterFail = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    expect(afterFail?.offset).toBe(before);
+    expect(afterFail?.records).toHaveLength(1);
+
+    const restarted = await LedgerClient.openJournal(
+      created.anchor,
+      new SqliteLedgerStore(path),
+      stream
+    );
+    await expect(restarted.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+    const afterRestart = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    expect(afterRestart?.offset).toBe(before);
+  });
 });

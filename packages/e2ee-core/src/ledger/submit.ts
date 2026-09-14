@@ -273,13 +273,19 @@ export class LedgerClient {
       let skippedUnknown = false;
       for (const record of copied) {
         const digest = await hashRecord(record);
+        const wasBound = bound;
         if (session.ledger.hasRecordHash(digest)) {
           if (snapshotHead && bytesEqual(digest, snapshotHead)) bound = true;
+          if (snapshotMode && wasBound) fail('wrong-parent');
           continue;
         }
         if (snapshotMode) {
           const decoded = decodeRecord(record);
-          if (decoded.body.type === 'genesis') continue;
+          if (decoded.body.type === 'genesis') {
+            if (wasBound) fail('wrong-parent');
+            skippedUnknown = true;
+            continue;
+          }
           if (decoded.body.type !== 'ordinary') fail('canonical');
           if (bytesEqual(decoded.body.fields.previousHash, expectedParent)) {
             bound = true;
@@ -287,30 +293,9 @@ export class LedgerClient {
             expectedParent = digest;
             continue;
           }
-          if (!bound) {
+          if (!wasBound) {
             skippedUnknown = true;
             continue;
-          }
-          if (fresh.length > 0) {
-            const applied = await applyFresh(fresh);
-            await this.save(
-              tx,
-              session,
-              session.journal.pending,
-              pageOffset,
-              applied.records,
-              true
-            );
-            session.ledger = applied.ledger;
-          } else if (session.journal.snapshotBound !== true) {
-            await this.save(
-              tx,
-              session,
-              session.journal.pending,
-              pageOffset,
-              session.journal.records,
-              true
-            );
           }
           fail('wrong-parent');
         }

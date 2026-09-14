@@ -33,4 +33,4 @@ Ledger.compareNotes(localNote, remoteNote, { originalEndorser });
 
 `compareNotes` 区分不同 Org、待同步（length 不同）、同位置一致、同位置冲突。原邀请者再签不得标独立核对。结构合法的虚假状态若由已认证背书者签署，验证器接受并保持尚未独立核对。
 
-完整字段见公开 `specs/e2ee-ledger.zh.md` §6.1。关联：[账本规范 §6.1](../../../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现)、[控制账本笔记](2026-09-12-e2ee-control-log.zh.md)。
+完整字段见公开 `specs/e2ee-ledger.zh.md` §6.1。关联：[账本规范 §6.1](../../../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现)、[控制账本笔记](2026-09-12-e2ee-control-log.zh.md)、[快照后缀 fail-closed](../../implemented/bug-fix/2026-09-14-e2ee-snapshot-suffix-bound.zh.md)。
