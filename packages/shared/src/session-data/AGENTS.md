@@ -41,3 +41,7 @@
   with a commit-time guard against regressing an advanced execution status.
 - Test the real Loro reader and writer. Delayed reads use small injected Promise
   gates; there is no test-only implementation of the complete command API.
+
+- Durable submission preparation stays within HistoryWriter: prepare on a fork,
+  persist the exact operations and their baseline before publishing, then replay
+  those operations without another append. Missing dependencies are not acceptance.

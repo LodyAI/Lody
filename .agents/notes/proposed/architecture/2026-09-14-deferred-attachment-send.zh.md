@@ -102,3 +102,9 @@ public-boundary 检查及文档检查分别通过。已运行 `pnpm format` 并�
 新增确定性测试覆盖并行取消、迟到的 store 获取、兄弟任务隔离、XHR 实际取消及上传进度与成功响应的区别。该层保持添加时上传；持久化发送和完整 draft 行为仍属于后两层。
 
 第二层验证：`TMPDIR=/private/tmp NODE_ENV=test pnpm check` 全部通过（组件 478 个文件、3,661 个测试），`pnpm format` 和 `pnpm run docs check` 已完成；文档无错误。仍未声称完成真实设备上的 draft 验收。
+
+第二层 PR：[#707](https://github.com/LodyAI/Lody/pull/707)，基于 #705。
+
+第三层正在实现。为关闭“已追加历史但磁盘确认丢失”的窗口，在同一个 HistoryWriter 抽象内先在临时 fork 准备操作，保存原副本名称及原始操作字节，然后才导入当前文档。重启重放相同操作，不重新 append。先 flush 原副本以保留操作依赖；跨窗口恢复先读取原副本，缺失时保留记录并停止，不以新窗口的空历史推断未发送。真实 Loro 测试已覆盖两副本重复重放、缺失依赖与校验失败；运行时、退出、UI 以及完整 IndexedDB 验证仍未接完，不能发布这一层。
+
+Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. `pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.

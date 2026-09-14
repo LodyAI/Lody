@@ -111,6 +111,7 @@ export interface WorkspaceWriter {
   ): Promise<void>;
 
   /** Message-queue mutations (durable CRDT on the session doc). */
+  prepareSessionMessage(sessionId: string, item: Record<string, unknown>): Promise<Uint8Array>;
   enqueueSessionMessage(sessionId: string, item: Record<string, unknown>): Promise<void>;
   removeSessionMessage(sessionId: string, itemId: string): Promise<void>;
   updateSessionMessage(

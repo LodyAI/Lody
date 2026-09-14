@@ -145,6 +145,8 @@ Takeover assigns stable submission/turn identity, preserving the existing `userT
 
 A fixed ID alone cannot prevent duplicate LoroList append. Implementation must validate cross-window exclusion, writer reconciliation, queue promotion, and reconnect. Sending twice with the same ID is not itself deduplication. The guarantee is that one local submission does not manufacture duplicate messages, not a new distributed exactly-once Agent execution mechanism.
 
+Recovery uses the existing HistoryWriter to prepare exact CRDT operations on a temporary fork. Persist the original baseline first, save the operation bytes in a strict IndexedDB transaction, then import into the live document and flush. Replaying the same operations is idempotent; never re-append after an uncertain receipt. Imported operations require explicit repo synchronization because the current Streams adapter only subscribes to local edits. A successful target transport sync is a durable handoff, not proof that the Agent executed the message. Submission and delivery use separate per-session Web Locks; delivery checks earlier unfinished turns before dispatch. Recovery records are account/workspace scoped and windows exchange invalidations only.
+
 Distinguish three evidence levels:
 
 1. **Writer acceptance:** local CRDT mutation, without proof of disk persistence or Daemon receipt.

@@ -1,3 +1,4 @@
+import { createConversationSession } from '../lib/conversation-view';
 import {
   applyPreviewVisualCommentMutation,
   getServerNow,
@@ -168,6 +169,18 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       await withSessionStore(sessionId, async (store) => {
         if (!(await store.sessionData.commands.respondPermission(requestId, outcome, options)))
           throw new Error('Permission request not found');
+      });
+    },
+
+    async prepareSessionMessage(sessionId, item) {
+      return withSessionStore(sessionId, (store) => {
+        const from = store.doc.version();
+        const fork = store.doc.fork();
+        const prepared = createConversationSession(fork, { sessionId: sessionId as SessionId });
+        try {
+          prepared.mirror.setState((draft) => ({ ...draft, mq: [...(draft.mq ?? []), item as MessageQueueItem] }));
+          return fork.export({ mode: 'update', from });
+        } finally { prepared.dispose(); fork.free(); from.free(); }
       });
     },
 

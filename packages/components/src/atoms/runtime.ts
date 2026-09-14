@@ -1,3 +1,4 @@
+import type { createSessionSendJournal } from '../lib/session-send-journal';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type { SessionData } from '@lody/shared/session-data';
@@ -173,6 +174,9 @@ export type WorkspaceRuntime = {
    */
   readonly workspaceId: WorkspaceId;
   readonly sendResources: SessionSendResources;
+  readonly sendJournal: ReturnType<typeof createSessionSendJournal> | null;
+  readonly sourceReplica: string;
+  readonly accountId: string | null;
   readonly repo: LoroRepo;
   /** Workspace-owned, scoped LRU for owner-session file-index Flock resources. */
   readonly codeCollabFileIndexCache: CodeCollabFileIndexCache;

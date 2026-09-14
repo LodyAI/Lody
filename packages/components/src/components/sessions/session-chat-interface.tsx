@@ -3648,6 +3648,7 @@ export const SessionChatInterface = memo(
             }
             const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
+              guideExpectedTurnId: options?.guideExpectedTurnId,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -4055,6 +4056,11 @@ export const SessionChatInterface = memo(
     // NEW message — the old turn is never revived.
     const handleResendUndelivered = useCallback(
       async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+        const pending = await runtime?.sendJournal?.read(userTurnId);
+        if (pending && pending.stage !== 'delivered') {
+          await runtime!.sendJournal!.retry(session.id);
+          return true;
+        }
         // This is a new Turn with the old content, not a replay of the old run:
         // freeze the currently committed composer Role beside the current run
         // config. Copying only the original Role would pair it with unrelated
@@ -4087,6 +4093,8 @@ export const SessionChatInterface = memo(
         return accepted;
       },
       [
+        runtime,
+        session.id,
         handleSendMessage,
         sessionConversationConfig.agentRoleId,
         sessionConversationConfig.agentRoleRevision,
