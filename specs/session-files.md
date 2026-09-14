@@ -17,7 +17,7 @@ Translation: current
 
 ## 1. Scenario and PR scope
 
-On either new-conversation landing or an existing conversation, the user adds attachments and reviews/edits the draft before sending. Send creates a local pending message and lets the user work elsewhere. Actual submission follows confirmed completion of all attachments; returning exposes progress, failures, and retry.
+On either new-conversation landing or an existing conversation, the user adds attachments and reviews/edits the draft before sending. Send accepts a local pending message and immediately opens its conversation; actual submission follows confirmed completion of all attachments. The pending item occupies the ordinary user-message position in that conversation, with attachment progress on each attachment and a clear message-level waiting status. Returning exposes progress, failures, and retry without a separate pending page or composer panel.
 
 Leaving a conversation means navigation inside its hosting page. Leaving the page includes close, reload, external navigation, or runtime destruction. The former continues work; the latter warns. Attachment services may receive files first, but cannot cause early Agent execution of this message. Existing tasks and non-executing warmup remain separate.
 
@@ -163,9 +163,9 @@ When actual history or queue content becomes visible, replace the placeholder by
 
 | Surface/stage                    | Presentation and behavior                                                                        |
 | -------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Composer                         | Pending preparation / Pending upload; remove or replace before Send                              |
-| Local preparation                | “Preparing files · Not sent,” with existing handoff completion semantics                         |
-| Remote transfer                  | “Uploading files; message not sent,” with per-file progress and reliable byte totals             |
+| Composer                         | Draft attachments before Send; remove or replace before Send                                      |
+| Local preparation                | The conversation opens immediately; the pending user-message row says “Waiting to send” and shows per-attachment preparation progress |
+| Remote transfer                  | The same pending user-message row says “Waiting to send · Uploading attachments”; each attachment carries its own progress             |
 | Server confirmation              | “Verifying files,” even at 100% byte transfer                                                    |
 | Failure                          | Name affected attachment and reason; preserve whole message with Retry / Cancel send             |
 | Unknown result                   | “Confirming send result”; do not claim the Daemon has not received it                            |

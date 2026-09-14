@@ -4167,5 +4167,9 @@
   "sessions.pendingSendClose": "关闭并保留消息",
   "sessions.attachmentDraft": "待上传",
   "sessions.attachmentPrepared": "已准备好",
+  "sessions.attachmentUploading": "正在上传 · {{progress}}%",
+  "sessions.pendingMessageUploading": "正在等待发送 · 正在上传附件",
+  "sessions.pendingMessageWaiting": "正在等待发送",
+  "sessions.pendingMessageUploadFailed": "尚未发送 · 附件上传失败",
   "sessions.attachmentPreparingNotSent": "附件准备中 · 尚未发送"
 }
