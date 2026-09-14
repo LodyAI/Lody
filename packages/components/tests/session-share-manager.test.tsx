@@ -211,16 +211,16 @@ describe('static share dialog steps', () => {
     expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
-  it('routes an unfinished draft to discard instead of a dead publish button', async () => {
+  it('publishes directly from an unfinished draft without a separate discard step', async () => {
     props.entry = { ...entry, status: 'draft' };
     props.hasSecret = false;
     props.shareLink = null;
     await render();
-    expect(container.textContent).toContain('This share was never finished.');
-    expect(button('Share conversation')).toBeUndefined();
+    expect(container.textContent).not.toContain('This share was never finished.');
     expect(button('Update share')).toBeUndefined();
-    await click('Discard and start over');
-    expect(props.onRevoke).toHaveBeenCalledOnce();
+    expect(button('Share conversation')).toBeTruthy();
+    await click('Share conversation');
+    expect(props.onPublish).toHaveBeenCalledOnce();
   });
 
   it('lets an administrator revoke but not publish another member’s share', async () => {

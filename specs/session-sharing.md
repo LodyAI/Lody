@@ -142,6 +142,8 @@ The tool echoes the caller's `requestId` for retries and returns `shareRequestId
 separately as the server record identity. Closing the editor discards upload
 credentials: an unpublished request must then be abandoned and recreated with a
 new retry key; an ordinary draft must be revoked before preparing another copy.
+The client revokes a stale draft as part of the next publish, not when the dialog
+opens.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a

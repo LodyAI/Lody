@@ -7,14 +7,15 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   have switched together. [Intent](../../../../../specs/session-sharing.md).
 - `session-share-dialog.tsx` and controlled `session-share-manager.tsx` own
   authenticated publication. The manager is one screen at a time — setup,
-  publishing, published, unfinished draft — with exactly one primary action each.
+  publishing, published — with exactly one primary action each.
   A human action always starts publication, and the package is frozen in full
   before any byte is uploaded. Include all selected stored history, including
   thought/tool content with the [sharing projection](../../../../../specs/session-sharing.md).
   The first screen states that anyone with the link can view the conversation and
   that images are shared while file attachments are not. `onPublish` freezes (or
   reuses the frozen retry keys), uploads and commits. There is no publication
-  preview or prepare-only action.
+  preview or prepare-only action. A stale draft is revoked by the next publish,
+  never on dialog open.
 - Progress must stay honest: only the object upload has a byte total, so only it
   may show a percentage. Capture and the publish commit use the indeterminate
   sweep. Auto-copy on success may claim "copied" only after the clipboard write

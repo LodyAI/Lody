@@ -127,6 +127,26 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
       if (current()) setBusy(false);
     }
   }
+  /**
+   * Revoke without the outer `run` wrapper, for callers already inside `run`.
+   * A stale draft has no resumable upload credentials, and the server requires
+   * it to be revoked before the next deployment can begin.
+   */
+  async function revokeDeployment(entry: SessionShareView) {
+    await revoke({ shareId: entry.shareId, expectedRevision: entry.revision });
+    if (current() && userId) {
+      try {
+        removeSessionShareSecret(
+          localStorage,
+          sessionShareSecretKey(userId, workspaceId, entry.shareId),
+          entry.credentialVersion
+        );
+      } catch {
+        /* Revocation remains effective. */
+      }
+      setEphemeral(null);
+    }
+  }
   return {
     busy,
     error,
@@ -170,22 +190,9 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
         remember(updated, secret);
       });
     },
+    revokeDeployment,
     revoke(entry: SessionShareView) {
-      return run(async () => {
-        await revoke({ shareId: entry.shareId, expectedRevision: entry.revision });
-        if (current() && userId) {
-          try {
-            removeSessionShareSecret(
-              localStorage,
-              sessionShareSecretKey(userId, workspaceId, entry.shareId),
-              entry.credentialVersion
-            );
-          } catch {
-            /* Revocation remains effective. */
-          }
-          setEphemeral(null);
-        }
-      });
+      return run(() => revokeDeployment(entry));
     },
   };
 }
@@ -373,6 +380,11 @@ export function useSessionShareManagement(
       try {
         const existing = pendingRef.current;
         if (existing && conflict) throw new Error('Share confirmation changed');
+        if (!existing && entry?.status === 'draft' && entry.canManage) {
+          // The draft's upload credentials are gone, so it can only be discarded.
+          // The server refuses a second deployment until it is revoked.
+          await actions.revokeDeployment(entry);
+        }
         await publishPrepared(existing ?? (await capture()));
       } finally {
         setPhase('idle');

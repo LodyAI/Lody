@@ -14,8 +14,8 @@ The removed paragraphs disclosed that the published package includes thinking an
 tool records, that the title is public in link previews, that later messages are
 not added, and that runtime settings and typed terminal output are omitted.
 Capture, projection and publication behavior is unchanged; only the confirmation
-copy shrank. The unfinished-draft and revoke notices were shortened in the same
-pass, keeping the irreversible-download warning. The sharing Spec and the sharing
+copy shrank. The revoke and post-revoke notices were tightened in the same pass,
+keeping the irreversible-download warning. The sharing Spec and the sharing
 component instructions drop the first-screen disclosure obligation to match.
 
 ## Decision
@@ -28,8 +28,7 @@ before: `session-share-export.ts` and `session-share-package.ts` still project a
 omit the same fields, readers still receive thought and tool content, and typed
 terminal output remains omitted on the wire.
 
-The same pass shortens the unfinished-draft notice by dropping the editor/credential
-mechanics, and tightens the revoke and post-revoke wording. The revoke confirmation
+The same pass tightens the revoke and post-revoke wording. The revoke confirmation
 keeps the warning that downloaded copies cannot be recalled, because that is the
 irreversible consequence of the action.
 
@@ -45,8 +44,7 @@ disclosure.
 
 `node scripts/check-i18n.mjs` passes after removing the two unused keys
 (`sharing.static.contentNotice`, `sharing.static.historyOmissions`) and updating
-`sharing.static.attachmentNotice` in both locales. `session-share-manager.test.tsx`
-and `share-management-setting.test.tsx` pass all 18 cases with the surviving
-`sharing.static.publicNotice` fallback, the `@lody/components` typecheck
-(`tsgo --noEmit`) passes, and oxlint reports no findings on the changed components.
+`sharing.static.attachmentNotice` in both locales. The full `@lody/components`
+suite passes (462 files, 3519 tests), including the manager and settings tests that
+render the surviving `sharing.static.publicNotice`; `tsgo --noEmit` and oxlint pass.
 Full workspace `pnpm check` was not run.

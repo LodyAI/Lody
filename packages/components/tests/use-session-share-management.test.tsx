@@ -197,6 +197,21 @@ describe('static publication client lifecycle', () => {
     ]);
   });
 
+  it('revokes an unfinished draft before beginning a fresh deployment', async () => {
+    cloud.state = { ...entry, status: 'draft' };
+    await render();
+    await act(async () => control.onPublish());
+    expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+      'sessionSharing:revoke',
+      'sessionSharing:beginDeployment',
+      'sessionSharing:publishDeployment',
+    ]);
+    expect(cloud.mutation.mock.calls[0]?.[1]).toEqual({
+      shareId: 'share',
+      expectedRevision: 1,
+    });
+  });
+
   it('uploads only after the human action and retains the published secret', async () => {
     await render();
     expect(cloud.capture).not.toHaveBeenCalled();

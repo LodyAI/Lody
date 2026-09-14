@@ -27,7 +27,7 @@ export type SessionShareManagerProps = ReturnType<typeof useSessionShareManageme
 };
 
 /** Which panel the dialog shows. One screen at a time, one primary action each. */
-type ShareStep = 'loading' | 'setup' | 'publishing' | 'published' | 'stale-draft';
+type ShareStep = 'loading' | 'setup' | 'publishing' | 'published';
 
 /**
  * Animates the dialog's height between steps so the panel grows into the next
@@ -128,17 +128,12 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const active = entry?.status === 'active';
   const canPublish = entry === null || !!entry?.canManage || entry?.status === 'revoked';
   const publishing = phase === 'capturing' || phase === 'uploading' || phase === 'publishing';
-  const staleDraft = entry?.status === 'draft' && !!entry.canManage && !hasPending;
-  const step: ShareStep =
-    entry === undefined
-      ? 'loading'
-      : publishing
-        ? 'publishing'
-        : result
-          ? 'published'
-          : staleDraft
-            ? 'stale-draft'
-            : 'setup';
+  const step: ShareStep = (() => {
+    if (entry === undefined) return 'loading';
+    if (publishing) return 'publishing';
+    if (result) return 'published';
+    return 'setup';
+  })();
 
   const toggleChildren = (checked: boolean) =>
     props.onSelect(
@@ -214,21 +209,6 @@ export function SessionShareManager(props: SessionShareManagerProps) {
               )}
             </Note>
           )}
-          {props.error && <Note tone="alert">{props.error}</Note>}
-        </div>
-      );
-    if (step === 'stale-draft')
-      return (
-        <div className="space-y-3 px-5 pb-5 pt-1">
-          <p className="text-sm leading-6 text-foreground">
-            {t('sharing.static.draft', 'This share was never finished.')}
-          </p>
-          <Note>
-            {t(
-              'sharing.static.draftRecovery',
-              'Discard it to share this conversation again; nothing was published.'
-            )}
-          </Note>
           {props.error && <Note tone="alert">{props.error}</Note>}
         </div>
       );
@@ -370,18 +350,6 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           <div className="flex-1" />
           <Button size="sm" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
             {t('settings.shares.copy', 'Copy link')}
-          </Button>
-        </>
-      );
-    if (step === 'stale-draft')
-      return (
-        <>
-          <div className="flex-1" />
-          <Button variant="ghost" size="sm" disabled={busy} onClick={props.onClose}>
-            {t('common.cancel', 'Cancel')}
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void props.onRevoke()}>
-            {t('sharing.static.discardDraft', 'Discard and start over')}
           </Button>
         </>
       );
