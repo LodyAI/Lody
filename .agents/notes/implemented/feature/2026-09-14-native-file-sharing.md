@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-14-native-file-sharing.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/685
+
 ## Abstract
 
 Binary previews on mobile offered only a host path even though the client could

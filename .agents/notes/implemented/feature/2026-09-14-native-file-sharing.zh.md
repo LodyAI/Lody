@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-14-native-file-sharing.md)
 
+PR: https://github.com/LodyAI/Lody/pull/685
+
 ## 摘要
 
 移动端二进制预览此前仅提供宿主路径，即使客户端已经能够读取文件。
