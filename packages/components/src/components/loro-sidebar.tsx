@@ -16,8 +16,8 @@ import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Kbd } from '@/ui/kbd';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Kbd } from '@lody/ui/kbd';
+import { Tooltip as UiTooltip } from '@lody/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import {
   DropdownMenu,
@@ -518,29 +518,35 @@ function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
  */
 function SidebarNewTaskButton({ label, onClick }: { label: string; onClick: () => void }) {
   const shortcut = useCommandShortcutLabel('tasks.quickAdd');
+  // `@lody/ui`'s tooltip rather than the Radix one, because the cap inside it
+  // is the reason this tooltip exists: the chip inverts, and only that Content
+  // tells a `Kbd` what surface it is standing on. The trigger keeps its own
+  // aria-label — a Base UI tooltip is visual-only and names nothing.
   return (
-    <TooltipProvider delayDuration={400}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={label}
-            onClick={onClick}
-            className={cn(
-              'flex h-6 w-6 items-center justify-center rounded-md text-sidebar-foreground-muted',
-              'transition-colors hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-              'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40'
-            )}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="flex items-center gap-1.5">
+    <UiTooltip.Provider delay={400}>
+      <UiTooltip.Root>
+        <UiTooltip.Trigger
+          render={
+            <button
+              type="button"
+              aria-label={label}
+              onClick={onClick}
+              className={cn(
+                'flex h-6 w-6 items-center justify-center rounded-md text-sidebar-foreground-muted',
+                'transition-colors hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40'
+              )}
+            />
+          }
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </UiTooltip.Trigger>
+        <UiTooltip.Content side="right" className="flex items-center gap-1.5">
           <span>{label}</span>
           {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        </UiTooltip.Content>
+      </UiTooltip.Root>
+    </UiTooltip.Provider>
   );
 }
 
@@ -814,8 +820,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           name: workspaceName,
           logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
         }}
-        className="h-5 w-5 text-[10px]"
-        fallbackClassName="bg-sidebar-hover/60 text-sidebar-foreground"
+        size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
@@ -926,7 +931,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                         <DropdownMenuRadioItem key={ws.id} value={ws.id} className="gap-2">
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
-                            className="h-5 w-5 shrink-0 text-[10px]"
+                            size="small"
+                            className="shrink-0"
                           />
                           <span className="min-w-0 truncate">{ws.name}</span>
                           {ws.planTier ? (

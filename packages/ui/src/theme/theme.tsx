@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { avatarPaletteTheme } from '../avatar/avatar.tokens.stylex';
 import { badgePaletteTheme } from '../badge/badge.tokens.stylex';
 import { buttonPaletteTheme } from '../button/button.tokens.stylex';
 import { cardPaletteTheme } from '../card/card.tokens.stylex';
@@ -7,6 +8,7 @@ import { dialogPaletteTheme } from '../dialog/dialog.tokens.stylex';
 import { disclosurePaletteTheme } from '../disclosure/disclosure.tokens.stylex';
 import { feedbackPaletteTheme } from '../feedback/feedback.tokens.stylex';
 import { fieldPaletteTheme } from '../field/field.tokens.stylex';
+import { kbdPaletteTheme } from '../kbd/kbd.tokens.stylex';
 import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { tablePaletteTheme } from '../table/table.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
@@ -20,6 +22,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * it; a group declared only at the document root keeps the root palette.
  */
 const componentPaletteThemes = [
+  avatarPaletteTheme,
   badgePaletteTheme,
   buttonPaletteTheme,
   cardPaletteTheme,
@@ -27,6 +30,7 @@ const componentPaletteThemes = [
   disclosurePaletteTheme,
   feedbackPaletteTheme,
   fieldPaletteTheme,
+  kbdPaletteTheme,
   popupPaletteTheme,
   tablePaletteTheme,
   tooltipPaletteTheme,

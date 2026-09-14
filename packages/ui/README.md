@@ -508,10 +508,23 @@ the caller's, because what a press does is a product decision.
 A `Badge` is a standing fact about the thing beside it, and the one part of this
 system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
 so it takes no background from the ladder. Its tone is a *film* of that tone
-over whatever is underneath, and its words stay ink in all five — `warning` is
-2.8:1 on a near-white surface, a colour for a 16px mark rather than for 11px
-text, and a badge is never wordless, so the tint carries the tone and the word
-carries the fact.
+over whatever is underneath — 12% of `label` for neutral, 22% of its own colour
+for the rest — **and its word carries that tone as well**, as the tone pulled
+halfway to `label`.
+
+The raw tone cannot carry it: `warning` is 2.8:1 on a near-white surface, a
+colour for a 16px mark rather than for 11px text. Half the distance to the ink
+keeps the hue and gains the contrast — 5.2:1 at the worst, on every rung in both
+palettes — and the word is the mark a person actually looks at on a 20px chip.
+The four words land 0.097 apart in oklab at the closest in the light palette and
+0.048 in the dark, against 0.030 and 0.035 for the films under them. In the dark
+palette that is the whole difference: `accent` is a pale peach there and
+`warning` an amber, so their films are two brown washes and their words are a
+peach and a gold.
+
+A neutral badge has no tone to carry, so its word is `label` — which is also the
+ink the other four are pulled toward, and not `secondaryLabel`: the word sits on
+the film rather than on the page, where `secondaryLabel` measured 3.4:1.
 
 ```tsx
 <Badge>Plus</Badge>
@@ -539,6 +552,65 @@ surface's layout.
 <Separator orientation="vertical" />
 ```
 
+An `Avatar` is who this is: a picture, or the letters standing in for one. It
+is the second part here on no rung and the one that is not a film — what it
+stands in for is opaque, so the fallback takes a **gray**, which is what the
+rules reserve the gray ramp for: a thing with no role.
+
+```tsx
+<Avatar.Root size="small">
+  <Avatar.Image src={user.image} alt={user.name} />
+  <Avatar.Fallback>ZX</Avatar.Fallback>
+</Avatar.Root>
+
+<Avatar.Root size="large" shape="tile">
+  <Avatar.Fallback style={{ backgroundColor: hueFor(workspace.name) }}>L</Avatar.Fallback>
+</Avatar.Root>
+```
+
+Five rungs — 16, 20, 24, 32 and 64 — and **the rung picks the letters**. That is
+the whole reason the size is a prop: the deleted implementation had one size,
+and each of its twenty call sites stated the box and the type step separately
+(`h-5 w-5 text-[9px]`, `h-7 w-7 text-[11px]`, `h-16 w-16 text-xl`), which is two
+facts a surface had to keep in step and eight different answers about what two
+letters in a circle means. Two initials want `small` or larger: at `mini` a
+circle is a face where an icon would otherwise be, and a picture or a mark is
+the better answer — two capitals fit it only just. Which of the image and the fallback is on
+screen is Base UI's, read from the image's own loading status, so a surface
+writes both and never writes the condition.
+
+A person is a `circle`, a thing is a `tile`: a circle around a logo is a crop,
+and the mark inside one was drawn square. The tile's corner follows the rung
+from the radius-by-size table rather than a token of its own. A surface with an
+identity colour for the thing — a hue derived from a workspace name, so the same
+workspace is the same colour everywhere — passes it as a `style`, because which
+hue belongs to which name is a product fact and not a token.
+
+A `Kbd` is a key on the keyboard, and a `KbdGroup` is the chord it is pressed
+in.
+
+```tsx
+<Kbd>esc</Kbd>
+<KbdGroup>
+  <Kbd>⌘</Kbd>
+  <Kbd>K</Kbd>
+</KbdGroup>
+```
+
+It is a gray for the same reason: a cap stands for a piece of hardware rather
+than for anything on the screen. It is never a control — no hover, no focus
+ring, no pressed state — and it is not a menu row's shortcut, which the rules
+give plain trailing metadata instead, because a column of chips down a menu's
+right edge turns a quiet list into a keyboard diagram. A cap is for the surfaces
+where the keys are the subject: a command palette, a shortcuts sheet, a tooltip
+that teaches one.
+
+A cap standing on a `Tooltip` inverts with it. `Tooltip.Content` declares
+`kbdOnInvertedTheme` on its popup, and every cap under it inherits — a component
+token group is how a surface tells what is inside it what it is standing on, and
+unlike the descendant selector the deleted implementation used it also reaches a
+cap a caller wrapped in something of their own.
+
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in
 [token rules](src/tokens/RULES.md#fields).
@@ -558,7 +630,10 @@ files they replace are recorded in the
 [UI table and pagination note](../../.agents/notes/implemented/feature/2026-09-12-ui-table-pagination.md);
 the card rung as a component, the badge that is on no rung, and the one line the
 rules allow are recorded in the
-[UI card, badge and separator note](../../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md).
+[UI card, badge and separator note](../../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md);
+the avatar ladder that picks its own letters, the key cap, and the token group
+that carries an inversion across a surface are recorded in the
+[UI avatar and kbd note](../../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the
