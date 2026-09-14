@@ -67,6 +67,8 @@ Translation: current
 
 ## PR 栈实施状态
 
+PR 1: [#705](https://github.com/LodyAI/Lody/pull/705) — `refactor/attachment-submission-boundary` → `main`.
+
 第一层从 `use-session-actions.ts` 提取 `lib/session-submission.ts`，React
 保留额度准入、统计和 atom 观察绑定。创建、首条历史、继续发送、dispatch 与
 guide 仍使用同一 writer 和路由，上传时机与接受行为不变；这一层不启用持久
