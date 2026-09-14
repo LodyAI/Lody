@@ -182,13 +182,13 @@ export const ICONS: Record<IconName, IconDefinition> = {
   sidebar: {
     marks: [
       { path: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z' },
-      { path: 'M9.5 4.5v15M6 8h1.5M6 10.5h1.5M6 13h1.5' },
+      { path: 'M10 4.5v15M5.5 8h2.5M5.5 10.5h2.5M5.5 13h2.5' },
     ],
   },
   'sidebar-collapsed': {
     marks: [
       { path: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z' },
-      { path: 'M6.5 4.5v15M12.5 9.5l2.5 2.5-2.5 2.5' },
+      { path: 'M6.5 4.5v15M4.75 8h.5M4.75 10.5h.5M4.75 13h.5' },
     ],
   },
   search: {
