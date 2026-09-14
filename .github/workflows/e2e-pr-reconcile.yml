@@ -103,13 +103,12 @@ jobs:
           SUITE: ${{ steps.evidence.outputs.suite }}
         run: |
           mkdir -p pr-evidence pr-report
-          manifest=$(node .github/scripts/e2e-daily-failure.mjs \
+          manifest=$(node .github/scripts/e2e-pr-failure.mjs \
             --evidence-root pr-evidence \
             --output-root pr-report \
             --run-id "$RUN_ID" \
             --run-url "$RUN_URL" \
             --head-sha "$HEAD_SHA" \
-            --channel pr \
             --suite "$SUITE")
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 

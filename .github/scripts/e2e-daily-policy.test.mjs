@@ -29,7 +29,7 @@ void test('selects only the Actions-owned Daily failure Issue', () => {
 });
 
 void test('does not let an outsider spoof a completed attachment marker', () => {
-  const marker = '<!-- desktop-e2e-daily-failure-run:123:video:LODY-TEST-001 -->';
+  const marker = '<!-- desktop-e2e-pr-failure-run:123:video:LODY-TEST-001 -->';
   const uploaded = 'https://github.com/user-attachments/assets/example';
   assert.equal(
     hasCompleteOwnedComment([{ body: `${marker}\n${uploaded}`, user: outsider }], marker, 1),
@@ -38,8 +38,8 @@ void test('does not let an outsider spoof a completed attachment marker', () => 
 });
 
 void test('retries a bot comment until its video reference was uploaded', () => {
-  const marker = '<!-- desktop-e2e-daily-failure-run:123:video:LODY-TEST-001 -->';
-  const localReference = '![](daily-evidence/scenarios/lody-test-001/failure.webm)';
+  const marker = '<!-- desktop-e2e-pr-failure-run:123:video:LODY-TEST-001 -->';
+  const localReference = '![](pr-evidence/scenarios/lody-test-001/failure.webm)';
   assert.equal(
     hasCompleteOwnedComment([{ body: `${marker}\n${localReference}`, user: bot }], marker, 1),
     false
@@ -60,10 +60,14 @@ void test('retries a bot comment until its video reference was uploaded', () => 
 });
 
 void test('accepts one bot-owned summary comment when no video exists', () => {
+  const marker = '<!-- desktop-e2e-pr-failure-run:123:summary -->';
+  assert.equal(hasCompleteOwnedComment([{ body: marker, user: bot }], marker, 0), true);
+});
+
+void test('only accepts Actions-owned Daily summary comments', () => {
   const marker = '<!-- desktop-e2e-daily-failure-run:123:summary -->';
   assert.equal(hasOwnedComment([{ body: marker, user: bot }], marker), true);
   assert.equal(hasOwnedComment([{ body: marker, user: outsider }], marker), false);
-  assert.equal(hasCompleteOwnedComment([{ body: marker, user: bot }], marker, 0), true);
 });
 
 void test('builds an artifact-only Daily failure comment', () => {

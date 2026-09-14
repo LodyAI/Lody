@@ -90,7 +90,7 @@ async function pathContainsSymlink(root, target) {
   return false;
 }
 
-export async function prepareDailyFailureReport({
+export async function preparePrFailureReport({
   evidenceRoot,
   outputRoot,
   runId,
@@ -98,7 +98,6 @@ export async function prepareDailyFailureReport({
   headSha,
   workingDirectory = process.cwd(),
   maxVideoBytes = MAX_VIDEO_BYTES,
-  channel = 'daily',
   suite = 'full',
 }) {
   if (!/^\d+$/u.test(String(runId))) throw new Error('runId must be numeric');
@@ -108,8 +107,7 @@ export async function prepareDailyFailureReport({
     throw new Error('runUrl must be a GitHub Actions run URL');
   }
   if (!/^[0-9a-f]{40}$/u.test(headSha)) throw new Error('headSha must be a full commit SHA');
-  if (channel !== 'daily' && channel !== 'pr') throw new Error('channel must be daily or pr');
-  if (channel === 'pr' && suite !== 'smoke' && suite !== 'full' && suite !== 'unknown') {
+  if (suite !== 'smoke' && suite !== 'full' && suite !== 'unknown') {
     throw new Error('PR suite must be smoke, full, or unknown');
   }
 
@@ -178,20 +176,14 @@ export async function prepareDailyFailureReport({
   }
 
   const groups = videos.length > 0 ? videos.map((video) => [video]) : [[]];
-  const markerScope = channel === 'pr' ? 'desktop-e2e-pr-failure' : 'desktop-e2e-daily-failure';
-  const subject =
-    channel === 'pr'
-      ? suite === 'unknown'
-        ? 'Desktop PR regression'
-        : `Desktop PR ${suite} regression`
-      : 'Desktop Daily regression';
+  const subject = suite === 'unknown' ? 'Desktop PR regression' : `Desktop PR ${suite} regression`;
   const batches = [];
   for (let index = 0; index < groups.length; index += 1) {
     const batchNumber = index + 1;
     const bodyPath = resolve(reports, `comment-${String(batchNumber).padStart(3, '0')}.md`);
     const marker = groups[index][0]
-      ? `<!-- ${markerScope}-run:${runId}:video:${groups[index][0].stableId} -->`
-      : `<!-- ${markerScope}-run:${runId}:summary -->`;
+      ? `<!-- desktop-e2e-pr-failure-run:${runId}:video:${groups[index][0].stableId} -->`
+      : `<!-- desktop-e2e-pr-failure-run:${runId}:summary -->`;
     const lines = [
       marker,
       `${subject} failed on commit \`${markdownText(headSha, 40)}\`.`,
@@ -228,7 +220,7 @@ export async function prepareDailyFailureReport({
     runId: String(runId),
     runUrl,
     headSha,
-    channel,
+    channel: 'pr',
     suite,
     failures,
     videos,
@@ -242,13 +234,12 @@ export async function prepareDailyFailureReport({
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const report = await prepareDailyFailureReport({
+  const report = await preparePrFailureReport({
     evidenceRoot: options['evidence-root'],
     outputRoot: options['output-root'],
     runId: options['run-id'],
     runUrl: options['run-url'],
     headSha: options['head-sha'],
-    channel: options.channel,
     suite: options.suite,
   });
   process.stdout.write(`${report.manifestPath}\n`);
