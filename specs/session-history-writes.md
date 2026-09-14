@@ -62,12 +62,18 @@ That tolerance must not authorize creating new malformed items locally.
   The CLI persists unresolved compaction as failed after confirmed cancellation,
   before accepting another turn.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
-- If Stop wins while a submitted steer awaits acceptance, a later successful ACK must
-  not transfer ownership, change the source invocation or settle the source as handled.
-  Mark that exact steer user turn `canceled` before returning `stale-turn`, without
-  changing dispatch pointers. Keep the current cancellation owner until provider completion.
-  Do not requeue the accepted steer: rejection of the local ownership transfer is not
-  proof of non-delivery.
+- A steer adapter reports one final delivery outcome: `applied`, `not-applied`, or
+  `unknown`. Only `not-applied` may return the same user turn to ordinary dispatch;
+  `applied` is already consumed, while `unknown` remains `pending_apply` with a
+  `delivery-unknown` response. Session execution does not infer delivery from Stop,
+  transport failure, or local ownership state.
+- Cancelling a turn carries an explicit pending-input policy. User Stop promotes a
+  provably `not-applied` steer; Edit & Resend, access revocation, and cleanup preserve it.
+  If Stop wins while an `applied` result is pending, the late result must not transfer
+  ownership or replay that user turn. The first cancellation policy wins repeated races.
+- Foreground run configuration belongs to its turn's Effect signal. Once that turn is
+  interrupted, an in-flight configuration request may finish, but it must not issue a
+  later configuration mutation or persist the interrupted turn's runtime patch.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned
@@ -102,5 +108,6 @@ Non-history control-field validation remains outside this HistoryWriter contract
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
+- [Interrupt pending input exactly once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.md)
 
 Draft for human review; implementation and passing tests do not grant Spec approval.

@@ -43,10 +43,16 @@ Translation: current
   也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
   和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
   将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
-- 已提交的 steer 等待接受时，若 Stop 先发生，则后到的成功 ACK 不得转移 ownership、
-  改变 source invocation 或将 source 结算为 handled。返回 `stale-turn` 前，将该 exact steer
-  用户轮次标为 `canceled`，不改变 dispatch pointer。保持当前 cancellation owner，
-  直到 provider 完成。不得重排该已接受的 steer：拒绝本地 ownership 转移不代表消息未投递。
+- steer adapter 只报告三种最终投递结果：`applied`、`not-applied` 或 `unknown`。只有
+  `not-applied` 可以把同一个用户轮次交回普通 dispatch；`applied` 表示已经消费，
+  `unknown` 则保持 `pending_apply` 并返回 `delivery-unknown`。Session execution 不根据
+  Stop、传输失败或本地 ownership 状态推断投递结果。
+- 取消 turn 必须显式携带 pending-input 策略。用户 Stop 可以提升已确定为
+  `not-applied` 的 steer；Edit & Resend、访问撤销和 cleanup 必须保持它。若 Stop 先于
+  `applied` 结果发生，晚到结果不能转移 ownership，也不能重放该用户轮次。重复取消竞争时，
+  第一次写入的策略生效。
+- foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求
+  可以结束，但不得再发送后续配置 mutation，也不得持久化被中断 turn 的 runtime patch。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 
@@ -77,5 +83,6 @@ Translation: current
 - [决策记录](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 - [业务字段修复与待定 hash 决策](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 - [外部历史基线修复](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [中断时 pending input 的 exactly-once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

@@ -432,9 +432,16 @@ export type SteerApplicationLease = {
   release: () => void;
 };
 
+export type SteerOutcome = 'applied' | 'not-applied' | 'unknown';
+
+export type SteerOutcomeResult =
+  | { outcome: 'applied'; application: SteerApplicationLease }
+  | { outcome: 'not-applied'; error: unknown }
+  | { outcome: 'unknown'; error: unknown };
+
 export type SteerPromptRun = {
   completion: Promise<acp.PromptResponse | undefined>;
-  applied: Promise<SteerApplicationLease>;
+  outcome: Promise<SteerOutcomeResult>;
 };
 
 type SteerApplicationWaiter = {
@@ -2370,7 +2377,14 @@ export class AgentClient implements acp.Client {
           : new Error(`Steer ${steerId} completed before application`)
       );
     });
-    return { completion, applied };
+    const outcome: Promise<SteerOutcomeResult> = applied.then(
+      (application) => ({ outcome: 'applied', application }),
+      (error: unknown) => ({
+        outcome: error instanceof AgentSteerNotDeliveredError ? 'not-applied' : 'unknown',
+        error,
+      })
+    );
+    return { completion, outcome };
   }
 
   private async requestSteeringExtension(
@@ -2426,9 +2440,14 @@ export class AgentClient implements acp.Client {
             )
           : error;
       });
-      const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
+      const parsed = z.object({ outcome: z.enum(['injected', 'failed']) }).safeParse(response);
       if (!parsed.success) {
         throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
+      }
+      if (parsed.data.outcome === 'failed') {
+        throw new AgentSteerNotDeliveredError(
+          `Agent reported that acknowledged steer ${steerId} was not applied`
+        );
       }
     } finally {
       if (signal && abortListener) {

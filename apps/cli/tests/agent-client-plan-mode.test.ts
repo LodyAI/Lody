@@ -422,8 +422,10 @@ describe('AgentClient plan mode permission restoration', () => {
           sessionId: 'acp-test',
           steerId,
         });
-        const lease = await steer.applied;
-        lease.release();
+        const outcome = await steer.outcome;
+        expect(outcome.outcome).toBe('applied');
+        if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
+        outcome.application.release();
         await application;
         const drain = client.pendingPromptCompletion;
         let drained = false;
@@ -476,7 +478,9 @@ describe('AgentClient plan mode permission restoration', () => {
         .then(() => {
           notificationCompleted = true;
         });
-      const lease = await steerRun.applied;
+      const outcome = await steerRun.outcome;
+      expect(outcome.outcome).toBe('applied');
+      if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
       expect(notificationCompleted).toBe(false);
       const postApplicationUpdate = client.sessionUpdate({
         sessionId: 'acp-test',
@@ -488,7 +492,7 @@ describe('AgentClient plan mode permission restoration', () => {
       await Promise.resolve();
       expect(onUpdateMessage).not.toHaveBeenCalled();
 
-      lease.release();
+      outcome.application.release();
       await notification;
       await postApplicationUpdate;
       expect(notificationCompleted).toBe(true);
@@ -522,20 +526,17 @@ describe('AgentClient plan mode permission restoration', () => {
       return { client, request: requestSpy };
     };
 
-    it('reports an acknowledged steer the agent refused as not delivered', async () => {
-      // Codex answers `No active Codex turn to steer` once the turn the guide
-      // was aimed at has ended — inject-or-refuse, so nothing was taken.
-      const { client, request } = createSteerClient(async () => {
-        throw Object.assign(new Error('Invalid request: No active Codex turn to steer'), {
-          code: -32600,
-        });
-      });
+    it('maps the Codex adapter failed verdict to not-applied', async () => {
+      const { client, request } = createSteerClient(async () => ({ outcome: 'failed' }));
 
       const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
         { type: 'text', text: 'guide' },
       ]);
 
-      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'not-applied',
+        error: expect.any(AgentSteerNotDeliveredError),
+      });
       expect(request).toHaveBeenCalledWith(
         '_session/steering',
         expect.objectContaining({ sessionId: 'acp-test', steerId: expect.any(String) })
@@ -554,12 +555,10 @@ describe('AgentClient plan mode permission restoration', () => {
         { type: 'text', text: 'guide' },
       ]);
 
-      const error = await steerRun.applied.then(
-        () => null,
-        (reason: unknown) => reason
-      );
-      expect(error).toBeInstanceOf(Error);
-      expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'unknown',
+        error: expect.not.objectContaining({ name: 'AgentSteerNotDeliveredError' }),
+      });
     });
 
     it('lets the refusal win when the steered turn ends before the agent answers', async () => {
@@ -589,7 +588,10 @@ describe('AgentClient plan mode permission restoration', () => {
         Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
       );
 
-      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'not-applied',
+        error: expect.any(AgentSteerNotDeliveredError),
+      });
     });
 
     it('handles rate limit extension notifications', async () => {

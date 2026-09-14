@@ -123,6 +123,17 @@ Requeueing a refused steer works through the pointer rather than the entry statu
 `sessionNeedsActiveWatch` reads meta only: a turn visible solely in history is dropped the
 moment the session goes idle and is never reconsidered, restart included.
 
+The execution service does not decide that interruption means non-delivery. AgentClient returns
+`applied`, `not-applied`, or `unknown`; only `not-applied` can move a steer back to ordinary
+dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop
+selects promotion, while internal cancellation such as Edit & Resend and access revocation
+preserves the pending input. `unknown` remains `pending_apply` and is surfaced as
+`delivery-unknown`, preventing an exactly-once ambiguity from becoming a duplicate prompt.
+
+Foreground ACP configuration runs with the owner Effect's `AbortSignal`. Each mutation checks
+that signal before the next mutation, so an old turn whose first configuration call finishes
+late cannot overwrite the configuration of the turn that started after Stop.
+
 ### Why resume reopens the assistant entry
 
 Teardown and cancel finalize (`message-handler.ts` `finalizeACPState`, no-turnId overload)

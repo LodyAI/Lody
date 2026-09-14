@@ -905,10 +905,10 @@ export function useSessionActions(): SessionActions {
         return true;
       }
       if (response?.disposition === 'no-active-turn') {
-        // The target prompt ended before the CLI submitted the steer. Reuse
-        // the same user turn as a normal follow-up instead of leaving it stuck
-        // in pending_apply. Other failures must not fall back because the
-        // provider may already have committed the steer.
+        // The CLI proved the steer was not applied, either before submission
+        // or from the adapter's final verdict. Reuse the same user turn as an
+        // ordinary follow-up. `delivery-unknown` and every other result stay
+        // pending_apply because replay could deliver the input twice.
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
         const promoted = await runtime.withSessionStore(

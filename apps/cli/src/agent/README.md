@@ -92,12 +92,12 @@ critical path of every session establishment while the agent process sits idle.
 
 ### Steer delivery classification
 
-The applied-waiter must wait for the steer request's own answer before giving up on the
-upstream turn's response: the Codex adapter drains session notifications before refusing,
-so the turn's response routinely wins that race and would otherwise mask the refusal. A
-closed connection, a dead agent process, or an internal error may have left the prompt
-inside the live turn, and the caller re-sends an undelivered steer — so widening the
-"not delivered" classification sends the user's message twice.
+AgentClient converts adapter evidence into `applied`, `not-applied`, or `unknown`. The
+applied-waiter must wait for the steer request's own answer before giving up on the upstream
+turn's response: Codex may finish the interrupted turn before returning its definitive
+`failed` response. A closed connection, a dead agent process, or an internal error stays
+`unknown`, because the prompt may already be inside the live turn. Session execution consumes
+this outcome without interpreting provider errors or interruption state itself.
 
 ### DeepSeek Harness is not a managed runtime
 
