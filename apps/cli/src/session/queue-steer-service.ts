@@ -178,6 +178,7 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
           yield* persist(() => doc.removeMessageQueueItem(marker.queueItemId));
         }
         yield* flush();
+        return undefined;
       });
 
       const fallback = Effect.fn('QueueSteer.fallback')(function* (

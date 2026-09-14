@@ -1624,6 +1624,7 @@ export class SessionExecutionService {
                 message: 'The active turn is stopping.',
               });
             }
+            return undefined;
           });
         const sessionDoc = yield* prepare(() =>
           self.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId)

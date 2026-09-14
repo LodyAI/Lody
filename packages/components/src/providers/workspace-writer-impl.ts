@@ -199,6 +199,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
+        return false;
       });
       if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
@@ -230,6 +231,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
               : item
           );
         });
+        return false;
       });
       if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
@@ -264,6 +266,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           }
           draft.mq = ordered;
         });
+        return false;
       });
       if (!remote) await bumpMessageQueueWatermark(sessionId);
     },
