@@ -79,6 +79,20 @@ Ownership and explanations: [README.md](README.md).
   including the iPad native shell. The bottom inset belongs to the adjacent surface
   (the composer uses `env(safe-area-inset-bottom)`); mobile insets per surface.
 
+## Conversation access
+
+- `session-sharing.tsx` owns ONE desktop header control for both access axes.
+  Team visibility picks the shape — private keeps the menu explaining its
+  inherited machine/project scope before either sharing action, anything else is
+  a plain button — and a published link picks the label in both shapes, being
+  the wider disclosure. Never add a second badge beside it; the private scope
+  stays the menu's first block.
+- `useSessionShareStatus` is the only cloud read a header makes while the share
+  editor is CLOSED: the management row, never a source document. `unknown` reads
+  as not-yet-shared, so the label upgrades in place instead of flashing in.
+- The page owns that editor: header control and `…` menu open the same
+  `SessionShareDialog`, keyed by session id so a switching tab cannot retarget it.
+
 ## Local projects
 
 - Adding a folder is a workspace action, not a this-machine action: the picker chooses

@@ -18,6 +18,17 @@ export type SessionSharingState = {
   projectName: string | null;
 };
 
+/**
+ * Whether a conversation is already published as a static share link.
+ *
+ * `unknown` covers both "the control plane has not answered yet" and "this
+ * build has no cloud", so a header never claims a conversation is unshared
+ * before it knows. Team visibility (`SessionSharingState`) is a separate axis:
+ * a private conversation can still carry a published link, and a team-visible
+ * one can carry none.
+ */
+export type SessionPublicShareStatus = 'unknown' | 'none' | 'shared';
+
 type SessionSharingRecord = {
   machineId?: string | null;
   project?: { kind?: string; localProjectId?: string | null } | null;

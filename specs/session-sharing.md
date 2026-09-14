@@ -68,6 +68,13 @@ Administrators and owners can inspect the workspace's share inventory and revoke
 others' shares, but cannot obtain others' link secrets or take over publication.
 Source metadata is not an author-identity certificate.
 
+The conversation header states publication where the consequence is: one control
+carries both team visibility and the published link, and a conversation with an
+active share rooted at it reads as shared whether or not it is private. It
+reports only that share, so a conversation published inside someone else's
+share still reads as unshared, and it never claims "not shared" before the
+control plane answers. Publication still starts only from the editor.
+
 Settings → Share management lists successfully published shares, not unfinished
 uploads. Ordinary members see their own shares; administrators see the workspace
 inventory. The list is paginated and shows title, status, conversation count and
@@ -185,6 +192,9 @@ are disclosed before confirmation, never fetched with workspace authority.
 Reader production-build browser checks cover layout, pinned deployments,
 credential changes, revocation and inert media. Service integration is validated
 separately; no hosted deployment or native-device acceptance is asserted here.
+
+The conversation header reads the same management row read-only to state
+publication; it is capability-gated, so a local build makes no such request.
 
 [Package](../packages/shared/src/session-share-package.ts),
 [exporter](../packages/shared/src/session-share-export.ts),
