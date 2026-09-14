@@ -59,6 +59,20 @@ replacing a disclosure or connector with ⋯ therefore leaves the title in place
 context-menu expand/collapse action uses the disclosure's callback, so either route
 changes the same tree state.
 
+The connector is drawn from the slot, but its length encodes the ROW: the trunk
+reaches 8px above and 9px below the 14px slot, which is exactly one 30px row (a 1px
+border, `py-1`, and a 20px title line) plus the list's 1px `gap-px`. So one row's
+trunk ends where the next one's begins and a nested group reads as one continuous
+line. A caller that gives its rows a different box — taller padding, a larger title
+line, no gap — gets a dash per row instead, which is how the anonymous share reader's
+tree first shipped. Reuse the slot and the row box together, or neither.
+
+Row selection is painted by the TITLE box, not by the row: the trunk and elbow pass
+through the gutter of rows they do not belong to, and a tint stretched across that
+gutter interrupts the line it crosses. The app's sidebar rows tint the whole row
+because their gutter is inside the tinted box already; a reuser that indents the
+highlight instead must keep it clear of the 7px connector centre.
+
 That slot used to hold status as well, with status winning: an active child dropped its
 trunk and elbow, and an active opener dropped its disclosure, because a node can show
 only one thing at its centre. The cost of that rule was backwards. Working, unread, and

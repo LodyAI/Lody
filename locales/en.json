@@ -4049,6 +4049,7 @@
   "sharing.loading": "Loading shared conversation…",
   "sharing.defaultTitle": "Shared conversation",
   "sharing.conversationTree": "Conversation tree",
+  "sharing.resizeTree": "Resize the conversation tree",
   "sharing.appearance": "Appearance: {{mode}}",
   "sharing.conversations": "Shared conversations",
   "sharing.signIn": "Sign in to Lody",

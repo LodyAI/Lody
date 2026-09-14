@@ -4049,6 +4049,7 @@
   "sharing.loading": "正在加载分享对话…",
   "sharing.defaultTitle": "分享对话",
   "sharing.conversationTree": "对话树",
+  "sharing.resizeTree": "调整对话树宽度",
   "sharing.appearance": "外观：{{mode}}",
   "sharing.conversations": "分享的对话",
   "sharing.signIn": "登录 Lody",

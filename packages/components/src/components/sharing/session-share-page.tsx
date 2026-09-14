@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import {
@@ -40,6 +40,7 @@ import { Button } from '@/ui/button';
 import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { Sheet, SheetContent, SheetTitle } from '@/ui/sheet';
 import { cn } from '@/lib/utils';
+import { clamp } from '@/lib/clamp';
 import { useTheme } from '@/theme-provider';
 import { SessionShareActions } from './session-share-actions';
 import {
@@ -253,6 +254,28 @@ function ShareConversationPane({
 
 const loadingSnapshot: SessionShareReaderSnapshot = { status: 'loading', history: [] };
 
+/** Width the tree opens at, matching the fixed `w-56` it had before it resized. */
+const TREE_DEFAULT_WIDTH = 224;
+const TREE_MIN_WIDTH = 180;
+const TREE_MAX_WIDTH = 480;
+/** The transcript is the page; never let the tree squeeze it below this. */
+const MAIN_MIN_WIDTH = 320;
+
+/**
+ * The widest the tree may be in a layout of this size.
+ *
+ * The bound follows the layout when it can be measured, so a drag — or a window
+ * the visitor makes narrower afterwards — stops while the transcript is still
+ * readable rather than at the static 480px. An unmeasurable box (0 in jsdom, or
+ * before the layout mounts) falls back to the static bound instead of collapsing
+ * the range to its minimum.
+ */
+function resolveTreeMaxWidth(availableWidth: number): number {
+  return availableWidth > 0
+    ? Math.max(TREE_MIN_WIDTH, Math.min(TREE_MAX_WIDTH, availableWidth - MAIN_MIN_WIDTH))
+    : TREE_MAX_WIDTH;
+}
+
 export function SessionShareSurface(props: {
   manifest: SharePackageManifest | null;
   sessionId: string | null;
@@ -270,6 +293,17 @@ export function SessionShareSurface(props: {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [treeVisible, setTreeVisible] = useState(true);
   const [treeSheetOpen, setTreeSheetOpen] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(TREE_DEFAULT_WIDTH);
+  const [treeMaxWidth, setTreeMaxWidth] = useState(TREE_MAX_WIDTH);
+  const [resizingTree, setResizingTree] = useState(false);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const resizeRef = useRef({ pointerId: -1, startX: 0, startWidth: TREE_DEFAULT_WIDTH });
+  /** Re-measures the bound, so the reported range and the width agree with it. */
+  const fitTreeWidth = useCallback((raw?: number) => {
+    const max = resolveTreeMaxWidth(layoutRef.current?.getBoundingClientRect().width ?? 0);
+    setTreeMaxWidth(max);
+    setTreeWidth((current) => Math.round(clamp(raw ?? current, [TREE_MIN_WIDTH, max])));
+  }, []);
   const { manifest, sessionId, status } = props;
   const tree = useMemo(() => {
     if (!manifest) return [];
@@ -288,6 +322,14 @@ export function SessionShareSurface(props: {
       }
     );
   }, [manifest, collapsed]);
+  // A window the visitor narrows afterwards must not leave a tree wide enough to
+  // crush the transcript, and the bound is only knowable once the layout exists.
+  useEffect(() => {
+    const fit = () => fitTreeWidth();
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [fitTreeWidth, status]);
   if (status === 'unavailable')
     return (
       <main className="flex min-h-dvh items-center justify-center p-8 text-center">
@@ -310,56 +352,70 @@ export function SessionShareSurface(props: {
         {t('sharing.loading', 'Loading shared conversation…')}
       </main>
     );
+  const endTreeResize = (handle: HTMLElement, pointerId: number) => {
+    if (resizeRef.current.pointerId !== pointerId) return;
+    resizeRef.current.pointerId = -1;
+    setResizingTree(false);
+    try {
+      handle.releasePointerCapture(pointerId);
+    } catch {
+      // Already released (or never captured); nothing to undo.
+    }
+  };
   const panes = resolveSharePanes(manifest, sessionId);
   const hasTree = manifest.conversations.filter((entry) => !entry.parentConversationId).length > 1;
   const title = (value: string) => value || t('sharing.defaultTitle', 'Shared conversation');
-  const treeRows = () =>
-    tree.map((node) => {
-      // A child Tab is named by the tab strip, so the tree marks the root the
-      // main pane belongs to — selecting a Tab keeps its conversation lit.
-      const active = node.id === panes.root.id;
-      return (
-        <div
-          key={node.id}
-          className={cn(
-            'flex items-center rounded-md border border-transparent transition-colors',
-            // Not `bg-accent`: `--accent` is not one of this project's theme
-            // tokens, so that utility resolved to no background at all and the
-            // tree had no visible selection. Tint the reader's own foreground,
-            // matching how the app marks a selected sidebar row.
-            active
-              ? 'border-foreground/10 bg-foreground/10'
-              : 'hover:border-foreground/5 hover:bg-foreground/5'
-          )}
-        >
-          <SessionRowLeadingSlot
-            menuLabel=""
-            openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
-              setCollapsed((previous) => {
-                const next = new Set(previous);
-                if (next.has(node.id)) next.delete(node.id);
-                else next.add(node.id);
-                return next;
-              })
-            )}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              props.onSelect(node.id);
-              setTreeSheetOpen(false);
-            }}
-            aria-current={active ? 'page' : undefined}
-            className={cn(
-              'min-w-0 flex-1 truncate px-2 py-2 text-left text-[13px]',
-              active ? 'font-medium text-foreground' : 'text-muted-foreground'
-            )}
-          >
-            {title(node.item.title)}
-          </button>
-        </div>
-      );
-    });
+  const treeRows = () => (
+    // The connector in `session-row-leading-slot.tsx` is drawn for the app's row
+    // box: it reaches 8px above and 9px below the 14px slot, which spans exactly
+    // one 30px row plus the list's 1px gap. Rows here are that box — `py-1` and a
+    // 20px title line — so a trunk ends where the next one starts and the tree
+    // reads as one line instead of a dash per row.
+    <div className="flex flex-col gap-px">
+      {tree.map((node) => {
+        // A child Tab is named by the tab strip, so the tree marks the root the
+        // main pane belongs to — selecting a Tab keeps its conversation lit.
+        const active = node.id === panes.root.id;
+        return (
+          <div key={node.id} className="flex items-center">
+            <SessionRowLeadingSlot
+              menuLabel=""
+              openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
+                setCollapsed((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(node.id)) next.delete(node.id);
+                  else next.add(node.id);
+                  return next;
+                })
+              )}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                props.onSelect(node.id);
+                setTreeSheetOpen(false);
+              }}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                // Selection and hover paint the title box only, never the slot
+                // beside it: the trunk and elbow pass through rows they do not
+                // belong to, and a tinted chip across that gutter cuts the line
+                // in two. Not `bg-accent` either — `--accent` is not one of this
+                // project's theme tokens, so that utility painted nothing at all.
+                // Tint the reader's own foreground, as the app's sidebar does.
+                'min-w-0 flex-1 truncate rounded-md border px-2 py-1 text-left text-sm transition-colors',
+                active
+                  ? 'border-foreground/10 bg-foreground/10 font-medium text-foreground'
+                  : 'border-transparent text-muted-foreground hover:border-foreground/5 hover:bg-foreground/5'
+              )}
+            >
+              {title(node.item.title)}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
   return (
     <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
@@ -399,26 +455,88 @@ export function SessionShareSurface(props: {
           <ShareViewerIdentity viewer={viewer} />
         </div>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+      <div
+        ref={layoutRef}
+        className={cn(
+          'relative flex min-h-0 flex-1 flex-col sm:flex-row',
+          // A drag must not select the titles it passes over.
+          resizingTree && 'select-none'
+        )}
+      >
         {hasTree && (
           // The toggle animates width rather than mounting and unmounting: a
           // conditional element cannot transition, so the tree used to blink in
           // and out and shove the transcript sideways with it. The inner column
           // keeps its own width so the rows slide out of a clipping box instead
-          // of reflowing to nothing on the way.
+          // of reflowing to nothing on the way. A drag drops the transition —
+          // animating every pointer move would trail the cursor.
           <nav
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
             inert={!treeVisible || undefined}
+            style={{ width: treeVisible ? treeWidth : 0 }}
             className={cn(
-              'hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-out',
-              'motion-reduce:transition-none sm:block',
-              treeVisible ? 'sm:w-56' : 'sm:w-0'
+              'hidden shrink-0 overflow-hidden sm:block',
+              resizingTree
+                ? 'transition-none'
+                : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
             )}
           >
-            <div className="h-full w-56 overflow-y-auto border-r border-border bg-muted/20 p-2">
+            <div
+              style={{ width: treeWidth }}
+              className="h-full overflow-y-auto border-r border-border bg-muted/20 p-2"
+            >
               {treeRows()}
             </div>
           </nav>
+        )}
+        {hasTree && treeVisible && (
+          // A 12px grab area straddling the tree's border, with a 2px line as the
+          // visible affordance. Absolute, so the columns keep their own widths and
+          // the handle cannot claim layout space of its own. Arrow keys step it for
+          // a visitor who is not dragging anything.
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
+            aria-valuenow={treeWidth}
+            aria-valuemin={TREE_MIN_WIDTH}
+            aria-valuemax={treeMaxWidth}
+            tabIndex={0}
+            style={{ left: treeWidth }}
+            className={cn(
+              'absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize sm:block',
+              'after:absolute after:inset-y-0 after:left-[5px] after:w-[2px] after:transition-colors',
+              'focus-visible:outline-hidden focus-visible:after:bg-foreground/40',
+              resizingTree ? 'after:bg-foreground/30' : 'hover:after:bg-foreground/20'
+            )}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              } catch {
+                // Capture is unavailable in some environments; the drag still tracks moves.
+              }
+              resizeRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startWidth: treeWidth,
+              };
+              setResizingTree(true);
+            }}
+            onPointerMove={(event) => {
+              const { pointerId, startX, startWidth } = resizeRef.current;
+              if (pointerId !== event.pointerId) return;
+              fitTreeWidth(startWidth + (event.clientX - startX));
+            }}
+            onPointerUp={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+            onPointerCancel={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+              event.preventDefault();
+              fitTreeWidth(treeWidth + (event.key === 'ArrowLeft' ? -16 : 16));
+            }}
+          />
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ShareConversationPane
