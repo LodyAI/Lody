@@ -32,9 +32,10 @@ row until history and its activation pointer are durable. Missing, editing, and 
 do neither.
 Before either remote queue control is written, the shared
 [source authorizer](../../packages/components/src/providers/session-control-authorization.ts)
-matches session metadata to the target machine and applies the existing session visibility
-policy to authenticated machine/project snapshots and current user. Incomplete snapshots fail
-closed; shared machine access does not expose another user's private project. Local routing
+matches session metadata to the target machine and requires current machine access plus
+matching project access for local-project sessions. Unlike UI visibility, control has no
+session-owner fallback: authorship cannot override revoked access. Incomplete snapshots fail
+closed. Local routing
 with an unavailable sender fails locally without creating a Streams client.
 The retained request contains no requester identity:
 the target daemon cannot authenticate such a claim and must not grant its owner fast path from it.

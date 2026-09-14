@@ -110,7 +110,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           authorization: {
             visibleMachineIds: new Set(visibleMachineIndex.convexAuthorizedMachineIds),
             visibleLocalProjectKeys: new Set(visibleProjectIndex.accessByProjectKey.keys()),
-            currentUserId,
           },
         };
   const authorizedMachineIdsRef = useRef<{

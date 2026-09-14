@@ -30,7 +30,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
         : {
             visibleMachineIds: new Set([remoteMachineId]),
             visibleLocalProjectKeys: new Set<string>(),
-            currentUserId: 'user-U',
           };
     const getMachineRpcClient = vi.fn(async () => {
       throw new Error('Remote client must not be created');

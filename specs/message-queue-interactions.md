@@ -48,9 +48,10 @@ the queue by hand.
 
   Both `session/queue-steer` and `session/queue-mutate` must pass one source-side session
   authorization before a remote request is written. The session metadata must match the target
-  machine; access follows `isSessionVisibleToUser` using authenticated machine visibility,
-  local-project visibility and the current user. Visible machine access alone does not grant
-  access to another user's private local-project session. Missing metadata or an incomplete
+  machine; control requires current authenticated machine access and, for local-project sessions,
+  matching project access. Control policy is separate from UI visibility: session authorship
+  never grants control or overrides revoked access, even if the UI still displays the session.
+  Missing metadata or an incomplete
   authorization snapshot fails closed, with no machine-only fallback.
   The request carries no requester identity: workspace Machine RPC cannot
   authenticate a caller-supplied member ID, and the target daemon must not use one for an owner

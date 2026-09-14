@@ -56,9 +56,12 @@ Provider requester identity comes from the active invocation, not the shared que
 Ordinary turn and composer routing remain unchanged.
 
 The source facade shares [session authorization](../../../../packages/components/src/providers/session-control-authorization.ts)
-between queue Steer and mutation, using the existing session visibility predicate and complete
-authenticated machine/project snapshots. A machine-only check would expose private-project
-sessions. RuntimeProvider supplies a workspace-fenced snapshot; missing metadata or authorization
+between queue Steer and mutation, using complete authenticated machine/project snapshots.
+Control requires machine access plus matching project access for local-project sessions.
+Reusing UI visibility was incorrect: its intentional session-owner fallback permits display
+after machine access is revoked, but must not grant control. The control contract therefore
+contains no currentUserId or session-owner input and does not call the visibility predicate.
+RuntimeProvider supplies a workspace-fenced snapshot; missing metadata or authorization
 fails closed. Routing plane is decided independently of sender availability: local failure cannot
 fall through to Streams. The target daemon cannot authenticate a caller identity from this RPC.
 
@@ -120,7 +123,9 @@ No race assertion depends on sleeps or real network scheduling.
 
 The execution suite connects the real source facade, Streams client/server, LoroDoc and execution
 service over an in-memory transport. A visible machine with a denied private project rejects
-both controls with zero appends, no marker, and unchanged queue/history/active turn. Local routing
+both controls with zero appends, no marker, and unchanged queue/history/active turn. The same
+trace covers session creators with revoked machine or denied project access, even while UI
+visibility remains true; a retained project grant cannot override machine revocation. Local routing
 with no sender also rejects without constructing the remote client. A positive project-access
 control reaches the daemon and applies C. Restart and in-request pre-history recovery both allow
 the same C/T to proceed. These are deterministic synthetic traces, not production-user traces.

@@ -53,8 +53,10 @@ Queue 服务不读取 runtime map、agentClient、promptInFlight、invocation �
 SessionExecutionServiceDeps。既有普通 turn 与 composer 路由不变。
 
 Source facade 为队列 Steer 和 mutation 共用 [session 授权](../../../../packages/components/src/providers/session-control-authorization.ts)，
-使用已有 session visibility 判断和完整的已认证 machine/project 快照。Machine-only 检查会暴露
-私有项目 session。RuntimeProvider 提供按 workspace 隔离的快照；metadata 或授权缺失时
+使用完整的已认证 machine/project 快照。控制需要 machine 权限，local-project session 还需
+对应项目权限。复用 UI visibility 是错误的：它刻意允许 session 创建者在 machine 权限撤销后
+仍看到 session，但不能据此授予控制权。因此控制契约不包含 currentUserId 或 session owner，
+也不调用 visibility predicate。RuntimeProvider 提供按 workspace 隔离的快照；metadata 或授权缺失时
 fail closed。Routing plane 独立于 sender 可用性，local 失败不能落入 Streams。
 目标 daemon 无法从此 RPC 认证调用方身份。
 
@@ -109,7 +111,8 @@ receipt/restart，以及真实 LoroDoc 上的 reservation 与 edit/remove/reorde
 
 Execution suite 用内存传输连接真实 source facade、Streams client/server、LoroDoc 和
 execution service。Machine 可见但私有项目不可见时，两种 control 均拒绝：零 append、无 marker，
-queue/history/active turn 不变。Local 缺 sender 同样拒绝且不创建远程 client。开放项目权限的
+queue/history/active turn 不变。同一 trace 覆盖 session 创建者被撤销 machine 或拒绝项目权限，
+即使 UI visibility 仍为 true；残留项目权限不能绕过 machine 撤权。Local 缺 sender 同样拒绝且不创建远程 client。开放项目权限的
 正向对照可到达 daemon 并应用 C。重启恢复和请求内 pre-history 恢复都允许相同 C/T 继续。
 这些是确定性合成数据 trace，不是生产用户 trace。
 

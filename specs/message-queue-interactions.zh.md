@@ -41,9 +41,10 @@ Translation: current
   失败推断未交付。
 
   `session/queue-steer` 与 `session/queue-mutate` 在写入远程请求前，必须共用 source-side
-  session 授权。Session metadata 必须匹配目标 machine；权限通过 `isSessionVisibleToUser`
-  根据已认证的 machine visibility、local-project visibility 和 current user 判断。
-  Machine 可见不意味着其他用户的私有 local-project session 可见。Metadata 缺失或授权快照
+  session 控制授权。Session metadata 必须匹配目标 machine；控制必须具备当前已认证的
+  machine 访问权限，local-project session 还必须具备对应项目权限。控制策略独立于 UI
+  visibility：创建 session 不授予控制权，也不能绕过权限撤销，即使 UI 仍显示该 session。
+  Metadata 缺失或授权快照
   不完整时 fail closed，绝不降级成 machine-only 检查。
   请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
   声称的成员 ID，目标 daemon 也不得用它命中 owner fast path。同机 local IPC 已是可信的
