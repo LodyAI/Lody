@@ -8,10 +8,10 @@ import {
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
-  DEEPSEEK_HARNESS_NPX_PACKAGES,
   DEEPSEEK_HARNESS_PROFILE_FILENAMES,
   DEEPSEEK_HARNESS_PROFILE_NAME,
   DEEPSEEK_HARNESS_VERSION,
+  createDeepSeekHarnessNpxSpecifiers,
   createDeepSeekHarnessProfileFiles,
   type DeepSeekHarnessSessionCompression,
 } from 'acp-extension-dsh/profile';
@@ -174,10 +174,10 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     args: [
       '--prefer-offline',
       '-y',
-      ...DEEPSEEK_HARNESS_NPX_PACKAGES.flatMap((packageName) => [
-        '--package',
-        `${packageName}@${DEEPSEEK_HARNESS_VERSION}`,
-      ]),
+      // Exact `name@version` specifiers: the Cordis-ecosystem packages version
+      // independently of the Harness family and have no release at
+      // `DEEPSEEK_HARNESS_VERSION`.
+      ...createDeepSeekHarnessNpxSpecifiers().flatMap((specifier) => ['--package', specifier]),
       'dsh',
       '--profile',
       profileName,

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   DEEPSEEK_HARNESS_HOME_ENV,
+  DEEPSEEK_HARNESS_VERSION,
   DeepSeekHarnessMixedSessionCompressionError,
   resolveDeepSeekHarnessHome,
   resolveDeepSeekHarnessProcessLaunch,
@@ -133,6 +134,11 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(launch.args).not.toContain('--force');
     expect(launch.args).not.toContain('--legacy-peer-deps');
     expect(launch.args).not.toContain('@deepseek-ai/dsh@0.1.0-rc.6');
+    // The Cordis ecosystem versions independently of the Harness family, and
+    // a `DEEPSEEK_HARNESS_VERSION` specifier for it fails the cold install.
+    expect(launch.args).toContain('@deepseek-ai/cordis@4.0.2');
+    expect(launch.args).toContain('@deepseek-ai/cordis-plugin-hmr@1.0.17');
+    expect(launch.args).not.toContain(`@deepseek-ai/cordis@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);
     expect(await readdir(rootDir)).toEqual(expect.arrayContaining(['profiles', 'sessions']));
   });
