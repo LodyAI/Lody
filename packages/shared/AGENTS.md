@@ -18,8 +18,10 @@ restore/delete retain containment-only targets. See [relations](../../specs/sess
   diagnostics; they must not leave partial history writes. Keep stored unknown fields
   and unchanged opaque items; do not sanitize/rewrite a whole stored document.
 - New inputs use the shared message parsers. Known protocol extension dictionaries
-  retain JSON data, not arbitrary JS objects. Storage layout stays separate: coordinate
-  any `Any.storageSchema` adoption with its Mirror patch, including rollback.
+  retain JSON data, not arbitrary JS objects. Storage layout is an insertion policy in
+  `schema.ts`: new metadata strings stay primitive and `LoroText` is declared only for
+  streaming fields, at every nesting level. Stored values keep their representation and
+  opening never rewrites them.
 
 - Parser coverage must include nested discriminators (`system_notice.name`) and
   correlated metadata, not just item `type`. Fork regression tests must cross the
@@ -56,11 +58,8 @@ restore/delete retain containment-only targets. See [relations](../../specs/sess
 - Permission responses inspect request metadata and materialize only the matching turn;
   a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
   `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
-- The pinned Mirror text-event patch copies only an existing single text leaf's path.
-  Preserve descriptors, old snapshots and subscriber delivery; structural/multi-event/tree
-  paths retain the general reader. Future Mirror patches must compose with this patch,
-  never silently replace it. No storage schema or write validation depends on this optimization.
-
+- Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
+  exists and no storage schema or write validation depends on it.
 
 ## Machine protocol negotiation
 

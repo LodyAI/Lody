@@ -24,7 +24,14 @@ That tolerance must not authorize creating new malformed items locally.
   dictionaries remain JSON-valued. Preserve unknown stored fields and untouched
   unknown/damaged items; reading is not a migration or permission to scrub data.
 - Existing primitive strings remain primitive; existing Text edits retain their
-  container identity. Storage-layout changes are separately reviewed.
+  container identity. New writes store an ordinary metadata string (tool `title`/`status`/
+  `kind`/`toolCallId`, a `locations[].path`) as a primitive, and create a Text container
+  only for fields that stream (`text`/`thought`, `markdown`, a tool block's `text`/`output`
+  and nested `content.text`, a worktree step's `output`). The rule holds at every nesting
+  level: nested tool/worktree metadata such as `command`, `path`, `args`, `cwd`,
+  `terminalId` and `input` values is primitive, never Text. This is an insertion policy:
+  not a migration, no rewrapping of stored values, and no validation constraint on old or
+  future payloads. Storage-layout changes are separately reviewed.
 - Fork is a stored-history copy, not new-message authoring. Copy from a snapshot
   captured by the writer, retaining target initialization rows and unchanged unknown fields
   and opaque items. Explicit changes and new fork notices still require parsing.

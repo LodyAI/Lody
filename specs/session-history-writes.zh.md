@@ -18,7 +18,13 @@ Translation: current
   保留旧值；另一条合法命令仍可执行。不重新校验无关旧 item。
 - 闭合的新输入对象过滤未知字段，明确的协议扩展字典仍保存 JSON 数据。
   保留已存储的未知字段，以及未修改的未知/损坏 item；读取不意味着迁移或清理数据。
-- 已有 primitive 字符串不升级容器；已有 Text 编辑保留容器身份。存储布局变更单独审查。
+- 已有 primitive 字符串不升级容器；已有 Text 编辑保留容器身份。新写入把普通元数据字符串
+  （工具的 `title`/`status`/`kind`/`toolCallId`、`locations[].path`）存为 primitive，
+  只为真正流式增长的字段创建 Text 容器（`text`/`thought`、`markdown`、工具 block 的
+  `text`/`output` 及嵌套 `content.text`、worktree step 的 `output`）。该规则对每个嵌套层级
+  都成立：嵌套的工具/worktree 元数据如 `command`、`path`、`args`、`cwd`、`terminalId` 和
+  `input` 值都是 primitive，绝不存为 Text。这是一条插入策略：不是迁移，不重写已存储的值，
+  也不对旧数据或未来 payload 增加校验约束。存储布局变更单独审查。
 - Fork 是复制已存历史，不是创建新消息。只能从 writer 捕获的快照复制，保留目标初始化日志，
   保留未改动的未知字段和不透明 item；显式修改及新增 fork notice 仍需解析。
   复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。

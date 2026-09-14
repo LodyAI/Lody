@@ -24,7 +24,10 @@ import type { InferContainerOptions, SchemaType } from 'loro-mirror';
  * - A field with an `Any` schema infers: plain object → `LoroMap`, array →
  *   `LoroList`, string → `LoroText` only when that `Any` set
  *   `defaultLoroText`. Schema-less descendants inherit the inference options
- *   of the `Any` they were created under.
+ *   of the `Any` they were created under. An explicit `storageSchema` hint on
+ *   the `Any` field overrides inference when the new value matches the hinted
+ *   container kind; raw `Mirror.setState` does not read hints, so hinted
+ *   layouts exist only because HistoryWriter owns every history write.
  * - A field with a primitive schema (or an unknown key on a map with no
  *   catchall) is set as a plain value after the schema's `encode` transform.
  * - `$cid` and `undefined` values are never written.
@@ -79,7 +82,9 @@ export function getMapFieldSchema(
   if (!isMapSchema(schema)) return undefined;
   if (Object.prototype.hasOwnProperty.call(schema.definition, key)) {
     const field = schema.definition[key];
-    // #443's optional hints require coordinated adoption of its Mirror patch.
+    // `schema.ts` marks genuinely streaming fields with an explicit `storageSchema`
+    // insertion hint. It is a storage policy, never a validation constraint, and it
+    // applies only when the new value's kind matches the hinted container.
     const storage =
       field?.type === 'any'
         ? (field.options as InferContainerOptions & { storageSchema?: SchemaType }).storageSchema
