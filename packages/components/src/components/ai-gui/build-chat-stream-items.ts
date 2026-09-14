@@ -131,10 +131,9 @@ const placeholderItemFor = (row: TurnIndexRow, turnIndex: number): PlaceholderSe
  *     are random UUIDs so collisions are improbable, but this is cheap insurance
  *     so a single corrupt doc cannot permanently break the layout.
  *
- * `lastAssistantMessageId` / `lastCompletedAssistantMessageId` come from the
- * index over the WHOLE conversation with the same empty-entry rule, so
- * context-window usage / quick actions attach to the last rendered assistant
- * message whether or not it is hydrated.
+ * `lastAssistantMessageId` / completion / forkability come from the index over
+ * the WHOLE conversation with the same empty-entry rule, so actions attach to
+ * the correct rendered assistant whether or not it is hydrated.
  */
 export function buildChatStreamItems(
   view: ConversationView | null,
@@ -149,11 +148,15 @@ export function buildChatStreamItems(
       items: [EMPTY_CHAT_STREAM_ITEM],
       lastAssistantMessageId: null,
       lastCompletedAssistantMessageId: null,
+      lastForkableAssistantMessageId: null,
       cache,
     };
   }
-  const { lastAssistantMessageId, lastCompletedAssistantMessageId } =
-    resolveLastAssistantTurnIds(view);
+  const {
+    lastAssistantMessageId,
+    lastCompletedAssistantMessageId,
+    lastForkableAssistantMessageId,
+  } = resolveLastAssistantTurnIds(view);
   /** Config from the latest user turn — attached to the following assistant
    *  so the model meta row can show the full turn run-config on demand. A
    *  non-hydrated user turn resets it: the header then shows nothing rather
@@ -228,8 +231,15 @@ export function buildChatStreamItems(
       items: [EMPTY_CHAT_STREAM_ITEM],
       lastAssistantMessageId: null,
       lastCompletedAssistantMessageId: null,
+      lastForkableAssistantMessageId: null,
       cache,
     };
   }
-  return { items, lastAssistantMessageId, lastCompletedAssistantMessageId, cache };
+  return {
+    items,
+    lastAssistantMessageId,
+    lastCompletedAssistantMessageId,
+    lastForkableAssistantMessageId,
+    cache,
+  };
 }

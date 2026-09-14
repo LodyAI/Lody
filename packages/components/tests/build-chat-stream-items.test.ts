@@ -87,6 +87,91 @@ describe('buildChatStreamItems', () => {
     expect(lastCompletedAssistantMessageId).toBe('a1');
   });
 
+  it('tracks the latest completed non-autonomous ACP assistant as forkable', () => {
+    const { lastCompletedAssistantMessageId, lastForkableAssistantMessageId } =
+      buildChatStreamItems(
+        [
+          {
+            ...entry({ id: 'a1', role: 'assistant', items: [text('answer')] }),
+            acpTurnId: 'turn-1',
+            finished: true,
+          },
+          {
+            ...entry({ id: 'auto-1', role: 'assistant', items: [text('scheduled')] }),
+            acpTurnId: 'auto:41',
+            finished: true,
+          },
+        ],
+        sessionId
+      );
+
+    expect(lastCompletedAssistantMessageId).toBe('auto-1');
+    expect(lastForkableAssistantMessageId).toBe('a1');
+  });
+
+  it('does not expose an autonomous-only history as forkable', () => {
+    const { lastForkableAssistantMessageId } = buildChatStreamItems(
+      [
+        {
+          ...entry({ id: 'auto-1', role: 'assistant', items: [text('scheduled')] }),
+          acpTurnId: 'auto:41',
+          finished: true,
+        },
+      ],
+      sessionId
+    );
+
+    expect(lastForkableAssistantMessageId).toBeNull();
+  });
+
+  it('keeps legacy completed assistants without a provider turn id forkable', () => {
+    const { lastForkableAssistantMessageId } = buildChatStreamItems(
+      [
+        {
+          ...entry({ id: 'legacy-1', role: 'assistant', items: [text('old answer')] }),
+          finished: true,
+        },
+      ],
+      sessionId
+    );
+
+    expect(lastForkableAssistantMessageId).toBe('legacy-1');
+  });
+
+  it('treats an empty provider turn id as legacy metadata', () => {
+    const { lastForkableAssistantMessageId } = buildChatStreamItems(
+      [
+        {
+          ...entry({ id: 'legacy-empty', role: 'assistant', items: [text('old answer')] }),
+          acpTurnId: '',
+          finished: true,
+        },
+      ],
+      sessionId
+    );
+
+    expect(lastForkableAssistantMessageId).toBe('legacy-empty');
+  });
+
+  it('keeps the completed forkable assistant behind a streaming suffix', () => {
+    const { lastForkableAssistantMessageId } = buildChatStreamItems(
+      [
+        {
+          ...entry({ id: 'a1', role: 'assistant', items: [text('answer')] }),
+          acpTurnId: 'turn-1',
+          finished: true,
+        },
+        {
+          ...entry({ id: 'a2', role: 'assistant', items: [text('streaming')] }),
+          acpTurnId: 'turn-2',
+        },
+      ],
+      sessionId
+    );
+
+    expect(lastForkableAssistantMessageId).toBe('a1');
+  });
+
   it('drops empty assistant entries (no items, no plan) left by interrupted turns', () => {
     const { items } = buildChatStreamItems(
       [

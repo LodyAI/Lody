@@ -69,11 +69,21 @@ describe('SessionTransientStore', () => {
       expect(store.get(id).engineTurn).toBeUndefined();
     });
 
+    it('returns the current owner only for its autonomous assistant entry', () => {
+      const store = new SessionTransientStore();
+      const id = sid('s1');
+      store.noteEngineTurnActivity(id, 'auto:42');
+
+      expect(store.getEngineTurnOwnerForCancel(id, 'assistant:autonomous-auto:41')).toBeUndefined();
+      expect(store.getEngineTurnOwnerForCancel(id, 'assistant:autonomous-auto:42')).toBe('auto:42');
+      expect(store.getEngineTurnOwnerForCancel(id, 'assistant:client-turn')).toBeUndefined();
+    });
+
     it('clears unconditionally on process termination', () => {
       const store = new SessionTransientStore();
       const id = sid('s1');
       store.noteEngineTurnActivity(id, 'auto:41');
-      store.clearEngineTurnActivity(id);
+      expect(store.clearEngineTurnActivity(id)).toBe(true);
       expect(store.isEngineTurnActive(id)).toBe(false);
     });
   });

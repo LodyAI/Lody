@@ -2981,7 +2981,13 @@ export class MessageHandler {
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
       isEngineTurnActive: (sessionId) => this.store.isEngineTurnActive(sessionId),
-      clearEngineTurnActivity: (sessionId) => this.store.clearEngineTurnActivity(sessionId),
+      getEngineTurnOwnerForCancel: (sessionId, assistantEntryId) =>
+        this.store.getEngineTurnOwnerForCancel(sessionId, assistantEntryId),
+      clearEngineTurnActivity: (sessionId, acpTurnId) => {
+        if (this.store.clearEngineTurnActivity(sessionId, acpTurnId)) {
+          this.executionService.notifyEngineTurnReleased(sessionId);
+        }
+      },
       hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
@@ -4047,6 +4053,7 @@ export class MessageHandler {
     // Some best-effort deletion tails may consult transient session state for
     // diagnostics. Re-assert the deletion barrier before returning so those
     // reads cannot leave an empty state record behind.
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
     void this.worktreeGc.schedule();
   }
@@ -4305,6 +4312,19 @@ export class MessageHandler {
     // window carries its own identity (replay carries no autonomous marker)
     // and must never be swallowed as replay.
     const autonomousTarget = this.autonomousACPUpdateTarget(sessionId, update);
+    // Kimi publishes this metadata-only marker at `turn.started` so admission
+    // can see an engine owner before its first output. It is not history: the
+    // shared applier maps session_info_update to no content, but routing it to
+    // an autonomous target would still materialize a blank assistant entry.
+    if (
+      autonomousTarget !== undefined &&
+      update.update.sessionUpdate === 'session_info_update' &&
+      !readLodyTurnEnded(update.update) &&
+      !('title' in update.update) &&
+      !('updatedAt' in update.update)
+    ) {
+      return;
+    }
     if (autonomousTarget === undefined && this.store.recordSuppressedAcpReplay(sessionId)) {
       return;
     }
@@ -4345,7 +4365,9 @@ export class MessageHandler {
     const target = autonomousACPUpdateTargetFrom(update);
     if (target) {
       if (readLodyTurnEnded(update.update)) {
-        this.store.clearEngineTurnActivity(sessionId, target.turnId);
+        if (this.store.clearEngineTurnActivity(sessionId, target.turnId)) {
+          this.executionService?.notifyEngineTurnReleased(sessionId);
+        }
       } else {
         this.store.noteEngineTurnActivity(sessionId, target.turnId);
       }
@@ -4358,7 +4380,9 @@ export class MessageHandler {
 
   /** Clear the engine-turn activity marker (ACP process termination). */
   clearEngineTurnActivity(sessionId: SessionId): void {
-    this.store.clearEngineTurnActivity(sessionId);
+    if (this.store.clearEngineTurnActivity(sessionId)) {
+      this.executionService?.notifyEngineTurnReleased(sessionId);
+    }
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -4394,6 +4418,7 @@ export class MessageHandler {
       state.acpUpdateBuffer = [];
     }
     await this.quiesceCodeCollabTurnPersistenceForDeletion(sessionId);
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
   }
 
@@ -9642,6 +9667,7 @@ export class MessageHandler {
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
 
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);

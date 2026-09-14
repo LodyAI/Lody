@@ -479,7 +479,10 @@ export interface SessionChatStreamViewProps {
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
   lastAssistantMessageId?: string | null;
+  /** @deprecated Prefer lastForkableAssistantMessageId. */
   lastCompletedAssistantMessageId?: string | null;
+  /** Most recent completed assistant entry that can be forked from session-level controls. */
+  lastForkableAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
@@ -1249,6 +1252,7 @@ export const SessionChatStreamView = forwardRef<
       onOpenHtmlFile,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
+      lastForkableAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
       assistantActions,
       assistantActionsMessageId = null,
@@ -1882,12 +1886,11 @@ export const SessionChatStreamView = forwardRef<
                   }
 
                   const canForkAssistantMessage =
-                    row.item.message.finished === true &&
-                    !(
-                      row.item.message.acpTurnId && isAutonomousTurnId(row.item.message.acpTurnId)
-                    ) &&
-                    (row.item.message.id === lastCompletedAssistantMessageId ||
-                      Boolean(row.item.message.acpTurnId));
+                    row.item.message.id ===
+                      (lastForkableAssistantMessageId ?? lastCompletedAssistantMessageId) ||
+                    (row.item.message.finished === true &&
+                      row.item.message.acpTurnId !== undefined &&
+                      !isAutonomousTurnId(row.item.message.acpTurnId));
                   const fileDiffOverride =
                     messageFileDiffEntriesByTurn === undefined
                       ? undefined

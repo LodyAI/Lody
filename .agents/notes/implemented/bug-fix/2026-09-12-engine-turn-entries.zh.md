@@ -47,7 +47,16 @@ runtime 的可行兜底，用精确性换部署便利）。
   终结标记或 ACP 进程终止时清除（活性以进程为界，不用墙钟——标记丢失的轮次在其进程
   死亡时立即释放会话）。`hasActiveTurn` 读取它，空闲 GC 便无法在引擎轮次中途回收 agent
   进程；live-status RPC 把 `unknown` 升级为 `running`，session 不再在引擎轮次工作时
-  显示"已完成"。
+  显示"已完成"。Kimi ACP server 现在会在 `turn.started`、首个内容增量之前发出仅含元数据的
+  所有权标记，因而保护覆盖整个引擎轮次生命周期，而不是延后才开始。
+- 自主条目的 Session Stop 会在取得 rewrite barrier 前后，都把该条目 id 解析为当前活动标记。
+  只有相符的 ACP owner 才会收到 session 级 cancel；活动标记和 presence 的清理也绑定 owner，
+  因而迟到的 Stop 不会抹掉替换后的引擎轮次。
+- 需要 prompt 的 Goal action 把引擎活动标记视作已占用的 session prompt slot。其 worker 会等
+  匹配的终结标记、进程终止或成功 Stop 释放该 slot，随后在提交给 provider 前再次检查。Kimi 的
+  起始标记关闭了此前“首条带标更新之前”的窗口；未打标 provider 仍保留旧限制。
+- 删除 session 也是引擎释放边界：MessageHandler 在丢弃 transient session state 前清除标记并
+  唤醒 Goal waiter，因此 eviction 不会把 waiter 永久挂在已删除的 session 上。
 
 ## 备选与取舍
 
@@ -62,6 +71,9 @@ runtime 的可行兜底，用精确性换部署便利）。
 - 面向普通打标 id 的通用属主路由层（把轮次 N 的迟到 chunk 路由回轮次 N 的条目）为把
   影响面收窄到 kimi 专属而砍掉：跨进下一轮次的残片保持其既有的合并行为，不为它新增
   代码路径。
+- 把引擎 owner 表示为伪造的客户端 `activeTurnId` 也被否决：客户端 release waiter 标识的是
+  真实 `TurnRuntimeState` owner，`auto:<n>` 会制造错误的 release signal。独立的
+  engine-release waiter 保持这条边界，同时仍让 Goal admission 等待。
 - task wake 轮次现在也会渲染为独立条目，把持有中的 subagent 汇报和发起它的用户轮次
   分开。这与引擎自己的轮次模型一致，但属于可见变化，值得在 subagent UX 里验证。
 - 遗留 follow-up：replay/import 不分类 cron fire，重新加载的 session 仍可能把 cron-fire
@@ -74,17 +86,21 @@ runtime 的可行兜底，用精确性换部署便利）。
   后一秒触发，其最终文本被持久化为该用户轮次 assistant 条目的可见答复。
 - 新增单元覆盖：`@lody/shared` 的引擎轮次分离、跨批次连续性、先死后收养的漏洞、终结
   标记完结（及其一次性的终结时间）、claude 多 uuid last-wins、codex collab 内联盖戳；
-  `apps/cli`（`session-transient-store`）的自主目标门控（来源与 `auto:` 前缀）与引擎
-  轮次活动置位/清除/替换；kimi `acp-server` 的引擎轮次打标、fork 序号互斥与终结标记
-  发送。
+  `apps/cli`（`session-transient-store`）的自主目标门控（来源与 `auto:` 前缀）、仅元数据
+  起始标记的路由、引擎轮次活动置位/清除/替换；kimi `acp-server` 的引擎轮次打标、fork
+  序号互斥、起始/终结标记发送；以及旧版已完成轮次 forkability 的恢复。
 - 在第二个生产 session 复现了状态侧症状（task-wake 变体）：引擎轮次的输出合并进已完结
   轮次，同时 `executionState` 停在 `idle`——本修复的活动标记覆盖的正是这种不可见性。
-- 在运行本分支的 OSS 桌面 + 本地构建的打标 runtime 上完成端到端验证：用户轮次之后的
-  cron 触发渲染为独立的已完成轮次；引擎轮次期间 session presence 为 `running`，终结
-  标记后为 `idle`。第一轮 UI 暴露的缺口——引擎轮次毫无来源提示——正是持久化
-  `acpTurnOrigin` 字段的动机，后续 PR 会把它渲染为来源分隔行。
-- 两个仓库的完整套件均通过，除三个已验证在未改动树上同样失败的用例：`apps/cli` 的
-  两个 Claude 凭据存储探测与一个 macOS `/var` vs `/private/var` worktree-GC 断言，以及
-  `acp-server` 的一个本地 bash 回退 e2e 测试。
-- 尚未在运行打标 runtime 的真实 session 里做端到端验证；那需要下一个 kimi
-  managed-runtime artifact。
+- 第一轮 UI 复查暴露了引擎轮次的展示缺口：没有来源提示时，自主条目无法与用户轮次区分。
+  这正是持久化 `acpTurnOrigin` 字段的动机；来源分隔行仍是后续工作，不在本次范围内。
+- 验证结果按 package 分开记录。`apps/cli` 完整套件运行了 262/263 个文件，2,749 个用例
+  通过、1 个失败、3 个跳过；唯一失败是已知的 macOS `/var` vs `/private/var`
+  worktree-GC 断言。Kimi `acp-server` 运行了 15/16 个文件，163 个通过、1 个失败；失败是
+  已知的本地 bash 回退 e2e 断言。components 运行了 455/456 个文件，3,477 个通过、1 个
+  失败；失败来自未改动的 `app-store-review-prompt-hook.test.tsx`。本次改动范围的定向测试，
+  包括遗留 Fork 回归测试，均通过。
+- 定向 follow-up 覆盖验证了自主 Stop 的 owner 匹配与替换保护、引擎释放后的 Goal admission、
+  删除边界释放、仅元数据起始标记路由、旧版已完成轮次的 forkability，以及提交给 provider
+  前的引擎复查。
+- 尚未在携带新 Kimi 起始/终结标记的 managed runtime 上验证完整 live 行为；这需要下一个
+  kimi managed-runtime artifact。

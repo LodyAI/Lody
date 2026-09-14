@@ -377,15 +377,32 @@ export class SessionTransientStore {
   }
 
   /**
+   * Return the engine owner for a Stop request naming its synthesized assistant
+   * entry. The assistant-entry id is the public cancel identity; do not let a
+   * request for an older autonomous entry cancel whichever engine turn happens
+   * to be current now.
+   */
+  getEngineTurnOwnerForCancel(sessionId: SessionId, assistantEntryId: string): string | undefined {
+    const engineTurn = this.sessions.get(sessionId)?.engineTurn;
+    return engineTurn && assistantEntryId === `assistant:autonomous-${engineTurn.acpTurnId}`
+      ? engineTurn.acpTurnId
+      : undefined;
+  }
+
+  /**
    * Clear the engine-turn marker — on the turn's end marker (matched by id) or
    * on ACP process termination (unconditional). A mismatched id belongs to an
    * older, already-replaced turn and is ignored.
+   *
+   * Returns whether the marker was actually cleared so callers can release
+   * engine-turn waiters only for a real owner transition.
    */
-  clearEngineTurnActivity(sessionId: SessionId, acpTurnId?: string): void {
+  clearEngineTurnActivity(sessionId: SessionId, acpTurnId?: string): boolean {
     const state = this.sessions.get(sessionId);
-    if (!state?.engineTurn) return;
-    if (acpTurnId !== undefined && state.engineTurn.acpTurnId !== acpTurnId) return;
+    if (!state?.engineTurn) return false;
+    if (acpTurnId !== undefined && state.engineTurn.acpTurnId !== acpTurnId) return false;
     state.engineTurn = undefined;
+    return true;
   }
 
   /** Whether an engine-opened turn is currently producing updates. */
@@ -533,6 +550,9 @@ export class SessionTransientStore {
   deleteSession(sessionId: SessionId): void {
     const state = this.sessions.get(sessionId);
     if (!state) return;
+
+    // MessageHandler clears the engine marker and notifies Goal waiters before
+    // calling this method. This store only drops the session-scoped state.
 
     // Cancel any lingering timer
     state.turnHistoryGate?.dispose();

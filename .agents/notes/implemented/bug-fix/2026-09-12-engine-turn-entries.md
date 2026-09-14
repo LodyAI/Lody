@@ -69,7 +69,21 @@ for unstamped runtimes, trading exactness for deployability).
   as its process dies). `hasActiveTurn` reads it so the idle GC cannot reap
   the agent process mid-engine-turn, and the live-status RPC upgrades
   `unknown` to `running` so the session stops showing "completed" while the
-  engine turn is still working.
+  engine turn is still working. The Kimi ACP server now emits a metadata-only
+  ownership marker at `turn.started`, before the first content delta, so this
+  protection covers the whole engine-turn lifetime rather than starting late.
+- A Session Stop for an autonomous entry resolves that entry id against the
+  current marker before and inside the rewrite barrier. Only the matching ACP
+  owner receives the session-wide cancel, and marker/presence cleanup stays
+  owner-bound so a late Stop cannot erase a replacement engine turn.
+- Goal actions that need a prompt treat the engine marker as the session's
+  occupied prompt slot. Their worker waits for a matched end marker, process
+  termination, or successful Stop to release it, then rechecks before provider
+  submission. The Kimi start marker closes the former pre-first-stamped-update
+  window; unstamped providers still retain the old limitation.
+- Session deletion is also an engine-release boundary: MessageHandler clears the
+  marker and notifies Goal waiters before dropping transient session state, so
+  eviction cannot strand a waiter on a deleted session.
 
 ## Alternatives and trade-offs
 
@@ -89,6 +103,10 @@ for unstamped runtimes, trading exactness for deployability).
   turn N back to turn N's entry) was dropped to keep the blast radius
   kimi-only: a straggler that crosses into the next turn keeps its pre-existing
   merge behavior rather than gaining a new code path.
+- Representing an engine owner as a synthetic client `activeTurnId` was rejected:
+  client-release waiters identify actual `TurnRuntimeState` owners, so an
+  `auto:<n>` id would create false release signals. A separate engine-release
+  waiter preserves the boundary while still letting Goal admission wait.
 - Task-wake turns now render as their own entries too, separating a held
   subagent's report from the user turn that prompted it. This is consistent
   with the engine's own turn model but is a visible change worth validating in
@@ -107,22 +125,30 @@ for unstamped runtimes, trading exactness for deployability).
   died-before-output adoption hole, end-marker finalization (and its
   once-only terminal timing), claude multi-uuid last-wins, and codex collab
   inline restamping in `@lody/shared`; autonomous-target gating (origin and
-  `auto:` prefix) and engine-turn activity note/clear/replace in `apps/cli`
-  (`session-transient-store`); engine-turn stamping, fork-index exclusivity,
-  and end-marker emission in the kimi `acp-server`.
+  `auto:` prefix), metadata-only start-marker routing, and engine-turn activity
+  note/clear/replace in `apps/cli` (`session-transient-store`); engine-turn
+  stamping, fork-index exclusivity, start/end marker emission in the kimi
+  `acp-server`; and restoration of legacy completed-turn forkability.
 - Reproduced the status-side symptom in a second production session (task-wake
   variant): the engine turn's output merged into the finalized turn while
   `executionState` stayed `idle` — the same invisibility this fix's activity
   marker now covers.
-- Verified end-to-end in a live OSS desktop running the branch and a locally
-  built stamped runtime: a cron fire after a user turn rendered as its own
-  finished turn, and session presence read `running` during the engine turn
-  and `idle` after its end marker. The first-pass UI gap it exposed — the
-  engine turn appeared with no origin cue — motivates the persisted
-  `acpTurnOrigin` field that a follow-up renders as an origin divider.
-- Full suites pass on both repos except three failures verified to reproduce on
-  unmodified trees: two Claude credential-store probes and one macOS
-  `/var` vs `/private/var` worktree-GC assertion in `apps/cli`, and one local
-  bash-fallback e2e test in `acp-server`.
-- Not yet verified end-to-end against a live session running a stamped runtime;
-  that requires the next kimi managed-runtime artifact.
+- The first-pass UI review exposed an engine-turn presentation gap: without a
+  source cue, an autonomous entry is indistinguishable from a user turn. That
+  motivates the persisted `acpTurnOrigin` field; the origin divider remains a
+  follow-up and is out of scope here.
+- Validation results are scoped by package. The full `apps/cli` suite ran
+  262/263 files with 2,749 passed, one failed, and three skipped; the sole
+  failure is the known macOS `/var` vs `/private/var` worktree-GC assertion.
+  The Kimi `acp-server` suite ran 15/16 files with 163 passed and one failed;
+  the failure is the known local bash-fallback e2e assertion. The components
+  suite ran 455/456 files with 3,477 passed and one failed in the unchanged
+  `app-store-review-prompt-hook.test.tsx` test. The changed-scope focused
+  tests, including the legacy Fork regression, passed.
+- Focused follow-up coverage verifies autonomous Stop owner matching and
+  replacement protection, engine-release Goal admission, deletion-boundary
+  release, metadata-only start-marker routing, legacy completed-turn
+  forkability, and the pre-provider engine recheck.
+- Full live behavior has not yet been verified against a managed runtime
+  carrying the new Kimi start/end markers; that requires the next kimi
+  managed-runtime artifact.
