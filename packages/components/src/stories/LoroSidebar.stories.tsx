@@ -11,7 +11,6 @@ import { LoroSidebar } from '@/components/loro-sidebar';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import {
-  buildChildSessionsByParent,
   buildSessionListRows,
   buildSidebarOpenerRowResolver,
 } from '@/components/sessions/session-list-rows';
@@ -1440,48 +1439,6 @@ export const CollapsedProjectActivity: Story = {
       ],
     },
   },
-};
-
-export const ExpandedProjectActivity: Story = {
-  render: (args) => {
-    const { sessions, liveSessionStatuses } = projectActivityFixture([2, 3, 2]);
-    return (
-      <WithProjectsLayout
-        {...args}
-        localProjectSessions={sessions}
-        localProjectLiveSessionStatuses={liveSessionStatuses}
-        initiallyCollapseLocalProjects={false}
-      />
-    );
-  },
-  args: Default.args,
-};
-
-export const CollapsedRemoteProjectRunning: Story = {
-  name: 'Collapsed remote project · running',
-  render: (args) => (
-    <WithProjectsLayout
-      {...args}
-      localProjectLiveSessionStatuses={new Map([['remote-sess-running', { type: 'running' }]])}
-      remoteProjectSessions={demoRemoteSessions}
-      initiallyCollapseRemoteProject
-    />
-  ),
-  args: Default.args,
-};
-
-export const CollapsedProjectChildPermissionRequired: Story = {
-  name: 'Collapsed project · child tab permission required',
-  render: (args) => (
-    <WithProjectsLayout
-      {...args}
-      localProjectLiveSessionStatuses={
-        new Map([['local-sess-child-tab', { type: 'requestPermission' }]])
-      }
-      localProjectChildSessionsByParent={buildChildSessionsByParent([demoChildTabSession])}
-    />
-  ),
-  args: Default.args,
 };
 
 /** 180 conversations across chats and eight worktree repositories for scrolling and density checks. */
