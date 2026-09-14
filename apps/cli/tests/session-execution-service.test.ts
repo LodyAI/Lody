@@ -592,6 +592,62 @@ describe('SessionExecutionService', () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it('rejects native queued Steer before consume when active requester identity is unavailable', async () => {
+    const sessionId = 'session-queue-steer-no-identity' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const steerPrompt = vi.fn();
+    const consumeMessageQueueItemAsUserTurn = vi.fn();
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ id: sessionId })),
+      consumeMessageQueueItemAsUserTurn,
+    };
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'claudeCode',
+            appliedNotificationMethod: 'claude/steerApplied',
+            upstreamTurn: 'handoff',
+            configPolicy: 'apply',
+          })),
+          steerPrompt,
+        },
+        acpSessionId: 'acp-steer' as ACPSessionId,
+      },
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi.spyOn(service, 'cancelSession');
+
+    await expect(
+      service.steerQueuedMessage({
+        sessionId,
+        expectedTurnId: activeTurnId,
+        queueItemId: 'C',
+      })
+    ).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      error: expect.stringContaining('identity is unavailable'),
+    });
+    expect(consumeMessageQueueItemAsUserTurn).not.toHaveBeenCalled();
+    expect(steerPrompt).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
       completion: new Promise(() => {}),
@@ -613,7 +669,7 @@ describe('SessionExecutionService', () => {
     const queuedItem: MessageQueueItem = {
       $cid: 'queue-user-2',
       task: 'change direction',
-      userId: 'user-1',
+      userId: 'forged-owner',
       userTurnId: 'user-2',
       timestamp: '2026-07-11T00:00:00.000Z',
       acpSessionConfig: { prompt: 'change direction' },
@@ -631,6 +687,7 @@ describe('SessionExecutionService', () => {
           expect(cid).toBe(queuedItem.$cid);
           const entry = buildEntry(queuedItem);
           if (!entry) return { type: 'invalid' as const };
+          expect(entry.userId).toBe('authenticated-user');
           return { type: 'consumed' as const, entry };
         }
       ),
@@ -678,7 +735,7 @@ describe('SessionExecutionService', () => {
       promptInFlight: true,
       invocation: {
         sourceTurnId: 'user-1',
-        requesterUserId: 'user-1',
+        requesterUserId: 'authenticated-user',
         inputConfig: { prompt: 'initial prompt' },
       },
       activePromptRun: initialPromptRun,
@@ -717,12 +774,12 @@ describe('SessionExecutionService', () => {
     expect(runtime.turnId).toBe('assistant:user-2');
     expect(runtime.userTurnId).toBe('user-2');
     expect(runtime.invocation).toMatchObject({
-      requesterUserId: 'user-1',
+      requesterUserId: 'authenticated-user',
       sourceTurnId: 'user-2',
       inputConfig: { prompt: 'change direction' },
     });
     expect(service.getActiveInvocationContext(sessionId)).toMatchObject({
-      requesterUserId: 'user-1',
+      requesterUserId: 'authenticated-user',
       sourceTurnId: 'user-2',
       inputConfig: { prompt: 'change direction' },
     });

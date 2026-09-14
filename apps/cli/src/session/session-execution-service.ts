@@ -1477,16 +1477,25 @@ export class SessionExecutionService {
           runtime.session.acpSessionId &&
           agentClient.getAcknowledgedSteerCapability()
         );
+        const authenticatedRequesterUserId = runtime.invocation?.requesterUserId?.trim() ?? '';
+        if (useNativeSteer && !authenticatedRequesterUserId) {
+          return respond('error', {
+            error: 'Active invocation identity is unavailable for native queue Steer.',
+          });
+        }
 
         // Queue order and immediate steering are separate mutations. Consume the
         // selected identity directly; A/B keep their relative order when C wins.
         // Native steer owns dispatch publication through its handoff path.
         const consumed = await sessionDoc.consumeMessageQueueItemAsUserTurn(
           options.queueItemId,
-          (item) =>
-            buildQueuedMessageUserTurn(item, meta, {
+          (item) => {
+            const queuedTurn = buildQueuedMessageUserTurn(item, meta, {
               status: useNativeSteer ? 'pending_apply' : 'pending',
-            }),
+            });
+            if (!queuedTurn || !useNativeSteer) return queuedTurn;
+            return { ...queuedTurn, userId: authenticatedRequesterUserId };
+          },
           { publishDispatch: !useNativeSteer }
         );
         if (consumed.type === 'missing') {
@@ -1503,9 +1512,8 @@ export class SessionExecutionService {
 
         if (useNativeSteer) {
           const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);
-          const userId = entry.userId?.trim();
           const timestamp = entry.timestamp?.trim();
-          if (!inputConfig || !userId || !timestamp) {
+          if (!inputConfig || !timestamp) {
             return finishConsumed(
               respond('invalid-queue-item', {
                 userTurnId: entry.id,
@@ -1517,7 +1525,7 @@ export class SessionExecutionService {
             sessionId: options.sessionId,
             expectedTurnId: options.expectedTurnId,
             userTurnId: entry.id,
-            userId,
+            userId: authenticatedRequesterUserId,
             timestamp,
             inputConfig,
           });

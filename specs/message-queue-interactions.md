@@ -42,6 +42,10 @@ the queue by hand.
   authenticate a caller-supplied member ID, and the target daemon must not use one for an owner
   fast path. Same-host local IPC is already the trusted local control boundary.
 
+  Native exact Steer must derive its requester identity from the authenticated active
+  invocation, never from the shared queue row. If that frozen identity is unavailable, the
+  daemon fails before consuming the row, submitting to the provider, or stopping the turn.
+
   For cancel-and-dispatch Steer, the selected queue row is the durable retry marker: append
   history first, publish `latestUserMsgId`, and remove the row only after both writes succeed.
   A retry after partial publication reuses the existing turn ID rather than duplicating history.

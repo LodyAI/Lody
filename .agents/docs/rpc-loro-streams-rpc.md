@@ -30,6 +30,8 @@ do neither.
 Before a remote renderer writes this control request, it fails closed against its authenticated
 `machines:listVisibleMachines` snapshot. The retained request contains no requester identity:
 the target daemon cannot authenticate such a claim and must not grant its owner fast path from it.
+Native queue Steer instead inherits the frozen requester from the authenticated active invocation;
+it fails before consumption when that identity is unavailable and never trusts the queue row.
 
 ## Remote lifecycle acknowledgements
 
