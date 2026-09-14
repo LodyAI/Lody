@@ -1,3 +1,4 @@
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -219,12 +220,17 @@ export type SessionActions = {
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
     payload: SessionToCreate,
-    history: Omit<SessionHistoryInput, 'id'>
+    history: Omit<SessionHistoryInput, 'id'>,
+    attachments?: SessionAttachmentDraft[]
   ) => Promise<StartSessionResult>;
   addSessionHistory: (
     sessionId: SessionId,
     history: Omit<SessionHistoryInput, 'id'>,
-    options?: { dispatch?: boolean; guideExpectedTurnId?: string }
+    options?: {
+      dispatch?: boolean;
+      guideExpectedTurnId?: string;
+      attachments?: SessionAttachmentDraft[];
+    }
   ) => Promise<SessionHistory>;
   requestSessionDispatch: (
     sessionId: SessionId,
@@ -326,6 +332,18 @@ async function upsertSessionActivityPatch(
   const existing = await runtime.repo.getDocMeta(roomId);
   if (isLoroRepoDocDeleted(existing)) return undefined;
   const meta = existing?.meta as SessionMeta | undefined;
+  // A pending creation belongs to the local journal until its input is ready.
+  // Activity must not publish a partial session that hides that placeholder.
+  if (
+    !meta?.id &&
+    runtime.sendJournal
+      ?.getSnapshot()
+      .some(
+        (record) =>
+          record.sessionId === sessionId && record.creation && record.stage !== 'delivered'
+      )
+  )
+    return undefined;
   const patch = buildSessionActivityPatch(meta, proposal);
   if (Object.keys(patch).length > 0) {
     await runtime.writer.upsertDocMeta(roomId, patch as RepoDocMetaPatch);
@@ -691,6 +709,14 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      await runtime.sendJournal?.refresh();
+      if (
+        runtime.sendJournal
+          ?.getSnapshot()
+          .some((record) => record.sessionId === sessionId && record.stage !== 'delivered')
+      ) {
+        throw new Error('Complete or cancel pending messages before deleting this conversation');
+      }
       const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
@@ -755,6 +781,21 @@ export function useSessionActions(): SessionActions {
         { ...sessionMeta, id: sessionId },
         ...collectSessionArchiveTargets(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
       ];
+      await runtime.sendJournal?.refresh();
+      if (
+        runtime.sendJournal
+          ?.getSnapshot()
+          .some(
+            (record) =>
+              record.stage !== 'delivered' &&
+              archiveTargets.some(
+                (target) =>
+                  target.id === record.sessionId || target.id === record.creation?.parentSessionId
+              )
+          )
+      ) {
+        throw new Error('Complete or cancel pending messages before archiving this conversation');
+      }
       for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });

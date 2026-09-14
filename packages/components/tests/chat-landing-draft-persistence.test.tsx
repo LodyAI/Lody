@@ -329,84 +329,37 @@ describe('chat landing draft persistence', () => {
     expect(readHarness().imageItems).toEqual([]);
   });
 
-  it('lets an image upload that was in flight at unmount finish into the restored draft', async () => {
-    mountLanding(WORKSPACE_A_KEY);
-    await act(async () => {
-      readHarness().addImages([pngFile('shot.png')]);
-      await uploadMocks.imageUploadStarted?.promise;
-    });
-    expect(readHarness().imageItems[0]!.status).toBe('uploading');
-
-    unmountLanding();
-    await act(async () => {
-      uploadMocks.imageUpload?.resolve({
-        imageId: 'image-1',
-        mimeType: 'image/png',
-        fileName: 'shot.png',
-        sizeBytes: 3,
-      });
-      await Promise.resolve();
-    });
-
-    mountLanding(WORKSPACE_A_KEY);
-    expect(readHarness().imageItems[0]!.status).toBe('uploaded');
-  });
-
-  it('does not abort a file upload when the landing unmounts', async () => {
-    mountLanding(WORKSPACE_A_KEY);
-    await act(async () => {
-      readHarness().addFiles([textFile('notes.txt')]);
-      await uploadMocks.fileUploadStarted?.promise;
-    });
-    expect(uploadMocks.fileUploadSignals).toHaveLength(1);
-
-    unmountLanding();
-    expect(uploadMocks.fileUploadSignals[0]?.aborted).toBe(false);
-
-    await act(async () => {
-      uploadMocks.fileUpload?.resolve({
-        fileId: 'file-1',
-        fileName: 'notes.txt',
-        mimeType: 'text/plain',
-        sizeBytes: 3,
-        sha256: 'sha256',
-        transport: 'cloud',
-        uploadedAt: 0,
-      });
-      await Promise.resolve();
-    });
-
-    mountLanding(WORKSPACE_A_KEY);
-    const restored = readHarness().fileItems;
-    expect(restored).toHaveLength(1);
-    expect(restored[0]!.status).toBe('uploaded');
-  });
-
-  it('clears the draft for good once submit or a draft reset releases it', async () => {
+  it('keeps images and files as nonblocking local drafts across navigation', () => {
     mountLanding(WORKSPACE_A_KEY);
     act(() => {
       readHarness().addImages([pngFile('shot.png')]);
-    });
-    await act(async () => {
       readHarness().addFiles([textFile('notes.txt')]);
-      await uploadMocks.fileUploadStarted?.promise;
     });
-    const [image] = readHarness().imageItems;
+    expect(readHarness().imageItems[0]?.status).toBe('draft');
+    expect(readHarness().fileItems[0]?.status).toBe('draft');
+    expect(resources.getActiveCount()).toBe(0);
+    const identity = readHarness().sessionId;
+    unmountLanding();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().imageItems[0]?.status).toBe('draft');
+    expect(readHarness().fileItems[0]?.status).toBe('draft');
+    expect(readHarness().sessionId).toBe(identity);
+  });
 
-    await act(async () => {
-      readHarness().clearDraft();
-      await uploadMocks.fileUploadAborted?.promise;
+  it('releases local draft sources and previews on explicit reset', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().addImages([pngFile('shot.png')]);
+      readHarness().addFiles([textFile('notes.txt')]);
     });
-
-    expect(revokedUrls).toEqual([image!.previewUrl]);
-    expect(uploadMocks.fileUploadSignals[0]?.aborted).toBe(true);
-    expect(readHarness().imageItems).toEqual([]);
-    expect(readHarness().fileItems).toEqual([]);
-
+    const preview = readHarness().imageItems[0]!.previewUrl;
+    act(() => readHarness().clearDraft());
+    expect(revokedUrls).toEqual([preview]);
     unmountLanding();
     mountLanding(WORKSPACE_A_KEY);
     expect(readHarness().imageItems).toEqual([]);
     expect(readHarness().fileItems).toEqual([]);
+    expect(resources.getActiveCount()).toBe(0);
   });
 
   it('keeps drafts in different workspaces apart', () => {

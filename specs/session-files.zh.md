@@ -13,7 +13,7 @@ Translation: current
 - **两类入口共用流程，分别验收。** 新对话保持预留 session ID 和可返回的待发送入口；已有对话冻结本轮配置并接入现有 direct/queue/guide，不改变正在执行的上一轮。
 - **重试、退出和恢复不丢内容、不重复提交。** 固定 turn ID，区分本地接受、持久化与 Daemon 接收；结果未知先核对。关闭/刷新保护覆盖未完成任务，移动端恢复后确认重试，不承诺应用退出后继续上传。
 - **建议分阶段用 Effect 管理任务与资源。** 先抽提交边界，再接管资源，再完善提交/投递，最后同时交付两类入口的 draft。前三步保留添加即传的时机；组件保留普通接口，Effect 留在 workspace 服务内部。持久化、跨窗口互斥与提交结果核对仍需明确实现。
-- **当前 PR 只落实 draft 生命周期。** 复用现有云端上传、本机 handoff、fallback 和 backfill 语义；原路径直引、永久零上传及相关协议/Daemon 改动属于[独立后续 PR](local-attachment-references.zh.md)，不作为本 PR 的依赖。长文本转文件和图片编辑器也不在本版。本文仍为待审阅草稿，尚未实现。
+- **当前 PR 只落实 draft 生命周期。** 复用现有云端上传、本机 handoff、fallback 和 backfill 语义；原路径直引、永久零上传及相关协议/Daemon 改动属于[独立后续 PR](local-attachment-references.zh.md)，不作为本 PR 的依赖。长文本转文件和图片编辑器也不在本版。四层实现已可审阅；本文仍为 draft，打包设备验收尚未完成。
 
 ## 1. 场景与 PR 范围
 
@@ -364,3 +364,11 @@ CLI Agent / backfill：各自运行，不是 renderer Scope 的子任务
 - Effect 官方 3.18.4 API 源码：[Scope/fiber 归属](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/Effect.ts)、[Promise 与取消信号](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/Effect.ts)、[ManagedRuntime](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/ManagedRuntime.ts)、[TestClock](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/TestClock.ts)。实际实验使用临时安装的 3.18.4，未修改仓库依赖。
 
 - 本轮生命周期证据：`packages/components/src/components/chat/submission/use-composer-submission.ts:44`；`hooks/use-session-preparation.ts:113`；`components/sessions/{session-detail.tsx:1979,session-chat-interface.tsx:2394}`；`providers/{workspace-writer-impl.ts:76,create-workspace-runtime.ts:3854,store-ref-tracker.ts:212}`（后四组前缀均为 `packages/components/src/`）。CLI 边界：`apps/cli/src/session/{session-preparation-service.ts:142,session-dispatch-watcher.ts:681,turn-history-gate.ts:5}`。
+
+## 实现证据与兼容性
+
+实现栈依次接入 Promise 提交边界、Effect 资源所有权、持久化提交记录和发送时附件准备。本地记录写入 version 2，包含附件 Blob 快照，并兼容读取 version 1。旧版读取器拒绝 version 2，不能把缺少附件的输入直接发送。回滚必须保留记录并使用兼容读取器。原始副本标识记录实际生成 CRDT 操作的窗口，不能假定它总是接管输入的窗口。
+
+添加附件不触发传输。已接管附件的源数据可在 renderer 重启后恢复；恢复只展示确认重试入口，不自动发送旧消息。已成功附件复用结果；目标确认接收后释放源 Blob 引用，孤立上传仍由现有服务清理。取消新会话第一条消息时，将建会话信息转交下一条已保存消息，保持入口可达。
+
+确定性测试覆盖部分成功后的失败、迟到取消、跨连接取消保护、持久化源文件、取消第一条消息、原操作重放及最新计费检查。仓库检查属于实现证据；打包桌面、多窗口真实网络和另一个仓库中的原生移动壳仍需设备验收。

@@ -115,3 +115,31 @@ describe('workspace send resources', () => {
     await resources.dispose();
   });
 });
+
+it('joins disposable warmup work without treating it as unsaved input on exit', async () => {
+  const resources = createSessionSendResources(unusedStores);
+  const started = gate();
+  const aborted = gate();
+  const finish = gate();
+  const work = resources.run(
+    async (signal) => {
+      signal.addEventListener('abort', () => aborted.resolve(), { once: true });
+      started.resolve();
+      await finish.promise;
+    },
+    undefined,
+    { protectExit: false }
+  );
+  const outcome = work.catch((error: unknown) => error);
+  await started.promise;
+  expect(resources.getActiveCount()).toBe(0);
+  let closed = false;
+  const closing = resources.dispose().then(() => {
+    closed = true;
+  });
+  await aborted.promise;
+  expect(closed).toBe(false);
+  finish.resolve();
+  await closing;
+  expect(await outcome).toMatchObject({ name: 'AbortError' });
+});
