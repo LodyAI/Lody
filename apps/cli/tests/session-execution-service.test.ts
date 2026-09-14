@@ -420,6 +420,73 @@ describe('SessionExecutionService', () => {
     ).toBe(runtime);
   });
 
+  it('keeps the active turn running when queue activation publication fails and allows retry', async () => {
+    const sessionId = 'session-queue-steer-publication-failed' as SessionId;
+    const activeTurnId = 'assistant:active';
+    const entry = {
+      id: 'user:C',
+      role: 'user' as const,
+      userId: 'owner-user',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      items: [{ type: 'text' as const, text: 'task C' }],
+      status: 'pending' as const,
+      read: false,
+      inputConfig: { prompt: 'task C' },
+    };
+    const consumeMessageQueueItemAsUserTurn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('metadata unavailable'))
+      .mockResolvedValue({ type: 'consumed' as const, entry });
+    const sessionDoc = {
+      getMetaState: vi.fn(async () => ({ id: sessionId })),
+      consumeMessageQueueItemAsUserTurn,
+    };
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    const runtime = {
+      sessionId,
+      turnId: activeTurnId,
+      userTurnId: 'active',
+      session: {},
+      promptInFlight: true,
+      cancelRequested: false,
+    };
+    (
+      service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+    const cancel = vi.spyOn(service, 'cancelSession').mockResolvedValue({ success: true });
+    const request = {
+      sessionId,
+      expectedTurnId: activeTurnId,
+      queueItemId: 'C',
+    };
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: false,
+      disposition: 'error',
+      error: 'metadata unavailable',
+    });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(
+      (
+        service as unknown as { turnRuntimeBySession: Map<SessionId, unknown> }
+      ).turnRuntimeBySession.get(sessionId)
+    ).toBe(runtime);
+
+    await expect(service.steerQueuedMessage(request)).resolves.toMatchObject({
+      accepted: true,
+      disposition: 'accepted',
+      userTurnId: 'user:C',
+    });
+    expect(consumeMessageQueueItemAsUserTurn).toHaveBeenCalledTimes(2);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('keeps the active turn and queue row while the target editing lease is active', async () => {
     const sessionId = 'session-queue-steer-editing' as SessionId;
     const activeTurnId = 'assistant:active';

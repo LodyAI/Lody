@@ -24,7 +24,7 @@ Translation: current
   | 当前 daemon/runtime                                                           | 引导行为                                                                          |
   | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
   | 支持精确队列项协议，且支持 acknowledged native ACP Steer                      | 原子消费目标行为 `pending_apply`，再通过 `steerPrompt` 注入当前 prompt。          |
-  | 支持精确队列项协议，但不支持 native ACP Steer                                 | 原子消费目标行为下一个用户 turn，再只停止预期 turn。                              |
+  | 支持精确队列项协议，但不支持 native ACP Steer                                 | 将目标行持久化并激活为下一用户 turn，从队列删除后再只停止预期 turn。               |
   | 旧 daemon，但 authoritative capability 声明支持 acknowledged native ACP Steer | 保留旧版真正 native Steer 路径。                                                  |
   | 旧 daemon，且不支持 acknowledged native ACP Steer                             | 仅保留既有队首 interrupt 行为；禁用后续行“引导”，并要求升级 daemon 才能精确选择。 |
 
@@ -35,6 +35,10 @@ Translation: current
   不可用时应 fail closed。请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
   声称的成员 ID，目标 daemon 也不得用它命中 owner fast path。同机 local IPC 已是可信的
   本地控制边界。
+
+  对 cancel-and-dispatch Steer，所选 queue row 是持久重试标记：先追加 history，再发布
+  `latestUserMsgId`，且仅在两项写入都成功后删除 row。部分发布后的重试应复用已有 turn ID，
+  不得重复追加 history。
 
 - 过期或冲突的精确“引导”选择必须失败且无副作用。所选 ID 已不存在、编辑 lease 仍有效，或
   预期 turn 已不再拥有执行权时，daemon 不得提交 native Steer，也不得停止任何 turn。Renderer

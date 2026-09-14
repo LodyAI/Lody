@@ -2789,12 +2789,13 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   /**
-   * Consume one exact queue identity in one synchronous ownership mutation.
+   * Consume one exact queue identity without losing its dispatch retry marker.
    *
    * The callback and editing-lease check run against the current queue row, with
-   * no await gap before the shared HistoryWriter accepts the turn and that row is
-   * removed. Ordinary dispatch then publishes its pointer; native Steer reserves
-   * the entry without publishing because its handoff owns activation.
+   * no await gap before the shared HistoryWriter accepts the turn. Ordinary
+   * dispatch retains the row until its metadata activation pointer is durable;
+   * native Steer removes it in the same ownership mutation because its handoff
+   * owns activation.
    */
   async consumeMessageQueueItemAsUserTurn(
     cid: string,
@@ -2817,6 +2818,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         | { type: 'editing' }
         | { type: 'invalid' };
     } = { value: { type: 'missing' } };
+    const publishDispatch = options.publishDispatch !== false;
     this.mirror.setState((prev) => {
       const queue = (prev.mq ?? []) as MessageQueueItem[];
       const item = queue.find((candidate) => candidate.$cid === cid);
@@ -2836,20 +2838,36 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
           `consumeMessageQueueItemAsUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
         );
       }
-      // HistoryWriter validates and commits before the queue row is removed.
-      // Both operate synchronously over the same LoroDoc in this callback, so a
-      // peer cannot replace/delete the selected row between validation and consume.
-      this.sessionData.writer.append(entry as SessionHistory);
-      // @ts-ignore - mirror state is writable inside setState.
-      prev.mq = queue.filter((candidate) => candidate.$cid !== cid);
-      outcome.value = { type: 'consumed', entry };
+      const existing = this.sessionData.writer.read(entry.id);
+      if (existing) {
+        const status = resolveSessionHistoryStatus(existing);
+        if (
+          !publishDispatch ||
+          existing.role !== 'user' ||
+          (status !== 'pending' && status !== 'seen')
+        ) {
+          outcome.value = { type: 'invalid' };
+          return prev;
+        }
+        // A previous ordinary consume may have committed history before metadata
+        // publication failed. Reuse that durable turn instead of appending it twice.
+        outcome.value = { type: 'consumed', entry: existing as SessionHistoryInput };
+      } else {
+        this.sessionData.writer.append(entry as SessionHistory);
+        outcome.value = { type: 'consumed', entry };
+      }
+      if (!publishDispatch) {
+        // @ts-ignore - mirror state is writable inside setState.
+        prev.mq = queue.filter((candidate) => candidate.$cid !== cid);
+      }
       return prev;
     });
 
-    if (outcome.value.type === 'consumed' && options.publishDispatch !== false) {
+    if (outcome.value.type === 'consumed' && publishDispatch) {
       await this.repo.upsertDocMeta(this.roomId, {
         latestUserMsgId: outcome.value.entry.id,
       } satisfies Partial<SessionMeta>);
+      await this.removeMessageQueueItem(cid);
     }
     return outcome.value;
   }

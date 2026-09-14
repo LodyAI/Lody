@@ -63,7 +63,7 @@ const createUserTurn = (id: string): SessionHistoryInput => ({
 });
 
 describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
-  it('atomically consumes the named later row without reordering the survivors', async () => {
+  it('consumes the named later row after activation without reordering the survivors', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const { doc } = createSessionDocument({ upsertDocMeta });
     const queue = await seedMessageQueue(
@@ -83,6 +83,33 @@ describe('SessionDocument.consumeMessageQueueItemAsUserTurn', () => {
     expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['user:C']);
     expect((await doc.getMessageQueue()).map((item) => item.task)).toEqual(['task A', 'task B']);
     expect(upsertDocMeta).toHaveBeenCalledWith(doc.roomId, { latestUserMsgId: 'user:C' });
+  });
+
+  it('retains the queue row and resumes publication without duplicating history', async () => {
+    const upsertDocMeta = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('metadata unavailable'))
+      .mockResolvedValue(undefined);
+    const { doc } = createSessionDocument({ upsertDocMeta });
+    const [target] = await seedMessageQueue(doc, [
+      {
+        task: 'task C',
+        timestamp: '2026-09-13T00:00:00.000Z',
+      },
+    ]);
+
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn(target!.$cid, () => createUserTurn('user:C'))
+    ).rejects.toThrow('metadata unavailable');
+    expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['user:C']);
+    expect((await doc.getMessageQueue()).map((item) => item.task)).toEqual(['task C']);
+
+    await expect(
+      doc.consumeMessageQueueItemAsUserTurn(target!.$cid, () => createUserTurn('user:C'))
+    ).resolves.toMatchObject({ type: 'consumed', entry: { id: 'user:C' } });
+    expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['user:C']);
+    expect(await doc.getMessageQueue()).toEqual([]);
+    expect(upsertDocMeta).toHaveBeenCalledTimes(2);
   });
 
   it('does not write history or a dispatch pointer when the identity is absent', async () => {

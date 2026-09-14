@@ -34,7 +34,9 @@ the selected identity is missing.
 - Let the daemon choose the execution mechanism after validating both identities and the
   target's editing lease. With acknowledged native ACP Steer, it atomically consumes the row
   as `pending_apply` and enters the existing `steerPrompt` handoff. Without native Steer, it
-  consumes the row as an ordinary pending turn and cancels only the expected active turn.
+  writes the row as an ordinary pending turn, publishes its activation pointer, removes the
+  queue row only after both writes succeed, then cancels only the expected active turn. A
+  partial publication retains the row as a retry marker and reuses the existing history ID.
 - Retain mixed-version behavior without reintroducing reorder-then-cancel. An older daemon
   with an authoritative acknowledged-Steer capability uses the legacy native path. Other
   older daemons retain only the established queue-head interrupt; later-row Steer controls
@@ -64,8 +66,8 @@ become accidental drag starters.
 - Queue component tests cover later-row Steer, old-daemon head-only disabling, authoritative
   legacy native selection, and the drag activator boundary.
 - CLI service and Session Doc tests cover exact C consumption, native `steerPrompt`, exact
-  cancellation, missing and active-edit rejection, cancellation failure, and response-loss
-  retries.
+  cancellation, missing and active-edit rejection, activation-publication failure,
+  cancellation failure, and response-loss retries.
 - Machine RPC and protocol-capability tests cover the queue/turn identities, rejection of a
   requester identity claim, source authorization, and mixed-version negotiation.
 - Component tests use synthetic pointer state. Physical touch dragging and a full

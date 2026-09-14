@@ -29,7 +29,7 @@ the queue by hand.
   | Active daemon/runtime                                         | Steer behavior                                                                                                                   |
   | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
   | Exact-item protocol and acknowledged native ACP Steer         | Atomically consume the selected row as `pending_apply`, then inject it into the current prompt through `steerPrompt`.            |
-  | Exact-item protocol without native ACP Steer                  | Atomically consume the selected row as the next user turn, then stop only the expected turn.                                     |
+  | Exact-item protocol without native ACP Steer                  | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.         |
   | Older daemon with authoritative acknowledged native ACP Steer | Preserve the legacy native Steer path.                                                                                           |
   | Older daemon without acknowledged native ACP Steer            | Keep the established queue-head interrupt behavior; disable Steer on later rows and require a daemon update for exact selection. |
 
@@ -41,6 +41,10 @@ the queue by hand.
   unavailable. The request carries no requester identity: workspace Machine RPC cannot
   authenticate a caller-supplied member ID, and the target daemon must not use one for an owner
   fast path. Same-host local IPC is already the trusted local control boundary.
+
+  For cancel-and-dispatch Steer, the selected queue row is the durable retry marker: append
+  history first, publish `latestUserMsgId`, and remove the row only after both writes succeed.
+  A retry after partial publication reuses the existing turn ID rather than duplicating history.
 
 - A stale or conflicting exact Steer selection is a failed no-op. If the selected queue
   identity is missing, its editing lease is active, or the expected turn no longer owns

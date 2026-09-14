@@ -26,7 +26,8 @@ Translation: current
   无法认证 workspace stream 写入者声称的身份。同机 local IPC 仍是可信的本地控制路径。
 - Daemon 确认两个 ID 及目标 editing lease 后决定执行机制。支持 acknowledged native ACP
   Steer 时，原子消费目标行为 `pending_apply`，并进入既有 `steerPrompt` handoff；否则消费为
-  普通 pending turn，再只取消预期活动 turn。
+  普通 pending turn，发布 activation pointer，并仅在两项写入都成功后删除 queue row，再只
+  取消预期活动 turn。部分发布失败时保留 row 作为重试标记，并复用已有 history ID。
 - 混合版本兼容不得恢复“先重排后取消”。旧 daemon 若 authoritative capability 声明支持
   acknowledged Steer，则使用旧 native 路径；其他旧 daemon 只保留既有队首 interrupt，后续行
   “引导”禁用并提示升级。
@@ -50,7 +51,7 @@ native steer，因为 `steerPrompt` 注入当前 prompt，而 cancel-and-dispatc
 - 队列组件测试覆盖后续行引导、旧 daemon 仅启用队首、authoritative legacy native 选择，以及
   拖动区域边界。
 - CLI service 与 Session Doc 测试覆盖精确消费 C、native `steerPrompt`、精确取消、目标缺失、
-  editing lease、取消失败及响应丢失重试。
+  editing lease、activation 发布失败、取消失败及响应丢失重试。
 - Machine RPC 与 protocol capability 测试覆盖队列／turn 两个 ID、拒绝请求者身份声明、来源
   授权以及混合版本协商。
 - 组件测试使用合成指针状态；未验证物理触摸拖动和完整的 Provider-backed steer 流程。

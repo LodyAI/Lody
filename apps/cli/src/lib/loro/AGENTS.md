@@ -49,7 +49,8 @@ Rules:
   fork targets).
 
 The dispatch watcher's contract, "session metadata is the activation index", is
-documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+documented in `../../session/AGENTS.md`. Queue promotion retains its row until history
+and that metadata activation are durable; the rule also applies to room enumeration.
 
 ## Shared ACP runtime config contains no secrets
 
