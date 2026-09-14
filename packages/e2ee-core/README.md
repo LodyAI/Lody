@@ -578,6 +578,45 @@ deployed backend or Lody runtime. See `src/streams-content.ts`,
 
 ## Node persistence
 
+### Durable content-snapshot admission
+
+`createContentSnapshotPublication({ cipher, mayWriteDocument, now, store })` accepts
+the platform-neutral `SnapshotPublicationStore` port from `./snapshot-admission`.
+Omitting `store` retains the **non-durable** memory prototype. The synchronous
+`transaction(streamKey, work)` callback exposes `current()`, `admitted(offset)` and
+`save({ offset, body })`; it must commit identity, exact ciphertext and current
+pointer atomically, roll back on failure, and return only after durable commit.
+Do not pass an async callback. Verification happens outside the lock; identity,
+current permission and the original lease are checked again inside the commit.
+
+```ts
+import { SqliteSnapshotPublicationStore } from '@lody/e2ee-core/node-snapshot-publication-store';
+
+// Initialization only: fails if the file already exists.
+const store = new SqliteSnapshotPublicationStore('/absolute/path/snapshots.sqlite', {
+  create: true,
+});
+// After restart: no implicit creation or history reset.
+const reopened = new SqliteSnapshotPublicationStore('/absolute/path/snapshots.sqlite');
+```
+
+The Node-only backend uses SQLite BLOB rows and a single local transaction. It
+retains admitted ciphertexts, including older positions, to recognize exact
+retries without moving current backward. It does not store any content keys.
+Concurrent processes serialize through SQLite or return `snapshot-store-busy`;
+retry with the unchanged request and original deadline. Reads/handles cannot
+mutate committed storage. Creation/opening, commit-before-ACK, rollback, process
+death, competing publishers and original-lease expiry are tested in
+`test/snapshot-publication-store.test.ts` with real SQLite and signatures.
+
+This is a single-host reference backend, not deployed Streams storage, JWT
+authentication, a distributed transaction, or protection against malicious
+host/disk rollback. The test HTTP peer still keeps its update log in memory;
+persisting admission does not make that unrelated log durable. The host must use
+the persisted `current()` result as snapshot truth, not a second authoritative
+in-memory snapshot cache. Full product integration and storage lifecycle/retention
+policy remain later work; never discard old identities to permit replacement.
+
 ### User identity (separate from device identity)
 
 `SqliteUserIdentityStore` from `./node-user-store` supports explicit `create`, `load`,

@@ -16,7 +16,8 @@
     "./node-key-outbox": "./src/node-key-outbox.ts",
     "./streams": "./src/streams.ts",
     "./streams-content": "./src/streams-content.ts",
-    "./snapshot-admission": "./src/snapshot-admission.ts"
+    "./snapshot-admission": "./src/snapshot-admission.ts",
+    "./node-snapshot-publication-store": "./src/node-snapshot-publication-store.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

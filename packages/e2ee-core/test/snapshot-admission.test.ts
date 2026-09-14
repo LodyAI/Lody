@@ -271,8 +271,10 @@ it('keeps the original lease while queued and ignores later mutation of the requ
   const firstAdmit = host.admit(first);
   const queued = host.admit(second);
   second.leaseExpiresAt = expires + 60_000;
-  await expect(firstAdmit).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
-  await expect(queued).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
+  await Promise.all([
+    expect(firstAdmit).rejects.toMatchObject({ message: 'snapshot-lease-expired' }),
+    expect(queued).rejects.toMatchObject({ message: 'snapshot-lease-expired' }),
+  ]);
   expect(host.current('docs/doc-1')).toBeUndefined();
 });
 

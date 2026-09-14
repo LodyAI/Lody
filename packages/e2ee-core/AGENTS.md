@@ -66,6 +66,14 @@ in-package tests only; do not re-export it.
   Decryption, transport offset, old head, self-declared time, or `verified=true`
   are not admission evidence. Production JWT/gateway is unimplemented. Do not
   enable production E2EE.
+- `snapshot-publication-store.ts` is the platform-neutral, synchronous atomic
+  storage port; default memory storage is not durable. `node-snapshot-publication-store.ts`
+  is exported only via `./node-snapshot-publication-store`. Explicit `{ create: true }`
+  creates a new SQLite file; ordinary open never recreates missing/foreign storage.
+  Verify outside the lock, re-read identity and current after acquiring it, then
+  recheck original lease and device permission before the atomic ciphertext/identity/
+  pointer commit. Return success only after commit. Busy is retryable with unchanged
+  input, not a reason to erase or steal a lock. No cross-stream transaction or JWT wiring.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.

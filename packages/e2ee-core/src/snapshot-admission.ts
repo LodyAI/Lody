@@ -1,5 +1,17 @@
 import { ContentCipher, type ContentAuthor, type ContentHeader } from './content';
 import { ControlLogError, invariant } from './wire';
+import {
+  MemorySnapshotPublicationStore,
+  type SnapshotPublicationStore,
+  type SnapshotPublicationTransaction,
+  type PublishedSnapshot,
+} from './snapshot-publication-store';
+export {
+  MemorySnapshotPublicationStore,
+  type SnapshotPublicationStore,
+  type SnapshotPublicationTransaction,
+  type PublishedSnapshot,
+} from './snapshot-publication-store';
 
 /** Worst residual authorization window already accepted for this package. Not a production JWT. */
 export const CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS = 15 * 60 * 1000;
@@ -36,6 +48,8 @@ export interface ContentSnapshotAdmissionResult {
 }
 
 export interface ContentSnapshotAdmissionOptions {
+  /** Omit only for the non-durable memory prototype. */
+  readonly store?: SnapshotPublicationStore;
   readonly cipher: ContentCipher;
   /** Current document-write capability at admit time. Not historical acceptance. */
   readonly mayWriteDocument: (author: ContentAuthor) => boolean;
@@ -43,33 +57,41 @@ export interface ContentSnapshotAdmissionOptions {
   readonly now: () => number;
 }
 
-type StreamPublication = {
-  currentOffset: string;
-  currentBody: Uint8Array;
-  admitted: Map<string, Uint8Array>;
-};
-
 /**
- * Host-side content-snapshot publication. Submit-time authorization is separate
- * from read-time historical open(). Trusts this host to enforce admission; does
- * not resist a malicious host colluding with a revoked device. Not a receipt.
+ * Trusted host admission. Storage is the source of publication identity, never
+ * a per-process cache. Signature verification does not hold a database lock.
  */
 export function createContentSnapshotPublication(options: ContentSnapshotAdmissionOptions) {
   const { cipher, mayWriteDocument, now } = options;
-  const streams = new Map<string, StreamPublication>();
-  const queues = new Map<string, Promise<void>>();
+  const store = options.store ?? new MemorySnapshotPublicationStore();
 
-  function exclusive<T>(streamKey: string, work: () => Promise<T>): Promise<T> {
-    const previous = queues.get(streamKey) ?? Promise.resolve();
-    const run = previous.then(work, work);
-    queues.set(
-      streamKey,
-      run.then(
-        () => undefined,
-        () => undefined
-      )
-    );
-    return run;
+  function existing(
+    tx: SnapshotPublicationTransaction,
+    offset: string,
+    body: Uint8Array
+  ): ContentSnapshotAdmissionResult | undefined {
+    const current = tx.current();
+    const prior = tx.admitted(offset);
+    if (prior) {
+      invariant(current !== undefined, 'snapshot-store-corrupt');
+      if (!equalBytes(prior, body)) throw new ControlLogError('snapshot-identity-conflict');
+      return {
+        status: 'idempotent',
+        currentOffset: current.offset,
+        currentBody: current.body,
+        header: null,
+      };
+    }
+    if (current && compareOffsets(offset, current.offset) === 0) {
+      if (!equalBytes(current.body, body)) throw new ControlLogError('snapshot-identity-conflict');
+      return {
+        status: 'idempotent',
+        currentOffset: current.offset,
+        currentBody: current.body,
+        header: null,
+      };
+    }
+    return undefined;
   }
 
   return {
@@ -83,50 +105,30 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
         input.body instanceof Uint8Array && input.body.byteLength > 0,
         'invalid-snapshot-body'
       );
-      // Copy caller-owned admission inputs before any await/queue so later mutation
-      // cannot extend the original lease or swap the bound device/room.
+      // Capture before async crypto; caller mutation cannot renew a lease.
       const streamKey = input.streamKey;
       const body = input.body.slice();
-      const submittingDevice = input.submittingDevice;
-      const leaseIssuedAt = input.leaseIssuedAt;
-      const leaseExpiresAt = input.leaseExpiresAt;
-      const expectedGenesis = input.expectedGenesis;
-      const expectedResource = input.expectedResource;
-      return await exclusive(streamKey, async () => {
-        const row = streams.get(streamKey);
-        const existing = row?.admitted.get(offset);
-        if (row && existing && equalBytes(existing, body)) {
-          return {
-            status: 'idempotent' as const,
-            currentOffset: row.currentOffset,
-            currentBody: row.currentBody.slice(),
-            header: null,
-          };
-        }
-        if (existing) throw new ControlLogError('snapshot-identity-conflict');
-        if (row && compareOffsets(offset, row.currentOffset) === 0) {
-          if (equalBytes(row.currentBody, body)) {
-            return {
-              status: 'idempotent' as const,
-              currentOffset: row.currentOffset,
-              currentBody: row.currentBody.slice(),
-              header: null,
-            };
-          }
-          throw new ControlLogError('snapshot-identity-conflict');
-        }
+      const { submittingDevice, leaseIssuedAt, leaseExpiresAt, expectedGenesis, expectedResource } =
+        input;
+      const retry = store.transaction(streamKey, (tx) => existing(tx, offset, body));
+      if (retry) return retry;
 
-        checkLease(now(), leaseIssuedAt, leaseExpiresAt);
-        const header = await authenticateSnapshot(cipher, body);
-        invariant(header.device === submittingDevice, 'snapshot-device-mismatch');
-        invariant(
-          header.genesis === expectedGenesis && header.resource === expectedResource,
-          'content-context-mismatch'
-        );
-        invariant(SNAPSHOT_PURPOSES.has(header.purpose), 'invalid-content-purpose');
+      checkLease(now(), leaseIssuedAt, leaseExpiresAt);
+      const header = await authenticateSnapshot(cipher, body);
+      invariant(header.device === submittingDevice, 'snapshot-device-mismatch');
+      invariant(
+        header.genesis === expectedGenesis && header.resource === expectedResource,
+        'content-context-mismatch'
+      );
+      invariant(SNAPSHOT_PURPOSES.has(header.purpose), 'invalid-content-purpose');
 
-        if (row) {
-          const order = compareOffsets(offset, row.currentOffset);
+      return store.transaction(streamKey, (tx) => {
+        // Another process may have committed while crypto was running.
+        const concurrentRetry = existing(tx, offset, body);
+        if (concurrentRetry) return concurrentRetry;
+        const current = tx.current();
+        if (current) {
+          const order = compareOffsets(offset, current.offset);
           if (order === 'incomparable' || order < 0)
             throw new ControlLogError(
               order === 'incomparable'
@@ -134,36 +136,20 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
                 : 'snapshot-offset-regression'
             );
         }
-
-        // Recheck current write and the original lease after async verify, with no
-        // await between this gate and storing the accepted bytes.
         invariant(mayWriteDocument(header) === true, 'unauthorized');
         checkLease(now(), leaseIssuedAt, leaseExpiresAt);
-        const stored = body.slice();
-        if (!row) {
-          const created: StreamPublication = {
-            currentOffset: offset,
-            currentBody: stored,
-            admitted: new Map([[offset, stored]]),
-          };
-          streams.set(streamKey, created);
-        } else {
-          row.admitted.set(offset, stored);
-          row.currentOffset = offset;
-          row.currentBody = stored;
-        }
+        // Synchronous transaction: immutable identity + bytes + current commit together.
+        tx.save({ offset, body });
         return {
           status: 'accepted' as const,
           currentOffset: offset,
-          currentBody: stored.slice(),
+          currentBody: body.slice(),
           header,
         };
       });
     },
-    current(streamKey: string): { offset: string; body: Uint8Array } | undefined {
-      const row = streams.get(streamKey);
-      if (!row) return undefined;
-      return { offset: row.currentOffset, body: row.currentBody.slice() };
+    current(streamKey: string): PublishedSnapshot | undefined {
+      return store.transaction(streamKey, (tx) => tx.current());
     },
   };
 }
