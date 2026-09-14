@@ -1,7 +1,6 @@
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Building2 } from 'lucide-react';
 import { useStableAvatarSrc } from '@/hooks/use-stable-avatar-src';
-import { cn } from '@/lib/utils';
 
 interface WorkspaceAvatarProps {
   workspace?: {
@@ -9,8 +8,10 @@ interface WorkspaceAvatarProps {
     /** BetterAuth stores the workspace avatar in `organization.logo`. */
     logo?: string | null;
   } | null;
+  /** Which rung of `@lody/ui`'s avatar ladder the tile sits on. */
+  size?: AvatarSize;
+  /** Layout only; the tile itself belongs to the primitive. */
   className?: string;
-  fallbackClassName?: string;
 }
 
 /* Deterministic 0–359 hue from a string — same recipe as
@@ -35,35 +36,37 @@ function firstGraphemeUpper(name: string): string | null {
  * Workspace (organization) avatar. Shares the stable blob-cache strategy with
  * {@link UserAvatar} via `useStableAvatarSrc`.
  *
- * Default (no logo): first letter / character of the workspace name on a
- * hashed solid color — matches the mobile home header fallback.
+ * It is a **tile** rather than a circle, which is the shape `@lody/ui` gives a
+ * thing as opposed to a person: a circle around a logo is a crop, and the mark
+ * inside one was drawn square. The corner follows the rung.
+ *
+ * Default (no logo): first letter / character of the workspace name on a hashed
+ * hue. Which hue belongs to which name is a product fact rather than a token,
+ * so it is passed as a style; the gray the primitive would otherwise draw is
+ * what a workspace with no name falls back to.
  */
-export function WorkspaceAvatar({
-  workspace,
-  className,
-  fallbackClassName,
-}: WorkspaceAvatarProps) {
+export function WorkspaceAvatar({ workspace, size = 'medium', className }: WorkspaceAvatarProps) {
   const avatarImage = useStableAvatarSrc(workspace?.logo);
   const name = workspace?.name ?? '';
   const initial = firstGraphemeUpper(name);
   const hue = stringToHue(name || 'workspace');
 
   return (
-    <Avatar className={className}>
-      <AvatarImage src={avatarImage} alt={workspace?.name || 'Workspace'} />
-      <AvatarFallback
-        className={cn(
-          fallbackClassName,
-          initial ? 'font-semibold text-white' : 'bg-muted text-muted-foreground'
-        )}
+    <Avatar.Root size={size} shape="tile" className={className}>
+      {avatarImage ? <Avatar.Image src={avatarImage} alt={workspace?.name || 'Workspace'} /> : null}
+      <Avatar.Fallback
         style={
           initial
-            ? { backgroundColor: `hsl(${hue} 62% 52%)` }
+            ? { backgroundColor: `hsl(${hue} 62% 52%)`, color: 'hsl(0 0% 100%)', fontWeight: 600 }
             : undefined
         }
       >
-        {initial ?? <Building2 className="h-4 w-4" />}
-      </AvatarFallback>
-    </Avatar>
+        {initial ?? (
+          <Avatar.Glyph>
+            <Building2 className="size-full" />
+          </Avatar.Glyph>
+        )}
+      </Avatar.Fallback>
+    </Avatar.Root>
   );
 }

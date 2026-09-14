@@ -63,12 +63,11 @@ export function AvatarEditor({
     }
   };
 
-  const avatarClassName = 'h-8 w-8 text-xs';
   const avatar =
     kind === 'user' ? (
-      <UserAvatar user={{ name, image, email }} className={avatarClassName} />
+      <UserAvatar user={{ name, image, email }} size="large" />
     ) : (
-      <WorkspaceAvatar workspace={{ name, logo: image }} className={avatarClassName} />
+      <WorkspaceAvatar workspace={{ name, logo: image }} size="large" />
     );
 
   if (!editable) {

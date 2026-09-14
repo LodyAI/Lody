@@ -341,8 +341,7 @@ function MachineOwnerAvatar({
         >
           <UserAvatar
             user={owner ?? (ownerUserId ? { id: ownerUserId, name: ownerName } : null)}
-            className="h-5 w-5 text-[9px]"
-            fallbackClassName="bg-muted text-muted-foreground"
+            size="small"
             showIcon={!ownerUserId}
           />
         </span>

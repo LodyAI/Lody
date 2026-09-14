@@ -553,7 +553,7 @@ export function MobileAccountSettings({
                   index > 0 && 'border-t border-border'
                 )}
               >
-                <UserAvatar user={member.user} className="h-9 w-9 shrink-0 text-[12px]" />
+                <UserAvatar user={member.user} size="large" className="shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[0.95rem] font-medium leading-tight">
                     {member.user?.name || '—'}

@@ -1390,8 +1390,8 @@ export function SessionHeaderMenu({
                     >
                       <UserAvatar
                         user={{ id: member.userId, name: member.name, image: member.image }}
-                        className="h-4 w-4 shrink-0"
-                        fallbackClassName="text-[0.55rem]"
+                        size="mini"
+                        className="shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate">{member.name}</span>
                       {isPending ? (

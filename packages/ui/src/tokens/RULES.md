@@ -41,7 +41,7 @@ One rung per component. The rung fixes background and shadow together.
   is the third: an action that destroys, and an outcome that failed.
 - Disabled is 45% opacity on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
-  scrollbar, tracks, kbd, skeleton.
+  scrollbar, tracks, kbd, skeleton, an avatar's stand-in.
 
 ## Fields
 
@@ -534,19 +534,41 @@ hover already use, which steps away from the surface in both palettes at once.
 
 A standing fact about the thing beside it, and the one part of this system on
 **no rung**: it sits on a page, a card, a menu row or a modal panel, so it can
-take no background from the ladder. Its fill is a _film_ — the tone at 8% of
-`label` or 14% of a tone over whatever is underneath, the form a destructive
+take no background from the ladder. Its fill is a _film_ — the tone at 12% of
+`label` or 22% of a tone over whatever is underneath, the form a destructive
 ghost Button's hover already takes — so one declaration reads on every rung and
-in both palettes.
+in both palettes. Those two started at 8 and 14, which was a film too thin to
+tell apart: the closest pair of tones measured 0.019 apart in oklab in the light
+palette and 0.026 in the dark one, and is now 0.030 and 0.035.
 
-The words stay `badge.label` in every tone, and that is measured rather than
-preferred: `warning` is 2.8:1 on a near-white surface, a colour tuned for a 16px
-mark where the bar is 3:1, used as 11px text where it is 4.5:1. A badge is never
-wordless, so the tint carries the tone and the word carries the fact.
+**The word carries the tone, and it is the tone pulled halfway to `label`.**
+The raw tone cannot: `warning` is 2.8:1 on a near-white surface, a colour tuned
+for a 16px mark where the bar is 3:1, used as 11px text where it is 4.5:1. But
+the raw tone is not the only way to carry a hue. At half the distance to the
+ink, a tone keeps its hue and gains the ink's contrast — the worst of the four
+measures 5.2:1 on its own chip, on every rung, in both palettes.
+
+The film alone could not do this. A 20px chip's tint is a wash a few percent off
+its surface; its word is the mark a person looks at. The four words land 0.097
+apart in oklab at the closest in the light palette and 0.048 in the dark one,
+against 0.030 and 0.035 for the films under them. The dark palette is where it
+earns its place: there `accent` is a pale peach and `warning` an amber, twenty-six
+degrees apart, so their films are two brown washes that no percentage separates,
+and their words are a peach and a gold at four times the chroma.
+
+Half is not a round number chosen for tidiness. At 60% of the tone the worst word
+is 4.2:1 — under the bar on the floating rung, where the chip is already a step
+darker — and at 40% the hues wash out.
+
+`badge.label` is the neutral word and the ink the rest are pulled toward: `label`,
+not `secondaryLabel`. A badge's word sits on the badge's own film rather than on
+the page, and there `secondaryLabel` was 3.9:1 on a danger chip and 3.4:1 inside
+a popup — under the bar before the films were strengthened, not because of it.
 
 It is metadata, so it takes the caption step the rules give a row's trailing
-metadata, `secondaryLabel` because it is _about_ the thing, `radius.mini` at
-`badge.height`, and figures at one width. It neither grows nor shrinks: a
+metadata — which is how it stays quieter than the thing it is attached to, by
+size rather than by a colour that cannot carry its own words — at `radius.mini`
+and `badge.height`, with figures at one width. It neither grows nor shrinks: a
 surface that must cap a long one caps the badge, because a chip that shrank
 would be clipped by a tight row rather than by a decision.
 
@@ -571,6 +593,74 @@ surface's layout, so it carries no margin of its own — a popup's divider has o
 only because it bleeds through an inset the caller cannot see. A vertical line
 stretches to its row rather than taking a percentage of a height the row has
 not got.
+
+## Faces and keys
+
+Two parts that stand for something outside the interface — a person, and a key
+on the keyboard — and neither is a control. They take the gray ramp, which is
+what the rules reserve it for: a thing with no role.
+
+### Avatar
+
+The second part on no rung, and the one that is **not a film**. A badge can be a
+tint over whatever holds it because a word reads through one; what an avatar
+stands in for is a photograph, and a translucent face would show a row's hover
+through it. So the fallback is `avatar.fallbackBackground`, a gray, the same
+reading `Skeleton` already takes.
+
+| part    | what it is                                                             |
+| ------- | ---------------------------------------------------------------------- |
+| box     | one of five rungs — 16, 20, 24, 32, 64 — a width, a height, and a crop |
+| picture | fills the box and is cropped to it; mounted only once it has loaded    |
+| letters | the rung's own step, in `avatar.fallbackLabel`                         |
+| mark    | an `avatar.glyph*` box, for a name there are no letters to make        |
+| circle  | a person: `radius.full` on `corner.round`                              |
+| tile    | a thing: `avatar.tileRadius*`, the radius-by-size table read per rung  |
+
+**The rung picks the letters.** A box and a type step stated separately are two
+facts that can disagree, and they did: the deleted implementation had one size
+and twenty call sites restating both. Two initials want 20px or more; 16 is a
+face where an icon would otherwise be.
+
+A circle is a person and a tile is a thing. A circle around a logo is a crop,
+and the mark inside one was drawn square. The letters take `label` rather than
+`secondaryLabel` — unlike a badge's word, which is _about_ the thing beside it,
+initials **are** the person, and measured on this gray the secondary label is
+3.5:1 in the light palette, under the 4.5:1 letters this small need.
+
+An avatar is a ceiling as well as a floor. A flex item's automatic minimum size
+is its content's, so a 16px circle holding two initials lays out 20px wide and
+stops being a circle; the box and the fallback both give that up, and the
+letters are clipped to the width instead.
+
+An identity colour — a hue derived from a name, so one workspace is one colour
+on every screen — is the surface's and arrives as a `style`. Which hue belongs
+to which name is a product fact, not a token.
+
+### Kbd
+
+`kbd.background`, a gray, at a badge's height and corner: a cap stands for a
+piece of hardware, so `accent` would claim it is live, ink would claim it is
+stored and a tone would claim it reported something. It is never a control —
+no hover, no focus ring, no pressed state, and it takes neither the pointer nor
+a selection. A chord is a `<kbd>` around `<kbd>`s at `kbd.gap`, with nothing
+between them: a `+` is how a chord is written in prose, and this is not prose.
+One cap is at least as wide as it is tall, so `K` and `Shift` do not read as
+noise side by side. The face is the UI font, because `<kbd>` defaults to
+monospace and `⌘` there is a different glyph from the identical character in the
+label beside it.
+
+A menu row's shortcut is **not** this: the rules give that slot plain trailing
+metadata in `popup.hint`, because a column of chips down a menu's right edge
+turns a quiet list into a keyboard diagram. A cap is for where the keys are the
+subject.
+
+A cap on a tooltip inverts with it. `kbdOnInvertedTheme` re-declares the two
+things a cap is made of — the film and the letters — and `Tooltip.Content`
+declares it on its own popup, so every cap under it inherits. A component token
+group is how a surface tells what is inside it what it is standing on; StyleX
+has no descendant selector, and unlike one this also reaches a cap a caller
+wrapped in something of their own.
 
 ## Corners
 

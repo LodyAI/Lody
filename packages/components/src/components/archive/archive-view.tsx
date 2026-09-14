@@ -544,11 +544,7 @@ function DesktopArchivedSessionItem({
           <Tooltip delayDuration={500}>
             <TooltipTrigger asChild>
               <span className="inline-flex shrink-0">
-                <UserAvatar
-                  user={owner}
-                  className="h-4 w-4"
-                  fallbackClassName="text-[8px] font-medium"
-                />
+                <UserAvatar user={owner} size="mini" />
               </span>
             </TooltipTrigger>
             <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>
@@ -746,11 +742,7 @@ function MobileArchivedSessionItem({
               <Tooltip delayDuration={500}>
                 <TooltipTrigger asChild>
                   <span className="inline-flex shrink-0">
-                    <UserAvatar
-                      user={owner}
-                      className="h-4 w-4"
-                      fallbackClassName="text-[8px] font-medium"
-                    />
+                    <UserAvatar user={owner} size="mini" />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>

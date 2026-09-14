@@ -66,7 +66,7 @@ function LocalWorkspaceNameplate() {
     <div className="flex w-full items-center gap-3 px-3 py-2">
       <WorkspaceAvatar
         workspace={{ name: workspace.name, logo: resolveWorkspaceIdentityLogo(null, false) }}
-        className="h-8 w-8"
+        size="large"
       />
       <span className="truncate text-lg font-semibold">{workspace.name}</span>
     </div>
@@ -155,7 +155,7 @@ function CloudOrganizationSwitcher() {
                     name: activeOrganization.name,
                     logo: activeOrganization.logo,
                   }}
-                  className="h-8 w-8"
+                  size="large"
                 />
                 <div className="flex flex-col items-start">
                   <span className="text-lg font-semibold truncate max-w-[120px]">
@@ -205,7 +205,8 @@ function CloudOrganizationSwitcher() {
                   <div className="flex min-w-0 items-center gap-2">
                     <WorkspaceAvatar
                       workspace={{ name: org.name, logo: org.logo }}
-                      className="h-6 w-6 shrink-0 text-xs"
+                      size="medium"
+                      className="shrink-0"
                     />
                     <span className="truncate text-sm">{org.name}</span>
                     {planTierByWorkspaceId.has(org.id) ? (

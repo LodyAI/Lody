@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
+import { avatar } from '../src/avatar/avatar.tokens.stylex';
 import { badge } from '../src/badge/badge.tokens.stylex';
 import { card } from '../src/card/card.tokens.stylex';
 import { dialog } from '../src/dialog/dialog.tokens.stylex';
 import { disclosure } from '../src/disclosure/disclosure.tokens.stylex';
 import { feedback } from '../src/feedback/feedback.tokens.stylex';
+import { kbd } from '../src/kbd/kbd.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
 import { table } from '../src/table/table.tokens.stylex';
@@ -282,6 +284,45 @@ describe('UiGallery', () => {
     expect(board).toContain('aria-orientation="vertical"');
     for (const name of tokenNames(badge)) {
       expect(board, `badge.${name} is missing from the board`).toContain(`badge.${name}`);
+    }
+  });
+
+  test('shows every avatar rung, both shapes, and each stand-in', () => {
+    // The board is where the ladder either holds or does not: the point of the
+    // size prop is that the box picks the letters, so all five rungs are on it
+    // rather than one with a note about the rest.
+    for (const legend of [
+      'mini \u00b7 16',
+      'small \u00b7 20',
+      'medium \u00b7 24',
+      'large \u00b7 32',
+      'xlarge \u00b7 64',
+    ]) {
+      expect(board, `avatar rung ${legend} is missing from the board`).toContain(legend);
+    }
+    expect(board).toContain('data-shape="tile"');
+    expect(board).toContain('data-shape="circle"');
+    // The letters where a picture has not arrived, and the identity colour a
+    // surface brought itself. There is no `<img>` in this markup and that is
+    // the component working: Base UI mounts the picture only once it has
+    // loaded, so a static render is every avatar showing its stand-in.
+    expect(board).not.toContain('<img');
+    expect(board).toContain('background-color:hsl(268 62% 52%)');
+    for (const name of tokenNames(avatar)) {
+      expect(board, `avatar.${name} is missing from the board`).toContain(`avatar.${name}`);
+    }
+  });
+
+  test('shows a key cap, a chord, and the same cap on the surface that inverts', () => {
+    // Nothing here is a stand-in for the cap; the chip is, because a tooltip is
+    // portalled and opens on a pointer the board has not got. It is composed
+    // from the very styles `Tooltip.Content` applies, so a chip this package no
+    // longer draws cannot be reported here.
+    expect(board).toContain('<kbd');
+    // A chord is a kbd around kbds, which is the shape HTML gives one gesture.
+    expect(board).toMatch(/<kbd[^>]*>\s*<kbd/);
+    for (const name of tokenNames(kbd)) {
+      expect(board, `kbd.${name} is missing from the board`).toContain(`kbd.${name}`);
     }
   });
 

@@ -88,6 +88,29 @@ export async function step(run: () => void | Promise<void>): Promise<void> {
   });
 }
 
+/**
+ * Waits for a condition instead of for a number of frames.
+ *
+ * `step` settles two animation frames, which is enough on an idle machine and
+ * is otherwise scheduler luck — the thing this repository's testing rule names
+ * by name. Base UI schedules part of a popup's state on its own animation
+ * frame, so how many frames a given interaction needs is a property of the
+ * machine that ran it: at one frame a different test in this suite fails than
+ * at two, and on a loaded CI runner the attribute can land a frame after the
+ * assertion that reads it. A test with a precondition, or one reading a state
+ * the library defers, states what it is waiting for here.
+ *
+ * It is bounded rather than open-ended, and the bound throws with what it was
+ * waiting for, so a real regression still fails the run and says why.
+ */
+export async function until(ready: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (ready()) return;
+    await step(() => {});
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
 /** The pointer moving onto something, which is what highlights a list row. */
 export async function hover(element: Element): Promise<void> {
   await step(() => {
