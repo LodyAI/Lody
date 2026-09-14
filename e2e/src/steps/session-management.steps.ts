@@ -42,10 +42,19 @@ Given('已建立含 child Tab 和两个独立 worktree 的 Session 关系', asyn
     await this.sessionRelationLifecyclePage!.seedRelationLifecycle(firstFork, secondFork);
 });
 
-When('用户归档并永久删除 opener Session', async function (this: LodyWorld) {
+When('用户在一次 lifecycle 发布失败下归档 opener Session 并重载', async function (this: LodyWorld) {
   await this.sessionRelationLifecyclePage!.archiveRelationRoot(
     this.sessionRelationLifecycleResources!
   );
+});
+
+Then('同一 durable lifecycle 操作完整覆盖 opener 与 child Tab', async function (this: LodyWorld) {
+  await this.sessionRelationLifecyclePage!.expectRecoveredLifecycleArchive(
+    this.sessionRelationLifecycleResources!
+  );
+});
+
+When('用户永久删除 opener Session', async function (this: LodyWorld) {
   await this.sessionRelationLifecyclePage!.permanentlyDeleteRelationRoot(
     this.sessionRelationLifecycleResources!
   );

@@ -53,6 +53,9 @@ opened Sessions. It verifies the target set and terminal set, child-write and fi
 write compensation, zero terminal effects on metadata failure, and both workspace switch
 boundaries: abort before the first write and finish against the captured runtime after it.
 
-This implements [#574](https://github.com/LodyAI/Lody/issues/574) and complements the
-containment decision recorded in
+This was the initial mitigation for [#574](https://github.com/LodyAI/Lody/issues/574).
+The coordinated local topology now supersedes its compensation path with the
+[durable lifecycle operation design](../../proposed/architecture/2026-09-13-session-lifecycle-commit.md);
+cloud and dual topologies retain this implementation until their independently
+deployed writers can be fenced. The containment decision remains in
 [Keep opened Sessions outside opener state cascades](2026-09-10-session-containment-lifecycle.md).

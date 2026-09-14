@@ -16,6 +16,8 @@
   场景: opener 删除不销毁独立 opened Session
     假如 已配置支持分叉的确定性 Agent 桌面
     并且 已建立含 child Tab 和两个独立 worktree 的 Session 关系
-    当 用户归档并永久删除 opener Session
+    当 用户在一次 lifecycle 发布失败下归档 opener Session 并重载
+    那么 同一 durable lifecycle 操作完整覆盖 opener 与 child Tab
+    当 用户永久删除 opener Session
     那么 child Tab 被删除而 opened Sessions 和 worktree 保留
     并且 metadata 未完成 hydration 时精确删除 empty child Tab 仍成功

@@ -1,4 +1,11 @@
 import type { LoroRepo } from 'loro-repo';
+import {
+  getAttachedSessionLifecycleRepository,
+  isSessionDocRoomId,
+  projectSessionLifecycleMetadata,
+  SESSION_DOC_PREFIX,
+  type SessionId,
+} from '@lody/shared';
 import { collectDocExistenceValues, collectDocMetadataPatchesFromEntries } from './flock-existence';
 
 type FlockScanRow = {
@@ -58,10 +65,22 @@ async function tryListDocMetaEntriesFromFlock(repo: LoroRepo): Promise<DocMetaEn
 
 export async function listDocMetaEntries(repo: LoroRepo): Promise<DocMetaEntry[]> {
   const batchedEntries = await tryListDocMetaEntriesFromFlock(repo);
-  if (batchedEntries) return batchedEntries;
-  const entries = await repo.listDoc();
+  const entries =
+    batchedEntries ??
+    (await repo.listDoc()).map((entry) => ({
+      ...entry,
+      meta: entry.meta as Record<string, unknown>,
+    }));
+  const lifecycle = getAttachedSessionLifecycleRepository(repo);
   return entries.map((entry) => ({
     ...entry,
-    meta: entry.meta as Record<string, unknown>,
+    meta:
+      lifecycle && isSessionDocRoomId(entry.docId)
+        ? projectSessionLifecycleMetadata(
+            lifecycle,
+            entry.docId.slice(SESSION_DOC_PREFIX.length) as SessionId,
+            entry.meta
+          )
+        : entry.meta,
   }));
 }

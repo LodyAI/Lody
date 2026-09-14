@@ -766,6 +766,26 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     }
   }
 
+  // Register before the repo facade's synthesized per-session events. The
+  // lifecycle owner has already installed the complete revision, and this one
+  // cache write makes every target visible together to React consumers.
+  const unsubscribeLifecycle = runtime.sessionLifecycle?.subscribe(({ revision, previous }) => {
+    const targetIds = new Set([...previous.bySessionId.keys(), ...revision.bySessionId.keys()]);
+    set(sessionMetaCacheAtom, (prev) => {
+      let next = prev;
+      for (const sessionId of targetIds) {
+        const roomId = `${SESSION_DOC_PREFIX}${sessionId}`;
+        const current = next[roomId];
+        if (!current) continue;
+        const isArchived = revision.bySessionId.get(sessionId)?.state === 'archived';
+        if (current.isArchived === isArchived) continue;
+        if (next === prev) next = { ...prev };
+        next[roomId] = { ...current, isArchived };
+      }
+      return next;
+    });
+  });
+
   const handle = runtime.repo.watch(
     (event) => {
       if (event.kind === 'doc-metadata') {
@@ -836,6 +856,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       clearTimeout(flushTimer);
       flushTimer = null;
     }
+    unsubscribeLifecycle?.();
     handle.unsubscribe();
   };
 });

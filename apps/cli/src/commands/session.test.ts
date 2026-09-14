@@ -20,9 +20,11 @@ import {
   createLocalProjectBranchSelector,
   normalizeLocalProjectRootPath,
 } from '@lody/shared/node/local-project';
+import type { LoroDocumentManager } from '../lib/loro/doc';
 
 import {
   applyAgentRunConfigSelection,
+  applySessionLifecycleState,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
   buildSessionArchiveMetaPatch,
@@ -990,6 +992,27 @@ describe('session command helpers', () => {
     expect(buildSessionRestoreMetaPatch()).toEqual({
       isArchived: false,
     });
+  });
+
+  it('commits one lifecycle operation without authoring legacy flags or runtime status', async () => {
+    const root = 'lifecycle-root' as SessionId;
+    const child = 'lifecycle-child' as SessionId;
+    const commit = vi.fn(async () => undefined);
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const manager = {
+      sessionLifecycle: { commit },
+      repo: { upsertDocMeta },
+    } as unknown as LoroDocumentManager;
+
+    await applySessionLifecycleState(manager, root, [child], 'archived', 'stable-operation');
+
+    expect(commit).toHaveBeenCalledWith({
+      operationId: 'stable-operation',
+      subjectId: root,
+      targetIds: [root, child],
+      state: 'archived',
+    });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('matches local project selectors against normalized paths', () => {

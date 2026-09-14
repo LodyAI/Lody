@@ -63,6 +63,10 @@ import {
   isSensitiveAcpConfigOptionId,
   BuiltinRuntimeOverridesSchema,
   CustomAcpLaunchSpecSchema,
+  createLoroMetaSessionLifecyclePublisher,
+  createSessionLifecycleBaselineOperation,
+  installSessionLifecycleRepoProjection,
+  SessionLifecycleRepository,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
@@ -100,6 +104,7 @@ import { getProxyForUrl } from 'proxy-from-env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { RateLimit } from 'acp-extension-core';
 import { createCliSqliteRepoStore } from './sqlite-repo-store';
+import { createSqliteSessionLifecycleAdmissionStore } from './session-lifecycle-persistence';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -314,6 +319,7 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
+  sessionLifecycle?: SessionLifecycleRepository | null;
 }
 
 export type LoroRepoPersistReason =
@@ -354,6 +360,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
+  public readonly sessionLifecycle: SessionLifecycleRepository | null;
 
   static async create(
     workspaceId: WorkspaceId,
@@ -361,6 +368,7 @@ export class LoroDocumentManager {
     logger: Logger,
     options: {
       attachRemoteOnCreate?: boolean;
+      enableSessionLifecycle?: boolean;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
     } = {}
@@ -391,6 +399,7 @@ export class LoroDocumentManager {
 
     let repo: LoroRepo | null = null;
     let manager: LoroDocumentManager | null = null;
+    let sessionLifecycle: SessionLifecycleRepository | null = null;
     try {
       const createRepoStartMs = Date.now();
       repo = await traceAsync(
@@ -410,6 +419,37 @@ export class LoroDocumentManager {
       );
       const createdRepo = repo;
       logger.debug(`[${workspaceId}] LoroRepo created in ${Date.now() - createRepoStartMs}ms`);
+      // The public local-only topology upgrades its bundled renderer and daemon
+      // together. Cloud-capable workspaces remain on the legacy representation
+      // until independently deployed writers can be fenced at admission.
+      if (options.enableSessionLifecycle === true) {
+        if (options.streamsTokens) {
+          throw new Error('Session lifecycle operations require the local-only topology');
+        }
+        const rawSessionEntries = (await createdRepo.listDoc()).filter(
+          (entry) => getSessionIdFromRoomId(entry.docId) && !isLoroRepoDocDeleted(entry)
+        );
+        sessionLifecycle = new SessionLifecycleRepository({
+          actorId: `cli:${userId}`,
+          store: await createSqliteSessionLifecycleAdmissionStore({ workspaceId }),
+          publisher: createLoroMetaSessionLifecyclePublisher(createdRepo),
+        });
+        await sessionLifecycle.initialize({
+          baselines: rawSessionEntries.flatMap((entry) => {
+            const sessionId = getSessionIdFromRoomId(entry.docId);
+            return sessionId && entry.meta.isArchived === true
+              ? [createSessionLifecycleBaselineOperation(sessionId)]
+              : [];
+          }),
+        });
+        installSessionLifecycleRepoProjection({
+          repo: createdRepo,
+          repository: sessionLifecycle,
+          getSessionId: getSessionIdFromRoomId,
+          getSessionDocId: getSessionRoomId,
+          rejectLegacyWrites: true,
+        });
+      }
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
       // Streams sink is attached later by the remote bridge.
@@ -455,6 +495,7 @@ export class LoroDocumentManager {
         remoteStreamsAttached: false,
         streamsTokens: options.streamsTokens ?? null,
         cloudBilling: options.cloudBilling ?? null,
+        sessionLifecycle,
       });
     } catch (error) {
       try {
@@ -470,6 +511,7 @@ export class LoroDocumentManager {
           )}`
         );
       }
+      await sessionLifecycle?.dispose().catch(() => undefined);
       throw error;
     }
 
@@ -515,6 +557,7 @@ export class LoroDocumentManager {
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
     this.streamsTokens = options.streamsTokens ?? null;
     this.cloudBilling = options.cloudBilling ?? null;
+    this.sessionLifecycle = options.sessionLifecycle ?? null;
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
     this.machineMonitorRuntime = options.machineMonitorRuntime ?? null;
@@ -1656,6 +1699,10 @@ export class LoroDocumentManager {
     this.remoteStreamsStatusUnsubscribe = null;
     // A coalesced flush may still be waiting out its debounce window.
     await this.remoteSyncPersist.flushNow();
+    if (this.sessionLifecycle) {
+      await this.sessionLifecycle.flushPending().catch(() => undefined);
+      await this.sessionLifecycle.dispose();
+    }
     await this.destroyRepo({ fast: options.fast });
   }
 

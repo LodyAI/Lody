@@ -5,6 +5,7 @@ import {
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
   type SessionDocMeta,
+  type SessionLifecycleRepository,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
@@ -20,6 +21,7 @@ import type { WorkspaceWriter } from './workspace-writer';
 /** Deps the writer needs from the runtime (repo + session stores). */
 export type DirectWorkspaceWriterDeps = {
   repo: LoroRepo;
+  sessionLifecycle?: SessionLifecycleRepository | null;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
   releaseSessionStoreRef: (sessionId: SessionId) => void;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
@@ -68,6 +70,13 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
   return {
     async upsertDocMeta(roomId, patch) {
       await deps.repo.upsertDocMeta(roomId, patch as Parameters<LoroRepo['upsertDocMeta']>[1]);
+    },
+
+    async commitSessionLifecycle(draft) {
+      if (!deps.sessionLifecycle) {
+        throw new Error('Session lifecycle operations are not enabled for this workspace topology');
+      }
+      return await deps.sessionLifecycle.commit(draft);
     },
 
     async startSession(sessionId, meta, entry, dispatch) {

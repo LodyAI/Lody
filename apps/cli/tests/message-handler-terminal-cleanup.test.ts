@@ -71,6 +71,14 @@ function createHarness(options?: {
   includeLegacySessionArchiveRequest?: boolean;
   deletedSessionIds?: SessionId[];
   localProjectRootPaths?: Record<LocalProjectId, string>;
+  lifecycleWinner?: { operationId: string; state: 'archived' | 'active' };
+  lifecycleCommit?: (draft: {
+    operationId: string;
+    subjectId: SessionId;
+    targetIds: readonly SessionId[];
+    state: 'archived' | 'active';
+  }) => Promise<void>;
+  terminateSessionInstance?: (sessionId: SessionId) => Promise<void>;
 }) {
   const sessionId = options?.sessionId ?? ('session-1' as SessionId);
   const childSessionIds = options?.childSessionIds ?? [];
@@ -120,7 +128,7 @@ function createHarness(options?: {
         return { meta: localSessionMeta, deleted };
       }
       if (roomId === sessionRoomId) {
-        return { meta: { isArchived: true, machineId } };
+        return { meta: { isArchived: true, machineId }, deleted: true };
       }
       if (roomId === machineRoomId) {
         return {
@@ -167,22 +175,74 @@ function createHarness(options?: {
     deleteDoc: vi.fn(async () => {}),
     flush: vi.fn(async () => {}),
   };
+  const lifecycleWinners = new Map<
+    SessionId,
+    {
+      operationId: string;
+      state: 'archived' | 'active';
+      order: { counter: string; actorId: string };
+    }
+  >();
+  if (options?.lifecycleWinner) {
+    lifecycleWinners.set(sessionId, {
+      ...options.lifecycleWinner,
+      order: { counter: '1', actorId: 'test' },
+    });
+  }
   const workspaceDocument = {
     sessions: new Map<SessionId, unknown>(),
     repo,
     getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
+    sessionLifecycle:
+      options?.lifecycleWinner || options?.lifecycleCommit
+        ? {
+            getRevision: () => ({ bySessionId: lifecycleWinners }),
+            commit: async (draft: {
+              operationId: string;
+              subjectId: SessionId;
+              targetIds: readonly SessionId[];
+              state: 'archived' | 'active';
+            }) => {
+              await options?.lifecycleCommit?.(draft);
+              for (const targetId of draft.targetIds) {
+                lifecycleWinners.set(targetId, {
+                  operationId: draft.operationId,
+                  state: draft.state,
+                  order: { counter: '2', actorId: 'test' },
+                });
+              }
+            },
+          }
+        : null,
   };
+  const activeSessions = new Map<SessionId, { terminate: ReturnType<typeof vi.fn> }>();
+  for (const id of activeSessionIds) {
+    const session = {
+      terminate: vi.fn(async () => {
+        await options?.terminateSessionInstance?.(id);
+        if (activeSessions.get(id) === session) {
+          activeSessionIds.delete(id);
+          activeSessions.delete(id);
+        }
+      }),
+    };
+    activeSessions.set(id, session);
+  }
   const sessionManager = {
     on: vi.fn(),
     setRequestPermissionHandler: vi.fn(),
     getActiveChildSessionIds: vi.fn(() => childSessionIds),
     hasSession: vi.fn((id: SessionId) => activeSessionIds.has(id)),
+    getSession: vi.fn((id: SessionId) => activeSessions.get(id) ?? null),
     terminateSession: vi.fn(async (id: SessionId) => {
       activeSessionIds.delete(id);
     }),
-    archiveSession: vi.fn(async () => {}),
+    archiveSession: vi.fn(async (id: SessionId) => {
+      activeSessionIds.delete(id);
+      activeSessions.delete(id);
+    }),
     cleanUp: vi.fn(async () => {}),
     setSessionError: vi.fn(async () => {}),
   };
@@ -221,6 +281,16 @@ function createHarness(options?: {
     isSessionActive: (id: SessionId) => activeSessionIds.has(id),
     flockSet,
     flockCommit,
+    setLifecycleWinner: (winner: { operationId: string; state: 'archived' | 'active' }) => {
+      lifecycleWinners.set(sessionId, {
+        ...winner,
+        order: { counter: '3', actorId: 'test' },
+      });
+    },
+    setActiveSession: (id: SessionId, session: { terminate: ReturnType<typeof vi.fn> }) => {
+      activeSessionIds.add(id);
+      activeSessions.set(id, session);
+    },
   };
 }
 
@@ -262,6 +332,85 @@ describe('MessageHandler terminal cleanup', () => {
     expect(isSessionActive(sessionId)).toBe(false);
     expect(isSessionActive(childSessionId)).toBe(false);
     expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
+  });
+
+  it('does not tear down a restored replacement runtime while old termination is pending', async () => {
+    const sessionId = 'session-runtime-generation' as SessionId;
+    let releaseTerminate!: () => void;
+    let signalTerminateStarted!: () => void;
+    const terminateStarted = new Promise<void>((resolve) => {
+      signalTerminateStarted = resolve;
+    });
+    const terminateGate = new Promise<void>((resolve) => {
+      releaseTerminate = resolve;
+    });
+    const harness = createHarness({
+      sessionId,
+      activeSessionIds: [sessionId],
+      lifecycleWinner: { operationId: 'archive-1', state: 'archived' },
+      terminateSessionInstance: async () => {
+        signalTerminateStarted();
+        await terminateGate;
+      },
+    });
+
+    const cleanup = harness.handler.handleSessionArchived(sessionId);
+    await terminateStarted;
+    const replacement = { terminate: vi.fn(async () => undefined) };
+    harness.setLifecycleWinner({ operationId: 'restore-2', state: 'active' });
+    harness.setActiveSession(sessionId, replacement);
+    releaseTerminate();
+    await cleanup;
+
+    expect(replacement.terminate).not.toHaveBeenCalled();
+    expect(harness.sessionManager.archiveSession).not.toHaveBeenCalled();
+    expect(harness.sessionManager.getSession(sessionId)).toBe(replacement);
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ status: SessionStatusFactory.idle() })
+    );
+  });
+
+  it('replays a newer archive that arrives while an older generation is terminating', async () => {
+    const sessionId = 'session-runtime-rearchive' as SessionId;
+    let releaseTerminate!: () => void;
+    let signalTerminateStarted!: () => void;
+    let signalReplacementTerminated!: () => void;
+    const terminateStarted = new Promise<void>((resolve) => {
+      signalTerminateStarted = resolve;
+    });
+    const terminateGate = new Promise<void>((resolve) => {
+      releaseTerminate = resolve;
+    });
+    const replacementTerminated = new Promise<void>((resolve) => {
+      signalReplacementTerminated = resolve;
+    });
+    const harness = createHarness({
+      sessionId,
+      activeSessionIds: [sessionId],
+      lifecycleWinner: { operationId: 'archive-1', state: 'archived' },
+      terminateSessionInstance: async () => {
+        signalTerminateStarted();
+        await terminateGate;
+      },
+    });
+
+    const cleanup = harness.handler.handleSessionArchived(sessionId);
+    await terminateStarted;
+    const replacement = {
+      terminate: vi.fn(async () => {
+        signalReplacementTerminated();
+      }),
+    };
+    harness.setLifecycleWinner({ operationId: 'restore-2', state: 'active' });
+    harness.setActiveSession(sessionId, replacement);
+    harness.setLifecycleWinner({ operationId: 'archive-3', state: 'archived' });
+    await harness.handler.handleSessionArchived(sessionId);
+    releaseTerminate();
+    await cleanup;
+    await replacementTerminated;
+
+    expect(replacement.terminate).toHaveBeenCalledOnce();
   });
 
   it('removes the worktree of an archived local-project session and keeps its branch', async () => {
@@ -527,6 +676,71 @@ describe('MessageHandler terminal cleanup', () => {
       projectDeleteIndex
     );
     expect(machineFlockRows).not.toContainEqual(expect.objectContaining({ key: localProjectKey }));
+  });
+
+  it('uses one durable lifecycle operation for a local-project root and its direct child', async () => {
+    const localProjectId = 'local-project-lifecycle' as LocalProjectId;
+    const rootSessionId = 'session-lifecycle-root' as SessionId;
+    const childSessionId = 'session-lifecycle-child' as SessionId;
+    const project = { kind: 'local' as const, localProjectId };
+    const commit = vi.fn(async () => undefined);
+    const localProjectKey = machineFlockKeys.localProject(localProjectId);
+    const harness = createHarness({
+      sessionId: rootSessionId,
+      childSessionIds: [childSessionId],
+      lifecycleCommit: commit,
+      sessionMetas: [
+        {
+          id: rootSessionId,
+          machineId: 'machine-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          project,
+        },
+        {
+          id: childSessionId,
+          machineId: 'machine-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          project,
+          parentSessionId: rootSessionId,
+        },
+      ] as SessionMeta[],
+      includeLegacySessionDeleteRequest: false,
+      machineFlockRows: [
+        {
+          key: localProjectKey,
+          value: {
+            id: localProjectId,
+            name: 'Project',
+            rootPath: '/repo',
+            createdAtMs: 1,
+          },
+        },
+      ],
+    });
+
+    await harness.handler.deleteLocalProjectResources(localProjectId, {
+      v: 1,
+      requestedAt: 7,
+    });
+
+    expect(commit).toHaveBeenCalledOnce();
+    expect(commit).toHaveBeenCalledWith({
+      operationId: `local-project-removal:${localProjectId}:7:${rootSessionId}`,
+      subjectId: rootSessionId,
+      targetIds: [rootSessionId, childSessionId],
+      state: 'archived',
+    });
+    expect(
+      harness.repo.upsertDocMeta.mock.calls.some(([, patch]) =>
+        Object.hasOwn(patch as object, 'isArchived')
+      )
+    ).toBe(false);
   });
 
   it('stops an archived active child session whose parent is already archived', async () => {

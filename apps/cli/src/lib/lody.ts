@@ -73,6 +73,7 @@ export class Lody {
       { workspaceId: options.workspaceId },
       async () =>
         await LoroDocumentManager.create(options.workspaceId, options.userId, options.logger, {
+          enableSessionLifecycle: options.cloudPort.kind === 'local',
           streamsTokens: options.cloudPort.streamsTokens,
           cloudBilling: options.cloudPort.billing,
         })

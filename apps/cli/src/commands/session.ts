@@ -960,7 +960,7 @@ export async function listChildSessionIds(
 
 async function applySessionAndChildren(
   sessionId: SessionId,
-  childSessionIds: SessionId[],
+  childSessionIds: readonly SessionId[],
   apply: (sessionId: SessionId) => Promise<void>
 ): Promise<void> {
   await Promise.all([sessionId, ...childSessionIds].map(apply));
@@ -2874,6 +2874,30 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   };
 }
 
+export async function applySessionLifecycleState(
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  childSessionIds: readonly SessionId[],
+  state: 'archived' | 'active',
+  operationId: string
+): Promise<void> {
+  if (manager.sessionLifecycle) {
+    await manager.sessionLifecycle.commit({
+      operationId,
+      subjectId: sessionId,
+      targetIds: [sessionId, ...childSessionIds],
+      state,
+    });
+    return;
+  }
+  await applySessionAndChildren(sessionId, childSessionIds, (id) =>
+    manager.repo.upsertDocMeta(
+      getSessionRoomId(id),
+      state === 'archived' ? buildSessionArchiveMetaPatch() : buildSessionRestoreMetaPatch()
+    )
+  );
+}
+
 export async function createSessionResult(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -4350,9 +4374,7 @@ const sessionArchiveCommand = new Command('archive')
         const childSessionIds = await listChildSessionIds(manager, sessionId);
         // The archived state is the whole request: the owning machine observes
         // it, releases the runtime, and reconciles the worktree directory.
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
-        );
+        await applySessionLifecycleState(manager, sessionId, childSessionIds, 'archived', uuidV4());
         await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
 
         if (options.json) {
@@ -4387,9 +4409,7 @@ const sessionRestoreCommand = new Command('restore')
           throw new Error(`Session ${sessionId} is not archived.`);
         }
         const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionRestoreMetaPatch())
-        );
+        await applySessionLifecycleState(manager, sessionId, childSessionIds, 'active', uuidV4());
         await ensureWorkspaceMetaSynced(manager, `session.restore:${sessionId}`);
 
         if (options.json) {

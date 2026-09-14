@@ -494,7 +494,7 @@
       "owner": "session-lifecycle",
       "feature": "src/features/session-management.feature",
       "fixture": "session-fork-and-seeded-relations",
-      "fingerprint": "bf5df94ba0e024a2ac8e9c34b0bd8879e821e67337be85bc01732979e8e05b87",
+      "fingerprint": "032c2d07f90233dd7a4c70f86a18d0094287750d30fac283c11337839639ed12",
       "ownerPaths": [
         "packages/components/src/hooks/use-session-actions.ts",
         "packages/components/src/lib/session-navigation.ts",
@@ -504,7 +504,9 @@
         { "id": "session.createCompletedSource" },
         { "id": "session.forkWorktree", "args": { "count": 2 } },
         { "id": "session.seedRelations" },
+        { "id": "session.injectLifecyclePublishFailure" },
         { "id": "session.archiveOpener" },
+        { "id": "session.reloadPendingLifecycle" },
         { "id": "archive.deletePermanently" },
         { "id": "session.openSurvivors" },
         { "id": "session.reloadWithMetadataScanBlocked" },
@@ -512,6 +514,7 @@
       ],
       "checkpoints": [
         "archive affects only the root and direct child Tab",
+        "durable lifecycle admission replays the same operation after publication failure",
         "permanent delete removes only the root and direct child Tab",
         "opened Sessions retain documents, provenance, running ACP processes, and worktrees",
         "dangling opener provenance is visible and non-navigable",
@@ -525,7 +528,7 @@
         "renderer": "Session archive, Archive delete, child Tabs, and opened-by provenance",
         "electronIpc": "Real window, local repo, terminal, and Session RPC",
         "bundledCli": "Real archive and worktree cleanup command processing",
-        "durableState": "Containment deletion, provenance retention, and worktree survival",
+        "durableState": "Atomic lifecycle replay, containment deletion, provenance retention, and worktree survival",
         "externalWire": "Scripted fork-capable ACP"
       },
       "signals": {

@@ -4,13 +4,12 @@ Status: proposed
 Translation: current
 
 契约：[Session 关系](../../../../specs/session-relations.md)
-执行：[实现计划](../../../../plans/001-session-lifecycle-commit.md)
 
 [English](2026-09-13-session-lifecycle-commit.md)
 
 ## 摘要
 
-当前归档通过恢复先前读取的快照来补偿失败的元数据写入，这可能覆盖合法的并发写入，也可能自身只留下部分目标的变更。提议的替代方案将每次归档或恢复记录为一个不可变操作，并通过共享的仓库投影推导有效的 Session 生命周期状态。操作是冲突解决、持久化和发布的单位；资源清理跟随所得状态。真实依赖探针确认本地 WASM 的回滚行为，但也暴露出非原子仓库观察和按键冲突解决。生产持久化和混合客户端迁移仍未验证，因此这是针对 #574 的提案，而不是已完成的修复。
+遗留产品拓扑通过恢复先前读取的快照来补偿失败的元数据写入，这可能覆盖合法的并发写入，也可能自身只留下部分目标的变更。本地 OSS 拓扑现在会把每次归档或恢复记录为一个不可变操作，并通过共享的仓库投影推导有效的 Session 生命周期状态。操作是冲突解决、持久化和发布的单位；资源清理跟随所得状态。真实依赖探针确认本地 WASM 的回滚行为，真实 IndexedDB、SQLite 与 LoroRepo 测试覆盖了替代边界。产品混合客户端仍没有准入机制，因此更广泛的发布仍处于提案状态，#574 对该拓扑也尚未完成。
 
 ## 决策与范围
 
@@ -24,11 +23,24 @@ Translation: current
 
 这是生命周期专用协议，不是通用 saga、命令队列或分布式数据库事务框架。兼容客户端仍针对自己的仓库本地写入。公共桌面端不引入 daemon 代理写入者、认证云端要求或托管实现。
 
+冻结的 v1 wire 与准入布局如下：
+
+| 边界 | v1 契约 |
+| --- | --- |
+| 同步记录 | 每个不可变操作以一条规范 JSON 字符串存储在元数据文档 `_lody/session-lifecycle-operations/v1` 的 `operation:<operationId>` 字段。 |
+| 排序 | 规范非负十进制 Lamport counter，随后按 `actorId` 与 `operationId` 的 UTF-8 字节序决胜。 |
+| 浏览器准入 | IndexedDB `lody-session-lifecycle-v1:<workspaceId>`，包含 `admissions` 与 `state` object store。 |
+| CLI 准入 | 工作区 Loro 存储目录中的专用 `session-lifecycle.sqlite3`，包含操作表与 high-water 表。 |
+| 结果 | 持久 receipt 区分 `published` 与 `pending`；无法确认的存储结果携带同一个可查询 operation id。 |
+| 迁移 | 已归档旧行生成确定性的 counter-zero `baseline:v1:<sessionId>` 操作；active 行继续使用默认 baseline。 |
+
+准入与本地 high-water 分配位于同一个存储事务。owner 会先安装完整 resolver revision，再通知逐 Session reader；启动时重放未发布准入，拒绝相同 operation id 的冲突 payload，并且不清理 v1 历史。本地启用后会拒绝直接写入遗留 `isArchived`，只有尚无 lifecycle winner 的 Session 可执行初始 `false` 写入。
+
 ## 依赖证据
 
 检查使用了 Lody commit `54623883be77bd17f9dab18ef5a60cc2a9b156ef`，以及匹配 `loro-repo@0.20.0` 和 `@loro-dev/flock-wasm@0.4.3` 的已安装产物。使用的合成 Node 探针基于内存副本；没有操作产品 Session 数据。
 
-[可复现的基线探针](../../../../plans/support/inspect-lifecycle-boundaries.cjs)针对这些固定版本检查回滚与仓库发布行为。
+基线探针针对这些固定版本检查了回滚与仓库发布行为；持久性契约现在由下文列出的 shared、browser 与 CLI owning tests 维护。
 
 | 边界               | 观察到的行为                                                                  | 后果                                                |
 | ------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -52,7 +64,7 @@ WASM 包随附的注释警告数据不会回滚，这与测试过的二进制相
 
 后台协调器可以从持久化操作重建派生状态。它无法仅从标志判断 `root active / child archived` 是有意的 Tab 操作还是失败的补偿。现有 worktree GC 协调的是磁盘资源，而不是生命周期元数据，并且仍只负责根拥有的 worktree。
 
-选定的操作排序、发布前的存储准入、迁移基线和旧写入者策略，是计划中替换生产路径前的门槛。切换前 IndexedDB 和 SQLite 的准入/恢复原型都必须通过；只证明一个 adapter 不够。daemon capability 无法隔离独立写入旧 renderer 的行为。公共仓库不包含所有产品客户端或工作区级的写入者准入机制；不得声称它们已迁移，也不得悄然启用较弱的双写模式。
+本地 OSS renderer 与 daemon 属于同一个协调发布物，只在 runtime 为纯本地拓扑时启用新权威。cloud 与 dual runtime 保留遗留路径，因为 daemon capability 无法隔离独立写入旧 renderer 的行为。公共仓库不包含所有产品客户端或工作区级的写入者准入机制；产品启用需要外部证据，也不得用较弱的双写模式替代。
 
 ## 与早期决策的关系
 
@@ -60,6 +72,8 @@ WASM 包随附的注释警告数据不会回滚，这与测试过的二进制相
 
 ## 验证与发布
 
-本提案尚未完成生产实现，也没有完成两个产品客户端的持久化/重启测试。执行计划要求在启用前完成确定性回归、双仓库观察、并发操作、持久恢复以及遗留客户端 fixture。Worktree 清理和终端处置依据有效提交状态评估，不会使生命周期提交可逆。
+本地实现已有确定性的 parser/resolver 测试、真实浏览器 IndexedDB reload、真实 SQLite 关闭重开与多连接分配，以及双 LoroRepo 测试，证明首次投影读取会同时看到所有目标。renderer 和 CLI producer suite 断言只提交一个 lifecycle 操作；UI cache 在一次写入中安装 revision。资源测试让旧 runtime 的终止跨越一次较新的 restore，并证明替代代次不会被归档或写成 idle。`LODY-SESSION-004` 桌面 journey 会在浏览器完成持久准入后注入发布失败，随后 reload，并验证同一个操作对根与直接 child 完成重放，同时独立 opened Session 保持 active。
 
-[#658](https://github.com/LodyAI/Lody/pull/658) 是受影响的实现，而不是已完成的替代 PR。在操作契约和迁移门槛获得证据前，[#574](https://github.com/LodyAI/Lody/issues/574) 仍保持开放。本地文档检查目前也报告了指向未初始化 ACP 子模块的预先存在链接；这些发现与实现验证无关。
+这些检查只允许纯本地切换，不允许产品启用。cloud 与 dual runtime 会继续使用遗留实现，直到共享兼容性边界能够准入或拒绝每个独立发布的 writer。Worktree 清理与终端处置跟随有效提交状态，不能让生命周期提交变得可逆。
+
+[#658](https://github.com/LodyAI/Lody/pull/658) 是受影响的实现。在产品兼容性门槛获得证据前，[#574](https://github.com/LodyAI/Lody/issues/574) 仍保持开放。本地文档检查可能报告指向未初始化 ACP 子模块的链接；这些发现与实现验证无关。

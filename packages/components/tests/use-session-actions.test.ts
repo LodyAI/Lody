@@ -10,6 +10,7 @@ import {
   getMachineRoomId,
   getSessionRoomId,
   machineFlockKeys,
+  SessionLifecycleAdmissionUncertainError,
   type MachineId,
   type SessionId,
   type SessionMeta,
@@ -123,7 +124,15 @@ function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void 
 
 const createRuntime = (
   overrides: Partial<
-    Pick<WorkspaceRuntime, 'ensureDocStream' | 'repo' | 'workspaceId' | 'workspaceSlug' | 'writer'>
+    Pick<
+      WorkspaceRuntime,
+      | 'ensureDocStream'
+      | 'repo'
+      | 'workspaceId'
+      | 'workspaceSlug'
+      | 'writer'
+      | 'sessionLifecycle'
+    >
   >
 ): WorkspaceRuntime => {
   const repo =
@@ -151,6 +160,10 @@ const createRuntime = (
       modeForSession: async () => 'direct' as const,
       upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
         await repoAsAny.upsertDocMeta?.(roomId, patch);
+      }),
+      commitSessionLifecycle: vi.fn(async (draft) => {
+        if (!overrides.sessionLifecycle) throw new Error('lifecycle unavailable');
+        return await overrides.sessionLifecycle.commit(draft);
       }),
       startSession: vi.fn(
         async (
@@ -184,6 +197,7 @@ const createRuntime = (
     workspaceSlug: overrides.workspaceSlug ?? 'workspace-slug',
     workspaceId: overrides.workspaceId ?? ('workspace-1' as WorkspaceId),
     repo,
+    sessionLifecycle: overrides.sessionLifecycle ?? null,
     writer,
     ensureDocStream: overrides.ensureDocStream ?? vi.fn(async () => undefined),
     releaseSessionStore: vi.fn(async () => undefined),
@@ -1150,7 +1164,7 @@ describe('useSessionActions', () => {
     expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
   });
 
-  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
+  it('rejects archive when only the rendered cache knows the session', async () => {
     const sessionId = 'session-archive-known-meta' as SessionId;
     const renderedMeta = {
       id: sessionId,
@@ -1174,12 +1188,10 @@ describe('useSessionActions', () => {
       sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
     });
 
-    await actions.archiveSession(sessionId);
-
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ isArchived: true })
+    await expect(actions.archiveSession(sessionId)).rejects.toThrow(
+      `Session metadata missing for ${sessionId}`
     );
+    expect(upsertDocMeta).not.toHaveBeenCalled();
 
     // A session neither the repo nor the UI knows still fails loudly.
     await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
@@ -1224,6 +1236,155 @@ describe('useSessionActions', () => {
     } finally {
       await repo.destroy();
     }
+  });
+
+  it('commits one durable lifecycle operation before closing any selected terminal', async () => {
+    const { rootSession, tabSession, openedSession, sessions } = createContainmentSessions(
+      'atomic-archive',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const commit = vi.fn(async (draft: Record<string, unknown>) => ({
+      operation: {
+        version: 1 as const,
+        ...draft,
+        order: { counter: '1', actorId: 'test' },
+      },
+      durability: 'accepted' as const,
+      publication: 'pending' as const,
+      revision: { revisionId: 'one', operationIds: ['operation'], bySessionId: new Map() },
+    }));
+    const runtime = createRuntime({
+      repo: metaRepo.repo,
+      sessionLifecycle: { commit } as unknown as NonNullable<WorkspaceRuntime['sessionLifecycle']>,
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+    sendIpcMock.mockClear();
+
+    await actions.archiveSession(rootSession.id);
+
+    expect(commit).toHaveBeenCalledOnce();
+    expect(commit).toHaveBeenCalledWith({
+      operationId: expect.any(String),
+      subjectId: rootSession.id,
+      targetIds: [rootSession.id, tabSession.id],
+      state: 'archived',
+    });
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(openedSession.id)).toMatchObject({ isArchived: false });
+    expect(sendIpcMock.mock.calls).toEqual([
+      ['terminal.closeSession', { sessionId: rootSession.id }],
+      ['terminal.closeSession', { sessionId: tabSession.id }],
+    ]);
+  });
+
+  it('leaves metadata and terminals untouched when lifecycle admission rejects', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'atomic-archive-reject',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const commit = vi.fn(async () => {
+      await metaRepo.repo.upsertDocMeta(getSessionRoomId(tabSession.id), {
+        isArchived: true,
+        status: { type: 'running' },
+        thirdPartyField: 'kept',
+      });
+      throw new Error('durable admission rejected');
+    });
+    const runtime = createRuntime({
+      repo: metaRepo.repo,
+      sessionLifecycle: { commit } as unknown as NonNullable<WorkspaceRuntime['sessionLifecycle']>,
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+    sendIpcMock.mockClear();
+
+    await expect(actions.archiveSession(rootSession.id)).rejects.toThrow(
+      'durable admission rejected'
+    );
+    expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
+    expect(metaRepo.getSession(tabSession.id)).toMatchObject({
+      isArchived: true,
+      status: { type: 'running' },
+      thirdPartyField: 'kept',
+    });
+    expect(sendIpcMock).not.toHaveBeenCalled();
+  });
+
+  it('reuses the same lifecycle operation id after an uncertain admission result', async () => {
+    const { rootSession, tabSession, sessions } = createContainmentSessions(
+      'atomic-archive-retry',
+      false
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const commit = vi
+      .fn()
+      .mockRejectedValueOnce(new SessionLifecycleAdmissionUncertainError('stable-retry'))
+      .mockResolvedValueOnce({
+        operation: {},
+        durability: 'accepted',
+        publication: 'pending',
+        revision: { revisionId: 'retry', operationIds: [], bySessionId: new Map() },
+      });
+    const runtime = createRuntime({
+      repo: metaRepo.repo,
+      sessionLifecycle: { commit } as unknown as NonNullable<WorkspaceRuntime['sessionLifecycle']>,
+    });
+    const actions = await renderActions(runtime);
+
+    await expect(actions.archiveSession(rootSession.id)).rejects.toBeInstanceOf(
+      SessionLifecycleAdmissionUncertainError
+    );
+    await actions.archiveSession(rootSession.id);
+
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(commit.mock.calls[0]?.[0]).toMatchObject({
+      operationId: commit.mock.calls[1]?.[0].operationId,
+      subjectId: rootSession.id,
+      targetIds: [rootSession.id, tabSession.id],
+    });
+  });
+
+  it('uses complete repository discovery for an atomic restore while the UI cache is cold', async () => {
+    const { rootSession, tabSession, openedSession, sessions } = createContainmentSessions(
+      'atomic-restore',
+      true
+    );
+    const metaRepo = createSessionMetaRepo(sessions);
+    const commit = vi.fn(async (draft: Record<string, unknown>) => ({
+      operation: {
+        version: 1 as const,
+        ...draft,
+        order: { counter: '2', actorId: 'test' },
+      },
+      durability: 'accepted' as const,
+      publication: 'published' as const,
+      revision: { revisionId: 'two', operationIds: ['operation'], bySessionId: new Map() },
+    }));
+    const runtime = createRuntime({
+      repo: metaRepo.repo,
+      sessionLifecycle: { commit } as unknown as NonNullable<WorkspaceRuntime['sessionLifecycle']>,
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
+    });
+
+    await actions.restoreSession(rootSession.id);
+
+    expect(commit).toHaveBeenCalledWith({
+      operationId: expect.any(String),
+      subjectId: rootSession.id,
+      targetIds: [rootSession.id, tabSession.id],
+      state: 'active',
+    });
+    expect(commit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ targetIds: expect.arrayContaining([openedSession.id]) })
+    );
   });
 
   it('keeps the root active and compensates child writes when a later child write fails', async () => {
@@ -1353,7 +1514,7 @@ describe('useSessionActions', () => {
     expect(failure).toMatchObject({
       message: 'Archive failed and 1 lifecycle rollback(s) also failed',
       cause: { message: 'root archive acknowledgement failed' },
-      rollbackErrors: [{ message: 'root rollback failed' }],
+      compensationFailures: [{ message: 'root rollback failed' }],
     });
     expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: true });
     expect(metaRepo.getSession(tabSession.id)).toMatchObject({ isArchived: true });

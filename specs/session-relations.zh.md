@@ -76,12 +76,12 @@ Tab T 是 A 的组成部分。即使 Session B 和 C 是由 A 或 T 发起创建
 
 本 Spec 不定义 worker 监管、状态或结果聚合、未读或权限路由、worker 面板、settle 或 handoff 行为。这些产品选择仍属于 [#529](https://github.com/LodyAI/Lody/issues/529) 的范围。
 
-当前归档实现会为每次操作读取仓库元数据索引，因此交互式根不依赖客户端投影是否发现了其直接子级。查询必须在首次归档写入前完成，查询失败会在不产生变更的情况下中止操作。其结果完整覆盖查询所观察到的仓库快照；它不是事务边界，也不包括快照之后创建的子级。恢复仍从客户端元数据缓存发现直接子级，因此保留冷启动实现缺口。归档仍使用独立写入和快照补偿；这并未实现上文的原子生命周期与并发写入保证。现有资源协调不会修复部分应用的元数据变更。
+归档与恢复现在都会在提交前读取同一个仓库元数据快照；查询或工作区所有权失败不会留下操作。在协调升级的本地 OSS 拓扑中，两种动作都会持久准入一个不可变操作，并通过仓库接缝投影其完整目标集合。浏览器准入使用工作区级 IndexedDB，CLI 准入使用专用工作区 SQLite 数据库；两者都会重放尚未发布的记录，而不改变其身份或排序。已有 archived flag 会成为确定性的 counter-zero baseline。本地启用后会拒绝直接写入遗留归档值；新建 Session 的初始 active 元数据仍然合法。
 
-替换方向是持久化操作记录与共享的原子发布投影。其冲突排序、持久化边界和混合客户端发布必须通过[实现计划](../plans/001-session-lifecycle-commit.md)，之后本 draft 才能视为已实现。[决策提案](../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)记录依赖证据和替代方案。本变更不涵盖发现快照之后创建的子级、递归包含以及永久删除的原子性。
+本地实现不涵盖发现快照之后创建的子级、递归包含、operation 历史压缩或永久删除的原子性。cloud 与 dual 产品拓扑仍保留遗留的独立写入路径，因为公共仓库无法隔离独立发布或离线的 renderer。在获得上文要求的外部混合客户端兼容证据前，这些拓扑不得启用新表示；Machine capability 不足以作为证据。因此本 Spec 仍为 draft，#574 对产品拓扑仍保持开放。[决策记录](../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)负责维护存储布局、验证证据和剩余发布门槛。
 
 ## 证据
 
-报告的行为和支持的场景见 [#531](https://github.com/LodyAI/Lody/issues/531)。客户端目标选择和精确清理位于 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts)，反向导航解析位于 [`session-navigation.ts`](../packages/components/src/lib/session-navigation.ts)。CLI 直接子级选择和嵌套子级拒绝位于 [`session.ts`](../apps/cli/src/commands/session.ts)。行为覆盖位于 [`use-session-actions.test.ts`](../packages/components/tests/use-session-actions.test.ts) 和 [`session-navigation.test.ts`](../packages/components/tests/session-navigation.test.ts)。
+报告的行为和支持的场景见 [#531](https://github.com/LodyAI/Lody/issues/531)。客户端目标选择和精确清理位于 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts)，反向导航解析位于 [`session-navigation.ts`](../packages/components/src/lib/session-navigation.ts)。CLI 直接子级选择和嵌套子级拒绝位于 [`session.ts`](../apps/cli/src/commands/session.ts)。行为覆盖位于 [`use-session-actions.test.ts`](../packages/components/tests/use-session-actions.test.ts) 和 [`session-navigation.test.ts`](../packages/components/tests/session-navigation.test.ts)。操作模型与仓库投影由 [`session-lifecycle.test.ts`](../packages/shared/tests/session-lifecycle.test.ts) 和 [`session-lifecycle-repository.test.ts`](../packages/shared/tests/session-lifecycle-repository.test.ts) 覆盖。浏览器与 CLI 持久性分别由相邻的 [`session-lifecycle-persistence.spec.ts`](../packages/components/tests/e2e/session-lifecycle-persistence.spec.ts) 和 [`session-lifecycle-persistence.test.ts`](../apps/cli/src/lib/loro/session-lifecycle-persistence.test.ts) 覆盖。
 
-包含关系目标规则由 [#569](https://github.com/LodyAI/Lody/pull/569) 实现。归档接受标准仍由 [#574](https://github.com/LodyAI/Lody/issues/574) 跟踪；仅有发现并不能建立完整操作契约。本 draft 仍待人工批准。
+包含关系目标规则由 [#569](https://github.com/LodyAI/Lody/pull/569) 实现。归档接受标准仍由 [#574](https://github.com/LodyAI/Lody/issues/574) 跟踪；本地证据不能建立产品混合客户端兼容性。本 draft 仍待人工批准。

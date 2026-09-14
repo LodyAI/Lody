@@ -4000,15 +4000,34 @@ export class MessageHandler {
     if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
       return;
     }
+    const lifecycleOperationId = this.workspaceDocument.sessionLifecycle
+      ?.getRevision()
+      .bySessionId.get(sessionId)?.operationId;
+    if (!(await this.isArchiveObservationCurrent(sessionId, lifecycleOperationId))) {
+      return;
+    }
     this.archiveInFlight.add(sessionId);
     try {
-      await this.releaseArchivedSessionRuntime(sessionId);
+      await this.releaseArchivedSessionRuntime(sessionId, { lifecycleOperationId });
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
       );
     } finally {
+      const nextWinner = this.workspaceDocument.sessionLifecycle
+        ?.getRevision()
+        .bySessionId.get(sessionId);
+      const shouldReplayNewerArchive =
+        lifecycleOperationId !== undefined &&
+        nextWinner?.state === 'archived' &&
+        nextWinner.operationId !== lifecycleOperationId;
       this.archiveInFlight.delete(sessionId);
+      if (shouldReplayNewerArchive) {
+        // A restore followed by a newer archive can arrive while the prior
+        // generation is still terminating. Its watch event was coalesced by
+        // archiveInFlight, so replay the latest winner after releasing the gate.
+        void this.handleSessionArchived(sessionId);
+      }
     }
     void this.worktreeGc.schedule();
   }
@@ -4021,30 +4040,73 @@ export class MessageHandler {
    */
   private async releaseArchivedSessionRuntime(
     sessionId: SessionId,
-    options: { writeIdleStatus?: boolean } = {}
+    options: {
+      writeIdleStatus?: boolean;
+      lifecycleOperationId?: string;
+      expectedState?: 'archived' | 'deleted';
+    } = {}
   ): Promise<void> {
     this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
+
+    const observationIsCurrent = async (): Promise<boolean> =>
+      options.expectedState === 'deleted'
+        ? await this.isDeletionObservationCurrent(sessionId)
+        : await this.isArchiveObservationCurrent(sessionId, options.lifecycleOperationId);
+    if (!(await observationIsCurrent())) return;
+    const capturedSession = this.sessionManager.getSession(sessionId);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
 
     await this.finalizeACPState(sessionId);
+    if (!(await observationIsCurrent())) return;
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
+    if (!(await observationIsCurrent())) return;
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
+    if (!(await observationIsCurrent())) return;
 
-    if (this.sessionManager.hasSession(sessionId)) {
+    if (capturedSession) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.sessionManager.terminateSession(sessionId, true);
-      if (options.writeIdleStatus !== false) {
+      await capturedSession.terminate(true);
+      const currentSessionAfterTerminate = this.sessionManager.getSession(sessionId);
+      if (
+        options.writeIdleStatus !== false &&
+        (await observationIsCurrent()) &&
+        (currentSessionAfterTerminate === null || currentSessionAfterTerminate === capturedSession)
+      ) {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
       }
     }
 
+    if (!(await observationIsCurrent())) return;
+    const currentSession = this.sessionManager.getSession(sessionId);
+    if (currentSession && currentSession !== capturedSession) return;
     await this.sessionManager.archiveSession(sessionId);
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
+  }
+
+  private async isArchiveObservationCurrent(
+    sessionId: SessionId,
+    lifecycleOperationId?: string
+  ): Promise<boolean> {
+    const lifecycle = this.workspaceDocument.sessionLifecycle;
+    if (lifecycle) {
+      const winner = lifecycle.getRevision().bySessionId.get(sessionId);
+      return (
+        winner?.state === 'archived' &&
+        (lifecycleOperationId === undefined || winner.operationId === lifecycleOperationId)
+      );
+    }
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    return (snapshot?.meta as SessionMeta | undefined)?.isArchived === true;
+  }
+
+  private async isDeletionObservationCurrent(sessionId: SessionId): Promise<boolean> {
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    return snapshot?.deleted === true;
   }
 
   private async handleSessionDeleted(sessionId: SessionId): Promise<void> {
@@ -4057,7 +4119,10 @@ export class MessageHandler {
     this.logger.debug(`[${sessionId}] Session doc deleted; releasing runtime`);
     try {
       // Never write into a deleted doc: the idle-status patch stays archive-only.
-      await this.releaseArchivedSessionRuntime(sessionId, { writeIdleStatus: false });
+      await this.releaseArchivedSessionRuntime(sessionId, {
+        writeIdleStatus: false,
+        expectedState: 'deleted',
+      });
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to release deleted session runtime: ${formatErrorMessage(error)}`
@@ -4220,7 +4285,10 @@ export class MessageHandler {
     }
   }
 
-  private async archiveLocalProjectSessions(localProjectId: LocalProjectId): Promise<void> {
+  private async archiveLocalProjectSessions(
+    localProjectId: LocalProjectId,
+    command: MachineDeleteLocalProjectCommand
+  ): Promise<void> {
     const sessions = (await listAliveSessionMetas(this.workspaceDocument)).filter(({ meta }) =>
       isSessionInLocalProjectRemovalScope(meta, {
         machineId: this.machineId,
@@ -4229,28 +4297,68 @@ export class MessageHandler {
     );
     if (sessions.length === 0) return;
 
-    const rootSessions = sessions.filter(
-      ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
-    );
-    const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
-    for (const { roomId, meta } of rootSessions) {
-      await this.releaseArchivedSessionRuntime(meta.id);
-      await this.workspaceDocument.repo.upsertDocMeta(roomId, {
-        isArchived: true,
-        status: SessionStatusFactory.idle(),
-      } as Partial<SessionMeta>);
-    }
-
-    for (const { roomId, meta } of sessions) {
-      if (archivedRootSessionIds.has(meta.id)) continue;
-      if (this.sessionManager.hasSession(meta.id)) {
+    if (this.workspaceDocument.sessionLifecycle) {
+      const handled = new Set<SessionId>();
+      const roots = sessions.filter(({ meta }) => !meta.parentSessionId);
+      const groups = roots.map(({ meta: root }) => [
+        root,
+        ...sessions
+          .map(({ meta }) => meta)
+          .filter((candidate) => candidate.parentSessionId === root.id),
+      ]);
+      for (const group of groups) {
+        if (group.every((meta) => meta.isArchived === true)) {
+          group.forEach((meta) => handled.add(meta.id));
+          continue;
+        }
+        const root = group[0];
+        if (!root) continue;
+        await this.workspaceDocument.sessionLifecycle.commit({
+          operationId: `local-project-removal:${localProjectId}:${command.requestedAt}:${root.id}`,
+          subjectId: root.id,
+          targetIds: group.map((meta) => meta.id),
+          state: 'archived',
+        });
+        for (const meta of group) {
+          handled.add(meta.id);
+          await this.handleSessionArchived(meta.id);
+        }
+      }
+      for (const { meta } of sessions) {
+        if (handled.has(meta.id) || meta.isArchived === true) continue;
+        await this.workspaceDocument.sessionLifecycle.commit({
+          operationId: `local-project-removal:${localProjectId}:${command.requestedAt}:${meta.id}`,
+          subjectId: meta.id,
+          targetIds: [meta.id],
+          state: 'archived',
+        });
+        await this.handleSessionArchived(meta.id);
+      }
+    } else {
+      const rootSessions = sessions.filter(
+        ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
+      );
+      const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
+      for (const { roomId, meta } of rootSessions) {
+        await this.workspaceDocument.repo.upsertDocMeta(roomId, {
+          isArchived: true,
+          status: SessionStatusFactory.idle(),
+        } as Partial<SessionMeta>);
         await this.releaseArchivedSessionRuntime(meta.id);
       }
-      if (meta.isArchived === true) continue;
-      await this.workspaceDocument.repo.upsertDocMeta(roomId, {
-        isArchived: true,
-        status: SessionStatusFactory.idle(),
-      } as Partial<SessionMeta>);
+
+      for (const { roomId, meta } of sessions) {
+        if (archivedRootSessionIds.has(meta.id)) continue;
+        if (meta.isArchived !== true) {
+          await this.workspaceDocument.repo.upsertDocMeta(roomId, {
+            isArchived: true,
+            status: SessionStatusFactory.idle(),
+          } as Partial<SessionMeta>);
+        }
+        if (this.sessionManager.hasSession(meta.id)) {
+          await this.releaseArchivedSessionRuntime(meta.id);
+        }
+      }
     }
 
     this.logger.debug(
@@ -4281,7 +4389,7 @@ export class MessageHandler {
       return undefined;
     }
 
-    await this.archiveLocalProjectSessions(localProjectId);
+    await this.archiveLocalProjectSessions(localProjectId, command);
 
     let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
     const originalRootPath = existingProject?.rootPath ?? command.originalRootPath;

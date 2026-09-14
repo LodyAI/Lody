@@ -101,12 +101,14 @@ describe('local platform zero-cloud integration', () => {
       identity.userId,
       logger,
       {
+        enableSessionLifecycle: true,
         streamsTokens: cloudPort.streamsTokens,
         cloudBilling: cloudPort.billing,
       },
     );
     try {
       expect(documentManager.isTransportConnected()).toBe(true);
+      expect(documentManager.sessionLifecycle).not.toBeNull();
       await expect(
         cloudPort.access.verifyMachineAccess({
           workspaceId: workspace.id as WorkspaceId,

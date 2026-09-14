@@ -4,6 +4,8 @@ import type {
   SessionHistory,
   PermissionOutcome,
   TaskProposalMeta,
+  SessionLifecycleCommitReceipt,
+  SessionLifecycleOperationDraft,
 } from '@lody/shared';
 
 // # WorkspaceWriter — the renderer's authored-write seam
@@ -18,6 +20,11 @@ import type {
 export interface WorkspaceWriter {
   /** `repo.upsertDocMeta(roomId, patch)` — session/machine doc-meta write. */
   upsertDocMeta(roomId: string, patch: Record<string, unknown>): Promise<void>;
+
+  /** Atomically admit one archive/restore operation in enabled local topology. */
+  commitSessionLifecycle(
+    draft: SessionLifecycleOperationDraft
+  ): Promise<SessionLifecycleCommitReceipt>;
 
   /**
    * Author a new session's meta and first user turn as one accept unit. The

@@ -135,25 +135,25 @@ This Spec does not define worker supervision, status or result aggregation, unre
 permission routing, worker panels, settle, or handoff behavior. Those product choices
 remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
 
-The current archive implementation reads the repository metadata index for every
-action, so an interactive root does not depend on the client projection having
-discovered its direct children. The
-query must complete before the first archive write, and query failure aborts the action
-without mutation. Its result is complete for the repository snapshot observed by that
-query; it is not a transaction boundary and does not include children created after the
-snapshot. Restore still discovers direct children from the client metadata cache and
-therefore retains the cold-start implementation gap. Archive still uses independent
-writes and snapshot compensation; this does not implement the atomic lifecycle and
-concurrent-write guarantees above. Existing resource reconciliation does not repair a
-partially applied metadata transition.
+Archive and restore now read one repository metadata snapshot before submission; a
+query or workspace-ownership failure leaves no operation. In the coordinated local OSS
+topology, both actions durably admit one immutable operation and project its complete
+target set through the repository seam. Browser admission uses workspace-scoped
+IndexedDB, CLI admission uses a dedicated workspace SQLite database, and both replay
+unpublished records without changing their identity or order. Existing archived flags
+become deterministic counter-zero baselines. Direct legacy archive writes are rejected
+after activation, while initial active metadata remains valid for a newly created
+Session.
 
-The replacement direction is a durable operation record with a shared, atomically
-published projection. Its conflict ordering, persistence boundary, and mixed-client
-rollout must pass the [implementation plan](../plans/001-session-lifecycle-commit.md)
-before this draft can be treated as implemented. The
-[decision proposal](../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)
-records the dependency evidence and alternatives. Children created after the discovery
-snapshot, recursive containment, and atomic permanent deletion are outside this change.
+The local implementation does not include children created after its discovery
+snapshot, recursive containment, operation compaction, or atomic permanent deletion.
+Cloud and dual product topologies retain the legacy independent-write path because the
+public repository cannot fence independently deployed or offline renderers. They must
+not enable the new representation until the mixed-client compatibility requirement
+above has external evidence; a Machine capability is insufficient. Consequently this
+Spec remains draft and #574 remains open for product topology. The
+[decision record](../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)
+owns the storage layout, verification evidence, and remaining rollout gate.
 
 ## Evidence
 
@@ -168,8 +168,16 @@ CLI direct-child selection and the nested-child rejection are in
 [`use-session-actions.test.ts`](../packages/components/tests/use-session-actions.test.ts)
 and
 [`session-navigation.test.ts`](../packages/components/tests/session-navigation.test.ts).
+The operation model and repository projection are covered by
+[`session-lifecycle.test.ts`](../packages/shared/tests/session-lifecycle.test.ts) and
+[`session-lifecycle-repository.test.ts`](../packages/shared/tests/session-lifecycle-repository.test.ts).
+Browser and CLI durability are covered by their adjacent
+[`session-lifecycle-persistence.spec.ts`](../packages/components/tests/e2e/session-lifecycle-persistence.spec.ts)
+and
+[`session-lifecycle-persistence.test.ts`](../apps/cli/src/lib/loro/session-lifecycle-persistence.test.ts)
+suites.
 
 The containment target rules were implemented by
 [#569](https://github.com/LodyAI/Lody/pull/569). The archive acceptance criteria remain
 tracked by [#574](https://github.com/LodyAI/Lody/issues/574); discovery alone does not
-establish the full operation contract. Human approval of this draft remains pending.
+establish mixed-product-client compatibility. Human approval of this draft remains pending.

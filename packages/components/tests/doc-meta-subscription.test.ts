@@ -237,6 +237,92 @@ describe('docMetaSubscriptionAtom', () => {
     }
   });
 
+  it('publishes all lifecycle targets to the UI cache in one revision', async () => {
+    const rootId = 'atomic-root' as SessionId;
+    const childId = 'atomic-child' as SessionId;
+    const rootRoomId = getSessionRoomId(rootId);
+    const childRoomId = getSessionRoomId(childId);
+    const repo = new CompatRepoDouble([
+      {
+        docId: rootRoomId,
+        exists: true,
+        meta: {
+          id: rootId,
+          title: 'Root',
+          createdAt: '2026-09-14T00:00:00.000Z',
+          isArchived: false,
+        },
+      },
+      {
+        docId: childRoomId,
+        exists: true,
+        meta: {
+          id: childId,
+          parentSessionId: rootId,
+          title: 'Child',
+          createdAt: '2026-09-14T00:01:00.000Z',
+          isArchived: false,
+        },
+      },
+    ]);
+    let lifecycleListener:
+      | ((event: {
+          previous: { bySessionId: Map<SessionId, unknown> };
+          revision: {
+            bySessionId: Map<
+              SessionId,
+              { operationId: string; state: 'archived'; order: { counter: string; actorId: string } }
+            >;
+          };
+        }) => void)
+      | undefined;
+    const runtime = {
+      ...createRuntime(repo as unknown as LoroRepo),
+      sessionLifecycle: {
+        subscribe: (listener: typeof lifecycleListener) => {
+          lifecycleListener = listener;
+          return () => {
+            lifecycleListener = undefined;
+          };
+        },
+      },
+    } as unknown as WorkspaceRuntime;
+    const store = createStore();
+    const unmountSubscription = store.sub(docMetaSubscriptionAtom, () => {});
+    const observed: Array<[boolean | undefined, boolean | undefined]> = [];
+    const unmountCache = store.sub(sessionMetaCacheAtom, () => {
+      const cache = store.get(sessionMetaCacheAtom);
+      observed.push([cache[rootRoomId]?.isArchived, cache[childRoomId]?.isArchived]);
+    });
+
+    try {
+      store.set(runtimeAtom, runtime);
+      await flush();
+      observed.length = 0;
+
+      lifecycleListener?.({
+        previous: { bySessionId: new Map() },
+        revision: {
+          bySessionId: new Map(
+            [rootId, childId].map((sessionId) => [
+              sessionId,
+              {
+                operationId: 'archive-both',
+                state: 'archived' as const,
+                order: { counter: '1', actorId: 'test' },
+              },
+            ])
+          ),
+        },
+      });
+
+      expect(observed).toEqual([[true, true]]);
+    } finally {
+      unmountCache();
+      unmountSubscription();
+    }
+  });
+
   it('bootstraps and updates machine metadata from real loro-repo watch events', async () => {
     const repo = (await LoroRepo.create({})) as RepoWithSyncRunner;
     const remote = await LoroRepo.create({});

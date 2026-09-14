@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
@@ -36,6 +36,8 @@ import {
   normalizeSessionTurnInputConfig,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
+  SessionLifecycleAdmissionUncertainError,
+  type SessionLifecycleOperationDraft,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -260,7 +262,7 @@ async function listSessionMetadataSnapshot(runtime: WorkspaceRuntime): Promise<S
   });
 }
 
-async function writeArchiveStateFailureSafe(
+async function writeLegacyArchiveState(
   runtime: WorkspaceRuntime,
   rootSessionId: SessionId,
   archiveTargets: readonly SessionMeta[]
@@ -274,21 +276,21 @@ async function writeArchiveStateFailureSafe(
   // the root so a later child failure can never leave the root archived while
   // that child remains active. The root is the final commit point.
   const writeTargets = [...archiveTargets.filter((session) => session.id !== rootSessionId), root];
-  const attemptedTargets: SessionMeta[] = [];
+  const touchedSessions: SessionMeta[] = [];
 
   try {
     for (const session of writeTargets) {
       // Include the current target before awaiting: a rejected writer call may
       // have accepted a local mutation before surfacing a later failure.
-      attemptedTargets.push(session);
+      touchedSessions.push(session);
       await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
         isArchived: true,
         status: SessionStatusFactory.idle(),
       } as Partial<SessionMeta>);
     }
   } catch (archiveError) {
-    const rollbackErrors: unknown[] = [];
-    const attemptedRoot = attemptedTargets.find((session) => session.id === rootSessionId);
+    const compensationFailures: unknown[] = [];
+    const attemptedRoot = touchedSessions.find((session) => session.id === rootSessionId);
 
     // Restore the root first when its final write was attempted. Only then may
     // children be restored, preserving root-archived => children-archived even
@@ -300,12 +302,12 @@ async function writeArchiveStateFailureSafe(
           status: attemptedRoot.status,
         } as Partial<SessionMeta>);
       } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
+        compensationFailures.push(rollbackError);
       }
     }
 
-    if (!attemptedRoot || rollbackErrors.length === 0) {
-      for (const session of [...attemptedTargets].reverse()) {
+    if (!attemptedRoot || compensationFailures.length === 0) {
+      for (const session of [...touchedSessions].reverse()) {
         if (session.id === rootSessionId) continue;
         try {
           await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
@@ -313,17 +315,17 @@ async function writeArchiveStateFailureSafe(
             status: session.status,
           } as Partial<SessionMeta>);
         } catch (rollbackError) {
-          rollbackErrors.push(rollbackError);
+          compensationFailures.push(rollbackError);
         }
       }
     }
 
-    if (rollbackErrors.length > 0) {
+    if (compensationFailures.length > 0) {
       const failure = new Error(
-        `Archive failed and ${rollbackErrors.length} lifecycle rollback(s) also failed`,
+        `Archive failed and ${compensationFailures.length} lifecycle rollback(s) also failed`,
         { cause: archiveError }
       );
-      Object.assign(failure, { rollbackErrors });
+      Object.assign(failure, { compensationFailures });
       throw failure;
     }
     throw archiveError;
@@ -577,6 +579,7 @@ export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
   const store = useStore();
+  const uncertainLifecycleOperationIds = useRef(new Map<string, string>());
   // Convex dedupes identical subscriptions client-side, so this shares the
   // entitlement subscription already held by the chat surfaces.
   const billingEntitlement = useCloudQuery(
@@ -602,6 +605,30 @@ export function useSessionActions(): SessionActions {
       });
     },
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
+  );
+
+  const commitSessionLifecycle = useCallback(
+    async (draft: Omit<SessionLifecycleOperationDraft, 'operationId'>): Promise<void> => {
+      if (!runtime?.sessionLifecycle) throw new Error('Session lifecycle owner is unavailable');
+      const retryKey = JSON.stringify([
+        runtime.workspaceId,
+        draft.subjectId,
+        draft.state,
+        draft.targetIds,
+      ]);
+      const operationId = uncertainLifecycleOperationIds.current.get(retryKey) ?? uuidv4();
+      uncertainLifecycleOperationIds.current.set(retryKey, operationId);
+      try {
+        await runtime.writer.commitSessionLifecycle({ ...draft, operationId });
+        uncertainLifecycleOperationIds.current.delete(retryKey);
+      } catch (error) {
+        if (!(error instanceof SessionLifecycleAdmissionUncertainError)) {
+          uncertainLifecycleOperationIds.current.delete(retryKey);
+        }
+        throw error;
+      }
+    },
+    [runtime]
   );
 
   const assertSessionCreateAllowed = useCallback(
@@ -1252,31 +1279,31 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
-      const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMetadata = await listSessionMetadataSnapshot(runtime);
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed while loading session metadata');
       }
       const repoMeta = sessionMetadata.find((session) => session.id === sessionId);
-      // The repository snapshot is preferred, but it can lag a Session
-      // the UI already renders. The archive write below is an idempotent patch,
-      // so rendered root metadata is enough to proceed. Descendant discovery
-      // still comes exclusively from the queried snapshot above.
-      const sessionMeta =
-        repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
-      if (!sessionMeta) {
+      if (!repoMeta) {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       log('[session-archive] session meta loaded', {
         sessionId,
-        machineId: sessionMeta.machineId,
+        machineId: repoMeta.machineId,
       });
 
-      const archiveTargets = getArchiveStateTargets(sessionId, sessionMeta, sessionMetadata);
-      // The first write is the commit boundary. From here the captured runtime
-      // must finish the old-workspace write set or compensate it; switching the
-      // active workspace cannot redirect or cancel an in-flight commit.
-      await writeArchiveStateFailureSafe(runtime, sessionId, archiveTargets);
+      const archiveTargets = getArchiveStateTargets(sessionId, repoMeta, sessionMetadata);
+      // Durable admission is the commit boundary. The captured runtime owns
+      // publication/replay even if the active workspace changes afterwards.
+      if (runtime.sessionLifecycle) {
+        await commitSessionLifecycle({
+          subjectId: sessionId,
+          targetIds: archiveTargets.map((session) => session.id),
+          state: 'archived',
+        });
+      } else {
+        await writeLegacyArchiveState(runtime, sessionId, archiveTargets);
+      }
 
       // Metadata is authoritative. Close terminals only after every lifecycle
       // target has committed so a failed archive has no partial terminal side
@@ -1298,7 +1325,7 @@ export function useSessionActions(): SessionActions {
         targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store]
+    [commitSessionLifecycle, runtime, store]
   );
 
   const restoreSession = useCallback(
@@ -1316,23 +1343,31 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const sessionMetadata = await listSessionMetadataSnapshot(runtime);
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed while loading session metadata');
+      }
+      const archiveTargets = getArchiveStateTargets(sessionId, sessionMeta, sessionMetadata);
 
-      for (const session of archiveTargets) {
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
-          isArchived: false,
-        } as Partial<SessionMeta>);
+      if (runtime.sessionLifecycle) {
+        await commitSessionLifecycle({
+          subjectId: sessionId,
+          targetIds: archiveTargets.map((session) => session.id),
+          state: 'active',
+        });
+      } else {
+        for (const session of archiveTargets) {
+          await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+            isArchived: false,
+          } as Partial<SessionMeta>);
+        }
       }
       log('[session-restore] restored', {
         sessionId,
         targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store]
+    [commitSessionLifecycle, runtime, store]
   );
 
   const deleteArchivedSessionMeta = useCallback(

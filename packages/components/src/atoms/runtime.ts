@@ -67,6 +67,7 @@ import type {
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
   FilePreviewV3Response,
+  SessionLifecycleRepository,
 } from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
@@ -159,6 +160,8 @@ export type WorkspaceRuntime = {
    */
   readonly workspaceId: WorkspaceId;
   readonly repo: LoroRepo;
+  /** Null for product topologies whose independently deployed writers cannot yet be fenced. */
+  readonly sessionLifecycle: SessionLifecycleRepository | null;
   /** Workspace-owned, scoped LRU for owner-session file-index Flock resources. */
   readonly codeCollabFileIndexCache: CodeCollabFileIndexCache;
   /**

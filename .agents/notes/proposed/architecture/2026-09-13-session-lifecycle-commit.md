@@ -4,21 +4,20 @@ Status: proposed
 Translation: current
 
 Contract: [Session relations](../../../../specs/session-relations.md)
-Execution: [Implementation plan](../../../../plans/001-session-lifecycle-commit.md)
 
 [中文](2026-09-13-session-lifecycle-commit.zh.md)
 
 ## Abstract
 
-Archive currently compensates failed metadata writes by restoring a previously read
-snapshot, which can overwrite legitimate concurrent writes and can itself leave only
-some targets changed. The proposed replacement records each archive or restore as one
+The legacy product topology compensates failed metadata writes by restoring a previously
+read snapshot, which can overwrite legitimate concurrent writes and can itself leave
+only some targets changed. The local OSS topology now records each archive or restore as one
 immutable operation and derives effective Session lifecycle state through a shared
 repository projection. The operation is the unit of conflict resolution, persistence,
 and publication; resource cleanup follows the resulting state. Real dependency probes
-establish local WASM rollback, but also expose non-atomic repository observation and
-per-key conflict resolution. Production persistence and mixed-client migration remain
-unverified, so this is a proposal rather than a completed fix for #574.
+establish local WASM rollback, and real IndexedDB, SQLite, and LoroRepo tests cover the
+replacement boundary. Product mixed-client admission remains unavailable, so the wider
+rollout remains proposed and #574 is not complete for that topology.
 
 ## Decision and scope
 
@@ -51,13 +50,31 @@ database transaction framework. A compatible client still authors locally agains
 own repository. No daemon proxy author, authenticated cloud requirement, or hosted
 implementation is introduced into the public desktop.
 
+The frozen v1 wire and admission layout are:
+
+| Boundary | v1 contract |
+| --- | --- |
+| Replicated record | One canonical JSON string per immutable operation at metadata document `_lody/session-lifecycle-operations/v1`, field `operation:<operationId>`. |
+| Ordering | Canonical non-negative decimal Lamport counter, then UTF-8 byte order of `actorId` and `operationId`. |
+| Browser admission | IndexedDB `lody-session-lifecycle-v1:<workspaceId>`, with `admissions` and `state` object stores. |
+| CLI admission | Dedicated `session-lifecycle.sqlite3` under the workspace Loro storage directory, with operation and high-water tables. |
+| Result | A durable receipt distinguishes `published` from `pending`; an unconfirmed storage result carries the same queryable operation id. |
+| Migration | Existing archived rows seed deterministic counter-zero `baseline:v1:<sessionId>` operations. Active rows remain the default baseline. |
+
+Admission and local high-water allocation share one storage transaction. The owner
+installs the complete resolver revision before notifying per-Session readers, replays
+unpublished admissions at startup, rejects conflicting reuse of an operation id, and
+does not compact v1 history. Direct legacy `isArchived` writes are rejected after local
+activation, except an initial `false` for a Session with no lifecycle winner.
+
 ## Dependency evidence
 
 Inspection used Lody commit `54623883be77bd17f9dab18ef5a60cc2a9b156ef` and installed
 artifacts matching `loro-repo@0.20.0` and `@loro-dev/flock-wasm@0.4.3`. Synthetic Node
 probes used in-memory replicas; they did not operate on product Session data.
-The [reproducible baseline probe](../../../../plans/support/inspect-lifecycle-boundaries.cjs)
-checks rollback and repository publication against those pinned versions.
+The baseline probe checked rollback and repository publication against those pinned
+versions; the durable contract now lives in the owning shared, browser, and CLI tests
+listed below.
 
 | Boundary                        | Observed behavior                                                                                        | Consequence                                                                     |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -97,13 +114,12 @@ infer whether `root active / child archived` is an intentional Tab action or fai
 compensation from those flags alone. Existing worktree GC reconciles disk resources,
 not lifecycle metadata, and remains responsible only for root-owned worktrees.
 
-The chosen operation ordering, storage admission before publication, migration
-baseline, and old-writer policy are gates before production path replacement in the
-plan. Both IndexedDB and SQLite admission/recovery prototypes must pass before that
-switch; proving one adapter is insufficient. A daemon
-capability cannot fence independently authoring old renderers. The public repository
-does not contain all product clients or a workspace-wide writer admission mechanism;
-do not claim their migration or silently enable a weaker dual-write mode.
+The local OSS renderer and daemon are one coordinated distribution and enable the new
+authority only when the runtime is local-only. Cloud and dual runtimes keep the legacy
+path because a daemon capability cannot fence independently authoring old renderers.
+The public repository does not contain all product clients or a workspace-wide writer
+admission mechanism; product activation requires that external evidence and must not
+use a weaker dual-write mode.
 
 ## Relationship to earlier decisions
 
@@ -116,14 +132,24 @@ records its historical implementation; it is not approval of this replacement.
 
 ## Verification and rollout
 
-No production implementation or two-product-client persistence/restart test has been
-completed for this proposal. The execution plan requires deterministic regression,
-two-repository observation, concurrent operations, durable recovery, and legacy-client
-fixtures before activation. Worktree cleanup and terminal disposal are evaluated
-against effective committed state and do not make lifecycle commits reversible.
+The local implementation has deterministic parser/resolver tests, real browser
+IndexedDB reload coverage, real SQLite close/reopen and multi-connection allocation,
+and a two-LoroRepo test proving the first projected read sees every target together.
+Renderer and CLI producer suites assert one lifecycle commit; the UI cache installs a
+revision in one write. Resource tests hold an old runtime termination across a newer
+restore and prove the replacement generation is not archived or assigned idle status.
+The `LODY-SESSION-004` desktop journey injects publication failure after durable browser
+admission, reloads, and verifies that the same operation is replayed for the root and
+direct child while independently opened Sessions remain active.
 
-[#658](https://github.com/LodyAI/Lody/pull/658) is the affected implementation, not a
-completed replacement PR. [#574](https://github.com/LodyAI/Lody/issues/574) remains open
-until the operation contract and migration gates have evidence. Local documentation
-checks currently also report pre-existing links into uninitialized ACP submodules;
-those findings are separate from implementation verification.
+These checks authorize the local-only switch, not product activation. Cloud and dual
+runtimes deliberately retain the legacy implementation until every independently
+deployed writer can be admitted or rejected by a shared compatibility boundary.
+Worktree cleanup and terminal disposal follow effective committed state and cannot make
+lifecycle commits reversible.
+
+[#658](https://github.com/LodyAI/Lody/pull/658) is the affected implementation.
+[#574](https://github.com/LodyAI/Lody/issues/574) remains open until the product
+compatibility gate has evidence. Local documentation checks may report links into
+uninitialized ACP submodules; those findings are separate from implementation
+verification.

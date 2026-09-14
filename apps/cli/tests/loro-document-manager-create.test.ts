@@ -296,6 +296,22 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     expect(repoDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects lifecycle activation when a cloud writer can participate', async () => {
+    const repoDestroy = vi.fn(async () => {});
+    mocks.repoCreate.mockResolvedValueOnce({ destroy: repoDestroy });
+
+    await expect(
+      LoroDocumentManager.create(
+        'workspace-incompatible-lifecycle' as WorkspaceId,
+        'user-1',
+        createSilentLogger(),
+        { enableSessionLifecycle: true, streamsTokens: testStreamsTokens }
+      )
+    ).rejects.toThrow('Session lifecycle operations require the local-only topology');
+
+    expect(repoDestroy).toHaveBeenCalledOnce();
+  });
+
   it('continues in degraded mode when meta room sync times out', async () => {
     process.env.LODY_LORO_SYNC_META_TIMEOUT_MS = '1';
 

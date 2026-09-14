@@ -42,6 +42,7 @@ runtime。终端关闭是提交后的尽力清理：元数据失败不会关闭�
 元数据失败时不关闭终端，以及切换工作区的两个边界：首笔写入前中止，首笔写入后继续在捕获的 runtime
 完成提交。
 
-本次改动实现 [#574](https://github.com/LodyAI/Lody/issues/574)，并补充
-[让被打开的 Session 不受开启者状态级联影响](2026-09-10-session-containment-lifecycle.zh.md)
-所记录的包含关系决策。
+这是 [#574](https://github.com/LodyAI/Lody/issues/574) 的初始缓解方案。协调升级的本地拓扑现在以
+[持久 lifecycle 操作设计](../../proposed/architecture/2026-09-13-session-lifecycle-commit.zh.md)
+取代其补偿路径；cloud 与 dual 拓扑会保留本实现，直到能够隔离独立发布的 writer。包含关系决策仍由
+[让被打开的 Session 不受开启者状态级联影响](2026-09-10-session-containment-lifecycle.zh.md)维护。

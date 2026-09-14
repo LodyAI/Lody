@@ -85,6 +85,17 @@ ACP/CRDT snapshot can queue minutes of React work behind a long active turn and
 retain every obsolete history tree, so history-only bursts coalesce to the latest
 snapshot once per animation frame while control state stays synchronous.
 
+## `use-session-actions.ts`
+
+Archive and restore discover the selected Session and direct child Tabs from one
+repository snapshot. In a local-only runtime they submit one immutable lifecycle
+operation through the workspace writer; terminal cleanup starts only after durable
+admission. The repository projection, not the rendered cache or raw `isArchived`, is
+the authority. Cloud and dual runtimes retain the legacy compatibility path until the
+product writer-admission gate in the
+[Session lifecycle decision](../../../../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md)
+is available.
+
 ## `use-app-store-review-prompt.ts`
 
 The stored list of the newest 50 completed-turn timestamps answers the whole

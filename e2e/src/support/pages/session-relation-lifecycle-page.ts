@@ -24,6 +24,7 @@ export type SessionRelationLifecycleResources = {
 
 export class SessionRelationLifecyclePage {
   private readonly fixture = new SessionRelationLifecycleFixture();
+  private pendingArchiveOperationId: string | null = null;
 
   constructor(private readonly page: Page) {}
 
@@ -54,6 +55,7 @@ export class SessionRelationLifecyclePage {
   }
 
   async archiveRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {
+    await this.fixture.failNextLifecyclePublication(this.page);
     await this.openRowMenu(this.activeRowById(resources.rootSessionId));
     await this.page.getByRole('menuitem', { name: /^(Archive Session|归档会话)$/u }).click();
     await expect(this.activeRowById(resources.rootSessionId)).toBeHidden({ timeout: 30_000 });
@@ -65,6 +67,53 @@ export class SessionRelationLifecyclePage {
         intervals: [50, 100, 250, 500],
       })
       .toEqual({ root: true, tab: true, opened: false, openedFromTab: false });
+
+    await expect
+      .poll(() => this.fixture.readLifecycleEvidence(this.page, resources.rootSessionId), {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toMatchObject({
+        targetIds: [resources.rootSessionId, resources.tabSessionId].sort(),
+        state: 'archived',
+        journalPublished: false,
+        replicated: false,
+        injectedFailures: 1,
+      });
+    const pendingEvidence = await this.fixture.readLifecycleEvidence(
+      this.page,
+      resources.rootSessionId
+    );
+    if (!pendingEvidence) throw new Error('Lifecycle admission was not persisted');
+    this.pendingArchiveOperationId = pendingEvidence.operationId;
+
+    await this.page.reload({ waitUntil: 'domcontentloaded' });
+  }
+
+  async expectRecoveredLifecycleArchive(
+    resources: SessionRelationLifecycleResources
+  ): Promise<void> {
+    if (!this.pendingArchiveOperationId) {
+      throw new Error('Pending lifecycle operation identity was not captured');
+    }
+    await expect
+      .poll(() => this.readArchiveStates(resources), {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toEqual({ root: true, tab: true, opened: false, openedFromTab: false });
+    await expect
+      .poll(() => this.fixture.readLifecycleEvidence(this.page, resources.rootSessionId), {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toMatchObject({
+        operationId: this.pendingArchiveOperationId,
+        targetIds: [resources.rootSessionId, resources.tabSessionId].sort(),
+        state: 'archived',
+        journalPublished: true,
+        replicated: true,
+      });
   }
 
   async permanentlyDeleteRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {

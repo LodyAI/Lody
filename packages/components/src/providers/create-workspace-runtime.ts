@@ -69,10 +69,16 @@ import {
   type LoroStreamsTokenProviderEvent,
   type SyncReason,
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
+  createLoroMetaSessionLifecyclePublisher,
+  createSessionLifecycleBaselineOperation,
+  getSessionIdFromRoomId,
+  installSessionLifecycleRepoProjection,
+  SessionLifecycleRepository,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { TaskId, WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
+import { createIndexedDbSessionLifecycleAdmissionStore } from '@/lib/session-lifecycle-persistence';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -462,6 +468,49 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   void transportReady.promise.catch(() => {});
   const syncMode: PlatformSyncMode =
     deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud');
+  // Plan 001 activation is deliberately limited to the coordinated OSS local
+  // topology. Cloud/dual workspaces can contain independently deployed writers,
+  // and the public repository has no admission fence that can prove they all
+  // understand lifecycle operations.
+  let sessionLifecycle: SessionLifecycleRepository | null = null;
+  if (syncMode === 'local') {
+    let admissionStore:
+      | Awaited<ReturnType<typeof createIndexedDbSessionLifecycleAdmissionStore>>
+      | null = null;
+    try {
+      const rawSessionEntries = (await repo.listDoc()).filter(
+        (entry) => isSessionDocRoomId(entry.docId) && !isLoroRepoDocDeleted(entry)
+      );
+      admissionStore = await createIndexedDbSessionLifecycleAdmissionStore({
+        workspaceId: deps.workspaceId,
+      });
+      sessionLifecycle = new SessionLifecycleRepository({
+        actorId: `renderer:${desktopWindowId() || 'primary'}`,
+        store: admissionStore,
+        publisher: createLoroMetaSessionLifecyclePublisher(repo),
+      });
+      await sessionLifecycle.initialize({
+        baselines: rawSessionEntries.flatMap((entry) => {
+          const sessionId = getSessionIdFromRoomId(entry.docId);
+          return sessionId && entry.meta.isArchived === true
+            ? [createSessionLifecycleBaselineOperation(sessionId)]
+            : [];
+        }),
+      });
+      installSessionLifecycleRepoProjection({
+        repo,
+        repository: sessionLifecycle,
+        getSessionId: getSessionIdFromRoomId,
+        getSessionDocId: getSessionRoomId,
+        rejectLegacyWrites: true,
+      });
+    } catch (error) {
+      if (sessionLifecycle) await sessionLifecycle.dispose().catch(() => undefined);
+      else await admissionStore?.close?.().catch(() => undefined);
+      await repo.destroy().catch(() => undefined);
+      throw error;
+    }
+  }
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
   // False only on the local-only platform: no Streams member, no token
@@ -4134,6 +4183,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
   const workspaceWriter = createDirectWorkspaceWriter({
     repo,
+    sessionLifecycle,
     acquireSessionStore: sessionStoreCache.acquire,
     releaseSessionStoreRef: sessionStoreCache.releaseRef,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
@@ -4507,6 +4557,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
 
       let destroyError: unknown = null;
+      if (sessionLifecycle) {
+        await sessionLifecycle.flushPending().catch(() => undefined);
+        await sessionLifecycle.dispose();
+      }
       try {
         await repo.destroy();
       } catch (error) {
@@ -4598,6 +4652,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     repo,
+    sessionLifecycle,
     codeCollabFileIndexCache,
     writer: workspaceWriter,
     prepareSessionTarget: (sessionId, machineId) =>

@@ -30,6 +30,11 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Sessions, files, and attachments
 
+- `loro/session-lifecycle-persistence.ts` — local-only SQLite admission journal for
+  immutable archive/restore operations. `LoroDocumentManager` replays pending records
+  and exposes their effective repository projection; cloud-capable runtimes retain the
+  legacy path until the product compatibility gate is available. Contract and layout:
+  [Session lifecycle decision](../../../../.agents/notes/proposed/architecture/2026-09-13-session-lifecycle-commit.md).
 - `session-image-download.ts` — CLI-side prompt image download through the injected
   attachment capability, including short retries before converting bytes to ACP image
   blocks.
