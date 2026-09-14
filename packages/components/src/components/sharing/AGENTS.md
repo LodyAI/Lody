@@ -79,25 +79,22 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   Localize the prompt with the reader's current i18n language and keep token URLs out of telemetry. Pass the
   selected conversation and pinned deployment; issue access only for published deployments.
   Clipboard rejection must leave a manual-copy prompt, not claim success.
-- Reader chrome: the Lody mark leads the header — the packaged app icon's own
-  black tile, which does not repaint with the reader's appearance — and links
-  back to the product in a new tab; right to left the header ends with viewer
-  identity, language toggle, then the theme control. Language toggles English/Chinese
-  and saves the existing `lody-language` preference without app/OneSignal hooks;
-  The conversation tree is a left sidebar on a
-  wide viewport and a left drawer on a narrow one, chosen by CSS with a toggle
-  per layout, never a viewport hook that can flash the wrong one. That control offers Light and Dark only and forces Light when it finds
-  any other stored value; the reader deliberately does not follow the app's
-  appearance setting. It drives the reader's ThemeProvider; publication does not embed the reader.
+- Reader chrome: the header starts with the packaged Lody icon (its black tile
+  never changes with appearance), linking to the product in a new tab. From right
+  to left: viewer identity, language toggle, theme control. English/Chinese uses
+  `lody-language`, without app/OneSignal hooks. The tree is a left sidebar on wide
+  viewports and a left drawer on narrow ones; CSS selects each layout's toggle,
+  never a viewport hook. Theme offers only Light/Dark, coerces other stored values
+  to Light, and drives the reader ThemeProvider independently of app appearance.
+  Publication does not embed the reader.
 - `ShareViewer` is host-supplied and defaults to `signed-out`. The reader never
   authenticates and, on its own origin, cannot read the app's session cookie:
   showing a name or avatar requires the host to establish it. Signed-out renders
   no identity placeholder or login entry, on either wide or narrow viewports.
-- Each pane is named by the app's tab pill (`shared/tab-pill-strip.tsx`), never a
-  second title bar, so one conversation and a set of child Tabs read alike. The
-  foot is `session-share-composer.tsx`: the product composer's exact resting
-  surface from `chat/composer-surface.ts`, inert and `aria-hidden`, with the
-  visitor's real actions floated over it. Keep Markdown copy there, per pane.
+- Name panes with the app's `shared/tab-pill-strip.tsx`, never a second title bar,
+  for both single conversations and child Tabs. `session-share-composer.tsx` uses
+  `chat/composer-surface.ts`'s exact resting surface, inert and `aria-hidden`, with
+  visitor actions floated over it, including per-pane Markdown copy.
 - The host owns origin/build/CSP and an isolated anonymous platform/store.
 
 - Static share snapshots render through `createSharedChatStreamBuilder`, which owns
