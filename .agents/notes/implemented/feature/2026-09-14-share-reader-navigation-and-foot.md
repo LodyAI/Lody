@@ -92,7 +92,8 @@ carrying Copy as Markdown and Copy Agent Prompt. The intent was to show what the
 page would be if the conversation were yours. The cost was that a reader gave roughly 152px of vertical
 space — on a phone, a visible fraction of the viewport — to a control that
 cannot be used, on a page that exists to show a transcript. The new row measures
-68.75px in Chromium at 1280px.
+67.75px in Chromium at 1280px, with no rule separating it from the transcript:
+an opaque background is enough, and a border read as a second tab bar.
 
 `session-share-composer.tsx` is now `session-share-actions.tsx`: one row with the
 same two buttons and the agent-access disclosure beneath them, inside the same
@@ -141,7 +142,8 @@ props with no share client: light and dark, 1280px and 390px, with the tree, wit
 a single conversation, and with the transcript still loading. Measured there: the
 marked row resolves to a real `oklab(… / 0.1)` background where an inactive row
 stays `rgba(0,0,0,0)`, the `nav` carries `width 0.2s cubic-bezier(0,0,0.2,1)` and
-tweens 165→95→51→24→8→0px across a collapse, and it is `inert` once closed.
+tweens 165→95→51→24→8→0px across a collapse, it is `inert` once closed, and the
+action row has `border-top-width: 0px`.
 
 `tsgo --noEmit`, oxlint and `node scripts/check-i18n.mjs` pass, and
 `pnpm run docs check` reports no errors. The whole `@lody/components` suite runs

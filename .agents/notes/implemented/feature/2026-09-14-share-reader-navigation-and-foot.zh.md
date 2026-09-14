@@ -91,8 +91,9 @@ Chromium 中对照新增的 `Sharing/SessionShareReader` stories 复核的——
 `SessionShareSurface`，不涉及分享客户端：明暗两种主题、1280px 与 390px、带树、单对话，
 以及正文仍在加载的状态。在那里测得：被标记的行解析出真实的 `oklab(… / 0.1)` 背景，而未选中行
 是 `rgba(0,0,0,0)`；`nav` 带有 `width 0.2s cubic-bezier(0,0,0.2,1)`，收起过程中宽度在
-165→95→51→24→8→0px 之间过渡；关闭后它带 `inert`。底部动作行在 1280px 下实测 68.75px，
-原先的仿输入框约为 152px。
+165→95→51→24→8→0px 之间过渡；关闭后它带 `inert`。底部动作行在 1280px 下实测 67.75px（`border-top-width: 0px`），
+原先的仿输入框约为 152px。它与正文之间不画分隔线：不透明背景已经够用，一条边框会被
+读成第二条标签栏。
 
 `tsgo --noEmit`、oxlint 与 `node scripts/check-i18n.mjs` 通过，`pnpm run docs check`
 无 error。`@lody/components` 全量套件 476 个文件中 474 个通过；`control-plane-mirror`
